@@ -20,7 +20,6 @@ import {
 	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
-	federationsOf,
 	type Logger,
 	type Module,
 	memoryFederationTokenStoreModule,
@@ -36,8 +35,8 @@ import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-sessio
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { oidcFederationModule, readOidcFederationConfigs } from "#/module.mjs";
-import { createFakeIdp, type FakeIdp } from "./helpers.mjs";
+import { oidcFederationTypeModule } from "#/index.mjs";
+import { createFakeIdp, type FakeIdp, routedFetch } from "./helpers.mjs";
 
 /**
  * Through the real session routes: two OIDC instances against two issuers
@@ -71,13 +70,11 @@ function buildConfig(): AppConfig {
 				"idp-b": {
 					enabled: true,
 					type: "oidc",
+					issuer: ISSUER_B,
+					clientId: "client-b",
+					clientSecret: "secret-b",
+					callbackURL: CALLBACK_B,
 					clientUrl: "https://app-b.test/",
-					oidc: {
-						issuer: ISSUER_B,
-						clientId: "client-b",
-						clientSecret: "secret-b",
-						callbackURL: CALLBACK_B,
-					},
 				},
 			},
 		}),
@@ -96,19 +93,6 @@ async function boot(
 		authenticateByToken: vi.fn(authenticateByToken),
 	};
 
-	const configsModule = defineModule({
-		name: "test:oidc-configs",
-		requires: ["config"] as const,
-		provides: {
-			oidcFederationConfigs: ({ config: c }) => {
-				const read = readOidcFederationConfigs(federationsOf(c));
-				return {
-					"idp-a": { ...read["idp-a"], fetch: idpA.fetch },
-					"idp-b": { ...read["idp-b"], fetch: idpB.fetch },
-				} as never;
-			},
-		},
-	});
 	const repositoryModule = defineModule({
 		name: "test:user-repository",
 		provides: { userRepository: () => repo } as never,
@@ -122,9 +106,7 @@ async function boot(
 		memoryRefreshTokenFamilyStoreModule,
 		defaultRefreshTokenFamilyRevocationModule,
 		repositoryModule,
-		configsModule,
-		oidcFederationModule("idp-a"),
-		oidcFederationModule("idp-b"),
+		oidcFederationTypeModule({ fetch: routedFetch(idpA, idpB) }),
 		...extraModules,
 	];
 	const handle = await createApp({

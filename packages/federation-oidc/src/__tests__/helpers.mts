@@ -53,3 +53,13 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 	idp.refreshWithIdToken = false;
 	return idp;
 }
+
+/** One fetch in front of several fake IdPs, each answering the URLs under its issuer. */
+export const routedFetch =
+	(...idps: readonly FakeIdp[]): typeof fetch =>
+	(input, init) => {
+		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+		const idp = idps.find((candidate) => url.startsWith(`${candidate.issuer}/`));
+		if (idp === undefined) throw new Error(`no fake IdP answers ${url}`);
+		return idp.fetch(input, init);
+	};

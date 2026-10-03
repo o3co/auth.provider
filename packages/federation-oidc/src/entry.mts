@@ -94,9 +94,6 @@ const entryKeys = z.strictObject({
 	clientUrl: text.optional(),
 });
 
-/** The keys an `oidc` entry carries besides core's, as the schema names them. */
-export const OIDC_ENTRY_KEYS: readonly string[] = Object.freeze(Object.keys(entryKeys.shape));
-
 /**
  * The schema of an `oidc` entry's own keys: strict (a key it does not name
  * refuses the entry), flat, and with exactly one of `clientSecret`
