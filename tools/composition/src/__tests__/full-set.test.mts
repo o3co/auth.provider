@@ -467,9 +467,6 @@ describe("the configuration createApp is handed reaches every loaded module whol
 			return section?.isEnabled?.(section.schema.parse(resolved["device-grant"]));
 		};
 		expect(switchedOn({ ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" })).toBe(true);
-		expect(contributionNames(deviceAuthorizationGrantModule, "grants")).toEqual([
-			DEVICE_CODE_GRANT_TYPE,
-		]);
 		// And off where nothing says on: the grant is opt-in.
 		expect(switchedOn(SINGLE_ENV)).toBe(false);
 	});

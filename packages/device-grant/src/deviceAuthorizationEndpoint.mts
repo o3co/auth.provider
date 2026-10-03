@@ -133,7 +133,7 @@ const CODE_COLLISION_RETRIES = 5;
 
 /**
  * The bounds on the two device-code settings, in whole seconds: what
- * `deviceGrantModule`'s schema holds `device-grant.*` to, and
+ * `deviceGrantConfigSchema` holds `device-grant.*` to, and
  * what this handler holds settings handed over as numbers to. RFC 8628 §5.4
  * wants a code "long enough … to be useable" and "sufficiently short to limit
  * the usability of a code obtained for phishing"; the interval is advertised

@@ -696,12 +696,9 @@ export const deviceAuthorizationGrantModule = defineModule<
 });
 
 /**
- * The device grant, as it was listed when the module was built from a
- * configuration: the argument is ignored, and the one module is returned.
+ * Returns {@link deviceAuthorizationGrantModule}; the argument is ignored.
  *
- * @deprecated List {@link deviceAuthorizationGrantModule} instead. The
- * module reads its switch, `device-grant.enabled`, from the configuration boot
- * parses, so nothing need be handed to it.
+ * @deprecated List {@link deviceAuthorizationGrantModule} instead.
  */
 export const deviceGrantModule = (_params?: {
 	readonly config?: unknown;

@@ -1629,8 +1629,15 @@ describe("the device-grant module — disabled surface", () => {
 		);
 	});
 
-	it("contributes the grant, which boot registers while the grant is on", () => {
-		expect(Object.keys(contributionsFor()?.grants ?? {})).toEqual([DEVICE_CODE_GRANT_TYPE]);
+	it("refuses the grant factory called directly without oauthTokenSettings, naming the slot", () => {
+		const factory = contributionsFor()?.grants?.[DEVICE_CODE_GRANT_TYPE] as (d: unknown) => unknown;
+		expect(() =>
+			factory({
+				section: sectionOf(ENABLED),
+				deviceCodeStore: createMemoryDeviceCodeStore(),
+				keyStore: createSymmetricKeyStore("device-lifetime-secret.at-least-32-bytes"),
+			}),
+		).toThrow(/oauthTokenSettings/);
 	});
 });
 

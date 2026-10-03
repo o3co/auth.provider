@@ -553,7 +553,10 @@ modules fills them.
   `device-grant` section it sets — `verificationUriComplete`,
   `codeLifetimeSeconds`, `pollingIntervalSeconds` and
   `rateLimit { limit, windowSeconds }` — or the boot is refused naming the
-  missing key. Parsed directly, an absent section is `undefined`.
+  missing key. This holds with the grant off too: `device-grant { enabled =
+  false }` alone, without the package's `reference.conf`, is refused; delete
+  the section or layer the reference. Parsed directly, an absent section is
+  `undefined`.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
