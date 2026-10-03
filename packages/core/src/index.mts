@@ -139,6 +139,7 @@ export type {
 	BootstrapMap,
 	CircularDependencyDetails,
 	CollectedRouteContribution,
+	ConfigDefaultsInvalidDetails,
 	ConfigPathRelocatedDetails,
 	ConfigValidationFailedDetails,
 	ContributeAndOverrideSameKeyDetails,

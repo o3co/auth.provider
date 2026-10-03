@@ -96,6 +96,7 @@
 . ConditionalRemoveAnswer type
 . ConditionalReplaceAnswer type
 . ConditionalSetRemoveAnswer type
+. ConfigDefaultsInvalidDetails type
 . ConfigPathRelocatedDetails type
 . ConfigSchema type
 . ConfigValidationFailedDetails type

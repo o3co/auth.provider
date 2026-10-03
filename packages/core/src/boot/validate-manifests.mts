@@ -63,7 +63,7 @@ import {
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
 import { contributesAuditHooks } from "./audit-fan-out.mjs";
-import { logConfigNotices } from "./config-notices.mjs";
+import { type ConfigDefaults, logConfigNotices, readConfigDefaults } from "./config-notices.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import {
 	checkFederationEntriesHandled,
@@ -371,13 +371,22 @@ function checkAuthoritativeClosure(modules: readonly NormalisedModule[]): void {
 }
 
 /**
+ * The name of the reserved bootstrap input (`ReservedBootstrapInputs`): boot
+ * takes it out of `bootstrapComponents` and reads it itself, so no component
+ * is named so — none is provided, required, read optionally or overridden
+ * under it (`reserved-component-key`).
+ */
+const RESERVED_BOOTSTRAP_INPUT = "configDefaults";
+
+/**
  * A host map carrying `__proto__` as its own key (a computed key, or parsed
  * from JSON) refuses boot (`reserved-component-key`): set on the component
  * map it would replace the prototype rather than name a component, so every
  * key of its value would read as a component no provider ran for, unseen by
- * the checks that read the map's own keys. Runs before any row reads a
- * component from the host maps (the pre-config rows and the parse read only
- * `config`).
+ * the checks that read the map's own keys. So does an `overrideComponents`
+ * entry named after the reserved bootstrap input, which names no component.
+ * Runs before any row reads a component from the host maps (the pre-config
+ * rows and the parse read only `config`).
  * @internal
  */
 function checkReservedHostKeys(
@@ -398,6 +407,18 @@ function checkReservedHostKeys(
 			reason: "reserved-component-key",
 			stage: "validateManifests",
 			details: { reason: "reserved-component-key", componentKey: "__proto__", source },
+		});
+	}
+	if (override !== undefined && Object.hasOwn(override, RESERVED_BOOTSTRAP_INPUT)) {
+		throw new BootError({
+			message: `overrideComponents carries "${RESERVED_BOOTSTRAP_INPUT}", which names no component: it is the configuration's defaults, which boot reads from bootstrapComponents itself. Hand it there, or remove the entry.`,
+			reason: "reserved-component-key",
+			stage: "validateManifests",
+			details: {
+				reason: "reserved-component-key",
+				componentKey: RESERVED_BOOTSTRAP_INPUT,
+				source: "overrideComponents",
+			},
 		});
 	}
 }
@@ -2259,13 +2280,36 @@ const SECTION_DEPS_KEY = "section";
  * component named `section`: its deps would carry both under one name, the
  * section shadowing the slot. Only that module is refused; elsewhere
  * `section` is an ordinary slot (provided, read by a module without a
- * section, bootstrapped or overridden). Throws `reserved-component-key`.
+ * section, bootstrapped or overridden). No module may provide, require or
+ * optionally read a component named after the reserved bootstrap input,
+ * which no component carries. Throws `reserved-component-key`.
  * @internal
  */
 function checkReservedComponentKeys(
 	rawModules: readonly Module[],
 	modules: readonly NormalisedModule[],
 ): void {
+	for (const m of modules) {
+		const sources = [
+			["module-provides", m.providesKeys, "provides"],
+			["module-requires", m.requires, "requires"],
+			["module-optional", m.optional, "optionally reads"],
+		] as const;
+		for (const [source, keys, verb] of sources) {
+			if (!(keys as readonly string[]).includes(RESERVED_BOOTSTRAP_INPUT)) continue;
+			throw new BootError({
+				message: `Module "${m.name}" ${verb} a component named "${RESERVED_BOOTSTRAP_INPUT}", which no component carries: it is the configuration's defaults, which boot reads from bootstrapComponents itself. Name the component otherwise.`,
+				reason: "reserved-component-key",
+				stage: "validateManifests",
+				details: {
+					reason: "reserved-component-key",
+					componentKey: RESERVED_BOOTSTRAP_INPUT,
+					source,
+					module: m.name,
+				},
+			});
+		}
+	}
 	modules.forEach((m, index) => {
 		if (rawModules[index]?.section === undefined) return;
 		const sources = [
@@ -2883,19 +2927,31 @@ function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
 }
 
 /**
- * The bootstrap map without `configDefaults`, and that input: boot reads it at
- * stage 1 for the notices and seeds no component from it. The map itself when
- * it holds no such key.
+ * The bootstrap map without `configDefaults`, and that input read once into a
+ * copy of its plain data (`readConfigDefaults`): boot reads it at stage 1 for
+ * the notices and seeds no component from it. The map itself, and no
+ * defaults, when it holds no such key. A value that is not plain data — not
+ * an object of sections, a getter, a throw as it is read — refuses boot
+ * (`config-defaults-invalid`), before any check, naming the path and no value.
  */
 function takeConfigDefaults(bootstrap: BootstrapMap): {
 	readonly bootstrapComponents: BootstrapMap;
-	readonly configDefaults: unknown;
+	readonly configDefaults: ConfigDefaults | undefined;
 } {
-	if (!Object.hasOwn(bootstrap, "configDefaults")) {
+	if (!Object.hasOwn(bootstrap, RESERVED_BOOTSTRAP_INPUT)) {
 		return { bootstrapComponents: bootstrap, configDefaults: undefined };
 	}
-	const { configDefaults, ...bootstrapComponents } = bootstrap;
-	return { bootstrapComponents, configDefaults };
+	const { configDefaults: handed, ...bootstrapComponents } = bootstrap;
+	const read = readConfigDefaults(handed);
+	if ("problem" in read) {
+		throw new BootError({
+			message: `bootstrapComponents.${[RESERVED_BOOTSTRAP_INPUT, ...read.path].join(".")} ${read.problem}. Hand boot the configuration's defaults as the composition resolves its configuration: the loaded modules' reference.conf files and core's, with no file of its own and no environment, as plain data.`,
+			reason: "config-defaults-invalid",
+			stage: "validateManifests",
+			details: { reason: "config-defaults-invalid", path: [...read.path], problem: read.problem },
+		});
+	}
+	return { bootstrapComponents, configDefaults: read.defaults };
 }
 
 // ---------------------------------------------------------------------------

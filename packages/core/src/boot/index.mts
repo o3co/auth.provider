@@ -41,6 +41,7 @@ export type {
 	CleanupRecord,
 	CollectedRouteContribution,
 	ComponentWorld,
+	ConfigDefaultsInvalidDetails,
 	ConfigPathRelocatedDetails,
 	ConfigValidationFailedDetails,
 	ContributeAndOverrideSameKeyDetails,

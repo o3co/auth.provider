@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile, parseString } from "@o3co/ts.hocon";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
-import type { BootstrapMap } from "#/boot/types.mjs";
+import { BootError, type BootstrapMap } from "#/boot/types.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { coreReference } from "#/config/references.mjs";
 import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
@@ -109,6 +109,19 @@ describe("a section no loaded module owns, with the configuration's defaults", (
 		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("secret-prefix-7f3a");
 	});
 
+	it("names as not loaded a section a variable set to a number's default: a variable carries a string", async () => {
+		const logger = await boot(
+			[],
+			resolved({ "sibling-store": { ...SIBLING_DEFAULT, ttlSeconds: "60" } }),
+			{
+				"sibling-store": { ...SIBLING_DEFAULT },
+			},
+		);
+		expect(noticesOf(logger, "config_sections_not_loaded")).toEqual([
+			{ sections: ["sibling-store"] },
+		]);
+	});
+
 	it("names a section its defaults do not set as ignored, beside one not loaded", async () => {
 		const logger = await boot(
 			[],
@@ -132,17 +145,12 @@ describe("a section no loaded module owns, with the configuration's defaults", (
 		expect(noticesOf(logger, "config_sections_not_loaded")).toEqual([]);
 	});
 
-	it("reads a value that is not an object as no defaults: every such section is ignored", async () => {
-		const logger = await boot(
-			[],
-			resolved({ "sibling-store": { ...SIBLING_DEFAULT } }),
-			"not-an-object",
-		);
+	it("reads configDefaults handed as undefined as none handed", async () => {
+		const logger = await boot([], resolved({ "sibling-store": { ...SIBLING_DEFAULT } }), undefined);
 		expect(noticesOf(logger, "config_sections_ignored")).toEqual([{ sections: ["sibling-store"] }]);
-		expect(noticesOf(logger, "config_sections_not_loaded")).toEqual([]);
 	});
 
-	it("is never a component: the config slot and the component map hold none of it", async () => {
+	it("is never a component: neither the component map nor the config slot holds it", async () => {
 		const handle = await createApp({
 			modules: [],
 			bootstrapComponents: {
@@ -152,7 +160,152 @@ describe("a section no loaded module owns, with the configuration's defaults", (
 			} as BootstrapMap,
 		});
 		expect(Object.hasOwn(handle.components, "configDefaults")).toBe(false);
+		const config = handle.components.config as unknown as Record<string, unknown>;
+		expect(Object.hasOwn(config, "configDefaults")).toBe(false);
+		expect(Object.hasOwn(config, "sibling-store")).toBe(false);
 		await handle.dispose();
+	});
+});
+
+describe("configDefaults that boot cannot read as plain data", () => {
+	/** What boot refused `configDefaults` with. */
+	const refusedWith = async (configDefaults: unknown): Promise<BootError> => {
+		try {
+			await boot([], resolved(), configDefaults);
+		} catch (err) {
+			expect(err).toBeInstanceOf(BootError);
+			return err as BootError;
+		}
+		return expect.fail("boot should have been refused");
+	};
+
+	it.each([
+		["null", null],
+		["a list", [{ "sibling-store": {} }]],
+		["a string", "not-an-object"],
+		["an instance", new Map([["sibling-store", {}]])],
+	])("refuses %s: it is not an object of sections", async (_label, value) => {
+		const err = await refusedWith(value);
+		expect(err.reason).toBe("config-defaults-invalid");
+		expect(err.details).toEqual({
+			reason: "config-defaults-invalid",
+			path: [],
+			problem: expect.stringContaining("not an object of sections"),
+		});
+	});
+
+	it("refuses a getter that throws, naming its path and no value", async () => {
+		const section = {};
+		Object.defineProperty(section, "keyPrefix", {
+			enumerable: true,
+			get() {
+				throw new Error("getter-secret-3b1e");
+			},
+		});
+		const err = await refusedWith({ "sibling-store": section });
+		expect(err.reason).toBe("config-defaults-invalid");
+		expect(err.details).toMatchObject({ path: ["sibling-store", "keyPrefix"] });
+		expect(err.message).toContain("sibling-store.keyPrefix");
+		expect(err.message).not.toContain("getter-secret-3b1e");
+	});
+
+	it("refuses an accessor even when it answers: plain data is read once, never through a getter", async () => {
+		const section = {};
+		Object.defineProperty(section, "keyPrefix", { enumerable: true, get: () => "sib:" });
+		const err = await refusedWith({ "sibling-store": section });
+		expect(err.details).toMatchObject({
+			reason: "config-defaults-invalid",
+			path: ["sibling-store", "keyPrefix"],
+		});
+	});
+
+	it("refuses a Proxy whose traps throw, at the level it was read", async () => {
+		const throwing = new Proxy(
+			{},
+			{
+				ownKeys() {
+					throw new Error("proxy-secret-c07d");
+				},
+			},
+		);
+		const err = await refusedWith({ "sibling-store": throwing });
+		expect(err.details).toMatchObject({
+			reason: "config-defaults-invalid",
+			path: ["sibling-store"],
+		});
+		expect(err.message).not.toContain("proxy-secret-c07d");
+	});
+
+	it("reads a Proxy that answers as plain data once, as the data it answered", async () => {
+		const get = vi.fn((target: Record<string, unknown>, key: string | symbol) =>
+			Reflect.get(target, key),
+		);
+		const defaults = new Proxy({ "sibling-store": { ...SIBLING_DEFAULT } }, { get });
+		const logger = await boot([], resolved({ "sibling-store": { ...SIBLING_DEFAULT } }), defaults);
+		expect(noticesOf(logger, "config_sections_ignored")).toEqual([]);
+		expect(noticesOf(logger, "config_sections_not_loaded")).toEqual([]);
+	});
+});
+
+describe("configDefaults, a reserved name", () => {
+	/** What boot refused `modules` and `overrideComponents` with. */
+	const refusedWith = async (
+		modules: readonly Module[],
+		overrideComponents?: Record<string, unknown>,
+	): Promise<BootError> => {
+		try {
+			const handle = await createApp({
+				modules,
+				bootstrapComponents: {
+					config: resolved() as unknown as AppConfig,
+					pathResolver: (s: string) => s,
+				} as BootstrapMap,
+				...(overrideComponents === undefined ? {} : { overrideComponents }),
+			});
+			await handle.dispose();
+		} catch (err) {
+			expect(err).toBeInstanceOf(BootError);
+			return err as BootError;
+		}
+		return expect.fail("boot should have been refused");
+	};
+
+	it("refuses a module that provides a component of that name", async () => {
+		const provider = {
+			name: "provider",
+			provides: { configDefaults: () => ({}) },
+		} as unknown as Module;
+		const err = await refusedWith([provider]);
+		expect(err.reason).toBe("reserved-component-key");
+		expect(err.details).toEqual({
+			reason: "reserved-component-key",
+			componentKey: "configDefaults",
+			source: "module-provides",
+			module: "provider",
+		});
+	});
+
+	it.each([
+		["requires", "module-requires"],
+		["optional", "module-optional"],
+	])("refuses a module whose %s names it", async (field, source) => {
+		const reader = { name: "reader", [field]: ["configDefaults"] } as unknown as Module;
+		const err = await refusedWith([reader]);
+		expect(err.details).toEqual({
+			reason: "reserved-component-key",
+			componentKey: "configDefaults",
+			source,
+			module: "reader",
+		});
+	});
+
+	it("refuses an overrideComponents entry of that name", async () => {
+		const err = await refusedWith([], { configDefaults: {} });
+		expect(err.details).toEqual({
+			reason: "reserved-component-key",
+			componentKey: "configDefaults",
+			source: "overrideComponents",
+		});
 	});
 });
 
