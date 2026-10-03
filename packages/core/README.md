@@ -31,25 +31,34 @@ A composition root resolves its configuration — its own files over the `refere
 2. laid over what was written, so a key no schema declares is kept — at the top, and under a section core declares;
 3. then with each loaded module's `configSchema`, over the base's output, and with each module's own section at its path, written back there: a loaded module's section is never stripped.
 
-A value any of them refuses refuses boot (`config-validation-failed`), naming each path the operator wrote. So does a key named after an `Object.prototype` member (`__proto__`, `constructor`, `toString`, …) or `prototype`, at any depth, whatever the schemas make of it: a schema would drop `__proto__` unread, and a lookup by any of the others may find the inherited member. The check covers the configuration's own data properties, which is everything a parsed HOCON file holds; a getter in a configuration built in code is read by the schemas' parse, not by this check. A top-level section nothing loaded owns is kept and named once in the log — `config_sections_ignored`, at `warn`, with the names, to the logger bootstrapped beside the configuration — which is where a misspelt section name shows. A section that sets nothing — empty, or holding only empty sections — is not named, as core's own `reference.conf` leaves `jwks` when `JWKS_PATH` and `JWKS_CACHE_MAX_AGE` are unset. While core's schema still mirrors other packages' sections (below), it names none of them: a mirrored section counts as owned, loaded module or not. What boot parsed is the `config` slot; read it from the handle.
+A value any of them refuses refuses boot (`config-validation-failed`), naming each path the operator wrote. So does a key named after an `Object.prototype` member (`__proto__`, `constructor`, `toString`, …) or `prototype`, at any depth, whatever the schemas make of it: a schema would drop `__proto__` unread, and a lookup by any of the others may find the inherited member. The check covers the configuration's own data properties, which is everything a parsed HOCON file holds; a getter in a configuration built in code is read by the schemas' parse, not by this check. A top-level section nothing loaded owns is kept, and named once in the log, at `warn`, with the names and never a value, to the logger bootstrapped beside the configuration. A package's `reference.conf` is layered whenever any of its modules is, so it sets the sections of siblings that are not loaded; a composition root that also hands boot the configuration's defaults — `bootstrapComponents.configDefaults`, the same references resolved with no file of its own and no environment, to plain data the same way as the configuration, since a section is compared with its default whole ([`ReservedBootstrapInputs`](src/boot/types.mts)) — lets boot tell them apart: a section the defaults hold and the configuration leaves equal to them is not named; one the operator's files or the environment changed is `config_sections_not_loaded`, a setting for a module the composition does not load; one the defaults do not hold is `config_sections_ignored`, which is where a misspelt section name shows. Without the defaults, every such section is `config_sections_ignored`. A section that sets nothing — empty, or holding only empty sections — is not named, as core's own `reference.conf` leaves `jwks` when `JWKS_PATH` and `JWKS_CACHE_MAX_AGE` are unset. While core's schema still mirrors other packages' sections (below), it names none of them: a mirrored section counts as owned, loaded module or not. Likewise, a variable a package's `reference.conf` captures in `renamed-variables` that the resolution saw set and no loaded module — nor core — declares renamed is named once as `environment_variables_not_applied`, at `warn`, with the names: `RATE_LIMIT_FAIL_MODE` set with the Redis package loaded but not its rate limiter, for one. What boot parsed is the `config` slot; read it from the handle.
 
 ```typescript
 import { fileURLToPath } from "node:url";
 import { type AppConfig, createApp, moduleReferences } from "@o3co/auth-provider-core";
-import { parseFile } from "@o3co/ts.hocon";
+import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 
-// The composition's own file over every loaded package's reference.conf, core's last.
-const resolved = moduleReferences(modules)
-  .reduce(
-    (layered, reference) => layered.withFallback(parseFile(fileURLToPath(reference))),
-    parseFile("config/application.conf"),
-  )
-  .toObject();
+// `own` over every loaded package's reference.conf, core's last.
+const layered = (own: Config, options?: { env: Record<string, string> }) =>
+  moduleReferences(modules)
+    .reduce(
+      (config, reference) => config.withFallback(parseFile(fileURLToPath(reference), options)),
+      own,
+    )
+    .toObject();
+
+const resolved = layered(parseFile("config/application.conf"));
+// The same references with no file of the composition's and no environment.
+const configDefaults = layered(empty(), { env: {} });
 
 const handle = await createApp({
   modules,
   // Unparsed: createApp parses it once, with every loaded module's schema.
-  bootstrapComponents: { config: resolved as unknown as AppConfig, pathResolver: import.meta.resolve },
+  bootstrapComponents: {
+    config: resolved as unknown as AppConfig,
+    configDefaults,
+    pathResolver: import.meta.resolve,
+  },
 });
 const config = handle.components.config; // what boot parsed
 ```

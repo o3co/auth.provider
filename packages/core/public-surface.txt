@@ -96,6 +96,7 @@
 . ConditionalRemoveAnswer type
 . ConditionalReplaceAnswer type
 . ConditionalSetRemoveAnswer type
+. ConfigDefaultsInvalidDetails type
 . ConfigPathRelocatedDetails type
 . ConfigSchema type
 . ConfigValidationFailedDetails type
@@ -553,6 +554,7 @@
 . RequirementInterruption type
 . RequirementSession type
 . RequirementVerdict type
+. ReservedBootstrapInputs type
 . ReservedComponentKeyDetails type
 . RetrieveFederationGrantTokenDeps type
 . RetrieveFederationGrantTokenRequest type

@@ -36,7 +36,6 @@ import {
 	findRelocatedKeys,
 	findRenamedVariables,
 	type HandedConfiguration,
-	pathsSetBy,
 	RENAMED_VARIABLES_SECTION,
 	type RelocatedPath,
 	type RenamedVariable,
@@ -64,6 +63,7 @@ import {
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
 import { contributesAuditHooks } from "./audit-fan-out.mjs";
+import { type ConfigDefaults, logConfigNotices, readConfigDefaults } from "./config-notices.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import {
 	checkFederationEntriesHandled,
@@ -371,13 +371,22 @@ function checkAuthoritativeClosure(modules: readonly NormalisedModule[]): void {
 }
 
 /**
+ * The name of the reserved bootstrap input (`ReservedBootstrapInputs`): boot
+ * takes it out of `bootstrapComponents` and reads it itself, so no component
+ * is named so — none is provided, required, read optionally or overridden
+ * under it (`reserved-component-key`).
+ */
+const RESERVED_BOOTSTRAP_INPUT = "configDefaults";
+
+/**
  * A host map carrying `__proto__` as its own key (a computed key, or parsed
  * from JSON) refuses boot (`reserved-component-key`): set on the component
  * map it would replace the prototype rather than name a component, so every
  * key of its value would read as a component no provider ran for, unseen by
- * the checks that read the map's own keys. Runs before any row reads a
- * component from the host maps (the pre-config rows and the parse read only
- * `config`).
+ * the checks that read the map's own keys. So does an `overrideComponents`
+ * entry named after the reserved bootstrap input, which names no component.
+ * Runs before any row reads a component from the host maps (the pre-config
+ * rows and the parse read only `config`).
  * @internal
  */
 function checkReservedHostKeys(
@@ -398,6 +407,18 @@ function checkReservedHostKeys(
 			reason: "reserved-component-key",
 			stage: "validateManifests",
 			details: { reason: "reserved-component-key", componentKey: "__proto__", source },
+		});
+	}
+	if (override !== undefined && Object.hasOwn(override, RESERVED_BOOTSTRAP_INPUT)) {
+		throw new BootError({
+			message: `overrideComponents carries "${RESERVED_BOOTSTRAP_INPUT}", which names no component: it is the configuration's defaults, which boot reads from bootstrapComponents itself. Hand it there, or remove the entry.`,
+			reason: "reserved-component-key",
+			stage: "validateManifests",
+			details: {
+				reason: "reserved-component-key",
+				componentKey: RESERVED_BOOTSTRAP_INPUT,
+				source: "overrideComponents",
+			},
 		});
 	}
 }
@@ -1926,30 +1947,20 @@ function conflictingOutputs(
 }
 
 /**
- * The top-level sections of the configuration as written that nothing owns,
- * sorted: not a section core's transitional base declares — its
- * own, or one it mirrors — not a top-level key of a loaded module's
- * `configSchema`, and not the first key of a loaded module's section path.
- * A section that sets nothing (`pathsSetBy`, the walk the relocation refusal
- * reads a configuration with) is none of them: an empty one, or one holding
- * only empty ones, as a `reference.conf` leaves a section whose variables are
- * unset. Boot keeps
- * them in the `config` slot and names them once in the log; a misspelt
- * section name is what an operator finds there.
+ * The top-level sections something loaded owns: every section core's
+ * transitional base declares — its own, or one it mirrors — every top-level
+ * key of a loaded module's `configSchema`, and the first key of every loaded
+ * module's section path. What the configuration sets outside them is what
+ * stage 1's notices name (`logConfigNotices`).
  * @internal
  */
-function ignoredSections(modules: readonly Module[], raw: unknown): readonly string[] {
-	// Boot's parse accepted `raw` as an object before this runs — a plain one
-	// or an instance: its own keys are the sections.
+function ownedSections(modules: readonly Module[]): ReadonlySet<string> {
 	const owned = new Set<string>(Object.keys(TransitionalConfigSchema.shape));
 	for (const m of modules) {
 		for (const key of Object.keys(m.configSchema?.shape ?? {})) owned.add(key);
 		if (m.section !== undefined) owned.add(sectionSegmentsOf(m)[0] as string);
 	}
-	const sections = raw as Readonly<Record<string, unknown>>;
-	return Object.keys(sections)
-		.filter((key) => !owned.has(key) && pathsSetBy(sections[key]).length > 0)
-		.sort();
+	return owned;
 }
 
 // ---------------------------------------------------------------------------
@@ -2269,13 +2280,36 @@ const SECTION_DEPS_KEY = "section";
  * component named `section`: its deps would carry both under one name, the
  * section shadowing the slot. Only that module is refused; elsewhere
  * `section` is an ordinary slot (provided, read by a module without a
- * section, bootstrapped or overridden). Throws `reserved-component-key`.
+ * section, bootstrapped or overridden). No module may provide, require or
+ * optionally read a component named after the reserved bootstrap input,
+ * which no component carries. Throws `reserved-component-key`.
  * @internal
  */
 function checkReservedComponentKeys(
 	rawModules: readonly Module[],
 	modules: readonly NormalisedModule[],
 ): void {
+	for (const m of modules) {
+		const sources = [
+			["module-provides", m.providesKeys, "provides"],
+			["module-requires", m.requires, "requires"],
+			["module-optional", m.optional, "optionally reads"],
+		] as const;
+		for (const [source, keys, verb] of sources) {
+			if (!(keys as readonly string[]).includes(RESERVED_BOOTSTRAP_INPUT)) continue;
+			throw new BootError({
+				message: `Module "${m.name}" ${verb} a component named "${RESERVED_BOOTSTRAP_INPUT}", which no component carries: it is the configuration's defaults, which boot reads from bootstrapComponents itself. Name the component otherwise.`,
+				reason: "reserved-component-key",
+				stage: "validateManifests",
+				details: {
+					reason: "reserved-component-key",
+					componentKey: RESERVED_BOOTSTRAP_INPUT,
+					source,
+					module: m.name,
+				},
+			});
+		}
+	}
 	modules.forEach((m, index) => {
 		if (rawModules[index]?.section === undefined) return;
 		const sources = [
@@ -2765,6 +2799,21 @@ export function renamedVariablesOf(
 }
 
 /**
+ * The variable names `relocating` — core, as module "core", and the loaded
+ * modules — declare renamed: each rename's old name and its new one. Boot
+ * judges these by their captures; a capture of any other name is what no
+ * loaded module applies. Read after the declarations are held.
+ * @internal
+ */
+function judgedVariables(relocating: readonly Module[]): ReadonlySet<string> {
+	return new Set(
+		declaredRenames(relocating).flatMap((rename) =>
+			rename.to === null ? [rename.from] : [rename.from, rename.to],
+		),
+	);
+}
+
+/**
  * A configuration still setting a key at or under a path a loaded module's
  * section moved from refuses boot (`config-path-relocated`) before it is
  * parsed: the old path may be in no section any loaded module reads, and what
@@ -2868,13 +2917,41 @@ function checkModuleSectionOwners(rawModules: readonly Module[]): void {
 }
 
 /**
- * Where stage 1's warnings go — the replica-safety warning and
- * `config_sections_ignored`, one rule for both: the logger the
- * composition root wired as a bootstrap component. A composition that wired
- * none hears nothing from stage 1.
+ * Where stage 1's warnings go — the replica-safety warning and the notices of
+ * configuration nothing loaded reads (`logConfigNotices`), one rule for both:
+ * the logger the composition root wired as a bootstrap component. A
+ * composition that wired none hears nothing from stage 1.
  */
 function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
 	return bootstrap.logger;
+}
+
+/**
+ * The bootstrap map without `configDefaults`, and that input read once into a
+ * copy of its plain data (`readConfigDefaults`): boot reads it at stage 1 for
+ * the notices and seeds no component from it. The map itself, and no
+ * defaults, when it holds no such key. A value that is not plain data — not
+ * an object of sections, a getter, a throw as it is read — refuses boot
+ * (`config-defaults-invalid`), before any check, naming the path and no value.
+ */
+function takeConfigDefaults(bootstrap: BootstrapMap): {
+	readonly bootstrapComponents: BootstrapMap;
+	readonly configDefaults: ConfigDefaults | undefined;
+} {
+	if (!Object.hasOwn(bootstrap, RESERVED_BOOTSTRAP_INPUT)) {
+		return { bootstrapComponents: bootstrap, configDefaults: undefined };
+	}
+	const { configDefaults: handed, ...bootstrapComponents } = bootstrap;
+	const read = readConfigDefaults(handed);
+	if ("problem" in read) {
+		throw new BootError({
+			message: `bootstrapComponents.${[RESERVED_BOOTSTRAP_INPUT, ...read.path].join(".")} ${read.problem}. Hand boot the configuration's defaults as the composition resolves its configuration: the loaded modules' reference.conf files and core's, with no file of its own and no environment, as plain data.`,
+			reason: "config-defaults-invalid",
+			stage: "validateManifests",
+			details: { reason: "config-defaults-invalid", path: [...read.path], problem: read.problem },
+		});
+	}
+	return { bootstrapComponents, configDefaults: read.defaults };
 }
 
 // ---------------------------------------------------------------------------
@@ -3191,11 +3268,14 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * for the first violation in input order.
  *
  * Deterministic: the same inputs give the same output or error. Its only side
- * effects are boot notices to the wired logger: the top-level sections
- * nothing owns (`config_sections_ignored`) and the replica-safety warning.
+ * effects are boot notices to the wired logger: the configuration nothing
+ * loaded reads (`logConfigNotices`) and the replica-safety warning.
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
-	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = input;
+	const { modules, contributionKinds, overrideComponents } = input;
+	// `configDefaults` is read here and is no component: no check and no later
+	// stage sees it.
+	const { bootstrapComponents, configDefaults } = takeConfigDefaults(input.bootstrapComponents);
 
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);
@@ -3244,12 +3324,15 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],
 	};
-	// The top-level sections nothing loaded owns stay in the config slot and
-	// are named once, to the logger the composition wired.
-	const ignored = ignoredSections(modules, config);
-	if (ignored.length > 0) {
-		warningLogger(bootstrapComponents)?.warn({ sections: [...ignored] }, "config_sections_ignored");
-	}
+	// The top-level sections nothing loaded owns stay in the config slot, and
+	// they and the captured variables nothing loaded declares are named once,
+	// to the logger the composition wired.
+	logConfigNotices(warningLogger(bootstrapComponents), {
+		config: rawConfig,
+		owned: ownedSections(modules),
+		defaults: configDefaults,
+		judged: judgedVariables(baseContext.relocating),
+	});
 
 	// A module its section switches off stays its name and its section: what
 	// it would register is out of every row below and every later stage.
