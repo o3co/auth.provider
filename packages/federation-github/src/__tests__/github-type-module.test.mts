@@ -18,8 +18,8 @@
  * The module that handles every `core.federations` entry of type `github`,
  * through core's `createApp`: one provider and one redirect policy per
  * enabled entry, under the entry's name; the entry flat and held to a strict
- * schema; GitHub reached through the fetch the module was given; and the same
- * provider and policy as the fixed-name module builds for the same entry.
+ * schema; GitHub reached through the fetch the module was given; and every
+ * key of the entry carried to the provider and its redirect policy.
  */
 
 import {
@@ -30,7 +30,6 @@ import {
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
 	type FederationProvider,
-	type Module,
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
@@ -51,7 +50,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	GITHUB_FEDERATION_TYPE,
 	type GithubProvider,
-	githubFederationModule,
 	githubFederationTypeModule,
 } from "#/index.mjs";
 import { createFakeGithub, type FakeGithub, GITHUB } from "./fake-github.mjs";
@@ -128,21 +126,7 @@ const activatorModule = defineModule({
 	},
 });
 
-/**
- * The deprecated path's bridge: the `githubFederationConfig` slot filled from
- * the `github` entry's fields, as a composition root fills it.
- */
-const bridgeOf = (entry: Record<string, unknown>, fetch: typeof globalThis.fetch): Module => {
-	const { enabled: _on, type: _type, ...fields } = entry;
-	return defineModule({
-		name: "test:github-federation-config",
-		provides: { githubFederationConfig: () => ({ ...fields, fetch }) as never },
-	});
-};
-
 interface BootOptions {
-	/** The modules that handle the entries; default the type module over the fake's fetch. */
-	readonly federationModules?: readonly Module[];
 	readonly authenticateByToken?: (token: string) => Promise<unknown>;
 }
 
@@ -165,7 +149,7 @@ async function boot(federations: Record<string, unknown>, options: BootOptions =
 		defaultRefreshTokenFamilyRevocationModule,
 		repositoryModule,
 		activatorModule,
-		...(options.federationModules ?? [githubFederationTypeModule({ fetch: github.fetch })]),
+		githubFederationTypeModule({ fetch: github.fetch }),
 	];
 	const handle = await createApp({
 		modules,
@@ -222,10 +206,7 @@ describe("githubFederationTypeModule", () => {
 	it("contributes the type github, and requires no dependency — the whole config least of all", () => {
 		const module = githubFederationTypeModule();
 		expect(GITHUB_FEDERATION_TYPE).toBe("github");
-		// Not the fixed-name module's name: both may be composed while a
-		// deployment moves from one to the other.
 		expect(module.name).toBe("federation-github-type");
-		expect(module.name).not.toBe(githubFederationModule.name);
 		expect(module.requires ?? []).toEqual([]);
 		expect(module.optional ?? []).toEqual([]);
 		const contributes = module.contributes as Record<string, Record<string, unknown>>;
@@ -404,28 +385,9 @@ describe("githubFederationTypeModule through createApp", () => {
 			expect(JSON.stringify(err.details)).not.toContain(SECRET);
 		});
 	});
-
-	it("refuses the fixed-name module beside it for the same entry: one federation has one handler", async () => {
-		const entry = { ...entryWork, callbackURL: CALLBACK_WORK.replace("github-work", "github") };
-		const err = await refusal(
-			boot(
-				{ github: entry },
-				{
-					federationModules: [
-						githubFederationTypeModule({ fetch: github.fetch }),
-						githubFederationModule,
-						bridgeOf(entry, github.fetch),
-					],
-				},
-			),
-		);
-		expect(err.reason).toBe("duplicate-contribute");
-		expect(err.message).toMatch(/"federation-github-type"/);
-		expect(err.message).toMatch(/"federation-github"/);
-	});
 });
 
-describe("githubFederationTypeModule — parity with the fixed-name module", () => {
+describe("githubFederationTypeModule — every key of the entry", () => {
 	const CALLBACK = "https://auth.test/session/oauth/federation/github/callback";
 	const entry = {
 		enabled: true,
@@ -440,74 +402,59 @@ describe("githubFederationTypeModule — parity with the fixed-name module", () 
 		endSessionEndpoint: "https://logout.test/end",
 	};
 
-	/** The provider and the policy one path builds for `github` from `entry`, against a fresh fake GitHub. */
-	async function built(path: "fixed-name" | "type") {
-		const fake = createFakeGithub();
-		const { handle } = await boot(
-			{ github: entry },
-			{
-				federationModules:
-					path === "type"
-						? [githubFederationTypeModule({ fetch: fake.fetch })]
-						: [githubFederationModule, bridgeOf(entry, fake.fetch)],
-			},
-		);
-		const provider = providersOf(handle).get("github") as GithubProvider | undefined;
+	it("reaches the provider and its redirect policy", async () => {
+		const { handle } = await boot({ github: entry });
+		const provider = providersOf(handle).get("github") as GithubProvider;
 		const policy = policiesOf(handle).get("github");
-		if (provider === undefined || policy === undefined) {
-			return expect.fail(`the ${path} path built no provider or no policy for github`);
-		}
-		return { fake, provider, policy };
-	}
 
-	it("builds the same provider and the same redirect policy from one entry", async () => {
-		const fixed = await built("fixed-name");
-		const type = await built("type");
-
-		expect(type.provider.name).toBe(fixed.provider.name);
-		expect(type.provider.scope).toEqual(fixed.provider.scope);
-		expect(Object.keys(type.provider).sort()).toEqual(Object.keys(fixed.provider).sort());
-
-		const authorize = (provider: FederationProvider) =>
-			provider.buildAuthorizationUrl({
-				redirectUri: CALLBACK,
-				state: "state-1",
-				codeVerifier: VERIFIER,
-				nonce: "nonce-1",
-			}).href;
-		expect(authorize(type.provider)).toBe(authorize(fixed.provider));
-
-		const exchange = async ({ fake, provider }: Awaited<ReturnType<typeof built>>) => {
-			const profile = await provider.exchangeCode({
-				code: "code-1",
-				codeVerifier: VERIFIER,
-				redirectUri: CALLBACK,
-				nonce: "nonce-1",
-			});
-			const token = fake.requestsTo(GITHUB.tokenEndpoint).at(-1);
-			return {
-				profile,
-				requests: fake.requests.map((r) => `${r.method} ${r.url.href}`),
-				authorization: token?.headers.get("authorization"),
-				body: Object.fromEntries(token?.body ?? []),
-			};
-		};
-		const exchanged = await exchange(type);
-		expect(exchanged).toEqual(await exchange(fixed));
-		expect(exchanged.body).toMatchObject({ client_id: "client-a", client_secret: "secret-a" });
-
-		const logout = { postLogoutRedirectUri: "https://app.test/bye", state: "st" };
-		expect((await type.provider.endSession(logout)).url.href).toBe(
-			(await fixed.provider.endSession(logout)).url.href,
+		// The provider: the entry's client, callback and logout endpoint.
+		const url = provider.buildAuthorizationUrl({
+			redirectUri: CALLBACK,
+			state: "state-1",
+			codeVerifier: VERIFIER,
+			nonce: "nonce-1",
+		});
+		expect(url.searchParams.get("client_id")).toBe("client-a");
+		expect(url.searchParams.get("redirect_uri")).toBe(CALLBACK);
+		await provider.exchangeCode({
+			code: "code-1",
+			codeVerifier: VERIFIER,
+			redirectUri: CALLBACK,
+			nonce: "nonce-1",
+		});
+		expect(lastTokenBody()).toMatchObject({
+			client_id: "client-a",
+			client_secret: "secret-a",
+			redirect_uri: CALLBACK,
+		});
+		const ended = await provider.endSession({
+			postLogoutRedirectUri: "https://app.test/bye",
+			state: "st",
+		});
+		expect(ended.url.href).toBe(
+			"https://logout.test/end?post_logout_redirect_uri=https%3A%2F%2Fapp.test%2Fbye&state=st",
 		);
 
-		for (const url of ["https://app.test/welcome", "https://elsewhere.test/"]) {
-			expect(type.policy.validateRedirect(url)).toEqual(fixed.policy.validateRedirect(url));
-		}
-		for (const session of [{}, { redirectTo: "https://app.test/welcome" }]) {
-			expect(type.policy.resolveCallbackRedirect(session)).toEqual(
-				fixed.policy.resolveCallbackRedirect(session),
-			);
-		}
+		// The policy: the entry's allowlist, authCallbackUrl and clientUrl.
+		expect(policy?.validateRedirect("https://app.test/welcome")).toEqual({
+			ok: true,
+			value: undefined,
+		});
+		expect(policy?.validateRedirect("https://elsewhere.test/")).toMatchObject({
+			ok: false,
+			status: 400,
+			error: "invalid_redirect",
+		});
+		expect(policy?.resolveCallbackRedirect({})).toEqual({ ok: true, value: "https://app.test/" });
+		expect(policy?.resolveCallbackRedirect({ redirectTo: "https://app.test/welcome" })).toEqual({
+			ok: true,
+			value: "https://app.test/auth/callback?redirect_to=https%3A%2F%2Fapp.test%2Fwelcome",
+		});
+	});
+
+	it("holds the allowlist to the entry's sessionDomain", async () => {
+		await expect(
+			boot({ github: { ...entry, redirectAllowlist: ["https://elsewhere.test/welcome"] } }),
+		).rejects.toThrow(/redirectAllowlist\[0\].*outside-session-domain/);
 	});
 });

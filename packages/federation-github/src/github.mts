@@ -16,7 +16,6 @@
 
 import {
 	codeChallenge,
-	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
@@ -27,22 +26,7 @@ import {
 	type SupportsClaimMapping,
 	type SupportsLogout,
 } from "@o3co/auth-provider-core";
-import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
-
-// ComponentMap slot declaration-merge: exposes githubFederationConfig as a typed
-// DI slot. Consumers supply this via a small bootstrap module that reads from
-// app config.
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		/**
-		 * @deprecated Read only by the deprecated `githubFederationModule`.
-		 * `githubFederationTypeModule()` takes each entry from `core.federations`
-		 * itself, through core's dispatch by type.
-		 */
-		readonly githubFederationConfig?: GithubProviderConfig;
-	}
-}
 
 const GITHUB_ISSUER = "https://github.com";
 const SCOPES = ["read:user", "user:email"] as const;
@@ -392,29 +376,3 @@ export function createNamedGithubProvider(
 		},
 	};
 }
-
-/**
- * Const Module for the GitHub federation integration.
- *
- * Contributes `federations.github` (the upstream OAuth 2 provider) and
- * `federationRedirectPolicies.github` (the consumer redirect URL policy).
- * Config is supplied via the `githubFederationConfig` ComponentMap slot.
- *
- * @deprecated Use `githubFederationTypeModule()`: one module handles every
- * `core.federations` entry of type `github`, under the entry's name, read
- * from the configuration by core, with no `githubFederationConfig` slot to
- * fill. Composing both for one entry refuses boot.
- */
-export const githubFederationModule = defineModule({
-	name: "federation-github",
-	requires: ["githubFederationConfig"] as const,
-	contributes: {
-		federations: {
-			// Single-tenant: provider.name is fixed at "github".
-			github: (deps) => createGithubProvider(deps.githubFederationConfig),
-		},
-		federationRedirectPolicies: {
-			github: (deps) => createFederationRedirectPolicy(deps.githubFederationConfig),
-		},
-	},
-});
