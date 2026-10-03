@@ -255,26 +255,28 @@ export function mergeWithBuiltins(
 /**
  * Build the `grants` `NameKeyedCollector` over one `GrantRegistry`. The
  * registry is the only store: `entries()` — what `grantHandlerResolver`
- * lists — reads the same map `get` does.
+ * lists — reads the same map `get` does. `get` answers `null` for a grant
+ * type registered switched off, so boot's pre-scan sees it claimed;
+ * `entries()` leaves it out.
  *
  * @internal
  */
-function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
+function makeGrantCollector(): NameKeyedCollector<GrantHandler | null> {
 	const registry = new GrantRegistry();
 
 	return {
 		kind: "name-keyed" as const,
-		register(name: string, value: GrantHandler): void {
+		register(name: string, value: GrantHandler | null): void {
 			registry.register(name, value);
 		},
-		replace(name: string, value: GrantHandler): void {
+		replace(name: string, value: GrantHandler | null): void {
 			registry.replace(name, value);
 		},
 		freeze(): void {
 			registry.freeze();
 		},
-		get(name: string): GrantHandler | undefined {
-			return registry.get(name);
+		get(name: string): GrantHandler | null | undefined {
+			return registry.has(name) ? (registry.get(name) ?? null) : undefined;
 		},
 		entries(): IterableIterator<readonly [string, GrantHandler]> {
 			return registry.entries();

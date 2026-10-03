@@ -410,7 +410,12 @@ export interface RouteCollector {
  * built-in kinds; consumers add custom kinds via `declare module` augmentation.
  */
 export interface ContributionCollectorMap {
-	readonly grants?: NameKeyedCollector<GrantHandler>;
+	/**
+	 * Collector for `grants` contributions, by grant type. A `null` entry is a
+	 * grant its module's settings switched off: it claims the grant type, and
+	 * `grantHandlerResolver` leaves it out. It is no override target.
+	 */
+	readonly grants?: NameKeyedCollector<GrantHandler | null>;
 	/**
 	 * Collector for `federations`, by name: the provider stage 4 builds for
 	 * each `core.federations` entry stage 1 dispatched to its type. Boot

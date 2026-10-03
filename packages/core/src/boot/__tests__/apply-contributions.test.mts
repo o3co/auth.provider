@@ -373,7 +373,6 @@ describe("applyContributions — step 2: factory throw wraps as BootError", () =
 describe("applyContributions — step 2: a grant is a handler", () => {
 	it.each([
 		["undefined", undefined],
-		["null", null],
 		["a string", "handler"],
 		["an array", []],
 		["an object with no handle", {}],

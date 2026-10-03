@@ -8,6 +8,7 @@ import type {
 	FederationInstance,
 	FederationTypeContribution,
 	GrantFactory,
+	GrantHandler,
 	RateLimitBudgetFactory,
 } from "../contributes-map.mjs";
 import type { ProviderDeps } from "../provider.mjs";
@@ -46,6 +47,12 @@ test("Per-kind factories receive Deps as argument", () => {
 test("List-shaped kinds are readonly arrays", () => {
 	type AuditField = NonNullable<ContributesMap<LocalDeps>["auditHooks"]>;
 	expectTypeOf<AuditField>().toMatchTypeOf<readonly AuditHookFactory<LocalDeps>[]>();
+});
+
+test("A grant factory answers a grant handler, or null to switch the grant off", () => {
+	expectTypeOf<GrantFactory<LocalDeps>>().toEqualTypeOf<
+		(deps: LocalDeps) => Contributed<GrantHandler | null>
+	>();
 });
 
 test("Name-keyed kinds are readonly records", () => {
