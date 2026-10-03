@@ -1258,16 +1258,24 @@ export async function applyContributions(
 			if (collector === undefined) continue;
 			const name = entry.key as string;
 			const target = collector.get(name);
+			if (target === undefined) {
+				throw new BootError({
+					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".`,
+					reason: "override-target-missing",
+					stage: "applyContributions",
+					details: {
+						reason: "override-target-missing",
+						kind: entry.kind,
+						name,
+						overridingModule: moduleName,
+					},
+				});
+			}
 			// A switched-off grant has no handler to replace: an override of it
 			// would switch on what its owner's settings switched off.
-			const switchedOffGrant = entry.kind === "grants" && target === null;
-			if (target === undefined || switchedOffGrant) {
+			if (entry.kind === "grants" && target === null) {
 				throw new BootError({
-					message:
-						`Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".` +
-						(switchedOffGrant
-							? " Its contributor answered null: the grant is switched off, so there is no handler to override."
-							: ""),
+					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}". Its contributor answered null: the grant is switched off, so there is no handler to override.`,
 					reason: "override-target-missing",
 					stage: "applyContributions",
 					details: {
