@@ -18,7 +18,7 @@
  * The schema of `jwks {}`, the JWKS module's own section. Each key reads the
  * string its environment variable carries; its defaults are applied where it
  * is read (`resolveJwksPath`, `resolveJwksCacheMaxAge`), so the section may be
- * absent or empty.
+ * absent or empty. Strict: an unknown key refuses boot, naming its path.
  */
 
 import { z } from "zod";
@@ -43,4 +43,5 @@ export const JWKS_SECTION = z
 		// time. An empty variable is refused, not served as `max-age=0`.
 		cacheMaxAge: durationFromEnv(z.number().int().nonnegative()).optional(),
 	})
+	.strict()
 	.optional();

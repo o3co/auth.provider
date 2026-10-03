@@ -134,7 +134,8 @@ it, while the module that owns it is loaded. A renamed variable refuses the
 boot when it is set alone or beside its new name at a different value; set
 to the same value as its new name, it boots, so a fleet can carry both
 through a rolling upgrade. Sections are strict: a key a section does not
-declare refuses the boot, naming it, where it used to be dropped.
+declare refuses the boot, naming it, where it used to be dropped — module by
+module, as [Values read more strictly](#values-read-more-strictly) lists.
 
 | What moved | Where it is listed |
 | --- | --- |
@@ -201,6 +202,15 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   A key named after an `Object.prototype` member (`__proto__`,
   `constructor`, `toString`, …), at any depth, refuses the boot naming its
   path (#1216).
+- **BREAKING: each module refuses a key its own section does not declare
+  (#1325).** From 0.17, a key inside a module's section that the module does
+  not read — a typo, or a key an earlier version read — refuses the boot
+  (`config-validation-failed`, naming the section or block that holds it and
+  the key), where it used to be ignored. The sections that refuse so far:
+  `jwks {}`, which reads `path` and `cacheMaxAge` alone. The other modules
+  follow in this release, each added here as it does. Before you upgrade,
+  check every key you set in these sections against the module's README, and
+  correct or delete the ones it does not list.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
   or is empty, a `__Secure-` or `__Host-` name (in any case) without what the
   prefix requires, and a `SESSION_STORE_DOMAIN` that is not a host name refuse

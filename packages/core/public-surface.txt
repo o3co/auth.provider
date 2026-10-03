@@ -1174,6 +1174,7 @@
 ./testing RenamedVariableCaptureInput type
 ./testing RenamedVariableCheck type
 ./testing RequirementContractInput type
+./testing SectionStrictnessOptions type
 ./testing SessionCookiePolicyContractInput type
 ./testing TestAppHandle type
 ./testing TestCsrfGuardOptions type
@@ -1220,6 +1221,7 @@
 ./testing renamedVariableCaptures value
 ./testing renamedVariableProblems value
 ./testing resolverForTests value
+./testing sectionStrictnessProblems value
 ./testing sessionCookiePolicyContract value
 ./testing sessionRequirementContract value
 ./testing testMfaFactorProofs value

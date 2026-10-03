@@ -1,6 +1,6 @@
 # composition — every workspace package, booted together
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 The contracts that exist only when all of this repository's modules are
 composed: the standalone template's composition with every package it does not
@@ -89,6 +89,13 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   alone needs none of what it would require and contributes no route, grant
   or factor
   ([`disabled-modules.test.mts`](src/__tests__/disabled-modules.test.mts)).
+- **Every module refuses an unknown key in its own section.** Core's
+  `sectionStrictnessProblems` over every sectioned module of the full set,
+  each section sampled from the configuration the full set boots with: a
+  level open by design is exempt with its reason, and a module not yet strict
+  is on an allowlist that may only shrink — an entry no longer needed fails,
+  and so does a new offender
+  ([`section-strictness.test.mts`](src/__tests__/section-strictness.test.mts)).
 - **What it checks on real Redis, under `core.deployment.mode = "multi"`.** That
   nothing in the full set declares replica-unsafe state, that each added
   memory store is refused at boot by name, and that two replicas on one
