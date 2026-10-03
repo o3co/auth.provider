@@ -166,7 +166,7 @@ export function createMemoryAttemptCounter(
 			}
 			if (!isAttemptSpec(spec)) {
 				throw new RangeError(
-					"createMemoryAttemptCounter: spec must be { limit, windowSeconds } as positive whole numbers, the window at most a year",
+					"createMemoryAttemptCounter: spec must be { limit, windowSeconds } as positive whole numbers, the window at most a day",
 				);
 			}
 			const { limit, windowSeconds } = spec;

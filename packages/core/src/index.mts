@@ -955,6 +955,7 @@ export {
 	isAttemptKey,
 	isAttemptSpec,
 	MAX_ATTEMPT_KEY_LENGTH,
+	MAX_ATTEMPT_WINDOW_SECONDS,
 	readAttemptCount,
 } from "./ratelimit/attempts.mjs";
 export {

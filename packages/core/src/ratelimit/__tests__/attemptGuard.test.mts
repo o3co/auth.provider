@@ -194,6 +194,7 @@ describe("createAttemptGuard: what it is built from", () => {
 	it.each([
 		["a zero limit", { limit: 0, windowSeconds: 60 }],
 		["a fractional window", { limit: 2, windowSeconds: 1.5 }],
+		["a window past a day", { limit: 2, windowSeconds: 86_401 }],
 		["no spec", undefined],
 	])("refuses %s", (_label, spec) => {
 		expect(() => guardOf({ spec: spec as AttemptSpec })).toThrow(RangeError);
@@ -395,6 +396,13 @@ describe("createAttemptGuard: answers and headers", () => {
 			error: "slow_down",
 			error_description: "too many device code attempts",
 		});
+	});
+
+	it("reads a refusal from a one-day window started under an earlier spec, with Retry-After from its end", async () => {
+		const app = appOf(guardOf({ counter: scripted(() => count(false, 0, 86_400_000)) }));
+		const res = await request(app).post("/per-ip");
+		expect(res.status).toBe(429);
+		expect(res.headers["retry-after"]).toBe("86400");
 	});
 
 	it("reads a refusal from a longer window started under an earlier spec, with Retry-After from its end", async () => {

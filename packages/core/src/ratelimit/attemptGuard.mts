@@ -182,7 +182,7 @@ function checkSpec(spec: unknown, tag: string): AttemptSpec {
 			: spec;
 	if (!isAttemptSpec(copy)) {
 		throw new RangeError(
-			`createAttemptGuard: ${tag}'s spec must be { limit, windowSeconds } as positive whole numbers, the window at most a year`,
+			`createAttemptGuard: ${tag}'s spec must be { limit, windowSeconds } as positive whole numbers, the window at most a day`,
 		);
 	}
 	return Object.freeze(copy);

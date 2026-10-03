@@ -142,7 +142,7 @@ const BAD_SPECS: readonly unknown[] = [
 	{ limit: 2, windowSeconds: 0 },
 	{ limit: 2, windowSeconds: 0.5 },
 	{ limit: 2, windowSeconds: Number.POSITIVE_INFINITY },
-	{ limit: 2, windowSeconds: 31_536_001 },
+	{ limit: 2, windowSeconds: 86_401 },
 ];
 
 const shown = (value: unknown): string =>

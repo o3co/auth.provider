@@ -20,7 +20,6 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { MAX_DURATION_SECONDS } from "#/config/durations.mjs";
 import {
 	ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
 	type AttemptCount,
@@ -29,6 +28,7 @@ import {
 	isAttemptKey,
 	isAttemptSpec,
 	MAX_ATTEMPT_KEY_LENGTH,
+	MAX_ATTEMPT_WINDOW_SECONDS,
 	readAttemptCount,
 } from "#/ratelimit/attempts.mjs";
 import type { RateLimiter } from "#/ratelimit/types.mjs";
@@ -48,9 +48,10 @@ describe("AttemptCounter", () => {
 });
 
 describe("isAttemptSpec", () => {
-	it("accepts a positive whole limit and a positive whole window of at most a year", () => {
+	it("accepts a positive whole limit and a positive whole window of at most a day", () => {
+		expect(MAX_ATTEMPT_WINDOW_SECONDS).toBe(86_400);
 		expect(isAttemptSpec({ limit: 1, windowSeconds: 1 })).toBe(true);
-		expect(isAttemptSpec({ limit: 20, windowSeconds: MAX_DURATION_SECONDS })).toBe(true);
+		expect(isAttemptSpec({ limit: 20, windowSeconds: 86_400 })).toBe(true);
 	});
 
 	it.each([
@@ -66,7 +67,7 @@ describe("isAttemptSpec", () => {
 		["a string limit", { limit: "5", windowSeconds: 60 }],
 		["a zero window", { limit: 5, windowSeconds: 0 }],
 		["a fractional window", { limit: 5, windowSeconds: 0.5 }],
-		["a window past a year", { limit: 5, windowSeconds: MAX_DURATION_SECONDS + 1 }],
+		["a window past a day", { limit: 5, windowSeconds: 86_401 }],
 		["an infinite window", { limit: 5, windowSeconds: Number.POSITIVE_INFINITY }],
 	])("refuses %s", (_label, value) => {
 		expect(isAttemptSpec(value)).toBe(false);
@@ -149,7 +150,7 @@ describe("readAttemptCount", () => {
 		expect(readAttemptCount(answer, SPEC, NOW)).toBeUndefined();
 	});
 
-	it("reads a window's end from the allowance before now to the longer of the window and a day, and the allowance, after it", () => {
+	it("reads a window's end from the allowance before now to a day and the allowance after it, whatever the spec's window", () => {
 		expect(ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS).toBe(5_000);
 		const at = (ms: number) =>
 			readAttemptCount({ allowed: true, remaining: 1, resetAt: new Date(ms) }, SPEC, NOW);
@@ -158,13 +159,9 @@ describe("readAttemptCount", () => {
 		expect(at(NOW - 5_001)).toBeUndefined();
 		expect(at(NOW + 86_405_001)).toBeUndefined();
 		expect(at(NOW + 365 * 86_400_000)).toBeUndefined();
-		// A window started under an earlier, longer spec is still a count.
+		// A window started under an earlier, longer spec, up to the one-day cap, is still a count.
 		expect(at(NOW + 900_000)?.resetAt.getTime()).toBe(NOW + 900_000);
-		const twoDays: AttemptSpec = { limit: 5, windowSeconds: 172_800 };
-		const long = (ms: number) =>
-			readAttemptCount({ allowed: true, remaining: 1, resetAt: new Date(ms) }, twoDays, NOW);
-		expect(long(NOW + 172_805_000)?.resetAt.getTime()).toBe(NOW + 172_805_000);
-		expect(long(NOW + 172_805_001)).toBeUndefined();
+		expect(at(NOW + 86_400_000)?.resetAt.getTime()).toBe(NOW + 86_400_000);
 		expect(
 			readAttemptCount({ allowed: true, remaining: 1, resetAt: RESET }, SPEC, Number.NaN),
 		).toBeUndefined();

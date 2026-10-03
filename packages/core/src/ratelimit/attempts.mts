@@ -25,10 +25,9 @@
  * one reading of its answer (`readAttemptCount`).
  */
 
-import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import { instantOf } from "../federations/token-lifetime.mjs";
 
-/** The limit one consume is counted against: at most `limit` attempts in a window of `windowSeconds`. */
+/** The limit one consume is counted against: at most `limit` attempts in a window of `windowSeconds`, at most a day. */
 export interface AttemptSpec {
 	readonly limit: number;
 	readonly windowSeconds: number;
@@ -66,14 +65,20 @@ export interface AttemptCounter {
 const isPositiveSafeInteger = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 
-/** A spec a counter takes: a positive whole `limit` and a positive whole `windowSeconds` of at most a year. */
+/**
+ * The longest window a counter takes. Verifier windows are minutes; the cap
+ * lets a reader bound a window's end without knowing the spec it started under.
+ */
+export const MAX_ATTEMPT_WINDOW_SECONDS = 86_400;
+
+/** A spec a counter takes: a positive whole `limit` and a positive whole `windowSeconds` of at most {@link MAX_ATTEMPT_WINDOW_SECONDS}. */
 export const isAttemptSpec = (value: unknown): value is AttemptSpec => {
 	if (typeof value !== "object" || value === null) return false;
 	const { limit, windowSeconds } = value as { limit?: unknown; windowSeconds?: unknown };
 	return (
 		isPositiveSafeInteger(limit) &&
 		isPositiveSafeInteger(windowSeconds) &&
-		windowSeconds <= MAX_DURATION_SECONDS
+		windowSeconds <= MAX_ATTEMPT_WINDOW_SECONDS
 	);
 };
 
@@ -87,19 +92,15 @@ export const isAttemptKey = (value: unknown): value is string =>
 /** How far a counter's clock may stand from the reader's when its window's end is judged. */
 export const ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS = 5_000;
 
-/** The least horizon a window's end is read within, so a window shortened on a shared store mid-window is still a count. */
-const MIN_RESET_HORIZON_SECONDS = 86_400;
-
 /**
  * A counter's answer, read at `nowMs`, as a fresh, frozen count, each field
  * read once, or `undefined` when it is not one under `spec`: `allowed` not a
  * boolean, `remaining` not a whole number below `spec.limit` on an allowed
  * attempt or 0 on a refused one, `resetAt` not a valid `Date` within
- * {@link ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS} of `[nowMs, nowMs + max(windowSeconds,
- * one day)]`, or a read that throws. The day keeps a window started under an
- * earlier, longer spec a count rather than an outage; a window of more than a
- * day, shortened while it runs, reads as an outage until its end is within a
- * day, which bounds how far ahead a faulty counter can lock a key.
+ * {@link ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS} of `[nowMs, nowMs + MAX_ATTEMPT_WINDOW_SECONDS]`,
+ * or a read that throws. The bound is the longest window any spec allows, not
+ * the current spec's, so a window started under an earlier, longer spec is
+ * still a count.
  */
 export function readAttemptCount(
 	answer: unknown,
@@ -124,10 +125,7 @@ export function readAttemptCount(
 	if (resetMs === undefined || !Number.isFinite(nowMs)) return undefined;
 	if (
 		resetMs < nowMs - ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS ||
-		resetMs >
-			nowMs +
-				Math.max(spec.windowSeconds, MIN_RESET_HORIZON_SECONDS) * 1000 +
-				ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS
+		resetMs > nowMs + MAX_ATTEMPT_WINDOW_SECONDS * 1000 + ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS
 	) {
 		return undefined;
 	}
