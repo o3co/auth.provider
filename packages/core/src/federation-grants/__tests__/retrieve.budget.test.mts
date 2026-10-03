@@ -757,6 +757,48 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		);
 
 		it.each([
+			["two past the look's", (grant: { version: number }) => grant.version + 1],
+			["behind the look's", (grant: { version: number }) => grant.version - 2],
+		])(
+			"that is %s asks the upstream nothing, and answers `storage`: a take bumps once or not at all",
+			async (_, answered) => {
+				await seedEndingAt(10 * MIN);
+				withTake(async (input) => {
+					const taken = await realTake(input);
+					return taken.ok
+						? { ok: true, grant: { ...taken.grant, version: answered(taken.grant) } }
+						: taken;
+				});
+				setNow(at(20 * MIN));
+				const result = await retrieve();
+				expect(result).toMatchObject({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(failureOf(result)).toMatchObject({ during: "rotation" });
+				expect(h.refresh).not.toHaveBeenCalled();
+			},
+		);
+
+		it("answered for another grant asks the upstream nothing, and answers `storage`", async () => {
+			await seedEndingAt(10 * MIN);
+			withTake(async (input) => {
+				const taken = await realTake(input);
+				return taken.ok ? { ok: true, grant: { ...taken.grant, id: "g-other" } } : taken;
+			});
+			setNow(at(20 * MIN));
+			const result = await retrieve();
+			expect(result).toMatchObject({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "storage",
+			});
+			expect(failureOf(result)).toMatchObject({ during: "rotation" });
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
+		it.each([
 			["no grant", () => undefined],
 			["a grant that is not an object", () => "g-1"],
 			[
