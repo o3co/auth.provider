@@ -492,6 +492,7 @@ describe("the session module reads no session-store.secret", () => {
 				federations: {
 					stub: {
 						enabled: true,
+						type: "stub",
 						clientId: "id",
 						clientSecret: "federation-client-secret",
 						callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",

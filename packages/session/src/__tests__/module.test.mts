@@ -32,6 +32,7 @@ import {
 	createTestApp,
 	createTestCsrfTokenSigner,
 	createTestSessionCookiePolicy,
+	federationTypeForTests,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -140,10 +141,10 @@ const refreshTokenFamilyRevocationModule = defineModule({
 });
 
 /**
- * Stub federation module — contributes `federations.stub` + the paired
- * `federationRedirectPolicies.stub`. Needed for any test that exercises the
- * boot path with at least one enabled federation in config (otherwise the
- * planner's pairing invariant would fail to satisfy from config alone).
+ * The provider of the enabled `stub` entry. The federation type `stub`
+ * registers it, with a redirect policy beside it, for any test that boots
+ * with at least one enabled federation in config (an enabled entry is handled
+ * by the module that registers its type).
  */
 const stubFederationProvider: FederationProvider = {
 	name: "stub",
@@ -152,19 +153,8 @@ const stubFederationProvider: FederationProvider = {
 	exchangeCode: async () => ({ issuer: "https://example.com", sub: "user-1", expiresAt: null }),
 };
 
-const stubFederationModule = defineModule({
-	name: "test:stub-federation",
-	contributes: {
-		federations: {
-			stub: () => stubFederationProvider,
-		},
-		federationRedirectPolicies: {
-			stub: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	},
+const stubFederationModule = federationTypeForTests("stub", {
+	provider: () => stubFederationProvider,
 });
 
 const baseTestModules = [
@@ -242,7 +232,7 @@ describe("sessionModule (boot integration)", () => {
 		await handle.dispose();
 	});
 
-	it("registers a federation provider contributed via per-federation module", async () => {
+	it("registers the provider of an enabled federation through the module of its type", async () => {
 		const base = makeValidAppConfig();
 		const config: AppConfig = {
 			...base,
@@ -251,6 +241,7 @@ describe("sessionModule (boot integration)", () => {
 				federations: {
 					stub: {
 						enabled: true,
+						type: "stub",
 						clientId: "id",
 						clientSecret: "secret",
 						callbackURL: "https://example.com/cb",
@@ -275,6 +266,7 @@ describe("sessionModule (boot integration)", () => {
 				federations: {
 					stub: {
 						enabled: true,
+						type: "stub",
 						clientId: "id",
 						clientSecret: "secret",
 						// callbackURL intentionally absent
@@ -302,6 +294,7 @@ describe("sessionModule (boot integration)", () => {
 				federations: {
 					disabledFed: {
 						enabled: false,
+						type: "stub",
 						// no callbackURL — must NOT throw because disabled
 					} as never,
 				},
@@ -374,6 +367,7 @@ describe("sessionModule — the link routes are a consumer of session admission"
 				federations: {
 					stub: {
 						enabled: true,
+						type: "stub",
 						clientId: "id",
 						clientSecret: "secret",
 						callbackURL: "https://example.com/session/oauth/federation/stub/callback",

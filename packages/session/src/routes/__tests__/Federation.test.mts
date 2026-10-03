@@ -3293,7 +3293,7 @@ describe("amr on federated sessions", () => {
 
 	it("records a trusted IdP's amr beside fed, where it counts (core.federations.<name>.trustUpstreamAmr)", async () => {
 		const created = await loginWith(["hwk", "mfa"], {
-			core: { federations: { test: { enabled: true, trustUpstreamAmr: true } } },
+			core: { federations: { test: { enabled: true, type: "test", trustUpstreamAmr: true } } },
 		});
 		expect(created.amr).toEqual(["hwk", "mfa", "fed"]);
 		expect(created.authentication).toStrictEqual({
@@ -3307,7 +3307,7 @@ describe("amr on federated sessions", () => {
 	it("records fed alone when the IdP asserted nothing, trusted or not", async () => {
 		for (const trustUpstreamAmr of [true, false]) {
 			const created = await loginWith(undefined, {
-				core: { federations: { test: { enabled: true, trustUpstreamAmr } } },
+				core: { federations: { test: { enabled: true, type: "test", trustUpstreamAmr } } },
 			});
 			expect(created.amr).toEqual(["fed"]);
 			expect(created.authentication).toStrictEqual({
@@ -3349,8 +3349,8 @@ describe("amr on federated sessions", () => {
 				config: {
 					core: {
 						federations: {
-							trusted: { enabled: true, trustUpstreamAmr: true },
-							untrusted: { enabled: true },
+							trusted: { enabled: true, type: "test", trustUpstreamAmr: true },
+							untrusted: { enabled: true, type: "test" },
 						},
 					},
 				},
@@ -3378,7 +3378,7 @@ describe("amr on federated sessions", () => {
 		// One reading for the split and the drop: a disabled section's switch
 		// trusts nothing, whichever of the two asks.
 		const created = await loginWith(["hwk", "mfa"], {
-			core: { federations: { test: { enabled: false, trustUpstreamAmr: true } } },
+			core: { federations: { test: { enabled: false, type: "test", trustUpstreamAmr: true } } },
 		});
 		expect(created.amr).toEqual(["fed"]);
 		expect(created.authentication).toStrictEqual({
@@ -3394,7 +3394,9 @@ describe("amr on federated sessions", () => {
 			buildCallbackApp({
 				providers: new Map([["test", makeFakeProvider()]]),
 				federation: { name: "test", state: "s1", codeVerifier: "v1" },
-				config: { core: { federations: { test: { enabled: true, trustUpstreamAmr: "yes" } } } },
+				config: {
+					core: { federations: { test: { enabled: true, type: "test", trustUpstreamAmr: "yes" } } },
+				},
 			}),
 		).toThrow(new RangeError("core.federations.test.trustUpstreamAmr must be true or false"));
 	});
