@@ -53,6 +53,7 @@ import {
 import {
 	coreConfigForTests,
 	createTestOAuthTokenSettings,
+	federationTypeForTests,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
 import { HttpUserRepository } from "@o3co/auth-provider-foundation";
@@ -182,17 +183,9 @@ const upstream = {
 	refreshDelegatedToken: async () => ({}),
 };
 
-const federationModule = defineModule({
-	name: "test-federation-upstream",
-	contributes: {
-		federations: { upstream: () => upstream },
-		federationRedirectPolicies: {
-			upstream: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	} as never,
+/** The module that handles the `upstream` entry's type, with the provider above. */
+const federationModule = federationTypeForTests("upstream-idp", {
+	provider: () => upstream,
 });
 
 interface Browser {
@@ -279,6 +272,8 @@ const boot = async (
 					federations: {
 						upstream: {
 							enabled: true,
+							type: "upstream-idp",
+							callbackURL: "https://provider.example/federation/upstream/callback",
 							issuer: "https://issuer.example",
 							clientId: "provider-client",
 						},

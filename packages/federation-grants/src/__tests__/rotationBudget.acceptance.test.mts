@@ -22,17 +22,25 @@
  * closes, and refreshes again once it has.
  */
 
-import type { BootstrapMap, Client, ClientRepository } from "@o3co/auth-provider-core";
+import type {
+	BootstrapMap,
+	Client,
+	ClientRepository,
+	FederationProvider,
+} from "@o3co/auth-provider-core";
 import {
 	createApp,
 	createInMemorySubjectRevocation,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
-	defineModule,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "@o3co/auth-provider-core";
-import { coreConfigForTests, makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import {
+	coreConfigForTests,
+	federationTypeForTests,
+	makeValidCoreConfig,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -81,24 +89,14 @@ const boot = async (settings: Record<string, unknown>) => {
 		expiresAt: new Date(Date.now() + TOKEN_LIFE * 1000),
 		tokenType: "Bearer",
 	}));
-	const federationModule = defineModule({
-		name: "test-federation-upstream",
-		contributes: {
-			federations: {
-				upstream: () => ({
-					name: "upstream",
-					buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
-					exchangeDelegatedCode: async () => ({}),
-					refreshDelegatedToken,
-				}),
-			},
-			federationRedirectPolicies: {
-				upstream: () => ({
-					validateRedirect: () => ({ ok: true as const, value: undefined }),
-					resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-				}),
-			},
-		} as never,
+	const federationModule = federationTypeForTests("upstream-idp", {
+		provider: () =>
+			({
+				name: "upstream",
+				buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+				exchangeDelegatedCode: async () => ({}),
+				refreshDelegatedToken,
+			}) as unknown as FederationProvider,
 	});
 	const store = createMemoryFederationGrantStore();
 	const handle = await createApp({
@@ -112,6 +110,8 @@ const boot = async (settings: Record<string, unknown>) => {
 					federations: {
 						upstream: {
 							enabled: true,
+							type: "upstream-idp",
+							callbackURL: "https://provider.example/federation/upstream/callback",
 							issuer: connection.upstreamIssuer,
 							clientId: connection.upstreamClientId,
 						},
