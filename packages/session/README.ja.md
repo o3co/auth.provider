@@ -9,7 +9,7 @@
 **役割。** 認証のブラウザ側の半分。このパッケージが使うポート（`UserRepository`、`UserSessionStore`、`FederationTokenStore`、`SessionFederationIndex`、フェデレーションアダプター契約）は core が持ち、core はルートを一つも実装しない。このパッケージはそれらのポートをブラウザ向けに駆動するドライバーである。責務は三つ:
 
 1. **`/session` ルート** — `sessionModule`。パスワードログイン、ログアウト、CSRF トークンのルート、フェデレーションの開始ルートとコールバックルート。パスワード検証または上流 IdP の応答を `UserSession` レコードと認証済みの express session に変え — どちらも一つの関数 [`establishSession`](#セッションの確立) を通して。この関数は core の [セッションアドミッション](../core/src/session-admission/README.md) が確立したものを書き、セッション requirement の完了（MFA パッケージのもの）もこれを呼ぶ — ログアウトでそれを取り消す。パスワードログインは何かを書く前に登録済みのセッション requirement に問い合わせ、requirement はそれを [中断する](#requirement-がログインを中断するとき) ことがある。
-2. **フェデレーションアダプターのツールキット** — アダプターパッケージが、自分が差し込まれるルーターから import するもの: `createFederationRedirectPolicy` とその元になる許可リストの規則、`extractFederationSection`。アダプターが上流への要求を組み立てるヘルパー — `codeChallenge`、`callbackUrlForExchange`、`FederationClientSecret` / `resolveClientSecret` — は core のもの。
+2. **フェデレーションアダプターのツールキット** — アダプターパッケージが、自分が差し込まれるルーターから import するもの: `createFederationRedirectPolicy` とその元になる許可リストの規則。アダプターが上流への要求を組み立てるヘルパー — `codeChallenge`、`callbackUrlForExchange`、`FederationClientSecret` / `resolveClientSecret` — は core のもの。
 3. **ブラウザセッションストア** — `sessionStoreModule` / `sessionStoreModuleFor` と `createSessionStoreFactory` / `registerBuiltinSessionStores`。express-session ミドルウェア、その cookie、そのストア（memory、または `connect-redis` 経由の Redis）。
 
 **持つもの:**
@@ -34,7 +34,7 @@
 
 **三つが同居する理由。** 他の二つはどちらもルートのために存在する。
 
-- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する contribution 種別であり、`extractFederationSection` はルーターがコールバック URL を読むのと同じ設定の形を読む。どちらもルーターのものであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。要求を組み立てる純粋関数のヘルパーはここにはない: ルーターはそのどれも使わないので、それらを使うようアダプターに指示する契約と並んで core にある。
+- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する contribution 種別である。これはルーターのものであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。フェデレーションのエントリはここでは読まない: `core.federations` の唯一の読み方は core の `federationsOf` と `enabledFederationsOf` であり、ルーターのコールバック URL もそれで読む。要求を組み立てる純粋関数のヘルパーはここにはない: ルーターはそのどれも使わないので、それらを使うようアダプターに指示する契約と並んで core にある。
 - ストア: `req.session` そのものであり、それを書くのはここのルートである。フェデレーションルーターは `form_post` トランザクションも同じストアに置く。`sessionModule` とは別のモジュールになっているのは、他のパッケージがこれらのルートなしに `req.session` を読むから — `oauth` の `/authorize`・同意・ログアウト、`device-grant` の検証ページ、`federation-grants` のブラウザ向けルート — であり、独自のログインを持つデプロイはストアだけをインストールする。
 
 **ソースの配置。** [`src/routes/`](src/routes/) は二つのルーター。[`src/establish-session.mts`](src/establish-session.mts) は二つのルーターが共有するログインの末尾。[`src/federations/`](src/federations/) はツールキットとルーターのフェデレーション部品（クレームの優先順位、同意済みスコープ、トランザクションストア、リダイレクトポリシー）。[`src/modules/`](src/modules/) と [`src/store/`](src/store/) はブラウザセッションストア。[`src/internal/`](src/internal/) は cookie の読み取り、定数時間の比較、`User` から読むクレーム。[`src/csrf.mts`](src/csrf.mts) は CSRF の規則。[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) はログインとフェデレーションのルートが共有する許可リストの規則。[`src/login-entry.mts`](src/login-entry.mts)、[`src/login-completion.mts`](src/login-completion.mts)、[`src/session-cookie-policy.mts`](src/session-cookie-policy.mts)、[`src/csrf-token-signer.mts`](src/csrf-token-signer.mts) は、CSRF ガードのほかにモジュールが他のパッケージに提供するもの。各ファイルが何をするかはそのファイルのヘッダーコメントにある。
@@ -468,27 +468,32 @@ core.federations {
 
 ### アダプターの書き方
 
-OpenID Connect の discovery ドキュメントを公開する IdP なら、コードは書かない: [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) の `type = "oidc"` セクションがアダプターになる。そうでなければ、アダプターは `federations.<name>`（`FederationProvider`）と `federationRedirectPolicies.<name>` の両方を contribute するモジュールであり、設定は小さなブリッジモジュールが `extractFederationSection` から埋める型付きの `ComponentMap` スロットに載せる:
+OpenID Connect の discovery ドキュメントを公開する IdP なら、コードは書かない: [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) の `type = "oidc"` エントリがアダプターになる。そうでなければ、アダプターは `federationTypes` に type を登録するモジュールである: エントリ自身のキーのスキーマ（フラット）と、その type の有効なエントリごとに core が呼ぶ二つのファクトリー。ファクトリーにはエントリの名前、その `callbackURL`、スキーマが返したキーが渡される。core は自分が所有するキー（`enabled`、`type`、`trustUpstreamAmr`、`callbackURL`）を取り除いてからスキーマにエントリを読ませる:
 
 ```ts
-import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
+import { defineFederationType, defineModule } from "@o3co/auth-provider-core";
 import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
+import { z } from "zod";
 
-declare module "@o3co/auth-provider-core" {
-  interface ComponentMap {
-    readonly exampleFederationConfig?: ExampleConfig;
-  }
-}
+const exampleEntrySchema = z.strictObject({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  clientUrl: z.string().optional(),
+  redirectAllowlist: z.array(z.string()).optional(),
+  authCallbackUrl: z.string().optional(),
+  sessionDomain: z.string().optional(),
+});
 
-export const exampleFederationModule = defineModule({
-  name: "federation:example",
-  requires: ["exampleFederationConfig"] as const,
+export const exampleFederationTypeModule = defineModule({
+  name: "federation-example-type",
   contributes: {
-    federations: {
-      example: (deps): FederationProvider => createExampleProvider(deps.exampleFederationConfig),
-    },
-    federationRedirectPolicies: {
-      example: (deps) => createFederationRedirectPolicy(deps.exampleFederationConfig),
+    federationTypes: {
+      example: defineFederationType()({
+        entrySchema: exampleEntrySchema,
+        factory: (_deps, { name, callbackURL, entry }) =>
+          createExampleProvider(name, { ...entry, callbackURL }),
+        redirectPolicy: (_deps, { entry }) => createFederationRedirectPolicy(entry),
+      }),
     },
   },
 });

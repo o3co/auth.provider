@@ -22,7 +22,7 @@ import {
 	type CsrfTokenSigner,
 	consoleLogger,
 	defineModule,
-	federationsOf,
+	enabledFederationsOf,
 	LOGIN_RETURN_PARAMETER,
 	type Logger,
 	loginPageCarriesReturn,
@@ -40,7 +40,6 @@ import {
 	MAX_CSRF_TTL_SECONDS,
 	sessionCsrfSlice,
 } from "./csrf.mjs";
-import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
 import { createLoginEntry } from "./login-entry.mjs";
 import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "./loginBudget.mjs";
@@ -136,27 +135,19 @@ const SECTION = {
 } as const;
 
 /**
- * Boot-time projection of `core.federations` to a `name → callbackURL`
- * map. Throws when an enabled federation has no `callbackURL`: a deployment
- * misconfiguration fails at boot, not per request.
+ * Each enabled `core.federations` entry's name and flat `callbackURL`, read
+ * as core reads the entries it dispatches (`enabledFederationsOf`). Core
+ * refuses the boot before any route is built when an enabled entry has no
+ * non-empty `callbackURL`, so the value is taken as written; a key named
+ * after the entry's type is one of the type's own keys and is not read here.
  */
-function deriveProviderCallbackUrls(
-	federations: Readonly<Record<string, unknown>>,
-): ReadonlyMap<string, string> {
-	const out = new Map<string, string>();
-	for (const name of Object.keys(federations)) {
-		const slice = extractFederationSection(federations, name);
-		if (!slice) continue; // disabled or absent — skip
-		const callbackURL = slice.callbackURL;
-		if (typeof callbackURL !== "string" || callbackURL.length === 0) {
-			throw new Error(
-				`core.federations.${name}: callbackURL is required when federation is enabled`,
-			);
-		}
-		out.set(name, callbackURL);
-	}
-	return out;
-}
+const providerCallbackUrlsOf = (config: unknown): ReadonlyMap<string, string> =>
+	new Map(
+		enabledFederationsOf(config).map(([name, entry]) => [
+			name,
+			(entry as { readonly callbackURL: string }).callbackURL,
+		]),
+	);
 
 /**
  * The `csrfGuard` slot's value: the signed double-submit token of
@@ -328,7 +319,7 @@ export const sessionModule = defineModule<
 						config,
 						federationProviders: deps.federationProviders,
 						federationRedirectPolicyResolver: deps.federationRedirectPolicyResolver,
-						providerCallbackUrls: deriveProviderCallbackUrls(federationsOf(config)),
+						providerCallbackUrls: providerCallbackUrlsOf(config),
 						userRepository: deps.userRepository,
 						userSessionStore: deps.userSessionStore,
 						sessionFederationIndex: deps.sessionFederationIndex,

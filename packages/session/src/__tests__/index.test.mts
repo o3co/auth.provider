@@ -96,11 +96,11 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect(Object.keys(loaded?.provides ?? {})).toEqual(["loginCompletion"]);
 	});
 
-	it("exports extractFederationSection as a runtime helper", async () => {
+	it("does NOT export a reader of the federation entries", async () => {
 		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { extractFederationSection?: unknown }).extractFederationSection).toBe(
-			"function",
-		);
+		// Core's `federationsOf` / `enabledFederationsOf` are the one reading of
+		// `core.federations`; an entry is flat and names its type.
+		expect((mod as Record<string, unknown>).extractFederationSection).toBeUndefined();
 	});
 
 	it("exports federation helper utilities for provider packages", async () => {
