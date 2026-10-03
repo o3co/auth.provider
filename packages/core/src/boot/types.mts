@@ -1156,8 +1156,8 @@ export interface FederationStoresIncompleteDetails {
  */
 export interface FederationTypeUnhandledDetails {
 	readonly reason: "federation-type-unhandled";
-	/** Each unhandled entry: its name, and its `type` when it names one. */
-	readonly unhandled: readonly { readonly federationName: string; readonly type?: string }[];
+	/** Each unhandled entry: its name and the `type` it names, which no installed module registers. */
+	readonly unhandled: readonly { readonly federationName: string; readonly type: string }[];
 	/** The types the installed modules register, in module order. */
 	readonly handled: readonly string[];
 }

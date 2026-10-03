@@ -46,13 +46,12 @@ export function withInsecureSessionCookie<C extends { readonly "session-store": 
 
 /**
  * What {@link withFederation} writes of one federation: its callback URL, the
- * type that handles it when a test names one, and client credentials a test
- * may name.
+ * type that handles it, and client credentials a test may name.
  */
 export interface FederationForTests {
 	readonly callbackURL: string;
-	/** The `federationTypes` key of the package that handles it; none by default. */
-	readonly type?: string;
+	/** The `federationTypes` key of the package that handles it. */
+	readonly type: string;
 	/** Default `<name>-client`. */
 	readonly clientId?: string;
 	/** Default `<name>-secret`. */
@@ -62,7 +61,7 @@ export interface FederationForTests {
 /** One enabled federation entry, as {@link withFederation} writes it. */
 export interface FederationEntryForTests {
 	readonly enabled: true;
-	readonly type?: string;
+	readonly type: string;
 	readonly clientId: string;
 	readonly clientSecret: string;
 	readonly callbackURL: string;
@@ -70,7 +69,7 @@ export interface FederationEntryForTests {
 
 /**
  * A copy of `config` whose `core.federations.<name>` is an enabled entry with
- * `entry`'s callback URL, type when given, and client credentials, every
+ * `entry`'s callback URL, type and client credentials, every
  * other federation and key of `core` and of `config` kept; `config` itself is
  * left as it was.
  */
@@ -83,7 +82,7 @@ export function withFederation<C extends object>(
 } {
 	const federation: FederationEntryForTests = {
 		enabled: true,
-		...(entry.type === undefined ? {} : { type: entry.type }),
+		type: entry.type,
 		clientId: entry.clientId ?? `${name}-client`,
 		clientSecret: entry.clientSecret ?? `${name}-secret`,
 		callbackURL: entry.callbackURL,

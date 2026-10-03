@@ -208,7 +208,7 @@ describe("AppConfigSchema", () => {
 				login: { windowMs: 60000, limit: 10 },
 				failMode: "open",
 			},
-			core: { federations: { google: { enabled: false } } },
+			core: { federations: { google: { enabled: false, type: "google" } } },
 			repositories: {
 				client: { type: "yaml", yaml: { path: "./config/clients.yaml" } },
 				user: { type: "yaml", yaml: { path: "./config/users.yaml" } },

@@ -29,6 +29,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
+import { federationTypeForTests } from "../../testing/fixtures/federationType.mjs";
 import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
@@ -39,7 +40,13 @@ function makeBootWithFederationEnabled() {
 			...makeValidAppConfig(),
 			...coreConfigForTests({
 				declaredAbsent: ["auditSink"],
-				federations: { google: { enabled: true } },
+				federations: {
+					google: {
+						enabled: true,
+						type: "google",
+						callbackURL: "https://auth.example/session/federation/google/callback",
+					},
+				},
 			}),
 		},
 		pathResolver: (p: string) => p,
@@ -54,25 +61,8 @@ function makeBootWithNoFederations() {
 	} as never;
 }
 
-/**
- * The module that handles the enabled federation: it contributes
- * `federations.google` and its redirect policy, so the entry is handled by
- * name (`federation-entries-handled`).
- */
-const googleFederationModule = defineModule({
-	name: "test:google-federation",
-	contributes: {
-		federations: {
-			google: () => ({
-				name: "google",
-				scope: ["openid"],
-				buildAuthorizationUrl: () => new URL("https://google.example/authorize"),
-				exchangeCode: async () => ({ issuer: "https://google.example", sub: "1", expiresAt: null }),
-			}),
-		},
-		federationRedirectPolicies: { google: () => ({}) },
-	} as never,
-});
+/** The module that handles the enabled federation: it registers its type, `google`. */
+const googleFederationModule = federationTypeForTests("google");
 
 /** A module that provides all 6 required session/federation/refresh-family stores. */
 const allStoresModule = defineModule({
