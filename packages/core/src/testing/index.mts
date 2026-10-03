@@ -65,6 +65,12 @@ export {
 // Client registrations as a registration file writes them, for an
 // `InMemoryClientRepository`, which fills the schema's defaults.
 export { clientEntries } from "./fixtures/clientEntries.mjs";
+// A module that registers one federation type, so that boot handles the
+// `core.federations` entries of that type without the package that owns it.
+export {
+	type FederationTypeForTestsOptions,
+	federationTypeForTests,
+} from "./fixtures/federationType.mjs";
 export {
 	type FederationEntryForTests,
 	type FederationForTests,

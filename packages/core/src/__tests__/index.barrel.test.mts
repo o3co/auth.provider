@@ -165,6 +165,16 @@ describe("core barrel — the grant policy's answers", () => {
 	});
 });
 
+describe("core barrel — the federations a configuration declares", () => {
+	it("re-exports the one reading of core.federations: the map by name, and the entries switched on", () => {
+		const config = {
+			core: { federations: { corp: { enabled: true, type: "acme" }, off: { enabled: false } } },
+		};
+		expect(Object.keys(core.federationsOf(config))).toEqual(["corp", "off"]);
+		expect(core.enabledFederationsOf(config)).toEqual([["corp", { enabled: true, type: "acme" }]]);
+	});
+});
+
 describe("core barrel — the federation adapter toolkit", () => {
 	it("re-exports the pure helpers every adapter builds its requests with", () => {
 		// They were `@o3co/auth-provider-session`'s, which is a router; an
