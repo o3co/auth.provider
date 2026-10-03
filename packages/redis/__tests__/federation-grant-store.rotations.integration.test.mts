@@ -18,7 +18,10 @@
 // Redis: the hash fields `rotationsSince` / `rotationsCount` read as the
 // grant's `rotations` on every read, a record without them (or with ones that
 // do not parse) as no window, a refresh through the store keeps them, and a
-// give-back counts down only the window it names, on the record as it is.
+// give-back writes only the count and the version, on the record as it is.
+// The refusals every adapter shares (another window, a stale version, a grant
+// that is not active or is past its expiry) are the shared contract suite's,
+// run here from `adapters.federation-grant-store.contract.mts`.
 
 import {
 	type FederationGrant,
@@ -353,7 +356,7 @@ describe("refundRotation", () => {
 		}
 	});
 
-	it("lands once of give-backs at once over two connections, and the other is refused", async () => {
+	it("gives back once per version: of four give-backs at one version over two connections, one lands", async () => {
 		const second = redis.duplicate();
 		try {
 			const held = store();

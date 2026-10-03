@@ -23,7 +23,11 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { FederationGrantStoreClient, TakeFederationGrantRotationInput } from "#/clients.mjs";
+import type {
+	FederationGrantStoreClient,
+	RefundFederationGrantRotationInput,
+	TakeFederationGrantRotationInput,
+} from "#/clients.mjs";
 import { makeIoredisFederationGrantStoreClient } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
@@ -1033,6 +1037,43 @@ describe("takeRotation", () => {
 		expect(
 			await client.revoke(grantKey("g-1"), credKey("g-1"), { atMs: at(DAY + MIN), by: "client" }),
 		).toMatchObject({ status: "revoked", rotationsSince: String(at(DAY)), rotationsCount: "1" });
+	});
+});
+
+describe("refundRotation", () => {
+	const refund = (over: Partial<RefundFederationGrantRotationInput> = {}, id = "g-1") => {
+		if (client.refundRotation === undefined)
+			throw new Error("fixture: the client has no refundRotation");
+		return client.refundRotation(grantKey(id), {
+			nowMs: at(DAY + MIN),
+			expectedVersion: 2,
+			sinceMs: at(DAY),
+			...over,
+		});
+	};
+	const rawOf = (id = "g-1") => redis.hgetall(grantKey(id));
+
+	it("reads a window opened outside the Date range as none, as the take does, and writes nothing", async () => {
+		await activeWithCredential();
+		const since = 9_000_000_000_000_000;
+		await redis.hset(grantKey("g-1"), { rotationsSince: String(since), rotationsCount: "1" });
+		const before = await rawOf();
+		expect(await refund({ sinceMs: since })).toBeNull();
+		expect(await rawOf()).toEqual(before);
+	});
+
+	it("refuses a stored version past the safe integers, which a bump could not move, and writes nothing", async () => {
+		await activeWithCredential();
+		const version = 2 ** 53;
+		await redis.hset(grantKey("g-1"), {
+			version: String(version),
+			rotationsSince: String(at(DAY)),
+			rotationsCount: "2",
+		});
+		const before = await rawOf();
+		expect(await refund({ expectedVersion: version })).toBeNull();
+		expect(await refund({ expectedVersion: version })).toBeNull();
+		expect(await rawOf()).toEqual(before);
 	});
 });
 
