@@ -211,6 +211,19 @@ describe("grants — a factory that answers null registers nothing", () => {
 		expect(err.message).toContain("switched off");
 	});
 
+	it("names no switched-off grant when the override's target was never contributed", async () => {
+		const err = await refusal([
+			grantsOwner,
+			defineModule({
+				name: "test:grants-overrider",
+				overrides: { grants: { [NEVER]: () => fakeGrantHandler("override") } },
+			}),
+		]);
+
+		expect(err.reason).toBe("override-target-missing");
+		expect(err.message).not.toContain("switched off");
+	});
+
 	it("lets an override answer null, which switches off the grant it replaces", async () => {
 		const handle = await boot([
 			grantsOwner,
