@@ -267,9 +267,9 @@ export interface FederationGrantStore {
 	 * attempt, its give-back included, is guarded by that version, so one from
 	 * an earlier attempt can never land after a later take. A refused take
 	 * writes nothing and bumps nothing. Kept by `replaceCredentials`, reset by
-	 * `activate`. A store whose take does not bump yet (the bundled Redis
-	 * store, until its follow-up) is tolerated: retrieval reads the guard off
-	 * the answered grant, which then carries the version the take was made at.
+	 * `activate`. A store whose take does not bump is tolerated: retrieval
+	 * reads the guard off the answered grant, which then carries the version
+	 * the take was made at.
 	 *
 	 * The window is fixed, not sliding: it opens at its first take, so any
 	 * `windowMs` that straddles two windows can hold up to twice `limit` takes.

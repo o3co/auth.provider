@@ -754,9 +754,10 @@ and a copy moved into the past cannot keep a live grant from being ended.
 
 The port's optional `takeRotation` is one script over two fields of the
 grant hash, `rotationsSince` and `rotationsCount`: non-secret, outside the
-envelope, compared against the version and written without bumping it. Its
-optional `refundRotation` is one script too: at the version the take was
-made at, and only for the window whose `rotationsSince` it names, it counts
+envelope, compared against the version and written with the version bumped
+once, in the same step, so the grant it answers carries the new one. Its
+optional `refundRotation` is one script too: at the version the take left,
+and only for the window whose `rotationsSince` it names, it counts
 `rotationsCount` down by one, never below 0, and bumps the version, so a
 second give-back of the same attempt is refused. Both read the caller's
 clock, as every write does. `replaceCredentials` and every other write keep
@@ -773,12 +774,21 @@ budget it had.
 The port's take is a version fence: it bumps the version, and every later
 write of the attempt, its give-back included, is guarded by the version of the
 grant it answered, so a late give-back of an earlier attempt can never refuse
-the next holder's write. This store's take does not bump yet, so the fence
-does not hold here: retrieval reads the version it was taken at off the
-answered grant and behaves as before. It joins the fence in a follow-up
-release. Upgrade core first: a core older than the fence keeps the version it
-read before the take, and against a take that bumps, every write after the
+the next holder's write. This store's take bumps, so the fence holds here.
+Anything that reads a grant's `version` from Redis directly sees it move on
+every take. Core and this package ship in lockstep, and the peer range a
+release publishes (`^` the release's own version) names the core that reads
+the guard off the grant the take answered; no released core takes a rotation
+without it. Keep the two at the same release: a core older than the fence
+would keep the version it read before the take, and every write after the
 take would be refused.
+
+Every script that bumps the version reads it as the TypeScript reader does: a
+safe integer whose successor is one too. A version stored at
+`Number.MAX_SAFE_INTEGER`, or one that only Lua's `tonumber` reads (`2.0`,
+`0x2`), is refused by every guarded write, which writes nothing, and is
+compared as no version at all. A revocation, which must always win, still
+ends such a grant and leaves its version as it was.
 
 The credential is sealed under a key **ring**, in core's `v2` key-ring
 envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the
