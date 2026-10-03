@@ -46,8 +46,6 @@ import {
 	ownedConfirmation,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
-	resolveAccessTokenLifetime,
-	resolveRefreshTokenLifetime,
 	resolveTokenBindingSettings,
 	type Token,
 } from "@o3co/auth-provider-core";
@@ -71,9 +69,11 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 // ---------------------------------------------------------------------------
 
 /**
- * What the WebAuthn grant reads: the shared grant slots (`config` and `keyStore` to mint,
- * `grantPolicy`, `refreshTokenFamilyRotation`, `logger`), the credential store and challenge
- * ceremony, the oauth token settings, and the RP fields of `webauthnConfig`.
+ * What the WebAuthn grant reads: the shared grant slots (`keyStore` to mint, `config` for core's
+ * token-binding settings alone, `grantPolicy`, `refreshTokenFamilyRotation`, `logger`), the
+ * credential store and challenge ceremony, the `oauthTokenSettings` slot (the token lifetimes and
+ * the resource-indicator switch, never read from `config`), and the RP fields of `webauthnConfig`
+ * — `webauthnModule` hands it its own section there.
  *
  * `webauthnModule` hands its deps over whole and checks with `satisfies` that every key here is a
  * slot it declares; `grant.types.test.mts` pins that the `webauthnConfig` fields exist on
@@ -85,7 +85,7 @@ export interface WebAuthnGrantDeps
 			GrantDependencies,
 			"config" | "keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "logger"
 		>,
-		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony", "oauthTokenSettings"> {
+		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony" | "oauthTokenSettings"> {
 	readonly webauthnConfig: {
 		readonly rpId: string;
 		readonly origin: readonly string[];
@@ -120,23 +120,12 @@ export interface WebAuthnGrantDeps
  */
 export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
-	// Token lifetimes are read once, here, so a hand-built configuration the resolvers refuse
-	// fails at composition, before any challenge is consumed. They come from the oauth module's
-	// `oauthTokenSettings` slot when the composition holds it (checked whole first), otherwise
-	// from the configuration through core's resolvers.
-	const tokenSettings =
-		deps.oauthTokenSettings === undefined
-			? undefined
-			: checkOAuthTokenSettings(deps.oauthTokenSettings, config);
-	const accessTokenExpiresIn = (
-		tokenSettings === undefined
-			? resolveAccessTokenLifetime(config)
-			: tokenSettings.accessTokenLifetime
-	).defaultExpiresIn;
-	const refreshTokenExpiresIn =
-		tokenSettings === undefined
-			? resolveRefreshTokenLifetime(config)
-			: tokenSettings.refreshTokenExpiresIn;
+	// The token settings are read once, here, from the `oauthTokenSettings` slot alone, checked
+	// whole first: a hand-built value the check refuses, or none, fails at composition, naming
+	// the slot, before any challenge is consumed.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
+	const refreshTokenExpiresIn = tokenSettings.refreshTokenExpiresIn;
 	// One logger for every line this grant writes. The module hands over the
 	// deployment's; a handler built without one still reports its outages.
 	const logger = deps.logger ?? consoleLogger;
@@ -327,17 +316,14 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// ------------------------------------------------------------------
 			// Step 7: grantPolicy gate
 			//
-			// Runs whenever `grantPolicy` is wired, as in the refresh grant;
-			// `oauth.resourceIndicator.enabled` gates only whether `resource` (RFC 8707) is
-			// forwarded. The policy is this grant's only scope bound, so gating the call on that
-			// flag (default false) would let any valid assertion mint any requested scope. A
-			// policy error fails closed. `webauthnModule` refuses to boot without a policy; the
+			// Runs whenever `grantPolicy` is wired, as in the refresh grant; the
+			// `oauthTokenSettings` slot's `resourceIndicatorEnabled` gates only whether
+			// `resource` (RFC 8707) is forwarded. The policy is this grant's only scope bound,
+			// so gating the call on that flag (default false) would let any valid assertion
+			// mint any requested scope. A policy error fails closed. `webauthnModule` refuses to boot without a policy; the
 			// check below serves handlers built directly, as in unit tests.
 			// ------------------------------------------------------------------
-			const resourceIndicatorEnabled =
-				tokenSettings === undefined
-					? config.oauth.resourceIndicator?.enabled === true
-					: tokenSettings.resourceIndicatorEnabled;
+			const resourceIndicatorEnabled = tokenSettings.resourceIndicatorEnabled;
 
 			let policyGrantedAudience: string | null = null;
 

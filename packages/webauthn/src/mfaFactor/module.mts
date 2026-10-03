@@ -19,7 +19,8 @@
  * `webauthn` second factor under core's `mfaFactors` kind, where the MFA
  * package's coordinator reads it through `mfaFactorResolver`; this package
  * imports nothing of the MFA package. Built from the relying party the
- * `webauthnConfig` slot holds and its own section, `webauthn-mfa-factor`,
+ * `webauthnConfig` slot holds (which `webauthnModule` provides from its
+ * section) and its own section, `webauthn-mfa-factor`,
  * which boot parses with the module's schema before any factory runs.
  * `webauthn-mfa-factor.enabled` is the module's switch (`section.isEnabled`):
  * false, and the module registers nothing. The relying party is taken when
@@ -51,8 +52,9 @@ export const webauthnMfaFactorModule = defineModule({
 					throw new Error(
 						"webauthnMfaFactorModule: webauthn-mfa-factor.enabled = true requires the " +
 							"webauthnConfig component — the relying party, built from webauthn.rpId, " +
-							"webauthn.rpName and webauthn.origin, which the deployment's WebAuthn bootstrap " +
-							"module provides. Provide it, or leave the factor off " +
+							"webauthn.rpName and webauthn.origin, which webauthnModule provides from its " +
+							"section. Install webauthnModule (or, without it, provide the slot), or leave " +
+							"the factor off " +
 							"(WEBAUTHN_MFA_FACTOR_ENABLED).",
 					);
 				}

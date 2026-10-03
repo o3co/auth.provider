@@ -210,11 +210,11 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   and the key, where it used to be ignored. Before you upgrade, check every
   key you set against the module's README, and correct or delete the ones it
   does not list. The sections that still accept an unknown key are `oauth`
-  (the section and its nested blocks), `webauthn` (the section and its
-  `rateLimit` blocks) and `session-store.storage`. `mfa`, at every level, and
-  `mfa-totp-factor` refuse one too (#1329): an empty `mfa.factors` block an
-  older configuration leaves behind (the TOTP factor's old path, its
-  variables unset) is such a key — delete it. The keys under `audit-sink` are the
+  (the section and its nested blocks) and `session-store.storage`. `mfa`, at
+  every level, and `mfa-totp-factor` refuse one too (#1329): an empty
+  `mfa.factors` block an older configuration leaves behind (the TOTP factor's
+  old path, its variables unset) is such a key — delete it. So does
+  `webauthn`, at every level (#1336). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -519,6 +519,30 @@ modules fills them.
   missing component. A deps object handed to the module's factories carries
   `oauthTokenSettings`; `config` is no longer read. Disabled, the module
   requires nothing.
+- **BREAKING: `webauthnModule` provides the `webauthnConfig` slot from its
+  own section, and requires `oauthTokenSettings` (#728).** Boot parses the
+  `webauthn` section with `webauthnConfigSchema` — the same rules for the
+  relying party's id and origins, now strict at every level — and the module
+  provides the result as the slot, naming it `authoritative`. Remove the
+  bridge module a composition wrote to fill the slot from `config.webauthn`:
+  beside `webauthnModule`, a module providing the slot refuses the boot
+  (`duplicate-provides`), as do a `bootstrapComponents` entry
+  (`bootstrap-component-collision`) and an `overrideComponents` entry
+  (`authoritative-component-overridden`). A composition that hard-coded the
+  slot writes those values in the `webauthn` section instead. Without
+  `webauthnModule` (the WebAuthn second factor alone), the composition still
+  fills the slot itself. The module's grant reads the token lifetimes and the
+  resource-indicator switch from the `oauthTokenSettings` slot alone and no
+  longer falls back to `oauth.accessToken`, `oauth.refreshToken.expiresIn`
+  or `oauth.resourceIndicator.enabled`: with `oauthModule` installed nothing
+  changes; a composition without it puts an `oauthTokenSettings` value in
+  `bootstrapComponents`, or the boot is refused for the missing component.
+  In code: `createWebAuthnGrant` requires `oauthTokenSettings` and throws a
+  `RangeError` naming it when it is missing; a deps object handed to the
+  module's factories carries the parsed section as `section` and
+  `oauthTokenSettings`, and no `webauthnConfig`; `webauthnConfigSchema`
+  refuses a key it does not declare, `allowCredentialsForKnownUser` included.
+  The module still requires `config`, for core's `core.tokenBinding` alone.
 - **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
   section's defaults live only in the package's `config/reference.conf`. A
   configuration that layers the modules' references (`moduleReferences`, as
