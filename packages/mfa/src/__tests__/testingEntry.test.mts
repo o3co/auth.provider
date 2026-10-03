@@ -70,7 +70,7 @@ describe("the section builders", () => {
 		});
 		const settings = readMfaSettings(fragment.mfa, { deploymentMode: "unset" });
 		expect(settings.encryptionKeys[0]?.key.equals(Buffer.from(KEY, "base64"))).toBe(true);
-		expect(fragment.mfa.rateLimit).toEqual({ routes: { limit: 60, windowSeconds: 300 } });
+		expect(fragment.mfa).not.toHaveProperty("rateLimit");
 		expect(
 			mfaConfigForTests({ key: KEY, maxAttemptsPerTransaction: 3 }).mfa.maxAttemptsPerTransaction,
 		).toBe(3);
