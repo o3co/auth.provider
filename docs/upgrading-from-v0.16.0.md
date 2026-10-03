@@ -198,6 +198,19 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   slashless `iss`, which is what discovery already advertised.
 - **Unknown keys.** A key under `oauth.clientIdMetadataDocuments` that the
   oauth package's `reference.conf` does not list refuses the boot (#1151).
+- **BREAKING: `oauth {}` refuses a key it does not declare, at every level
+  (#728).** Wherever the oauth module is installed (the standalone template
+  installs it), a key under `oauth` that its schema does not declare — a
+  typo such as `oauth.nonce.maxLenght`, or a key a deployment kept that
+  nothing reads — refuses the boot (`config-validation-failed`), naming its
+  path. It used to be dropped unread. A path another section moved from
+  (`oauth.grants`, `oauth.dpop`, `oauth.mtls`, `oauth.deviceAuthorization`,
+  `oauth.tokenExchange`, `oauth.code`, `oauth.tokenBinding`,
+  `oauth.jwt.signingKey`) may stay as an empty object; a key set under it is
+  refused, naming its new path while the module it moved to is loaded, and
+  as a key `oauth` does not declare otherwise. The keys, their defaults and
+  their variables are unchanged; they are listed in the
+  [oauth README](../packages/oauth/README.md#configuration).
   A key named after an `Object.prototype` member (`__proto__`,
   `constructor`, `toString`, …), at any depth, refuses the boot naming its
   path (#1216).
@@ -556,6 +569,17 @@ modules fills them.
 - **Rate-limit helpers** (`resolveSeededLimitSpecs`, `resolveLoginLimitSpec`,
   the per-feature prefixes and specs) are gone from core; the prefixes are
   exported by the packages that key them (#782).
+- **BREAKING: `oauthTokenSettingsFrom` takes `oauth {}`, not the
+  configuration (#728).** A composition that provides the `oauthTokenSettings`
+  slot itself calls `oauthTokenSettingsFrom(config.oauth)` where it called
+  `oauthTokenSettingsFrom(config)`.
+- **The oauth module is one value, `oauthEndpointsModule` (#728).** Compose it
+  where you composed `oauthModule({ config })`. `oauthModule` is deprecated:
+  it answers `oauthEndpointsModule` whatever it is handed, and never read its
+  parameter. The module reads every `oauth.*` setting from its own parsed
+  section; `createOAuthRouter` takes that section as `section` (typed
+  `OAuthSection`) and, without one, reads the `oauth {}` its `config`
+  carries, as before.
 - **Signatures.** `renderFrontchannelLogoutHtml` takes
   `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
   requires a `grantPolicy` key, `undefined` for none (#1169); the federation

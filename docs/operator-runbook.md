@@ -2441,7 +2441,7 @@ lists every breaking change since, and which of the steps below each needs.
 5. **The oauth and session settings at their modules' sections.** Each path
    and variable that moved refuses boot naming the new one; the paths are in
    the [oauth](../packages/oauth/README.md#which-grants-are-on) and
-   [session](../packages/session/README.md#configuration) READMEs. Three
+   [session](../packages/session/README.md#configuration) READMEs. Four
    changes go further than the rename:
 
    - **The grant switches read the boolean vocabulary every other switch
@@ -2476,6 +2476,13 @@ lists every breaking change since, and which of the steps below each needs.
      removed (`environment-variable-renamed`). They used to log
      `pkce_config_ignored_s256_is_mandatory` once and be ignored. Delete both
      before you upgrade (the table in step 2).
+   - **`oauth {}` is strict.** A key under `oauth` that the oauth module's
+     schema does not declare, at any level, is refused
+     (`config-validation-failed`, naming its path) where it used to be
+     dropped unread: a typo, or a key nothing reads any more. A path another
+     section moved from (`oauth.grants`, `oauth.dpop`, …) may stay only as an
+     empty object. The keys the section declares are in the
+     [oauth README](../packages/oauth/README.md#configuration).
 
 6. **The template's own settings, the adapter selections, the repositories,
    the audit sink's declared absence and the federations at their new
