@@ -182,7 +182,15 @@ const SAMPLES: Readonly<Record<string, (base: unknown) => readonly unknown[]>> =
 	// The paths other sections moved from, which the oauth section accepts only
 	// as an empty object.
 	oauth: (base) => [
-		["grants", "code", "deviceAuthorization", "tokenExchange", "mtls", "dpop", "tokenBinding"].reduce(
+		[
+			"grants",
+			"code",
+			"deviceAuthorization",
+			"tokenExchange",
+			"mtls",
+			"dpop",
+			"tokenBinding",
+		].reduce(
 			(sample, key) => withValue(sample, [key], {}),
 			withValue(base, ["jwt", "signingKey"], {}),
 		),
