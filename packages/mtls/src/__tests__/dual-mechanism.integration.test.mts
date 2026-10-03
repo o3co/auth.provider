@@ -35,6 +35,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	CORE_RELOCATIONS,
+	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
@@ -69,6 +70,7 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 				iatWindowSeconds: 60,
 				algWhitelist: ["ES256", "ES384", "EdDSA", "RS256"],
 				replayStoreTtlSeconds: 300,
+				nonce: { required: "never", ttlSeconds: 300 },
 			},
 			mtls: {
 				enabled: true,
@@ -90,8 +92,10 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 			}),
 		} as never,
 		pathResolver: (s: string) => s,
-		// DPoP records every proof it accepts in the seen-set.
+		// DPoP records every proof it accepts in the seen-set, and checks each
+		// proof's htu against the issuer the token settings carry.
 		replaySeenSet: createMemoryReplaySeenSet(),
+		oauthTokenSettings: createTestOAuthTokenSettings(),
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 /**

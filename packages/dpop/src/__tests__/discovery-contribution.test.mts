@@ -34,6 +34,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	CORE_RELOCATIONS,
+	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
@@ -41,10 +42,14 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { dpopConfigSchema, dpopModule } from "#/module.mjs";
+import { shippedDpopSection } from "./shippedSection.mjs";
 
-/** The `dpop` section as boot hands it to the module: parsed with `dpopConfigSchema`. */
-function dpopSection(written: Record<string, unknown> | undefined = {}): unknown {
-	return dpopConfigSchema.parse(written);
+/**
+ * The `dpop` section as boot hands it to the module: `written` over the
+ * shipped defaults, parsed with `dpopConfigSchema`.
+ */
+function dpopSection(written: Record<string, unknown> = {}): unknown {
+	return dpopConfigSchema.parse(shippedDpopSection(written));
 }
 
 async function contribution(section: unknown): Promise<OidcDiscoveryContribution> {
@@ -75,8 +80,8 @@ describe("dpopModule — discoveryMetadata contribution", () => {
 	});
 
 	it("is switched off by its section when DPoP is disabled (the secure default), so nothing is contributed", () => {
-		expect(dpopModule.section?.isEnabled?.(dpopConfigSchema.parse({}))).toBe(false);
-		expect(dpopModule.section?.isEnabled?.(dpopConfigSchema.parse({ enabled: true }))).toBe(true);
+		expect(dpopModule.section?.isEnabled?.(dpopSection() as never)).toBe(false);
+		expect(dpopModule.section?.isEnabled?.(dpopSection({ enabled: true }) as never)).toBe(true);
 	});
 
 	it("contributes nothing when algWhitelist is empty, rather than advertising no algorithm", async () => {
@@ -147,7 +152,7 @@ const bootWith = (dpop: Record<string, unknown>): BootstrapMap =>
 	({
 		config: {
 			...makeValidCoreConfig(),
-			dpop,
+			dpop: shippedDpopSection(dpop),
 			"renamed-variables": renamedVariableCaptures({
 				modules: [dpopModule],
 				core: CORE_RELOCATIONS,
@@ -155,8 +160,10 @@ const bootWith = (dpop: Record<string, unknown>): BootstrapMap =>
 			}),
 		} as never,
 		pathResolver: (s: string) => s,
-		// An enabled mechanism records every proof in the seen-set.
+		// An enabled mechanism records every proof in the seen-set, and builds
+		// each proof's expected `htu` on the issuer the token settings carry.
 		replaySeenSet: createMemoryReplaySeenSet(),
+		oauthTokenSettings: createTestOAuthTokenSettings(),
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 describe("dpopModule — discovery metadata in the served document", () => {

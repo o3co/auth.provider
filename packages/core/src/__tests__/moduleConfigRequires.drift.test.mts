@@ -65,7 +65,6 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	// Each reads a section of its own that is not yet under its name, and some
 	// a key of another module's section beside it.
 	"packages/device-grant -> device-grant",
-	"packages/dpop -> dpop",
 	"packages/federation-grants -> federation-grants",
 	"packages/mfa -> mfa-totp-factor",
 	"packages/oauth -> oauth",
