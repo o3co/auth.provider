@@ -51,6 +51,13 @@ local function fg_int(v)
   if n == nil or n > 9007199254740991 or n < -9007199254740991 then return nil end
   return n
 end
+-- A stored version a write may bump: read as fg_int reads it, and with a
+-- safe successor, so the bump moves it to a version the reader accepts.
+local function fg_bumpable(v)
+  local n = fg_int(v)
+  if n == nil or n >= 9007199254740991 then return nil end
+  return n
+end
 local function fg_fields(flat)
   local t = {}
   for i = 1, #flat, 2 do t[flat[i]] = flat[i + 1] end
@@ -262,7 +269,7 @@ if g['authorization'] ~= nil then
   if g['upstreamIssuer'] ~= ARGV[6] then return {0} end
   if g['upstreamSubject'] ~= ARGV[7] then return {0} end
 end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 if version == nil then return {0} end
 redis.call('HDEL', KEYS[1],
   'intentHandle', 'intentExpiresAt', 'ineligible',
@@ -304,7 +311,7 @@ local expected = tonumber(ARGV[2])
 if now == nil or expected == nil then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 if version == nil or version ~= expected then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
@@ -344,7 +351,7 @@ local expected = tonumber(ARGV[2])
 if now == nil or expected == nil then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 if version == nil or version ~= expected then return {0} end
 redis.call('HDEL', KEYS[1],
   'ext', 'failureAt', 'failureKind', 'failureCount',
@@ -404,7 +411,7 @@ if g['status'] == 'revoked' then return {0} end
 -- the state an operator reaches for this in.
 local horizon = fg_revoke_horizon(g)
 if horizon ~= nil and not (at < horizon) then return {0} end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 local wasPending = g['status'] == 'pending'
 redis.call('HDEL', KEYS[1],
   'intentHandle', 'intentExpiresAt', 'ext',
@@ -414,9 +421,10 @@ redis.call('HSET', KEYS[1],
   'status', 'revoked',
   'revokedBy', ARGV[2],
   'revokedAt', ARGV[1])
--- A version that is not a number is left as it is: it cannot be bumped, and
--- refusing over it would be refusing the revocation. The caller is told the
--- write could not be represented, and the credential is gone all the same.
+-- A version that cannot be bumped (fg_bumpable) is left as it is: refusing
+-- over it would be refusing the revocation, and the credential is gone all
+-- the same. One the reader does not read tells the caller the write could not
+-- be represented.
 if version ~= nil then
   redis.call('HSET', KEYS[1], 'version', string.format('%.0f', version + 1))
 end
@@ -448,7 +456,7 @@ local row = tonumber(ARGV[5])
 if now == nil or expected == nil or failedAt == nil then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
-local version = fg_num(g['version'])
+local version = fg_int(g['version'])
 if version == nil or version ~= expected then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
@@ -484,9 +492,10 @@ return {1, redis.call('HGETALL', KEYS[1])}
  * Takes one rotation from the grant's budget. `KEYS[1]` = record; `ARGV` = the caller's clock,
  * the expected version, the limit, the window. On an `active` grant at that version, before its
  * stored expiry: a new window when there is none or the clock is at or past its end, else one
- * more below the limit, else refused. Writes only `rotationsSince` and `rotationsCount`: no
- * version bump, no deadline moved. A window whose fields do not read as the TypeScript reader
- * reads them is none, there and here alike; one counted down to 0 is still a window.
+ * more below the limit, else refused. Writes only `rotationsSince`, `rotationsCount` and the
+ * version, bumped once in the same step: no deadline moved. A window whose fields do not read as
+ * the TypeScript reader reads them is none, there and here alike; one counted down to 0 is still
+ * a window.
  */
 const LUA_FG_TAKE_ROTATION = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -497,7 +506,7 @@ if now == nil or expected == nil or limit == nil or window == nil then return {0
 if not (limit >= 1) or not (window > 0) or window == math.huge then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 if version == nil or version ~= expected then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
@@ -515,7 +524,8 @@ else
 end
 redis.call('HSET', KEYS[1],
   'rotationsSince', string.format('%.0f', since),
-  'rotationsCount', string.format('%.0f', count))
+  'rotationsCount', string.format('%.0f', count),
+  'version', string.format('%.0f', version + 1))
 return {1, redis.call('HGETALL', KEYS[1])}
 `;
 
@@ -524,8 +534,7 @@ return {1, redis.call('HGETALL', KEYS[1])}
  * version, the window's opening. On an `active` grant at that version, before its stored
  * expiry, whose window opened at exactly that instant and holds at least one: the count down by
  * one and the version bumped, which makes it once per attempt. Writes only `rotationsCount` and
- * `version`: no deadline moved. The window's fields are read as the take reads them, and the
- * version only as a safe integer whose successor is one too.
+ * `version`: no deadline moved. The window's fields are read as the take reads them.
  */
 const LUA_FG_REFUND_ROTATION = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -534,10 +543,8 @@ local opened = tonumber(ARGV[3])
 if now == nil or expected == nil or opened == nil then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
--- A safe integer with a safe successor: the bump below must move it, to a
--- version the reader accepts.
-local version = fg_int(g['version'])
-if version == nil or version ~= expected or version >= 9007199254740991 then return {0} end
+local version = fg_bumpable(g['version'])
+if version == nil or version ~= expected then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
 local since = fg_int(g['rotationsSince'])

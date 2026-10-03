@@ -289,8 +289,8 @@ export interface FederationGrantStoreClient {
 	 * `expectedVersion`, before its stored expiry: a new window
 	 * (`rotationsSince` = `nowMs`, `rotationsCount` = 1) when there is none or
 	 * `nowMs` is at or past its end, else one more below `limit`, else refused.
-	 * Bumps no version and touches no other field. A bound below its minimum
-	 * is refused.
+	 * Bumps the version once in the same step and touches no other field. A
+	 * bound below its minimum is refused.
 	 *
 	 * Optional: a store over a client without it keeps no rotation budget.
 	 */
