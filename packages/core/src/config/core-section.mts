@@ -33,7 +33,9 @@ const CoreSectionReader = z.object({ core: CoreConfigSchema.shape.core });
 
 /**
  * `core {}` of `raw`, parsed by the schema boot parses it with: strict at
- * every level, a variable's string coerced as boot coerces it. An absent
+ * every level but a federation's entry, whose keys beyond core's own pass
+ * through for its type's schema to parse at boot; a variable's string
+ * coerced as boot coerces it. An absent
  * section is an empty one. No other section is parsed or refused here; each
  * is its module's to read.
  *

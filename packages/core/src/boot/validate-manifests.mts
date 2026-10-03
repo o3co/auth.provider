@@ -2917,8 +2917,10 @@ interface StageOneContext {
  * every reader's `checkOAuthTokenSettings` applies). A host map is known
  * before any provider runs, so it is refused here
  * (`token-settings-lifetime-exceeds-configuration`), naming the map, the
- * member and both values; a module-provided value is refused where a reader
- * first reads it. A member that is not a number is left to the readers' check.
+ * member and both values; a module-provided value is refused the same way
+ * as stage 3 materialises it (`token-settings-slot.mts`), which also holds a
+ * host's value to the contract and stores the frozen snapshot every reader
+ * reads. A member that is not a number is left to that check.
  * @internal
  */
 function checkHostTokenSettingsLifetimes(

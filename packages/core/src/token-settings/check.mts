@@ -164,18 +164,23 @@ const readOnce = (member: string, read: () => unknown): unknown => {
  *
  * This form needs no configuration: it holds the lifetimes to their
  * contract rule alone. Bounding them by the ones core resolves from the
- * configuration is core's: boot holds every slot a composition holds to
- * them, whoever provides it — a host map's at stage 1, a module's when boot
- * reads the slot's issuer (`compositionIssuer`).
+ * configuration is boot's, for every slot a composition holds, whoever
+ * fills it: as the value enters the component map (stage 3, a host map's
+ * also at stage 1), boot replaces it with the snapshot of the
+ * two-argument form, so every reader within `createApp` is handed a frozen
+ * value already within them. A caller outside boot — a grant or handler
+ * built by hand from a value that never went through `createApp` — owns
+ * the bound, and holds the value with the two-argument form.
  *
  * @throws RangeError naming the first member that does not hold or whose
  *   read throws, or the slot when it holds no settings object.
  */
 export function checkOAuthTokenSettings(value: unknown): OAuthTokenSettings;
 /**
- * Transitional: the check above, and no lifetime longer than the one core
- * resolves from `config` (both values named when one is). For a reader that
- * still holds the whole configuration; a reader holds the slot with the
+ * The check above, and no lifetime longer than the one core resolves from
+ * `config` (both values named when one is): what boot holds every slot to,
+ * and what a caller outside boot holds a value to. Transitional for a
+ * reader within `createApp`, which holds the slot boot checked with the
  * one-argument form instead. Passing `config` selects this form even when
  * it is `undefined`, which refuses.
  */
