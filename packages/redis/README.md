@@ -752,11 +752,11 @@ honours from the text itself (#627) — read as the TypeScript reader reads it,
 so a value the reader refuses gives no horizon and the revocation proceeds —
 and a copy moved into the past cannot keep a live grant from being ended.
 
-The port's optional `takeRotation` is one script over two fields of the
+The port's `takeRotation` is one script over two fields of the
 grant hash, `rotationsSince` and `rotationsCount`: non-secret, outside the
 envelope, compared against the version and written with the version bumped
 once, in the same step, so the grant it answers carries the new one. Its
-optional `refundRotation` is one script too: at the version the take left,
+`refundRotation` is one script too: at the version the take left,
 and only for the window whose `rotationsSince` it names, it counts
 `rotationsCount` down by one, never below 0, and bumps the version, so a
 second give-back of the same attempt is refused. Both read the caller's
@@ -764,10 +764,9 @@ clock, as every write does. `replaceCredentials` and every other write keep
 the fields; `activate` removes both. A record without both, or with one that
 is not a whole number (or a count below 0), has no window, and the scripts
 and the reader agree on that; a window counted down to 0 is still one, and
-the next take counts into it. The store offers each member only over a
-client that has its primitive: a `FederationGrantStoreClient` of your own
-without `takeRotation` gives a store that keeps no rotation budget, and one
-without `refundRotation` a store that keeps every rotation taken. During a rolling deploy, an activation by an earlier
+the next take counts into it. A `FederationGrantStoreClient` of your own
+implements both primitives, `takeRotation` and `refundRotation`: they are
+required members of the client. During a rolling deploy, an activation by an earlier
 release leaves the fields in place, so a renewed grant can start with the
 budget it had.
 

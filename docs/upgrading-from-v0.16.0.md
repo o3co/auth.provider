@@ -621,6 +621,19 @@ with what a store of yours records and refuses. Per port:
   left out and never `null` (#1215). Run
   `federationTokenStoreConditionalContract`. Records written by v0.16.0 stay
   readable and get a generation at their first versioned read.
+- **`FederationGrantStore`.** Implement `takeRotation` and `refundRotation`,
+  now required members (#1032). `takeRotation` bumps the version once, in the
+  same atomic step as the count, and answers the grant at the new version:
+  core accepts only a grant answered at exactly the version it read plus one,
+  and treats anything else as a storage outage, without asking the upstream.
+  `refundRotation` gives one rotation back as the port's contract says: at the
+  version the take left, for the window `since` it names, never below zero,
+  bumping the version, so once per attempt. Persist `rotations`, a required
+  key of the usage fields, `undefined` until the first take and reset by
+  `activate`. Run the contract suite in
+  `packages/core/src/federation-grants/__tests__/store.contract.mts` (not
+  exported: copy the file into your store's tests). A store without the two
+  members no longer type-checks.
 - **`FederationGrantStore` callers** give an access token's
   `effectiveExpiresAt` on `activate` / `replaceCredentials` (#1078). A
   **`FederationGrantRefresher`** of your own reports `tokenType` (#1228); its
@@ -642,7 +655,8 @@ with what a store of yours records and refuses. Per port:
   `UserSessionStoreClient` implements `replaceIfUnchanged` (#707). A
   `FederationTokenStoreClient` wrapper implements `attachRecord`,
   `readVersioned`, `replaceIfGeneration`, `removeIfGeneration`, `pExpireGT`
-  and `durability` (#1176, #1149).
+  and `durability` (#1176, #1149). A `FederationGrantStoreClient` implements
+  `takeRotation` and `refundRotation`, now required (#1032).
   `makeIoredisClients` provides them all.
 - **The MFA ports**, new since v0.16.0. An `MfaFactorStore`'s membership
   writes are `createIf`, `removeIf` and the reset `removeAllForSubject`, at
@@ -833,6 +847,11 @@ are the template README's
 
 [Operator runbook §7, Rolling out](operator-runbook.md#rolling-out) has the
 detail; what a mixed fleet of v0.16.0 and this release does:
+
+- **Upgrade every package together, onto the same release.** A federation
+  grant store whose take bumps the version (the Redis store of this release)
+  paired with an older core refuses every write after the take: each
+  refresh's rotated token would be lost (#1032).
 
 - **Codes cross releases** for at most one code lifetime. A code a v0.16.0
   replica issued, redeemed by this release, yields tokens without `amr`, and

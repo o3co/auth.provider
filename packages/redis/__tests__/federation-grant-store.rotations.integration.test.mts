@@ -17,7 +17,7 @@
 // The rotation budget in the Redis federation grant store, against a real
 // Redis: the hash fields `rotationsSince` / `rotationsCount` read as the
 // grant's `rotations` on every read, a record without them (or with ones that
-// do not parse) as no window, a refresh through the store keeps them, and a
+// do not parse) as no window (`undefined`), a refresh through the store keeps them, and a
 // give-back writes only the count and the version, on the record as it is.
 // The refusals every adapter shares (another window, a stale version, a grant
 // that is not active or is past its expiry) are the shared contract suite's,
@@ -131,7 +131,7 @@ describe("the rotation budget's fields", () => {
 	it("read back as the grant's rotations, from every read", async () => {
 		const held = store();
 		const grant = await activated(held);
-		const taken = await held.takeRotation?.({
+		const taken = await held.takeRotation({
 			grantId: "g-1",
 			expectedVersion: grant.version,
 			limit: 3,
@@ -149,11 +149,11 @@ describe("the rotation budget's fields", () => {
 		}
 	});
 
-	it("are no key at all on a record without them, and on one whose fields do not parse", async () => {
+	it("are `undefined` on a record without them, and on one whose fields do not parse", async () => {
 		const held = store();
 		await activated(held);
 		for (const read of await everyRead(held, at(DAY))) {
-			expect(read).not.toHaveProperty("rotations");
+			expect(Object.entries(read as object)).toContainEqual(["rotations", undefined]);
 		}
 		for (const fields of [
 			{ rotationsSince: String(at(DAY).getTime()) },
@@ -166,7 +166,10 @@ describe("the rotation budget's fields", () => {
 			await redis.hdel(grantKey("g-1"), "rotationsSince", "rotationsCount");
 			await redis.hset(grantKey("g-1"), fields);
 			for (const read of await everyRead(held, at(DAY))) {
-				expect(read, JSON.stringify(fields)).not.toHaveProperty("rotations");
+				expect(Object.entries(read as object), JSON.stringify(fields)).toContainEqual([
+					"rotations",
+					undefined,
+				]);
 			}
 		}
 	});
@@ -174,7 +177,7 @@ describe("the rotation budget's fields", () => {
 	it("are kept by a refresh through the store, on the record and in what it answers", async () => {
 		const held = store();
 		const grant = await activated(held);
-		await held.takeRotation?.({
+		await held.takeRotation({
 			grantId: "g-1",
 			expectedVersion: grant.version,
 			limit: 3,
@@ -200,14 +203,6 @@ describe("the rotation budget's fields", () => {
 	});
 });
 
-describe("a client without takeRotation", () => {
-	it("gives a store without the member, which keeps no rotation budget", () => {
-		const { takeRotation: _, ...rest } = makeIoredisFederationGrantStoreClient(redis);
-		expect(storeOver(rest).takeRotation).toBeUndefined();
-		expect(store().takeRotation).toBeTypeOf("function");
-	});
-});
-
 describe("takeRotation's bounds", () => {
 	it("are refused with a RangeError before anything is sent", async () => {
 		let sent = 0;
@@ -220,7 +215,7 @@ describe("takeRotation's bounds", () => {
 			},
 			async takeRotation(...args) {
 				sent += 1;
-				return (await client.takeRotation?.(...args)) ?? null;
+				return await client.takeRotation(...args);
 			},
 		};
 		const held = storeOver(counting);
@@ -231,12 +226,12 @@ describe("takeRotation's bounds", () => {
 			{ limit: 1, windowMs: Number.NaN },
 		]) {
 			await expect(
-				held.takeRotation?.({ grantId: "g-1", expectedVersion: 2, now: at(DAY), ...bounds }),
+				held.takeRotation({ grantId: "g-1", expectedVersion: 2, now: at(DAY), ...bounds }),
 				JSON.stringify(bounds),
 			).rejects.toThrow(RangeError);
 		}
 		await expect(
-			held.takeRotation?.({
+			held.takeRotation({
 				grantId: "g-1",
 				expectedVersion: 2,
 				limit: 1,
@@ -251,14 +246,14 @@ describe("takeRotation's bounds", () => {
 		const held = store();
 		const grant = await activated(held);
 		const take = (now: Date, expectedVersion: number) =>
-			held.takeRotation?.({
+			held.takeRotation({
 				grantId: "g-1",
 				expectedVersion,
 				limit: 1,
 				windowMs: 0.5,
 				now,
 			});
-		expect((await take(at(DAY), grant.version))?.ok).toBe(true);
+		expect((await take(at(DAY), grant.version)).ok).toBe(true);
 		// 0.5 ms on: the next whole instant is already past the window.
 		expect(await take(at(DAY + 1), grant.version + 1)).toMatchObject({
 			ok: true,
@@ -270,25 +265,18 @@ describe("takeRotation's bounds", () => {
 
 describe("refundRotation", () => {
 	const takeAt = async (held: FederationGrantStore, version: number, now: Date) => {
-		const taken = await held.takeRotation?.({
+		const taken = await held.takeRotation({
 			grantId: "g-1",
 			expectedVersion: version,
 			limit: 3,
 			windowMs: HOUR,
 			now,
 		});
-		if (taken?.ok !== true) throw new Error("fixture: the take was refused");
+		if (!taken.ok) throw new Error("fixture: the take was refused");
 		return taken;
 	};
 	const refundAt = (held: FederationGrantStore, version: number, since: Date, now: Date) =>
-		held.refundRotation?.({ grantId: "g-1", expectedVersion: version, since, now });
-
-	it("is offered only over a client that has the primitive", () => {
-		const { refundRotation: _, ...rest } = makeIoredisFederationGrantStoreClient(redis);
-		expect(storeOver(rest).refundRotation).toBeUndefined();
-		expect(storeOver(rest).takeRotation).toBeTypeOf("function");
-		expect(store().refundRotation).toBeTypeOf("function");
-	});
+		held.refundRotation({ grantId: "g-1", expectedVersion: version, since, now });
 
 	it("leaves a window counted down to none, read back from every read, which a take counts on into", async () => {
 		const held = store();
@@ -319,7 +307,7 @@ describe("refundRotation", () => {
 		const before = await redis.hgetall(grantKey("g-1"));
 		const deadlines = [await redis.pexpiretime(grantKey("g-1")), await redis.pexpiretime(credKey)];
 		const credential = await redis.get(credKey);
-		expect((await refundAt(held, grant.version + 1, at(DAY), at(DAY + MIN)))?.ok).toBe(true);
+		expect((await refundAt(held, grant.version + 1, at(DAY), at(DAY + MIN))).ok).toBe(true);
 		expect(await redis.hgetall(grantKey("g-1"))).toEqual({
 			...before,
 			version: String(grant.version + 2),
@@ -371,7 +359,7 @@ describe("refundRotation", () => {
 					refundAt(each, grant.version + 2, at(DAY), at(DAY + 2 * MIN)),
 				),
 			);
-			expect(results.filter((result) => result?.ok === true)).toHaveLength(1);
+			expect(results.filter((result) => result.ok)).toHaveLength(1);
 			expect(await redis.hmget(grantKey("g-1"), "version", "rotationsCount")).toEqual([
 				String(grant.version + 3),
 				"1",
@@ -401,7 +389,7 @@ describe("refundRotation", () => {
 			},
 			async refundRotation(...args) {
 				sent += 1;
-				return (await client.refundRotation?.(...args)) ?? null;
+				return await client.refundRotation(...args);
 			},
 		};
 		const held = storeOver(counting);

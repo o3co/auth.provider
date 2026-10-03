@@ -27,7 +27,6 @@ import type {
 	BootstrapMap,
 	ClientRepository,
 	FederationProvider,
-	Logger,
 	LoginEntry,
 } from "@o3co/auth-provider-core";
 import {
@@ -57,7 +56,6 @@ import {
 	callbackUrlFor,
 	sessionMiddlewareModule,
 } from "./acquisitionFixture.mjs";
-import { createLogSpy, payloadOf, written } from "./logSpy.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -108,17 +106,6 @@ const durableStoreModule = defineModule({
 	provides: {
 		federationGrantStore: () => ({ ...createMemoryFederationGrantStore(), kind: "redis" }),
 	} as never,
-});
-
-/** The memory store without `takeRotation`: a store that keeps no rotation budget. */
-const noBudgetStoreModule = defineModule({
-	name: "test-no-budget-federation-grant-store",
-	provides: {
-		federationGrantStore: () => {
-			const { takeRotation: _none, ...store } = createMemoryFederationGrantStore();
-			return store;
-		},
-	},
 });
 
 /** A single-boundary adapter: `revokeBefore` and `revokedBefore`, with no grants boundary on it. */
@@ -188,13 +175,8 @@ interface Setup {
 	readonly connections?: Record<string, unknown>;
 	readonly grants?: Record<string, unknown>;
 	readonly withStore?: boolean;
-	/**
-	 * `"memory"` is the bundled pair; `"durable"` says grants outlive the
-	 * process; `"no-budget"` keeps no rotation budget.
-	 */
-	readonly store?: "memory" | "durable" | "no-budget";
-	/** The deployment's logger; none by default. */
-	readonly logger?: Logger;
+	/** `"memory"` is the bundled pair; `"durable"` says grants outlive the process. */
+	readonly store?: "memory" | "durable";
 	/** What ends a grant a user withdrew on a replica that never saw the withdrawal. */
 	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
@@ -265,11 +247,9 @@ const boot = (setup: Setup) => {
 			: [
 					setup.store === "durable"
 						? durableStoreModule
-						: setup.store === "no-budget"
-							? noBudgetStoreModule
-							: setup.storeClosed === undefined
-								? storeModule
-								: storeModuleClosingInto(setup.storeClosed),
+						: setup.storeClosed === undefined
+							? storeModule
+							: storeModuleClosingInto(setup.storeClosed),
 				]),
 		...(setup.federationFirst === false ? federation : []),
 	];
@@ -310,7 +290,6 @@ const boot = (setup: Setup) => {
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
-			...(setup.logger === undefined ? {} : { logger: setup.logger }),
 			...(setup.tokenSettingsIssuer === undefined
 				? {}
 				: {
@@ -384,22 +363,6 @@ describe("enabling the feature", () => {
 		// are materialised would refuse a valid composition for the order its
 		// author happened to write.
 		const handle = await boot({ federationFirst: false });
-		await handle.dispose();
-	});
-
-	it("warns once, at boot, that a store without `takeRotation` keeps no rotation budget", async () => {
-		const spy = createLogSpy();
-		const handle = await boot({ store: "no-budget", logger: spy.logger });
-		// Exactly one line, object-first, at warn.
-		payloadOf(spy.lines, "federation_grant_store_no_rotation_budget");
-		expect(written(spy.lines)).toContain("warn federation_grant_store_no_rotation_budget");
-		await handle.dispose();
-	});
-
-	it("says nothing of the budget beside a store that keeps one", async () => {
-		const spy = createLogSpy();
-		const handle = await boot({ logger: spy.logger });
-		expect(written(spy.lines)).not.toContain("warn federation_grant_store_no_rotation_budget");
 		await handle.dispose();
 	});
 

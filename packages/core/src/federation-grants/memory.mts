@@ -486,10 +486,10 @@ export function createMemoryFederationGrantStore(
 				...copyAuthorization(authorization),
 				lastUsedAt: grant.lastUsedAt,
 				// The authorization is replaced, so what was judged against the
-				// old one goes with it, and the rotation budget starts afresh
-				// (`rotations` left out).
+				// old one goes with it, and the rotation budget starts afresh.
 				ineligible: undefined,
 				refreshFailure: undefined,
+				rotations: undefined,
 			};
 			entry.intent = null;
 			entry.credentials = credentials;

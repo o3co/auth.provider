@@ -164,7 +164,7 @@ export interface FederationGrantRetrievalLimits {
 	/**
 	 * Upstream refresh-token rotations a grant may take in a window (24 when
 	 * absent): what bounds the rotations a client and an upstream can cause
-	 * together. Kept by a store with `takeRotation`; one without keeps none.
+	 * together, kept by the store.
 	 */
 	readonly rotationBudget?: number;
 	/** The budget's window (an hour when absent). */
@@ -786,9 +786,9 @@ async function evaluate(
 	}
 	// The rotation budget, read as a hint: while it is spent the upstream is
 	// not asked, and the store's take would refuse anyway. Reported after the
-	// marker and the stamp; not read where the store keeps no budget.
+	// marker and the stamp.
 	let spent: FederationGrantDenial | undefined;
-	if (notAsked === undefined && deps.store.takeRotation !== undefined) {
+	if (notAsked === undefined) {
 		const budget = judgeFederationGrantRotationBudget(
 			grant.rotations,
 			federationGrantRotationBudget(deps.limits),
@@ -1121,7 +1121,7 @@ async function refreshUnderLock(
 	held: Extract<Evaluation, { kind: "refresh" }>,
 	refresher: FederationGrantRefresher,
 	hardDeadline: number,
-	/** The window the rotation for this attempt was taken in; `undefined` when none was. */
+	/** The window the rotation for this attempt was taken in; `undefined` when the take answered none. */
 	rotation: Date | undefined,
 ): Promise<RefreshOutcome> {
 	const { grant, guard, connection } = held;
@@ -1568,17 +1568,15 @@ function answeredField(grant: unknown, field: "id" | "version"): unknown {
  * read. Waited for until `deadline`, the soft one, and an answer
  * that comes later is not used: nobody waits for the rotation it would admit.
  * What is answered instead is the take's outage, or a refusal, which the last
- * look tells apart: a budget spent meanwhile, or a grant that changed. A store
- * without the member keeps no budget, and nothing is taken. `at`: when the
- * take was answered; `since`: the window it counted into; `guard`: what every
- * later write of the attempt is guarded by, the version of the grant the take
- * answered (one past the look's where the take bumps, the look's where it does
- * not). One that answers a grant it could not have written (another grant, a
- * version at neither of those, or none that can be read) is the take's
- * outage: the upstream must not rotate a token that could not be stored. One
- * that never answered lets the lock go: it is guarded by the look's version,
- * so landing late it is refused after the next holder's take, or makes that
- * take refuse before the upstream is asked.
+ * look tells apart: a budget spent meanwhile, or a grant that changed. `at`:
+ * when the take was answered; `since`: the window it counted into; `guard`:
+ * what every later write of the attempt is guarded by, the version of the
+ * grant the take answered, one past the look's. One that answers a grant it
+ * could not have written (another grant, any other version, or none that can
+ * be read) is the take's outage: the upstream must not rotate a token that
+ * could not be stored. One that never answered lets the lock go: it is
+ * guarded by the look's version, so landing late it is refused after the next
+ * holder's take, or makes that take refuse before the upstream is asked.
  */
 async function takeRotation(
 	deps: RetrieveFederationGrantTokenDeps,
@@ -1595,12 +1593,10 @@ async function takeRotation(
 	| { readonly taken: false; readonly denial: FederationGrantDenial }
 > {
 	const { store } = deps;
-	const take = store.takeRotation;
-	if (take === undefined) return { taken: true, at: deps.now().getTime(), guard };
 	const { limit, windowMs } = federationGrantRotationBudget(deps.limits);
 	const askedAt = deps.now();
 	const taken = await within(
-		settle(() => take.call(store, { ...guard, limit, windowMs, now: askedAt })),
+		settle(() => store.takeRotation({ ...guard, limit, windowMs, now: askedAt })),
 		deadline - askedAt.getTime(),
 	);
 	const at = deps.now().getTime();
@@ -1619,12 +1615,12 @@ async function takeRotation(
 	if (!taken.value.ok) return { taken: false, denial: unavailable("concurrent_update") };
 	const written = taken.value.grant;
 	// The grant this take could have written: this one, at the look's version
-	// bumped once, or left where the store's take does not bump.
-	const answered = answeredField(written, "version");
-	const bumped = guard.expectedVersion + 1;
-	const version =
-		answered === bumped ? bumped : answered === guard.expectedVersion ? answered : undefined;
-	if (answeredField(written, "id") !== guard.grantId || version === undefined) {
+	// bumped once.
+	const version = guard.expectedVersion + 1;
+	if (
+		answeredField(written, "id") !== guard.grantId ||
+		answeredField(written, "version") !== version
+	) {
 		const unusable = new TypeError("the store's take answered a grant it could not have written");
 		return {
 			taken: false,
@@ -1656,13 +1652,11 @@ async function giveBackRotation(
 	deadline: number,
 ): Promise<{ readonly keepLock?: true }> {
 	const { store } = deps;
-	const refund = store.refundRotation;
-	if (refund === undefined) return {};
 	const now = deps.now();
 	// What spent the budget was a write already reported.
 	if (!(now.getTime() < deadline)) return {};
 	const given = await within(
-		settle(() => refund.call(store, { ...guard, since, now })),
+		settle(() => store.refundRotation({ ...guard, since, now })),
 		deadline - now.getTime(),
 	);
 	if (given === "elapsed") {

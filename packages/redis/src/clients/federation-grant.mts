@@ -291,10 +291,8 @@ export interface FederationGrantStoreClient {
 	 * `nowMs` is at or past its end, else one more below `limit`, else refused.
 	 * Bumps the version once in the same step and touches no other field. A
 	 * bound below its minimum is refused.
-	 *
-	 * Optional: a store over a client without it keeps no rotation budget.
 	 */
-	takeRotation?(
+	takeRotation(
 		grantKey: string,
 		input: TakeFederationGrantRotationInput,
 	): Promise<FederationGrantHashFields | null>;
@@ -303,10 +301,8 @@ export interface FederationGrantStoreClient {
 	 * its stored expiry, whose window opened at `sinceMs` and holds at least
 	 * one: `rotationsCount` - 1 and the version bumped, nothing else touched.
 	 * The bump makes it once per attempt.
-	 *
-	 * Optional: a store over a client without it keeps every rotation taken.
 	 */
-	refundRotation?(
+	refundRotation(
 		grantKey: string,
 		input: RefundFederationGrantRotationInput,
 	): Promise<FederationGrantHashFields | null>;
