@@ -61,11 +61,14 @@ const resolved = (extra: Record<string, unknown> = {}): Record<string, unknown> 
 const noticesOf = (logger: ReturnType<typeof recordingLogger>, name: string): unknown[] =>
 	logger.warn.mock.calls.filter(([, message]) => message === name).map(([fields]) => fields);
 
-/** Boots `modules` on `config`, with `configDefaults` when given, and answers the logger. */
+/**
+ * Boots `modules` on `config`, with `configDefaults` as an own key when it is
+ * passed — `undefined` included — and answers the logger.
+ */
 async function boot(
 	modules: readonly Module[],
 	config: Record<string, unknown>,
-	configDefaults?: unknown,
+	...configDefaults: [] | [unknown]
 ): Promise<ReturnType<typeof recordingLogger>> {
 	const logger = recordingLogger();
 	const handle = await createApp({
@@ -74,7 +77,7 @@ async function boot(
 			config: config as unknown as AppConfig,
 			pathResolver: (s: string) => s,
 			logger,
-			...(configDefaults === undefined ? {} : { configDefaults }),
+			...(configDefaults.length === 0 ? {} : { configDefaults: configDefaults[0] }),
 		} as BootstrapMap,
 	});
 	await handle.dispose();
@@ -143,6 +146,22 @@ describe("a section no loaded module owns, with the configuration's defaults", (
 		});
 		expect(noticesOf(logger, "config_sections_ignored")).toEqual([]);
 		expect(noticesOf(logger, "config_sections_not_loaded")).toEqual([]);
+	});
+
+	it("compares a section holding lists element by element", async () => {
+		const sibling = { hosts: ["a.test", "b.test"], routes: [{ path: "/x" }] };
+		const silent = await boot([], resolved({ "sibling-store": structuredClone(sibling) }), {
+			"sibling-store": structuredClone(sibling),
+		});
+		expect(noticesOf(silent, "config_sections_not_loaded")).toEqual([]);
+		const changed = await boot(
+			[],
+			resolved({ "sibling-store": { ...structuredClone(sibling), hosts: ["a.test"] } }),
+			{ "sibling-store": structuredClone(sibling) },
+		);
+		expect(noticesOf(changed, "config_sections_not_loaded")).toEqual([
+			{ sections: ["sibling-store"] },
+		]);
 	});
 
 	it("reads configDefaults handed as undefined as none handed", async () => {
@@ -217,6 +236,43 @@ describe("configDefaults that boot cannot read as plain data", () => {
 			reason: "config-defaults-invalid",
 			path: ["sibling-store", "keyPrefix"],
 		});
+	});
+
+	it("refuses a value inside a section that is not plain data, naming its path", async () => {
+		const err = await refusedWith({ "sibling-store": { expiresAt: new Date(0) } });
+		expect(err.details).toEqual({
+			reason: "config-defaults-invalid",
+			path: ["sibling-store", "expiresAt"],
+			problem: expect.stringContaining("not plain data"),
+		});
+	});
+
+	it("refuses an accessor in a list, naming its index", async () => {
+		const hosts = ["a.test"];
+		Object.defineProperty(hosts, "0", { enumerable: true, get: () => "a.test" });
+		const err = await refusedWith({ "sibling-store": { hosts } });
+		expect(err.details).toMatchObject({
+			reason: "config-defaults-invalid",
+			path: ["sibling-store", "hosts", "0"],
+		});
+	});
+
+	it("refuses a Proxy that throws as its kind is read, at the top", async () => {
+		const throwing = new Proxy(
+			{},
+			{
+				getPrototypeOf() {
+					throw new Error("proxy-secret-5a90");
+				},
+			},
+		);
+		const err = await refusedWith(throwing);
+		expect(err.details).toEqual({
+			reason: "config-defaults-invalid",
+			path: [],
+			problem: "threw as it was read",
+		});
+		expect(err.message).not.toContain("proxy-secret-5a90");
 	});
 
 	it("refuses a Proxy whose traps throw, at the level it was read", async () => {
