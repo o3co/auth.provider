@@ -21,11 +21,13 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	createApp,
-	defineModule,
 	type Module,
 	moduleReferences,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
+import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
+import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
@@ -439,6 +441,39 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The federation variables `config/application.conf` documents on lines it
+ * ships commented out — a key an operator binds by uncommenting it — as the
+ * string an operator would supply. They are not live substitutions, so they
+ * are not in `DOCUMENTED_ENV`; the federation cases below bind them as their
+ * comments write them (`commentedFederationBindings`).
+ */
+const COMMENTED_FEDERATION_ENV: Readonly<Record<string, string>> = {
+	CORE_FEDERATIONS_GOOGLE_SESSION_DOMAIN: ".example.com",
+	CORE_FEDERATIONS_GOOGLE_AUTH_CALLBACK_URL: "https://app.example.com/auth/callback",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_URL: "https://app.example.com/",
+	CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS: "false",
+};
+
+/**
+ * Each `# <key> = ${?CORE_FEDERATIONS_<NAME>_…}` line of the shipped
+ * `config/application.conf`, uncommented as an operator's layer above it:
+ * `core.federations.<name>.<key> = ${?…}`.
+ */
+function commentedFederationBindings(): string {
+	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
+	return readFileSync(applicationConfPath, "utf8")
+		.split("\n")
+		.flatMap((line) => {
+			const match =
+				/^\s*#\s*([A-Za-z]+) = \$\{\?(CORE_FEDERATIONS_([A-Z0-9]+)_[A-Z0-9_]+)\}\s*$/.exec(line);
+			if (match === null) return [];
+			const [, key, variable, name] = match as unknown as [string, string, string, string];
+			return [`core.federations.${name.toLowerCase()}.${key} = \${?${variable}}`];
+		})
+		.join("\n");
+}
+
+/**
  * The provider environment `o3co/auth`'s `tests/docker-compose.yml` sets,
  * transcribed: each renamed variable under its old and its new name, the two
  * at one value. The umbrella E2E boots the shipped template with exactly this,
@@ -516,48 +551,88 @@ const FEDERATION_STORES = Object.fromEntries(
 	].map((key) => [key, {}]),
 );
 
-/**
- * Contributes the federations the documented environment enables, each with
- * the redirect policy a federation is paired with, so boot has a module that
- * handles every enabled federation. What they do is not this suite's question.
- */
-const DOCUMENTED_FEDERATIONS = ["google", "oidc"];
-const documentedFederationsModule = defineModule({
-	name: "test:documented-federations",
-	contributes: {
-		federations: Object.fromEntries(DOCUMENTED_FEDERATIONS.map((name) => [name, () => ({ name })])),
-		federationRedirectPolicies: Object.fromEntries(
-			DOCUMENTED_FEDERATIONS.map((name) => [
-				name,
-				() => ({
-					validateRedirect: () => ({ ok: true as const, value: undefined }),
-					resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-				}),
-			]),
-		),
-	} as never,
-});
+/** What core handed a federation type for one entry: its callback, and its own keys as the type's schema parsed them. */
+interface Dispatched {
+	readonly callbackURL: string;
+	readonly entry: Readonly<Record<string, unknown>>;
+}
+
+/** A federation type's declaration, as far as this suite reads it. */
+interface TypeDeclaration {
+	readonly factory: (deps: unknown, instance: { name: string } & Dispatched) => unknown;
+}
 
 /**
- * The shipped layers under `env`, as `app.mts` hands them to boot, and the
- * configuration boot parsed: phase one for what the composition expects of
- * session admission, phase two resolved over the reference of every package
- * the template's modules come from (the template's own and core's) and
- * parsed once by `createApp` — no bridge on the way.
- * No module is loaded but the federations' stub unless `modules` names one:
- * the parse is what this suite asks about, and each key it reads is one
- * core's schema declares, or the section of a module it loads.
+ * `module`, a federation type module, with each type's factory recording what
+ * core handed it into `dispatched`, by the entry's name, before building the
+ * provider as the module does. The schema, the parse and the provider are the
+ * module's own.
  */
-async function bootParsed(
+function recordingDispatch(module: Module, dispatched: Map<string, Dispatched>): Module {
+	const contributes = module.contributes as {
+		readonly federationTypes: Readonly<Record<string, TypeDeclaration>>;
+	};
+	const federationTypes = Object.fromEntries(
+		Object.entries(contributes.federationTypes).map(([type, declaration]) => [
+			type,
+			{
+				...declaration,
+				factory: (deps: unknown, instance: { name: string } & Dispatched) => {
+					dispatched.set(instance.name, {
+						callbackURL: instance.callbackURL,
+						entry: instance.entry,
+					});
+					return declaration.factory(deps, instance);
+				},
+			},
+		]),
+	);
+	return { ...module, contributes: { ...contributes, federationTypes } } as Module;
+}
+
+/**
+ * The upstream the documented OIDC federation's issuer names. Its type
+ * discovers the issuer at boot, so the module is handed this fake's `fetch`
+ * rather than the network. Made once per file.
+ */
+let oidcUpstream: Promise<FakeIdp> | undefined;
+const documentedOidcUpstream = (): Promise<FakeIdp> => {
+	oidcUpstream ??= createFakeIdp({
+		issuer: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_ISSUER as string,
+		discovery: true,
+		clientId: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_CLIENT_ID as string,
+	});
+	return oidcUpstream;
+};
+
+/**
+ * The shipped layers under `env`, as `app.mts` hands them to boot, booted
+ * with the federation types the template bundles: phase one for what the
+ * composition expects of session admission, phase two resolved over the
+ * reference of every package the template's modules come from (the
+ * template's own and core's) and parsed once by `createApp` — no bridge on
+ * the way. Core dispatches each enabled federation to its type, which parses
+ * the entry with its own schema; `dispatched` is what each type was handed.
+ * No other module is loaded unless `modules` names one: the parse is what this
+ * suite asks about, and each key it reads is one core's schema declares, or
+ * the section of a module it loads.
+ */
+async function bootDispatched(
 	env: Record<string, string>,
 	configEnv = "production",
 	operatorLayer?: string,
 	modules: readonly Module[] = [],
-): Promise<AppConfig> {
+): Promise<{ readonly parsed: AppConfig; readonly dispatched: ReadonlyMap<string, Dispatched> }> {
 	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
 	const switches = readSwitches(own);
+	const dispatched = new Map<string, Dispatched>();
+	const upstream = await documentedOidcUpstream();
 	const handle = await createApp({
-		modules: [documentedFederationsModule, ...modules],
+		modules: [
+			recordingDispatch(googleFederationTypeModule(), dispatched),
+			recordingDispatch(oidcFederationTypeModule({ fetch: upstream.fetch }), dispatched),
+			...modules,
+		],
 		bootstrapComponents: {
 			config: resolveForBoot(own, buildModules(switches, { environment: configEnv }), switches),
 			pathResolver: (s: string) => s,
@@ -567,7 +642,17 @@ async function bootParsed(
 	const parsed = handle.components.config;
 	await handle.dispose();
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
-	return parsed;
+	return { parsed, dispatched };
+}
+
+/** The configuration boot parsed, as {@link bootDispatched} boots it. */
+async function bootParsed(
+	env: Record<string, string>,
+	configEnv = "production",
+	operatorLayer?: string,
+	modules: readonly Module[] = [],
+): Promise<AppConfig> {
+	return (await bootDispatched(env, configEnv, operatorLayer, modules)).parsed;
 }
 
 /** `session-store {}` as the session store's module parses it. */
@@ -732,6 +817,133 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(sections["redis-mfa-transaction-store"]?.keyPrefix).toBe("tenant-a:mfat:");
 		// A comma-separated string becomes a list of origins, trimmed.
 		expect(http.cors.allowedOrigins).toEqual(["https://app.example.com", "http://localhost:5173"]);
+	});
+
+	describe("the federations' variables, read by each federation's type", () => {
+		it("hands each enabled federation's type the entry its documented variables set", async () => {
+			const { dispatched } = await bootDispatched(DOCUMENTED_ENV);
+			expect(Object.fromEntries(dispatched)).toEqual({
+				google: {
+					callbackURL: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CALLBACK_URL,
+					entry: {
+						clientId: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_ID,
+						clientSecret: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET,
+						redirectAllowlist: [],
+						accessType: "online",
+					},
+				},
+				oidc: {
+					callbackURL: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_CALLBACK_URL,
+					entry: {
+						issuer: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_ISSUER,
+						clientId: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_CLIENT_ID,
+						clientSecret: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_CLIENT_SECRET,
+						scopes: ["openid", "profile", "email"],
+						redirectAllowlist: [],
+					},
+				},
+			});
+		});
+
+		it("reads the Google keys the configuration documents commented out, bound as their comments write them", async () => {
+			const { dispatched } = await bootDispatched(
+				{ ...DOCUMENTED_ENV, ...COMMENTED_FEDERATION_ENV },
+				"production",
+				commentedFederationBindings(),
+			);
+			expect(dispatched.get("google")?.entry).toEqual({
+				clientId: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_ID,
+				clientSecret: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET,
+				redirectAllowlist: [],
+				accessType: "online",
+				sessionDomain: COMMENTED_FEDERATION_ENV.CORE_FEDERATIONS_GOOGLE_SESSION_DOMAIN,
+				authCallbackUrl: COMMENTED_FEDERATION_ENV.CORE_FEDERATIONS_GOOGLE_AUTH_CALLBACK_URL,
+				clientUrl: COMMENTED_FEDERATION_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_URL,
+				requireAuthorizationResponseIss: false,
+			});
+			// `toEqual` passes a key present as `undefined`: no variable binds
+			// `endSessionEndpoint`, so the entry must not carry the key at all.
+			expect(dispatched.get("google")?.entry).not.toHaveProperty("endSessionEndpoint");
+		});
+
+		it("hands the Google type no key the documented variables leave unset, not even as undefined", async () => {
+			const { dispatched } = await bootDispatched(DOCUMENTED_ENV);
+			const entry = dispatched.get("google")?.entry;
+			expect(entry).toBeDefined();
+			for (const key of [
+				"sessionDomain",
+				"authCallbackUrl",
+				"clientUrl",
+				"requireAuthorizationResponseIss",
+				"endSessionEndpoint",
+			]) {
+				expect(entry, key).not.toHaveProperty(key);
+			}
+		});
+
+		it("binds every variable the configuration documents commented out", () => {
+			expect(
+				commentedFederationBindings()
+					.match(/\$\{\?[A-Z0-9_]+\}/g)
+					?.sort(),
+			).toEqual(
+				Object.keys(COMMENTED_FEDERATION_ENV)
+					.map((name) => `\${?${name}}`)
+					.sort(),
+			);
+		});
+
+		/** The entry the Google type was handed under `variables`, the commented keys bound. */
+		const googleEntryUnder = async (variables: Record<string, string>) =>
+			(
+				await bootDispatched(
+					{ ...DOCUMENTED_ENV, ...variables },
+					"production",
+					commentedFederationBindings(),
+				)
+			).dispatched.get("google")?.entry;
+
+		for (const [supplied, expected] of [
+			["true", true],
+			["TRUE", true],
+			["1", true],
+			["false", false],
+			["False", false],
+			[" false ", false],
+			["0", false],
+		] as const) {
+			it(`CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS=${JSON.stringify(supplied)} reads as ${expected}`, async () => {
+				const entry = await googleEntryUnder({
+					CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS: supplied,
+				});
+				expect(entry?.requireAuthorizationResponseIss).toBe(expected);
+			});
+		}
+
+		it("refuses CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS exported empty or misspelt, naming the key, rather than turning the check off", async () => {
+			for (const supplied of ["", "no", "off", "ture"]) {
+				await expect(
+					googleEntryUnder({
+						CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS: supplied,
+					}),
+					supplied,
+				).rejects.toThrow(/core\.federations\.google\.requireAuthorizationResponseIss/);
+			}
+		});
+
+		it("reads CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE as offline or online, exactly", async () => {
+			for (const supplied of ["offline", "online"]) {
+				expect(
+					(await googleEntryUnder({ CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE: supplied }))?.accessType,
+				).toBe(supplied);
+			}
+			for (const supplied of ["", "Online", "offine", "true"]) {
+				await expect(
+					googleEntryUnder({ CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE: supplied }),
+					supplied,
+				).rejects.toThrow(/core\.federations\.google\.accessType/);
+			}
+		});
 	});
 
 	describe("HTTP_CORS_ALLOWED_ORIGINS", () => {

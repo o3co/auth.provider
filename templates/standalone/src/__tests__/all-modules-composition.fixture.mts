@@ -31,9 +31,9 @@
  * - the refresh-token family store under `core.deployment.mode = "single"`: memory,
  *   not the shipped Redis, so the single-replica boot opens no sockets;
  * - upstream identity providers: core's fake OpenID Provider, through the
- *   `fetch` option the Google and OIDC adapters take; the config bridges'
- *   values are read as shipped (`googleFederationConfigModule`, the OIDC
- *   package's reader), with only `fetch` added;
+ *   `fetch` option the Google and OIDC federation type modules take: each is
+ *   the module `buildModules` lists, built with that option, and the entries
+ *   it handles are read as shipped;
  * - configuration with no environment form (grant connections, a key ring, a
  *   landing URL): one more HOCON layer above the shipped ones.
  *
@@ -62,6 +62,8 @@ import {
 	terminalErrorHandler,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
+import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import express from "express";
 import helmet from "helmet";
 import request from "supertest";
@@ -75,7 +77,6 @@ import {
 	resolveForBoot,
 	type Switches,
 } from "#/configPath.mjs";
-import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
 
 export const ISSUER = "https://auth.test";
 const OIDC_ISSUER = "https://idp.test";
@@ -345,14 +346,40 @@ let upstreams: Promise<{ fakes: Upstreams; reset: () => void }> | undefined;
  * run if one did.
  */
 export async function sharedUpstreams(): Promise<Upstreams> {
+	const { fakes, reset } = await madeUpstreams();
+	reset();
+	return fakes;
+}
+
+/** The two fake upstreams, made on first use and never reset here. */
+function madeUpstreams(): Promise<{ fakes: Upstreams; reset: () => void }> {
 	upstreams ??= createUpstreams().then((fakes) => ({
 		fakes,
 		reset: resettable(fakes.oidc, fakes.google),
 	}));
-	const { fakes, reset } = await upstreams;
-	reset();
-	return fakes;
+	return upstreams;
 }
+
+/** A `fetch` that reaches the shared fake upstream `name`. */
+const upstreamFetch =
+	(name: keyof Upstreams): typeof fetch =>
+	async (input, init) =>
+		(await madeUpstreams()).fakes[name].fetch(input, init);
+
+/**
+ * The federation type modules `buildModules` lists, by name, each built as
+ * the template builds it but with a `fetch` that reaches its fake upstream.
+ */
+const UPSTREAM_TYPE_MODULES: ReadonlyMap<string, () => Module> = new Map([
+	[
+		googleFederationTypeModule().name,
+		() => googleFederationTypeModule({ fetch: upstreamFetch("google") }),
+	],
+	[
+		oidcFederationTypeModule().name,
+		() => oidcFederationTypeModule({ fetch: upstreamFetch("oidc") }),
+	],
+]);
 
 /**
  * Snapshots each fake's settings (every property that is not a function) and
@@ -430,52 +457,6 @@ async function createUpstreams(): Promise<Upstreams> {
 			sub: GOOGLE_SUB,
 		}),
 	};
-}
-
-/**
- * What one of the template's config bridges provides for `config`. Read
- * through a record, not the typed slot: a program that loads this file without
- * a federation package's ComponentMap augmentation (`tools/composition` does)
- * has no key to name.
- */
-const bridged = <T,>(module: Module, slot: string, config: AppConfig): T => {
-	const provider = (module.provides as Record<string, unknown> | undefined)?.[slot];
-	if (typeof provider !== "function") throw new Error(`${module.name} provides no ${slot}`);
-	return (provider as (deps: { config: AppConfig }) => T)({ config });
-};
-
-/**
- * The two federation config slots, read by the template's own bridges
- * (`oidcFederationConfigModule`, `googleFederationConfigModule`), with each
- * adapter's `fetch` pointed at its fake upstream. Only for the federations the
- * config enables — which is when `buildModules` lists the bridges.
- */
-async function federationOverrides(
-	config: Switches,
-	upstreams: Upstreams,
-): Promise<Record<string, unknown>> {
-	const overrides: Record<string, unknown> = {};
-	const modules = buildModules(config).map((m) => m.name);
-	if (modules.includes(oidcFederationConfigModule.name)) {
-		const oidc = bridged<Record<string, object>>(
-			oidcFederationConfigModule,
-			"oidcFederationConfigs",
-			config,
-		);
-		overrides.oidcFederationConfigs = Object.fromEntries(
-			Object.entries(oidc).map(([name, entry]) => [
-				name,
-				{ ...entry, fetch: upstreams.oidc.fetch },
-			]),
-		);
-	}
-	if (modules.includes(googleFederationConfigModule.name)) {
-		overrides.googleFederationConfig = {
-			...bridged<object>(googleFederationConfigModule, "googleFederationConfig", config),
-			fetch: upstreams.google.fetch,
-		};
-	}
-	return overrides;
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +578,7 @@ export interface ComposeOptions {
 	readonly mailSenderModules?: readonly Module[];
 	/** Modules added after the template's own, before the order and the outage apply. */
 	readonly extraModules?: (config: Switches) => readonly Module[];
-	/** Components laid over the boot's, beside the federation config slots. */
+	/** Components laid over the boot's (`overrideComponents`). */
 	readonly extraOverrides?: (config: Switches) => Record<string, unknown>;
 	/** Client registrations beside the fixture's own, as `ClientEntrySchema` input. */
 	readonly extraClients?: Readonly<Record<string, Record<string, unknown>>>;
@@ -639,7 +620,7 @@ export function composedModules(config: Switches, options: ComposeOptions = {}):
 			...(options.shippedRefreshTokenFamilyStore
 				? {}
 				: { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),
-		}),
+		}).map((module) => UPSTREAM_TYPE_MODULES.get(module.name)?.() ?? module),
 		...(options.extraModules?.(config) ?? []),
 	];
 	if (options.outage) modules = withOutage(modules, options.outage.slot, options.outage.outage);
@@ -692,10 +673,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 			pathResolver: (s) => s,
 			logger,
 		},
-		overrideComponents: {
-			...(await federationOverrides(config, fakes)),
-			...options.extraOverrides?.(config),
-		} as never,
+		overrideComponents: { ...options.extraOverrides?.(config) } as never,
 	});
 	const parsed = handle.components.config;
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");

@@ -75,10 +75,7 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	"packages/oauth-token-exchange -> oauth-token-exchange",
 	"packages/session -> session",
 	"packages/webauthn -> webauthn",
-	// The standalone template's federation config bridges, which read
-	// `federations`, and its deprecated `stores` bundle.
-	"templates/standalone -> google-federation-config",
-	"templates/standalone -> oidc-federation-config",
+	// The standalone template's deprecated `stores` bundle.
 	"templates/standalone -> stores",
 ];
 

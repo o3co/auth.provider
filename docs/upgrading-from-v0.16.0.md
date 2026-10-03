@@ -63,6 +63,52 @@ rather than `workspace:*`, and refresh the lockfile. Then:
   store (#1177).
 - A mail sender of your own goes through `buildModules`'
   `overrides.mailSenderModules`, never into the module list (#1241).
+- **BREAKING: federations are handled by their `type`** (#1291). The
+  template's federation config bridges (`googleFederationConfigModule`,
+  `oidcFederationConfigModule`) and its reading of the federation map before
+  boot (`googleEnabled`, `oidcFederationNames` in `buildModules`,
+  `core.federations` in `SWITCHES`) are gone. `buildModules` always lists
+  `googleFederationTypeModule()` and `oidcFederationTypeModule()`, and core
+  hands each enabled `core.federations` entry to the module of its `type`.
+  - Every entry needs a `type`. The new `application.conf` writes
+    `type = "google"` on `core.federations.google`, and an environment layer
+    (`{env}.conf`) merges over it, so a `core.federations.google` written
+    there inherits that type. A scaffold that keeps its own
+    `application.conf`, or declares an entry of its own, writes the `type`
+    on the entry, or an enabled one refuses the boot
+    (`federation-type-unhandled`), naming the entry and, for an entry named
+    after a loaded type, the setting to add
+    (`core.federations.google.type = "google"`).
+  - A fork that composes `googleFederationModule` or
+    `oidcFederationModule(name)` beside the new list removes it: a module
+    that contributes `federations.<name>` for an entry its type also handles
+    is refused as `duplicate-contribute`. A module of its own that only
+    provides a bridge's slot (`googleFederationConfig`,
+    `oidcFederationConfigs`) is not refused: with those modules gone,
+    nothing reads the slot.
+  - Code of a fork's own that read `core.federations` from what
+    `readSwitches` answers gets nothing there now. Read it at boot, from the
+    parsed configuration (a module that requires `config`, as the bridges
+    did), or let a federation type module handle the entry, which core
+    hands it at boot: the template bundles Google's and OIDC's, and the
+    GitHub and Apple packages ship `githubFederationTypeModule()` and
+    `appleFederationTypeModule()`.
+  - Each entry's keys are now read by its type's strict schema: a key the
+    type does not name, or the keys nested under the type's name
+    (`google { google { … } }`), refuse the boot at the key's path, where the
+    bridges ignored the one and accepted the other. A missing Google
+    `clientId`, `clientSecret` or `callbackURL` was refused by the bridge
+    too; an empty one, which the bridge handed to the provider, is now
+    refused at its path.
+  - The Google entry's `endSessionEndpoint`, which the bridge never handed
+    to the provider, now takes effect: a scaffold whose own layer still
+    carries one sends RP-initiated logout to it, with the session's ID token
+    as `id_token_hint`. Remove it unless that is what you want.
+  - Every `CORE_FEDERATIONS_*` variable reads as before,
+    `CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS`'s spellings
+    and `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`'s two values included.
+  - A second Google client is now configuration alone: another entry with
+    `type = "google"` ([template README](../templates/standalone/README.md#google-federation)).
 - Install MFA only through `MFA_MODE`
   ([Turning MFA on](#turning-mfa-on)).
 - **MFA is on by default** in the new `config/reference.conf`
