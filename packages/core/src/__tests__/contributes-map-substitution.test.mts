@@ -100,7 +100,7 @@ describe("the two contracts core owns: FederationProvider and ExchangeTokenValid
 		expect(true).toBe(true);
 	});
 
-	it("refuses a federation contribution that is missing the methods, through the public entry point", () => {
+	it("refuses a federation type whose factory answers a provider missing the methods, through the public entry point", () => {
 		// Written against missing methods rather than a mistyped field:
 		// `FederationProfile` carries a string index signature, so a wrong
 		// field name can satisfy it vacuously and would pin nothing.
@@ -108,9 +108,13 @@ describe("the two contracts core owns: FederationProvider and ExchangeTokenValid
 			name: "acme-federation",
 			requires: [],
 			contributes: {
-				federations: {
-					// @ts-expect-error — no `buildAuthorizationUrl`, no `exchangeCode`
-					acme: () => ({ name: "acme", scope: [] }),
+				federationTypes: {
+					acme: {
+						entrySchema: z.object({}),
+						// @ts-expect-error — no `buildAuthorizationUrl`, no `exchangeCode`
+						factory: (_deps, { name }) => ({ name, scope: [] }),
+						redirectPolicy: () => ({}),
+					},
 				},
 			},
 		});
@@ -231,14 +235,12 @@ describe("rate-limit budgets and declared federation contributions", () => {
 		expect(unpaired).toBeDefined();
 	});
 
-	it("a federations entry is a bare factory again: a declaration there does not compile", () => {
+	it("a module contributes no federations: a federation registers through its type, so the kind does not compile", () => {
 		defineModule({
-			name: "acme-federation-declared",
+			name: "acme-federation-direct",
 			contributes: {
-				federations: {
-					// @ts-expect-error — `federations` takes the factory; a type is declared under `federationTypes`
-					corp: { type: "acme", entrySchema: AcmeEntry, factory: () => provider },
-				},
+				// @ts-expect-error — `federations` is core's; a type is declared under `federationTypes`
+				federations: { corp: () => provider },
 			},
 		});
 		expect(true).toBe(true);

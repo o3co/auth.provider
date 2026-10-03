@@ -19,9 +19,8 @@
  * What a `federationTypes` declaration registers as, read once; at stage 1,
  * the refusal of an enabled entry whose type no module registers and the
  * parse of each entry dispatched to a registered type; at stage 4, the
- * provider and the redirect policy one dispatched entry builds, and the check
- * that holds a provider — dispatched, or contributed directly by its key — to
- * the name it registers under.
+ * provider and the redirect policy one dispatched entry builds, the provider
+ * held to the name it registers under.
  */
 
 import type { z } from "zod";
@@ -39,7 +38,6 @@ import type {
 import { failureSummary } from "./failure-summary.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
 import type {
-	ContributionKindMap,
 	DispatchedFederation,
 	NameKeyedCollector,
 	NormalisedModule,
@@ -128,36 +126,6 @@ function declaredTypes(modules: readonly NormalisedModule[]): ReadonlyMap<string
 	return types;
 }
 
-/** Each name a module contributes or overrides under `federations`, with the first such module. */
-function directFederations(modules: readonly NormalisedModule[]): ReadonlyMap<string, string> {
-	const names = new Map<string, string>();
-	for (const m of modules) {
-		for (const entry of [...m.contributesEntries, ...m.overridesEntries]) {
-			if (entry.kind !== "federations" || typeof entry.key !== "string") continue;
-			if (!names.has(entry.key)) names.set(entry.key, m.name);
-		}
-	}
-	return names;
-}
-
-/**
- * The host collector — `federations`, then `federationRedirectPolicies` —
- * that already holds `name`, or `undefined`. A host may pre-load a name-keyed
- * collector (the `override-targets` row takes such an entry as a target):
- * either half of a pair it pre-loaded leaves no room for a dispatched entry's
- * pair, and handles no entry itself.
- */
-function seededBy(
-	contributionKinds: ContributionKindMap | undefined,
-	name: string,
-): "federations" | "federationRedirectPolicies" | undefined {
-	if (contributionKinds?.federations?.get(name) !== undefined) return "federations";
-	if (contributionKinds?.federationRedirectPolicies?.get(name) !== undefined) {
-		return "federationRedirectPolicies";
-	}
-	return undefined;
-}
-
 /**
  * The `type` an entry names. Core's schema holds every entry to a non-empty
  * string before any row reads it; `""`, which no module registers, stands in
@@ -176,81 +144,40 @@ const quoted = (names: readonly string[]): string =>
 const BARE_KEY = /^[A-Za-z0-9_-]+$/;
 
 /**
- * `section.<name>`, as the path is written: the name bare when it is a bare
- * key, and otherwise quoted as JSON, so a name with a dot, a quote or a
- * newline in it reads as one key on one line.
+ * Where an entry is written, as the operator writes the path: the name bare
+ * when it is a bare key, and otherwise quoted as JSON, so a name with a dot,
+ * a quote or a newline in it reads as one key on one line.
  */
-const keyAt = (section: string, name: string): string =>
-	`${section}.${BARE_KEY.test(name) ? name : JSON.stringify(name)}`;
-
-/** Where an entry is written, as the operator writes the path (`keyAt`). */
-const entryAt = (name: string): string => keyAt("core.federations", name);
+const entryAt = (name: string): string =>
+	`core.federations.${BARE_KEY.test(name) ? name : JSON.stringify(name)}`;
 
 /**
  * Every enabled `core.federations` entry is handled by the installed module
- * that registers its `type` under `federationTypes`, and by no other: a
- * module contributing or overriding `federations.<name>` directly, or a host
- * whose `federations` collector already holds the name, handles none. An
- * enabled entry whose type no module registers is
- * `federation-type-unhandled`, every such entry listed at once with its type,
- * and the types handled; the message says when a module contributes the
- * entry's name directly. One dispatched by its type and also contributed by
- * name, or already held by either host collector (`federations`,
- * `federationRedirectPolicies`), is `duplicate-contribute`, refused here
- * rather than when stage 4 registers half of its pair. The message names
- * each entry and its type, and quotes nothing else of it. A disabled entry is
- * not read; that every entry names a type is core's schema's.
+ * that registers its `type` under `federationTypes`; nothing else registers
+ * a federation, since no module contributes and no host supplies the
+ * `federations` or `federationRedirectPolicies` collector
+ * (`contribution-kind-guarded`). An enabled entry whose type no module
+ * registers is `federation-type-unhandled`, every such entry listed at once
+ * with its type, and the types handled. The message names each entry and its
+ * type, and quotes nothing else of it. A disabled entry is not read; that
+ * every entry names a type is core's schema's.
  * @internal
  */
 export function checkFederationEntriesHandled(
 	modules: readonly NormalisedModule[],
 	config: unknown,
-	contributionKinds?: ContributionKindMap,
 ): void {
 	const types = declaredTypes(modules);
-	const direct = directFederations(modules);
 	const unhandled: { readonly federationName: string; readonly type: string }[] = [];
-	const both: {
-		readonly name: string;
-		readonly kind: "federations" | "federationRedirectPolicies";
-		readonly modules: readonly [string, string];
-		readonly byHost: boolean;
-	}[] = [];
 	for (const [name, entry] of enabledFederationsOf(config)) {
 		const type = typeOf(entry);
-		const declared = types.get(type);
-		if (declared === undefined) {
-			unhandled.push({ federationName: name, type });
-			continue;
-		}
-		const contributor = direct.get(name);
-		const seeded = seededBy(contributionKinds, name);
-		if (contributor !== undefined) {
-			both.push({
-				name,
-				kind: "federations",
-				modules: [declared.module, contributor],
-				byHost: false,
-			});
-		} else if (seeded !== undefined) {
-			both.push({
-				name,
-				kind: seeded,
-				modules: [declared.module, `contributionKinds.${seeded}`],
-				byHost: true,
-			});
-		}
+		if (!types.has(type)) unhandled.push({ federationName: name, type });
 	}
 	if (unhandled.length > 0) {
 		const handled = [...types.keys()];
 		const fixes = unhandled.map(({ federationName, type }) => {
 			const at = entryAt(federationName);
-			const contributor = direct.get(federationName);
-			const directly =
-				contributor === undefined
-					? ""
-					: ` (module ${JSON.stringify(contributor)} contributes federations[${JSON.stringify(federationName)}] directly, which handles no entry)`;
-			return `${at} names the type ${JSON.stringify(type)}: install the module that contributes federationTypes[${JSON.stringify(type)}], correct the type to one an installed module handles, or set ${at}.enabled = false${directly}`;
+			return `${at} names the type ${JSON.stringify(type)}: install the module that contributes federationTypes[${JSON.stringify(type)}], correct the type to one an installed module handles, or set ${at}.enabled = false`;
 		});
 		throw new BootError({
 			message:
@@ -260,27 +187,6 @@ export function checkFederationEntriesHandled(
 			reason: "federation-type-unhandled",
 			stage: "validateManifests",
 			details: { reason: "federation-type-unhandled", unhandled, handled },
-		});
-	}
-	const [first] = both;
-	if (first !== undefined) {
-		throw new BootError({
-			message: first.byHost
-				? `${entryAt(first.name)} is dispatched by its type to module "${first.modules[0]}" ` +
-					`and its name is already held by the host's ${first.modules[1]} collector: one federation has one handler, ` +
-					`so remove its type or remove ${JSON.stringify(first.name)} from that collector.`
-				: `${entryAt(first.name)} is dispatched by its type to module "${first.modules[0]}" ` +
-					`and contributed by name by module "${first.modules[1]}": one federation has one handler, so remove its ` +
-					`type or remove the module that contributes federations[${JSON.stringify(first.name)}].`,
-			reason: "duplicate-contribute",
-			stage: "validateManifests",
-			details: {
-				reason: "duplicate-contribute",
-				kind: first.kind,
-				identity: first.name,
-				identityKind: "name",
-				modules: first.modules,
-			},
 		});
 	}
 }
@@ -316,8 +222,7 @@ const nestsUnderType = (entry: object, type: string): boolean => {
  * entry. An entry is flat: a key named after its type is read as one of the
  * type's keys, and the refusal of a missing `callbackURL` says so when that
  * key holds an object. Runs after `checkFederationEntriesHandled`, so every
- * enabled entry's type is registered, and an entry it dispatches is
- * contributed by no module directly.
+ * enabled entry's type is registered.
  * @internal
  */
 export function parseFederationEntries(
@@ -434,18 +339,6 @@ export async function buildDispatchedFederation(
 		throw new RangeError(`${subject} redirectPolicy must answer a redirect policy, an object`);
 	}
 	return { provider, redirectPolicy };
-}
-
-/**
- * The provider a module contributes or overrides directly under
- * `federations.<key>`, held to what a dispatched entry's provider is held to
- * (`namedProvider`): an object named `key`. Throws — for the caller to report
- * as the contribution's failure — otherwise; the message names the key as a
- * path (`keyAt`).
- * @internal
- */
-export function checkDirectFederation(key: string, provider: unknown): FederationProvider {
-	return namedProvider(provider, key, `${keyAt("federations", key)}: the factory`, "its key");
 }
 
 /**

@@ -32,7 +32,6 @@ import type {
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
 	DuplicateSecondFactorAuthorityDetails,
-	FederationRedirectPolicyUnpairedDetails,
 	FederationStoresIncompleteDetails,
 	FederationTypeUnhandledDetails,
 	GrantPolicyWithoutIssuerDetails,
@@ -74,7 +73,7 @@ describe("BootStage", () => {
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 41 reason literals", () => {
+	it("contains exactly the 40 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -96,7 +95,6 @@ describe("BootErrorReason", () => {
 			| "contribute-factory-failed"
 			| "route-order-cycle"
 			| "route-order-target-missing"
-			| "federation-redirect-policy-unpaired"
 			| "grant-policy-without-issuer"
 			| "federation-stores-incomplete"
 			| "federation-type-unhandled"
@@ -232,12 +230,6 @@ describe("per-reason *Details discriminators", () => {
 		expectTypeOf<
 			RouteOrderTargetMissingDetails["reason"]
 		>().toEqualTypeOf<"route-order-target-missing">();
-	});
-
-	it("FederationRedirectPolicyUnpairedDetails.reason", () => {
-		expectTypeOf<
-			FederationRedirectPolicyUnpairedDetails["reason"]
-		>().toEqualTypeOf<"federation-redirect-policy-unpaired">();
 	});
 
 	it("GrantPolicyWithoutIssuerDetails.reason", () => {

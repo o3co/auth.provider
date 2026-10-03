@@ -411,12 +411,20 @@ export interface RouteCollector {
  */
 export interface ContributionCollectorMap {
 	readonly grants?: NameKeyedCollector<GrantHandler>;
+	/**
+	 * Collector for `federations`, by name: the provider stage 4 builds for
+	 * each `core.federations` entry stage 1 dispatched to its type. Boot
+	 * fills it alone: a module's contribution or override, and a host
+	 * collector, are refused (`contribution-kind-guarded`).
+	 */
 	readonly federations?: NameKeyedCollector<FederationProvider>;
 	/**
-	 * Collector for `federationRedirectPolicies` contributions.
-	 * The concrete policy type (`FederationRedirectPolicy`) is declared in the
-	 * session package via `declare module` augmentation; core stores it as
-	 * `unknown` to avoid a cross-package dependency.
+	 * Collector for `federationRedirectPolicies`, by name: the redirect policy
+	 * stage 4 builds beside each dispatched entry's provider, filled by boot
+	 * alone like `federations`. The concrete policy type
+	 * (`FederationRedirectPolicy`) is declared in the session package via
+	 * `declare module` augmentation; core stores it as `unknown` to avoid a
+	 * cross-package dependency.
 	 */
 	readonly federationRedirectPolicies?: NameKeyedCollector<unknown>;
 	readonly tokenExchangeValidators?: NameKeyedCollector<ExchangeTokenValidator>;
@@ -644,12 +652,12 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 41 literals
+// BootErrorReason — 40 literals
 // ---------------------------------------------------------------------------
 
 /**
  * Every reason a BootError can carry: one literal per validation or runtime
- * failure the boot planner detects, 41 in all.
+ * failure the boot planner detects, 40 in all.
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -672,7 +680,6 @@ export type BootErrorReason =
 	| "contribute-factory-failed"
 	| "route-order-cycle"
 	| "route-order-target-missing"
-	| "federation-redirect-policy-unpaired"
 	| "grant-policy-without-issuer"
 	| "federation-stores-incomplete"
 	| "federation-type-unhandled"
@@ -695,7 +702,7 @@ export type BootErrorReason =
 	| "token-settings-lifetime-exceeds-configuration";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 41 in all
+// Per-reason *Details interfaces — one per BootErrorReason, 40 in all
 // ---------------------------------------------------------------------------
 
 /**
@@ -1107,21 +1114,6 @@ export interface RouteOrderTargetMissingDetails {
 }
 
 /**
- * A federation contributing `federations[name]` lacks a matching
- * `federationRedirectPolicies[name]` (or vice versa).
- *
- * `name`: the unmatched federation/policy key.
- * `side`: which side is missing its pair.
- * `contributedBy`: the module that contributed the unpaired side.
- */
-export interface FederationRedirectPolicyUnpairedDetails {
-	readonly reason: "federation-redirect-policy-unpaired";
-	readonly name: string;
-	readonly side: "federation-without-policy" | "policy-without-federation";
-	readonly contributedBy: string;
-}
-
-/**
  * When any module provides `grantPolicy`, `config.oauth.jwt.issuer` must be a
  * non-empty string: the grant policy hook signs decisions against the
  * issuer, and an empty one turns its fail-closed enforcement into a silent
@@ -1149,9 +1141,8 @@ export interface FederationStoresIncompleteDetails {
 
 /**
  * An enabled `core.federations` entry no installed module handles: its `type`
- * is not one a module registers under `federationTypes`, and no module
- * contributes `federations.<name>` either. Every such entry is listed, in the
- * order written. Its routes would otherwise answer `404` while the operator
+ * is not one a module registers under `federationTypes`, the one way a
+ * federation registers. Every such entry is listed, in the order written. Its routes would otherwise answer `404` while the operator
  * believes the federation is on.
  */
 export interface FederationTypeUnhandledDetails {
@@ -1218,17 +1209,27 @@ export interface ComponentAbsenceUndeclaredDetails {
  * planner's alone: `rateLimitBudgets` — a host collector could answer
  * a looser budget than the owning module contributed, on a prefix such as
  * RFC 8628 §5.1's device verification — `federationTypes`, and
- * `admissionActions`, whose grades admission hands the requirements, and
- * `auditHooks`, which the audit fan-out reads. Refused in `createApp`, before
- * the kinds are merged. Also a module's
- * `overrides.admissionActions` entry, at stage 1 (`channel: "overrides"`,
- * naming the module and the action): an action's grade is its registrant's.
+ * `admissionActions`, whose grades admission hands the requirements,
+ * `auditHooks`, which the audit fan-out reads, and `federations` and
+ * `federationRedirectPolicies`, which boot fills from the dispatched
+ * `core.federations` entries. Refused in `createApp`, before the kinds are
+ * merged. Also, at stage 1, naming the module and the channel: a module's
+ * `overrides.admissionActions` entry, naming the action (an action's grade is
+ * its registrant's), and a module's `contributes` or `overrides` of
+ * `federations` or `federationRedirectPolicies`, naming the entry when the
+ * kind was given as a record (a federation registers through its type alone).
  */
 export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
-	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions" | "auditHooks";
-	/** Present for a module's override; absent for a host collector. */
-	readonly channel?: "overrides";
+	readonly kind:
+		| "rateLimitBudgets"
+		| "federationTypes"
+		| "admissionActions"
+		| "auditHooks"
+		| "federations"
+		| "federationRedirectPolicies";
+	/** Present for a module's contribution or override; absent for a host collector. */
+	readonly channel?: "contributes" | "overrides";
 	readonly module?: string;
 	readonly name?: string;
 }
@@ -1355,7 +1356,7 @@ export interface SecondFactorAuthorityNotDeclaredDetails {
 
 /**
  * Discriminated union (on `reason`) of the per-reason details: one member
- * per `BootErrorReason`, 41 in all.
+ * per `BootErrorReason`, 40 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1378,7 +1379,6 @@ export type BootErrorDetails =
 	| ContributeFactoryFailedDetails
 	| RouteOrderCycleDetails
 	| RouteOrderTargetMissingDetails
-	| FederationRedirectPolicyUnpairedDetails
 	| GrantPolicyWithoutIssuerDetails
 	| FederationStoresIncompleteDetails
 	| FederationTypeUnhandledDetails

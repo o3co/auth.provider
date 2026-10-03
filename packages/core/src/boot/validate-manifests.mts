@@ -172,7 +172,7 @@ function normaliseModule(m: Module): NormalisedModule {
 				});
 			}
 		} else if (kindMap !== null && typeof kindMap === "object") {
-			// Name-keyed kinds: grants, federations, tokenExchangeValidators, mfaFactors, …
+			// Name-keyed kinds: grants, tokenExchangeValidators, mfaFactors, …
 			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
 				contributesEntries.push({
 					kind: kind as ContributionKind,
@@ -678,6 +678,20 @@ function buildMissingRequiredPath(
 const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
 
 /**
+ * The kinds a federation's provider and redirect policy register under. Core
+ * registers them, from each enabled `core.federations` entry, with the
+ * factories of the type the entry names: no module contributes or overrides
+ * an entry of either (`checkFederationKindGuard`), and no host supplies their
+ * collector (`refuseGuardedHostKinds`).
+ */
+const FEDERATION_KINDS = ["federations", "federationRedirectPolicies"] as const;
+
+/** How the entries of the federation kinds register, as a refusal says it. */
+const FEDERATION_KINDS_REGISTERED =
+	"boot registers a federation's provider and redirect policy from its core.federations entry, " +
+	"with the factories of the type the entry names under federationTypes";
+
+/**
  * The kinds whose collector is the planner's alone: a host collector
  * for `rateLimitBudgets` could answer a looser budget than the owning module
  * contributed — on RFC 8628 §5.1's device-verification prefix, say —
@@ -685,23 +699,33 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
  * `admissionActions` is where admission reads the grade it hands the
  * requirements, and `auditHooks` is what the audit fan-out in the `auditSink`
  * slot reads at each event, the slot stage 1 counts as filled once a hook is
- * contributed. Unlike `GUARDED_KINDS`, a module may override an entry of the
- * first two; `auditHooks` is list-shaped, and a list kind has no override.
+ * contributed; `federations` and `federationRedirectPolicies` are filled by
+ * boot alone, from the dispatched entries (`FEDERATION_KINDS`). Unlike
+ * `GUARDED_KINDS`, a module may override an entry of the first two;
+ * `auditHooks` is list-shaped, and a list kind has no override.
  */
 const PLANNER_OWNED_KINDS = [
 	"rateLimitBudgets",
 	"federationTypes",
 	"admissionActions",
 	"auditHooks",
+	...FEDERATION_KINDS,
 ] as const;
 
 /** What a refusal of a host collector for a planner-owned `kind` says of its entries. */
-const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string =>
-	kind === "auditHooks"
-		? "and the audit fan-out in the auditSink slot reads them"
-		: kind === "admissionActions"
-			? "and no module overrides one"
-			: "and a module may override one";
+const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string => {
+	switch (kind) {
+		case "federations":
+		case "federationRedirectPolicies":
+			return FEDERATION_KINDS_REGISTERED;
+		case "auditHooks":
+			return "the modules that own its entries contribute them, and the audit fan-out in the auditSink slot reads them";
+		case "admissionActions":
+			return "the modules that own its entries contribute them, and no module overrides one";
+		default:
+			return "the modules that own its entries contribute them, and a module may override one";
+	}
+};
 
 /**
  * A requirement is switched off by not installing it, never removed from
@@ -735,6 +759,47 @@ function checkSessionRequirementKindGuard(modules: readonly NormalisedModule[]):
 }
 
 /**
+ * A module contributes or overrides neither `federations` nor
+ * `federationRedirectPolicies`: an entry of either would serve no
+ * federation, since only the module registering an enabled entry's type
+ * handles it. Refused here, before any factory runs, as the kind guarded
+ * (`contribution-kind-guarded`), naming the module, the channel and — for a
+ * name-keyed entry — its name; the message points the author at
+ * `federationTypes`.
+ * @internal
+ */
+function checkFederationKindGuard(modules: readonly NormalisedModule[]): void {
+	// Read off the normalised entries — what the pass applies — not the raw
+	// manifest, whose maps a getter could answer differently twice.
+	for (const m of modules) {
+		for (const [channel, entries] of [
+			["contributes", m.contributesEntries],
+			["overrides", m.overridesEntries],
+		] as const) {
+			const entry = entries.find(({ kind }) =>
+				(FEDERATION_KINDS as readonly string[]).includes(kind),
+			);
+			if (entry === undefined) continue;
+			const name = typeof entry.key === "string" ? entry.key : undefined;
+			throw new BootError({
+				message:
+					`Module "${m.name}" ${channel} ${entry.kind}${name === undefined ? "" : ` ${JSON.stringify(name)}`}, ` +
+					`which no module may: ${FEDERATION_KINDS_REGISTERED}. To handle a federation, register a type under federationTypes instead.`,
+				reason: "contribution-kind-guarded",
+				stage: "validateManifests",
+				details: {
+					reason: "contribution-kind-guarded",
+					kind: entry.kind as (typeof FEDERATION_KINDS)[number],
+					channel,
+					module: m.name,
+					...(name === undefined ? {} : { name }),
+				},
+			});
+		}
+	}
+}
+
+/**
  * The host's `contributionKinds` held to the same rule, in `createApp`
  * before the kinds are merged and before stage 1: a collector for
  * `sessionRequirements` or `mfaFactors` the host
@@ -758,7 +823,7 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	for (const kind of PLANNER_OWNED_KINDS) {
 		if (Object.hasOwn(host, kind)) {
 			throw new BootError({
-				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${plannerOwnedEntries(kind)}.`,
+				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: ${plannerOwnedEntries(kind)}.`,
 				reason: "contribution-kind-guarded",
 				stage: "validateManifests",
 				details: { reason: "contribution-kind-guarded", kind },
@@ -1186,74 +1251,6 @@ function checkRouteCollisions(
 				});
 			}
 			seenEffective.set(effectiveIdentity, { module, mountPath: route.mountPath });
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Step 7.5 — Federation / federationRedirectPolicies pairing invariant
-// ---------------------------------------------------------------------------
-
-/**
- * Step 7.5: Every `federations[name]` contribution MUST have a matching
- * `federationRedirectPolicies[name]` contribution and vice versa.
- *
- * Throws BootError({ reason: "federation-redirect-policy-unpaired" }).
- * @internal
- */
-function checkFederationRedirectPolicyPairing(modules: readonly NormalisedModule[]): void {
-	const federationNames = new Map<string, string>(); // name → first contributing module
-	const policyNames = new Map<string, string>(); // name → first contributing module
-
-	// A name counts as registered if contributes or overrides declares it.
-	// Walking contributes alone would report "federation-without-policy" when
-	// one module contributes federations[x] and another overrides
-	// federationRedirectPolicies[x], before step 8 could give the more precise
-	// override-target-missing.
-	for (const m of modules) {
-		const allEntries = [...m.contributesEntries, ...m.overridesEntries];
-		for (const entry of allEntries) {
-			if (entry.kind === "federations" && typeof entry.key === "string") {
-				if (!federationNames.has(entry.key)) {
-					federationNames.set(entry.key, m.name);
-				}
-			} else if (entry.kind === "federationRedirectPolicies" && typeof entry.key === "string") {
-				if (!policyNames.has(entry.key)) {
-					policyNames.set(entry.key, m.name);
-				}
-			}
-		}
-	}
-
-	for (const [name, contributedBy] of federationNames) {
-		if (!policyNames.has(name)) {
-			throw new BootError({
-				message: `Federation "${name}" (contributed by "${contributedBy}") has no matching federationRedirectPolicies["${name}"] contribution.`,
-				reason: "federation-redirect-policy-unpaired",
-				stage: "validateManifests",
-				details: {
-					reason: "federation-redirect-policy-unpaired",
-					name,
-					side: "federation-without-policy",
-					contributedBy,
-				},
-			});
-		}
-	}
-
-	for (const [name, contributedBy] of policyNames) {
-		if (!federationNames.has(name)) {
-			throw new BootError({
-				message: `federationRedirectPolicies["${name}"] (contributed by "${contributedBy}") has no matching federations["${name}"] contribution.`,
-				reason: "federation-redirect-policy-unpaired",
-				stage: "validateManifests",
-				details: {
-					reason: "federation-redirect-policy-unpaired",
-					name,
-					side: "policy-without-federation",
-					contributedBy,
-				},
-			});
 		}
 	}
 }
@@ -3028,6 +3025,11 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		run: (ctx) => checkSessionRequirementKindGuard(ctx.modules),
 	},
 	{
+		id: "federation-kind-guard",
+		spec: "issue #728 (a federation registers through the type its entry names)",
+		run: (ctx) => checkFederationKindGuard(ctx.modules),
+	},
+	{
 		id: "requires-closure",
 		spec: "A2-β §5.1 step 4",
 		run: (ctx) => checkRequiresClosure(ctx.modules, ctx.plannedKeys),
@@ -3051,11 +3053,6 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		id: "route-collisions",
 		spec: "A2-β §5.1 step 7",
 		run: (ctx) => checkRouteCollisions(ctx.modules, ctx.rawModules),
-	},
-	{
-		id: "federation-redirect-policy-pairing",
-		spec: "A5 §8.2 (step 7.5)",
-		run: (ctx) => checkFederationRedirectPolicyPairing(ctx.modules),
 	},
 	{
 		id: "override-targets",
@@ -3101,8 +3098,7 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 	{
 		id: "federation-entries-handled",
 		spec: "issue #728 (an enabled core.federations entry is handled by the module registering its type)",
-		run: (ctx) =>
-			checkFederationEntriesHandled(ctx.modules, ctx.parsedConfig, ctx.contributionKinds),
+		run: (ctx) => checkFederationEntriesHandled(ctx.modules, ctx.parsedConfig),
 	},
 	{
 		id: "declared-absence",

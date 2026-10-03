@@ -109,16 +109,6 @@ function acmePackage(
 	return { module, factory, redirectPolicy };
 }
 
-/** A module contributing `federations.<name>` and its redirect policy directly. */
-const directly = (moduleName: string, name: string): Module =>
-	defineModule({
-		name: moduleName,
-		contributes: {
-			federations: { [name]: () => providerNamed(name) },
-			federationRedirectPolicies: { [name]: () => policyFor(name) },
-		} as never,
-	});
-
 /** An enabled entry of `type` with a callback URL and `extra`. */
 const enabledEntry = (type: string, name: string, extra: Record<string, unknown> = {}) => ({
 	enabled: true,
@@ -127,10 +117,12 @@ const enabledEntry = (type: string, name: string, extra: Record<string, unknown>
 	...extra,
 });
 
-/** Stages 1 to 4 over the built-in kinds, answering the `federationTypes` collector. */
-async function registeredTypes(modules: readonly Module[], extra: Record<string, unknown> = {}) {
+/**
+ * Stages 1 to 3 over the built-in kinds, then stage 4 started: the kinds,
+ * which can be read whether stage 4 refuses or not, and what it settles to.
+ */
+async function throughStage4(modules: readonly Module[], bootstrap: BootstrapMap) {
 	const kinds = mergeWithBuiltins(undefined);
-	const bootstrap = bootWith(extra);
 	const validated = validateManifests({
 		modules,
 		bootstrapComponents: bootstrap,
@@ -143,7 +135,13 @@ async function registeredTypes(modules: readonly Module[], extra: Record<string,
 		undefined,
 		kinds,
 	);
-	await applyContributions(material, kinds);
+	return { kinds, applied: applyContributions(material, kinds) };
+}
+
+/** Stages 1 to 4 over the built-in kinds, answering the `federationTypes` collector. */
+async function registeredTypes(modules: readonly Module[], extra: Record<string, unknown> = {}) {
+	const { kinds, applied } = await throughStage4(modules, bootWith(extra));
+	await applied;
 	return kinds.federationTypes;
 }
 
@@ -482,18 +480,15 @@ describe("core.federations — dispatched by type", () => {
 				lifecycle: { closingSlot: { eager: true, cleanup } },
 			} as never);
 			const { module } = acmePackage(options);
-			// The host's empty collectors, so what was registered can be read after the refusal.
-			const { federations, federationRedirectPolicies } = mergeWithBuiltins(undefined);
-
-			const err = await refusal(
-				createApp({
-					modules: [closing, federationStores, module],
-					bootstrapComponents: federationsConfig({
-						corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
-					}),
-					contributionKinds: { federations, federationRedirectPolicies },
+			// Stage by stage, so what was registered can be read after the refusal.
+			const { kinds, applied } = await throughStage4(
+				[closing, federationStores, module],
+				federationsConfig({
+					corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
 				}),
 			);
+
+			const err = await refusal(applied);
 
 			expect(err.reason).toBe("contribute-factory-failed");
 			expect(err.stage).toBe("applyContributions");
@@ -506,8 +501,8 @@ describe("core.federations — dispatched by type", () => {
 			expect(err.message).toContain('"federation-acme"');
 			expect(err.message).toContain('"corp"');
 			expect(cleanup).toHaveBeenCalledOnce();
-			expect([...(federations?.entries() ?? [])]).toEqual([]);
-			expect([...(federationRedirectPolicies?.entries() ?? [])]).toEqual([]);
+			expect([...(kinds.federations?.entries() ?? [])]).toEqual([]);
+			expect([...(kinds.federationRedirectPolicies?.entries() ?? [])]).toEqual([]);
 		},
 	);
 
@@ -570,116 +565,31 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 	it.each([
 		["an enabled entry", true],
 		["a disabled entry", false],
-	])(
-		"refuses %s without a type at core.federations.<name>.type, whatever module contributes its name",
-		async (_label, enabled) => {
-			const err = await refusal(
-				createApp({
-					modules: [federationStores, directly("federation-google", "google")],
-					bootstrapComponents: federationsConfig({
-						google: {
-							enabled,
-							callbackURL: "https://auth.example/session/federation/google/callback",
-						},
-					}),
-				}),
-			);
-
-			expect(err.reason).toBe("config-validation-failed");
-			expect(err.stage).toBe("validateManifests");
-			expect(err.message).toContain("core.federations.google.type");
-			expect(err.details).toMatchObject({
-				reason: "config-validation-failed",
-				issues: expect.arrayContaining([
-					expect.objectContaining({ path: ["core", "federations", "google", "type"] }),
-				]),
-			});
-		},
-	);
-
-	it("does not take a module contributing an enabled entry's name as handling it: only its type does", async () => {
-		const err = await refusal(
-			createApp({
-				modules: [federationStores, directly("federation-google", "google")],
-				bootstrapComponents: federationsConfig({
-					google: enabledEntry("google", "google", { clientId: 7 }),
-				}),
-			}),
-		);
-
-		expect(err.reason).toBe("federation-type-unhandled");
-		expect(err.details).toEqual({
-			reason: "federation-type-unhandled",
-			unhandled: [{ federationName: "google", type: "google" }],
-			handled: [],
-		});
-		expect(err.message).toContain('federationTypes["google"]');
-		expect(err.message).toContain(
-			'module "federation-google" contributes federations["google"] directly, which handles no entry',
-		);
-	});
-
-	it("does not take the host's federations collector holding an enabled entry's name as handling it", async () => {
-		const { federations } = mergeWithBuiltins(undefined);
-		federations?.register("google", providerNamed("google"));
-
+	])("refuses %s without a type at core.federations.<name>.type", async (_label, enabled) => {
 		const err = await refusal(
 			createApp({
 				modules: [federationStores],
-				bootstrapComponents: federationsConfig({ google: enabledEntry("google", "google") }),
-				contributionKinds: { federations },
+				bootstrapComponents: federationsConfig({
+					google: {
+						enabled,
+						callbackURL: "https://auth.example/session/federation/google/callback",
+					},
+				}),
 			}),
 		);
 
-		expect(err.reason).toBe("federation-type-unhandled");
-		expect(err.details).toEqual({
-			reason: "federation-type-unhandled",
-			unhandled: [{ federationName: "google", type: "google" }],
-			handled: [],
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.message).toContain("core.federations.google.type");
+		expect(err.details).toMatchObject({
+			reason: "config-validation-failed",
+			issues: expect.arrayContaining([
+				expect.objectContaining({ path: ["core", "federations", "google", "type"] }),
+			]),
 		});
 	});
 
-	it.each(["federations", "federationRedirectPolicies"] as const)(
-		"refuses an entry dispatched by its type whose name the host's %s collector already holds",
-		async (kind) => {
-			const { module, factory } = acmePackage();
-			const kinds = mergeWithBuiltins(undefined);
-			const seeded = {
-				federations: kinds.federations,
-				federationRedirectPolicies: kinds.federationRedirectPolicies,
-			};
-			if (kind === "federations") seeded.federations?.register("corp", providerNamed("corp"));
-			else seeded.federationRedirectPolicies?.register("corp", policyFor("corp"));
-
-			const err = await refusal(
-				createApp({
-					modules: [federationStores, module],
-					bootstrapComponents: federationsConfig({
-						corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
-					}),
-					contributionKinds: seeded,
-				}),
-			);
-
-			expect(err.reason).toBe("duplicate-contribute");
-			expect(err.stage).toBe("validateManifests");
-			expect(err.details).toEqual({
-				reason: "duplicate-contribute",
-				kind,
-				identity: "corp",
-				identityKind: "name",
-				modules: ["federation-acme", `contributionKinds.${kind}`],
-			});
-			expect(err.message).toContain(`contributionKinds.${kind}`);
-			expect(factory).not.toHaveBeenCalled();
-			// Nothing of the pair was registered beside what the host seeded.
-			expect([...(seeded.federations?.entries() ?? [])].map(([name]) => name)).toEqual(
-				kind === "federations" ? ["corp"] : [],
-			);
-		},
-	);
-
-	it("writes a name that is not a bare key quoted in the refusals of the row, so a newline does not split them", async () => {
+	it("writes a name that is not a bare key quoted in the row's refusal, so a newline does not split it", async () => {
 		const unhandled = await refusal(
 			createApp({
 				modules: [federationStores],
@@ -693,42 +603,6 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 		expect(unhandled.message).not.toContain("\n");
 		expect(unhandled.message).toContain('core.federations."corp\\nidp" names the type "nobody"');
 		expect(unhandled.message).toContain('core.federations."partner\\nidp".enabled = false');
-
-		const both = await refusal(
-			createApp({
-				modules: [federationStores, acmePackage().module, directly("federation-corp", "corp\nidp")],
-				bootstrapComponents: federationsConfig({
-					"corp\nidp": enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
-				}),
-			}),
-		);
-		expect(both.reason).toBe("duplicate-contribute");
-		expect(both.message).not.toContain("\n");
-		expect(both.message).toContain('core.federations."corp\\nidp" is dispatched');
-	});
-
-	it("refuses an entry both dispatched by its type and contributed by its name", async () => {
-		const { module, factory } = acmePackage();
-
-		const err = await refusal(
-			createApp({
-				modules: [federationStores, module, directly("federation-corp", "corp")],
-				bootstrapComponents: federationsConfig({
-					corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
-				}),
-			}),
-		);
-
-		expect(err.reason).toBe("duplicate-contribute");
-		expect(err.stage).toBe("validateManifests");
-		expect(err.details).toEqual({
-			reason: "duplicate-contribute",
-			kind: "federations",
-			identity: "corp",
-			identityKind: "name",
-			modules: ["federation-acme", "federation-corp"],
-		});
-		expect(factory).not.toHaveBeenCalled();
 	});
 
 	it("refuses the missing federation stores first", async () => {
@@ -776,44 +650,6 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 
 		expect(err.reason).toBe("federation-type-unhandled");
 		expect(err.details).toMatchObject({ unhandled: [{ federationName: "corp", type: "acme" }] });
-	});
-});
-
-describe("core.federations — a dispatched entry has no override target", () => {
-	const corp = federationsConfig({
-		corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
-	});
-
-	it.each<readonly [string, Record<string, unknown>, string]>([
-		[
-			"its provider alone",
-			{ federations: { corp: () => providerNamed("corp") } },
-			"federation-redirect-policy-unpaired",
-		],
-		[
-			"its redirect policy alone",
-			{ federationRedirectPolicies: { corp: () => policyFor("corp") } },
-			"federation-redirect-policy-unpaired",
-		],
-		[
-			"both",
-			{
-				federations: { corp: () => providerNamed("corp") },
-				federationRedirectPolicies: { corp: () => policyFor("corp") },
-			},
-			"override-target-missing",
-		],
-	])("refuses a module overriding %s under the entry's name", async (_label, overrides, reason) => {
-		const { module, factory } = acmePackage();
-		const overriding = defineModule({ name: "test:overriding", overrides: overrides as never });
-
-		const err = await refusal(
-			createApp({ modules: [federationStores, module, overriding], bootstrapComponents: corp }),
-		);
-
-		expect(err.reason).toBe(reason);
-		expect(err.stage).toBe("validateManifests");
-		expect(factory).not.toHaveBeenCalled();
 	});
 });
 

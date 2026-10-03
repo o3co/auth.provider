@@ -78,8 +78,9 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
  * `mergeWithBuiltins` seeds the built-in contribution kinds and consumer kinds
  * overlay them, except `sessionRequirements` and `mfaFactors`
  * (`session-requirement-kind-guarded`) and `rateLimitBudgets`,
- * `federationTypes` and `admissionActions` (`contribution-kind-guarded`),
- * which `createApp` refuses to see replaced before the merge
+ * `federationTypes`, `admissionActions`, `auditHooks`, `federations` and
+ * `federationRedirectPolicies` (`contribution-kind-guarded`), which
+ * `createApp` refuses to see replaced before the merge
  * (`refuseGuardedHostKinds`).
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of

@@ -182,7 +182,6 @@
 . FederatedIdentityRegistration type
 . FederatedLogin type
 . FederationClientSecret type
-. FederationFactory type
 . FederationGrant type
 . FederationGrantAcquisitionConnection type
 . FederationGrantAdministrationDeps type
@@ -250,7 +249,6 @@
 . FederationProfile type
 . FederationProvider type
 . FederationRedirectPolicyContribution type
-. FederationRedirectPolicyUnpairedDetails type
 . FederationRefreshErrorClassification type
 . FederationRefreshErrorReason type
 . FederationResponseMode type
@@ -1093,7 +1091,6 @@
 ./modules/manifest ContributesMap type
 ./modules/manifest ExchangeTokenValidator type
 ./modules/manifest ExchangeTokenValidatorFactory type
-./modules/manifest FederationFactory type
 ./modules/manifest FederationInstance type
 ./modules/manifest FederationProvider type
 ./modules/manifest FederationRedirectPolicyContribution type
