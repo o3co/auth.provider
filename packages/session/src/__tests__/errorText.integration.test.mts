@@ -36,6 +36,7 @@ import { defineModule } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
 	createTestApp,
+	federationTypeForTests,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -93,25 +94,20 @@ const stores = [
 	}),
 ];
 
-/** A query-mode federation named `stub`, and the redirect policy paired with it. */
+/** The federation type `stub`: a query-mode provider for the entry `stub`, and `policy` beside it. */
 const federationModule = (policy: FederationRedirectPolicy) =>
-	defineModule({
-		name: "test:stub-federation",
-		contributes: {
-			federations: {
-				stub: (): FederationProvider => ({
-					name: "stub",
-					scope: ["openid"],
-					buildAuthorizationUrl: () => new URL("https://idp.example/authorize"),
-					exchangeCode: async () => ({
-						issuer: "https://idp.example",
-						sub: "user-1",
-						expiresAt: null,
-					}),
-				}),
-			},
-			federationRedirectPolicies: { stub: () => policy },
-		},
+	federationTypeForTests("stub", {
+		provider: (): FederationProvider => ({
+			name: "stub",
+			scope: ["openid"],
+			buildAuthorizationUrl: () => new URL("https://idp.example/authorize"),
+			exchangeCode: async () => ({
+				issuer: "https://idp.example",
+				sub: "user-1",
+				expiresAt: null,
+			}),
+		}),
+		redirectPolicy: () => policy,
 	});
 
 const permissivePolicy: FederationRedirectPolicy = {
@@ -136,6 +132,7 @@ const config = (): AppConfig => {
 			federations: {
 				stub: {
 					enabled: true,
+					type: "stub",
 					clientId: "id",
 					clientSecret: "secret",
 					callbackURL: "https://as.example/session/oauth/federation/stub/callback",
