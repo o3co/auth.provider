@@ -58,9 +58,13 @@ export interface AttemptCounterClient {
 	/**
 	 * Count one attempt under `key`, **atomically**:
 	 *
-	 *   - a window is running when the key holds a count and an end after
-	 *     `nowMs`; then the attempt is allowed and counted while the count is
-	 *     below `limit`, and refused otherwise, writing nothing
+	 *   - a window is running when the key holds a count and an end, and
+	 *     either the end is after `nowMs` or the key's remaining TTL is above
+	 *     `expiryAllowanceMs` (the server's countdown, which a caller's clock
+	 *     running ahead cannot end early: such a caller is answered the running
+	 *     window's end, never a fresh window); then the attempt is allowed and
+	 *     counted while the count is below `limit`, and refused otherwise,
+	 *     writing nothing
 	 *   - with no window running, open one: count 1, ending at `resetAtMs`,
 	 *     the key's TTL `resetAtMs − nowMs + expiryAllowanceMs`
 	 *   - a running window's end and TTL are never moved

@@ -315,7 +315,8 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 				return good;
 			},
 		};
-		for (const now of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+		// The last instant a Date holds: a window opened there would end past the range.
+		for (const now of [Number.NaN, Number.POSITIVE_INFINITY, -1, 8_640_000_000_000_000]) {
 			const counter = createRedisAttemptCounter({ client, now: () => now });
 			await expect(counter.consume("k", SPEC)).rejects.toThrow(RangeError);
 		}

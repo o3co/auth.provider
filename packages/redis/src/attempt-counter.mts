@@ -49,6 +49,7 @@ import {
 	defineModule,
 	isAttemptKey,
 	isAttemptSpec,
+	isStorableExpiry,
 	type Logger,
 	loggableError,
 	readAttemptCount,
@@ -113,10 +114,15 @@ export function createRedisAttemptCounter(options: RedisAttemptCounterOptions): 
 			}
 			const { limit, windowSeconds } = spec;
 			const nowMs = Math.floor(now());
-			if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+			const resetAtMs = nowMs + windowSeconds * 1000;
+			// A window it may open must end, with its key, within the Date range.
+			if (
+				!Number.isSafeInteger(nowMs) ||
+				nowMs < 0 ||
+				!isStorableExpiry(resetAtMs + ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS)
+			) {
 				throw new RangeError("createRedisAttemptCounter: the clock answered no instant");
 			}
-			const resetAtMs = nowMs + windowSeconds * 1000;
 			const reply: unknown = await client.consume(`${keyPrefix}${key}`, {
 				nowMs,
 				limit,
