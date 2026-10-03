@@ -1118,7 +1118,10 @@ below the issued one, or a token stored already past half its life each let a
 client rotate on most requests. The bound is now a budget per grant: at most
 `rotationBudget` rotations (24) in a window of `rotationWindow` (an hour),
 counted in the record's non-secret `rotations` by the store's optional
-`takeRotation`, without a version bump. The window is fixed, not sliding: it
+`takeRotation`, without a version bump. A rotation here is a refresh the
+upstream may have acted on, whether or not it issued a new refresh token: the
+shrinking-lifetime path drives a refresh per request at an IdP that does not
+rotate as much as at one that does. The window is fixed, not sliding: it
 opens at its first take and closes `rotationWindow` later, so any hour that
 straddles two windows can hold up to twice the budget. The rotation is taken under the refresh
 lock, after the look under it and immediately before the upstream is asked, at

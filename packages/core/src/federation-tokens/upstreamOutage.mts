@@ -15,6 +15,16 @@
  */
 
 /**
+ * What a failed upstream IdP call says, read off what the library raised.
+ * Two readings:
+ *
+ * - {@link readFederationUpstreamDelivery}: whether the request is proven not
+ *   to have been acted on (`unprocessed`), may have been (`unknown`), or the
+ *   error says nothing (`silent`). The refresh-error reader judges a failed
+ *   refresh by it, to give back a rotation only for an attempt the upstream
+ *   provably did not act on.
+ * - {@link isFederationUpstreamOutage}, described below.
+ *
  * Whether a failed upstream IdP call is an OUTAGE (not reached, timed out, or
  * answered 5xx) rather than the upstream's verdict. The refresh-error
  * classifier (`refresh-error.mts`) checks it before the OAuth codes that
@@ -37,7 +47,8 @@
  *   or on its own; any other code, even under a `TypeError`, is not;
  * - a 5xx `status` on the error, or on the `Response` it was raised over.
  *
- * Never throws: every read is guarded.
+ * The delivery reading follows causes by the same rule, and reads a non-Error
+ * cause (a parsed body) only for doubt. Never throws: every read is guarded.
  */
 
 import { guardedRead, isError } from "../logging/loggableError.mjs";

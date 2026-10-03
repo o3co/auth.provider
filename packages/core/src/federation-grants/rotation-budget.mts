@@ -21,6 +21,9 @@
  * hint, by the same rule, that spares a spent budget the lock and the
  * upstream call. Pure: no clock, no store.
  *
+ * A rotation here is a refresh the upstream may have acted on, whether or
+ * not it issued a new refresh token.
+ *
  * The window is fixed, not sliding: it opens at its first take and closes
  * `windowMs` later, so any `windowMs` that straddles two windows can hold up
  * to twice `limit`.

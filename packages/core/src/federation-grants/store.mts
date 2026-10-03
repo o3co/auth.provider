@@ -252,9 +252,10 @@ export interface FederationGrantStore {
 
 	/**
 	 * Takes one upstream refresh-token rotation from the grant's rotation
-	 * budget, before the upstream is asked. The grant must be `active`, at the
-	 * caller's `version`, with `now` before `expiresAt`. Then, in one atomic
-	 * step against `rotations`:
+	 * budget, before the upstream is asked. A rotation here is a refresh the
+	 * upstream may have acted on, whether or not it issued a new refresh
+	 * token. The grant must be `active`, at the caller's `version`, with `now`
+	 * before `expiresAt`. Then, in one atomic step against `rotations`:
 	 *
 	 * - none, a `since` that holds no instant, or `now` at or after
 	 *   `since + windowMs`: a new window, `{ since: now, count: 1 }`;
@@ -292,7 +293,8 @@ export interface FederationGrantStore {
 
 	/**
 	 * Gives back a rotation `takeRotation` took, for an attempt the upstream
-	 * definitely did not perform. The grant must be `active`, at the caller's
+	 * definitely did not perform. A rotation here is a refresh the upstream
+	 * may have acted on, whether or not it issued a new refresh token. The grant must be `active`, at the caller's
 	 * `version` (the one the take was made at), with `now` before `expiresAt`,
 	 * and `rotations.since` must be `since`, the window the take counted into,
 	 * with a `count` of at least one. Then, in one atomic step, `count - 1` and
