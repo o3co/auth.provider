@@ -20,6 +20,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import {
 	redisAccessTokenDenylistModule,
+	redisAttemptCounterModule,
 	redisChallengeStoreModule,
 	redisCodeRepositoryModule,
 	redisConsentStoreModule,
@@ -40,6 +41,7 @@ const REFERENCE = new URL("../config/reference.conf", import.meta.url);
 
 const MODULES: readonly Module[] = [
 	redisAccessTokenDenylistModule,
+	redisAttemptCounterModule,
 	redisChallengeStoreModule,
 	redisCodeRepositoryModule,
 	redisConsentStoreModule,
@@ -99,6 +101,7 @@ describe("the package's config/reference.conf", () => {
 
 	it.each([
 		["REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX", "redis-access-token-denylist.keyPrefix"],
+		["REDIS_ATTEMPT_COUNTER_KEY_PREFIX", "redis-attempt-counter.keyPrefix"],
 		["REDIS_CODE_REPOSITORY_KEY_PREFIX", "redis-code-repository.keyPrefix"],
 		["REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN", "redis-code-repository.defaultExpiresIn"],
 		["REDIS_CONSENT_STORE_KEY_PREFIX", "redis-consent-store.keyPrefix"],
@@ -126,6 +129,7 @@ describe("the package's config/reference.conf", () => {
 
 	it.each([
 		["redis-access-token-denylist.keyPrefix", "atdeny:"],
+		["redis-attempt-counter.keyPrefix", "attempt:"],
 		["redis-challenge-store.keyPrefix", "chal:"],
 		["redis-code-repository.keyPrefix", "oauth:code:"],
 		["redis-code-repository.defaultExpiresIn", 600],

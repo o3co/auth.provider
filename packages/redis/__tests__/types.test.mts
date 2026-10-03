@@ -8,6 +8,7 @@ import { describe, expectTypeOf, it } from "vitest";
 // so this type-shape test exercises the consumer-facing surface — any drift
 // between `index.mts` re-exports and `clients.mts` definitions fails here.
 import type {
+	AttemptCounterClient,
 	ChallengeStoreClient,
 	ConsentRecordFields,
 	ConsentStoreClient,
@@ -46,6 +47,13 @@ describe("makeIoredisClients return shape", () => {
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionFederationIndexClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("federationTokenStoreClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("rateLimiterClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("attemptCounterClient");
+	});
+
+	it("attemptCounterClient satisfies AttemptCounterClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["attemptCounterClient"]
+		>().toMatchTypeOf<AttemptCounterClient>();
 	});
 
 	it("challengeStoreClient satisfies ChallengeStoreClient", () => {
@@ -195,6 +203,12 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 	it("rateLimiterClient slot is optional and of RateLimiterClient type", () => {
 		expectTypeOf<ComponentMap["rateLimiterClient"]>().toEqualTypeOf<
 			RateLimiterClient | undefined
+		>();
+	});
+
+	it("attemptCounterClient slot is optional and of AttemptCounterClient type", () => {
+		expectTypeOf<ComponentMap["attemptCounterClient"]>().toEqualTypeOf<
+			AttemptCounterClient | undefined
 		>();
 	});
 
