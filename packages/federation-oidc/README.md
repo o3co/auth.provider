@@ -144,9 +144,10 @@ support.
 An entry is flat, and its schema is strict: the keys core owns (`enabled`,
 `type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
 The schema is `oidcEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
-does not name — a typo, or a nested `oidc { ... }` section — refuses boot with
-`config-validation-failed`, naming `core.federations.<name>.<field>`; so does a
-missing or malformed key. A key written `null` counts as absent. A boolean
+does not name — a typo, or a nested `oidc { ... }` section — refuses boot
+with `config-validation-failed` at `core.federations.<name>`, naming the key;
+so does setting both or neither of `clientSecret` and `privateKey`. A missing
+or malformed key is refused at `core.federations.<name>.<field>`. A key written `null` counts as absent. A boolean
 key also takes the strings `"true"` and `"false"`, as an environment variable
 writes them. An absent key means what the table says, read by the provider;
 the schema fills in no default.
