@@ -77,8 +77,9 @@ export const createStartHandler =
 			}
 			const policy = federationRedirectPolicyResolver.get(provider.name);
 			if (!policy) {
-				// Pairing invariant fires at boot; this branch is defence-in-depth
-				// against a hypothetical bug bypassing the invariant at runtime.
+				// Boot registers a provider and its policy together, from the
+				// entry's type; this branch is defence-in-depth against a
+				// hypothetical bug that registers one without the other.
 				return answerNoRedirectPolicy(res, logger, { provider: provider.name });
 			}
 			const validation = policy.validateRedirect(redirect_to);

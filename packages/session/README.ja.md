@@ -2,7 +2,7 @@
 
 最終更新: 2026-10-03
 
-[auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージがプロバイダーと並べて contribute するリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
+[auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージの type がプロバイダーと並べて作るリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
 ## 責務と役割
 
@@ -17,7 +17,7 @@
 - `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログインのレート制限ガードの配線とその予算（`session.rateLimit.login`。session モジュールがこれを `login` の予算として寄与する）。リダイレクト許可リスト（`session.redirectAllowlist`、`core.federations.<name>.redirectAllowlist`）。
 - モジュールが、契約が core にあるスロットを通して他のパッケージに提供するもの: `csrfGuard`、`loginEntry`、`loginCompletion`、そして `sessionCookiePolicy` と `csrfTokenSigner` — [後述](#モジュールが他のパッケージに提供するもの)。
 - フェデレーションの駆動方法: `state`・PKCE・`nonce`、`form_post` トランザクションとその cookie、クレームの優先順位、ログインが記録する `amr`、コールバックがストアに書き込む内容。
-- `federationRedirectPolicies` という contribution 種別と、それが core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
+- core の `ContributesMap` に宣言する `federationRedirectPolicies` キー（フェデレーション type の `redirectPolicy` が返すリダイレクトポリシーの型を与える。モジュールによるその contribution や override は起動が拒否する）と、core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
 - express-session ミドルウェア、その cookie、そのストア（`session-store.*`）。
 - 二つのセクション `session` と `session-store`、およびそのデフォルト値を置く [`config/reference.conf`](config/reference.conf) — [設定](#設定)。
 
@@ -34,7 +34,7 @@
 
 **三つが同居する理由。** 他の二つはどちらもルートのために存在する。
 
-- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する contribution 種別である。これはルーターのものであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。フェデレーションのエントリはここでは読まない: `core.federations` の唯一の読み方は core の `federationsOf` と `enabledFederationsOf` であり、ルーターのコールバック URL もそれで読む。要求を組み立てる純粋関数のヘルパーはここにはない: ルーターはそのどれも使わないので、それらを使うようアダプターに指示する契約と並んで core にある。
+- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する契約である — その型が、フェデレーション type の `redirectPolicy` が返すものになる。これはルーターのものであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。フェデレーションのエントリはここでは読まない: `core.federations` の唯一の読み方は core の `federationsOf` と `enabledFederationsOf` であり、ルーターのコールバック URL もそれで読む。要求を組み立てる純粋関数のヘルパーはここにはない: ルーターはそのどれも使わないので、それらを使うようアダプターに指示する契約と並んで core にある。
 - ストア: `req.session` そのものであり、それを書くのはここのルートである。フェデレーションルーターは `form_post` トランザクションも同じストアに置く。`sessionModule` とは別のモジュールになっているのは、他のパッケージがこれらのルートなしに `req.session` を読むから — `oauth` の `/authorize`・同意・ログアウト、`device-grant` の検証ページ、`federation-grants` のブラウザ向けルート — であり、独自のログインを持つデプロイはストアだけをインストールする。
 
 **ソースの配置。** [`src/routes/`](src/routes/) は二つのルーター。[`src/establish-session.mts`](src/establish-session.mts) は二つのルーターが共有するログインの末尾。[`src/federations/`](src/federations/) はツールキットとルーターのフェデレーション部品（クレームの優先順位、同意済みスコープ、トランザクションストア、リダイレクトポリシー）。[`src/modules/`](src/modules/) と [`src/store/`](src/store/) はブラウザセッションストア。[`src/internal/`](src/internal/) は cookie の読み取り、定数時間の比較、`User` から読むクレーム。[`src/csrf.mts`](src/csrf.mts) は CSRF の規則。[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) はログインとフェデレーションのルートが共有する許可リストの規則。[`src/login-entry.mts`](src/login-entry.mts)、[`src/login-completion.mts`](src/login-completion.mts)、[`src/session-cookie-policy.mts`](src/session-cookie-policy.mts)、[`src/csrf-token-signer.mts`](src/csrf-token-signer.mts) は、CSRF ガードのほかにモジュールが他のパッケージに提供するもの。各ファイルが何をするかはそのファイルのヘッダーコメントにある。
@@ -51,7 +51,7 @@ peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-sess
 optional peer dependencies: Redis セッションストアのライブラリである `redis@^6.2.1` と `connect-redis@^10.0.0`。
 このパッケージ自身の dependency は、セクションのスキーマを書く `zod` だけである。
 
-core が peer なのは、このパッケージが core を拡張する（`federationRedirectPolicies` の contribution 種別とそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。`session-store.storage.type = "memory"` のデプロイは Redis のライブラリをどちらもインストールしない。Redis ストアを組み立てるまで何もそれらを import しない。`"redis"`（デフォルト）なら両方をインストールする: どちらかが無ければ、無いパッケージとインストールコマンドを示して起動に失敗する。
+core が peer なのは、このパッケージが core を拡張する（フェデレーションのリダイレクトポリシーの型を与える `federationRedirectPolicies` キーとそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。`session-store.storage.type = "memory"` のデプロイは Redis のライブラリをどちらもインストールしない。Redis ストアを組み立てるまで何もそれらを import しない。`"redis"`（デフォルト）なら両方をインストールする: どちらかが無ければ、無いパッケージとインストールコマンドを示して起動に失敗する。
 
 ## 組み立て
 
@@ -141,11 +141,11 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | GET | `/session/oauth/federation/:name/callback` | `query` フェデレーションのコールバック。`form_post` フェデレーションには `405`（`Allow: POST`） |
 | POST | `/session/oauth/federation/:name/callback` | `form_post` フェデレーションのコールバック。`query` フェデレーションには `405`（`Allow: GET`） |
 
-`:name` はフェデレーションの名前。どのモジュールも contribute していない名前は `404`。
+`:name` はフェデレーションの名前。有効な `core.federations` のエントリがどれも登録しない名前は `404`。
 
 マニフェスト（[`src/module.mts`](src/module.mts)）:
 
-- `requires`: `config`、`userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`、`csrfTokenSigner`（CSRF トークンを署名・検査するもの。セッションストアのモジュールが提供する）、`sessionCookiePolicy`（セッション cookie の名前・属性・寿命。これもセッションストアのモジュールが提供する）、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは per-federation モジュールの `federations.<name>` と `federationRedirectPolicies.<name>` の contribution から boot planner が組み立てる。さらに `sessionRequirementResolver` — パスワードログインは何かを書く前に core の [セッションアドミッション](../core/src/session-admission/README.md) を通して登録済みの requirement に問い合わせ、アカウントリンクのルートはそれを通してセッションを読むので、`sessionModule` を入れる構成は `core.sessionRequirements.expected` を宣言する。手で組み立てるルーター（`routes/Session.mts`、`routes/Federation.mts`）は resolver を必須のオプション `requirements` として受け取り、無ければ例外を投げる。テストは core の `resolverForTests` で作る。そして `deploymentMode` — core が `core.deployment.mode` から埋める。ログインのスロットルのプロセス内フォールバックは `multi` で拒否されるので、モードは未設定として読まれるのではなく必須になっている。手で組み立てるセッションルーターは、署名器も必須のオプション `csrfTokenSigner` として受け取って無ければ例外を投げ、モードを必須のオプション `deploymentMode` として受け取って、三つの値のどれでもない値（無い場合も含む）は構築時に TypeError になる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
+- `requires`: `config`、`userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`、`csrfTokenSigner`（CSRF トークンを署名・検査するもの。セッションストアのモジュールが提供する）、`sessionCookiePolicy`（セッション cookie の名前・属性・寿命。これもセッションストアのモジュールが提供する）、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは、core が type で振り分けるフェデレーションから組み立てる — 有効な `core.federations` のエントリごとに、その `type` を登録するモジュールが作るプロバイダーとリダイレクトポリシー。さらに `sessionRequirementResolver` — パスワードログインは何かを書く前に core の [セッションアドミッション](../core/src/session-admission/README.md) を通して登録済みの requirement に問い合わせ、アカウントリンクのルートはそれを通してセッションを読むので、`sessionModule` を入れる構成は `core.sessionRequirements.expected` を宣言する。手で組み立てるルーター（`routes/Session.mts`、`routes/Federation.mts`）は resolver を必須のオプション `requirements` として受け取り、無ければ例外を投げる。テストは core の `resolverForTests` で作る。そして `deploymentMode` — core が `core.deployment.mode` から埋める。ログインのスロットルのプロセス内フォールバックは `multi` で拒否されるので、モードは未設定として読まれるのではなく必須になっている。手で組み立てるセッションルーターは、署名器も必須のオプション `csrfTokenSigner` として受け取って無ければ例外を投げ、モードを必須のオプション `deploymentMode` として受け取って、三つの値のどれでもない値（無い場合も含む）は構築時に TypeError になる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
 - `optional`: `logger`、`rateLimiter`、`auditSink`、`subjectSessionIndex`、`subjectRevocation`（リンクのルートのアドミッションが読む境界）。`auditSink` を配線しないなら `core.declaredAbsent = ["auditSink"]`、`subjectSessionIndex` と `subjectRevocation` を配線しないなら `oauth.revocation.subject = "unsupported"` で宣言しなければ起動は拒否される。
 
 ### パスワードログイン
@@ -429,8 +429,8 @@ core が所有するのは `enabled`、`type`、`trustUpstreamAmr`、`callbackUR
 
 - core は type に振り分けるすべてのエントリに空でない `callbackURL` を要求し、無ければ起動を拒否する（`core.federations.<name>.callbackURL` における `config-validation-failed`）。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
 - `trustUpstreamAmr` はエントリの最上位、`enabled` の横でだけ読まれる。無ければ `false` で、（環境変数が渡す綴りを変換したあと）真偽値でないものは core のスキーマが拒否する。別のキーの下に置いた `trustUpstreamAmr`（`core.federations.okta.oidc.trustUpstreamAmr`）は読まれない。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
-- すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。`type` で扱われるフェデレーション（`federationTypes`）は、core から両方を対で受け取る。
-- `sessionModule` は設定と contribution を突き合わせない。一方向は core の起動が検査する: その `type` をインストールされたどのモジュールも登録しない有効なエントリは起動を拒否される（`federation-type-unhandled`）。逆方向は検査されない: 有効なエントリなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。これで起動を失敗させたい組み立ては自分で検査を加える。
+- フェデレーションのプロバイダーとリダイレクトポリシーは、その `type` を `federationTypes` に登録するモジュールから一緒に来る: 有効なエントリごとに一つずつ、エントリの名前で。モジュールは `federations` も `federationRedirectPolicies` も contribute・override できず、どちらも起動時に拒否される（`contribution-kind-guarded`）。
+- `sessionModule` は設定と登録されたフェデレーションを突き合わせない。core の起動が検査する: その `type` をインストールされたどのモジュールも登録しない有効なエントリは起動を拒否される（`federation-type-unhandled`）。無効なエントリはフェデレーションを登録しないので、その開始は `404` を返す。
 
 ### リダイレクト許可リスト
 
@@ -464,7 +464,7 @@ core.federations {
 
 `authCallbackUrl` と `clientUrl` は許可リストではなく `resolveCallbackRedirect` が読む: 前者は `redirect_to` を受け渡すブリッジページ、後者は開始時に `redirect_to` が無かったコールバックの戻り先。どちらかが必要なのに未設定のコールバックは、セッションを保存したあとで `500 misconfiguration` を返し、ポリシーが答える `5xx` がすべてそうであるように error レベルで 1 行、`redirect_policy_server_fault` としてログに出る。したがって、すべての開始が `redirect_to` を持つのでない限りどのフェデレーションにも `clientUrl` が必要で、`redirect_to` を持つ開始には `authCallbackUrl` が必要になる。
 
-`FederationRedirectPolicy`（[`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts)）が差し替え点である: モジュールはフェデレーションに独自のポリシーを contribute でき、そのポリシーは fail closed でなければならない。`createFederationRedirectPolicy` がデフォルトで、`checkRedirectShape`、`createRedirectAllowlistValidator`、`describeRedirectRejection`、`isLoopbackHostname` は独自のポリシーが同じ規則と拒否の語彙を再利用できるよう export されている。ポリシーのメソッドは [`FederationResult`](src/federations/types.mts) で答える: 値を持つ `ok`、または返すステータス・OAuth エラーコード・説明。ルートはステータスをそのまま返し、コードと説明は core の `errorEnvelope` を通して送る。そこが RFC 6749 の文字（`"` と `\` を除く印字可能な ASCII）に収めるので、範囲外の説明の文字は `?` として出る。形式に合わないコードは、4xx なら `invalid_request` として出し（拒否はあくまでクライアントのものであり、`400 server_error` は自己矛盾になる）、`redirect_policy_error_malformed` をログに残す。それ以外のステータスでは `server_error` として出る。`describeRedirectRejection` のテキストは最初から範囲内である。`5xx` はクライアントへの判定ではなく、サーバーが答えられないというポリシーの表明なので、error レベルで 1 行、`redirect_policy_server_fault` としてステータスとポリシーのコード・説明（サニタイズして上限で切る。開始レグではプロバイダーも）とともにログにも出る。`4xx` はログに出ない（[`src/internal/refusalEnvelope.mts`](src/internal/refusalEnvelope.mts)）。
+`FederationRedirectPolicy`（[`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts)）が差し替え点である: フェデレーション type の `redirectPolicy` がその各エントリのポリシーを作り、デフォルト以外のポリシーは fail closed でなければならない。フェデレーションのリダイレクトポリシーを変えたいデプロイは、その type を override する（`overrides.federationTypes.<type>`）。`createFederationRedirectPolicy` がデフォルトで、`checkRedirectShape`、`createRedirectAllowlistValidator`、`describeRedirectRejection`、`isLoopbackHostname` は独自のポリシーが同じ規則と拒否の語彙を再利用できるよう export されている。ポリシーのメソッドは [`FederationResult`](src/federations/types.mts) で答える: 値を持つ `ok`、または返すステータス・OAuth エラーコード・説明。ルートはステータスをそのまま返し、コードと説明は core の `errorEnvelope` を通して送る。そこが RFC 6749 の文字（`"` と `\` を除く印字可能な ASCII）に収めるので、範囲外の説明の文字は `?` として出る。形式に合わないコードは、4xx なら `invalid_request` として出し（拒否はあくまでクライアントのものであり、`400 server_error` は自己矛盾になる）、`redirect_policy_error_malformed` をログに残す。それ以外のステータスでは `server_error` として出る。`describeRedirectRejection` のテキストは最初から範囲内である。`5xx` はクライアントへの判定ではなく、サーバーが答えられないというポリシーの表明なので、error レベルで 1 行、`redirect_policy_server_fault` としてステータスとポリシーのコード・説明（サニタイズして上限で切る。開始レグではプロバイダーも）とともにログにも出る。`4xx` はログに出ない（[`src/internal/refusalEnvelope.mts`](src/internal/refusalEnvelope.mts)）。
 
 ### アダプターの書き方
 

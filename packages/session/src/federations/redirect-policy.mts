@@ -71,12 +71,13 @@ export interface FederationRedirectPolicy {
 }
 
 /**
- * Per-contribution factory type for `federationRedirectPolicies` contributions.
+ * The value type of the `federationRedirectPolicies` key: what a federation
+ * type's `redirectPolicy` answers, read off this key by core. It is not the
+ * factory of a contribution kind a module fills; boot refuses those.
  *
- * `Contributed<T>` because `applyContributions` awaits this kind like every
- * other, so a policy built from something a deployment has to read may be
- * `async`. Declared here rather than in core, this kind keeps the same rule
- * the core kinds keep.
+ * `Contributed<T>` because boot awaits a type's `redirectPolicy` like every
+ * factory, so a policy built from something a deployment has to read may be
+ * `async`.
  */
 export type FederationRedirectPolicyFactory<Deps = ProviderDeps<never, never>> = (
 	deps: Deps,
