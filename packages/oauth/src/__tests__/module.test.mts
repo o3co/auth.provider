@@ -47,6 +47,7 @@ import {
 	coreConfigForTests,
 	createTestApp,
 	createTestLoginEntry,
+	federationTypeForTests,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -325,18 +326,21 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 			...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
 		} as ReturnType<typeof makeValidAppConfig>;
 	};
-	/** A federation, contributed as a federation package's module contributes one. */
-	const googleFederationModule = defineModule({
-		name: "test:google-federation-acr",
-		contributes: {
-			federations: { google: () => federationBase("google") },
-			federationRedirectPolicies: {
-				google: () => ({
-					validateRedirect: () => ({ ok: true as const, value: undefined }),
-					resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-				}),
-			},
-		} as never,
+	/**
+	 * The federation type `google`, registered as a federation package's
+	 * module registers its type: boot installs a federation for each enabled
+	 * `core.federations` entry of the type.
+	 */
+	const googleFederationModule = federationTypeForTests("google", {
+		provider: (instance) => federationBase(instance.name),
+	});
+	/** The `core.federations.google` entry of the type `google`. */
+	const googleEntry = (entry: Record<string, unknown>) => ({
+		google: {
+			type: "google",
+			callbackURL: "https://auth.example.com/federation/google/callback",
+			...entry,
+		},
 	});
 	const boot = async (
 		extraModules: readonly Module[],
@@ -396,9 +400,10 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 		// for an installed, enabled federation that says nothing of its trust.
 		// (Boot parses the `core.federations` map core's schema declares
 		// whenever it is present, so an entry states `enabled`.)
-		const { body, logger, lines } = await boot([googleFederationModule, ...federationStores], {
-			google: { enabled: true },
-		});
+		const { body, logger, lines } = await boot(
+			[googleFederationModule, ...federationStores],
+			googleEntry({ enabled: true }),
+		);
 		expect(body.acr_values_supported).toEqual(["urn:example:pwd"]);
 		expect(lines(logger.info)).toEqual([
 			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, "acr_value_unsatisfiable"],
@@ -407,18 +412,20 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 	});
 
 	it("advertises every entry, and drops none, while an installed, enabled federation trusts its upstream amr", async () => {
-		const { body, logger, lines } = await boot([googleFederationModule, ...federationStores], {
-			google: { enabled: true, trustUpstreamAmr: true },
-		});
+		const { body, logger, lines } = await boot(
+			[googleFederationModule, ...federationStores],
+			googleEntry({ enabled: true, trustUpstreamAmr: true }),
+		);
 		expect(body.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:mfa"]);
 		expect(lines(logger.info)).toEqual([]);
 		expect(lines(logger.warn)).toEqual([]);
 	});
 
-	it("counts no installed federation whose section is disabled as trusted: nothing can sign a user in through it", async () => {
-		const { body, logger, lines } = await boot([googleFederationModule], {
-			google: { enabled: false, trustUpstreamAmr: true },
-		});
+	it("counts no federation whose section is disabled as trusted: its type installs nothing for it, and nothing can sign a user in through it", async () => {
+		const { body, logger, lines } = await boot(
+			[googleFederationModule],
+			googleEntry({ enabled: false, trustUpstreamAmr: true }),
+		);
 		expect(body.acr_values_supported).toEqual(["urn:example:pwd"]);
 		expect(lines(logger.info)).toEqual([
 			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, "acr_value_unsatisfiable"],
@@ -430,7 +437,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 		// read; the reader's own refusal, for a configuration handed to it
 		// outside boot, is pinned beside it in core.
 		await expect(
-			boot([googleFederationModule], { google: { enabled: false, trustUpstreamAmr: "yes" } }),
+			boot([googleFederationModule], googleEntry({ enabled: false, trustUpstreamAmr: "yes" })),
 		).rejects.toThrow(/core\.federations\.google\.trustUpstreamAmr: /);
 	});
 });
@@ -833,22 +840,12 @@ describe("oauthModule — federation logout via typed deps", () => {
 			name: "test:refresh-token-family-revocation",
 			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
-		// federationProviders is SYNTHETIC: built from the "federations"
-		// collector and injected by the boot planner as deps.federationProviders.
-		// Every federations[name] contribution requires a paired
-		// federationRedirectPolicies[name] contribution (a boot invariant).
-		// `as never` at the contributes boundary admits the stub fixtures.
-		const federationModule = defineModule({
-			name: "test:google-federation",
-			contributes: {
-				federations: { google: () => googleProvider },
-				federationRedirectPolicies: {
-					google: () => ({
-						validateRedirect: () => ({ ok: true as const, value: undefined }),
-						resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-					}),
-				},
-			} as never,
+		// federationProviders is SYNTHETIC: boot builds it from the enabled
+		// `core.federations` entries a registered federation type handles and
+		// injects it as deps.federationProviders. The type `google` answers
+		// this test's provider for the entry `google`.
+		const federationModule = federationTypeForTests("google", {
+			provider: () => googleProvider,
 		});
 		const keyStoreWithSecret = defineModule({
 			name: "test:key-store-logout",
@@ -858,6 +855,16 @@ describe("oauthModule — federation logout via typed deps", () => {
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
+			core: {
+				...base.core,
+				federations: {
+					google: {
+						type: "google",
+						enabled: true,
+						callbackURL: "https://auth.example.com/federation/google/callback",
+					},
+				},
+			},
 			oauth: {
 				...base.oauth,
 				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },

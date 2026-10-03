@@ -430,7 +430,7 @@ describe("acr_values_supported", () => {
 			const config = withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] });
 			return {
 				...config,
-				core: { federations: { google: { enabled: true, trustUpstreamAmr } } },
+				core: { federations: { google: { type: "google", enabled: true, trustUpstreamAmr } } },
 			} as unknown as AppConfig;
 		};
 		const trusted = await discoveryContribution(
@@ -450,7 +450,7 @@ describe("acr_values_supported", () => {
 		// through it, so nothing it could assert can meet an entry.
 		const config = {
 			...withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
-			core: { federations: { google: { enabled: false, trustUpstreamAmr: true } } },
+			core: { federations: { google: { type: "google", enabled: false, trustUpstreamAmr: true } } },
 		} as unknown as AppConfig;
 		const meta = await discoveryContribution(
 			{ federationProviders: new Map([["google", {}]]) },
@@ -464,7 +464,7 @@ describe("acr_values_supported", () => {
 		// can write a session.
 		const config = {
 			...withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
-			core: { federations: { google: { enabled: false, trustUpstreamAmr: true } } },
+			core: { federations: { google: { type: "google", enabled: false, trustUpstreamAmr: true } } },
 		} as unknown as AppConfig;
 		const meta = await discoveryContribution({ federationProviders: new Map() }, config);
 		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);

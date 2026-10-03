@@ -167,9 +167,9 @@ const makeApp = async (opts: {
 		config: makeConfig(
 			opts.oauth ?? {},
 			opts.federation === "trusted"
-				? { google: { enabled: true, trustUpstreamAmr: true } }
+				? { google: { type: "google", enabled: true, trustUpstreamAmr: true } }
 				: opts.federation === "untrusted"
-					? { google: { enabled: true } }
+					? { google: { type: "google", enabled: true } }
 					: {},
 		),
 		clientRepository,
