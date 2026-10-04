@@ -160,25 +160,86 @@ const notRun = (what: string, hook: string): ContractCase => ({
 	run: async () => {},
 });
 
-/** A store whose every answer is read by core's readers: a malformed answer throws. */
+/** Whether `value` is a plain object: `Object.prototype` or `null` its prototype. */
+const isPlain = (value: unknown): value is Record<string, unknown> => {
+	if (typeof value !== "object" || value === null) return false;
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+};
+
+/** Throws unless `value` is a plain object whose own keys are exactly `keys`. */
+function assertShape(value: unknown, keys: readonly string[], what: string): void {
+	assert.ok(isPlain(value), `${what} is a plain object`);
+	assert.deepStrictEqual(
+		Object.keys(value).sort(),
+		[...keys].sort(),
+		`${what} names exactly its keys`,
+	);
+}
+
+/**
+ * Throws unless a record is answered whole, as plain data, before any reader
+ * copies it: every key named (`close` too, as `undefined`, while active) and
+ * no other.
+ */
+function assertWholeRecord(record: unknown, where: string): void {
+	assertShape(
+		record,
+		["sub", "state", "expiresAt", "participants", "close"],
+		`${where}: the record`,
+	);
+	const { participants, close } = record as Record<string, unknown>;
+	assert.ok(Array.isArray(participants), `${where}: participants is an array`);
+	for (const p of participants) assertShape(p, ["kind", "id", "data"], `${where}: a participant`);
+	if (close !== undefined)
+		assertShape(close, ["cause", "closingAt", "pending"], `${where}: the close`);
+}
+
+/**
+ * A store whose every answer is read by core's readers, so a malformed answer
+ * throws, and whose records are checked whole before a reader copies them.
+ */
 function reading(store: SessionLifecycleStore) {
+	const read = async (sid: string) => {
+		const raw = await store.read(sid);
+		if (raw !== null) assertWholeRecord(raw.value, `read(${sid})`);
+		return readVersionedSessionLifecycle(raw);
+	};
 	return {
 		open: async (sid: string, sub: string, expiresAt: Date) =>
 			readSessionOpenAnswer(await store.open(sid, sub, expiresAt)).outcome,
 		join: async (sid: string, joining: SessionParticipant) =>
 			readSessionJoinAnswer(await store.join(sid, joining)).outcome,
-		close: async (sid: string, req: SessionCloseRequest = request()) =>
-			readSessionCloseAnswer(await store.beginClose(sid, req)),
+		close: async (sid: string, req: SessionCloseRequest = request()) => {
+			const raw = await store.beginClose(sid, req);
+			if (raw.outcome !== "missing") assertWholeRecord(raw.record, `beginClose(${sid})`);
+			return readSessionCloseAnswer(raw);
+		},
 		complete: async (sid: string, expected: StoreGeneration, item: string) =>
 			readConditionalReplaceAnswer(await store.completeIf(sid, expected, item)),
-		read: async (sid: string) => readVersionedSessionLifecycle(await store.read(sid)),
+		read,
 		live: async (sid: string): Promise<Versioned<SessionLifecycleRecord>> => {
-			const read = readVersionedSessionLifecycle(await store.read(sid));
-			assert.notEqual(read, null, `${sid} is live`);
-			return read as Versioned<SessionLifecycleRecord>;
+			const answer = await read(sid);
+			assert.notEqual(answer, null, `${sid} is live`);
+			return answer as Versioned<SessionLifecycleRecord>;
 		},
-		listClosing: async (limit: number) =>
-			readSessionLifecycleListing(await store.listClosing(limit), limit),
+		listClosing: async (limit: number, after?: string) =>
+			readSessionLifecycleListing(await store.listClosing(limit, after), limit, after),
+		/** Every closing sid, paged `limit` at a time, each page from the last sid of the one before. */
+		listAllClosing: async (limit: number): Promise<string[]> => {
+			const all: string[] = [];
+			let after = "";
+			for (;;) {
+				const page = readSessionLifecycleListing(
+					await store.listClosing(limit, after),
+					limit,
+					after,
+				);
+				all.push(...page);
+				if (page.length < limit) return all;
+				after = page[page.length - 1] as string;
+			}
+		},
 	};
 }
 
@@ -549,7 +610,7 @@ export function sessionLifecycleStoreContract(
 			await check("closed", done.generation);
 		}),
 
-		test("a closing record is listed, and an active, a closed or an absent one is not; a listing names at most its limit", async (store, harness) => {
+		test("a closing record is listed, and an active, a closed or an absent one is not; a listing names at most its limit, in ascending order after its cursor, and paging from the last sid reaches every closing record", async (store, harness) => {
 			const { sid: active } = await opened(store, harness, "list-active");
 			const { sid: closing } = await opened(store, harness, "list-closing");
 			const { sid: closing2 } = await opened(store, harness, "list-closing-2");
@@ -572,6 +633,18 @@ export function sessionLifecycleStoreContract(
 				assert.ok(!listed.includes(sid), `${sid} is not closing, and is not listed`);
 			}
 			assert.equal((await store.listClosing(1)).length, 1, "a listing names at most its limit");
+			const [first, second] = [closing, closing2].sort((a, b) =>
+				Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
+			) as [string, string];
+			const after = await store.listClosing(1000, first);
+			assert.ok(!after.includes(first), "a listing starts after its cursor");
+			assert.ok(after.includes(second), "and names what follows it");
+			const paged = await store.listAllClosing(1);
+			assert.ok(
+				paged.includes(closing) && paged.includes(closing2),
+				"paging one at a time reaches every closing record",
+			);
+			for (const sid of [active, closed]) assert.ok(!paged.includes(sid), `${sid} is not paged`);
 		}),
 
 		test("every answer is one core's readers accept", async (_store, harness) => {
@@ -648,14 +721,21 @@ export function sessionLifecycleStoreContract(
 
 	if (input.supports?.clock === true) {
 		cases.push(
-			test("a join from the session's expiresAt on answers closed, while the record is still kept active", async (store, harness) => {
+			test("a join or a repeated open from the session's expiresAt on is refused, while the record is still kept active", async (store, harness) => {
 				const clock = declared(harness.clock, "clock");
 				const { sid } = await opened(store, harness, "expired-join");
 				await clock.advance(HOUR - 1);
 				assert.equal(await store.join(sid, participant("rp", "client-1")), "joined");
 				await clock.advance(1);
 				assert.equal(await store.join(sid, participant("rp", "client-2")), "closed");
+				const before = await store.live(sid);
+				assert.equal(
+					await store.open(sid, "user-1", before.value.expiresAt),
+					"refused",
+					"a repeated open from the session's end on is refused",
+				);
 				const read = await store.live(sid);
+				assert.deepStrictEqual(read, before, "and writes nothing");
 				assert.equal(read.value.state, "active");
 				assert.deepStrictEqual(read.value.participants, [participant("rp", "client-1")]);
 				const answer = committed(await store.close(sid, request({ cause: "expiry" })));

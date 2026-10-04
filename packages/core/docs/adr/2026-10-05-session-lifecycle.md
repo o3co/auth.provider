@@ -76,16 +76,24 @@ that and the commit plus the `retainMs` the caller hands in — the longest
 refresh-token lifetime, since token lifetimes are not clamped to the session —
 kept through `closed`. Past it, every part of the record is gone at once.
 
-**D6. A listing of closing records,** `listClosing(limit)`, for whatever
-resumes pending work. It never names a record that left `closing` before the
-call began.
+**D6. A listing of closing records,** `listClosing(limit, after)`, for
+whatever resumes pending work: closing sids in ascending order of their UTF-8
+bytes, after the cursor. Paging with the last sid answered reaches every
+record that stays closing, however many records whose work keeps failing
+stay ahead of it; an order by closing time would let a thousand stuck
+records hide every later one. It never names a record that left `closing`
+before the call began.
 
 **D7. The service is the port's only caller** (the next steps). It decides
 the close causes' policy (which causes notify the relying parties; `expiry`
 does not), answers a logout whose close work is still pending, resumes
 pending work, and decides whether the session grant joins. The port only has
 to make those possible: a cause per close, steps and per-participant work the
-caller names, and `listClosing`.
+caller names, and `listClosing`. Two constraints carry to it: `join` replaces
+a participant's `data`, so a late copy of an older join can put older data
+back while the record is active — the service keeps in `data` only what a
+participant's identity fixes; and `completeIf` fences the bookkeeping, not
+the work, so every work item is safe to run more than once.
 
 ## Consequences
 

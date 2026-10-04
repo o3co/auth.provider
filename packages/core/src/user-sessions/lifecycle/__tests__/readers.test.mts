@@ -156,6 +156,16 @@ describe("readVersionedSessionLifecycle", () => {
 		}
 	});
 
+	it("reads a Date's own time, never an overridden getTime", () => {
+		const expiresAt = Object.assign(new Date(1_000), { getTime: () => Number.MAX_VALUE });
+		const read = readVersionedSessionLifecycle({
+			value: { ...active(), expiresAt },
+			generation: G,
+		});
+		expect(Date.prototype.getTime.call(read?.value.expiresAt)).toBe(1_000);
+		expect(Object.hasOwn(read?.value.expiresAt ?? {}, "getTime")).toBe(false);
+	});
+
 	it("reads an active record whose close is left out as one whose close is undefined, named", () => {
 		const { close: _left, ...rest } = active();
 		const read = readVersionedSessionLifecycle({
@@ -242,6 +252,29 @@ describe("readVersionedSessionLifecycle", () => {
 				generation: G,
 			},
 		],
+		[
+			"an invalid expiresAt whose getTime answers a time",
+			{
+				value: {
+					...active(),
+					expiresAt: Object.assign(new Date(Number.NaN), { getTime: () => 0 }),
+				},
+				generation: G,
+			},
+		],
+		[
+			"an invalid closingAt whose getTime answers a time",
+			{
+				value: {
+					...closing(),
+					close: {
+						...closing().close,
+						closingAt: Object.assign(new Date(Number.NaN), { getTime: () => 0 }),
+					},
+				},
+				generation: G,
+			},
+		],
 		["a value whose read throws", throwing({ generation: G }, "value")],
 		["a field whose read throws", { value: throwing(active(), "participants"), generation: G }],
 	];
@@ -292,6 +325,20 @@ describe("readSessionLifecycleListing", () => {
 		expect(read).toEqual(["a", "b"]);
 		expect(read).not.toBe(answer);
 		expect(Object.isFrozen(read)).toBe(true);
+	});
+
+	it("answers sids in ascending order of their UTF-8 bytes, each after the cursor", () => {
+		expect(readSessionLifecycleListing(["b", "c"], 5, "a")).toEqual(["b", "c"]);
+		// "\uffff" is 0xEF 0xBF 0xBF in UTF-8, so it sorts before "\u{10000}" (0xF0 …),
+		// although its UTF-16 code unit sorts after the surrogate pair's.
+		expect(readSessionLifecycleListing(["\uffff", "\u{10000}"], 5)).toEqual([
+			"\uffff",
+			"\u{10000}",
+		]);
+		expect(() => readSessionLifecycleListing(["\u{10000}", "\uffff"], 5)).toThrow(TypeError);
+		expect(() => readSessionLifecycleListing(["b", "a"], 5)).toThrow(TypeError);
+		expect(() => readSessionLifecycleListing(["a"], 5, "a")).toThrow(TypeError);
+		expect(() => readSessionLifecycleListing(["a"], 5, "b")).toThrow(TypeError);
 	});
 
 	it("refuses more than the limit, a sid named twice, a sid that is no key, and no array", () => {

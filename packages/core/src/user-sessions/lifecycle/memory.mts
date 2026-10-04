@@ -36,8 +36,10 @@ import {
 	checkSessionCloseRequest,
 	checkSessionExpiresAt,
 	checkSessionLifecycleKey,
+	checkSessionListingCursor,
 	checkSessionListingLimit,
 	checkSessionParticipant,
+	compareSessionSids,
 } from "./readers.mjs";
 import {
 	type SessionClose,
@@ -136,13 +138,13 @@ export function createInMemorySessionLifecycleStore(
 			checkSessionLifecycleKey(sub, "sub");
 			const expiresAtMs = checkSessionExpiresAt(expiresAt).getTime();
 			const at = now();
+			if (expiresAtMs <= at) return { outcome: "refused" };
 			const stored = live(sid, at);
 			if (stored !== undefined) {
 				const same =
 					stored.state === "active" && stored.sub === sub && stored.expiresAtMs === expiresAtMs;
 				return { outcome: same ? "opened" : "refused" };
 			}
-			if (expiresAtMs <= at) return { outcome: "refused" };
 			if (records.size >= maxEntries) {
 				for (const [key, entry] of records) if (entry.retainUntilMs <= at) records.delete(key);
 				if (records.size >= maxEntries) {
@@ -224,20 +226,17 @@ export function createInMemorySessionLifecycleStore(
 				: { value: toRecord(stored), generation: stored.generation };
 		},
 
-		async listClosing(limit) {
+		async listClosing(limit, after = "") {
 			checkSessionListingLimit(limit);
+			checkSessionListingCursor(after);
 			const at = now();
-			const closing: Array<readonly [string, number]> = [];
+			const closing: string[] = [];
 			for (const [sid, stored] of records) {
 				if (stored.retainUntilMs <= at) records.delete(sid);
-				else if (stored.state === "closing" && stored.close !== undefined) {
-					closing.push([sid, stored.close.closingAtMs]);
-				}
+				else if (stored.state === "closing" && compareSessionSids(after, sid) < 0)
+					closing.push(sid);
 			}
-			return closing
-				.sort((a, b) => a[1] - b[1])
-				.slice(0, limit)
-				.map(([sid]) => sid);
+			return closing.sort(compareSessionSids).slice(0, limit);
 		},
 	};
 }

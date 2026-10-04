@@ -70,16 +70,26 @@ const isCloseItem = (value: unknown): value is string => {
 	);
 };
 
-/** A `Date` with a finite time, copied; `undefined` for anything else. */
+/** The largest time a `Date` holds, in epoch milliseconds either way. */
+const MAX_DATE_MS = 8.64e15;
+
+/**
+ * A `Date` with a valid time, copied from its own time value, never an
+ * overridden `getTime`; `undefined` for anything else.
+ */
 const dateOf = (value: unknown): Date | undefined => {
 	if (!(value instanceof Date)) return undefined;
 	try {
-		const time = value.getTime();
-		return Number.isFinite(time) ? new Date(time) : undefined;
+		const time = Date.prototype.getTime.call(value);
+		return Number.isFinite(time) && Math.abs(time) <= MAX_DATE_MS ? new Date(time) : undefined;
 	} catch {
 		return undefined;
 	}
 };
+
+/** The order of a listing: by the sids' UTF-8 bytes, so every store can keep it. */
+export const compareSessionSids = (a: string, b: string): number =>
+	Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
 const isParticipantShape = (kind: unknown, id: unknown, data: unknown): boolean =>
 	isOneOf(SESSION_PARTICIPANT_KINDS, kind) &&
@@ -195,10 +205,14 @@ export function readSessionCloseAnswer(answer: SessionCloseAnswer): SessionClose
 	return Object.freeze({ outcome, generation, record });
 }
 
-/** A store's answer to `listClosing(limit)`: distinct sids, at most `limit`. */
+/**
+ * A store's answer to `listClosing(limit, after)`: at most `limit` sids, in
+ * ascending order of their UTF-8 bytes, each after `after`.
+ */
 export function readSessionLifecycleListing(
 	answer: readonly string[],
 	limit: number,
+	after = "",
 ): readonly string[] {
 	const what = "session closing listing";
 	const sids = readList(
@@ -211,6 +225,13 @@ export function readSessionLifecycleListing(
 		(sid) => sid,
 	);
 	if (sids.length > limit) throw new TypeError(`${what}: more sids than the limit`);
+	let previous = after;
+	for (const sid of sids) {
+		if (compareSessionSids(previous, sid) >= 0) {
+			throw new TypeError(`${what}: sids are not in ascending order after the cursor`);
+		}
+		previous = sid;
+	}
 	return sids;
 }
 
@@ -313,6 +334,16 @@ export function checkSessionExpiresAt(value: Date): Date {
 /** A work item the port admits: a step name, or a participant's item; a RangeError otherwise. */
 export function checkSessionCloseItem(value: string): string {
 	if (!isCloseItem(value)) throw new RangeError("session lifecycle: item is no work item");
+	return value;
+}
+
+/** A listing's cursor the port admits: a string of at most 512 characters, `""` the start; a RangeError otherwise. */
+export function checkSessionListingCursor(value: string): string {
+	if (typeof value !== "string" || value.length > SESSION_LIFECYCLE_MAX_KEY_LENGTH) {
+		throw new RangeError(
+			`session lifecycle: after must be a string of at most ${SESSION_LIFECYCLE_MAX_KEY_LENGTH} characters`,
+		);
+	}
 	return value;
 }
 

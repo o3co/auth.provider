@@ -152,7 +152,7 @@ const CASE = {
 	readers: named("every answer is one core's readers accept"),
 	copies: named("the store keeps its own copies"),
 	apart: named("one sid's writes"),
-	expiredJoin: named("a join from the session's expiresAt on"),
+	expiredJoin: named("a join or a repeated open from the session's expiresAt on"),
 	retention: named("a closing record is kept until"),
 	lapse: named("retention lapses together"),
 	outage: named("an outage rejects"),
@@ -394,6 +394,72 @@ describe("sessionLifecycleStoreContract refuses a broken store", () => {
 			listClosing: () => store.listClosing(1000),
 		}));
 		expect(unbounded).toContain(CASE.listing);
+	});
+
+	it("refuses a listing that ignores its cursor", async () => {
+		const refused = await refusedBy((store) => ({
+			...store,
+			listClosing: (limit) => store.listClosing(limit),
+		}));
+		expect(refused).toContain(CASE.listing);
+	});
+
+	it("refuses a record answered with its close left out, a field of its own, or as a class instance", async () => {
+		const reshape =
+			(change: (record: SessionLifecycleRecord) => SessionLifecycleRecord): Fault =>
+			(store) => ({
+				...store,
+				read: async (sid) => {
+					const read = await store.read(sid);
+					return read === null ? null : { ...read, value: change(read.value) };
+				},
+				beginClose: async (sid, request) => {
+					const answer = await store.beginClose(sid, request);
+					return answer.outcome === "missing"
+						? answer
+						: { ...answer, record: change(answer.record) };
+				},
+			});
+		class Record {}
+		for (const change of [
+			(record: SessionLifecycleRecord) => {
+				if (record.close !== undefined) return record;
+				const { close: _left, ...rest } = record;
+				return rest as SessionLifecycleRecord;
+			},
+			(record: SessionLifecycleRecord) => ({ ...record, extra: true }),
+			(record: SessionLifecycleRecord) => ({
+				...record,
+				participants: record.participants.map((p) => ({ ...p, joinedAt: 0 })),
+			}),
+			(record: SessionLifecycleRecord) => Object.assign(new Record(), record),
+		]) {
+			const refused = await refusedBy(reshape(change));
+			expect(refused).toContain(CASE.join);
+		}
+		const closeOnly = await refusedBy(
+			reshape((record) =>
+				record.close === undefined ? record : { ...record, close: { ...record.close, extra: 1 } },
+			),
+		);
+		expect(closeOnly).toContain(CASE.close);
+	});
+
+	it("refuses a repeated open answered opened from the session's end on", async () => {
+		const refused = await refusedBy((store) => ({
+			...store,
+			open: async (sid, sub, expiresAt) => {
+				const answer = await store.open(sid, sub, expiresAt);
+				const read = await store.read(sid);
+				return answer.outcome === "refused" &&
+					read?.value.state === "active" &&
+					read.value.sub === sub &&
+					read.value.expiresAt.getTime() === expiresAt.getTime()
+					? { outcome: "opened" }
+					: answer;
+			},
+		}));
+		expect(refused).toContain(CASE.expiredJoin);
 	});
 
 	it("refuses malformed answers", async () => {

@@ -202,12 +202,15 @@ export interface SessionLifecycleStore {
 	read(sid: string): Promise<Versioned<SessionLifecycleRecord> | null>;
 
 	/**
-	 * The sids of live records in `closing`, each at most once, at most
-	 * `limit` of them (1 to {@link SESSION_LIFECYCLE_MAX_LISTING}): every one
-	 * when no more are closing. A record that has left `closing` before the
-	 * call begins is not named.
+	 * The sids of live records in `closing` that sort after `after` (`""`, the
+	 * default, is the start), in ascending order of their UTF-8 bytes, at most
+	 * `limit` of them (1 to {@link SESSION_LIFECYCLE_MAX_LISTING}): the first
+	 * `limit` in that order. Paging with the last sid answered as the next
+	 * `after` reaches every record that stays closing, however many others
+	 * stay ahead of it. A record that has left `closing` before the call
+	 * begins is not named.
 	 */
-	listClosing(limit: number): Promise<readonly string[]>;
+	listClosing(limit: number, after?: string): Promise<readonly string[]>;
 }
 
 /** The work item one participant makes: its kind, a colon, its id. No step name holds a colon. */

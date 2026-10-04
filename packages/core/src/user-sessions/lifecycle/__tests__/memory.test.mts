@@ -89,6 +89,17 @@ describe("createInMemorySessionLifecycleStore", () => {
 			expect((await read(store, "s"))?.value.participants).toEqual([rp("a")]);
 		});
 
+		it("refuses a repeated open from the session's expiresAt on, keeping the record as it was", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now });
+			const expiresAt = new Date(START + HOUR);
+			await store.open("s", "u", expiresAt);
+			const before = await read(store, "s");
+			time.advance(HOUR);
+			expect((await store.open("s", "u", expiresAt)).outcome).toBe("refused");
+			expect(await read(store, "s")).toStrictEqual(before);
+		});
+
 		it("refuses an open whose expiresAt is not after its clock", async () => {
 			const time = clock();
 			const store = createInMemorySessionLifecycleStore({ now: time.now });
@@ -200,6 +211,8 @@ describe("createInMemorySessionLifecycleStore", () => {
 			await expect(store.open("s", "", later)).rejects.toThrow(RangeError);
 			await expect(store.open("s", "u", new Date(Number.NaN))).rejects.toThrow(RangeError);
 			await expect(store.open("s", "u", "later" as never)).rejects.toThrow(RangeError);
+			const forged = Object.assign(new Date(Number.NaN), { getTime: () => Date.now() + HOUR });
+			await expect(store.open("s", "u", forged)).rejects.toThrow(RangeError);
 			expect(await read(store, "s")).toBeNull();
 			await expect(store.read("")).rejects.toThrow(RangeError);
 		});
@@ -268,16 +281,21 @@ describe("createInMemorySessionLifecycleStore", () => {
 		});
 	});
 
-	it("lists the closing records oldest first, at most the limit", async () => {
-		const time = clock();
-		const store = createInMemorySessionLifecycleStore({ now: time.now });
-		for (const sid of ["a", "b", "c"]) {
-			await store.open(sid, "u", new Date(START + HOUR));
+	it("lists the closing sids in ascending order after the cursor, at most the limit, and pages through them all", async () => {
+		const store = createInMemorySessionLifecycleStore();
+		for (const sid of ["c", "a", "b", "d"]) {
+			await store.open(sid, "u", new Date(Date.now() + HOUR));
+			if (sid !== "d") await store.beginClose(sid, CLOSE);
 		}
-		await store.beginClose("b", CLOSE);
-		time.advance(1);
-		await store.beginClose("a", CLOSE);
-		expect(await store.listClosing(10)).toEqual(["b", "a"]);
-		expect(await store.listClosing(1)).toEqual(["b"]);
+		expect(await store.listClosing(2)).toEqual(["a", "b"]);
+		expect(await store.listClosing(2, "b")).toEqual(["c"]);
+		expect(await store.listClosing(2, "c")).toEqual([]);
+		expect(await store.listClosing(5, "")).toEqual(["a", "b", "c"]);
+		const a = readSessionCloseAnswer(await store.beginClose("a", CLOSE));
+		if (a.outcome !== "closing") throw new Error("not closing");
+		await store.completeIf("a", a.generation, "user_session");
+		expect(await store.listClosing(1, "a")).toEqual(["b"]);
+		await expect(store.listClosing(1, "x".repeat(513))).rejects.toThrow(RangeError);
+		await expect(store.listClosing(1, 7 as never)).rejects.toThrow(RangeError);
 	});
 });
