@@ -237,7 +237,7 @@ describe("sessionModule (boot integration)", () => {
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					stub: {
 						enabled: true,
@@ -262,7 +262,7 @@ describe("sessionModule (boot integration)", () => {
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					stub: {
 						enabled: true,
@@ -290,7 +290,7 @@ describe("sessionModule (boot integration)", () => {
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					disabledFed: {
 						enabled: false,

@@ -63,11 +63,7 @@ export interface RateLimiter {
 	 * `closed`; any other value refuses the guard's or the policy's build.
 	 */
 	readonly failMode?: RateLimitFailMode;
-	/**
-	 * The budget a key falls to when nothing else covers its prefix. Boot holds
-	 * an override of a switched-off budget to it; a limiter that declares none
-	 * gets no such override.
-	 */
+	/** The budget a key falls to when nothing else covers its prefix. */
 	readonly defaultLimit?: RateLimitSpec;
 	/**
 	 * Atomic check + increment. Key is endpoint-specific (e.g.,
@@ -87,10 +83,26 @@ export interface RateLimitSpec {
 	readonly windowSeconds: number;
 }
 
+/**
+ * The declared-absence policy of the `rateLimiter` slot, which boot attaches
+ * wherever a module reads the slot: a composition that wires no limiter lists
+ * `rateLimiter` in `core.declaredAbsent`, or boot refuses. A module that
+ * attaches a policy to the slot itself attaches this one.
+ */
+export const RATE_LIMITER_ABSENCE_POLICY = {
+	configKey: ["core", "declaredAbsent"],
+	absentValue: "rateLimiter",
+	hint:
+		"Without a limiter, a route that keys it and has no per-process fallback of its own lets " +
+		"each request through: no request-volume limit applies there, unless something in front " +
+		"of the provider applies one.",
+} as const;
+
 // ---------------------------------------------------------------------------
-// ComponentMap slot: `rateLimiter`, optional in oauthModule, so
-// `deps.rateLimiter` is `RateLimiter | undefined`. Absent, oauth routes apply
-// no rate limiting.
+// ComponentMap slot: `rateLimiter`, optional to wire but not to decide (see
+// RATE_LIMITER_ABSENCE_POLICY), so `deps.rateLimiter` is
+// `RateLimiter | undefined`. Absent, a route that keys it passes requests
+// through unless its module falls back to a per-process limiter.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

@@ -12,6 +12,7 @@ import {
 	type RateLimiter,
 	type RateLimitFailMode,
 	type RateLimitSpec,
+	refuseVerifierLimitEntries,
 	shownConfigValue,
 	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
@@ -146,12 +147,16 @@ const rateLimitSpecSchema = z
 
 /**
  * The schema of `redis-rate-limiter {}`, the module's own section: per-prefix
- * `limits`, the `defaultLimit` a key nothing covers falls to, and `failMode`,
- * the limiter's outage policy. Strict at every level.
+ * `limits`, none naming a verifier's prefix, the `defaultLimit` a key nothing
+ * covers falls to, and `failMode`, the limiter's outage policy. Strict at
+ * every level.
  */
 export const redisRateLimiterSectionSchema = z
 	.object({
-		limits: z.record(z.string(), rateLimitSpecSchema).default({}),
+		limits: z
+			.record(z.string(), rateLimitSpecSchema)
+			.superRefine(refuseVerifierLimitEntries)
+			.default({}),
 		defaultLimit: rateLimitSpecSchema.default(() => ({ ...DEFAULT_LIMIT })),
 		failMode: z.enum(["open", "closed"]).default("closed"),
 	})

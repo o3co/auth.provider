@@ -47,6 +47,7 @@ import {
 import { describeValue } from "../errors/describe-value.mjs";
 import { enabledFederationsOf } from "../federations/configured.mjs";
 import {
+	type AbsencePolicy,
 	describeAbsenceDeclaration,
 	isAbsenceDeclared,
 } from "../modules/manifest/absence-policy.mjs";
@@ -54,6 +55,8 @@ import type { ComponentKey, ComponentMap } from "../modules/manifest/component-m
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
+import { RATE_LIMITER_ABSENCE_POLICY } from "../ratelimit/types.mjs";
+import { verifierLimitSetting } from "../ratelimit/verifierLimits.mjs";
 import {
 	admissionActionProblem,
 	registeredAdmissionAction,
@@ -722,8 +725,10 @@ const FEDERATION_KINDS_REGISTERED =
  * slot reads at each event, the slot stage 1 counts as filled once a hook is
  * contributed; `federations` and `federationRedirectPolicies` are filled by
  * boot alone, from the dispatched entries (`FEDERATION_KINDS`). Unlike
- * `GUARDED_KINDS`, a module may override an entry of the first two;
- * `auditHooks` is list-shaped, and a list kind has no override.
+ * `GUARDED_KINDS`, a module may override a `federationTypes` entry; no module
+ * overrides a `rateLimitBudgets` prefix or an admission action
+ * (`checkContributionShapes`), and `auditHooks` is list-shaped, and a list
+ * kind has no override.
  */
 const PLANNER_OWNED_KINDS = [
 	"rateLimitBudgets",
@@ -742,6 +747,7 @@ const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string
 		case "auditHooks":
 			return "the modules that own its entries contribute them, and the audit fan-out in the auditSink slot reads them";
 		case "admissionActions":
+		case "rateLimitBudgets":
 			return "the modules that own its entries contribute them, and no module overrides one";
 		default:
 			return "the modules that own its entries contribute them, and a module may override one";
@@ -899,6 +905,9 @@ const containerShape = (container: unknown): string =>
  *   before its first `:`, whatever the budget's factory answers;
  * - a prefix names no `Object.prototype` member (`constructor`, `__proto__`),
  *   which a limiter looking budgets up on a plain object finds in its place;
+ * - a prefix is claimed by the module whose routes key it, so an override of
+ *   one is refused as the kind guarded (`contribution-kind-guarded`), naming
+ *   the setting a verifier's prefix is limited at;
  * - a declaration, as normalisation read it (`federationTypeSnapshot`), is
  *   an object with a Zod `entrySchema` and `factory` and `redirectPolicy`
  *   functions, so one written in JavaScript is refused as itself, not as a
@@ -980,6 +989,33 @@ function checkContributionShapes(
 			const normalised = modules[index];
 			const entries =
 				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
+			// Read off the entries normalisation captured, which stage 4 applies.
+			for (const entry of entries ?? []) {
+				if (
+					channel !== "overrides" ||
+					entry.kind !== "rateLimitBudgets" ||
+					typeof entry.key !== "string"
+				) {
+					continue;
+				}
+				const setting = verifierLimitSetting(entry.key);
+				throw new BootError({
+					message:
+						`Module "${m.name}" overrides rateLimitBudgets "${entry.key}", which no module may: a prefix is claimed by the module whose routes key it` +
+						(setting === undefined
+							? ", and a limiter's own limits decide what applies under it."
+							: `, and "${entry.key}" is a verifier's own limit, set at ${setting}.`),
+					reason: "contribution-kind-guarded",
+					stage: "validateManifests",
+					details: {
+						reason: "contribution-kind-guarded",
+						kind: "rateLimitBudgets",
+						channel: "overrides",
+						module: m.name,
+						name: entry.key,
+					},
+				});
+			}
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
 				if (channel === "overrides") {
@@ -1419,11 +1455,24 @@ function readConfigPath(config: unknown, path: readonly string[]): unknown {
 }
 
 /**
- * Enforces `ModuleSpec.absencePolicies`: every optional key carrying a policy
- * must be filled from one of the three component sources, or the config must
- * carry the policy's declared-absent value. Otherwise boot refuses with
+ * The policies core attaches to slots it declares, wherever a module reads the
+ * slot: its readers need not attach it. A module that does attaches the same
+ * policy, or is refused as disagreeing.
+ */
+const CORE_SLOT_ABSENCE_POLICIES: Readonly<Record<string, AbsencePolicy>> = {
+	rateLimiter: RATE_LIMITER_ABSENCE_POLICY,
+};
+
+/** Who a core-attached policy is declared by, as the disagreement refusal names it. */
+const CORE_POLICY_OWNER = "core";
+
+/**
+ * Enforces `ModuleSpec.absencePolicies`, and the policies core attaches to its
+ * own slots (`CORE_SLOT_ABSENCE_POLICIES`): every optional key carrying a
+ * policy must be filled from one of the three component sources, or the config
+ * must carry the policy's declared-absent value. Otherwise boot refuses with
  * `component-absence-undeclared`: a capability slot (token revocation, an
- * audit sink) must never be a silent no-op.
+ * audit sink, a rate limiter) must never be a silent no-op.
  *
  * Two modules attaching different policies to one key are refused even when
  * the absence is declared, so the advice does not depend on module order;
@@ -1451,6 +1500,17 @@ function checkDeclaredAbsence(
 	const byKey = new Map<string, Collected>();
 	// Step 1 (checkUniqueModuleNames) has run, so the name lookup is total.
 	const normalisedByName = new Map(modules.map((nm) => [nm.name, nm]));
+	const readersOf = (key: string): string[] =>
+		modules
+			.filter(
+				(m) =>
+					(m.requires as readonly string[]).includes(key) ||
+					(m.optional as readonly string[]).includes(key),
+			)
+			.map((m) => m.name);
+	for (const [key, policy] of Object.entries(CORE_SLOT_ABSENCE_POLICIES)) {
+		if (readersOf(key).length > 0) byKey.set(key, { policy, declaredBy: [CORE_POLICY_OWNER] });
+	}
 
 	for (const m of rawModules) {
 		// biome-ignore lint/style/noNonNullAssertion: every raw module was normalised under its (unique) name
@@ -1523,13 +1583,7 @@ function checkDeclaredAbsence(
 		if (plannedKeys.has(key)) continue;
 		if (isAbsenceDeclared(config, policy)) continue;
 
-		const consumedBy = modules
-			.filter(
-				(m) =>
-					(m.requires as readonly string[]).includes(key) ||
-					(m.optional as readonly string[]).includes(key),
-			)
-			.map((m) => m.name);
+		const consumedBy = readersOf(key);
 		const configKeyDotted = policy.configKey.join(".");
 
 		throw new BootError({

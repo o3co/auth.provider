@@ -82,7 +82,7 @@ describe("core's own modules refuse an unknown key at every level of their secti
 						{
 							maxBuckets: 10000,
 							defaultLimit: { limit: 60, windowSeconds: 60 },
-							limits: { login: { limit: 5, windowSeconds: 60 } },
+							limits: { token: { limit: 5, windowSeconds: 60 } },
 						},
 					],
 				},

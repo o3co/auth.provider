@@ -504,6 +504,7 @@
 . ProviderDeps type
 . ProvidesFactoryFailedDetails type
 . PublicClient type
+. RATE_LIMITER_ABSENCE_POLICY value
 . RECOVERY_CODE_AMR value
 . RENEWAL_NONCE_BYTES value
 . REPLICA_UNSAFE_MODULES value
@@ -1030,6 +1031,7 @@
 . recordableDeviceApproval value
 . recordableEnrollmentFacts value
 . recordableSessionAuthentication value
+. refuseVerifierLimitEntries value
 . registerBuiltinAccessTokenDenylists value
 . registerBuiltinAuditSinks value
 . registerBuiltinChallengeStores value
