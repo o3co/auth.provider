@@ -151,22 +151,20 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// or predates a subject-wide revocation. Admission decides (flag, live
 			// record by `sid`, subject, revocation boundary, requirements).
 			const claim = cookieClaim({ session });
-			const admission = await admitSession(admissionDeps, {
-				claim,
-				action: "oauth.session_grant" satisfies keyof typeof SESSION_GRANT_ADMISSION_ACTIONS,
-			});
+			const admit = () =>
+				admitSession(admissionDeps, {
+					claim,
+					action: "oauth.session_grant" satisfies keyof typeof SESSION_GRANT_ADMISSION_ACTIONS,
+				});
+			const admission = await admit();
 			const refusal = refusalFor(admission);
 			if (refusal !== undefined) return { result: refusal };
 			// `admitted`: the tracked identity is authoritative — the record's
 			// `sub`, which admission held equal to the cookie's — else, with no
 			// store, the cookie's own, which a cookie claim always names by now.
-			const tracked = (admission as Extract<Admission, { outcome: "admitted" }>).session;
+			let tracked = (admission as Extract<Admission, { outcome: "admitted" }>).session;
 			const userId = tracked === null ? claim.subject : tracked.sub;
 			const sid = claim.sid;
-			// The access token's `amr` is what the tracked session vouches for
-			// (as `/authorize` records on the code), never the record's raw `amr`;
-			// an untracked browser session is not a source.
-			const trackedAmr = tracked === null ? undefined : wellFormedAmr(vouchedAmr(tracked));
 			// The email gate covers every path that mints for a user.
 			// `invalid_grant`, not `access_denied`: RFC 6749 §5.2 does not define
 			// the latter for the token endpoint.
@@ -255,7 +253,18 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 				);
 				if (!bounded.ok) return { result: bounded.result };
 				policyAudience = bounded.audience;
+				// Admission again, after the policy's await and before minting: a
+				// session revoked or ended while the policy evaluated mints nothing.
+				const readmission = await admit();
+				const refusalAfter = refusalFor(readmission);
+				if (refusalAfter !== undefined) return { result: refusalAfter };
+				tracked = (readmission as Extract<Admission, { outcome: "admitted" }>).session;
 			}
+
+			// The access token's `amr` is what the tracked session vouches for
+			// (as `/authorize` records on the code), never the record's raw `amr`;
+			// an untracked browser session is not a source.
+			const trackedAmr = tracked === null ? undefined : wellFormedAmr(vouchedAmr(tracked));
 
 			// The primary authentication's time, which a step-up never moves (RFC
 			// 9470 §6.1), read against the minting clock (core's `authTimeAt`):
@@ -266,8 +275,8 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// signing cannot put `auth_time` after `iat`. Taken after the policy,
 			// so a slow policy cannot mint a token already expired.
 			const mintingNow = Date.now();
-			// Admission held the tracked session live on its own clock, before
-			// the policy's await: a session that expired since then mints nothing.
+			// Admission held the tracked session live on its own clock: a session
+			// that expired before the minting instant mints nothing.
 			if (tracked !== null && !(tracked.expiresAt.getTime() > mintingNow)) {
 				return {
 					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },

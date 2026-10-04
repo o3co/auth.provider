@@ -33,6 +33,7 @@ import {
 	type GrantContext,
 	type GrantError,
 	type GrantHandler,
+	type GrantPolicyHook,
 	type GrantResult,
 	type RequirementInput,
 	type RequirementVerdict,
@@ -126,6 +127,7 @@ const grant = (opts: {
 	subjectRevocation?: SubjectRevocation;
 	requirements?: readonly SessionRequirement[];
 	logger?: MockLogger;
+	grantPolicy?: GrantPolicyHook;
 }) =>
 	createSessionGrant({
 		config,
@@ -137,6 +139,7 @@ const grant = (opts: {
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
+		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 	});
 
 const ctx = (session: Record<string, unknown>): GrantContext => ({
@@ -258,6 +261,96 @@ describe("the session grant on admission — what the session and its record dec
 		expect(claims.sub).toBe(SUBJECT);
 		expect(claims.sid).toBe(SID);
 		expect(claims.amr).toEqual(["pwd"]);
+	});
+});
+
+describe("the session grant — admission is read again after the policy", () => {
+	const policy = (onEvaluate: () => Promise<void> = async () => {}): GrantPolicyHook => ({
+		kind: "slow",
+		evaluate: async () => {
+			await onEvaluate();
+			return { outcome: "allow" };
+		},
+	});
+
+	it("a revocation landing while the policy evaluates mints nothing, refused as before the policy", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const handler = grant({
+			userSessionStore: storeWith(record()),
+			subjectRevocation: revocation,
+			grantPolicy: policy(async () => {
+				await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
+			}),
+		});
+		const during = await refused(handler);
+		// The same request once the revocation has landed: refused before the policy.
+		const before = await refused(
+			grant({
+				userSessionStore: storeWith(record()),
+				subjectRevocation: revocation,
+				grantPolicy: policy(async () => {
+					expect.fail("the policy must not be consulted for a revoked session");
+				}),
+			}),
+		);
+		expect(during).toEqual(before);
+		expect(during).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+	});
+
+	it("a session ended while the policy evaluates mints nothing", async () => {
+		let live: UserSession | null = record();
+		const result = await refused(
+			grant({
+				userSessionStore: storeAnswering(async (sid) => (sid === SID ? live : null)),
+				grantPolicy: policy(async () => {
+					live = null;
+				}),
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+	});
+
+	it("an outage on the second read is 503, mapped as an outage on the first", async () => {
+		let reads = 0;
+		const result = await refused(
+			grant({
+				userSessionStore: storeAnswering(async (sid) => {
+					reads += 1;
+					if (reads > 1) throw new Error("redis down");
+					return sid === SID ? record() : null;
+				}),
+				grantPolicy: policy(),
+			}),
+		);
+		expect(reads).toBe(2);
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session store unavailable",
+		});
+	});
+
+	it("a session still live after the policy mints", async () => {
+		const store = storeWith(record());
+		const { result } = await grant({
+			userSessionStore: store,
+			subjectRevocation: createInMemorySubjectRevocation(),
+			grantPolicy: policy(),
+		}).handle(ctx(LIVE_COOKIE));
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		const claims = decodeJwt(result.tokens.access_token);
+		expect(claims.sub).toBe(SUBJECT);
+		expect(claims.sid).toBe(SID);
+		expect(store.get).toHaveBeenCalledTimes(2);
 	});
 });
 
