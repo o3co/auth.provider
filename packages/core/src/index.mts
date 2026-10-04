@@ -841,6 +841,7 @@ export type {
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,
+	VerifierLimitDeclaration,
 } from "./modules/index.mjs";
 export {
 	// The way to author a federationTypes declaration, its entry tied to its schema.
@@ -1011,8 +1012,9 @@ export {
 	isUsableRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "./ratelimit/usableSpec.mjs";
-// A limiter section's `limits` never names a prefix a verifier limits itself.
-export { refuseVerifierLimitEntries } from "./ratelimit/verifierLimits.mjs";
+// A limiter section's `limits` never names a prefix a verifier limits itself,
+// which the verifier's module declares by claiming it with `verifierLimitClaim`.
+export { refuseVerifierLimitEntries, verifierLimitClaim } from "./ratelimit/verifierLimits.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,

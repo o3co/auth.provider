@@ -23,10 +23,12 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { MAX_DURATION_SECONDS } from "../../config/durations.mjs";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
 import type { RateLimiter } from "../../ratelimit/types.mjs";
+import { verifierLimitClaim } from "../../ratelimit/verifierLimits.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp, mergeWithBuiltins } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
@@ -698,5 +700,316 @@ describe("rateLimitBudgets — the kind takes a record keyed by prefix", () => {
 			channel,
 			problem: expect.stringContaining("record keyed by"),
 		});
+	});
+});
+
+describe("rateLimitBudgets — a verifier's claim", () => {
+	/** A module claiming `prefix` as a verifier's own limit, made at `setting`. */
+	const verifierModule = (prefix: string, setting: string, name = "verifier-owner"): Module =>
+		defineModule({
+			name,
+			contributes: { rateLimitBudgets: { [prefix]: verifierLimitClaim({ setting }) } },
+		});
+
+	/** The in-process limiter's own limits, one entry per prefix. */
+	const limitsOn = (...prefixes: readonly string[]): BootstrapMap =>
+		withMemoryLimiter({
+			"core-rate-limiter-memory": {
+				limits: Object.fromEntries(
+					prefixes.map((prefix) => [prefix, { limit: 5, windowSeconds: 60 }]),
+				),
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				maxBuckets: 100,
+			},
+		});
+
+	it("refuses boot on a limiter's limits entry for the prefix, naming its path and the declared setting", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [memoryRateLimiterModule, verifierModule("fixture_attempts", "fixture.attempts")],
+				bootstrapComponents: limitsOn("fixture_attempts", "token"),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.message).toContain("core-rate-limiter-memory.limits.fixture_attempts");
+		expect(err.message).toContain("set fixture.attempts instead");
+		expect(err.message).not.toContain("limits.token");
+	});
+
+	it("names the declared setting for login in place of the one core falls back to", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [memoryRateLimiterModule, verifierModule("login", "fixture.login.attempts")],
+				bootstrapComponents: limitsOn("login"),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("core-rate-limiter-memory.limits.login");
+		expect(err.message).toContain("set fixture.login.attempts instead");
+		expect(err.message).not.toContain("session.rateLimit.login");
+	});
+
+	it("refuses the entry while the declaring module is switched off", async () => {
+		const Switch = z.object({ enabled: z.boolean() }).strict();
+		const switchable = defineModule({
+			name: "verifier-switchable",
+			section: { schema: Switch, isEnabled: (section) => section.enabled },
+			contributes: {
+				rateLimitBudgets: { fixture_attempts: verifierLimitClaim({ setting: "fixture.attempts" }) },
+			},
+		});
+		const bootstrap = limitsOn("fixture_attempts");
+
+		const err = await refusal(
+			createApp({
+				modules: [memoryRateLimiterModule, switchable],
+				bootstrapComponents: {
+					...bootstrap,
+					config: { ...bootstrap.config, "verifier-switchable": { enabled: false } } as never,
+				},
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("set fixture.attempts instead");
+	});
+
+	it("boots with a limits entry for a prefix claimed without a declaration, and for one nobody claims", async () => {
+		const plain = defineModule({
+			name: "plain-owner",
+			contributes: {
+				rateLimitBudgets: {
+					fixture_plain: () => null,
+					fixture_budgeted: () => ({ limit: 1, windowSeconds: 60 }),
+				},
+			},
+		});
+
+		const handle = await createApp({
+			modules: [
+				memoryRateLimiterModule,
+				plain,
+				verifierModule("fixture_attempts", "fixture.attempts"),
+			],
+			bootstrapComponents: limitsOn("fixture_plain", "fixture_budgeted", "unclaimed"),
+		});
+		await handle.dispose();
+	});
+
+	it.each([
+		["login", "session.rateLimit.login"],
+		["device_verification", "device-grant.rateLimit"],
+	])(
+		"still refuses %s, which core names itself, while its claim declares nothing",
+		async (prefix, setting) => {
+			const undeclared = defineModule({
+				name: "undeclared-owner",
+				contributes: { rateLimitBudgets: { [prefix]: () => null } },
+			});
+
+			const err = await refusal(
+				createApp({
+					modules: [memoryRateLimiterModule, undeclared],
+					bootstrapComponents: limitsOn(prefix),
+				}),
+			);
+
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain(`core-rate-limiter-memory.limits.${prefix}`);
+			expect(err.message).toContain(setting);
+		},
+	);
+
+	it("claims the prefix with no budget: absent from the resolver, keyed by the limiter's defaultLimit", async () => {
+		let resolver: { get: (prefix: string) => unknown } | undefined;
+		let handed: RateLimiter | undefined;
+		const reader = defineModule({
+			name: "budget-reader",
+			requires: ["rateLimitBudgetResolver", "rateLimiter"],
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						resolver = deps.rateLimitBudgetResolver;
+						handed = deps.rateLimiter;
+						return null;
+					},
+				],
+			},
+		});
+
+		const handle = await createApp({
+			modules: [
+				memoryRateLimiterModule,
+				verifierModule("fixture_attempts", "fixture.attempts"),
+				reader,
+			],
+			bootstrapComponents: limitsOn(),
+		});
+
+		expect(resolver?.get("fixture_attempts")).toBeUndefined();
+		expect((await handed?.check("fixture_attempts:ip:1.2.3.4", { ip: "1.2.3.4" }))?.limit).toBe(60);
+		await handle.dispose();
+	});
+
+	it("is a claim like any other: a second module contributing the prefix refuses boot", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [
+					verifierModule("fixture_attempts", "fixture.attempts", "verifier-first"),
+					defineModule({
+						name: "budget-second",
+						contributes: { rateLimitBudgets: { fixture_attempts: () => null } },
+					}),
+				],
+				bootstrapComponents: bootWith(),
+			}),
+		);
+
+		expect(err.reason).toBe("duplicate-contribute");
+		expect(err.details).toMatchObject({
+			kind: "rateLimitBudgets",
+			identity: "fixture_attempts",
+			modules: ["verifier-first", "budget-second"],
+		});
+	});
+
+	it("names the declared setting when a module overrides the prefix", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [
+					verifierModule("fixture_attempts", "fixture.attempts"),
+					defineModule({
+						name: "budget-replacer",
+						overrides: {
+							rateLimitBudgets: { fixture_attempts: () => ({ limit: 1, windowSeconds: 600 }) },
+						},
+					}),
+				],
+				bootstrapComponents: bootWith(),
+			}),
+		);
+
+		expect(err.reason).toBe("contribution-kind-guarded");
+		expect(err.message).toContain("set at fixture.attempts");
+	});
+
+	it.each<readonly [string, unknown]>([
+		["an empty setting", { setting: "" }],
+		["a setting that is not a string", { setting: 5 }],
+		["no setting", {}],
+		["a declaration that is not an object", "fixture.attempts"],
+		["null", null],
+	])("refuses a declaration with %s at stage 1", async (_label, verifier) => {
+		let ran = false;
+		const claim = Object.assign(
+			() => {
+				ran = true;
+				return null;
+			},
+			{ verifier },
+		);
+		const err = await refusal(
+			createApp({
+				modules: [
+					defineModule({
+						name: "verifier-malformed",
+						contributes: { rateLimitBudgets: { fixture_attempts: claim as never } },
+					}),
+				],
+				bootstrapComponents: bootWith(),
+			}),
+		);
+
+		expect(err.reason).toBe("contribution-malformed");
+		expect(err.details).toEqual({
+			reason: "contribution-malformed",
+			module: "verifier-malformed",
+			kind: "rateLimitBudgets",
+			name: "fixture_attempts",
+			channel: "contributes",
+			problem: expect.stringContaining("setting"),
+		});
+		expect(ran).toBe(false);
+	});
+
+	it("refuses a declaration whose read throws at stage 1, as itself", async () => {
+		const claim = Object.defineProperty(() => null, "verifier", {
+			get(): never {
+				throw new Error("declaration unavailable");
+			},
+		});
+		const err = await refusal(
+			createApp({
+				modules: [
+					defineModule({
+						name: "verifier-throwing",
+						contributes: { rateLimitBudgets: { fixture_attempts: claim as never } },
+					}),
+				],
+				bootstrapComponents: bootWith(),
+			}),
+		);
+
+		expect(err.reason).toBe("contribution-malformed");
+		expect(err.details).toMatchObject({ module: "verifier-throwing", name: "fixture_attempts" });
+		expect(err.message).toContain("declaration unavailable");
+	});
+
+	it("reads the declaration once: the setting a refusal names is the one first read", async () => {
+		let reads = 0;
+		const claim = Object.defineProperty(() => null, "verifier", {
+			get() {
+				reads += 1;
+				return { setting: reads === 1 ? "fixture.attempts" : "" };
+			},
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [
+					memoryRateLimiterModule,
+					defineModule({
+						name: "verifier-shifting",
+						contributes: { rateLimitBudgets: { fixture_attempts: claim as never } },
+					}),
+				],
+				bootstrapComponents: limitsOn("fixture_attempts"),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("set fixture.attempts instead");
+		expect(reads).toBe(1);
+	});
+
+	it("holds the declarations for that boot's section parse alone", async () => {
+		await refusal(
+			createApp({
+				modules: [memoryRateLimiterModule, verifierModule("fixture_attempts", "fixture.attempts")],
+				bootstrapComponents: limitsOn("fixture_attempts"),
+			}),
+		);
+
+		const parsed = memoryRateLimiterModule.section?.schema.safeParse({
+			limits: { fixture_attempts: { limit: 5, windowSeconds: 60 } },
+		});
+		expect(parsed?.success).toBe(true);
+		const handle = await createApp({
+			modules: [memoryRateLimiterModule],
+			bootstrapComponents: limitsOn("fixture_attempts"),
+		});
+		await handle.dispose();
+	});
+
+	it("answers null as a factory, and holds its declaration frozen", () => {
+		const claim = verifierLimitClaim({ setting: "fixture.attempts" });
+
+		expect(claim(undefined as never)).toBeNull();
+		expect(claim.verifier).toEqual({ setting: "fixture.attempts" });
+		expect(Object.isFrozen(claim)).toBe(true);
+		expect(Object.isFrozen(claim.verifier)).toBe(true);
 	});
 });

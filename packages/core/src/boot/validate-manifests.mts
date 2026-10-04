@@ -56,7 +56,10 @@ import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
 import { RATE_LIMITER_ABSENCE_POLICY } from "../ratelimit/types.mjs";
-import { verifierLimitSetting } from "../ratelimit/verifierLimits.mjs";
+import {
+	verifierLimitSetting,
+	withVerifierLimitDeclarations,
+} from "../ratelimit/verifierLimits.mjs";
 import {
 	admissionActionProblem,
 	registeredAdmissionAction,
@@ -119,17 +122,77 @@ export interface ValidateManifestsInput {
 const admissionActionSnapshots = new WeakMap<object, { readonly grade: unknown }>();
 
 /**
+ * What each `rateLimitBudgets` factory carrying a `verifier` declaration was
+ * read as, once, at stage 1 — its setting, or what its read threw — keyed by
+ * the registration factory `nameKeyedFactory` answered for it.
+ */
+const verifierClaimSnapshots = new WeakMap<
+	object,
+	{ readonly setting: unknown } | { readonly threw: string }
+>();
+
+/** Why a verifier claim's declaration, as read, is refused, or `undefined` when it is usable. */
+function verifierClaimProblem(
+	snapshot: { readonly setting: unknown } | { readonly threw: string },
+): string | undefined {
+	if ("threw" in snapshot) return `reading its verifier declaration threw: ${snapshot.threw}`;
+	return typeof snapshot.setting === "string" && snapshot.setting.length > 0
+		? undefined
+		: "a verifier's claim declares { setting }, the setting its limit is made at, a non-empty string";
+}
+
+/**
+ * The setting each prefix `modules` claim as a verifier's is made at, from
+ * the declarations normalisation read: the first usable one per prefix (a
+ * second claim is refused as a duplicate).
+ */
+function declaredVerifierLimits(modules: readonly NormalisedModule[]): ReadonlyMap<string, string> {
+	const declared = new Map<string, string>();
+	for (const m of modules) {
+		for (const entry of m.contributesEntries) {
+			if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+			const snapshot = verifierClaimSnapshots.get(entry.factory as object);
+			if (snapshot === undefined || verifierClaimProblem(snapshot) !== undefined) continue;
+			if (!declared.has(entry.key)) {
+				declared.set(entry.key, (snapshot as { readonly setting: string }).setting);
+			}
+		}
+	}
+	return declared;
+}
+
+/**
  * The factory a name-keyed entry registers through. A `federationTypes` entry
  * is a declaration, `{ entrySchema, factory, redirectPolicy }`, not a
  * factory: its members are read once, here, and what registers is a
  * `RegisteredFederationType` whose factories are bound to the deps stage 4
  * hands every factory (`federationTypeRegistration`). An `admissionActions` entry is a declaration,
  * `{ grade }`: its grade is read once, here, and what registers is the
- * action `name` with that grade. `checkContributionShapes` holds each
- * snapshot's shape; a declaration that is not an object is left for it to
- * refuse. Every other value is its own factory.
+ * action `name` with that grade. A `rateLimitBudgets` factory's `verifier`
+ * declaration is read once, here, and what registers is a factory calling it.
+ * `checkContributionShapes` holds each snapshot's shape; a declaration that
+ * is not an object is left for it to refuse. Every other value is its own
+ * factory.
  */
 function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
+	if (kind === "rateLimitBudgets" && typeof value === "function") {
+		let snapshot: { readonly setting: unknown } | { readonly threw: string };
+		try {
+			const verifier: unknown = (value as { readonly verifier?: unknown }).verifier;
+			if (verifier === undefined) return value;
+			snapshot = {
+				setting:
+					typeof verifier === "object" && verifier !== null
+						? (verifier as { readonly setting?: unknown }).setting
+						: undefined,
+			};
+		} catch (thrown) {
+			snapshot = { threw: failureSummary(thrown) };
+		}
+		const register = (deps: unknown): unknown => (value as (deps: unknown) => unknown)(deps);
+		verifierClaimSnapshots.set(register, snapshot);
+		return register;
+	}
 	if (typeof value !== "object" || value === null) return value;
 	if (kind === "admissionActions") {
 		if (Array.isArray(value)) return value;
@@ -946,6 +1009,7 @@ function checkContributionShapes(
 			},
 		});
 	};
+	const declaredVerifiers = declaredVerifierLimits(modules);
 	rawModules.forEach((m, index) => {
 		for (const channel of ["contributes", "overrides"] as const) {
 			const map = m[channel] as Readonly<Record<string, unknown>> | undefined;
@@ -998,7 +1062,7 @@ function checkContributionShapes(
 				) {
 					continue;
 				}
-				const setting = verifierLimitSetting(entry.key);
+				const setting = verifierLimitSetting(entry.key, declaredVerifiers);
 				throw new BootError({
 					message:
 						`Module "${m.name}" overrides rateLimitBudgets "${entry.key}", which no module may: a prefix is claimed by the module whose routes key it` +
@@ -1015,6 +1079,12 @@ function checkContributionShapes(
 						name: entry.key,
 					},
 				});
+			}
+			for (const entry of entries ?? []) {
+				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+				const snapshot = verifierClaimSnapshots.get(entry.factory as object);
+				const problem = snapshot === undefined ? undefined : verifierClaimProblem(snapshot);
+				if (problem !== undefined) refuse(m, "rateLimitBudgets", entry.key, channel, problem);
 			}
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
@@ -3373,7 +3443,12 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// Each module's own section, parsed out of that configuration by
 	// the module's schema and written back at its path — before any
 	// post-config row, which may assume the configuration is valid.
-	const { config: parsedConfig, sections } = parseModuleSections(modules, composedConfig);
+	// A limiter section refuses the prefixes every loaded module claims as a
+	// verifier's, switched on or not: no switch is read before the parse.
+	const { config: parsedConfig, sections } = withVerifierLimitDeclarations(
+		declaredVerifierLimits(normalisedModules),
+		() => parseModuleSections(modules, composedConfig),
+	);
 	const substitutedBootstrap: BootstrapMap = {
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],

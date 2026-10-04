@@ -44,7 +44,12 @@
  * says.
  */
 
-import { BootError, defineModule, type RateLimiter } from "@o3co/auth-provider-core";
+import {
+	BootError,
+	defineModule,
+	type RateLimiter,
+	verifierLimitClaim,
+} from "@o3co/auth-provider-core";
 import {
 	compose,
 	login,
@@ -227,6 +232,33 @@ describe.each<Adapter>(["memory", "redis"])("the %s limiter's own limits", (adap
 			expect((err as BootError).message).toContain(setting);
 		},
 	);
+
+	it("refuses the boot on an entry for a prefix a module declares a verifier's, naming its setting", async () => {
+		const declarer = defineModule({
+			name: "test:verifier-declarer",
+			contributes: {
+				rateLimitBudgets: {
+					"test-verifier": verifierLimitClaim({ setting: "test-verifier.attempts" }),
+				},
+			},
+		});
+		const options = await fullSetOptions({
+			env: envFor(adapter),
+			operatorHocon: `${limiterSection(adapter)}.limits { test-verifier { limit = 1000, windowSeconds = 1 } }`,
+		});
+		const err = await compose({
+			...options,
+			extraModules: (config) => [...(options.extraModules?.(config) ?? []), declarer],
+		}).then(
+			(composition) => composition.handle.dispose().then(() => undefined),
+			(caught: unknown) => caught,
+		);
+
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain(`${limiterSection(adapter)}.limits.test-verifier`);
+		expect((err as BootError).message).toContain("set test-verifier.attempts instead");
+	});
 });
 
 /** Every prefix a package keys a limiter under, with the module that owns it. */

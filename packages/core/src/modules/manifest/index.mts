@@ -51,6 +51,8 @@ export type {
 	RateLimitBudgetFactory,
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
+	// What a verifier's claim of a rate-limit prefix declares.
+	VerifierLimitDeclaration,
 } from "./contributes-map.mjs";
 export {
 	defineFederationType,
