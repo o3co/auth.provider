@@ -20,6 +20,16 @@ export {
 	redisAccessTokenDenylistBuilder,
 	redisAccessTokenDenylistModule,
 } from "./access-token-denylist.mjs";
+// ---------------------------------------------------------------------------
+// AttemptCounter: the counter behind a verifier's own attempt limits, under a
+// key namespace of its own.
+// ---------------------------------------------------------------------------
+export {
+	createRedisAttemptCounter,
+	DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX,
+	type RedisAttemptCounterOptions,
+	redisAttemptCounterModule,
+} from "./attempt-counter.mjs";
 export {
 	createRedisChallengeStore,
 	type RedisChallengeStoreOptions,
@@ -40,6 +50,9 @@ export type {
 	ActivateFederationGrantInput,
 	ApplyMfaSubjectRecoveryInput,
 	ApplyMfaSubjectRecoveryReply,
+	AttemptCounterClient,
+	AttemptCounterConsumeInput,
+	AttemptCounterConsumeReply,
 	AuthorizeMfaSubjectRecoveryInput,
 	AuthorizeMfaSubjectRecoveryReply,
 	ChallengeStoreClient,

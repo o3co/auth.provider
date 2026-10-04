@@ -25,7 +25,7 @@
 import type { AppConfig, OidcDiscoveryContribution } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import { oauthModule } from "../module.mjs";
+import { oauthEndpointsModule } from "../module.mjs";
 
 /** Truthy stubs for the six session-store deps that gate logout advertisement. */
 const allLogoutStores = {
@@ -68,12 +68,15 @@ async function discoveryContribution(
 	deps: Record<string, unknown> = {},
 	config: AppConfig = configWithRevocation(),
 ): Promise<OidcDiscoveryContribution> {
-	const factory = oauthModule({ config }).contributes?.discoveryMetadata?.[0];
+	const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
 	// Awaited as the boot planner does: a contribution factory may answer with
 	// a promise.
 	return await factory({
 		config,
+		// The module's own section, as boot hands it: what the slice reads of
+		// `oauth {}`.
+		section: config.oauth,
 		// An authorization server that serves /authorize unless a test says
 		// otherwise.
 		grantHandlerResolver: grantResolver("authorization_code"),
@@ -160,10 +163,11 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 				grants: { authorization_code: { pkce: { supportedMethods: ["S256", "plain"] } } },
 			},
 		} as unknown as AppConfig;
-		const factory = oauthModule({ config }).contributes?.discoveryMetadata?.[0];
+		const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
 		if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
 		const meta = await factory({
 			config,
+			section: config.oauth,
 			grantHandlerResolver: grantResolver("authorization_code"),
 			sessionRequirementResolver: resolverForTests([]),
 		} as never);

@@ -21,7 +21,7 @@
  * A token cannot exist apart from OAuth, so these settings are this module's,
  * in `oauth {}`; modules outside this package that mint, bind or verify
  * tokens, or build a URL on the issuer, read them through the slot instead of
- * the section. Each value is resolved here:
+ * the section. Each value is resolved here, from the section alone:
  *
  * - the issuer as written, held to core's `checkCanonicalIssuer` — the oauth
  *   router refuses the same issuer at construction;
@@ -37,7 +37,6 @@
  */
 
 import {
-	type AppConfig,
 	checkCanonicalIssuer,
 	describeIssuerRejection,
 	type OAuthTokenSettings,
@@ -45,24 +44,36 @@ import {
 	resolveRefreshTokenLifetime,
 } from "@o3co/auth-provider-core";
 
-/** The keys of `oauth {}` the settings are read from, as a configuration may carry them. */
-interface OAuthTokenSection {
+/**
+ * The keys of `oauth {}` the settings are read from: the section as the
+ * module's schema parsed it, or as a composition that provides the slot
+ * without the module writes it.
+ */
+export interface OAuthTokenSection {
 	readonly jwt?: { readonly issuer?: unknown; readonly legacyTypAccept?: unknown };
+	readonly accessToken?: {
+		readonly defaultExpiresIn?: unknown;
+		readonly maxExpiresIn?: unknown;
+		readonly expiresIn?: unknown;
+	};
+	readonly refreshToken?: { readonly expiresIn?: unknown };
 	readonly resourceIndicator?: { readonly enabled?: unknown };
 	readonly requireEmailVerified?: unknown;
 }
 
 /**
- * The token settings `config` carries, resolved and frozen. Throws on an issuer
- * that is not canonical, and on a lifetime core's resolvers refuse.
+ * The token settings the section `oauth` carries, resolved and frozen. Throws
+ * on an issuer that is not canonical, and on a lifetime core's resolvers
+ * refuse.
  */
-export function oauthTokenSettingsFrom(config: AppConfig): OAuthTokenSettings {
-	const oauth = (config as { oauth?: OAuthTokenSection }).oauth;
+export function oauthTokenSettingsFrom(oauth: OAuthTokenSection | undefined): OAuthTokenSettings {
 	const issuer = oauth?.jwt?.issuer;
 	const rejection = checkCanonicalIssuer(issuer);
 	if (rejection !== null) {
 		throw new Error(`oauthTokenSettings: oauth.jwt.issuer ${describeIssuerRejection(rejection)}`);
 	}
+	// Core's resolvers read a configuration; the section is all they read of it.
+	const config = { oauth: oauth ?? {} };
 	const { defaultExpiresIn, maxExpiresIn } = resolveAccessTokenLifetime(config);
 	return Object.freeze({
 		// `checkCanonicalIssuer` answered null, which only a string satisfies.

@@ -79,6 +79,7 @@ import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
 import { createTokenHandler } from "./routes/token.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
+import type { OAuthSection } from "./section.mjs";
 import {
 	extractConfirmation,
 	type IntrospectResponse,
@@ -367,6 +368,7 @@ export const createOAuthRouter = async (
 	{
 		registry,
 		config,
+		section,
 		clientRepository: registeredClients,
 		codeRepository,
 		keyStore,
@@ -401,7 +403,20 @@ export const createOAuthRouter = async (
 		 * bare `GrantRegistry`.
 		 */
 		registry: Pick<GrantHandlerResolver, "get">;
+		/**
+		 * The configuration, for what the router reads beyond `oauth {}`: which
+		 * installed federation trusts its upstream IdP's `amr`. Without
+		 * `section`, its `oauth {}` too.
+		 */
 		config: AppConfig;
+		/**
+		 * `oauth {}` as the oauth module's schema parsed it: every `oauth.*`
+		 * setting the router reads — the issuer, the switches, the acr table,
+		 * the consent page, the Client ID Metadata Documents, what revocation
+		 * promises. `oauthModule` passes its own section; a router built by hand
+		 * without one reads the `oauth {}` its `config` carries.
+		 */
+		section?: OAuthSection;
 		clientRepository: ClientRepository;
 		/**
 		 * Where `/authorize` issues its codes. Required when `registry` holds
@@ -459,7 +474,7 @@ export const createOAuthRouter = async (
 		/**
 		 * The seams of the Client ID Metadata Document fetch (`fetch`,
 		 * `lookup`, `now`), for tests. Everything else about the feature comes
-		 * from `oauth.clientIdMetadataDocuments` in the config.
+		 * from `oauth.clientIdMetadataDocuments` in the section.
 		 */
 		clientIdMetadataDocuments?: Pick<ClientIdMetadataDocumentOptions, "fetch" | "lookup" | "now">;
 		/**
@@ -501,9 +516,12 @@ export const createOAuthRouter = async (
 		);
 	}
 	const router = express.Router();
+	// Every `oauth.*` setting below is read from here, and from nowhere else.
+	const oauth: unknown = section ?? config.oauth;
 
 	const { options, acrTable, canonicalIssuer, authorizationResponse, clientRepository } =
 		resolveRouterSettings({
+			section: oauth,
 			config,
 			authorizationEndpoint,
 			requirements,
@@ -567,10 +585,11 @@ export const createOAuthRouter = async (
 					// The session module's login entry, required here.
 					login: requireLoginEntry(loginEntry),
 					// The consent page, `oauth.consentPage.url`, read per request. The
-					// default lives in the package's reference.conf; a hand-built config
+					// default lives in the package's reference.conf; a hand-built section
 					// without the key falls back the same way.
 					consentUrl: () =>
-						(config.oauth as { consentPage?: { url?: string } }).consentPage?.url ?? "/consent",
+						(oauth as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
+						"/consent",
 					consentStore,
 					pendingConsentStore,
 					oauth: { ...options, acrValues: acrTable },
@@ -780,7 +799,7 @@ export const createOAuthRouter = async (
 			keyStore,
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
-			accessTokenRevocation: readAccessTokenRevocationMode(config),
+			accessTokenRevocation: readAccessTokenRevocationMode({ oauth }),
 			logger,
 			issuer: canonicalIssuer,
 			// private_key_jwt at /oauth/revoke, verified as at /oauth/token.

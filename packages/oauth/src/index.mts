@@ -58,14 +58,17 @@ export {
 } from "./middleware/clientAssertion.mjs";
 export type { ClientAuthMiddlewareOptions } from "./middleware/clientAuth.mjs";
 export { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
-export { oauthModule } from "./module.mjs";
+export { oauthEndpointsModule, oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
 export { oauthSessionModule } from "./oauthSession.mjs";
 export { createOAuthRouter } from "./routes.mjs";
+// `oauth {}` as the oauth module's schema parses it: what `createOAuthRouter`
+// takes as its `section`.
+export type { OAuthSection } from "./section.mjs";
 // The oauthTokenSettings slot's value, which oauthModule provides;
 // exported so a composition that provides the slot without the module
 // resolves it the same way.
-export { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
+export { type OAuthTokenSection, oauthTokenSettingsFrom } from "./tokenSettings.mjs";
 export {
 	extractConfirmation,
 	type IntrospectResponse,

@@ -356,6 +356,15 @@ Module-level messages that arrive wrapped in a factory failure:
   `redis-mfa-transaction-store.keyPrefix` that contains a brace is a `RangeError`
   `cause` (`packages/redis/src/internal/mfa-durability.mts`,
   `internal/mfa-keys.mts`).
+- The attempt counter on Redis: `redisAttemptCounterModule` reads the
+  server's `maxmemory-policy` before it provides the counter. Any policy but
+  `noeviction` is refused with a `RedisStoreEvictableError` `cause` whose
+  `reason` is `attempt-counter-evictable` and whose message names the policy:
+  every window's key carries a TTL, and an evicted running window starts its
+  key over, loosening a verifier's attempt limit. Set `maxmemory-policy`
+  `noeviction`, or give the counter a Redis of its own
+  (`packages/redis/src/attempt-counter.mts`). A policy it cannot read is a
+  warning instead (§4).
 - The Store as the MFA factor store (`foundationMfaFactorStoreModule`,
   `packages/foundation/src/mfa/module.mts`): `foundation-mfa-factor-store.listUrl
   (FOUNDATION_MFA_FACTOR_STORE_LIST_URL), … must be set: the Store keeps the MFA
@@ -1611,6 +1620,7 @@ stream — its level is fixed at `info`.
 | `federation_token_store_eviction_unchecked` (info, `store`, `adapter: "redis"`; `maxmemoryPolicy` — a policy it does not know; `err` when the server refused the question or could not answer; once at boot) | `redis/src/internal/federation-token-eviction.mts` | the federation token store could not judge its server's eviction policy (a managed server that blocks `INFO` and `CONFIG`, a policy it does not know, or no answer at boot) and booted. Confirm `noeviction` where the server is configured |
 | `mfa_factor_store_lossy`, `mfa_transaction_store_lossy` (warn, `store`, `adapter: "redis"`, once at boot) | `redis/src/internal/mfa-durability.mts` | the MFA store's Redis takes RDB snapshots and has no AOF: a crash loses what was written since the last snapshot — enrollments, whose accounts then read as never enrolled, or an operator reset's email-proof requirement (D12). Turn AOF on (`appendonly yes`, `appendfsync everysec`) |
 | `mfa_factor_store_volatile`, `mfa_transaction_store_volatile` (warn, `store`, `adapter: "redis"`, once at boot) | same | the MFA store's Redis has no persistence at all: a restart empties it. Turn AOF on |
+| `attempt_counter_durability_unchecked` (warn, `store: "attemptCounter"`, `adapter: "redis"`, `unread: ["maxmemory-policy"]`; `err` — the refusal's projection; once at boot) | `redis/src/attempt-counter.mts` | the attempt counter could not read the server's `maxmemory-policy` — `INFO` and `CONFIG` refused or renamed — and booted. Confirm `noeviction` where the server is configured: an evicting policy may drop a running attempt window |
 | `mfa_factor_store_durability_unchecked`, `mfa_transaction_store_durability_unchecked` (warn, `store`, `adapter: "redis"`; `unread` — the parts it could not read: `maxmemory-policy`, `appendonly`, `save`; `maxmemoryPolicy` — a policy it does not know, neither `noeviction`, a `volatile-*` nor an `allkeys-*` one; `err` — the first refusal's projection; once at boot) | same | part of the check could not run, and the store booted: the server refused a question — `INFO` or `CONFIG` renamed, disabled, or not permitted to the connection's user — or answered without the value, or reports a policy the check does not know. Confirm the rest where the server is configured (`noeviction`, AOF on), or let the user run `INFO` and `CONFIG GET` |
 | `mfa_transaction_store_lock_evictable` (warn, `store`, `adapter: "redis"`, `maxmemoryPolicy`, `evictableFamilies`, once at boot) | same | the MFA transaction store's Redis runs a `volatile-*` policy. A subject's lock and weekly window (`mfat:lock:`, `mfat:week:`) carry a TTL once no run of failures is counted, so at `maxmemory` the server may evict them, and a weekly hold on guessable proofs ends early (D21). A subject's first-binding mark (`mfat:first-binding:`) always carries one, and an evicted mark fails open: a session whose recorded enrollment witness may be stale is no longer refused a first binding (D12). A subject's lease (`mfat:lease:`) always carries one, and an evicted lease lets a second writer at the subject's factors. At `maxmemory`, `volatile-lru` and `volatile-random` were seen to evict nearly every mark; `volatile-lfu` and `volatile-ttl` spared them in the same probe. `evictableFamilies` names the four: `lock`, `week`, `first-binding`, `lease`. The MFA stores require `maxmemory-policy` `noeviction`: set it, on a Redis of their own if need be |
 | `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `core.deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; the standalone template installs no MFA store |
@@ -1823,6 +1833,7 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `oauth:code:<code>` | string, JSON code record | `redis-code-repository.defaultExpiresIn` (`REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN`, default 600 s) or the per-call `expiresIn`; consumed with `GETDEL` | `packages/redis/src/code-repository.mts` |
 | `atdeny:<jti>` | string `"1"` | the revoked access token's **remaining** lifetime plus about five minutes (`REVOCATION_RETENTION_ALLOWANCE_MS` — the verifier accepts a token that long past its `exp`); a token already past that writes nothing | `packages/redis/src/access-token-denylist.mts`, `packages/oauth/src/routes/revoke.mts` |
 | `<tag>:ip:<ip>` — `token`, `authorize`, `introspect`, `login`, `device_authorization`, `webauthn-authentication-options`; `device_verification:user:<subject>` | integer counter | the prefix's `windowSeconds`: `redis-rate-limiter.limits.<prefix>` when declared, else the budget the prefix's owning module contributes — `login` 20 per 900 s from `session.rateLimit.login` (the session module), `device_verification` 5 per 300 s from `device-grant.rateLimit` (the device grant), `webauthn-authentication-options` 30 per 60 s from `webauthn.rateLimit.authenticationOptions` (WebAuthn), `mfa` 60 per 300 s from `mfa.rateLimit.routes` (the MFA module) — else `defaultLimit` 60/60 s. The expiry is set atomically with the increment and only when missing, so a steady stream cannot hold a window open | `packages/redis/src/ratelimit.mts`, `ioredis/scripts/rate-limiter.mts` (`LUA_INCREMENT_WITH_TTL`), `core/src/ratelimit/budgetLookup.mts` |
+| `attempt:<tag>:<id>` — a verifier's attempt window (what core's attempt guard keys, for instance `<tag>:ip:<ip>`) | hash `{count, resetAt}` — the attempts counted in the window and its end, epoch ms on the replica's clock | the window's length plus 5 s (`ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS`), relative (`PEXPIRE`), set when the window opens and moved by nothing; a refused attempt writes nothing. The module refuses any `maxmemory-policy` but `noeviction` at boot. A key holding another type rejects every attempt under it (`WRONGTYPE`, a `503`): `DEL` it | `packages/redis/src/attempt-counter.mts`, `ioredis/scripts/attempt-counter.mts` (`ATTEMPT_COUNTER_CONSUME`) |
 | `ss:us:<sid>` | string, JSON `{sid, sub, authTimeMs, createdAtMs, expiresAtMs, claims, amr?, authentication?, enrollmentFacts?, renewalNonce?}` — `amr` (RFC 8176, #481) is left out when the login path recorded none; `authentication` (`{primary, federation?, upstreamAmr?, mfaAtMs?}`, the MFA ADR's D9) is left out by a release before it, and such a session is read as one to split — a federated one vouches for `fed` alone; `enrollmentFacts` (`{witness, mailAddress}`: the login's MFA enrollment witness and what its address is — none, one the provider reads, or one it cannot (`mailAddress`: `none`, `address`, `unreadable`), never the address; the MFA ADR's D12, D24) is left out by a release before it; such a session recorded nothing, which the MFA ADR's D12 has the `mfa` requirement send to log in before a first binding; `renewalNonce` (22 base64url characters, the MFA ADR's D27) is written by a verified second factor that carries one, binding the session to the one cookie session renewed for it, and left out until then — any other value reads the envelope as corrupt | the session's `expiresAt` (`SET … PX … NX`); a verified second factor rewrites the value with `KEEPTTL` | `packages/redis/src/userSessionStore.mts` |
 | `ss:rp:<sid>` | hash, field = `clientId`, value = RP envelope | `session.expiresAt`, raised but never truncated (`PEXPIREAT NX` + `GT`) | `packages/redis/src/sessionRPRegistry.mts`, `internal/redisSidHash.mts` |
 | `ss:fi:<sid>`, `ss:fed:<sid>` | sorted sets of family ids / federation names | same rule | `packages/redis/src/sessionFamilyIndex.mts`, `sessionFederationIndex.mts`, `internal/redisSidSortedSet.mts` |
@@ -2451,7 +2462,7 @@ lists every breaking change since, and which of the steps below each needs.
 5. **The oauth and session settings at their modules' sections.** Each path
    and variable that moved refuses boot naming the new one; the paths are in
    the [oauth](../packages/oauth/README.md#which-grants-are-on) and
-   [session](../packages/session/README.md#configuration) READMEs. Three
+   [session](../packages/session/README.md#configuration) READMEs. Four
    changes go further than the rename:
 
    - **The grant switches read the boolean vocabulary every other switch
@@ -2486,6 +2497,13 @@ lists every breaking change since, and which of the steps below each needs.
      removed (`environment-variable-renamed`). They used to log
      `pkce_config_ignored_s256_is_mandatory` once and be ignored. Delete both
      before you upgrade (the table in step 2).
+   - **`oauth {}` is strict.** A key under `oauth` that the oauth module's
+     schema does not declare, at any level, is refused
+     (`config-validation-failed`, naming its path) where it used to be
+     dropped unread: a typo, or a key nothing reads any more. A path another
+     section moved from (`oauth.grants`, `oauth.dpop`, …) may stay only as an
+     empty object or `null`. The keys the section declares are in the
+     [oauth README](../packages/oauth/README.md#configuration).
 
 6. **The template's own settings, the adapter selections, the repositories,
    the audit sink's declared absence and the federations at their new

@@ -27,6 +27,8 @@ import type {
  * Read-only projection of the boot planner's `grants` collector, for route
  * factories that dispatch by `grant_type` at request time. The planner builds
  * it before the `provides` factories run and freezes the registry behind it.
+ * A grant whose factory answered `null` (switched off) is absent from both
+ * `get` and `entries`, exactly like a grant type no module contributes.
  */
 export interface GrantHandlerResolver {
 	readonly get: (grantType: string) => GrantHandler | undefined;
