@@ -101,7 +101,7 @@ const config = handle.components.config; // boot がパースしたもの
 
 #### グラントハンドラーの登録
 
-モジュールはグラントを `contributes.grants` にグラントタイプをキーとして宣言します。そもそもグラントを contribute するかどうかはモジュールが決めます: `oauth` パッケージのモジュールはスイッチ — session グラントは `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — が true のグラントだけを contribute し、token exchange と WebAuthn はモジュールが組み込まれれば自分のグラントを contribute し、device-grant モジュールは自身の `device-grant.enabled` が true のときだけ device grant を登録します。boot は各ファクトリーを実行し、ハンドラーをそのグラントタイプで登録し — 2 つのモジュールが同じグラントタイプを contribute すると boot は拒否されます — ステージ 5 でレジストリを freeze するので、boot 後の登録は throw します。コンシューマコードがレジストリを import したり組み立てたりすることはありません: `GrantRegistry` は内部実装で、パッケージルートからは export されていません。
+モジュールはグラントを `contributes.grants` にグラントタイプをキーとして宣言します。そもそもグラントを contribute するかどうかはモジュールが決めます: `oauth` パッケージのモジュールはスイッチ — session グラントは `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — が true のグラントだけを contribute し、token exchange と WebAuthn はモジュールが組み込まれれば自分のグラントを contribute し、device-grant モジュールは自身の `device-grant.enabled` が true のときだけ device grant を登録します。ファクトリーは代わりに `null` を返してグラントをオフにできます: そのグラントタイプはトークンエンドポイントのディスパッチにも discovery の `grant_types_supported` にも現れず、どのモジュールも contribute していないグラントタイプと同じ扱いになりますが、名前は確保されたままで、それを override すると boot は拒否されます。boot は各ファクトリーを実行し、ハンドラーをそのグラントタイプで登録し — 2 つのモジュールが同じグラントタイプを contribute すると boot は拒否されます — ステージ 5 でレジストリを freeze するので、boot 後の登録は throw します。コンシューマコードがレジストリを import したり組み立てたりすることはありません: `GrantRegistry` は内部実装で、パッケージルートからは export されていません。
 
 `GrantHandler` には後始末のフックがありません。`AppHandle.dispose()` は、提供された各コンポーネントの `lifecycle[K].cleanup` を reverse-topological 順で実行し、次に宣言を持たないモジュール提供値の `Symbol.asyncDispose` を、最後に `LifecycleRegistrar` の drain を行い — レジストリには触れません。ハンドラーのためにリソースを保持するモジュールは、自分の `lifecycle[K].cleanup` でそれを解放します。[`src/grants/README.md`](src/grants/README.md) を参照してください。
 
@@ -476,7 +476,7 @@ const myGrantModule = defineModule({
 });
 ```
 
-`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。`GrantFactory` は `GrantDependencies` を受け取り、その必須スロットは `config` と `keyStore` なので、モジュールはその両方を requires します。oauth モジュールの設定の issuer、有効期間、スイッチを読むグラントは `oauthTokenSettings` を optional に宣言し、`checkOAuthTokenSettings(deps.oauthTokenSettings)` で検査します。これは設定を必要としません: スロットの有効期間を設定の値に収めるのは boot 自身です。boot planner はグラントを `my_grant` で登録し、`/oauth/token` は `grantHandlerResolver` synthetic key を通じてそれにディスパッチします。
+`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。`GrantFactory` は `GrantDependencies` を受け取り、その必須スロットは `config` と `keyStore` なので、モジュールはその両方を requires します。返すのはハンドラー、またはモジュール自身の設定がグラントをオフにしているときは `null` で、Promise で返しても構いません。oauth モジュールの設定の issuer、有効期間、スイッチを読むグラントは `oauthTokenSettings` を optional に宣言し、`checkOAuthTokenSettings(deps.oauthTokenSettings)` で検査します。これは設定を必要としません: スロットの有効期間を設定の値に収めるのは boot 自身です。boot planner はグラントを `my_grant` で登録し、`/oauth/token` は `grantHandlerResolver` synthetic key を通じてそれにディスパッチします。
 
 ### YAML からクライアントとユーザーを読み込む
 

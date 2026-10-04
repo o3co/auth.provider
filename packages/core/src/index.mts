@@ -156,6 +156,7 @@ export type {
 	DuplicateProvidesDetails,
 	DuplicateSecondFactorAuthorityDetails,
 	EnvironmentVariableRenamedDetails,
+	GrantCollector,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
 	ListCollector,

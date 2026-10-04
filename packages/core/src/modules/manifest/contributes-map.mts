@@ -81,7 +81,18 @@ export type GrantPolicyHookContribution = GrantPolicyHook;
 
 // Per-kind factory types: each is `(deps: Deps) => Value`.
 
-export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler>;
+/**
+ * A `grants` entry, keyed by grant type. `null` when the grant is switched off
+ * by the module's settings: it is then absent from `grantHandlerResolver` —
+ * so from the token endpoint's dispatch and discovery's
+ * `grant_types_supported` — as a grant type no module contributes is, yet
+ * still claimed, so a second contribution of it is a duplicate. It is no
+ * override target: an override of it refuses boot
+ * (`override-target-missing`), so nothing switches on what its owner switched
+ * off. An override may answer `null`, which switches off the grant it
+ * replaces.
+ */
+export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler | null>;
 
 /**
  * One configured federation as a type's factories receive it: the operator's

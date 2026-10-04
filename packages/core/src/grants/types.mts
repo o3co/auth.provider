@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { Contributed } from "../modules/manifest/contributed.mjs";
 import type { ProviderDeps } from "../modules/manifest/provider.mjs";
 import type { TokenEndpointAuthMethod } from "../repositories/types.mjs";
 import type { SenderConstraint } from "./senderConstraint.mjs";
@@ -238,7 +239,11 @@ export type GrantDependencies = ProviderDeps<
 >;
 
 /**
- * Factory function type for creating grant handlers.
- * Used by OSS consumers to implement custom grant types.
+ * Factory function type for creating grant handlers: a module's
+ * `contributes.grants` entry over `GrantDependencies`. Used by OSS consumers
+ * to implement custom grant types. It answers the handler, or `null` when the
+ * module's settings switch the grant off — the grant type is then absent from
+ * the token endpoint's dispatch and from discovery, as one no module
+ * contributes is — and may answer either through a promise.
  */
-export type GrantFactory = (deps: GrantDependencies) => GrantHandler;
+export type GrantFactory = (deps: GrantDependencies) => Contributed<GrantHandler | null>;

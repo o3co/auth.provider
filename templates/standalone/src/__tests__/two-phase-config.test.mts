@@ -248,7 +248,7 @@ describe("phase two: what createApp is handed", () => {
 		const reference = join(dir, "reference.conf");
 		writeFileSync(
 			reference,
-			'widget { size = 3 }\noauth.revocation.accessToken = "widget-revocation"\noauth.oidcMode = "widget-mode"\n',
+			'widget { size = 3 }\noauth.revocation.accessToken = "widget-revocation"\ncore.tokenBinding.dispatchPolicy = "widget-policy"\n',
 		);
 		return {
 			name: "widget",
@@ -267,7 +267,9 @@ describe("phase two: what createApp is handed", () => {
 		// The template's application.conf wins over a package's reference…
 		expect(resolved.oauth?.revocation).toEqual({ accessToken: "denylist" });
 		// …and a package's reference over core's.
-		expect(resolved.oauth?.oidcMode).toBe("widget-mode");
+		expect(
+			(resolved.core?.tokenBinding as { dispatchPolicy?: unknown } | undefined)?.dispatchPolicy,
+		).toBe("widget-policy");
 	});
 
 	it("layers no reference a loaded module does not declare", () => {

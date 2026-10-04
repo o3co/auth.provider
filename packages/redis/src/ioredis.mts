@@ -12,6 +12,7 @@ import { consoleLogger, type EventLogger } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import type {
 	AccessTokenDenylistClient,
+	AttemptCounterClient,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
 	ConsentStoreClient,
@@ -30,6 +31,7 @@ import type {
 	SubjectSessionIndexClient,
 	UserSessionStoreClient,
 } from "./clients.mjs";
+import { makeIoredisAttemptCounterClient } from "./ioredis/clients/attempt-counter.mjs";
 import {
 	makeIoredisConsentStoreClient,
 	makeIoredisPendingConsentStoreClient,
@@ -106,6 +108,7 @@ export function makeIoredisClients(
 	subjectRevocationClient: SubjectRevocationClient;
 	federationTokenStoreClient: FederationTokenStoreClient;
 	rateLimiterClient: RateLimiterClient;
+	attemptCounterClient: AttemptCounterClient;
 	codeRepositoryClient: CodeRepositoryClient;
 	deviceCodeStoreClient: DeviceCodeStoreClient;
 	consentStoreClient: ConsentStoreClient;
@@ -145,6 +148,7 @@ export function makeIoredisClients(
 		subjectRevocationClient,
 		federationTokenStoreClient,
 		rateLimiterClient,
+		attemptCounterClient: makeIoredisAttemptCounterClient(io),
 		codeRepositoryClient,
 		deviceCodeStoreClient,
 		consentStoreClient,

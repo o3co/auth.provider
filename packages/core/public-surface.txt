@@ -277,6 +277,7 @@
 . GenerateIdTokenOptions type
 . GenerateLogoutTokenOptions type
 . GenerateTokenOptions type
+. GrantCollector type
 . GrantContext type
 . GrantDependencies type
 . GrantError type
