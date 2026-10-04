@@ -63,7 +63,7 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
  * about (refused under `multi`, a warning when `unset`). The module contributes
  * `webauthn.rateLimit.authenticationOptions` as the tag's budget, which a wired limiter applies;
  * the fallback limiter applies the same key. The outage policy is the limiter's own `failMode`,
- * as for the OAuth endpoints and `/session/login`.
+ * as for the OAuth endpoints and the MFA routes.
  */
 export const webauthnModule = defineModule<
 	| "webauthnCredentialStore"
@@ -268,10 +268,10 @@ export const webauthnModule = defineModule<
 						);
 					}
 				} else {
-					// A shared limiter applies the contributed budget for the tag, which another
-					// module may have overridden away from the section's; boot warns once when
-					// they differ. A limiter's own `limits` entry for the tag overrides both and
-					// is not visible here.
+					// A shared limiter applies the budget registered for the tag: the one this
+					// module contributes from its section, since boot refuses an override of
+					// it. Boot warns once if the two ever differ. A limiter's own `limits`
+					// entry for the tag overrides both and is not visible here.
 					const contributed = deps.rateLimitBudgetResolver.get(
 						WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
 					);
@@ -289,9 +289,9 @@ export const webauthnModule = defineModule<
 						);
 					}
 				}
-				// Fall back rather than leave the route unguarded, as `/session/login` does: this is
-				// the credential-store flood and enumeration surface, and a per-process bucket is
-				// weak protection, not none. The warning above states which one is in force.
+				// Fall back rather than leave the route unguarded: this is the credential-store flood
+				// and enumeration surface, and a per-process bucket is weak protection, not none.
+				// The warning above states which one is in force.
 				const limiter: RateLimiter =
 					deps.rateLimiter ??
 					createMemoryRateLimiter({
@@ -302,7 +302,7 @@ export const webauthnModule = defineModule<
 				router.post(
 					"/",
 					// The outage policy is the limiter's own `failMode`, the one the
-					// OAuth endpoints and `/session/login` apply on the same limiter:
+					// OAuth endpoints and the MFA routes apply on the same limiter:
 					// an outage must not mean "shed load" on one surface and "let
 					// everything through" on another.
 					createRateLimitGuard({
