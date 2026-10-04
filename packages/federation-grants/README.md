@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -199,7 +199,11 @@ say what each one means and what to do.
   `federation_grants` or `federation_grants_browser`. While the feature is on,
   the module claims both prefixes with no budget of its own
   (`rateLimitBudgets`): the limiter's `limits` entry or its default applies,
-  and no other module can set a budget for them.
+  and no other module can set a budget for them. Request volume is the
+  deployment's limiter's to bound: the module does not require one. With no
+  `rateLimiter` wired, both halves let every request through, and core's
+  policy for the slot refuses the boot (`component-absence-undeclared`) unless
+  `core.declaredAbsent` lists `"rateLimiter"`.
 
 ## Public API
 

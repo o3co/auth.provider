@@ -275,6 +275,12 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   do), so request-volume limits on the others are then for what
   sits in front of the provider. The template wires a limiter
   (`adapters.rateLimiter`), so a scaffold needs nothing.
+- **Federation grants no longer require a rate limiter (#807).** With
+  `federation-grants.enabled = true` and no `rateLimiter` wired, the module
+  no longer refuses the boot itself; its client routes and browser pages let
+  every request through, and core's policy for the slot applies instead: list
+  `"rateLimiter"` in `core.declaredAbsent`. With a limiter wired, both are
+  throttled as before.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
   refused (#807).** `core-rate-limiter-memory.limits` and
   `redis-rate-limiter.limits` may not name either prefix: each is a verifier's

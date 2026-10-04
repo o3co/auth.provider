@@ -126,19 +126,26 @@ export function createFederationGrantBrowserRouter(
 
 	// The deployment's own logger and audit sink: a limiter outage here is
 	// logged and audited as on every other throttled route.
-	const throttlePolicy = createRateLimitPolicy(
-		{
-			limiter: options.rateLimiter,
-			tag: FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
-			...(options.logger === undefined ? {} : { logger: options.logger }),
-			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
-		},
-		"createFederationGrantBrowserRouter",
-	);
-	/** The browser budget: the outage policy is core's, the rendering is the transport's. */
+	const throttlePolicy =
+		options.rateLimiter === undefined
+			? undefined
+			: createRateLimitPolicy(
+					{
+						limiter: options.rateLimiter,
+						tag: FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
+						...(options.logger === undefined ? {} : { logger: options.logger }),
+						...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+					},
+					"createFederationGrantBrowserRouter",
+				);
+	/**
+	 * The browser budget: the outage policy is core's, the rendering is the
+	 * transport's. Without a limiter, a request passes.
+	 */
 	const throttle =
 		(render: (res: Response, status: number) => void): RequestHandler =>
 		async (req, res, next) => {
+			if (throttlePolicy === undefined) return next();
 			const ip = req.ip ?? "unknown";
 			const outcome = await checkWithFailMode(
 				throttlePolicy,

@@ -237,8 +237,11 @@ export interface FederationGrantRouterOptions extends FederationGrantTokenHandle
 	 * `connect_uri` is built on.
 	 */
 	readonly issuer: string;
-	/** The routes' budget; its own `failMode` is the outage policy. */
-	readonly rateLimiter: RateLimiter;
+	/**
+	 * The routes' budget; its own `failMode` is the outage policy. Absent, the
+	 * routes are not throttled.
+	 */
+	readonly rateLimiter?: RateLimiter;
 	/** Where a `private_key_jwt` assertion's single-use `jti` is recorded. */
 	readonly replaySeenSet?: ReplaySeenSet;
 }
@@ -290,15 +293,17 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	// `deniedDescription` keeps this route's throttle speaking the same
 	// vocabulary as core's — `rate_limited` with the reason `provider` — rather
 	// than whichever budget name the limiter adapter reports.
-	router.use(
-		createRateLimitGuard({
-			limiter: options.rateLimiter,
-			tag: FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
-			deniedDescription: "provider",
-			...(options.logger === undefined ? {} : { logger: options.logger }),
-			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
-		}),
-	);
+	if (options.rateLimiter !== undefined) {
+		router.use(
+			createRateLimitGuard({
+				limiter: options.rateLimiter,
+				tag: FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
+				deniedDescription: "provider",
+				...(options.logger === undefined ? {} : { logger: options.logger }),
+				...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+			}),
+		);
+	}
 	router.use(supportedContentType);
 	router.use(withinBodyLimit);
 	router.use(express.json({ limit: BODY_LIMIT }));
