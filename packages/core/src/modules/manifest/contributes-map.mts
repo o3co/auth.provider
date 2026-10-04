@@ -280,9 +280,8 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * time. A prefix contributed twice refuses boot (`duplicate-contribute`); an
 	 * empty prefix, one holding `:` or one naming an `Object.prototype` member
 	 * refuses it at stage 1 (`contribution-malformed`); an unusable budget fails
-	 * its contribution, and so does an override that loosens the budget it
-	 * replaces (a `null` side counts as the wired limiter's `defaultLimit`); a
-	 * host may not supply the collector (`contribution-kind-guarded`).
+	 * its contribution; a prefix is its claimant's, so an override of one, and a
+	 * host's own collector, are refused (`contribution-kind-guarded`).
 	 */
 	readonly rateLimitBudgets?: {
 		readonly [prefix: string]: RateLimitBudgetFactory<Deps>;

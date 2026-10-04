@@ -27,8 +27,9 @@
  * - configured: each owner's own key set by an operator
  *   (`session.rateLimit.login`, `device-grant.rateLimit`,
  *   `webauthn.rateLimit.authenticationOptions`, `mfa.rateLimit.routes`);
- * - declared: the same, and every prefix also declared in the limiter's own
- *   `limits`, which wins;
+ * - declared: the same, and every prefix but a verifier's also declared in
+ *   the limiter's own `limits`, which wins; `login` and `device_verification`
+ *   stay their owners', since a limiter's `limits` may not name them;
  * - off: the owners switched off — the device grant disabled, WebAuthn and
  *   the MFA package not installed. The session module is the template's and
  *   always installed, and its reference ships `session.rateLimit.login`;
@@ -79,14 +80,14 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 	login: {
 		shipped: spec(20, 900),
 		configured: spec(7, 60),
-		declared: spec(4, 45),
+		declared: spec(7, 60),
 		off: spec(20, 900),
 		offConfigured: spec(7, 60),
 	},
 	device_verification: {
 		shipped: spec(5, 300),
 		configured: spec(3, 120),
-		declared: spec(2, 90),
+		declared: spec(3, 120),
 		// Disabled, the grant registers nothing: the limiter's default applies.
 		off: spec(60, 60),
 		offConfigured: spec(60, 60),
@@ -123,11 +124,13 @@ webauthn.rateLimit.authenticationOptions { limit = 11, windowSeconds = 30 }
 mfa.rateLimit.routes { limit = 13, windowSeconds = 240 }
 `;
 
-/** Every prefix in the limiter's own section, beside the owners' keys. */
+/** The limiter's own section's name. */
+const limiterSection = (adapter: Adapter): string =>
+	adapter === "redis" ? "redis-rate-limiter" : "core-rate-limiter-memory";
+
+/** Every prefix but a verifier's in the limiter's own section, beside the owners' keys. */
 const declaredLimits = (adapter: Adapter): string => `
-${adapter === "redis" ? "redis-rate-limiter" : "core-rate-limiter-memory"}.limits {
-  login { limit = 4, windowSeconds = 45 }
-  device_verification { limit = 2, windowSeconds = 90 }
+${limiterSection(adapter)}.limits {
   webauthn-authentication-options { limit = 9, windowSeconds = 15 }
   mfa { limit = 6, windowSeconds = 75 }
   token { limit = 17, windowSeconds = 20 }
@@ -197,6 +200,29 @@ describe.each<Adapter>(["memory", "redis"])("the %s limiter", (adapter) => {
 				if (limiter === undefined) throw new Error("the full set booted without a rateLimiter");
 				expect(await applied(limiter, prefix)).toEqual(TABLE[prefix][cell]);
 			});
+		},
+	);
+});
+
+describe.each<Adapter>(["memory", "redis"])("the %s limiter's own limits", (adapter) => {
+	it.each([
+		["login", "session.rateLimit.login"],
+		["device_verification", "device-grant.rateLimit"],
+	])(
+		"refuses the boot on an entry for %s, a verifier's own limit, naming the key and %s",
+		async (prefix, setting) => {
+			const err = await composeFullSet({
+				env: envFor(adapter),
+				operatorHocon: `${limiterSection(adapter)}.limits { ${prefix} { limit = 1000, windowSeconds = 1 } }`,
+			}).then(
+				(composition) => composition.handle.dispose().then(() => undefined),
+				(caught: unknown) => caught,
+			);
+
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe("config-validation-failed");
+			expect((err as BootError).message).toContain(`${limiterSection(adapter)}.limits.${prefix}`);
+			expect((err as BootError).message).toContain(setting);
 		},
 	);
 });

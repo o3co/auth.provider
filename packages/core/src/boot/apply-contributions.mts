@@ -36,7 +36,7 @@ import type {
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
 import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
-import { isBoundedRateLimitSpec, isUsableRateLimitSpec } from "../ratelimit/usableSpec.mjs";
+import { isBoundedRateLimitSpec } from "../ratelimit/usableSpec.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
@@ -463,7 +463,7 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  *   is the copy `registeredRequirement` makes, its page held to the issuer's
  *   origin; its `reach` is read later (`checkSessionRequirements`);
  * - a `rateLimitBudgets` budget no limiter can apply as written
- *   (`isUsableRateLimitSpec`). What registers is the frozen copy that was
+ *   (`isBoundedRateLimitSpec`). What registers is the frozen copy that was
  *   validated.
  *
  * `null` (switched off by configuration) passes for `grants`, `mfaFactors`
@@ -564,40 +564,6 @@ function checkNameKeyedValue(
 	return value;
 }
 
-/** A budget as a refusal shows it. */
-const describedBudget = (spec: RateLimitSpec): string =>
-	`limit ${spec.limit}, windowSeconds ${spec.windowSeconds}`;
-
-/**
- * Refuses a `rateLimitBudgets` override that loosens the budget it replaces:
- * a higher `limit` or a shorter `windowSeconds`. A `null` side counts as the
- * wired limiter's `defaultLimit`; without one it cannot be compared, and is
- * refused.
- * @internal
- */
-function checkBudgetOverride(
-	name: string,
-	replaced: RateLimitSpec | null,
-	overriding: RateLimitSpec | null,
-	limiter: unknown,
-): void {
-	if (replaced === null && overriding === null) return;
-	const declared = (limiter as { readonly defaultLimit?: unknown } | undefined)?.defaultLimit;
-	const defaultLimit = isUsableRateLimitSpec(declared) ? declared : undefined;
-	const from = replaced ?? defaultLimit;
-	const to = overriding ?? defaultLimit;
-	if (from === undefined || to === undefined) {
-		throw new RangeError(
-			`rateLimitBudgets "${name}": an override may only tighten the budget it replaces, and a switched-off budget counts as the wired limiter's defaultLimit, which no wired limiter declares`,
-		);
-	}
-	if (to.limit > from.limit || to.windowSeconds < from.windowSeconds) {
-		throw new RangeError(
-			`rateLimitBudgets "${name}": an override may only tighten the budget it replaces — limit no higher and windowSeconds no shorter than ${describedBudget(from)}${replaced === null ? ", the limiter's defaultLimit" : ""} (got ${describedBudget(to)}${overriding === null ? ", the limiter's defaultLimit" : ""})`,
-		);
-	}
-}
-
 /** The wired limiter's kind and the outage policy the guard applies for it. */
 function limiterInForce(
 	limiter: RateLimiter | undefined,
@@ -615,7 +581,7 @@ function limiterInForce(
 /**
  * Logs `rate_limit_budgets_registered` at info — the wired limiter's kind and
  * outage policy, and each prefix with its contributed budget and the module
- * that set it; a limiter's own `limits` entry wins over that budget and is
+ * that claimed it; a limiter's own `limits` entry wins over that budget and is
  * not shown — and `rate_limit_fail_mode_not_applied` at warn when
  * `rateLimit.failMode` says `open` and the wired limiter applies another
  * policy: the path `redis-rate-limiter.failMode` moved from, which only the
@@ -628,34 +594,28 @@ function logRateLimitBudgets(
 	components: Record<string, unknown>,
 	collector: NameKeyedCollector<RateLimitSpec | null> | undefined,
 ): void {
-	const setters = new Map<string, { module: string; by: "contribution" | "override" }>();
+	const claimants = new Map<string, string>();
 	for (const moduleName of material.plan.initOrder) {
 		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
 		const normalised = material.plan.validated.byName.get(moduleName)!.normalised;
-		for (const [entries, by] of [
-			[normalised.contributesEntries, "contribution"],
-			[normalised.overridesEntries, "override"],
-		] as const) {
-			for (const entry of entries) {
-				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
-				setters.set(entry.key, { module: moduleName, by });
-			}
+		for (const entry of normalised.contributesEntries) {
+			if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+			claimants.set(entry.key, moduleName);
 		}
 	}
 	const limiter = limiterInForce(components.rateLimiter as RateLimiter | undefined);
-	if (setters.size === 0 && limiter === null) return;
+	if (claimants.size === 0 && limiter === null) return;
 	const logger = (components.logger as Logger | undefined) ?? consoleLogger;
 	logger.info(
 		{
 			limiter,
-			budgets: [...setters].map(([prefix, { module, by }]) => {
+			budgets: [...claimants].map(([prefix, module]) => {
 				const budget = collector?.get(prefix) ?? null;
 				return {
 					prefix,
 					budget:
 						budget === null ? null : { limit: budget.limit, windowSeconds: budget.windowSeconds },
 					module,
-					by,
 				};
 			}),
 		},
@@ -1335,14 +1295,6 @@ export async function applyContributions(
 			let value: unknown;
 			try {
 				value = checkNameKeyedValue(entry.kind, name, await factory(deps), issuerOf(components));
-				if (entry.kind === "rateLimitBudgets") {
-					checkBudgetOverride(
-						name,
-						collector.get(name) as RateLimitSpec | null,
-						value as RateLimitSpec | null,
-						components.rateLimiter,
-					);
-				}
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({

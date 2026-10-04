@@ -52,6 +52,24 @@ describe("redisRateLimiterBuilder", () => {
 		);
 	});
 
+	it.each([
+		["login", "session.rateLimit.login"],
+		["device_verification", "device-grant.rateLimit"],
+	])(
+		"refuses limits.%s, a verifier's own limit, naming the setting it is made at",
+		(prefix, setting) => {
+			const client = { incrementWithTtl: async () => 1 };
+			const build = () =>
+				redisRateLimiterBuilder(
+					{ client, limits: { [prefix]: { limit: 5, windowSeconds: 60 } } },
+					{},
+				);
+			expect(build).toThrow(RangeError);
+			expect(build).toThrow(`limits.${prefix}`);
+			expect(build).toThrow(setting);
+		},
+	);
+
 	it("refuses a failMode JSON cannot write — a BigInt, a circular object — with its RangeError", () => {
 		const client = { incrementWithTtl: async () => 1 };
 		const circular: Record<string, unknown> = {};

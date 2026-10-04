@@ -176,9 +176,10 @@ export function makeValidAppConfig() {
 	return {
 		...core,
 		...makeValidFullSections(),
-		// Declares the audit sink absent (this fixture has no audit trail, on
-		// purpose); the bundled modules refuse an unfilled `auditSink`
-		// otherwise. A test of the declared-absence guard removes the entry.
-		...coreConfigForTests({ declaredAbsent: ["auditSink"] }),
+		// Declares the audit sink and the rate limiter absent (this fixture has
+		// no audit trail and no limiter, on purpose); boot refuses either slot
+		// unfilled and undeclared once a module reads it. A test of the
+		// declared-absence guard removes the entries.
+		...coreConfigForTests({ declaredAbsent: ["auditSink", "rateLimiter"] }),
 	} satisfies AppConfig;
 }

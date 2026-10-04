@@ -487,7 +487,10 @@ The rate limiter takes a key's budget from core's one lookup,
 `createRateLimitBudgetLookup`: its own `redis-rate-limiter.limits` entry for the
 key's prefix, else the budget the prefix's owning module contributed
 (`rateLimitBudgetResolver`, read and checked at each check), else its
-`defaultLimit`, which it declares (`RateLimiter.defaultLimit`).
+`defaultLimit`, which it declares (`RateLimiter.defaultLimit`). Its `limits`
+may not name `login` or `device_verification`, a verifier's own attempt limit
+set at `session.rateLimit.login` and `device-grant.rateLimit`: the section and
+`redisRateLimiterBuilder` refuse such an entry.
 `redisRateLimiterModule` answers `redis-rate-limiter.failMode`, its own key, as
 the limiter's outage policy (`RateLimiter.failMode`), which the guard applies
 while Redis cannot answer; a value other than `"open"` or `"closed"` refuses

@@ -997,19 +997,25 @@ export {
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
 // @o3co/auth-provider-redis.
-export type {
-	RateLimitContext,
-	RateLimitDecision,
-	RateLimiter,
-	RateLimiterFactory,
-	RateLimitFailMode,
-	RateLimitSpec,
+export {
+	RATE_LIMITER_ABSENCE_POLICY,
+	type RateLimitContext,
+	type RateLimitDecision,
+	type RateLimiter,
+	type RateLimiterFactory,
+	type RateLimitFailMode,
+	type RateLimitSpec,
 } from "./ratelimit/types.mjs";
 export {
 	assertUsableRateLimitSpecs,
 	isUsableRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "./ratelimit/usableSpec.mjs";
+// A limiter's own `limits` never names a prefix a verifier limits itself.
+export {
+	assertNoVerifierLimits,
+	refuseVerifierLimitEntries,
+} from "./ratelimit/verifierLimits.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,

@@ -1318,7 +1318,8 @@ export interface ComponentAbsenceUndeclaredDetails {
  * `core.federations` entries. Refused in `createApp`, before the kinds are
  * merged. Also, at stage 1, naming the module and the channel: a module's
  * `overrides.admissionActions` entry, naming the action (an action's grade is
- * its registrant's), and a module's `contributes` or `overrides` of
+ * its registrant's), a module's `overrides.rateLimitBudgets` entry, naming
+ * the prefix (a prefix is its claimant's), and a module's `contributes` or `overrides` of
  * `federations` or `federationRedirectPolicies` whatever it holds, the module
  * switched on or not (a federation registers through its type alone), naming
  * the container's first entry only when the container is a record with one.
@@ -1336,9 +1337,10 @@ export interface ContributionKindGuardedDetails {
 	readonly channel?: "contributes" | "overrides";
 	readonly module?: string;
 	/**
-	 * The entry refused: the action of an `admissionActions` override, or the
-	 * first entry of a federation kind's container when it is a record with
-	 * one; absent otherwise.
+	 * The entry refused: the action of an `admissionActions` override, the
+	 * prefix of a `rateLimitBudgets` override, or the first entry of a
+	 * federation kind's container when it is a record with one; absent
+	 * otherwise.
 	 */
 	readonly name?: string;
 }

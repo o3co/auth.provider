@@ -265,6 +265,22 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   enabled `core.federations` entries with the same `callbackURL` refuse the
   boot (`config-validation-failed` at `core.federations.<name>.callbackURL`).
   Only one of them could complete a login. Give each its own.
+- **BREAKING: a composition with no rate limiter says so (#807).** When no
+  module provides `rateLimiter` and an installed module reads it, the boot is
+  refused (`component-absence-undeclared`, naming `rateLimiter`) unless
+  `core.declaredAbsent` lists it: `core.declaredAbsent = ["rateLimiter"]`,
+  beside `"auditSink"` if you list that. Declared absent, the routes that key
+  the limiter let every request through, so request-volume limits are then
+  for what sits in front of the provider. The template wires a limiter
+  (`adapters.rateLimiter`), so a scaffold needs nothing.
+- **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
+  refused (#807).** `core-rate-limiter-memory.limits` and
+  `redis-rate-limiter.limits` (and the builders' `limits`) may not name either
+  prefix: each is a verifier's own attempt limit, which no limiter may loosen.
+  The boot is refused (`config-validation-failed`, naming the key and the
+  setting). Move the numbers to the module's own setting:
+  `session.rateLimit.login` for login, `device-grant.rateLimit` for device
+  verification.
 
 The boot refusals you can meet, with their messages, are in
 [operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).
@@ -512,8 +528,9 @@ modules fills them.
   the type instead (`overrides.federationTypes.<type>`, with its own
   `redirectPolicy`).
 - **Rate limits.** The module that keys a prefix contributes its budget
-  (`rateLimitBudgets`); the bundled limiters seed none (#782). An override
-  that loosens a budget refuses the boot. In code: the `failMode` options are
+  (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
+  overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot
+  (`contribution-kind-guarded`, #807). In code: the `failMode` options are
   gone from `createDeviceVerificationHandler`, the federation-grants routers,
   `RateLimitGuardOptions` and `RateLimitPolicyOptions`; `checkWithFailMode`
   takes a policy from `createRateLimitPolicy` and refuses any other object;
@@ -764,8 +781,7 @@ with what a store of yours records and refuses. Per port:
   ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
 - **`RateLimiter`.** One that declares no `failMode` fails closed, whatever
   `redis-rate-limiter.failMode` says (formerly `rateLimit.failMode`, now a
-  retired path that refuses the boot); a wrapper forwards `failMode` and
-  `defaultLimit` (#782).
+  retired path that refuses the boot); a wrapper forwards `failMode` (#782).
 - **Redis clients of your own.** `SubjectRevocationClient` implements
   `advanceRevocationBoundaries`, and `setRevocationBoundaries` is gone (#993):
   add the method on the current release first.

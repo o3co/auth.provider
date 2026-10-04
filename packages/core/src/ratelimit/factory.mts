@@ -17,6 +17,7 @@
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from "./memory.mjs";
 import type { RateLimiter, RateLimiterFactory, RateLimitSpec } from "./types.mjs";
+import { assertNoVerifierLimits } from "./verifierLimits.mjs";
 
 export function createRateLimiterFactory(): RateLimiterFactory {
 	return createAdapterFactory<RateLimiter>("RateLimiter");
@@ -35,7 +36,8 @@ const DEFAULT_LIMIT: RateLimitSpec = { limit: 60, windowSeconds: 60 };
 /**
  * Registers the built-in in-memory RateLimiter, over the `limits` and
  * `defaultLimit` it is given and no contributed budget: those reach a limiter
- * through `memoryRateLimiterModule`. The "redis" backend is in
+ * through `memoryRateLimiterModule`. A `limits` entry naming a verifier's
+ * prefix is refused, as the module's section refuses it. The "redis" backend is in
  * `@o3co/auth-provider-redis`; consumers wire it via:
  *
  *   import { redisRateLimiterBuilder } from "@o3co/auth-provider-redis";
@@ -46,6 +48,7 @@ const DEFAULT_LIMIT: RateLimitSpec = { limit: 60, windowSeconds: 60 };
 export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 	factory.register("memory", (rawConfig) => {
 		const config = rawConfig as unknown as MemoryRateLimiterConfig;
+		assertNoVerifierLimits("createMemoryRateLimiter", config.limits);
 		// What was configured, as it was: `createMemoryRateLimiter` refuses a
 		// spec it cannot apply as written. Dropping such a spec, or putting a
 		// default in for a malformed one, would give a looser budget than the

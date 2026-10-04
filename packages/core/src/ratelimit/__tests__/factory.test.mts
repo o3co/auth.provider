@@ -115,6 +115,27 @@ describe("memory rate limiter — a spec it cannot apply as written", () => {
 	});
 });
 
+describe("memory rate limiter — a verifier's own limit", () => {
+	it.each([
+		["login", "session.rateLimit.login"],
+		["device_verification", "device-grant.rateLimit"],
+	])(
+		"refuses limits.%s through the factory, naming the setting it is made at",
+		async (prefix, setting) => {
+			const factory = createRateLimiterFactory();
+			registerBuiltinRateLimiters(factory);
+			const built = (async () =>
+				factory.create({
+					type: "memory",
+					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+				}))();
+			await expect(built).rejects.toThrow(RangeError);
+			await expect(built).rejects.toThrow(`limits.${prefix}`);
+			await expect(built).rejects.toThrow(setting);
+		},
+	);
+});
+
 describe("memory rate limiter — what it is built with", () => {
 	const SANE = { limit: 60, windowSeconds: 60 };
 

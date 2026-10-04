@@ -429,37 +429,6 @@ describe("webauthn authentication/options rate limit — the slot and the contri
 		}
 	});
 
-	it("warns when a module has overridden the contributed budget away from the key and the slot, naming it", async () => {
-		const logger = spyLogger();
-		const tightener = defineModule({
-			name: "test:webauthn-rl-tightener",
-			overrides: {
-				rateLimitBudgets: {
-					[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: () => ({ limit: 1, windowSeconds: 60 }),
-				},
-			},
-		});
-		const { handle } = await bootApp(
-			makeWebAuthnConfig(2),
-			[withLogger(logger), sharedLimiter(), tightener],
-			undefined,
-			undefined,
-			{ webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } } },
-		);
-
-		expect(mismatchCalls(logger)).toEqual([
-			[
-				{
-					key: "webauthn.rateLimit.authenticationOptions",
-					contributed: { limit: 1, windowSeconds: 60 },
-					webauthnConfig: { limit: 2, windowSeconds: 60 },
-				},
-				EVENT,
-			],
-		]);
-		await handle.dispose();
-	});
-
 	it("is silent when no shared limiter is wired: the fallback is built from the slot", async () => {
 		const logger = spyLogger();
 		const { handle } = await bootApp(makeWebAuthnConfig(2), [withLogger(logger)]);
