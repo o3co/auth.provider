@@ -338,8 +338,11 @@ describe("the session grant — admission is read again after the policy", () =>
 		});
 	});
 
-	it("a session still live after the policy mints", async () => {
-		const store = storeWith(record());
+	it("a session still live after the policy mints from the second read's record", async () => {
+		const first = record({ authTime: minutesAgo(5) });
+		const second = record({ authTime: minutesAgo(3) });
+		const reads = [first, second];
+		const store = storeAnswering(async () => reads.shift() ?? null);
 		const { result } = await grant({
 			userSessionStore: store,
 			subjectRevocation: createInMemorySubjectRevocation(),
@@ -350,7 +353,15 @@ describe("the session grant — admission is read again after the policy", () =>
 		const claims = decodeJwt(result.tokens.access_token);
 		expect(claims.sub).toBe(SUBJECT);
 		expect(claims.sid).toBe(SID);
+		expect(claims.auth_time).toBe(Math.floor(second.authTime.getTime() / 1000));
 		expect(store.get).toHaveBeenCalledTimes(2);
+	});
+
+	it("without a policy, admission is read once", async () => {
+		const store = storeWith(record());
+		const { result } = await grant({ userSessionStore: store }).handle(ctx(LIVE_COOKIE));
+		expect(result.status).toBe(200);
+		expect(store.get).toHaveBeenCalledTimes(1);
 	});
 });
 

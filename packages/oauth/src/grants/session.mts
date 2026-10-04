@@ -253,7 +253,8 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 				);
 				if (!bounded.ok) return { result: bounded.result };
 				policyAudience = bounded.audience;
-				// Admission again, after the policy's await and before minting: a
+				// The whole admission again (live read, revocation boundary,
+				// requirements), after the policy's await and before minting: a
 				// session revoked or ended while the policy evaluated mints nothing.
 				const readmission = await admit();
 				const refusalAfter = refusalFor(readmission);
