@@ -160,6 +160,15 @@ describe("createInMemorySessionLifecycleStore", () => {
 	});
 
 	describe("bounds", () => {
+		it("names the option it refuses", () => {
+			expect(() => createInMemorySessionLifecycleStore({ maxParticipants: 0 })).toThrow(
+				/maxParticipants must be/,
+			);
+			expect(() => createInMemorySessionLifecycleStore({ maxEntries: 0 })).toThrow(
+				/maxEntries must be/,
+			);
+		});
+
 		it("refuses a maxEntries or a maxParticipants that is not a usable cap", () => {
 			for (const bad of [0, -1, 1.5, Number.NaN, MAX_MEMORY_STORE_ENTRIES + 1]) {
 				expect(() => createInMemorySessionLifecycleStore({ maxEntries: bad })).toThrow(RangeError);
@@ -253,6 +262,37 @@ describe("createInMemorySessionLifecycleStore", () => {
 			).toBe("conflict");
 		});
 
+		it("refuses a malformed expected generation, writing nothing", async () => {
+			const store = await live();
+			const answer = readSessionCloseAnswer(await store.beginClose("s", CLOSE));
+			if (answer.outcome !== "closing") throw new Error("not closing");
+			for (const bad of ["", "has space", 'quote"d', 7]) {
+				await expect(store.completeIf("s", bad as never, "user_session")).rejects.toThrow(
+					RangeError,
+				);
+			}
+			expect((await read(store, "s"))?.generation).toBe(answer.generation);
+		});
+
+		it("answers a repeated open for the same subject and end, and refuses another, writing nothing", async () => {
+			const store = await live();
+			const before = await read(store, "s");
+			const expiresAt = before?.value.expiresAt as Date;
+			expect((await store.open("s", "u", expiresAt)).outcome).toBe("opened");
+			expect((await store.open("s", "other", expiresAt)).outcome).toBe("refused");
+			expect(await read(store, "s")).toStrictEqual(before);
+		});
+
+		it("makes one work item per participant of a listed kind", async () => {
+			const store = await live();
+			await store.join("s", rp("a"));
+			await store.join("s", { kind: "family", id: "f", data: "" });
+			const answer = readSessionCloseAnswer(await store.beginClose("s", CLOSE));
+			expect(
+				answer.outcome !== "missing" && [...(answer.record.close?.pending ?? [])].sort(),
+			).toEqual(["rp:a", "user_session"]);
+		});
+
 		it("refuses an item while the record is active, at its generation", async () => {
 			const store = await live();
 			const at = await read(store, "s");
@@ -275,6 +315,7 @@ describe("createInMemorySessionLifecycleStore", () => {
 			const first = await store.read("s");
 			if (first === null) throw new Error("absent");
 			(first.value.expiresAt as Date).setTime(0);
+			(first.value.participants[0] as { data: string }).data = "mutated";
 			(first.value.participants as SessionParticipant[]).push(rp("z"));
 			const again = await read(store, "s");
 			expect(again?.value.participants).toEqual([rp("a")]);

@@ -227,6 +227,17 @@ describe("readVersionedSessionLifecycle", () => {
 			{ value: { ...closing(), close: { ...closing().close, pending: [] } }, generation: G },
 		],
 		[
+			"a pending participant item that names no participant of the snapshot",
+			{
+				value: { ...closing(), close: { ...closing().close, pending: ["rp:ghost"] } },
+				generation: G,
+			},
+		],
+		[
+			"an expiresAt that is a Date in name only",
+			{ value: { ...active(), expiresAt: Object.create(Date.prototype) }, generation: G },
+		],
+		[
 			"a closed record with work pending",
 			{ value: { ...closed(), close: closing().close }, generation: G },
 		],

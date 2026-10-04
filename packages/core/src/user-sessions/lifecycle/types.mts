@@ -52,12 +52,13 @@ export const SESSION_CLOSE_CAUSES = Object.freeze([
 export type SessionCloseCause = (typeof SESSION_CLOSE_CAUSES)[number];
 
 /**
- * The longest sid, sub or participant id, in characters. Each is well-formed
- * text, no lone surrogate, so its UTF-8 bytes name it alone.
+ * The longest sid, sub or participant id, in UTF-16 code units (`length`).
+ * Each is well-formed text, no lone surrogate, so its UTF-8 bytes name it
+ * alone.
  */
 export const SESSION_LIFECYCLE_MAX_KEY_LENGTH = 512;
 
-/** The longest participant `data`, in characters. */
+/** The longest participant `data`, in UTF-16 code units (`length`). */
 export const SESSION_PARTICIPANT_MAX_DATA_LENGTH = 8192;
 
 /** The most sids one `listClosing` may ask for. */
@@ -193,7 +194,8 @@ export interface SessionLifecycleStore {
 	 * `expected`, at a new generation; the record is `closed` in the same step
 	 * once nothing is pending. `missing` and `conflict` write nothing. The
 	 * generation is checked before the item: at `expected`, an item not
-	 * pending is a `RangeError`.
+	 * pending is a `RangeError`, and so is an `expected` that is no
+	 * well-formed generation (`isStoreGeneration`).
 	 */
 	completeIf(
 		sid: string,

@@ -26,11 +26,12 @@
 
 import {
 	type ConditionalReplaceAnswer,
+	isStoreGeneration,
 	newStoreGeneration,
 	type StoreGeneration,
 } from "../../adapters/conditionalWrite.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
-import { usableMaxEntries } from "../../single-use/max-entries.mjs";
+import { MAX_MEMORY_STORE_ENTRIES, usableMaxEntries } from "../../single-use/max-entries.mjs";
 import {
 	checkSessionCloseItem,
 	checkSessionCloseRequest,
@@ -107,10 +108,17 @@ export function createInMemorySessionLifecycleStore(
 		options.maxEntries ?? DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_ENTRIES,
 		owner,
 	);
-	const maxParticipants = usableMaxEntries(
-		options.maxParticipants ?? DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS,
-		`${owner} (maxParticipants)`,
-	);
+	const maxParticipants =
+		options.maxParticipants ?? DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS;
+	if (
+		!Number.isInteger(maxParticipants) ||
+		maxParticipants <= 0 ||
+		maxParticipants > MAX_MEMORY_STORE_ENTRIES
+	) {
+		throw new RangeError(
+			`${owner}: maxParticipants must be a whole number from 1 to ${MAX_MEMORY_STORE_ENTRIES} (got ${String(maxParticipants)})`,
+		);
+	}
 	const clock = options.now ?? Date.now;
 	const records = new Map<string, Stored>();
 
@@ -206,6 +214,11 @@ export function createInMemorySessionLifecycleStore(
 		async completeIf(sid, expected, item): Promise<ConditionalReplaceAnswer> {
 			checkSessionLifecycleKey(sid, "sid");
 			checkSessionCloseItem(item);
+			if (!isStoreGeneration(expected)) {
+				throw new RangeError(
+					`${owner}: expected is no well-formed generation; nothing was written`,
+				);
+			}
 			const stored = live(sid, now());
 			if (stored === undefined) return { outcome: "missing" };
 			if (stored.generation !== expected) return { outcome: "conflict" };

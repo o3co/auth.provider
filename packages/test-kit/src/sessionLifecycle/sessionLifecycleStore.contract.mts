@@ -525,6 +525,14 @@ export function sessionLifecycleStoreContract(
 				"conflict",
 			);
 			assert.deepStrictEqual(await store.live(sid), after, "a conflict writes nothing");
+			for (const malformed of ["", "has space", 'quote"d']) {
+				await assert.rejects(
+					harness.store.completeIf(sid, malformed as StoreGeneration, "subject_index"),
+					RangeError,
+					`a malformed generation (${JSON.stringify(malformed)}) is the caller's error`,
+				);
+			}
+			assert.deepStrictEqual(await store.live(sid), after, "and writes nothing");
 		}),
 
 		test("of concurrent completions of one item at one generation through two instances, exactly one is updated", async (_store, harness) => {
@@ -688,12 +696,20 @@ export function sessionLifecycleStoreContract(
 			joining.data = "changed";
 			const handedOut = await harness.store.read(sid);
 			assert.ok(handedOut !== null);
-			try {
-				(handedOut.value.expiresAt as Date).setTime(0);
+			const tryTo = (change: () => void): void => {
+				try {
+					change();
+				} catch {
+					// A frozen answer is a copy too.
+				}
+			};
+			tryTo(() => (handedOut.value.expiresAt as Date).setTime(0));
+			tryTo(() => {
+				(handedOut.value.participants[0] as { data: string }).data = "mutated";
+			});
+			tryTo(() => {
 				(handedOut.value.participants as SessionParticipant[]).push(participant("rp", "pushed"));
-			} catch {
-				// A frozen answer is a copy too.
-			}
+			});
 			const read = await store.live(sid);
 			assert.equal(read.value.expiresAt.getTime(), kept);
 			assert.deepStrictEqual(read.value.participants, [participant("rp", "client-1", "data")]);

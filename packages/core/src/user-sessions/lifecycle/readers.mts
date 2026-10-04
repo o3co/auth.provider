@@ -55,7 +55,7 @@ const STEP_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 /** A lone surrogate: it has no UTF-8 of its own, so two keys holding one could share their bytes. */
 const LONE_SURROGATE = /\p{Cs}/u;
 
-/** 1 to 512 characters of well-formed UTF-16, so that its UTF-8 bytes name it alone. */
+/** 1 to 512 UTF-16 code units of well-formed text, so that its UTF-8 bytes name it alone. */
 const isKey = (value: unknown): value is string =>
 	typeof value === "string" &&
 	value.length > 0 &&
@@ -167,6 +167,10 @@ const readRecord = (value: unknown, what: string): SessionLifecycleRecord => {
 		if (rawClose !== undefined) throw new TypeError(`${what}: an active record holds a close`);
 	} else {
 		close = readClose(rawClose, `${what}: close`);
+		const named = new Set(participants.map(sessionCloseItemOf));
+		if (close.pending.some((item) => !STEP_NAME.test(item) && !named.has(item))) {
+			throw new TypeError(`${what}: a pending item names no participant of the snapshot`);
+		}
 		if ((state === "closing") !== close.pending.length > 0) {
 			throw new TypeError(`${what}: pending work does not match the state`);
 		}
@@ -320,7 +324,7 @@ export function checkSessionCloseRequest(request: SessionCloseRequest): SessionC
 	return Object.freeze({ cause, steps, perParticipant, retainMs: retainMs as number });
 }
 
-/** A sid or sub the port admits: 1 to 512 characters, no lone surrogate; a RangeError otherwise. */
+/** A sid or sub the port admits: 1 to 512 UTF-16 code units, no lone surrogate; a RangeError otherwise. */
 export function checkSessionLifecycleKey(value: string, name: string): string {
 	if (!isKey(value)) {
 		throw new RangeError(

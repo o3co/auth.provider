@@ -23,9 +23,11 @@
 
 import {
 	createInMemorySessionLifecycleStore,
+	isStoreGeneration,
 	newStoreGeneration,
 	type SessionLifecycleRecord,
 	type SessionLifecycleStore,
+	type SessionParticipant,
 	type Versioned,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
@@ -335,6 +337,39 @@ describe("sessionLifecycleStoreContract refuses a broken store", () => {
 			},
 		}));
 		expect(refused).toContain(CASE.complete);
+	});
+
+	it("refuses a completion that answers a malformed generation as a conflict", async () => {
+		const refused = await refusedBy((store) => ({
+			...store,
+			completeIf: async (sid, expected, item) =>
+				isStoreGeneration(expected)
+					? store.completeIf(sid, expected, item)
+					: { outcome: "conflict" },
+		}));
+		expect(refused).toContain(CASE.complete);
+	});
+
+	it("refuses a store that hands out the participants it holds", async () => {
+		const refused = await refusedBy((store) => {
+			const held = new Map<string, SessionParticipant>();
+			return {
+				...store,
+				read: async (sid) => {
+					const read = await store.read(sid);
+					if (read === null) return null;
+					const participants = read.value.participants.map((p) => {
+						const key = `${sid}/${p.kind}:${p.id}`;
+						const kept = held.get(key);
+						if (kept !== undefined) return kept;
+						held.set(key, p);
+						return p;
+					});
+					return { ...read, value: { ...read.value, participants } };
+				},
+			};
+		});
+		expect(refused).toContain(CASE.copies);
 	});
 
 	it("refuses a completion that answers updated for a race it lost", async () => {
