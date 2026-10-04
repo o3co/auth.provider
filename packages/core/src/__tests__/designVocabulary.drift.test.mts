@@ -135,11 +135,6 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+normalizeAllowedOrigins\b/,
 	},
 	{
-		concept: "device-verification budget shape (#448)",
-		home: "packages/device-grant/src/verificationBudget.mts",
-		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
-	},
-	{
 		concept: "usable rate-limit spec — what a limiter applies as written",
 		home: "packages/core/src/ratelimit/usableSpec.mts",
 		definition: /(?:function|const)\s+isUsableRateLimitSpec\b/,
