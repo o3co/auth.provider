@@ -81,7 +81,8 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   (`null`; the last two are counted on the attempt counter), so they fall to the limiter's `defaultLimit`, asked of the limiter
   the full set hands a consumer, on the in-process limiter and on the Redis
   one: with the shipped configuration, with each owner's own key set, with the
-  limiter's own `limits` declaring every prefix (which wins), and with the
+  limiter's own `limits` declaring every prefix but `login` and
+  `device_verification`, which it may not name (an entry wins), and with the
   owners switched off.
 - **A module switched off by its own `enabled` key registers nothing.** Each
   such module — DPoP, mTLS, the device grant, the session grant, federation
