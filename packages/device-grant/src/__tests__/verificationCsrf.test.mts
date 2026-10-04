@@ -28,7 +28,7 @@
  */
 
 import type { ClientRepository, Logger, UserSessionStore } from "@o3co/auth-provider-core";
-import { createMemoryDeviceCodeStore, createMemoryRateLimiter } from "@o3co/auth-provider-core";
+import { createMemoryDeviceCodeStore } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import {
 	createCsrfProtectionFromConfig,
@@ -105,7 +105,6 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 			verificationUriComplete: false,
 			codeLifetimeSeconds: 600,
 			pollingIntervalSeconds: 5,
-			// The contributed budget below agrees with it.
 			rateLimit: { limit: 50, windowSeconds: 300 },
 		}),
 		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: `https://${SERVER_HOST}` }),
@@ -113,15 +112,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 		deviceCodeStore: store,
 		userSessionStore: sessionsAuthenticatedBeforeNow(),
 		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
-		rateLimitBudgetResolver: {
-			get: (prefix: string) =>
-				prefix === "device_verification" ? { limit: 50, windowSeconds: 300 } : undefined,
-			entries: () => new Map().entries(),
-		},
-		rateLimiter: createMemoryRateLimiter({
-			limits: { device_verification: { limit: 50, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		}),
+		deploymentMode: "single",
 		logger,
 		...("csrfGuard" in overrides
 			? overrides.csrfGuard === undefined

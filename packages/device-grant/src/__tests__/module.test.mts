@@ -22,6 +22,7 @@
  */
 
 import type {
+	AttemptCounter,
 	BootstrapMap,
 	ClientRepository,
 	CsrfGuard,
@@ -31,14 +32,15 @@ import type {
 	RateLimitSpec,
 } from "@o3co/auth-provider-core";
 import {
+	BootError,
 	createApp,
 	createInMemoryUserSessionStore,
+	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
 	createMemoryRateLimiter,
 	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 	DeviceCodeStoreError,
-	defineModule,
 } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
@@ -126,6 +128,10 @@ interface Overrides {
 	readonly deviceGrant?: Record<string, unknown>;
 	readonly withStore?: boolean;
 	readonly withRateLimiter?: boolean;
+	/** What `core.declaredAbsent` lists. Default `["auditSink"]`. */
+	readonly declaredAbsent?: readonly string[];
+	/** Filled into the `attemptCounter` slot. */
+	readonly attemptCounter?: AttemptCounter;
 	readonly withUserSessionStore?: boolean;
 	readonly withCsrfGuard?: boolean;
 	/** Leave the audit sink's absence undeclared: no `auditSink` in `core.declaredAbsent`. */
@@ -145,7 +151,7 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			// with no sink must say so — which is what this fixture is.
 			...(overrides.withoutAuditDeclaration === true
 				? {}
-				: coreConfigForTests({ declaredAbsent: ["auditSink"] })),
+				: coreConfigForTests({ declaredAbsent: overrides.declaredAbsent ?? ["auditSink"] })),
 			oauth: {
 				...core.oauth,
 			},
@@ -170,10 +176,11 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			? {}
 			: {
 					rateLimiter: createMemoryRateLimiter({
-						limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+						limits: {},
 						defaultLimit: { limit: 60, windowSeconds: 60 },
 					}),
 				}),
+		...(overrides.attemptCounter === undefined ? {} : { attemptCounter: overrides.attemptCounter }),
 	} as unknown as BootstrapMap;
 };
 
@@ -251,14 +258,37 @@ describe("the device-grant module — boot", () => {
 		await expect(boot({ deviceGrant: { enabled: true } })).rejects.toThrow(/verificationUri/);
 	});
 
-	it("refuses to boot enabled without a rate limiter", async () => {
-		// RFC 8628 §5.1 sizes the user code's entropy AGAINST a rate limit:
-		// ~34.5 bits is sufficient only where an attacker gets a handful of
-		// attempts. Without a limiter that argument does not hold, so this is a
-		// refusal rather than a degraded mode.
-		await expect(boot({ deviceGrant: ENABLED, withRateLimiter: false })).rejects.toThrow(
-			/§5\.1|rate/i,
+	it("boots enabled without a rate limiter once its absence is declared: device_authorization passes through", async () => {
+		// The rate limiter is the deployment's abuse control, not the user
+		// code's attempt limit, which the attempt guard counts.
+		const handle = await boot({
+			deviceGrant: ENABLED,
+			withRateLimiter: false,
+			declaredAbsent: ["auditSink", "rateLimiter"],
+		});
+		try {
+			const app = express();
+			app.use(handle.router);
+			for (let i = 0; i < 65; i++) {
+				const res = await request(app)
+					.post("/oauth/device_authorization")
+					.send({ client_id: CONFIDENTIAL_ID });
+				expect(res.status).toBe(401);
+				expect(res.headers["ratelimit-limit"]).toBeUndefined();
+			}
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses to boot enabled without a rate limiter or its declaration, as core's absence policy does", async () => {
+		const err = await boot({ deviceGrant: ENABLED, withRateLimiter: false }).then(
+			() => undefined,
+			(caught: unknown) => caught,
 		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("component-absence-undeclared");
+		expect((err as BootError).message).toContain("rateLimiter");
 	});
 
 	it("refuses to boot enabled without a userSessionStore, naming the component", async () => {
@@ -531,6 +561,8 @@ describe("the device-grant module — the route it actually contributes", () => 
 	};
 
 	const enabledDeps = (overrides: { limits?: Record<string, RateLimitSpec> } = {}) => ({
+		// The synthetic key boot fills from `core.deployment.mode`.
+		deploymentMode: "single",
 		section: sectionOf({
 			enabled: true,
 			verificationUri: "https://example.test/device",
@@ -551,17 +583,8 @@ describe("the device-grant module — the route it actually contributes", () => 
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
 		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
-		// The contributed budgets, as the planner fills them from this module's contribution.
-		rateLimitBudgetResolver: {
-			get: (prefix: string) =>
-				prefix === "device_verification" ? { limit: 5, windowSeconds: 300 } : undefined,
-			entries: () => new Map().entries(),
-		},
 		rateLimiter: createMemoryRateLimiter({
-			limits: {
-				device_verification: { limit: 5, windowSeconds: 300 },
-				...(overrides.limits ?? {}),
-			},
+			limits: { ...(overrides.limits ?? {}) },
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 		}),
 	});
@@ -646,15 +669,24 @@ describe("the device-grant module — the route it actually contributes", () => 
 		expect(next.status).toBe(429);
 	});
 
-	it.each([0, 1])(
-		"mounts route %i with no configuration at all: the outage policy is the limiter's own",
-		(index) => {
-			const deps = enabledDeps();
-			expect(deps).not.toHaveProperty("config");
-			const factory = contributionsFor(deps)?.routes?.[index] as (d: unknown) => unknown;
-			expect(() => factory(deps)).not.toThrow();
-		},
-	);
+	it("passes device_authorization through with no rate limiter wired", async () => {
+		const { rateLimiter: _rateLimiter, ...deps } = enabledDeps();
+		const app = mountContributedRoute(0, deps);
+		for (let i = 0; i < 65; i++) {
+			const res = await request(app)
+				.post("/oauth/device_authorization")
+				.send({ client_id: CONFIDENTIAL_ID });
+			expect(res.status).toBe(401);
+			expect(res.headers["ratelimit-limit"]).toBeUndefined();
+		}
+	});
+
+	it.each([0, 1])("mounts route %i with no configuration at all", (index) => {
+		const deps = enabledDeps();
+		expect(deps).not.toHaveProperty("config");
+		const factory = contributionsFor(deps)?.routes?.[index] as (d: unknown) => unknown;
+		expect(() => factory(deps)).not.toThrow();
+	});
 
 	/** Mount the contributed verification route behind a fixed end-user session. */
 	const mountVerificationRoute = (deps: TestDeps) => {
@@ -763,33 +795,80 @@ describe("the device-grant module — the route it actually contributes", () => 
 		},
 	};
 
-	it.each([
-		// Under `closed` the outage is the answer; under `open` the lookup
-		// proceeds to the store, which has never heard of the code.
-		["closed", 503, "service_unavailable"],
-		["open", 404, "invalid_user_code"],
-	] as const)(
-		"applies the limiter's failMode = %s on the mounted device/verification route, whatever rateLimit.failMode says",
-		async (failMode, status, error) => {
-			// What no test of the handler alone can observe: that the module
-			// hands this route the limiter, whose own policy applies.
-			const deps = enabledDeps();
+	/** A lookup on the mounted verification route. */
+	const lookup = (app: express.Express) =>
+		request(app)
+			.post("/oauth/device/verification")
+			.set("Host", "as.example.test")
+			.set("Origin", "http://as.example.test")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+
+	it("counts the verification's attempts on the attemptCounter slot, under the subject, against device-grant.rateLimit", async () => {
+		// What no test of the handler alone can observe: that the module hands
+		// this route the slot's counter and the section's limit.
+		const calls: { key: string; spec: unknown }[] = [];
+		const inner = createMemoryAttemptCounter();
+		const attemptCounter: AttemptCounter = {
+			consume: (key, spec) => {
+				calls.push({ key, spec });
+				return inner.consume(key, spec);
+			},
+		};
+		const deps = enabledDeps();
+		const app = mountVerificationRoute({
+			...deps,
+			section: { ...deps.section, rateLimit: { limit: 2, windowSeconds: 120 } },
+			attemptCounter,
+		});
+
+		expect((await lookup(app)).status).toBe(404);
+		expect((await lookup(app)).status).toBe(404);
+		const limited = await lookup(app);
+		expect(limited.status).toBe(429);
+		expect(limited.body.error).toBe("slow_down");
+		expect(calls.map(({ key }) => key)).toEqual(Array(3).fill("device_verification:user:user-1"));
+		expect(calls[0]?.spec).toEqual({ limit: 2, windowSeconds: 120 });
+	});
+
+	it.each(["closed", "open"] as const)(
+		"answers 503 while the attempt counter is down, whatever a limiter with failMode = %s says",
+		async (failMode) => {
 			const app = mountVerificationRoute({
-				...deps,
-				config: { rateLimit: { failMode: failMode === "open" ? "closed" : "open" } },
+				...enabledDeps(),
 				rateLimiter: { ...brokenLimiter, failMode },
+				attemptCounter: {
+					consume: async () => {
+						throw new Error("redis down");
+					},
+				} satisfies AttemptCounter,
 			});
-
-			const res = await request(app)
-				.post("/oauth/device/verification")
-				.set("Host", "as.example.test")
-				.set("Origin", "http://as.example.test")
-				.send({ action: "lookup", user_code: "BCDF-GHJK" });
-
-			expect(res.status).toBe(status);
-			expect(res.body.error).toBe(error);
+			const res = await lookup(app);
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "service_unavailable",
+				error_description: "Attempt counter temporarily unavailable",
+			});
 		},
 	);
+
+	it("asks no rate limiter on the verification route: a limiter that is down changes nothing there", async () => {
+		const check = vi.fn(brokenLimiter.check);
+		const app = mountVerificationRoute({
+			...enabledDeps(),
+			rateLimiter: { kind: "broken", failMode: "closed", check } satisfies RateLimiter,
+		});
+		expect((await lookup(app)).status).toBe(404);
+		expect(check).not.toHaveBeenCalled();
+	});
+
+	it('refuses to mount device/verification under "multi" with no attemptCounter, naming it', () => {
+		const deps = { ...enabledDeps(), deploymentMode: "multi" };
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).toThrow(
+			/core\.deployment\.mode is "multi" but no shared attemptCounter is wired for "device_verification"/,
+		);
+		expect(() => factory({ ...deps, attemptCounter: createMemoryAttemptCounter() })).not.toThrow();
+	});
 
 	it("hands the verification route the resolver the planner built: a requirement's step-up reaches approve", async () => {
 		// The session-admission ADR's D1: the module requires the synthetic key
@@ -1510,55 +1589,18 @@ describe("the device-grant module — the route it actually contributes", () => 
 	 * `enabledDeps()` with `device-grant.rateLimit` replaced, handed to the
 	 * factory as a hand-built section that never passed the schema.
 	 */
-	const withVerificationBudget = (rateLimit: unknown) => {
+	const withAttemptLimit = (rateLimit: unknown) => {
 		const deps = enabledDeps();
 		return { ...deps, section: { ...deps.section, rateLimit } };
 	};
 
-	it("refuses to mount device/verification without the budget, device-grant.rateLimit", () => {
-		// The "requires a rateLimiter" refusal reasons from a budget of five,
-		// and the limiter applies five only because this module contributes
-		// `device_verification` from this key. With the key missing it
-		// contributes none, leaving the limiter's 60/60s default, so a
-		// hand-built config that never passed the schema would boot with a
-		// refusal that argued from five while the limiter applied sixty.
-		const deps = withVerificationBudget(undefined);
+	it("refuses to mount device/verification without its attempt limit, device-grant.rateLimit", () => {
+		// RFC 8628 §5.1 sizes the user code against this limit; a hand-built
+		// section that never passed the schema must not mount the route
+		// without it.
+		const deps = withAttemptLimit(undefined);
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/device-grant\.rateLimit/);
-	});
-
-	it.each([
-		["a budget another module set", { limit: 3, windowSeconds: 600 }],
-		["no budget at all", undefined],
-	])(
-		"refuses to mount device/verification when the contributed device_verification budget is %s, not device-grant.rateLimit",
-		(_label, inForce) => {
-			const deps = {
-				...enabledDeps(),
-				rateLimitBudgetResolver: {
-					get: (prefix: string) => (prefix === "device_verification" ? inForce : undefined),
-					entries: () => new Map().entries(),
-				},
-			};
-			const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
-			expect(() => factory(deps)).toThrow(/contributed device_verification budget/);
-			expect(() => factory(deps)).toThrow(/device-grant\.rateLimit/);
-		},
-	);
-
-	it("refuses boot when a module overrides the device_verification budget, even to tighten it", async () => {
-		const tightener = defineModule({
-			name: "test:device-verification-tightener",
-			overrides: {
-				rateLimitBudgets: { device_verification: () => ({ limit: 3, windowSeconds: 600 }) },
-			},
-		});
-		const err = await boot({ deviceGrant: ENABLED, extraModules: [tightener] }).then(
-			() => undefined,
-			(caught: unknown) => caught as Error,
-		);
-		expect(err?.message).toMatch(/device_verification/);
-		expect(err?.message).toMatch(/device-grant\.rateLimit/);
 	});
 
 	it.each([
@@ -1566,29 +1608,22 @@ describe("the device-grant module — the route it actually contributes", () => 
 		["a fractional window", { limit: 5, windowSeconds: 0.5 }],
 		["a non-numeric string limit", { limit: "five", windowSeconds: 300 }],
 		["a blank window", { limit: 5, windowSeconds: " " }],
-		// Refused here by name, rather than by the limiter's RangeError at
-		// construction naming its own `limits.device_verification`.
+		["a window over a day", { limit: 5, windowSeconds: 86_401 }],
 		["a window past the Date range", { limit: 5, windowSeconds: 1e13 }],
-	])("refuses to mount device/verification with %s as the budget", (_label, rateLimit) => {
-		// The same shapes the contributed budget refuses: with one definition
-		// of "usable" shared with core, a budget the route accepts is the one
-		// the limiter applies.
-		const deps = withVerificationBudget(rateLimit);
+	])("refuses to mount device/verification with %s as the limit", (_label, rateLimit) => {
+		const deps = withAttemptLimit(rateLimit);
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/device-grant\.rateLimit/);
 	});
 
-	it("mounts device/verification with a usable budget", () => {
-		const deps = withVerificationBudget({ limit: 5, windowSeconds: 300 });
+	it("mounts device/verification with a usable limit", () => {
+		const deps = withAttemptLimit({ limit: 5, windowSeconds: 300 });
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).not.toThrow();
 	});
 
-	it("mounts device/verification with the budget as numeric strings, as the contributed budget reads it", () => {
-		// The contributed budget and this refusal read the key the same way —
-		// as a coercing schema does — so a budget the limiter applies is one
-		// this accepts.
-		const deps = withVerificationBudget({ limit: "5", windowSeconds: "300" });
+	it("mounts device/verification with the limit as numeric strings, as the schema reads it", () => {
+		const deps = withAttemptLimit({ limit: "5", windowSeconds: "300" });
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).not.toThrow();
 	});
@@ -1799,8 +1834,9 @@ describe("the device-grant module — private_key_jwt on the mounted route", () 
 		oauthTokenSettings: createTestOAuthTokenSettings({ ...WITHIN_CONFIGURATION, issuer: ISSUER }),
 		clientRepository: jwtRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
+		deploymentMode: "single",
 		rateLimiter: createMemoryRateLimiter({
-			limits: { device_verification: { limit: 50, windowSeconds: 300 } },
+			limits: {},
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 		}),
 		...(replaySeenSet === undefined ? {} : { replaySeenSet }),
