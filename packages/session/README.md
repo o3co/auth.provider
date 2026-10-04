@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -220,7 +220,9 @@ composition root layers because the modules declare it.
 | `session.loginPage.url` | `SESSION_LOGIN_PAGE_URL` | `/login` | Required. The page the `loginEntry` slot names: a path or an absolute URL, with no `redirect_to` of its own |
 | `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | Required. `POST /session/login`'s budget, which the module contributes as `login` |
 
-Each section is strict: a key it does not declare refuses boot, naming it. The
+Each section is strict at every level: a key it does not declare refuses boot,
+naming it. `session-store.storage` holds `type` and the `redis` block alone, so
+a block for any other storage type is refused too. The
 paths these keys moved from — each key of the cookie and its store under
 `session`, `endpoints.login.url` and `rateLimit.login` — refuse boot
 (`config-path-relocated`), naming the new path and its variable. The variables

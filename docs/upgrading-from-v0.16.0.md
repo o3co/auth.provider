@@ -223,8 +223,10 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   and the key, where it used to be ignored. Before you upgrade, check every
   key you set against the module's README, and correct or delete the ones it
   does not list. The sections that still accept an unknown key are `oauth`
-  (the section and its nested blocks), `webauthn` (the section and its
-  `rateLimit` blocks) and `session-store.storage`. `mfa`, at every level, and
+  (the section and its nested blocks) and `webauthn` (the section and its
+  `rateLimit` blocks). `session-store.storage` refuses one too: it holds
+  `type` and the `redis` block alone, so a block for another storage type
+  (`memory {}`, say) is refused — delete it. `mfa`, at every level, and
   `mfa-totp-factor` refuse one too (#1329): an empty `mfa.factors` block an
   older configuration leaves behind (the TOTP factor's old path, its
   variables unset) is such a key — delete it. The keys under `audit-sink` are the

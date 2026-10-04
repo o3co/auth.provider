@@ -65,7 +65,6 @@ const EXEMPT: Readonly<Record<string, string>> = {
  */
 const NOT_YET_STRICT: Readonly<Record<string, readonly string[]>> = {
 	webauthn: ["webauthn", "webauthn.rateLimit", "webauthn.rateLimit.authenticationOptions"],
-	"session-store": ["session-store.storage"],
 };
 
 /**
