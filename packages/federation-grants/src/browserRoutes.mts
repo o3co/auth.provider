@@ -18,8 +18,8 @@
  * The browser half of federation-grant acquisition, mounted at
  * `/session/federation-grants`: the connect start a client sends the user to,
  * the consent the deployment's page reads and answers, and the upstream callback.
- * This file mounts each stage behind the browser budget and the shutdown drain;
- * what follows holds across the stages.
+ * This file mounts each stage behind the shutdown drain and, when a limiter is
+ * wired, the browser budget; what follows holds across the stages.
  *
  * Connect and the callback are navigations: redirects and plain text, never a
  * JSON body. `GET`/`POST /consent` mirror `/oauth/consent` for the page that

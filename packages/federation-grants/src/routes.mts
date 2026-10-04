@@ -20,8 +20,9 @@
  * 2026-09-17-federation-grants-offline-delegation, D9.
  *
  *   1. cache directives and correlation, ahead of anything that can answer;
- *   2. the throttle, keyed on the IP, BEFORE client authentication, so that
- *      repeated unauthenticated hits are bounded before a repository lookup;
+ *   2. when a limiter is wired, the throttle, keyed on the IP, BEFORE client
+ *      authentication, so that repeated unauthenticated hits are bounded
+ *      before a repository lookup;
  *   3. content type and body parsing, then `parserRefusals`;
  *   4. client authentication, before domain validation, so an unauthenticated
  *      caller learns nothing about a grant, not even from a refusal's timing;
