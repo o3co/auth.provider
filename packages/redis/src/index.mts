@@ -75,6 +75,7 @@ export type {
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
 	FederationTokenAttachInput,
+	FederationTokenReadInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
