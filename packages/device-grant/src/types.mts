@@ -16,18 +16,19 @@
 
 /** Shared types for the RFC 8628 device authorization grant. */
 
-import type { AuditSink, DeviceCodeStore, RateLimiter } from "@o3co/auth-provider-core";
+import type { AuditSink, DeviceCodeStore } from "@o3co/auth-provider-core";
 
 /** The grant type URN. RFC 8628 §3.4. */
 export const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
-/** Key prefix this package rate-limits the verification endpoint under. */
-export { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX } from "./verificationBudget.mjs";
+/** The tag the verification endpoint counts attempts under. */
+export { DEVICE_VERIFICATION_ATTEMPT_TAG } from "./verificationAttempts.mjs";
 
 /**
- * Key prefix `POST /oauth/device_authorization` is throttled under, keyed
- * `device_authorization:ip:<ip>` by `createRateLimitGuard` like the other
- * public entry points (`token`, `authorize`, `introspect`).
+ * Key prefix `POST /oauth/device_authorization` is throttled under when a
+ * rate limiter is wired, keyed `device_authorization:ip:<ip>` by
+ * `createRateLimitGuard` like the other public entry points (`token`,
+ * `authorize`, `introspect`).
  */
 export const DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX = "device_authorization";
 
@@ -51,7 +52,6 @@ export interface DeviceAuthorizationSettings {
 export interface DeviceGrantDependencies {
 	readonly store: DeviceCodeStore;
 	readonly settings: DeviceAuthorizationSettings;
-	readonly rateLimiter?: RateLimiter;
 	/**
 	 * Where `device.approved` / `device.denied` / `device.rate_limited` /
 	 * `device.decision_outcome_unknown` go. Optional to wire; the module
@@ -63,10 +63,10 @@ export interface DeviceGrantDependencies {
 		warn(obj: Record<string, unknown>, msg: string): void;
 		info?(obj: Record<string, unknown>, msg: string): void;
 		/**
-		 * Where a limiter-backend outage is reported
-		 * (`rate_limiter_failed_open` / `rate_limiter_failed_closed`, written by
-		 * `createRateLimitGuard`). Optional so a warn-only logger keeps
-		 * compiling; without it the line goes to core's console logger.
+		 * Where an outage is reported (an attempt counter's
+		 * `attempt_counter_unavailable`, a session-admission outage). Optional
+		 * so a warn-only logger keeps compiling; without it the line goes to
+		 * core's console logger.
 		 */
 		error?(obj: Record<string, unknown>, msg: string): void;
 	};

@@ -98,8 +98,11 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly csrfGuard: Pick<CsrfGuard, "check">;
 	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
 	readonly issuer: string;
-	/** The browser budget; its own `failMode` is the outage policy. */
-	readonly rateLimiter: RateLimiter;
+	/**
+	 * The browser budget; its own `failMode` is the outage policy. Absent, the
+	 * pages are not throttled.
+	 */
+	readonly rateLimiter?: RateLimiter;
 	readonly background: FederationGrantBackground;
 	/**
 	 * The subject's GRANTS boundary: what the callback's backstop and re-read

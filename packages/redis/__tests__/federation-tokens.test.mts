@@ -12,6 +12,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
 	FederationTokenAttachInput,
+	FederationTokenReadInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
@@ -142,15 +143,22 @@ function createFakeRedis() {
 			return false;
 		}),
 		// The scripts' semantics, in process: the generation is the wrapper's `g`.
-		readVersioned: vi.fn(async (k: string, candidate: string) => {
+		readVersioned: vi.fn(async (k: string, input: FederationTokenReadInput) => {
 			const stored = data.get(k);
 			if (stored === undefined) return null;
 			const g = generationIn(stored);
 			if (g !== undefined) return { raw: stored, generation: g };
+			if (lateAt(input.deadlineMs) || keptAnswer(input.replayKey) !== undefined) {
+				return { raw: stored, generation: "" };
+			}
 			if (mintable(stored)) {
-				const minted = `{"g":${JSON.stringify(candidate)},${stored.slice(1)}`;
+				const minted = `{"g":${JSON.stringify(input.candidate)},${stored.slice(1)}`;
 				data.set(k, minted);
-				return { raw: minted, generation: candidate };
+				replays.set(input.replayKey, {
+					answer: "minted",
+					untilMs: input.deadlineMs + input.clockSkewMs + 1,
+				});
+				return { raw: minted, generation: input.candidate };
 			}
 			return { raw: stored, generation: "" };
 		}),
@@ -1423,6 +1431,21 @@ describe("redis FederationTokenStore conditional members", () => {
 			"ft:sid-1:google",
 			expect.objectContaining({ deadlineMs: 1_001_000, clockSkewMs: CLOCK_SKEW_MS }),
 		);
+	});
+
+	it("stamps a versioned read with a deadline 1 s past its issue, keys its mint by the generation it may mint, and stops waiting there", async () => {
+		const store = storeOver();
+		vi.useFakeTimers({ now: 1_000_000, toFake: ["Date", "setTimeout", "clearTimeout"] });
+		redis.readVersioned.mockImplementationOnce(() => new Promise(() => {}));
+		const read = store.getVersioned("sid-1", "google");
+		const settled = expect(read).rejects.toThrow(
+			/getVersioned had no answer within 1000 ms; the outcome is unknown/,
+		);
+		await vi.advanceTimersByTimeAsync(1_000);
+		await settled;
+		const [, input] = redis.readVersioned.mock.calls[0] as [string, FederationTokenReadInput];
+		expect(input).toMatchObject({ deadlineMs: 1_001_000, clockSkewMs: CLOCK_SKEW_MS });
+		expect(input.replayKey).toBe(`ft:w:{ft:sid-1:google}:${input.candidate}`);
 	});
 
 	it("keys each attach's answer by the generation it writes", async () => {

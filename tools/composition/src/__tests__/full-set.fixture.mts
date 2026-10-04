@@ -27,9 +27,10 @@
  * - The settings with no default laid over the configuration. The added
  *   packages' `reference.conf` files are layered because their modules
  *   declare them (`section.reference`), as `app.mts` does.
- * - The small modules each package's README has a deployment write: the
- *   WebAuthn config bridge and a `grantPolicy` (WebAuthn refuses to boot
- *   without one, and no package ships one).
+ * - The small module each package's README has a deployment write: a
+ *   `grantPolicy` (WebAuthn refuses to boot without one, and no package
+ *   ships one). WebAuthn's relying party is its section, which its module
+ *   provides as the `webauthnConfig` slot itself.
  * - The Apple and GitHub federations as `core.federations` entries of their
  *   types, handled by each package's type module, whose `fetch` option points
  *   it at a fake upstream.
@@ -93,7 +94,10 @@ import {
 	type RecordingMailSender,
 	withUserRepositoryHttp,
 } from "@o3co/auth-provider-core/testing";
-import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import {
+	DEVICE_CODE_GRANT_TYPE,
+	deviceAuthorizationGrantModule,
+} from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationTypeModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationTypeModule } from "@o3co/auth-provider-federation-github";
@@ -122,7 +126,6 @@ import {
 import type { Switches } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import type { FakeStoreUrls } from "@o3co/auth-provider-test-kit";
 import {
-	webauthnConfigSchema,
 	webauthnMfaFactorModule,
 	webauthnModule,
 	webauthnSessionSubjectModule,
@@ -371,16 +374,6 @@ function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 // ---------------------------------------------------------------------------
 // The modules a deployment writes
 // ---------------------------------------------------------------------------
-
-/** The README's WebAuthn bootstrap: the `webauthn` section, through the package's schema. */
-const webauthnConfigModule = defineModule({
-	name: "deployment:webauthn-config",
-	requires: ["config"] as const,
-	provides: {
-		webauthnConfig: ({ config }) =>
-			webauthnConfigSchema.parse((config as unknown as { webauthn: unknown }).webauthn),
-	},
-});
 
 /**
  * The deployment's grant policy. WebAuthn's grant refuses to boot without one
@@ -728,7 +721,6 @@ function httpUserRepository(http: Readonly<Record<string, unknown>>): Promise<Us
 
 /** Every module the template does not compose, as a deployment adds them to its manifest. */
 function addedModules(
-	config: AppConfig,
 	features: Features,
 	stores: AddedStores,
 	f: Fakes,
@@ -737,7 +729,7 @@ function addedModules(
 	outage: { once: FixtureCeremony["requirement"] | undefined },
 ): Module[] {
 	return [
-		deviceGrantModule({ config }),
+		deviceAuthorizationGrantModule,
 		stores.deviceCode === "redis" ? redisDeviceCodeStoreModule : memoryDeviceCodeStoreModule,
 		dpopModule,
 		mtlsModule,
@@ -745,15 +737,14 @@ function addedModules(
 		...(features.webauthn
 			? [
 					webauthnModule,
-					webauthnConfigModule,
 					webauthnSubjectModule,
 					stores.credential,
 					stores.challenge === "redis" ? redisChallengeStoreModule : memoryChallengeStoreModule,
 					defaultChallengeCeremonyModule,
 				]
 			: []),
-		// The WebAuthn second factor, over the relying party the WebAuthn
-		// bootstrap provides: off by its reference.conf, on through
+		// The WebAuthn second factor, over the relying party webauthnModule
+		// provides from its section: off by its reference.conf, on through
 		// WEBAUTHN_MFA_FACTOR_ENABLED.
 		...(features.webauthn && features.mfa ? [webauthnMfaFactorModule] : []),
 		grantPolicyModule,
@@ -944,8 +935,8 @@ export async function fullSetOptions(
 		...(userHttp === undefined
 			? {}
 			: { switches: (switches: Switches) => ({ ...switches, storeTransport: userHttp }) }),
-		extraModules: (config) => [
-			...addedModules(config, features, added, f, interrupt, opened, outage),
+		extraModules: () => [
+			...addedModules(features, added, f, interrupt, opened, outage),
 			...(ownModules ?? []),
 		],
 		// The caller's own overrides win, its own mail sender included.

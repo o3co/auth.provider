@@ -33,6 +33,7 @@ export const ADAPTERS_SECTION = "adapters";
 /** Each selection's key under `adapters`, and the variable its path is bound to. */
 const VARIABLES: Readonly<Record<keyof Adapters, string>> = {
 	rateLimiter: "ADAPTERS_RATE_LIMITER",
+	attemptCounter: "ADAPTERS_ATTEMPT_COUNTER",
 	userSessionStores: "ADAPTERS_USER_SESSION_STORES",
 	accessTokenDenylist: "ADAPTERS_ACCESS_TOKEN_DENYLIST",
 	replaySeenSet: "ADAPTERS_REPLAY_SEEN_SET",

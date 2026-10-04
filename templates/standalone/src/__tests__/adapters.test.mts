@@ -141,6 +141,7 @@ describe("the shipped selections", () => {
 	it("reads every selection from the template's reference.conf, at the values the template ships", () => {
 		expect(adaptersFrom()).toEqual({
 			rateLimiter: "memory",
+			attemptCounter: "memory",
 			userSessionStores: "memory",
 			accessTokenDenylist: "redis",
 			replaySeenSet: "redis",
@@ -163,6 +164,13 @@ describe("the shipped selections", () => {
 			expect(adaptersFrom({ [`ADAPTERS_${name}`]: value })[key]).toBe(value);
 		},
 	);
+
+	it("reads adapters.attemptCounter from ADAPTERS_ATTEMPT_COUNTER", () => {
+		expect(adaptersFrom({ ADAPTERS_ATTEMPT_COUNTER: "redis" }).attemptCounter).toBe("redis");
+		expect(refusal({ ADAPTERS_ATTEMPT_COUNTER: "memcached" }).message).toMatch(
+			/adapters\.attemptCounter/,
+		);
+	});
 
 	it("reads a selection an operator writes in HOCON", () => {
 		expect(adaptersFrom({}, 'adapters.rateLimiter = "redis"\n').rateLimiter).toBe("redis");
@@ -276,6 +284,13 @@ describe("the modules phase one chooses by the selections", () => {
 		const modules = names({ [variable]: value });
 		expect(modules).toContain(installed);
 		expect(modules).not.toContain(absent);
+	});
+
+	it("ADAPTERS_ATTEMPT_COUNTER=redis installs redis-attempt-counter over the shared Redis socket; memory installs no counter", () => {
+		const onRedis = names({ ADAPTERS_ATTEMPT_COUNTER: "redis" });
+		expect(onRedis).toContain("redis-attempt-counter");
+		expect(onRedis).toContain("redis-clients");
+		expect(names({ ADAPTERS_ATTEMPT_COUNTER: "memory" })).not.toContain("redis-attempt-counter");
 	});
 });
 

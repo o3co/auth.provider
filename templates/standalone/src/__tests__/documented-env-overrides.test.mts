@@ -159,6 +159,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// Which adapter fills each slot: the composition root's own section,
 	// read before the modules are chosen.
 	ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_ATTEMPT_COUNTER: "redis",
 	ADAPTERS_USER_SESSION_STORES: "redis",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
 	// The replay seen-set behind private_key_jwt client authentication.

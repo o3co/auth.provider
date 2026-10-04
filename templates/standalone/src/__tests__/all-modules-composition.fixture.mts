@@ -110,6 +110,7 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_STORAGE_TYPE: "memory",
 	ADAPTERS_USER_SESSION_STORES: "memory",
 	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_ATTEMPT_COUNTER: "memory",
 	ADAPTERS_CODE_REPOSITORY: "memory",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
 	ADAPTERS_REPLAY_SEEN_SET: "memory",
@@ -151,6 +152,8 @@ export const MULTI_ENV: Readonly<Record<string, string>> = {
 	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	ADAPTERS_USER_SESSION_STORES: "redis",
 	ADAPTERS_RATE_LIMITER: "redis",
+	// The login's attempt counter, shared: per process, `multi` refuses the login.
+	ADAPTERS_ATTEMPT_COUNTER: "redis",
 	ADAPTERS_CODE_REPOSITORY: "redis",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
 	ADAPTERS_REPLAY_SEEN_SET: "redis",

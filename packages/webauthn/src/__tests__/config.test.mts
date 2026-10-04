@@ -73,9 +73,18 @@ describe("webauthnConfigSchema", () => {
 
 	// The endpoint's own throttle.
 	describe("authentication/options security knobs", () => {
-		it("carries no allowCredentialsForKnownUser: the key is dropped, never read", () => {
-			const parsed = webauthnConfigSchema.parse({ ...VALID, allowCredentialsForKnownUser: true });
-			expect(parsed).not.toHaveProperty("allowCredentialsForKnownUser");
+		it("carries no allowCredentialsForKnownUser: the key is refused as one the schema does not declare", () => {
+			const result = webauthnConfigSchema.safeParse({
+				...VALID,
+				allowCredentialsForKnownUser: true,
+			});
+			expect(result.success).toBe(false);
+			expect(result.error?.issues).toEqual([
+				expect.objectContaining({
+					code: "unrecognized_keys",
+					keys: ["allowCredentialsForKnownUser"],
+				}),
+			]);
 		});
 
 		it("rateLimit.authenticationOptions is required", () => {

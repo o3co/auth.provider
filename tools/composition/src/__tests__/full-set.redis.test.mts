@@ -237,6 +237,27 @@ describe("two replicas on one Redis database share every flow's state", () => {
 		expect(tokens.status).toBe(200);
 	});
 
+	it("a subject's device verification attempts are counted once across replicas, on the Redis attempt counter", async () => {
+		// Earlier tests approve as the same subject: start from no counts.
+		await inspect.flushdb();
+		const hocon = "device-grant.rateLimit { limit = 2, windowSeconds = 300 }";
+		const a = await replica({ operatorHocon: hocon });
+		const b = await replica({ operatorHocon: hocon });
+		expect(a.handle.components.attemptCounter).toBeDefined();
+		const { cookies } = await login(a.app);
+		const lookup = (app: FullSet["app"]) =>
+			postWith(app, cookies, "/oauth/device/verification", {
+				action: "lookup",
+				user_code: "BCDF-GHJK",
+			});
+		expect((await lookup(a.app)).status).toBe(404);
+		expect((await lookup(b.app)).status).toBe(404);
+		const limited = await lookup(a.app);
+		expect(limited.status).toBe(429);
+		expect(limited.body.error).toBe("slow_down");
+		expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+	});
+
 	it("a DPoP proof accepted on one replica is refused on the other", async () => {
 		const a = await replica();
 		const b = await replica();

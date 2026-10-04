@@ -40,17 +40,9 @@ import { describe, expect, it } from "vitest";
 import type { WebAuthnConfig } from "#/config.mjs";
 import { webauthnModule } from "#/module.mjs";
 import { webauthnSessionSubjectModule } from "#/sessionSubject.mjs";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, testTokenSettings, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
-const base = makeAppConfig();
-const bootstrapComponents = {
-	config: {
-		...base,
-		oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://test.example" } },
-	},
-	pathResolver: (p: string) => p,
-} as never;
-
+/** `webauthnModule`'s section. */
 const webauthnConfig: WebAuthnConfig = {
 	rpId: "example.com",
 	rpName: "Example App",
@@ -61,12 +53,21 @@ const webauthnConfig: WebAuthnConfig = {
 	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
 
+const base = makeAppConfig();
+const bootstrapComponents = {
+	config: withWebAuthnSection(
+		{
+			...base,
+			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://test.example" } },
+		},
+		webauthnConfig,
+	),
+	pathResolver: (p: string) => p,
+	oauthTokenSettings: testTokenSettings({ issuer: "https://test.example" }),
+} as never;
+
 /** What `webauthnModule` needs beside itself. */
 const webauthnSupport: readonly Module[] = [
-	defineModule({
-		name: "test:webauthn-config",
-		provides: { webauthnConfig: () => webauthnConfig },
-	}),
 	defineModule({
 		name: "test:key-store",
 		provides: { keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!") },

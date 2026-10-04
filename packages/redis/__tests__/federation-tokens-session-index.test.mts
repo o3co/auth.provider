@@ -13,7 +13,11 @@
 
 import type { FederationTokenStore, FederationTokens } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import type { FederationTokenAttachInput, FederationTokenStoreClient } from "#/clients.mjs";
+import type {
+	FederationTokenAttachInput,
+	FederationTokenReadInput,
+	FederationTokenStoreClient,
+} from "#/clients.mjs";
 import {
 	createRedisFederationTokenStore,
 	redisFederationTokenStoreBuilder,
@@ -97,7 +101,7 @@ function createFakeRedis() {
 			return "attached" as const;
 		}),
 		// The conditional members' primitives; these tests write unconditionally.
-		readVersioned: vi.fn(async (_k: string, _candidate: string) => null),
+		readVersioned: vi.fn(async (_k: string, _input: FederationTokenReadInput) => null),
 		replaceIfGeneration: vi.fn(async () => "missing" as const),
 		removeIfGeneration: vi.fn(async () => "missing" as const),
 		pExpireGT: vi.fn(async (_key: string, _ttlMs: number) => {}),

@@ -18,6 +18,7 @@ import { createSecretKey } from "node:crypto";
 import {
 	type AuditEvent,
 	type AuditSink,
+	type BootError,
 	type ClientRepository,
 	type CodeRepository,
 	createAsymmetricKeyStore,
@@ -303,7 +304,10 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
 				authorize: { acrValues },
 			},
-			...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
+			...coreConfigForTests({
+				declaredAbsent: ["auditSink", "rateLimiter"],
+				federations: federations as never,
+			}),
 		} as ReturnType<typeof makeValidAppConfig>;
 	};
 	/**
@@ -713,6 +717,68 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 		expect(rateLimiter.check).toHaveBeenCalled();
 		expect(res.status).toBe(429);
 
+		await handle.dispose();
+	});
+});
+
+describe("oauthModule — no rateLimiter wired", () => {
+	const SECRET = "test-secret-at-least-32-chars!!";
+	const modules = () => [
+		oauthEndpointsModule,
+		memoryAccessTokenDenylistModule,
+		jwksModule,
+		clientRepositoryModule,
+		codeRepositoryModule,
+		defineModule({
+			name: "test:key-store-secret",
+			provides: { keyStore: () => createSymmetricKeyStore(SECRET) },
+		}),
+	];
+
+	it("refuses the boot unless core.declaredAbsent lists rateLimiter, naming the slot and the fix", async () => {
+		const config = {
+			...makeValidAppConfig(),
+			...coreConfigForTests({ declaredAbsent: ["auditSink"] }),
+		};
+		const err = await createTestApp({
+			modules: modules(),
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
+		}).then(
+			() => undefined,
+			(caught: unknown) => caught as BootError,
+		);
+		expect(err).toMatchObject({
+			reason: "component-absence-undeclared",
+			details: { componentKey: "rateLimiter" },
+		});
+		expect(err?.message).toContain('list "rateLimiter" in core.declaredAbsent');
+	});
+
+	it("lets every request through once the absence is declared", async () => {
+		const handle = await createTestApp({
+			modules: modules(),
+			bootstrapComponents: {
+				config: withOauthCaptures({ ...makeValidAppConfig() }),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.set("trust proxy", 1);
+		app.use(express.json());
+		app.use(express.urlencoded({ extended: false }));
+		for (const route of handle.inspect.routes) {
+			app.use(route.contribution.mountPath, route.contribution.handler);
+		}
+
+		const statuses = new Set<number>();
+		for (let n = 0; n < 70; n++) {
+			statuses.add(
+				(await request(app).post("/oauth/token").send({ grant_type: "password" })).status,
+			);
+		}
+
+		expect(statuses.has(429)).toBe(false);
+		expect(statuses.has(503)).toBe(false);
 		await handle.dispose();
 	});
 });

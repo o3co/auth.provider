@@ -841,6 +841,7 @@ export type {
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,
+	VerifierLimitDeclaration,
 } from "./modules/index.mjs";
 export {
 	// The way to author a federationTypes declaration, its entry tied to its schema.
@@ -997,19 +998,23 @@ export {
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
 // @o3co/auth-provider-redis.
-export type {
-	RateLimitContext,
-	RateLimitDecision,
-	RateLimiter,
-	RateLimiterFactory,
-	RateLimitFailMode,
-	RateLimitSpec,
+export {
+	RATE_LIMITER_ABSENCE_POLICY,
+	type RateLimitContext,
+	type RateLimitDecision,
+	type RateLimiter,
+	type RateLimiterFactory,
+	type RateLimitFailMode,
+	type RateLimitSpec,
 } from "./ratelimit/types.mjs";
 export {
 	assertUsableRateLimitSpecs,
 	isUsableRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "./ratelimit/usableSpec.mjs";
+// A limiter section's `limits` never names a prefix a verifier limits itself,
+// which the verifier's module declares by claiming it with `verifierLimitClaim`.
+export { refuseVerifierLimitEntries, verifierLimitClaim } from "./ratelimit/verifierLimits.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,
@@ -1230,6 +1235,43 @@ export {
 	createSessionRPRegistryFactory,
 	createUserSessionStoreFactory,
 } from "./user-sessions/factory.mjs";
+// The session lifecycle port (active → closing → closed), its readers and
+// its in-process store. Nothing reads the slot yet.
+export {
+	createInMemorySessionLifecycleStore,
+	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_ENTRIES,
+	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS,
+	type InMemorySessionLifecycleStoreOptions,
+} from "./user-sessions/lifecycle/memory.mjs";
+export {
+	checkSessionCloseRequest,
+	checkSessionParticipant,
+	readSessionCloseAnswer,
+	readSessionJoinAnswer,
+	readSessionLifecycleListing,
+	readSessionOpenAnswer,
+	readVersionedSessionLifecycle,
+} from "./user-sessions/lifecycle/readers.mjs";
+export {
+	SESSION_CLOSE_CAUSES,
+	SESSION_LIFECYCLE_MAX_KEY_LENGTH,
+	SESSION_LIFECYCLE_MAX_LISTING,
+	SESSION_LIFECYCLE_STATES,
+	SESSION_PARTICIPANT_KINDS,
+	SESSION_PARTICIPANT_MAX_DATA_LENGTH,
+	type SessionClose,
+	type SessionCloseAnswer,
+	type SessionCloseCause,
+	type SessionCloseRequest,
+	type SessionJoinAnswer,
+	type SessionLifecycleRecord,
+	type SessionLifecycleState,
+	type SessionLifecycleStore,
+	type SessionOpenAnswer,
+	type SessionParticipant,
+	type SessionParticipantKind,
+	sessionCloseItemOf,
+} from "./user-sessions/lifecycle/types.mjs";
 export { createInMemorySessionFamilyIndex } from "./user-sessions/memory/sessionFamilyIndex.mjs";
 export { createInMemorySessionFederationIndex } from "./user-sessions/memory/sessionFederationIndex.mjs";
 export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";

@@ -64,7 +64,6 @@ const EXEMPT: Readonly<Record<string, string>> = {
  * and a module with it.
  */
 const NOT_YET_STRICT: Readonly<Record<string, readonly string[]>> = {
-	webauthn: ["webauthn", "webauthn.rateLimit", "webauthn.rateLimit.authenticationOptions"],
 	"session-store": ["session-store.storage"],
 };
 
@@ -145,10 +144,10 @@ function withValue(base: unknown, path: readonly string[], value: unknown): unkn
 const SAMPLES: Readonly<Record<string, (base: unknown) => readonly unknown[]>> = {
 	"audit-sink": () => [{ "splunk-hec": { url: "https://splunk.test/services/collector" } }],
 	"core-rate-limiter-memory": (base) => [
-		withValue(base, ["limits"], { login: { limit: 5, windowSeconds: 60 } }),
+		withValue(base, ["limits"], { token: { limit: 5, windowSeconds: 60 } }),
 	],
 	"redis-rate-limiter": (base) => [
-		withValue(base, ["limits"], { login: { limit: 5, windowSeconds: 60 } }),
+		withValue(base, ["limits"], { token: { limit: 5, windowSeconds: 60 } }),
 	],
 	"federation-grants": (base) => {
 		const connections = valueAt(base, ["connections"]);
