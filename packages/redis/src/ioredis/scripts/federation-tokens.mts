@@ -25,8 +25,8 @@
  * removable when nothing more can be written. Besides the delete, the removal
  * writes only its answer: one small replay key per call, living about 2 s,
  * and on `missing` or `conflict` that key is all it writes. The read writes
- * only a mint, once per record written without a generation. The attach and
- * the replace declare no flags.
+ * only a mint and its replay key, once per record written without a
+ * generation. The attach and the replace declare no flags.
  */
 
 import { defineScript } from "./define.mjs";
@@ -61,24 +61,31 @@ end
 `;
 
 /**
- * The versioned read. `KEYS[1]` = the record; `ARGV[1]` = a fresh generation.
- * Returns `false` for no key, else `{ value, generation }`. A record the
- * store's format wrote without `g` (it decodes to an object with `v` 2 and no
- * `g`, and its first byte is `{`) is given `ARGV[1]`, its TTL kept, and
- * answered with it. The mint splices `"g"` in after that first byte rather
- * than re-encoding the object, which could change its numbers. Any other
- * value without a generation is answered with the generation `""`. Its first
- * line declares `allow-oom`, so it must stay the script's first line.
+ * The versioned read. `KEYS[1]` = the record, `KEYS[2]` = the read's replay
+ * key; `ARGV[1]` = a fresh generation, `ARGV[2]` = the deadline (epoch ms),
+ * `ARGV[3]` = when the replay key expires. Returns `false` for no key, else
+ * `{ value, generation }`. A record the store's format wrote without `g` (it
+ * decodes to an object with `v` 2 and no `g`, and its first byte is `{`) is
+ * given `ARGV[1]`, its TTL kept, and answered with it, only before the
+ * deadline and only when the replay key is absent; the mint is kept there
+ * until `ARGV[3]`. So a copy of the read sent again never mints `ARGV[1]`
+ * into a record written after the first copy's mint. The mint splices `"g"`
+ * in after that first byte rather than re-encoding the object, which could
+ * change its numbers. Any other value without a generation is answered with
+ * the generation `""`. Its first line declares `allow-oom`, so it must stay
+ * the script's first line.
  */
 const LUA_READ_VERSIONED = `${ALLOW_OOM}${FT_PRELUDE}
 local raw = redis.call('GET', KEYS[1])
 if not raw then return false end
 local g = ft_generation(raw)
 if g then return {raw, g} end
+if ft_late(ARGV[2]) or redis.call('EXISTS', KEYS[2]) == 1 then return {raw, ''} end
 local ok, rec = pcall(cjson.decode, raw)
 if ok and type(rec) == 'table' and rec['v'] == 2 and rec['g'] == nil and string.sub(raw, 1, 1) == '{' then
   local minted = '{"g":' .. cjson.encode(ARGV[1]) .. ',' .. string.sub(raw, 2)
   redis.call('SET', KEYS[1], minted, 'KEEPTTL')
+  ft_keep(KEYS[2], 'minted', ARGV[3])
   return {minted, ARGV[1]}
 end
 return {raw, ''}
