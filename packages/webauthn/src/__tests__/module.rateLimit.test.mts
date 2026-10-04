@@ -357,9 +357,8 @@ describe("webauthn authentication/options rate limit — the section and the con
 	/**
 	 * A shared limiter applies the budget the module contributes from its
 	 * section's `webauthn.rateLimit.authenticationOptions`; the route's
-	 * per-process fallback and its headers read the same key. Another module
-	 * may override the contributed budget (only to tighten it): boot then warns
-	 * once, naming both values.
+	 * per-process fallback and its headers read the same key. No module may
+	 * override the contributed budget, so the two agree and boot is silent.
 	 */
 	const EVENT = "webauthn_authentication_options_budget_mismatch";
 	const sharedLimiter = () =>
@@ -386,7 +385,7 @@ describe("webauthn authentication/options rate limit — the section and the con
 		expect(err?.message).toContain("webauthn.rateLimit.authenticationOptions");
 	});
 
-	it("is silent when nothing overrides the budget, the key as the strings HOCON substitutes included", async () => {
+	it("is silent when a shared limiter is wired, the key as the strings HOCON substitutes included", async () => {
 		for (const authenticationOptions of [
 			{ limit: 2, windowSeconds: 60 },
 			{ limit: "2", windowSeconds: "60" },
@@ -404,8 +403,7 @@ describe("webauthn authentication/options rate limit — the section and the con
 		}
 	});
 
-	it("warns when a module has overridden the contributed budget away from the key, naming both", async () => {
-		const logger = spyLogger();
+	it("refuses the boot when a module overrides the contributed budget", async () => {
 		const tightener = defineModule({
 			name: "test:webauthn-rl-tightener",
 			overrides: {
@@ -414,25 +412,12 @@ describe("webauthn authentication/options rate limit — the section and the con
 				},
 			},
 		});
-		const { handle } = await bootApp(
-			makeWebAuthnConfig(2),
-			[withLogger(logger), sharedLimiter(), tightener],
-			undefined,
-			undefined,
-			{ webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } } },
+		const err = await bootApp(makeWebAuthnConfig(2), [sharedLimiter(), tightener]).then(
+			() => undefined,
+			(caught: unknown) => caught as BootError,
 		);
-
-		expect(mismatchCalls(logger)).toEqual([
-			[
-				{
-					key: "webauthn.rateLimit.authenticationOptions",
-					contributed: { limit: 1, windowSeconds: 60 },
-					webauthnConfig: { limit: 2, windowSeconds: 60 },
-				},
-				EVENT,
-			],
-		]);
-		await handle.dispose();
+		expect(err?.reason).toBe("contribution-kind-guarded");
+		expect(err?.message).toContain(WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG);
 	});
 
 	it("is silent when no shared limiter is wired: the fallback is built from the key", async () => {

@@ -119,7 +119,10 @@ function configWith(federations: Record<string, unknown>): AppConfig {
 	const base = makeValidAppConfig();
 	return {
 		...base,
-		...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
+		...coreConfigForTests({
+			declaredAbsent: ["auditSink", "rateLimiter"],
+			federations: federations as never,
+		}),
 	} as unknown as AppConfig;
 }
 

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -487,7 +487,12 @@ The rate limiter takes a key's budget from core's one lookup,
 `createRateLimitBudgetLookup`: its own `redis-rate-limiter.limits` entry for the
 key's prefix, else the budget the prefix's owning module contributed
 (`rateLimitBudgetResolver`, read and checked at each check), else its
-`defaultLimit`, which it declares (`RateLimiter.defaultLimit`).
+`defaultLimit`, which it declares (`RateLimiter.defaultLimit`). Its `limits`
+may not name `login` or `device_verification`, a verifier's own attempt limit
+set at `session.rateLimit.login` and `device-grant.rateLimit`: the section
+refuses such an entry, and the contributed budget applies in its place.
+`redisRateLimiterBuilder` reads no contributed budget, and takes its `limits`
+as given.
 `redisRateLimiterModule` answers `redis-rate-limiter.failMode`, its own key, as
 the limiter's outage policy (`RateLimiter.failMode`), which the guard applies
 while Redis cannot answer; a value other than `"open"` or `"closed"` refuses
@@ -654,7 +659,7 @@ conditional-write convention for a record
   removal writes only its answer: one small replay key per call, living
   about 2 s, and on `missing` or `conflict` that key is all it writes. A
   versioned read of a record written without a generation is a write, the
-  mint, once per such record; it runs there because a stored token is served
+  mint and its replay key, once per such record; it runs there because a stored token is served
   from the versioned read, and a conditional removal starts from it, so
   without it a full server would neither serve nor remove such a record
   until memory was freed. The attach and the replace are refused there.
@@ -699,6 +704,15 @@ conditional-write convention for a record
   by the skew. `attach` overwrites whatever the record holds, so without
   this a resent copy would put an older record and its generation back over
   a later write.
+- **The mint is bounded the same way.** A versioned read that mints carries
+  the same deadline and keeps that it minted under a replay key of its own,
+  keyed by the generation it mints, until the clock skew past the deadline.
+  A copy of that read the driver sends again, or one that reaches the server
+  at or after its deadline, mints nothing: it answers a record that carries a
+  generation as any read does, and makes `getVersioned` reject, as an outage
+  would, on a record that carries none. So a resent read never puts the
+  generation another reader already holds onto a record an older replica
+  wrote since, and that reader's conditional write answers `conflict`.
 - **The index.** A copy of `attach` the driver resends after a logout
   writes no record, but its index add (one MULTI before the script) lands
   again: the session's `idx:` set is made again, naming a record that is
@@ -733,10 +747,10 @@ conditional-write convention for a record
 
 A `FederationTokenStoreClient` of your own implements the five primitives
 `attach` and the conditional members use: `attachRecord`, `readVersioned`,
-`replaceIfGeneration`, `removeIfGeneration` (each one atomic step, all but
-`readVersioned` refusing at or after the deadline they are handed and
-keeping their answer under the replay key they are handed until the clock
-skew they are handed past it) and `pExpireGT`; and `durability`, the
+`replaceIfGeneration`, `removeIfGeneration` (each one atomic step, refusing
+at or after the deadline they are handed, `readVersioned` only its mint, and
+keeping their answer, or `readVersioned` its mint, under the replay key they
+are handed until the clock skew they are handed past it) and `pExpireGT`; and `durability`, the
 server's report the module's boot check reads. The builder refuses a client
 without them. [`federation-tokens.conditional.test.mts`](__tests__/federation-tokens.conditional.test.mts)
 runs `federationTokenStoreConditionalContract` (`@o3co/auth-provider-test-kit`)

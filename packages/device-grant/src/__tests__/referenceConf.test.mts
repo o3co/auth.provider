@@ -22,16 +22,16 @@
  * runs over its own file.
  */
 
-import { makeValidAppConfig, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
+import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { deviceGrantModule } from "#/module.mjs";
+import { deviceAuthorizationGrantModule } from "#/module.mjs";
 
 /** The package's defaults, as a composition root finds them. */
 const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 
 describe("the package's config/reference.conf", () => {
-	const modules = [deviceGrantModule({ config: makeValidAppConfig() })];
+	const modules = [deviceAuthorizationGrantModule];
 
 	it("is read at the section named after its module", () => {
 		expect(

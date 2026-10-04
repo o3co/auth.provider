@@ -237,7 +237,7 @@ describe("sessionModule (boot integration)", () => {
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					stub: {
 						enabled: true,
@@ -262,7 +262,7 @@ describe("sessionModule (boot integration)", () => {
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					stub: {
 						enabled: true,
@@ -290,7 +290,7 @@ describe("sessionModule (boot integration)", () => {
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					disabledFed: {
 						enabled: false,
@@ -550,12 +550,12 @@ describe("sessionModule — the password login is a consumer of session admissio
 });
 
 // ---------------------------------------------------------------------------
-// The login throttle's per-process fallback is decided by core's
-// `deploymentMode` slot, which core fills from `core.deployment.mode`: the module
-// reads nothing of `deployment` itself.
+// The login's per-process attempt counting, with no attemptCounter wired, is
+// decided by core's `deploymentMode` slot, which core fills from
+// `core.deployment.mode`: the module reads nothing of `deployment` itself.
 // ---------------------------------------------------------------------------
 
-describe("sessionModule — the login throttle reads the deploymentMode slot", () => {
+describe("sessionModule — the login's attempt limit reads the deploymentMode slot", () => {
 	const spyLogger = () => {
 		const warn = vi.fn();
 		const logger = {
@@ -599,26 +599,54 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 		expect(sessionModule.requires).toContain("deploymentMode");
 	});
 
-	it('refuses the per-process fallback when the slot says "multi", whatever the configuration\'s deployment says', () => {
+	it('refuses per-process counting when the slot says "multi", whatever the configuration\'s deployment says', () => {
 		expect(() => sessionRoutes("multi", { mode: "single" }, spyLogger().logger)).toThrow(
-			expect.objectContaining({
-				name: "BootError",
-				reason: "replica-unsafe-adapter",
-				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
-			}),
+			/core\.deployment\.mode is "multi" but no shared attemptCounter is wired for "login"/,
 		);
 	});
 
 	it('is silent when the slot says "single" and warns when it says "unset", whatever the configuration\'s deployment says', () => {
 		const single = spyLogger();
 		expect(sessionRoutes("single", { mode: "multi" }, single.logger).id).toBe("session-routes");
-		expect(single.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"login_rate_limiter_not_shared",
-		);
+		expect(single.warn).not.toHaveBeenCalledWith(expect.anything(), "attempt_counter_not_shared");
 		const unset = spyLogger();
 		sessionRoutes("unset", { mode: "multi" }, unset.logger);
-		expect(unset.warn).toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
+		expect(unset.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ tag: "login" }),
+			"attempt_counter_not_shared",
+		);
+	});
+
+	it("through createApp, boots under core.deployment.mode = multi on the attemptCounter slot's counter, without a warning", async () => {
+		const { logger, warn } = spyLogger();
+		const base = makeValidAppConfig();
+		const consume = vi.fn(async () => ({
+			allowed: true,
+			remaining: 1,
+			resetAt: new Date(Date.now() + 60_000),
+		}));
+		const handle = await createTestApp({
+			modules: [
+				...baseTestModules,
+				defineModule({
+					name: "test:attempt-counter",
+					provides: { attemptCounter: () => ({ consume }) },
+				}),
+			],
+			bootstrapComponents: {
+				config: withSessionCaptures({
+					...base,
+					core: { ...base.core, deployment: { mode: "multi" } },
+				}),
+				pathResolver: (s: string) => s,
+				logger,
+			} as never,
+		});
+		try {
+			expect(warn).not.toHaveBeenCalledWith(expect.anything(), "attempt_counter_not_shared");
+		} finally {
+			await handle.dispose();
+		}
 	});
 
 	it.each([
@@ -627,7 +655,7 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 		["mounted with the warning", "an empty deployment section", {}],
 		["mounted with the warning", "no deployment section", undefined],
 	] as const)(
-		"through createApp, the per-process login limiter is %s under %s",
+		"through createApp, per-process login counting is %s under %s",
 		async (outcome, _what, deployment) => {
 			const { logger, warn } = spyLogger();
 			const base = makeValidAppConfig();
@@ -645,15 +673,15 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 			if (outcome === "refused at boot") {
 				await expect(boot).rejects.toMatchObject({
 					reason: "contribute-factory-failed",
-					cause: { reason: "replica-unsafe-adapter", details: { modules: ["session"] } },
+					cause: {
+						message: expect.stringContaining('no shared attemptCounter is wired for "login"'),
+					},
 				});
 				return;
 			}
 			const handle = await boot;
 			try {
-				const warned = warn.mock.calls.some(
-					([, event]) => event === "login_rate_limiter_not_shared",
-				);
+				const warned = warn.mock.calls.some(([, event]) => event === "attempt_counter_not_shared");
 				expect(warned).toBe(outcome === "mounted with the warning");
 			} finally {
 				await handle.dispose();

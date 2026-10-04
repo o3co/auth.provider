@@ -37,7 +37,7 @@ export interface RateLimitGuardOptions {
 	/**
 	 * Endpoint tag: the key prefix (`<tag>:ip:<ip>`) by which an adapter
 	 * resolves this route's spec, and the `tag` field on the guard's log and
-	 * audit emissions. E.g. `"token"`, `"authorize"`, `"introspect"`, `"login"`.
+	 * audit emissions. E.g. `"token"`, `"authorize"`, `"introspect"`, `"mfa"`.
 	 */
 	readonly tag: string;
 	/** Operator-visible outage channel. Defaults to `consoleLogger`. */
@@ -51,7 +51,7 @@ export interface RateLimitGuardOptions {
 	/**
 	 * Configured spec backing the `RateLimit-Limit` / `RateLimit-Reset` headers
 	 * when the decision does not carry `limit` / `resetAt`. Callers with a
-	 * documented per-endpoint spec (e.g. `session.rateLimit.login`) pass it here;
+	 * documented per-endpoint spec (e.g. `webauthn.rateLimit.authenticationOptions`) pass it here;
 	 * without it the guard only advertises what the adapter actually reported,
 	 * because a header value the caller invented is a limit no request is
 	 * measured against.
@@ -218,9 +218,9 @@ export const rateLimiterUnavailableEnvelope = (): ErrorEnvelope =>
 	errorEnvelope("service_unavailable", "Rate limiter temporarily unavailable");
 
 /**
- * Middleware factory for the product's security throttles, shared by the
- * OAuth endpoints (`/token`, `/authorize`, `/introspect`) and
- * `/session/login`. It checks `limiter.check("<tag>:ip:<ip>", ctx)` and:
+ * Middleware factory for the routes the deployment's rate limiter throttles,
+ * shared by every module that keys the limiter (the OAuth endpoints among
+ * them). It checks `limiter.check("<tag>:ip:<ip>", ctx)` and:
  *
  * - **allow** → `RateLimit-*` headers, then `next()`;
  * - **deny** → `RateLimit-*` headers, `Retry-After` when the decision carries

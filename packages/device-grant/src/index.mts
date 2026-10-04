@@ -35,15 +35,18 @@ export {
 	type DeviceAuthorizationEndpointOptions,
 } from "./deviceAuthorizationEndpoint.mjs";
 export { createDeviceCodeGrant, type DeviceCodeGrantOptions } from "./grant.mjs";
-export { deviceGrantConfigSchema, deviceGrantModule } from "./module.mjs";
+export {
+	deviceAuthorizationGrantModule,
+	deviceGrantConfigSchema,
+	deviceGrantModule,
+} from "./module.mjs";
 export {
 	DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
 	DEVICE_CODE_GRANT_TYPE,
-	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+	DEVICE_VERIFICATION_ATTEMPT_TAG,
 	type DeviceAuthorizationSettings,
 	type DeviceGrantDependencies,
 } from "./types.mjs";
-export { isDeviceVerificationRateLimitSpec } from "./verificationBudget.mjs";
 export {
 	createDeviceVerificationHandler,
 	type DeviceVerificationHandlerOptions,

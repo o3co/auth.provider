@@ -21,11 +21,12 @@
  * read as some other number.
  */
 
-import { MAX_DURATION_SECONDS } from "@o3co/auth-provider-core";
+import { MAX_ATTEMPT_WINDOW_SECONDS } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { deviceGrantConfigSchema } from "#/module.mjs";
+import { shippedDeviceGrantSection } from "./shippedSection.mjs";
 
-/** Each key `device-grant {}` reads a number at: the section that sets it, its range's message, and a value inside the range. */
+/** Each key `device-grant {}` reads a number at: the keys that set it over the shipped section, its range's message, and a value inside the range. */
 const KEYS: ReadonlyArray<
 	readonly [path: string, set: (value: unknown) => unknown, message: string, inRange: number]
 > = [
@@ -38,7 +39,7 @@ const KEYS: ReadonlyArray<
 	[
 		"rateLimit.windowSeconds",
 		(value) => ({ rateLimit: { limit: 5, windowSeconds: value } }),
-		`must be a whole number from 1 to ${MAX_DURATION_SECONDS}, in decimal digits`,
+		`must be a whole number from 1 to ${MAX_ATTEMPT_WINDOW_SECONDS}, in decimal digits`,
 		60,
 	],
 	[
@@ -70,6 +71,12 @@ const REFUSED: ReadonlyArray<unknown> = [
 	Number.NaN,
 ];
 
+/** The shipped section with `overrides` laid over it, parsed. */
+const parse = (overrides: unknown) =>
+	deviceGrantConfigSchema.safeParse(
+		shippedDeviceGrantSection(overrides as Readonly<Record<string, unknown>>),
+	);
+
 const issuesAt = (result: ReturnType<typeof deviceGrantConfigSchema.safeParse>, path: string) =>
 	(result.error?.issues ?? [])
 		.filter((issue) => issue.path.map(String).join(".") === path)
@@ -84,30 +91,28 @@ const readAt = (section: unknown, path: string): unknown =>
 describe("device-grant {} reads each number setting in decimal digits, held to its range", () => {
 	describe.each(KEYS)("%s", (path, set, message, inRange) => {
 		it.each(REFUSED.map((value) => [value]))("refuses %j, naming the key", (value) => {
-			const result = deviceGrantConfigSchema.safeParse(set(value));
+			const result = parse(set(value));
 			expect(result.success).toBe(false);
 			expect(issuesAt(result, path)).toEqual([message]);
 		});
 
 		it.each([[0], ["0"]])("refuses %j, below the minimum", (value) => {
-			expect(issuesAt(deviceGrantConfigSchema.safeParse(set(value)), path)).toEqual([message]);
+			expect(issuesAt(parse(set(value)), path)).toEqual([message]);
 		});
 
 		it.each([[inRange], [`${inRange}`], [` ${inRange} `]])("reads %j", (value) => {
-			const result = deviceGrantConfigSchema.safeParse(set(value));
+			const result = parse(set(value));
 			expect(result.error?.issues ?? []).toEqual([]);
 			expect(readAt(result.data, path)).toBe(inRange);
 		});
 	});
 
 	it.each([
-		["rateLimit.windowSeconds", MAX_DURATION_SECONDS + 1],
+		["rateLimit.windowSeconds", MAX_ATTEMPT_WINDOW_SECONDS + 1],
 		["codeLifetimeSeconds", 3601],
 		["pollingIntervalSeconds", 61],
 	] as const)("refuses %s = %d, above the maximum", (path, value) => {
 		const [, set, message] = KEYS.find(([key]) => key === path) ?? [];
-		expect(
-			set === undefined ? [] : issuesAt(deviceGrantConfigSchema.safeParse(set(value)), path),
-		).toEqual([message]);
+		expect(set === undefined ? [] : issuesAt(parse(set(value)), path)).toEqual([message]);
 	});
 });

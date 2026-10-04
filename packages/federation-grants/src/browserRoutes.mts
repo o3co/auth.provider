@@ -18,8 +18,8 @@
  * The browser half of federation-grant acquisition, mounted at
  * `/session/federation-grants`: the connect start a client sends the user to,
  * the consent the deployment's page reads and answers, and the upstream callback.
- * This file mounts each stage behind the browser budget and the shutdown drain;
- * what follows holds across the stages.
+ * This file mounts each stage behind the shutdown drain and, when a limiter is
+ * wired, the browser budget; what follows holds across the stages.
  *
  * Connect and the callback are navigations: redirects and plain text, never a
  * JSON body. `GET`/`POST /consent` mirror `/oauth/consent` for the page that
@@ -126,19 +126,26 @@ export function createFederationGrantBrowserRouter(
 
 	// The deployment's own logger and audit sink: a limiter outage here is
 	// logged and audited as on every other throttled route.
-	const throttlePolicy = createRateLimitPolicy(
-		{
-			limiter: options.rateLimiter,
-			tag: FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
-			...(options.logger === undefined ? {} : { logger: options.logger }),
-			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
-		},
-		"createFederationGrantBrowserRouter",
-	);
-	/** The browser budget: the outage policy is core's, the rendering is the transport's. */
+	const throttlePolicy =
+		options.rateLimiter === undefined
+			? undefined
+			: createRateLimitPolicy(
+					{
+						limiter: options.rateLimiter,
+						tag: FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
+						...(options.logger === undefined ? {} : { logger: options.logger }),
+						...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+					},
+					"createFederationGrantBrowserRouter",
+				);
+	/**
+	 * The browser budget: the outage policy is core's, the rendering is the
+	 * transport's. Without a limiter, a request passes.
+	 */
 	const throttle =
 		(render: (res: Response, status: number) => void): RequestHandler =>
 		async (req, res, next) => {
+			if (throttlePolicy === undefined) return next();
 			const ip = req.ip ?? "unknown";
 			const outcome = await checkWithFailMode(
 				throttlePolicy,

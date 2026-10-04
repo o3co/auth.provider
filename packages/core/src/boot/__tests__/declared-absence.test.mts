@@ -31,6 +31,8 @@ import {
 	defineModule,
 	describeAbsenceDeclaration,
 	isAbsenceDeclared,
+	memoryRateLimiterModule,
+	RATE_LIMITER_ABSENCE_POLICY,
 } from "../../index.mjs";
 import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
@@ -197,6 +199,89 @@ describe("checkDeclaredAbsence", () => {
 		await expect(
 			createApp({ modules: [plainOptionalModule], bootstrapComponents: boot() }),
 		).resolves.toBeDefined();
+	});
+});
+
+/** A module that reads `rateLimiter` and attaches no policy of its own. */
+const limiterReaderModule = defineModule({
+	name: "test:limiter-reader",
+	optional: ["rateLimiter"] as const,
+});
+
+/** A second reader of the slot. */
+const secondLimiterReaderModule = defineModule({
+	name: "test:limiter-reader-2",
+	optional: ["rateLimiter"] as const,
+});
+
+describe("checkDeclaredAbsence — the rateLimiter slot, whose policy core attaches", () => {
+	it("refuses boot when no limiter is wired and the absence is undeclared, naming the slot and the fix", async () => {
+		const err = await createApp({
+			modules: [limiterReaderModule, secondLimiterReaderModule],
+			bootstrapComponents: boot(),
+		}).catch((e: unknown) => e as BootError);
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "component-absence-undeclared",
+			details: {
+				reason: "component-absence-undeclared",
+				componentKey: "rateLimiter",
+				consumedBy: ["test:limiter-reader", "test:limiter-reader-2"],
+				configKey: "core.declaredAbsent",
+				absentValue: "rateLimiter",
+			},
+		});
+		expect((err as BootError).message).toContain('list "rateLimiter" in core.declaredAbsent');
+		expect((err as BootError).message).toContain(RATE_LIMITER_ABSENCE_POLICY.hint);
+	});
+
+	it("boots with no limiter when core.declaredAbsent lists the slot, and leaves it empty", async () => {
+		const handle = await createApp({
+			modules: [limiterReaderModule],
+			bootstrapComponents: boot(declaring("rateLimiter")),
+		});
+		expect(handle.components.rateLimiter).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("boots with a limiter wired, with no declaration needed", async () => {
+		const handle = await createApp({
+			modules: [limiterReaderModule, memoryRateLimiterModule],
+			bootstrapComponents: boot(),
+		});
+		await handle.dispose();
+	});
+
+	it("asks nothing of a composition in which no module reads the slot", async () => {
+		const handle = await createApp({ modules: [], bootstrapComponents: boot() });
+		await handle.dispose();
+	});
+
+	it("agrees with a module attaching the same policy, and refuses one that differs", async () => {
+		const attaching = defineModule({
+			name: "test:limiter-reader-attaching",
+			optional: ["rateLimiter"] as const,
+			absencePolicies: { rateLimiter: RATE_LIMITER_ABSENCE_POLICY },
+		});
+		const agreeing = await createApp({
+			modules: [limiterReaderModule, attaching],
+			bootstrapComponents: boot(declaring("rateLimiter")),
+		});
+		await agreeing.dispose();
+
+		const differing = defineModule({
+			name: "test:limiter-reader-differing",
+			optional: ["rateLimiter"] as const,
+			absencePolicies: {
+				rateLimiter: { ...RATE_LIMITER_ABSENCE_POLICY, hint: "a different story" },
+			},
+		});
+		const err = await createApp({
+			modules: [limiterReaderModule, differing],
+			bootstrapComponents: boot(declaring("rateLimiter")),
+		}).catch((e: unknown) => e as BootError);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).message).toContain("disagree");
 	});
 });
 

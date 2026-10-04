@@ -435,6 +435,97 @@ describe("conditional writes over a real Redis", () => {
 		expect(again.generation).not.toBe(read.generation);
 	});
 
+	it("a versioned read the driver sends again after a replacement written without a generation mints nothing, so a stale holder of its first mint meets conflict", async () => {
+		suiteCounter += 1;
+		const keyPrefix = `t291ft:${suiteCounter}:`;
+		const key = `${keyPrefix}sid-1:google`;
+		const { federationTokenStoreClient } = makeIoredisClients(raw);
+		// The first versioned read's command, recorded so it can be sent again as
+		// the driver does after a reconnect; its reply is lost.
+		let lostRead: unknown[] | undefined;
+		const client = new Proxy(federationTokenStoreClient, {
+			get(target, method, receiver) {
+				const member = Reflect.get(target, method, receiver) as unknown;
+				if (method !== "readVersioned" || typeof member !== "function") return member;
+				return async (...args: unknown[]) => {
+					const reply = await (member as (...a: unknown[]) => Promise<unknown>).apply(target, args);
+					if (lostRead !== undefined) return reply;
+					lostRead = args;
+					throw new Error("connection lost");
+				};
+			},
+		});
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client,
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix,
+			scanFallback: false,
+		});
+		await store.attach("sid-1", "google", tokens);
+		await rewriteWithoutGeneration(key, 600_000);
+
+		// 1. Read A mints a generation; its reply is lost.
+		await expect(store.getVersioned("sid-1", "google")).rejects.toThrow(/connection lost/);
+		if (lostRead === undefined) throw new Error("no versioned read sent");
+		// 2. Reader B obtains the generation A minted.
+		const stale = await live(store, "sid-1", "google");
+		expect(JSON.parse((await raw.get(key)) as string).g).toBe(stale.generation);
+		// 3. A replica without generations replaces the tokens.
+		const next = { ...tokens, accessToken: "at-linked" };
+		await store.attach("sid-1", "google", next);
+		const replacement = await rewriteWithoutGeneration(key, 600_000);
+		// 4. The driver sends A again.
+		const resent = (await (
+			federationTokenStoreClient.readVersioned as (...a: unknown[]) => Promise<unknown>
+		)(...lostRead)) as { raw: string; generation: string } | null;
+		expect(resent?.generation).not.toBe(stale.generation);
+		expect(await raw.get(key)).toBe(replacement);
+
+		expect(await store.replaceIf("sid-1", "google", stale.generation, tokens)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await store.removeIf("sid-1", "google", stale.generation)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await store.get("sid-1", "google")).toEqual(next);
+		// A read of its own mints a fresh generation into the replacement.
+		const fresh = await live(store, "sid-1", "google");
+		expect(fresh.value).toEqual(next);
+		expect(fresh.generation).not.toBe(stale.generation);
+	});
+
+	it("a versioned read past its deadline mints nothing; one on time keeps its mint under its replay key the declared clock skew past its deadline", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const bytes = await rewriteWithoutGeneration(key, 600_000);
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const now = await serverClock(() => raw)();
+		const read = (candidate: string, deadlineMs: number) =>
+			client.readVersioned(key, {
+				candidate,
+				deadlineMs,
+				replayKey: `${key}:w:${candidate}`,
+				clockSkewMs: CLOCK_SKEW_MS,
+			});
+
+		expect(await read("mint-late", now - 1)).toEqual({ raw: bytes, generation: "" });
+		expect(await raw.get(key)).toBe(bytes);
+		expect(await raw.exists(`${key}:w:mint-late`)).toBe(0);
+
+		const deadlineMs = now + 30_000;
+		const minted = await read("mint-1", deadlineMs);
+		expect(minted?.generation).toBe("mint-1");
+		expect(await raw.get(key)).toBe(minted?.raw);
+		expect(await raw.pexpiretime(`${key}:w:mint-1`)).toBe(deadlineMs + CLOCK_SKEW_MS + 1);
+		// A copy sent again while the record still carries the mint answers it, writing nothing.
+		expect(await read("mint-1", deadlineMs)).toEqual(minted);
+		// A record carrying a generation is read whatever the deadline, and nothing is written.
+		expect(await read("mint-2", now - 1)).toEqual(minted);
+		expect(await raw.exists(`${key}:w:mint-2`)).toBe(0);
+	});
+
 	it("mints a generation into a v2 record without one whatever the order of its fields, splicing it in before the bytes it read", async () => {
 		const { keyPrefix, store } = makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;

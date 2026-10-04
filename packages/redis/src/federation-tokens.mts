@@ -33,7 +33,10 @@
  * writes"), outside the ciphertext, so a replica that does not know it reads
  * the record as before. Every write sets a fresh one. A record written without
  * one (by such a replica) is given one by its first versioned read, its TTL
- * kept; a conditional write against it answers `conflict`. A record `get`
+ * kept; a conditional write against it answers `conflict`. That mint is
+ * bounded as a write is, below: a copy of the read sent again mints nothing,
+ * so it never puts a generation another reader holds onto a record written
+ * since. A record `get`
  * reads that the versioned read can neither find a generation in nor mint one
  * into makes `getVersioned` reject, as an outage would: it is never removed.
  *
@@ -522,7 +525,18 @@ export function createRedisFederationTokenStore(
 		},
 		async getVersioned(sid, name) {
 			const key = k(sid, name);
-			const read = await opts.client.readVersioned(key, newStoreGeneration());
+			const candidate = newStoreGeneration();
+			const replayKey = replayKeyFor("getVersioned", key, candidate);
+			const read = await withWriteDeadline(
+				(deadlineMs) =>
+					opts.client.readVersioned(key, {
+						candidate,
+						deadlineMs,
+						replayKey,
+						clockSkewMs: CLOCK_SKEW_MS,
+					}),
+				unanswered("getVersioned"),
+			);
 			if (read === null) return null;
 			let value: FederationTokens;
 			try {

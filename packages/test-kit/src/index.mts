@@ -81,6 +81,11 @@ export {
 	startFakeStore,
 } from "./mfa/fakeStore.mjs";
 export {
+	type SessionLifecycleStoreContractInput,
+	type SessionLifecycleStoreHarness,
+	sessionLifecycleStoreContract,
+} from "./sessionLifecycle/sessionLifecycleStore.contract.mjs";
+export {
 	type WebAuthnCredentialStoreContractInput,
 	type WebAuthnCredentialStoreHarness,
 	webAuthnCredentialStoreContract,
