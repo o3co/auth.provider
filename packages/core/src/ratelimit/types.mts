@@ -93,15 +93,16 @@ export const RATE_LIMITER_ABSENCE_POLICY = {
 	configKey: ["core", "declaredAbsent"],
 	absentValue: "rateLimiter",
 	hint:
-		"Without a limiter every route that keys it lets each request through: no request-volume " +
-		"limit applies, unless something in front of the provider applies one.",
+		"Without a limiter, a route that keys it and has no per-process fallback of its own lets " +
+		"each request through: no request-volume limit applies there, unless something in front " +
+		"of the provider applies one.",
 } as const;
 
 // ---------------------------------------------------------------------------
 // ComponentMap slot: `rateLimiter`, optional to wire but not to decide (see
 // RATE_LIMITER_ABSENCE_POLICY), so `deps.rateLimiter` is
-// `RateLimiter | undefined`. Absent, the routes that key it pass requests
-// through.
+// `RateLimiter | undefined`. Absent, a route that keys it passes requests
+// through unless its module falls back to a per-process limiter.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

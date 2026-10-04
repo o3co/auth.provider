@@ -16,10 +16,11 @@
 
 /**
  * The prefixes whose limit a verifier sets itself: the attempts a credential
- * check allows. A limiter's own `limits` may not name one, so no limiter
- * configuration loosens a verifier's limit; the setting each is made at is
- * what a refusal points to. The one place core names another package's
- * prefix and setting.
+ * check allows. The bundled limiter modules' sections may not name one in
+ * their `limits`, where the owner's contributed budget applies in its place;
+ * the builders and constructors read no contributed budget and take `limits`
+ * as given. The setting each is made at is what a refusal points to. The one
+ * place core names another package's prefix and setting.
  */
 
 import type { z } from "zod";

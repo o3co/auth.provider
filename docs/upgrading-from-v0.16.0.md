@@ -269,14 +269,16 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   module provides `rateLimiter` and an installed module reads it, the boot is
   refused (`component-absence-undeclared`, naming `rateLimiter`) unless
   `core.declaredAbsent` lists it: `core.declaredAbsent = ["rateLimiter"]`,
-  beside `"auditSink"` if you list that. Declared absent, the routes that key
-  the limiter let every request through, so request-volume limits are then
-  for what sits in front of the provider. The template wires a limiter
+  beside `"auditSink"` if you list that. Declared absent, a route that keys
+  the limiter lets every request through unless its module falls back to a
+  per-process limiter (the session login, WebAuthn authentication options and
+  the MFA routes do), so request-volume limits on the others are then for what
+  sits in front of the provider. The template wires a limiter
   (`adapters.rateLimiter`), so a scaffold needs nothing.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
   refused (#807).** `core-rate-limiter-memory.limits` and
   `redis-rate-limiter.limits` may not name either prefix: each is a verifier's
-  own attempt limit, which no limiter may loosen. A limiter built with
+  own attempt limit, which no limiter module's configuration may loosen. A limiter built with
   `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` reads no
   contributed budget and keeps the `limits` it is given.
   The boot is refused (`config-validation-failed`, naming the key and the
