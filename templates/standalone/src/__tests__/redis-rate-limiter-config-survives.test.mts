@@ -156,12 +156,13 @@ describe("the shipped configuration reaches the Redis rate limiter", () => {
 		expect(booted.switches.adapters.rateLimiter).toBe("redis");
 	});
 
-	it("carries the operator's per-endpoint budgets through boot's parse", () => {
+	it("carries the operator's per-endpoint budgets through boot's parse, beside the shipped one", () => {
 		expect(
 			(config as unknown as Record<string, { limits?: unknown }>)["redis-rate-limiter"]?.limits,
 		).toEqual({
 			token: { limit: 120, windowSeconds: 60 },
 			authorize: { limit: 30, windowSeconds: 60 },
+			mfa: { limit: 60, windowSeconds: 300 },
 		});
 	});
 
