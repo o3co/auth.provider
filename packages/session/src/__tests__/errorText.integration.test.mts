@@ -18,16 +18,15 @@
  * RFC 6749 Appendix A.7 / A.8 on the session router, booted through core's
  * `createApp` with `sessionModule`: the error text `/session/*` sends stays
  * inside `1*NQSCHAR` (printable ASCII without `"` and `\`) — its own text,
- * a configured federation's name, and what a limiter adapter or a
- * contributed redirect policy hands it.
+ * a configured federation's name, and what a contributed redirect policy
+ * hands it.
  */
 
 import type {
 	AppConfig,
+	AttemptCounter,
 	FederationProvider,
 	FederationTokenStore,
-	RateLimitDecision,
-	RateLimiter,
 	SessionFederationIndex,
 	UserRepository,
 	UserSessionStore,
@@ -115,9 +114,13 @@ const permissivePolicy: FederationRedirectPolicy = {
 	resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
 };
 
-const limiterAnswering = (decision: Partial<RateLimitDecision>): RateLimiter => ({
-	kind: "custom",
-	check: async () => ({ allowed: true, ...decision }) as RateLimitDecision,
+/** A counter answering every attempt `allowed`, or refusing it with the window ending in a minute. */
+const counterAnswering = (allowed: boolean): AttemptCounter => ({
+	consume: async (_key, spec) => ({
+		allowed,
+		remaining: allowed ? spec.limit - 1 : 0,
+		resetAt: new Date(Date.now() + 60_000),
+	}),
 });
 
 const config = (): AppConfig => {
@@ -149,7 +152,7 @@ afterEach(async () => {
 });
 
 const boot = async (
-	options: { limiter?: RateLimiter; policy?: FederationRedirectPolicy } = {},
+	options: { counter?: AttemptCounter; policy?: FederationRedirectPolicy } = {},
 ): Promise<express.Express> => {
 	const cfg = config();
 	const handle = await createTestApp({
@@ -158,7 +161,11 @@ const boot = async (
 			sessionStoreModuleFor(cfg),
 			...stores,
 			federationModule(options.policy ?? permissivePolicy),
-			providing("test:rate-limiter", "rateLimiter", options.limiter ?? limiterAnswering({})),
+			providing(
+				"test:attempt-counter",
+				"attemptCounter",
+				options.counter ?? counterAnswering(true),
+			),
 		],
 		bootstrapComponents: { config: cfg, pathResolver: (s: string) => s },
 	});
@@ -180,11 +187,11 @@ const login = async (app: express.Express, body: Record<string, unknown>) => {
 };
 
 describe("POST /session/login", () => {
-	it("sends a limiter adapter's refusal reason inside RFC 6749's set", async () => {
-		const app = await boot({ limiter: limiterAnswering({ allowed: false, reason: HOSTILE }) });
+	it("answers a refused attempt with its own text, inside RFC 6749's set", async () => {
+		const app = await boot({ counter: counterAnswering(false) });
 		const res = await login(app, {});
 		expect(res.status).toBe(429);
-		expect(res.body).toEqual({ error: "rate_limited", error_description: HOSTILE_ON_THE_WIRE });
+		expect(res.body).toEqual({ error: "rate_limited", error_description: "Rate limit exceeded" });
 	});
 
 	it.each([

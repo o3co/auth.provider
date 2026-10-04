@@ -161,6 +161,9 @@ services:
       # The memory rate limiter is per-process and evadable under bucket
       # exhaustion (see README) — production points it at Redis.
       ADAPTERS_RATE_LIMITER: redis
+      # The counter behind the login's own attempt limit: on Redis, a restart
+      # does not reset it. Redis must keep `maxmemory-policy noeviction`.
+      ADAPTERS_ATTEMPT_COUNTER: redis
       # The federation token store is deliberately left at its `memory`
       # default, and that is coherent here rather than an oversight: this
       # template ships every federation disabled, so nothing writes to the

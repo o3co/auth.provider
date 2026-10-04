@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-10-03
+最終更新: 2026-10-05
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -73,7 +73,9 @@ my-app:
 
 allowlist はネットワーク上の制御であって、暗号学的な制御ではない。エッジは受信した `X-Forwarded-*` ヘッダーに追記するのではなく**除去**しなければならず、エッジとこのプロセスの間のホップは、送信元アドレスを偽装できる者から到達できてはならない。
 
-**`adapters.rateLimiter` を Redis に向けること。** デフォルトは `"memory"` でプロセスごとである: N レプリカでは設定したすべての limit が実質 N 倍になり、デプロイのたびにリセットされる。memory アダプターは**バケット枯渇によって回避可能**でもある: バケット数の上限を 10,000 とし、上限に達すると、新しいキーを受け入れる際にリセットが最も近いバケットを追い出す — そのため多数の送信元 IP を提示できる攻撃者（`HTTP_TRUST_PROXY` が実際のホップより広ければ、`req.ip` はクライアントの影響を受ける）は、標的のカウンターが追い出されてやり直しになるまでテーブルをかき回せる。これは開発用の 1 プロセスなら許容できるが、本番の rate limit ではない。ログインガードも同じ共有コンポーネントの上で動くため、1 つの設定で OAuth エンドポイントと `/session/login` の両方がカバーされる。ログインのウィンドウと上限は引き続き `session.rateLimit.login` で設定する。session モジュールがそれを両アダプターが読む `login` の予算として寄与するため、改めて書き直すものは無い。
+**`adapters.rateLimiter` を Redis に向けること。** デフォルトは `"memory"` でプロセスごとである: N レプリカでは設定したすべての limit が実質 N 倍になり、デプロイのたびにリセットされる。memory アダプターは**バケット枯渇によって回避可能**でもある: バケット数の上限を 10,000 とし、上限に達すると、新しいキーを受け入れる際にリセットが最も近いバケットを追い出す — そのため多数の送信元 IP を提示できる攻撃者（`HTTP_TRUST_PROXY` が実際のホップより広ければ、`req.ip` はクライアントの影響を受ける）は、標的のカウンターが追い出されてやり直しになるまでテーブルをかき回せる。これは開発用の 1 プロセスなら許容できるが、本番の rate limit ではない。`/session/login` はこのコンポーネントの上では動かない: ログイン自身の試行上限 `session.rateLimit.login` は試行カウンターの上で数えられ、リミッターの設定はこれを変えない。
+
+**`adapters.attemptCounter` を Redis に向けること。** デフォルトは `"memory"` でカウンターを配線しない: ログインは試行をプロセスごとに数えるので、N レプリカでは `session.rateLimit.login` が上限の N 倍を許し、デプロイのたびにリセットされる。`CORE_DEPLOYMENT_MODE=multi` は起動を拒否する。`"redis"`（`ADAPTERS_ATTEMPT_COUNTER=redis`）は共有の Redis ソケットの上に `redisAttemptCounterModule` を入れる。その Redis は `maxmemory-policy noeviction`（Redis のデフォルト）で動かすこと: 追い出された窓は数え直しになるからである。モジュールは読み取れたほかのポリシーでは起動を拒否するが、サーバーが答えない（`INFO` と `CONFIG` が拒否・改名されている）ときは `attempt_counter_durability_unchecked` を警告して起動するので、ポリシーはサーバーの設定側で確かめること。ログインは閉じる側に倒れる: カウンターが答えられない間、`/session/login` は `redis-rate-limiter.failMode` が何であっても `503` を返す。
 
 **BFF の背後では、必要になる前に `limits.token` を上げておくこと。** OAuth エンドポイントの rate limit は `req.ip` をキーにする（`packages/core/src/ratelimit/guard.mts` はバケットキーを `<endpoint>:ip:<req.ip>` として組み立てる）。クライアントがブラウザやネイティブアプリで、このプロバイダーと直接通信しているなら、これは正しい identity である。しかし backend-for-frontend 構成 — サーバー側アプリがセッションを保持し、ユーザーに代わってコード交換と refresh を行う構成 — では誤った identity になる: すべての `/oauth/token` と `/oauth/introspect` の呼び出しが BFF の単一アドレスから届き、デプロイ全体で 1 つのバケットを共有する。デフォルトの 60 秒あたり 60 リクエストでは、**全ユーザー合計で毎分およそ 60 回の session グラント交換**が上限になる — しかもそれは rate limit として表に出てこない。BFF は想定していない `429` を受け取り、それを自分の呼び出し元への `502` に変え、ユーザーが報告する症状は「サインインがときどき壊れる」になる。それは起き始めるトラフィック量に達した時点で現れ、それより前には現れない。
 
@@ -94,7 +96,7 @@ redis-rate-limiter {
 
 デフォルトは意図的に変えていない: 送信元 IP ごとに 60 秒あたり 60 回というのは、クライアントが本当に別々の IP であるデプロイにとって妥当な総当たり対策の上限であり、一方の構成に合わせて全体的に引き上げれば、もう一方の構成での防御が弱まる。BFF *自身の*ユーザーを守るスロットリングは、ユーザーごとの identity がまだ存在する BFF の前段に置くこと。
 
-**2 つ以上のレプリカを動かすようになったら `CORE_DEPLOYMENT_MODE=multi` を設定すること。** すると、共有が必要な in-memory ストアがまだ配線されていれば起動が*失敗*し、該当するものすべてと、それぞれの代償が名指しされる — ユーザーセッションの分岐（back-channel logout が 1 つのレプリカにしか届かず、ログアウトしたセッションが他のレプリカでは有効なまま）、rate limit カウンターの倍増、アクセストークン失効の未伝播、一度きりのクライアントアサーションや WebAuthn チャレンジがレプリカごとに 1 回ずつ再利用できてしまうこと。このチェックはライブラリのモジュール名のリストではなく、インストールされた各モジュールが自身の manifest に持つ宣言を読むため、このテンプレート独自の in-memory モジュール — ユーザーセッションストア（`ADAPTERS_USER_SESSION_STORES=memory`）、認可コードリポジトリ（`ADAPTERS_CODE_REPOSITORY=memory`）、フェデレーショントークンストア（`ADAPTERS_FEDERATION_TOKEN_STORE=memory`、デフォルト） — も名指しで拒否される。`SESSION_STORE_STORAGE_TYPE=memory` のときの express-session 自身のストア（#474）と、デフォルトの memory の rate limiter（`core-rate-limiter-memory`、`ADAPTERS_RATE_LIMITER=memory`）も同様である。モードが未設定なら何も拒否されない: これらはすべて、起動時の 1 件の `replica_unsafe_adapters` 警告に列挙される。（login と WebAuthn-options のルートは、それぞれ個別に警告するプロセス単位のフォールバック limiter を持つが、それが働くのは `rateLimiter` をまったく配線しない構成だけで、このテンプレートは常に配線する。オペレーター runbook を参照。）`CORE_DEPLOYMENT_MODE=single` ではチェックは何も言わない。レプリカは 1 つだと宣言したからである。このテンプレートは DPoP をインストールしない。DPoP を加えた構成では、受け入れた DPoP proof はすべて `private_key_jwt` と同じ replay seen-set（`ADAPTERS_REPLAY_SEEN_SET`）に記録されるため、同じ扱いを受ける — `memory` は `CORE_DEPLOYMENT_MODE=multi` のもとで拒否され、モード未設定なら警告に列挙される。同梱の `redis` なら DPoP の記録もレプリカ間で共有される。dpop パッケージの [operator requirements](../../packages/dpop/README.md#operator-requirements) を参照。
+**2 つ以上のレプリカを動かすようになったら `CORE_DEPLOYMENT_MODE=multi` を設定すること。** すると、共有が必要な in-memory ストアがまだ配線されていれば起動が*失敗*し、該当するものすべてと、それぞれの代償が名指しされる — ユーザーセッションの分岐（back-channel logout が 1 つのレプリカにしか届かず、ログアウトしたセッションが他のレプリカでは有効なまま）、rate limit カウンターの倍増、アクセストークン失効の未伝播、一度きりのクライアントアサーションや WebAuthn チャレンジがレプリカごとに 1 回ずつ再利用できてしまうこと。このチェックはライブラリのモジュール名のリストではなく、インストールされた各モジュールが自身の manifest に持つ宣言を読むため、このテンプレート独自の in-memory モジュール — ユーザーセッションストア（`ADAPTERS_USER_SESSION_STORES=memory`）、認可コードリポジトリ（`ADAPTERS_CODE_REPOSITORY=memory`）、フェデレーショントークンストア（`ADAPTERS_FEDERATION_TOKEN_STORE=memory`、デフォルト） — も名指しで拒否される。`SESSION_STORE_STORAGE_TYPE=memory` のときの express-session 自身のストア（#474）と、デフォルトの memory の rate limiter（`core-rate-limiter-memory`、`ADAPTERS_RATE_LIMITER=memory`）も同様である。モードが未設定なら何も拒否されない: これらはすべて、起動時の 1 件の `replica_unsafe_adapters` 警告に列挙される。（WebAuthn-options のルートは個別に警告するプロセス単位のフォールバック limiter を持つが、それが働くのは `rateLimiter` をまったく配線しない構成だけで、このテンプレートは常に配線する。ログインは `ADAPTERS_ATTEMPT_COUNTER=memory` のときプロセスごとに数える: `multi` ではログインを名指しして起動が拒否され、モード未設定なら `attempt_counter_not_shared` を警告する。オペレーター runbook を参照。）`CORE_DEPLOYMENT_MODE=single` ではチェックは何も言わない。レプリカは 1 つだと宣言したからである。このテンプレートは DPoP をインストールしない。DPoP を加えた構成では、受け入れた DPoP proof はすべて `private_key_jwt` と同じ replay seen-set（`ADAPTERS_REPLAY_SEEN_SET`）に記録されるため、同じ扱いを受ける — `memory` は `CORE_DEPLOYMENT_MODE=multi` のもとで拒否され、モード未設定なら警告に列挙される。同梱の `redis` なら DPoP の記録もレプリカ間で共有される。dpop パッケージの [operator requirements](../../packages/dpop/README.md#operator-requirements) を参照。
 
 この変数は `core.deployment.mode` を設定する。旧名の `DEPLOYMENT_MODE` は、単独で、または `CORE_DEPLOYMENT_MODE` と異なる値で設定されているとブートを拒否し、同じ値で並べて設定されていればブートする。
 
@@ -217,6 +219,7 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `ADAPTERS_RATE_LIMITER` | `memory` | `adapters.rateLimiter`: `memory` または `redis`。[マルチレプリカ構成](#マルチレプリカ構成) を参照 |
+| `ADAPTERS_ATTEMPT_COUNTER` | `memory` | `adapters.attemptCounter`: ログインの試行上限を数えるカウンター。`memory`（配線しない: プロセスごと）または `redis`。[マルチレプリカ構成](#マルチレプリカ構成) を参照 |
 | `ADAPTERS_USER_SESSION_STORES` | `memory` | `adapters.userSessionStores`: ユーザーセッションストア、`memory` または `redis`。`SESSION_STORE_STORAGE_TYPE` と揃える（[Docker](#docker) を参照） |
 | `ADAPTERS_ACCESS_TOKEN_DENYLIST` | `redis` | `adapters.accessTokenDenylist`: `memory` または `redis` |
 | `ADAPTERS_REPLAY_SEEN_SET` | `redis` | `adapters.replaySeenSet`: `private_key_jwt` の背後の replay seen-set、`memory` または `redis` |

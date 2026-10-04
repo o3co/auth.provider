@@ -255,6 +255,7 @@ export const redisClientsSectionSchema = z
 export const adaptersSchema = z
 	.object({
 		rateLimiter: z.enum(["memory", "redis"]),
+		attemptCounter: z.enum(["memory", "redis"]),
 		userSessionStores: z.enum(["memory", "redis"]),
 		accessTokenDenylist: z.enum(["memory", "redis"]),
 		replaySeenSet: z.enum(["memory", "redis"]),

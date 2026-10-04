@@ -271,8 +271,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `core.declaredAbsent` lists it: `core.declaredAbsent = ["rateLimiter"]`,
   beside `"auditSink"` if you list that. Declared absent, a route that keys
   the limiter lets every request through unless its module falls back to a
-  per-process limiter (the session login, WebAuthn authentication options and
-  the MFA routes do), so request-volume limits on the others are then for what
+  per-process limiter (WebAuthn authentication options and the MFA routes
+  do), so request-volume limits on the others are then for what
   sits in front of the provider. The template wires a limiter
   (`adapters.rateLimiter`), so a scaffold needs nothing.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
@@ -285,6 +285,31 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   setting). Move the numbers to the module's own setting:
   `session.rateLimit.login` for login, `device-grant.rateLimit` for device
   verification.
+- **BREAKING: the login's limit is its own, counted on an attempt counter
+  (#807).** `POST /session/login` is limited by `session.rateLimit.login`
+  alone, counted per client IP on the `attemptCounter` slot; no rate limiter
+  takes part. The setting keeps its name, shape and default (20 per
+  900000 ms); `windowMs` above a day (86400000) now refuses the boot
+  (`config-validation-failed` at `session.rateLimit.login.windowMs`), and a
+  window that is not whole seconds is read rounded up. A limiter's
+  `limits.login` no longer applies: set `session.rateLimit.login`. The
+  session module claims the `login` prefix with no budget, so the limiter
+  answers its `defaultLimit` if anything else keys it.
+- **BREAKING: more than one replica needs a shared attempt counter (#807).**
+  With no `attemptCounter` wired the login counts its attempts per process:
+  `core.deployment.mode = "multi"` refuses the boot
+  (`contribute-factory-failed`, its cause naming `attemptCounter` and
+  `"login"`), an unset mode warns `attempt_counter_not_shared`, `single` is
+  silent. A shared limiter no longer covers the login. In the standalone
+  template set `adapters.attemptCounter = "redis"`
+  (`ADAPTERS_ATTEMPT_COUNTER=redis`; a new selection, `memory` by default);
+  a composition of your own installs `redisAttemptCounterModule` from
+  `@o3co/auth-provider-redis`, whose client the template's `redis-clients`
+  module provides as `attemptCounterClient`. Its Redis must run
+  `maxmemory-policy noeviction` (the default). The module refuses the boot on
+  any other policy it reads; a server that will not say boots with the
+  warning `attempt_counter_durability_unchecked`, and the policy is then
+  yours to confirm.
 
 The boot refusals you can meet, with their messages, are in
 [operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).
@@ -371,6 +396,19 @@ The boot refusals you can meet, with their messages, are in
   `Object.prototype` member refuses the boot (`contribution-malformed`).
 
 ### Passkeys, users and sessions
+
+- **BREAKING: the login fails closed when its attempt counter is down
+  (#807).** `POST /session/login` answers `503 service_unavailable`
+  "Attempt counter temporarily unavailable" while the counter cannot answer,
+  whatever `redis-rate-limiter.failMode` says — `open` no longer lets logins
+  through an outage. It was "Rate limiter temporarily unavailable", or no
+  limit under `open`. Operators see `attempt_counter_unavailable` (error)
+  instead of `rate_limiter_failed_closed` / `_open`; the audit event stays
+  `rate_limit.unavailable` (`tag: "login"`), its `details` gaining
+  `failure`. A refused login is still `429 rate_limited`, now with
+  `Retry-After` and `Cache-Control: no-store` and without `RateLimit-*`
+  headers. The per-process warning is `attempt_counter_not_shared`, no longer
+  `login_rate_limiter_not_shared`.
 
 - **WebAuthn.** An assertion whose user handle is not its credential owner's
   canonical handle is `400 invalid_grant` (`user_handle_mismatch`) (#863); one
