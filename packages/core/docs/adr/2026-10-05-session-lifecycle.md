@@ -115,3 +115,37 @@ expiry), the service (close runner, cause policy, the RP-notification
 contract, resumption), its Redis wiring, and oauth's notifier. Switch: the
 callers, one module at a time. Remove: the old fence and stores, once old
 nodes are gone and the longest session lifetime has passed.
+
+## Amendment 2026-10-05 — the Redis store's closing index
+
+The Redis store keeps a session's whole record in one hash on the sid's hash
+tag, with one expiry, so D5's single retention holds by construction. D6's
+listing cannot be kept that way: an index of every closing sid is one key on
+a slot of its own, and on Redis Cluster no script writes it together with a
+record. The index is therefore kept correct by order, not atomicity:
+
+- **Added before the commit.** `beginClose` adds the sid, with the close's
+  write deadline, before the closing commit, which carries the same deadline
+  and is refused at or after it on the server's clock. A close that cannot
+  add the sid rejects without committing, so every closing record has an
+  entry.
+- **Stale entries are filtered, then removed only when dead.** The listing
+  re-reads each entry's record and names only closing ones, reading on until
+  it has `limit` of them. It removes an entry whose record is not closing only
+  when the index's clock was past the entry's deadline plus the declared skew
+  before that read: no close that added it can commit afterwards, and a later
+  close raises the stored deadline, which the removal checks.
+- **The closing step removes its own entry** when the closed record outlives
+  that deadline plus the skew, since every close that added the entry then
+  finds the record closed.
+
+So paging `listClosing` reaches every record that stays closing, under the
+store's stated assumptions: the clocks agree within the declared skew,
+acknowledged writes are not rolled back, and nothing is evicted (the store's
+boot check refuses an eviction policy). The index has no TTL: it shrinks only
+as those steps remove entries, so the service's resumption must page through
+`listClosing`.
+
+Sharding the index across a fixed number of hash tags was not taken: it
+spreads the one hot slot, but each listing must then merge the shards' orders
+and gains nothing in correctness. It stays possible behind the same port.
