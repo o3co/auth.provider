@@ -43,11 +43,10 @@ export {
 export {
 	DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
 	DEVICE_CODE_GRANT_TYPE,
-	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+	DEVICE_VERIFICATION_ATTEMPT_TAG,
 	type DeviceAuthorizationSettings,
 	type DeviceGrantDependencies,
 } from "./types.mjs";
-export { isDeviceVerificationRateLimitSpec } from "./verificationBudget.mjs";
 export {
 	createDeviceVerificationHandler,
 	type DeviceVerificationHandlerOptions,

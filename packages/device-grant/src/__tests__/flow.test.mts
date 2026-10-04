@@ -24,13 +24,15 @@
  */
 
 import type {
+	AttemptCount,
+	AttemptCounter,
+	AttemptSpec,
 	AuditEvent,
 	AuditSink,
 	AuthenticatedClient,
 	ClientRepository,
+	DeploymentMode,
 	GrantContext,
-	RateLimiter,
-	RateLimitFailMode,
 	SubjectRevocation,
 	TokenBinding,
 	UserSession,
@@ -39,8 +41,8 @@ import type {
 import {
 	consoleLogger,
 	createInMemorySubjectRevocation,
+	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
-	createMemoryRateLimiter,
 	createSymmetricKeyStore,
 	DEFAULT_CLOCK_SKEW_MS,
 	generateUserCode,
@@ -134,10 +136,16 @@ const makeClock = (start = 1_800_000_000_000) => {
 	};
 };
 
+/** The verification's attempt limit as the package ships it: five per five minutes. */
+const SHIPPED_ATTEMPT_LIMIT: AttemptSpec = { limit: 5, windowSeconds: 300 };
+
 const makeHarness = (
 	overrides: {
 		settings?: Partial<typeof settings>;
-		rateLimiter?: RateLimiter;
+		clock?: ReturnType<typeof makeClock>;
+		attemptCounter?: AttemptCounter;
+		attemptLimit?: AttemptSpec;
+		deploymentMode?: DeploymentMode;
 		session?: Record<string, unknown>;
 		auditSink?: AuditSink;
 		logger?: ReturnType<typeof makeLogger>;
@@ -147,15 +155,9 @@ const makeHarness = (
 		subjectRevocation?: SubjectRevocation;
 	} = {},
 ) => {
-	const clock = makeClock();
+	const clock = overrides.clock ?? makeClock();
 	const store = overrides.store ?? createMemoryDeviceCodeStore();
 	const resolved = { ...settings, ...(overrides.settings ?? {}) };
-	const rateLimiter =
-		overrides.rateLimiter ??
-		createMemoryRateLimiter({
-			limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
 
 	const session = overrides.session ?? liveCookieSession();
 	const userSessionStore = overrides.userSessionStore ?? liveSessionStore();
@@ -185,7 +187,9 @@ const makeHarness = (
 		createDeviceVerificationHandler({
 			store,
 			settings: resolved,
-			rateLimiter,
+			attemptLimit: overrides.attemptLimit ?? SHIPPED_ATTEMPT_LIMIT,
+			...(overrides.attemptCounter ? { attemptCounter: overrides.attemptCounter } : {}),
+			deploymentMode: overrides.deploymentMode ?? "single",
 			userSessionStore,
 			// No requirement registered; what admission changes here (the
 			// session-admission ADR's D8) is admission.test.mts's.
@@ -222,7 +226,7 @@ const makeHarness = (
 			...(tokenBinding === undefined ? {} : { tokenBinding }),
 		} as unknown as GrantContext);
 
-	return { app, store, clock, grant, poll, rateLimiter };
+	return { app, store, clock, grant, poll };
 };
 
 const startDevice = async (app: express.Express, body: Record<string, unknown> = {}) =>
@@ -304,17 +308,30 @@ const answeringBroken = (
 /** The sink is fire-and-forget, so give the detached promise a turn. */
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-/**
- * A limiter whose backend is down: every check rejects, as a Redis client
- * would, and `failMode` is its own outage policy.
- */
-const brokenLimiter = (failMode: RateLimitFailMode): RateLimiter => ({
-	kind: "broken",
-	failMode,
-	check: async () => {
-		throw new Error("redis down");
-	},
-});
+/** A counter whose backend is down: every consume rejects, as a Redis client would. */
+const brokenCounter = (): AttemptCounter & { calls: number } => {
+	const counter = {
+		calls: 0,
+		consume: async (): Promise<AttemptCount> => {
+			counter.calls += 1;
+			throw new Error("redis down");
+		},
+	};
+	return counter;
+};
+
+/** An in-process counter on `clock`, recording each key and spec it is handed. */
+const recordingCounter = (clock: ReturnType<typeof makeClock>) => {
+	const inner = createMemoryAttemptCounter({ now: clock.now });
+	const calls: { key: string; spec: AttemptSpec }[] = [];
+	return {
+		calls,
+		consume: (key: string, spec: AttemptSpec) => {
+			calls.push({ key, spec });
+			return inner.consume(key, spec);
+		},
+	} satisfies AttemptCounter & { calls: unknown };
+};
 
 describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 	it("returns the codes, the verification URI, and the polling contract", async () => {
@@ -569,13 +586,12 @@ describe("verification endpoint", () => {
 		expect((await verify(app, { action: "deny", user_code: userCode })).status).toBe(200);
 	});
 
-	it("does not spend the subject's budget on an approval the email gate refuses", async () => {
+	it("does not spend the subject's attempts on an approval the email gate refuses", async () => {
 		// Refused before the code is read: no oracle, and no attempt counted.
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
+		const { app } = makeHarness({
+			requireEmailVerified: true,
+			attemptLimit: { limit: 1, windowSeconds: 300 },
 		});
-		const { app } = makeHarness({ requireEmailVerified: true, rateLimiter });
 		for (let i = 0; i < 3; i++) {
 			const res = await verify(app, { action: "approve", user_code: "BCDF-GHJK" });
 			expect(res.status).toBe(403);
@@ -619,35 +635,24 @@ describe("verification endpoint", () => {
 	});
 });
 
-describe("rate limiting (RFC 8628 §5.1)", () => {
-	/** A limiter that runs `during` while it is asked, then answers as the memory limiter does. */
-	const slowLimiter = () => {
-		const inner = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
-		const slow = {
-			during: (): void => undefined,
-			limiter: {
-				kind: "slow",
-				check: async (key: string, ctx: Parameters<RateLimiter["check"]>[1]) => {
-					slow.during();
-					return inner.check(key, ctx);
-				},
-			} satisfies RateLimiter,
-		};
-		return slow;
-	};
-
+describe("verification attempts (RFC 8628 §5.1)", () => {
 	it.each([
 		["lookup", 404, "invalid_user_code"],
 		["approve", 410, "expired_token"],
 		["deny", 410, "expired_token"],
 	] as const)(
-		"judges a %s against the clock after the budget: a code that expires while the limiter answers is refused",
+		"judges a %s against the clock after the attempt is counted: a code that expires while the counter answers is refused",
 		async (action, status, error) => {
-			const slow = slowLimiter();
-			const { app, clock } = makeHarness({ rateLimiter: slow.limiter });
+			const clock = makeClock();
+			const inner = createMemoryAttemptCounter({ now: clock.now });
+			const slow = { during: (): void => undefined };
+			const counter: AttemptCounter = {
+				consume: (key, spec) => {
+					slow.during();
+					return inner.consume(key, spec);
+				},
+			};
+			const { app } = makeHarness({ clock, attemptCounter: counter });
 			const started = await startDevice(app);
 			slow.during = () => clock.advance(settings.codeLifetimeSeconds * 1000 + 1_000);
 
@@ -658,15 +663,11 @@ describe("rate limiting (RFC 8628 §5.1)", () => {
 		},
 	);
 
-	it("counts lookups against the same budget as approvals", async () => {
+	it("counts lookups against the same limit as approvals", async () => {
 		// The lookup is the same brute-force oracle: it answers "is this a real
 		// code?". A lookup route that did not count would be a free oracle
 		// beside a limited one.
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 3, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
-		const { app } = makeHarness({ rateLimiter });
+		const { app } = makeHarness({ attemptLimit: { limit: 3, windowSeconds: 300 } });
 
 		const statuses: number[] = [];
 		for (let i = 0; i < 5; i++) {
@@ -679,11 +680,7 @@ describe("rate limiting (RFC 8628 §5.1)", () => {
 	it("counts a malformed code as an attempt", async () => {
 		// Excluding malformed input would hand an attacker an unmetered way to
 		// probe which shapes the endpoint accepts.
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 2, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
-		const { app } = makeHarness({ rateLimiter });
+		const { app } = makeHarness({ attemptLimit: { limit: 2, windowSeconds: 300 } });
 
 		await verify(app, { action: "lookup", user_code: "!!!!" });
 		await verify(app, { action: "lookup", user_code: "!!!!" });
@@ -691,22 +688,119 @@ describe("rate limiting (RFC 8628 §5.1)", () => {
 		expect(third.status).toBe(429);
 	});
 
-	it("keys the budget on the user, not the code", async () => {
+	it("counts on the attemptCounter it is handed, keyed on the user, not the code, against its own limit", async () => {
 		// Keying on the code would spend whichever code the attacker happened
-		// to hit, which is nobody's budget. Keying on the subject means an
+		// to hit, which is nobody's limit. Keying on the subject means an
 		// attacker needs an account and burns their own.
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 2, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
-		const spy = { check: vi.fn(rateLimiter.check), kind: rateLimiter.kind };
-		const { app } = makeHarness({ rateLimiter: spy as RateLimiter });
+		const clock = makeClock();
+		const counter = recordingCounter(clock);
+		const { app } = makeHarness({ clock, attemptCounter: counter });
 
 		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
-		expect(spy.check).toHaveBeenCalledWith(
-			"device_verification:user:user-1",
-			expect.objectContaining({ userId: "user-1" }),
+		expect(counter.calls).toEqual([
+			{ key: "device_verification:user:user-1", spec: { limit: 5, windowSeconds: 300 } },
+		]);
+	});
+
+	it("answers a refused attempt 429 slow_down with Retry-After alone, never RateLimit-*", async () => {
+		const { app } = makeHarness({ attemptLimit: { limit: 1, windowSeconds: 300 } });
+
+		const first = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(Object.keys(first.headers).filter((h) => h.startsWith("ratelimit-"))).toEqual([]);
+		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+
+		expect(limited.status).toBe(429);
+		expect(limited.body).toEqual({
+			error: "slow_down",
+			error_description: "too many device code attempts",
+		});
+		expect(Number(limited.headers["retry-after"])).toBe(300);
+		expect(limited.headers["cache-control"]).toBe("no-store");
+		expect(Object.keys(limited.headers).filter((h) => h.startsWith("ratelimit-"))).toEqual([]);
+	});
+});
+
+describe("verification attempts — no counter wired", () => {
+	const handlerFor = (deploymentMode: unknown, logger = makeLogger()) =>
+		createDeviceVerificationHandler({
+			store: createMemoryDeviceCodeStore(),
+			settings,
+			attemptLimit: SHIPPED_ATTEMPT_LIMIT,
+			deploymentMode: deploymentMode as DeploymentMode,
+			userSessionStore: liveSessionStore(),
+			requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
+			requireEmailVerified: false,
+			logger,
+		});
+
+	it("still limits, per process", async () => {
+		const { app } = makeHarness({ attemptLimit: { limit: 1, windowSeconds: 300 } });
+		expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(404);
+		expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(429);
+	});
+
+	it('refuses to build under "multi", naming the verification and the slot', () => {
+		expect(() => handlerFor("multi")).toThrow(
+			/core\.deployment\.mode is "multi" but no shared attemptCounter is wired for "device_verification"/,
 		);
+	});
+
+	it('builds under "multi" when a counter is wired, without warning', () => {
+		const logger = makeLogger();
+		expect(() =>
+			createDeviceVerificationHandler({
+				store: createMemoryDeviceCodeStore(),
+				settings,
+				attemptLimit: SHIPPED_ATTEMPT_LIMIT,
+				attemptCounter: createMemoryAttemptCounter(),
+				deploymentMode: "multi",
+				userSessionStore: liveSessionStore(),
+				requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
+				requireEmailVerified: false,
+				logger,
+			}),
+		).not.toThrow();
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it('is silent under "single", and warns attempt_counter_not_shared when the mode is "unset"', () => {
+		const single = makeLogger();
+		handlerFor("single", single);
+		expect(single.warn).not.toHaveBeenCalled();
+		const unset = makeLogger();
+		handlerFor("unset", unset);
+		expect(unset.warn).toHaveBeenCalledWith(
+			{ tag: "device_verification", limit: 5, windowSeconds: 300 },
+			"attempt_counter_not_shared",
+		);
+	});
+
+	it("refuses a mode it cannot read, absent included, as a TypeError", () => {
+		for (const deploymentMode of [undefined, "MULTI", null]) {
+			expect(() => handlerFor(deploymentMode), String(deploymentMode)).toThrow(TypeError);
+		}
+	});
+
+	it("refuses an attempt limit no counter takes, a window over a day included", () => {
+		for (const attemptLimit of [
+			undefined,
+			{ limit: 0, windowSeconds: 300 },
+			{ limit: 5, windowSeconds: 86_401 },
+		]) {
+			expect(
+				() =>
+					createDeviceVerificationHandler({
+						store: createMemoryDeviceCodeStore(),
+						settings,
+						attemptLimit: attemptLimit as never,
+						deploymentMode: "single",
+						userSessionStore: liveSessionStore(),
+						requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
+						requireEmailVerified: false,
+					}),
+				JSON.stringify(attemptLimit),
+			).toThrow(RangeError);
+		}
 	});
 });
 
@@ -749,18 +843,21 @@ describe("audit trail for the human's decision", () => {
 		});
 	});
 
-	it("records device.rate_limited when the subject's budget runs out", async () => {
+	it("records device.rate_limited when the subject's attempts run out", async () => {
 		// The 429 is the signal that someone is guessing codes from an account
 		// — exactly what a dashboard wants to see, and exactly what a
 		// `logger.warn` nobody tails does not deliver.
 		const { sink, events } = makeSink();
 		const logger = makeLogger();
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
+		const clock = makeClock();
+		const counter = recordingCounter(clock);
+		const { app } = makeHarness({
+			auditSink: sink,
+			clock,
+			attemptCounter: counter,
+			attemptLimit: { limit: 1, windowSeconds: 300 },
+			logger,
 		});
-		const spy = { check: vi.fn(rateLimiter.check), kind: rateLimiter.kind };
-		const { app } = makeHarness({ auditSink: sink, rateLimiter: spy as RateLimiter, logger });
 
 		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
@@ -774,9 +871,8 @@ describe("audit trail for the human's decision", () => {
 			subject: "user-1",
 			details: { action: "lookup", remaining: 0 },
 		});
-		// The check sits behind the shared outage policy; the budget is the
-		// subject's, and the operator-facing line fires.
-		expect(spy.check.mock.calls.map(([key]) => key)).toEqual([
+		// The attempts are the subject's, and the operator-facing line fires.
+		expect(counter.calls.map(({ key }) => key)).toEqual([
 			"device_verification:user:user-1",
 			"device_verification:user:user-1",
 		]);
@@ -786,29 +882,20 @@ describe("audit trail for the human's decision", () => {
 		);
 	});
 
-	it.each(["open", "closed"] as const)(
-		"answers 429 for an exhausted budget under failMode = %s — the policy is for outages, not decisions",
-		async (failMode) => {
-			// `failMode = "open"` waves a request through when the limiter has
-			// no answer; a limiter that answered "no" is not that case.
-			const { sink, events } = makeSink();
-			const rateLimiter: RateLimiter = {
-				...createMemoryRateLimiter({
-					limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				}),
-				failMode,
-			};
-			const { app } = makeHarness({ auditSink: sink, rateLimiter });
+	it("audits a refusal as device.rate_limited alone: a counter that answered is not an outage", async () => {
+		const { sink, events } = makeSink();
+		const { app } = makeHarness({
+			auditSink: sink,
+			attemptLimit: { limit: 1, windowSeconds: 300 },
+		});
 
-			await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
-			const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
-			await settle();
+		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		await settle();
 
-			expect(limited.status).toBe(429);
-			expect(events.map((e) => e.type)).toEqual(["device.rate_limited"]);
-		},
-	);
+		expect(limited.status).toBe(429);
+		expect(events.map((e) => e.type)).toEqual(["device.rate_limited"]);
+	});
 
 	it("never puts the code itself in an event", async () => {
 		// The user code is the thing being brute-forced and the device code is
@@ -837,43 +924,39 @@ describe("audit trail for the human's decision", () => {
 	});
 });
 
-describe("limiter outage — the limiter's failMode applies here too", () => {
-	// This endpoint runs the limiter itself rather than through
-	// `createRateLimitGuard`, so a limiter-backend outage must still follow
-	// the limiter's `failMode` and raise the `rate_limit.unavailable` event the alert
-	// operators page on — on the one endpoint RFC 8628 §5.1 sizes the user
-	// code's entropy against.
+describe("attempt counter outage — fails closed", () => {
+	// RFC 8628 §5.1 sizes the user code's entropy against the attempt limit,
+	// so a counter that cannot count refuses every attempt, whatever any rate
+	// limiter's `failMode` says, and raises the `rate_limit.unavailable`
+	// event operators page on.
 
-	it('failMode = "closed": answers 503 with the guard\'s envelope and does not decide', async () => {
-		const { app, store, clock } = makeHarness({
-			rateLimiter: brokenLimiter("closed"),
-			logger: makeLogger(),
-		});
-		const started = await startDevice(app);
+	it.each(["lookup", "approve", "deny"] as const)(
+		"answers %s 503 with the guard's envelope and does not decide",
+		async (action) => {
+			const { app, store, clock } = makeHarness({
+				attemptCounter: brokenCounter(),
+				logger: makeLogger(),
+			});
+			const started = await startDevice(app);
 
-		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+			const res = await verify(app, { action, user_code: started.body.user_code });
 
-		expect(res.status).toBe(503);
-		// The same body every guarded route answers, so a client and a
-		// dashboard see one outage shape rather than two.
-		expect(res.body).toEqual({
-			error: "service_unavailable",
-			error_description: "Rate limiter temporarily unavailable",
-		});
-		expect(res.headers["cache-control"]).toContain("no-store");
-		// The approval did not happen: the code is still pending.
-		const userCode = normaliseUserCode(started.body.user_code as string) as string;
-		expect(await store.findPendingByUserCode(userCode, clock.now())).not.toBeNull();
-	});
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "service_unavailable",
+				error_description: "Attempt counter temporarily unavailable",
+			});
+			expect(res.headers["cache-control"]).toContain("no-store");
+			// No decision was made: the code is still pending.
+			const userCode = normaliseUserCode(started.body.user_code as string) as string;
+			expect(await store.findPendingByUserCode(userCode, clock.now())).not.toBeNull();
+		},
+	);
 
-	it('failMode = "closed": emits rate_limit.unavailable with the guard\'s fields, and no device.rate_limited', async () => {
+	it("emits rate_limit.unavailable tagged device_verification, and no device.rate_limited", async () => {
 		const { sink, events } = makeSink();
 		const logger = makeLogger();
-		const { app } = makeHarness({
-			rateLimiter: brokenLimiter("closed"),
-			auditSink: sink,
-			logger,
-		});
+		const { app } = makeHarness({ attemptCounter: brokenCounter(), auditSink: sink, logger });
 
 		await request(app)
 			.post("/oauth/device/verification")
@@ -885,16 +968,18 @@ describe("limiter outage — the limiter's failMode applies here too", () => {
 		expect(events[0]).toMatchObject({
 			type: "rate_limit.unavailable",
 			userAgent: "device-test/1.0",
-			details: { tag: "device_verification", cause: { name: "Error" } },
+			details: { tag: "device_verification", failure: "threw", cause: { name: "Error" } },
 		});
 		expect(typeof events[0]?.ip).toBe("string");
-		expect(events[0]?.timestamp).toBeInstanceOf(Date);
 		// An outage is not a subject guessing codes: the
-		// `device_verification_rate_limited` line stays reserved for a limiter
-		// that answered "no".
+		// `device_verification_rate_limited` line stays reserved for a refusal.
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ error: "redis down", mode: "closed", tag: "device_verification" }),
-			"rate_limiter_failed_closed",
+			expect.objectContaining({
+				tag: "device_verification",
+				failure: "threw",
+				error: "redis down",
+			}),
+			"attempt_counter_unavailable",
 		);
 		expect(logger.warn).not.toHaveBeenCalledWith(
 			expect.anything(),
@@ -902,50 +987,27 @@ describe("limiter outage — the limiter's failMode applies here too", () => {
 		);
 	});
 
-	it.each(["lookup", "approve", "deny"] as const)(
-		'failMode = "open": lets %s proceed and reports the outage',
-		async (action) => {
-			const { sink, events } = makeSink();
-			const logger = makeLogger();
+	it("writes the outage line to core's console logger when the logger has no error channel", async () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
 			const { app } = makeHarness({
-				rateLimiter: brokenLimiter("open"),
-				auditSink: sink,
-				logger,
+				attemptCounter: brokenCounter(),
+				logger: { warn: vi.fn() } as unknown as ReturnType<typeof makeLogger>,
 			});
-			const started = await startDevice(app);
-
-			const res = await verify(app, { action, user_code: started.body.user_code });
-			await settle();
-
-			expect(res.status).toBe(200);
-			expect(res.body.client_id).toBe(CLIENT_ID);
-			expect(events.map((e) => e.type)).toContain("rate_limit.unavailable");
-			expect(logger.error).toHaveBeenCalledWith(
-				expect.objectContaining({ error: "redis down", mode: "open", tag: "device_verification" }),
-				"rate_limiter_failed_open",
-			);
-		},
-	);
-
-	it('failMode = "open": an approval made during the outage is a real approval', async () => {
-		// Fail-open means the request is served as if allowed, all the way to
-		// the device collecting its token — not half-served.
-		const { app, poll, clock } = makeHarness({ rateLimiter: brokenLimiter("open") });
-		const started = await startDevice(app);
-
-		const approval = await verify(app, { action: "approve", user_code: started.body.user_code });
-		expect(approval.status).toBe(200);
-
-		clock.advance(10_000);
-		expect((await poll(started.body.device_code as string)).result.status).toBe(200);
+			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(503);
+			expect(spy.mock.calls.map(([, event]) => event)).toEqual(["attempt_counter_unavailable"]);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
-	it("still answers 401 and 400 before consulting the limiter at all", async () => {
-		// The outage policy sits where the check sits: after the action and
-		// the session are validated. An anonymous caller during an outage is
-		// still told to log in, not that the limiter is down.
+	it("still answers 401 and 400 before counting an attempt at all", async () => {
+		// The count sits after the action and the session are validated. An
+		// anonymous caller during an outage is still told to log in, not that
+		// the counter is down.
+		const counter = brokenCounter();
 		const anonymous = makeHarness({
-			rateLimiter: brokenLimiter("closed"),
+			attemptCounter: counter,
 			session: { isAuthenticated: false },
 		});
 		const unauthenticated = await verify(anonymous.app, {
@@ -954,9 +1016,10 @@ describe("limiter outage — the limiter's failMode applies here too", () => {
 		});
 		expect(unauthenticated.status).toBe(401);
 
-		const { app } = makeHarness({ rateLimiter: brokenLimiter("closed") });
+		const { app } = makeHarness({ attemptCounter: counter });
 		const badAction = await verify(app, { action: "revoke", user_code: "BCDF-GHJK" });
 		expect(badAction.status).toBe(400);
+		expect(counter.calls).toBe(0);
 	});
 });
 
@@ -2009,13 +2072,14 @@ describe("the session check, further", () => {
 		expect(line.err).not.toBeInstanceOf(Error);
 	});
 
-	it("spends none of the subject's budget on a session that has ended", async () => {
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
+	it("spends none of the subject's attempts on a session that has ended", async () => {
+		const clock = makeClock();
+		const attemptCounter = createMemoryAttemptCounter({ now: clock.now });
+		const attemptLimit = { limit: 1, windowSeconds: 300 };
 		const dead = makeHarness({
-			rateLimiter,
+			clock,
+			attemptCounter,
+			attemptLimit,
 			session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-gone" },
 		});
 		for (let i = 0; i < 3; i++) {
@@ -2023,7 +2087,7 @@ describe("the session check, further", () => {
 				401,
 			);
 		}
-		const live = makeHarness({ rateLimiter });
+		const live = makeHarness({ clock, attemptCounter, attemptLimit });
 		expect((await verify(live.app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(404);
 	});
 
@@ -2083,11 +2147,7 @@ describe("the session check, further", () => {
 	it("writes the rate-limited warning to core's console logger when no logger is wired", async () => {
 		const spy = vi.spyOn(consoleLogger, "warn").mockImplementation(() => {});
 		try {
-			const rateLimiter = createMemoryRateLimiter({
-				limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-			});
-			const { app } = makeHarness({ rateLimiter });
+			const { app } = makeHarness({ attemptLimit: { limit: 1, windowSeconds: 300 } });
 			await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(429);
 			expect(spy).toHaveBeenCalledWith(
@@ -2104,10 +2164,8 @@ describe("the session check, further", () => {
 			createDeviceVerificationHandler({
 				store: createMemoryDeviceCodeStore(),
 				settings,
-				rateLimiter: createMemoryRateLimiter({
-					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				}),
+				attemptLimit: SHIPPED_ATTEMPT_LIMIT,
+				deploymentMode: "single",
 				requireEmailVerified: false,
 			} as never),
 		).toThrow(/userSessionStore/);

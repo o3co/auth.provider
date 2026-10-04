@@ -38,11 +38,16 @@
  * module provides it, and a composition without that module fills it.
  *
  * Enabled, boot is refused without each setting and slot the grant needs to
- * be safe; the `require*` helpers below say why. The verification endpoint
- * authorises on the session cookie, which makes it a CSRF target (RFC 8628
- * §5.4 remote phishing: a foreign page auto-submits `approve` for the
- * attacker's `user_code`), so it accepts JSON only — a form POST needs no
- * preflight — and runs the session module's `csrfGuard` on the whole route.
+ * be safe; the `require*` helpers below say why. The user code's attempt
+ * limit, `device-grant.rateLimit`, is counted by core's attempt guard on the
+ * `attemptCounter` slot, never by a rate limiter; the `rateLimiter` slot,
+ * when wired, throttles `/oauth/device_authorization` alone.
+ *
+ * The verification endpoint authorises on the session cookie, which makes it
+ * a CSRF target (RFC 8628 §5.4 remote phishing: a foreign page auto-submits
+ * `approve` for the attacker's `user_code`), so it accepts JSON only — a form
+ * POST needs no preflight — and runs the session module's `csrfGuard` on the
+ * whole route.
  */
 
 import {
@@ -55,7 +60,7 @@ import {
 	defineModule,
 	guardedRead,
 	loggableError,
-	MAX_DURATION_SECONDS,
+	MAX_ATTEMPT_WINDOW_SECONDS,
 	type ProviderDeps,
 	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
@@ -71,21 +76,20 @@ import {
 import { createDeviceCodeGrant } from "./grant.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import {
-	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
-	readVerificationRateLimitBudget,
-} from "./verificationBudget.mjs";
+	DEVICE_VERIFICATION_ATTEMPT_TAG,
+	readVerificationAttemptSpec,
+} from "./verificationAttempts.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 /**
- * `device-grant.rateLimit` — the budget RFC 8628 §5.1 sizes the user code
- * against. The floor of 1 is load-bearing: a zero budget locks every user out.
+ * `device-grant.rateLimit` — the attempts RFC 8628 §5.1 sizes the user code
+ * against. The floor of 1 is load-bearing: a zero limit locks every user out.
+ * The window is at most a day, the longest an attempt counter takes.
  */
 const rateLimitSpecSchema = z
 	.object({
 		limit: wholeNumberInRangeFromEnv(1),
-		// One year at most, as core's schema holds every duration an operator
-		// writes: a window past the Date range is one the limiter refuses anyway.
-		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
+		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_ATTEMPT_WINDOW_SECONDS),
 	})
 	.strict();
 
@@ -128,9 +132,9 @@ export const deviceGrantConfigSchema = z
 			DEVICE_POLLING_INTERVAL_SECONDS.max,
 		),
 		/**
-		 * The verification endpoint's budget per authenticated subject, which
-		 * the module contributes as the `device_verification` budget every
-		 * limiter reads (a limiter's own `limits.device_verification` wins).
+		 * The verification endpoint's attempt limit per authenticated subject,
+		 * counted on the `attemptCounter` slot's counter, never a rate
+		 * limiter's.
 		 */
 		rateLimit: rateLimitSpecSchema,
 		/**
@@ -152,9 +156,9 @@ const REQUIRES = [
 	// Session admission's synthetic key: the verification endpoint admits
 	// each action through it. The planner always fills it.
 	"sessionRequirementResolver",
-	// The contributed budgets; the verification route holds its own to its
-	// configuration. The planner always fills it.
-	"rateLimitBudgetResolver",
+	// Counting verification attempts per process is refused under `multi`, so
+	// a mode read as absent must not lift that. Boot always fills it.
+	"deploymentMode",
 	// What the oauth module provides of `oauth {}`: the issuer, the
 	// access-token lifetime and `requireEmailVerified`. A composition without
 	// that module fills it.
@@ -165,6 +169,11 @@ const REQUIRES = [
 // `server_error`, never an assertion accepted unchecked.
 const OPTIONAL = [
 	"deviceCodeStore",
+	// The counter the verification's attempt limit runs on. Without one it is
+	// counted per process, where the deployment mode allows it.
+	"attemptCounter",
+	// The deployment's abuse control on `/oauth/device_authorization`. Core
+	// attaches its absence policy: unfilled, `core.declaredAbsent` lists it.
 	"rateLimiter",
 	"replaySeenSet",
 	"logger",
@@ -377,22 +386,6 @@ const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 	return middleware as RequestHandler;
 };
 
-const requireRateLimiter = (
-	deps: DeviceGrantModuleDeps,
-): NonNullable<DeviceGrantModuleDeps["rateLimiter"]> => {
-	if (deps.rateLimiter === undefined) {
-		throw new Error(
-			"deviceAuthorizationGrantModule: device-grant.enabled = true requires a " +
-				"rateLimiter component. RFC 8628 §5.1 sizes the user code's entropy " +
-				"against a rate limit — 8 base-20 characters is ~34.5 bits, which is " +
-				"sufficient only because an attacker gets a handful of attempts. " +
-				"Without a limiter that argument does not hold, so this refuses to " +
-				"boot rather than serving a code that looks strong and is not.",
-		);
-	}
-	return deps.rateLimiter;
-};
-
 /**
  * Presence check for the optional `deviceCodeStore` slot, read by the grant
  * and both endpoints. Declaring the store `"unsupported"` does not let the
@@ -435,47 +428,6 @@ const requireUserSessionStore = (
 		);
 	}
 	return deps.userSessionStore;
-};
-
-/**
- * The contributed `device_verification` budget (`rateLimitBudgetResolver`,
- * after any override) must be `device-grant.rateLimit`, the
- * budget the `rateLimiter` requirement's RFC 8628 §5.1 argument rests on; boot
- * is refused otherwise. A limiter's own `limits.device_verification` wins over
- * it and is not compared.
- */
-const requireContributedVerificationBudget = (
-	slice: DeviceAuthorizationConfigSlice,
-	deps: Pick<DeviceGrantModuleDeps, "rateLimitBudgetResolver">,
-): void => {
-	const configured = readVerificationRateLimitBudget(slice);
-	if (configured === null) {
-		throw new Error(
-			"deviceAuthorizationGrantModule: device-grant.enabled = true requires " +
-				"device-grant.rateLimit { limit, windowSeconds }. It is the budget " +
-				"RFC 8628 §5.1 sizes the user code against and the `device_verification` budget " +
-				"this module contributes; without it POST /oauth/device/verification would run " +
-				"on the limiter's default budget, which is not the number the rateLimiter " +
-				"requirement reasons from.",
-		);
-	}
-	const contributed = deps.rateLimitBudgetResolver.get(DEVICE_VERIFICATION_RATE_LIMIT_PREFIX);
-	if (
-		contributed?.limit !== configured.limit ||
-		contributed.windowSeconds !== configured.windowSeconds
-	) {
-		const shown =
-			contributed === undefined
-				? "none"
-				: `limit ${contributed.limit}, windowSeconds ${contributed.windowSeconds}`;
-		throw new Error(
-			`deviceAuthorizationGrantModule: the contributed device_verification budget (${shown}) is not ` +
-				`device-grant.rateLimit (limit ${configured.limit}, windowSeconds ` +
-				`${configured.windowSeconds}): another module has overridden it. RFC 8628 §5.1 sizes the ` +
-				"user code against the configured budget; change device-grant.rateLimit " +
-				"instead.",
-		);
-	}
 };
 
 /**
@@ -532,11 +484,11 @@ export const deviceAuthorizationGrantModule = defineModule<
 		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 	},
 	contributes: {
-		// The verification endpoint's budget, for every limiter to read.
+		// Both prefixes are claimed with no budget: no limiter decides the
+		// verification's limit, which the attempt guard counts, and the
+		// device_authorization guard runs on the limiter's own limits.
 		rateLimitBudgets: {
-			[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX]: (deps) =>
-				readVerificationRateLimitBudget(enabledSection(deps.section)),
-			// Keyed by the device_authorization guard, with no budget of its own.
+			[DEVICE_VERIFICATION_ATTEMPT_TAG]: () => null,
 			[DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX]: () => null,
 		},
 		// Absent while the grant is off — see the file header — `/oauth/token`
@@ -570,21 +522,23 @@ export const deviceAuthorizationGrantModule = defineModule<
 				// stay `router.use`: Express skips routes while an error is pending, and
 				// an error here can only come from this router's own layers.
 				router.all("/", noStore);
-				// Throttled ahead of client authentication, as at the token
-				// endpoint, so unauthenticated hits are bounded before any
-				// repository lookup and a public client cannot fill the
-				// device-code store; ahead of the size check too, so an
-				// oversized request spends an attempt. Keyed
-				// `device_authorization:ip:<ip>`.
-				router.all(
-					"/",
-					createRateLimitGuard({
-						limiter: requireRateLimiter(deps),
-						tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
-						...(deps.logger ? { logger: deps.logger } : {}),
-						auditSink: deps.auditSink,
-					}),
-				);
+				// With a limiter wired, throttled ahead of client authentication,
+				// as at the token endpoint, so unauthenticated hits are bounded
+				// before any repository lookup and a public client cannot fill the
+				// device-code store; ahead of the size check too, so an oversized
+				// request spends an attempt. Keyed `device_authorization:ip:<ip>`.
+				// Without one, a declared absence, requests pass through.
+				if (deps.rateLimiter !== undefined) {
+					router.all(
+						"/",
+						createRateLimitGuard({
+							limiter: deps.rateLimiter,
+							tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
+							...(deps.logger ? { logger: deps.logger } : {}),
+							auditSink: deps.auditSink,
+						}),
+					);
+				}
 				// Router-level body parsing, matching `oauthModule` and the
 				// WebAuthn routes: `createApp` installs no global parser. A
 				// declared oversized body is refused before it is read.
@@ -639,19 +593,17 @@ export const deviceAuthorizationGrantModule = defineModule<
 				// The session module's CSRF guard, on the whole route rather than
 				// on `approve` / `deny` alone, so no future action can forget it.
 				const csrfMiddleware = requireCsrfMiddleware(deps);
-				// The `rateLimiter` requirement means the configured budget only
-				// while that budget is the one contributed.
-				requireContributedVerificationBudget(slice, deps);
 				const userSessionStore = requireUserSessionStore(deps);
 				router.post(
 					"/",
 					csrfMiddleware,
 					createDeviceVerificationHandler({
 						store: requireDeviceCodeStore(deps),
-						// The handler keys its budget on the subject, so it runs the
-						// guard's check itself, with the limiter's own outage policy,
-						// rather than the guard as middleware.
-						rateLimiter: requireRateLimiter(deps),
+						// The attempts RFC 8628 §5.1 sizes the user code against,
+						// counted per subject on the slot's counter.
+						attemptLimit: readVerificationAttemptSpec(slice),
+						...(deps.attemptCounter ? { attemptCounter: deps.attemptCounter } : {}),
+						deploymentMode: deps.deploymentMode,
 						// What session admission reads for every action: the
 						// live session, and the requirements registered.
 						userSessionStore,

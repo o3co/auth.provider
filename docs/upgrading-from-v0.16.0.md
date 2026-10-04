@@ -301,12 +301,24 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `limits.login` no longer applies: set `session.rateLimit.login`. The
   session module claims the `login` prefix with no budget, so the limiter
   answers its `defaultLimit` if anything else keys it.
+- **BREAKING: device verification's limit is its own, counted on an attempt
+  counter (#807).** `POST /oauth/device/verification` is limited by
+  `device-grant.rateLimit` alone, counted per signed-in subject on the
+  `attemptCounter` slot; no rate limiter takes part. The setting keeps its
+  name, shape and default (5 per 300 s); `windowSeconds` above a day (86400)
+  now refuses the boot (`config-validation-failed` at
+  `device-grant.rateLimit.windowSeconds`). A limiter's
+  `limits.device_verification` no longer applies. An enabled grant no longer
+  requires a `rateLimiter`: without one `/oauth/device_authorization` lets
+  every request through, and `core.declaredAbsent` lists `"rateLimiter"`.
 - **BREAKING: more than one replica needs a shared attempt counter (#807).**
-  With no `attemptCounter` wired the login counts its attempts per process:
+  With no `attemptCounter` wired the login, and an enabled device grant's
+  verification, count their attempts per process:
   `core.deployment.mode = "multi"` refuses the boot
   (`contribute-factory-failed`, its cause naming `attemptCounter` and
-  `"login"`), an unset mode warns `attempt_counter_not_shared`, `single` is
-  silent. A shared limiter no longer covers the login. In the standalone
+  `"login"` or `"device_verification"`), an unset mode warns
+  `attempt_counter_not_shared`, `single` is silent. A shared limiter no
+  longer covers either. In the standalone
   template set `adapters.attemptCounter = "redis"`
   (`ADAPTERS_ATTEMPT_COUNTER=redis`; a new selection, `memory` by default);
   a composition of your own installs `redisAttemptCounterModule` from
@@ -415,6 +427,18 @@ The boot refusals you can meet, with their messages, are in
   `Retry-After` and `Cache-Control: no-store` and without `RateLimit-*`
   headers. The per-process warning is `attempt_counter_not_shared`, no longer
   `login_rate_limiter_not_shared`.
+- **BREAKING: device verification fails closed when its attempt counter is
+  down (#807).** `POST /oauth/device/verification` answers
+  `503 service_unavailable` "Attempt counter temporarily unavailable" for
+  every action while the counter cannot answer, whatever
+  `redis-rate-limiter.failMode` says. It was "Rate limiter temporarily
+  unavailable", or no limit under `open`. Operators see
+  `attempt_counter_unavailable` (error, `tag: "device_verification"`) instead
+  of `rate_limiter_failed_closed` / `_open`; the audit event stays
+  `rate_limit.unavailable`, its `details` gaining `failure`. A refused
+  attempt is still `429 slow_down`, logged `device_verification_rate_limited`
+  and audited `device.rate_limited`, now with `Retry-After` and
+  `Cache-Control: no-store`.
 
 - **WebAuthn.** An assertion whose user handle is not its credential owner's
   canonical handle is `400 invalid_grant` (`user_handle_mismatch`) (#863); one
@@ -582,8 +606,8 @@ modules fills them.
   gone from `createDeviceVerificationHandler`, the federation-grants routers,
   `RateLimitGuardOptions` and `RateLimitPolicyOptions`; `checkWithFailMode`
   takes a policy from `createRateLimitPolicy` and refuses any other object;
-  `memoryRateLimiterModule`, `redisRateLimiterModule`, `deviceGrantModule`
-  and `webauthnModule` require `rateLimitBudgetResolver`, which a hand-built
+  `memoryRateLimiterModule`, `redisRateLimiterModule` and `webauthnModule`
+  require `rateLimitBudgetResolver`, which a hand-built
   deps object for their factories carries. `createDeviceVerificationHandler`'s
   `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
   `revokedBefore` (#717).
@@ -605,6 +629,16 @@ modules fills them.
   `replayStoreTtlSeconds` and `nonce { required, ttlSeconds }` — or the boot
   is refused naming the missing key; an absent section, or one without
   `enabled`, is off. Parsed directly, an absent section is `undefined`.
+- **BREAKING: `createDeviceVerificationHandler` takes an attempt limit, not a
+  rate limiter (#807).** Its `rateLimiter` option is gone, and so is
+  `DeviceGrantDependencies.rateLimiter`; it takes `attemptLimit`
+  (`{ limit, windowSeconds }`), an optional `attemptCounter` and
+  `deploymentMode`. The module requires `deploymentMode` instead of
+  `rateLimitBudgetResolver` and reads `attemptCounter`, so a deps object
+  handed to its factories carries them. `DEVICE_VERIFICATION_RATE_LIMIT_PREFIX`
+  is now `DEVICE_VERIFICATION_ATTEMPT_TAG` (still `"device_verification"`),
+  and `isDeviceVerificationRateLimitSpec` is removed: core's `isAttemptSpec`
+  judges the limit.
 - **BREAKING: the device grant is one module, `deviceAuthorizationGrantModule`,
   switched by its own section (#728).** List it as it is: it reads
   `device-grant.enabled` from the configuration boot parses, and an absent

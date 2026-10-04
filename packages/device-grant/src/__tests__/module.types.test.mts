@@ -29,13 +29,16 @@ const REQUIRES = [
 	"keyStore",
 	// The session-admission ADR's D1: every consumer of admission requires it.
 	"sessionRequirementResolver",
-	// The contributed budgets: the verification route holds its own to its configuration.
-	"rateLimitBudgetResolver",
+	// What counting verification attempts per process is refused or warned by.
+	"deploymentMode",
 	// What the oauth module provides of `oauth {}`: no configuration is read.
 	"oauthTokenSettings",
 ] as const;
 const OPTIONAL = [
 	"deviceCodeStore",
+	// The counter the verification's attempt limit runs on.
+	"attemptCounter",
+	// The abuse control on /oauth/device_authorization, when wired.
 	"rateLimiter",
 	"replaySeenSet",
 	"logger",

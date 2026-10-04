@@ -37,10 +37,11 @@
  *   budget.
  *
  * `token` has no owner: the limiter's `defaultLimit`, or its own `limits`
- * entry. `login` is claimed with no budget: the session module counts its
- * attempts on the attempt counter, against `session.rateLimit.login`, so the
- * limiter holds only its `defaultLimit` for the prefix, whatever the owner's
- * key says.
+ * entry. `login` and `device_verification` are claimed with no budget: their
+ * owners count attempts on the attempt counter, against
+ * `session.rateLimit.login` and `device-grant.rateLimit`, so the limiter
+ * holds only its `defaultLimit` for each prefix, whatever the owner's key
+ * says.
  */
 
 import { BootError, defineModule, type RateLimiter } from "@o3co/auth-provider-core";
@@ -87,10 +88,9 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		offConfigured: spec(60, 60),
 	},
 	device_verification: {
-		shipped: spec(5, 300),
-		configured: spec(3, 120),
-		declared: spec(3, 120),
-		// Disabled, the grant registers nothing: the limiter's default applies.
+		shipped: spec(60, 60),
+		configured: spec(60, 60),
+		declared: spec(60, 60),
 		off: spec(60, 60),
 		offConfigured: spec(60, 60),
 	},

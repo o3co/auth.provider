@@ -21,7 +21,7 @@
  * read as some other number.
  */
 
-import { MAX_DURATION_SECONDS } from "@o3co/auth-provider-core";
+import { MAX_ATTEMPT_WINDOW_SECONDS } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { deviceGrantConfigSchema } from "#/module.mjs";
 import { shippedDeviceGrantSection } from "./shippedSection.mjs";
@@ -39,7 +39,7 @@ const KEYS: ReadonlyArray<
 	[
 		"rateLimit.windowSeconds",
 		(value) => ({ rateLimit: { limit: 5, windowSeconds: value } }),
-		`must be a whole number from 1 to ${MAX_DURATION_SECONDS}, in decimal digits`,
+		`must be a whole number from 1 to ${MAX_ATTEMPT_WINDOW_SECONDS}, in decimal digits`,
 		60,
 	],
 	[
@@ -108,7 +108,7 @@ describe("device-grant {} reads each number setting in decimal digits, held to i
 	});
 
 	it.each([
-		["rateLimit.windowSeconds", MAX_DURATION_SECONDS + 1],
+		["rateLimit.windowSeconds", MAX_ATTEMPT_WINDOW_SECONDS + 1],
 		["codeLifetimeSeconds", 3601],
 		["pollingIntervalSeconds", 61],
 	] as const)("refuses %s = %d, above the maximum", (path, value) => {
