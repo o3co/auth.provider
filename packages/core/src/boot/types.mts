@@ -30,6 +30,7 @@ import type { AppConfig } from "../config/application.schema.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
+import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	AuditHook,
@@ -190,6 +191,20 @@ export interface ValidatedManifests {
 	 * order: what stage 4 builds a provider and a redirect policy from.
 	 */
 	readonly dispatchedFederations: readonly DispatchedFederation[];
+	/**
+	 * Each slot an absence policy governs whose absence the configuration does
+	 * not declare. Every one is planned (stage 1 refuses otherwise); stage 3
+	 * refuses any that holds `undefined` once its sources have answered.
+	 */
+	readonly undeclaredAbsenceSlots: readonly UndeclaredAbsenceSlot[];
+}
+
+/** A slot that must hold a value: its absence policy is in force and undeclared. */
+export interface UndeclaredAbsenceSlot {
+	readonly componentKey: ComponentKey;
+	/** Modules naming the key in `requires` / `optional`, in input order. */
+	readonly consumedBy: readonly string[];
+	readonly policy: AbsencePolicy;
 }
 
 /**
