@@ -540,6 +540,36 @@ modules fills them.
   `replayStoreTtlSeconds` and `nonce { required, ttlSeconds }` — or the boot
   is refused naming the missing key; an absent section, or one without
   `enabled`, is off. Parsed directly, an absent section is `undefined`.
+- **BREAKING: the device grant is one module, `deviceAuthorizationGrantModule`,
+  switched by its own section (#728).** List it as it is: it reads
+  `device-grant.enabled` from the configuration boot parses, and an absent
+  section or key is off. `deviceGrantModule({ config })` is deprecated: it
+  ignores its argument and returns that module, so a composition calling it
+  still boots. The refusal of a module built from a configuration that
+  disagrees with the booted one about `device-grant.enabled` is gone, and a
+  composition root no longer reads that key before boot.
+- **BREAKING: an enabled device grant requires `oauthTokenSettings`, and no
+  longer reads the configuration (#728).** It takes the issuer client
+  authentication holds an assertion's audience to, the access-token lifetime
+  it mints and `requireEmailVerified` from the slot alone, and no longer
+  falls back to `oauth.jwt.issuer`, `oauth.accessToken` or
+  `oauth.requireEmailVerified` when no module provides it. With `oauthModule`
+  installed nothing changes. A composition with the grant enabled and without
+  `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`,
+  or the boot is refused for the missing component. A deps object handed to
+  the module's factories carries `oauthTokenSettings` and `section`; `config`
+  is no longer read. Disabled, the module requires nothing.
+- **BREAKING: `deviceGrantConfigSchema` fills no default (#728).** The
+  `device-grant` section's defaults live only in the package's
+  `config/reference.conf`. A configuration that layers the modules'
+  references sees no change. One built by hand writes every key of a
+  `device-grant` section it sets — `verificationUriComplete`,
+  `codeLifetimeSeconds`, `pollingIntervalSeconds` and
+  `rateLimit { limit, windowSeconds }` — or the boot is refused naming the
+  missing key. This holds with the grant off too: `device-grant { enabled =
+  false }` alone, without the package's `reference.conf`, is refused; delete
+  the section or layer the reference. Parsed directly, an absent section is
+  `undefined`.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from

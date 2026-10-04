@@ -60,7 +60,10 @@ import {
 	createRecordingMailSender,
 	unreadableModuleLeaves,
 } from "@o3co/auth-provider-core/testing";
-import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import {
+	DEVICE_CODE_GRANT_TYPE,
+	deviceAuthorizationGrantModule,
+} from "@o3co/auth-provider-device-grant";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import {
 	ACCESS_TOKEN_TYPE,
@@ -99,7 +102,7 @@ import {
 	WEB,
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import { readOwnLayers, readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
+import { readOwnLayers, resolveLayers } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import { standardSmtpMailSenderModule } from "@o3co/auth-provider-standard";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
@@ -445,27 +448,27 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		expect(valueAt(on, "webauthn.rpId")).toBe("auth.test");
 	});
 
-	it("reads the device grant's switch in phase one as the operator wrote it, so the grant registers", () => {
+	it("reads the device grant's switch from its own section as the operator wrote it, so the grant registers", () => {
 		// A deployment that adds the device grant to the template's modules
-		// hands it phase one's configuration: `deviceGrantModule({ config })`
-		// decides from `device-grant.enabled` there, read as its section's
-		// schema reads it, whether the grant exists.
+		// lists the one module: whether the grant exists is its section's
+		// `device-grant.enabled`, read over the package's reference by the
+		// section's schema, as boot reads it.
 		const operator = join(mkdtempSync(join(tmpdir(), "full-set-472-")), "device.conf");
 		writeFileSync(
 			operator,
 			`device-grant {\n  enabled = \${?DEVICE_GRANT_ENABLED}\n  verificationUri = "${ISSUER}/device"\n}\n`,
 		);
-		const switches = readSwitches(
-			readOwnLayers([operator, ...ownFiles()], {
-				env: { ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" },
-			}),
-		);
-		expect(contributionNames(deviceGrantModule({ config: switches }), "grants")).toEqual([
-			DEVICE_CODE_GRANT_TYPE,
-		]);
+		const section = deviceAuthorizationGrantModule.section;
+		const switchedOn = (env: Readonly<Record<string, string>>): unknown => {
+			const resolved = resolveLayers(
+				readOwnLayers([operator, ...ownFiles()], { env }),
+				section?.reference === undefined ? [] : [section.reference],
+			);
+			return section?.isEnabled?.(section.schema.parse(resolved["device-grant"]));
+		};
+		expect(switchedOn({ ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" })).toBe(true);
 		// And off where nothing says on: the grant is opt-in.
-		const unset = readSwitches(readOwnLayers([operator, ...ownFiles()], { env: SINGLE_ENV }));
-		expect(contributionNames(deviceGrantModule({ config: unset }), "grants")).toEqual([]);
+		expect(switchedOn(SINGLE_ENV)).toBe(false);
 	});
 
 	it("reads every leaf a module declares from the string an environment variable carries, every store on Redis", async () => {

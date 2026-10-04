@@ -15,10 +15,9 @@
  */
 
 import type { DeviceCodeStore, ProviderDeps, RateLimiter } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { createDeviceCodeGrant } from "#/grant.mjs";
-import { type DeviceGrantModuleDeps, deviceGrantModule } from "#/module.mjs";
+import { type DeviceGrantModuleDeps, deviceAuthorizationGrantModule } from "#/module.mjs";
 
 // The manifest's contribution callbacks read only the slots it declares, and
 // an optional slot is used only behind a presence check.
@@ -26,13 +25,14 @@ import { type DeviceGrantModuleDeps, deviceGrantModule } from "#/module.mjs";
 // file is in both typecheck lists (vitest.config.mts and tsconfig.test.json).
 
 const REQUIRES = [
-	"config",
 	"clientRepository",
 	"keyStore",
 	// The session-admission ADR's D1: every consumer of admission requires it.
 	"sessionRequirementResolver",
 	// The contributed budgets: the verification route holds its own to its configuration.
 	"rateLimitBudgetResolver",
+	// What the oauth module provides of `oauth {}`: no configuration is read.
+	"oauthTokenSettings",
 ] as const;
 const OPTIONAL = [
 	"deviceCodeStore",
@@ -44,20 +44,15 @@ const OPTIONAL = [
 	"subjectRevocation",
 	// The one CSRF policy: required once the grant is enabled.
 	"csrfGuard",
-	// What the oauth module provides of `oauth {}`; read with the
-	// configuration's value as the fallback.
-	"oauthTokenSettings",
 	// Consulted by the grant at the poll, when wired.
 	"grantPolicy",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("deviceGrantModule's deps are the slots it declares", () => {
+describe("the device-grant module's deps are the slots it declares", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		expectTypeOf<DeviceGrantModuleDeps>().branded.toEqualTypeOf<Declared>();
-		const installed = deviceGrantModule({
-			config: { ...makeValidAppConfig(), "device-grant": { enabled: true } } as never,
-		});
+		const installed = deviceAuthorizationGrantModule;
 		expect([...(installed.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(installed.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
 	});

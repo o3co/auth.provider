@@ -24,28 +24,25 @@
  * the boot refusal reasons from.
  */
 
-import {
-	type AppConfig,
-	isUsableRateLimitSpec,
-	type RateLimitSpec,
-} from "@o3co/auth-provider-core";
+import { isUsableRateLimitSpec, type RateLimitSpec } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { deviceGrantModule } from "#/module.mjs";
+import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
 import {
 	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
 	isDeviceVerificationRateLimitSpec,
 } from "#/verificationBudget.mjs";
 
-const switchedOn = (enabled: boolean) => ({ "device-grant": { enabled } }) as unknown as AppConfig;
-
-/** What the module, built with the grant `enabled` or not, contributes for `device_verification`. */
-const verificationBudget = async (
-	section: unknown,
-	enabled = true,
-): Promise<RateLimitSpec | null | undefined> =>
-	deviceGrantModule({ config: switchedOn(enabled) }).contributes?.rateLimitBudgets?.[
+/** What the module contributes for `device_verification`, handed `section`. */
+const verificationBudget = async (section: unknown): Promise<RateLimitSpec | null | undefined> =>
+	deviceAuthorizationGrantModule.contributes?.rateLimitBudgets?.[
 		DEVICE_VERIFICATION_RATE_LIMIT_PREFIX
 	]?.({ section } as never);
+
+/** Whether the module's switch reads `section` as on, as boot reads it before any factory runs. */
+const switchedOn = (section: unknown): unknown =>
+	deviceAuthorizationGrantModule.section?.isEnabled?.(
+		deviceGrantConfigSchema.parse(section) as never,
+	);
 
 describe("the device grant's device_verification budget", () => {
 	it("is keyed by the prefix the verification endpoint limits under", () => {
@@ -59,10 +56,17 @@ describe("the device grant's device_verification budget", () => {
 		});
 	});
 
-	it("is not contributed while the grant is off: the module registers nothing", async () => {
+	it("is not contributed while the grant is off: the switch reads off, and boot registers nothing of the module", () => {
+		expect(switchedOn(undefined)).toBe(false);
 		expect(
-			await verificationBudget({ rateLimit: { limit: 5, windowSeconds: 300 } }, false),
-		).toBeUndefined();
+			switchedOn({
+				enabled: false,
+				verificationUriComplete: false,
+				codeLifetimeSeconds: 600,
+				pollingIntervalSeconds: 5,
+				rateLimit: { limit: 5, windowSeconds: 300 },
+			}),
+		).toBe(false);
 	});
 
 	it("is switched off when the section gives no budget", async () => {

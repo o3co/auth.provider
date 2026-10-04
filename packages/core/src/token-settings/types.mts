@@ -20,8 +20,10 @@
  *
  * A key several modules read has one owner (here the oauth module, owner of
  * `oauth {}`), which parses its section once and provides these values.
- * Readers list the slot as optional, since they also run without the oauth
- * module, and read the configuration only when no module provides it. A
+ * Most readers list the slot as optional, since they also run without the
+ * oauth module, and read the configuration only when nothing fills it. A
+ * reader that requires the slot reads none of the configuration: a
+ * composition without the oauth module fills the slot itself. A
  * provided slot is read whole, checked with `checkOAuthTokenSettings`, never
  * mixed with the configuration.
  *

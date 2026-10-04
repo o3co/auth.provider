@@ -18,42 +18,45 @@
  * `device-grant.rateLimit`: the budget RFC 8628 §5.1 sizes the
  * user code against, as a config key that reaches the limiter (otherwise the
  * `device_verification:` prefix falls through to the adapter's 60/60s
- * default). Pins both ends: the schema boundary (defaults and bounds), and the
+ * default). Pins both ends: the schema boundary (the shipped default and the
+ * bounds), and the
  * documented key in `reference.conf` resolving, through the real HOCON parser,
  * the budget the module contributes and the real limiter module, to a budget
  * of five.
  */
 
 import { fileURLToPath } from "node:url";
-import {
-	type AppConfig,
-	memoryRateLimiterModule,
-	type RateLimitSpec,
-} from "@o3co/auth-provider-core";
+import { memoryRateLimiterModule, type RateLimitSpec } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { deviceGrantConfigSchema, deviceGrantModule } from "#/module.mjs";
+import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
 import { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX } from "#/verificationBudget.mjs";
+import { shippedDeviceGrantSection } from "./shippedSection.mjs";
 
 const REFERENCE_CONF = fileURLToPath(new URL("../../config/reference.conf", import.meta.url));
 
 describe("device-grant.rateLimit — schema boundary", () => {
-	it("defaults to RFC 8628 §5.1's five attempts per five minutes", () => {
+	it("ships RFC 8628 §5.1's five attempts per five minutes", () => {
 		// §5.1's worked example: ~34.5 bits is sufficient only where "the
 		// rate-limiting interval and validity period would need to only
 		// allow 5 attempts". Five minutes is half the default code lifetime.
-		const parsed = deviceGrantConfigSchema.parse({ enabled: false });
-		expect(parsed.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });
+		const parsed = deviceGrantConfigSchema.parse(shippedDeviceGrantSection());
+		expect(parsed?.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });
 	});
 
-	it("applies the same default when the whole section is omitted", () => {
-		const parsed = deviceGrantConfigSchema.parse(undefined);
-		expect(parsed.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });
+	it("holds no default of its own: a section written without a budget refuses, naming it", () => {
+		// A hand-assembled section that leaves the budget out does not run on
+		// the limiter's default of sixty while the boot refusal reasons from five.
+		const { rateLimit: _rateLimit, ...withoutBudget } = shippedDeviceGrantSection();
+		const result = deviceGrantConfigSchema.safeParse(withoutBudget);
+		expect(result.error?.issues.map((issue) => issue.path.join("."))).toEqual(["rateLimit"]);
 	});
 
 	it("accepts an operator's own budget", () => {
-		const parsed = deviceGrantConfigSchema.parse({ rateLimit: { limit: 3, windowSeconds: 600 } });
-		expect(parsed.rateLimit).toEqual({ limit: 3, windowSeconds: 600 });
+		const parsed = deviceGrantConfigSchema.parse(
+			shippedDeviceGrantSection({ rateLimit: { limit: 3, windowSeconds: 600 } }),
+		);
+		expect(parsed?.rateLimit).toEqual({ limit: 3, windowSeconds: 600 });
 	});
 
 	it.each([
@@ -69,7 +72,7 @@ describe("device-grant.rateLimit — schema boundary", () => {
 		// A zero here is not "no limit" — it is what an empty environment
 		// variable coerces to, and a zero-attempt budget locks every user out
 		// while a zero window is not a window. Both fail boot, loudly.
-		const result = deviceGrantConfigSchema.safeParse({ rateLimit });
+		const result = deviceGrantConfigSchema.safeParse(shippedDeviceGrantSection({ rateLimit }));
 		expect(result.success).toBe(false);
 	});
 });
@@ -81,11 +84,9 @@ describe("device-grant.rateLimit — the documented key resolves", () => {
 	 * advertised limit and which were allowed.
 	 */
 	const spendSix = async (section: { readonly rateLimit?: unknown }) => {
-		const contribute = deviceGrantModule({
-			config: { "device-grant": { enabled: true } } as unknown as AppConfig,
-		}).contributes?.rateLimitBudgets?.[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] as (
-			deps: unknown,
-		) => RateLimitSpec | null;
+		const contribute = deviceAuthorizationGrantModule.contributes?.rateLimitBudgets?.[
+			DEVICE_VERIFICATION_RATE_LIMIT_PREFIX
+		] as (deps: unknown) => RateLimitSpec | null;
 		const budget = contribute({ section });
 		const budgets = new Map(
 			budget === null ? [] : [[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX, budget]],
@@ -123,21 +124,9 @@ describe("device-grant.rateLimit — the documented key resolves", () => {
 		const parsed = deviceGrantConfigSchema.parse(
 			(parseFile(REFERENCE_CONF).toObject() as { "device-grant": unknown })["device-grant"],
 		);
-		expect(parsed.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });
+		expect(parsed?.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });
 
-		const { advertised, outcomes } = await spendSix(parsed);
-		expect(advertised).toBe(5);
-		expect(outcomes).toEqual([true, true, true, true, true, false]);
-	});
-
-	it("reaches the limiter as a budget of five when the section is omitted entirely", async () => {
-		// The route an embedder who hand-assembles config takes: no
-		// reference.conf, no `rateLimit` block, just the schema default. It has
-		// to travel the same path as the documented key, or the boot refusal
-		// reasons from five while the limiter applies sixty.
-		const parsed = deviceGrantConfigSchema.parse(undefined);
-
-		const { advertised, outcomes } = await spendSix(parsed);
+		const { advertised, outcomes } = await spendSix(parsed ?? {});
 		expect(advertised).toBe(5);
 		expect(outcomes).toEqual([true, true, true, true, true, false]);
 	});
