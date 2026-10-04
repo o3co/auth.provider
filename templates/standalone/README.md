@@ -339,9 +339,19 @@ switch decides it (see [Multi-factor authentication](#multi-factor-authenticatio
 boot parses it once, with every loaded module's schema. What
 the template reads after boot — the trusted hops, the port, the readiness
 deadline — it reads from the `http` module: core's `httpSettings` slot and the
-template's `httpHostSettings`. A top-level section no
-loaded module owns is kept and logged once at boot as
-`config_sections_ignored`: that is where a misspelt section name shows.
+template's `httpHostSettings`. Beside it, the template hands boot the
+configuration's defaults (`configDefaultsFor`): the same `reference.conf`
+files with neither of the two files above and no environment. Boot names a
+top-level section no loaded module owns by them, once, at warn, and keeps it:
+a section a loaded package's `reference.conf` sets for a module the
+composition does not load (`redis-clients` with no store on Redis, say) is
+silent while it is as that file sets it, and `config_sections_not_loaded`
+once your files or a variable change it — the setting reaches nothing; a
+section no loaded package sets is `config_sections_ignored`, which is where a
+misspelt section name shows. A renamed variable a loaded package's
+`reference.conf` captures and no loaded module declares is named
+`environment_variables_not_applied`. The [operator
+runbook](../../docs/operator-runbook.md) has a row for each.
 
 Values in the overlay take precedence over `application.conf`. The scaffold
 ships with `development.conf`, `production.conf` and `mailpit.conf` (the

@@ -25,12 +25,14 @@
  * parse has, which matters because adapter selections have no disagreement
  * guard at boot; `two-phase-config.test.mts` pins this for the shipped
  * environments. A loaded module's own schema may still make something else of
- * a switch at boot.
+ * a switch at boot. Beside phase two it builds the configuration's defaults,
+ * which boot names the sections nothing loaded reads by
+ * (`configDefaultsFor`): the same references, with no file of the
+ * composition's and no environment.
  */
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDeepStrictEqual } from "node:util";
 import {
 	type AppConfig,
 	coreReference,
@@ -360,28 +362,6 @@ function refuseIntentPrefixLeftAtDefault(
 const ROOT_SECTIONS: readonly string[] = [ADAPTERS_SECTION, MFA_SWITCH];
 
 /**
- * The sections the template's own `config/reference.conf` sets that no module
- * in `modules` owns and that nothing has changed: as that file sets them with
- * no environment. Boot is not handed them, so a module of the template's the
- * composition does not load names nothing at boot; a section an operator's
- * layer or the environment changed is handed on, and boot names it once as a
- * section nothing owns.
- */
-function unownedTemplateDefaults(
-	resolved: Readonly<Record<string, unknown>>,
-	modules: readonly Module[],
-): readonly string[] {
-	const defaults = resolveLayers({ config: empty(), env: {} }, [templateReference()]);
-	return Object.keys(defaults).filter(
-		(name) =>
-			name !== RENAMED_VARIABLES &&
-			!ROOT_SECTIONS.includes(name) &&
-			!ownsSection(modules, name) &&
-			isDeepStrictEqual(resolved[name], defaults[name]),
-	);
-}
-
-/**
  * Refuses, with a `RangeError` naming it, a module whose section is at or
  * under one of the composition root's own sections, which phase one consumes
  * and boot is never handed: the module would read nothing its operator wrote.
@@ -400,9 +380,6 @@ function refuseModuleAtRootSections(modules: readonly Module[]): void {
 	}
 }
 
-/** The section a resolution captures renamed variables in: never left out. */
-const RENAMED_VARIABLES = "renamed-variables";
-
 /**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
@@ -413,9 +390,9 @@ const RENAMED_VARIABLES = "renamed-variables";
  * the `oauth` acr table as the template's MFA switch decides them
  * (`mfaSectionForBoot`, `oauthForBoot`). Left out:
  * `adapters` and `mfaMode`, the composition root's own keys, which phase one
- * consumed, and a section the template's own `reference.conf` sets for a
- * module the composition does not load, left as that file sets it
- * (`unownedTemplateDefaults`).
+ * consumed. A section a loaded package's `reference.conf` sets for a module
+ * the composition does not load is handed on as resolved: boot tells it
+ * apart by the configuration's defaults (`configDefaultsFor`).
  *
  * Refuses, with a `RangeError`, a module whose section is under a section of
  * the composition root's (`refuseModuleAtRootSections`), what
@@ -434,8 +411,9 @@ export function resolveForBoot(
 	refuseModuleAtRootSections(modules);
 	const all = resolveLayers(own, moduleReferences(modules));
 	refuseIntentPrefixLeftAtDefault(all, modules);
-	const unowned = new Set([...ROOT_SECTIONS, ...unownedTemplateDefaults(all, modules)]);
-	const layered = Object.fromEntries(Object.entries(all).filter(([name]) => !unowned.has(name)));
+	const layered = Object.fromEntries(
+		Object.entries(all).filter(([name]) => !ROOT_SECTIONS.includes(name)),
+	);
 	const { mfa: _decided, ...resolved } = layered;
 	const mfa = mfaSectionForBoot({
 		mode: switches.mfaMode,
@@ -459,4 +437,14 @@ export function resolveForBoot(
 					core: { ...(resolved.core as Record<string, unknown> | undefined), sessionRequirements },
 				}),
 	} as unknown as AppConfig;
+}
+
+/**
+ * The configuration's defaults, which boot names the sections nothing loaded
+ * reads by (`bootstrapComponents.configDefaults`): the `reference.conf` of
+ * every package `modules` come from, layered as `resolveForBoot` layers them
+ * (core's last), with no file of the composition's and no environment.
+ */
+export function configDefaultsFor(modules: readonly Module[]): Record<string, unknown> {
+	return resolveLayers({ config: empty(), env: {} }, moduleReferences(modules));
 }
