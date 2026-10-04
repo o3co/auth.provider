@@ -16,11 +16,11 @@
 
 /**
  * The prefixes whose limit a verifier sets itself: the attempts a credential
- * check allows. The bundled limiter modules' sections may not name one in
- * their `limits`, where the owner's contributed budget applies in its place;
- * the builders and constructors read no contributed budget and take `limits`
- * as given. The setting each is made at is what a refusal points to. The one
- * place core names another package's prefix and setting.
+ * check allows, counted on the attempt counter at the owner's setting and
+ * never by a rate limiter. The bundled limiter modules' sections may not name
+ * one in their `limits`; the builders and constructors take `limits` as given.
+ * The setting each is made at is what a refusal points to. The one place core
+ * names another package's prefix and setting.
  */
 
 import type { z } from "zod";

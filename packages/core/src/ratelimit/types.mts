@@ -67,7 +67,7 @@ export interface RateLimiter {
 	readonly defaultLimit?: RateLimitSpec;
 	/**
 	 * Atomic check + increment. Key is endpoint-specific (e.g.,
-	 * "login:ip:1.2.3.4", "token:client:abc").
+	 * "token:ip:1.2.3.4", "token:client:abc").
 	 */
 	check(key: string, ctx: RateLimitContext): Promise<RateLimitDecision>;
 }
