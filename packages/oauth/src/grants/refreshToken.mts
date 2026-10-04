@@ -463,11 +463,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 					finalAudience = policyAudience.audience;
 					policyChoseAudience = true;
 				}
-				// The subject's revocation watermark again, after the policy's
-				// await: a revocation that landed meanwhile mints nothing. The
-				// session is admitted below, after the policy too.
-				const reverified = await verifyPresented(refreshTokenValue, issuer);
-				if (!reverified.ok) return { result: reverified.result };
 			}
 
 			// RFC 8707 §2: when no policy narrowed the audience, derive it from
@@ -505,20 +500,27 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				typeof tokenPayloadClaims.jti === "string" ? tokenPayloadClaims.jti : null;
 			const newFamilyId = familyId ?? randomUUID();
 
-			// Admit the token's session before the rotation spends the presented
-			// token: the live session by `sid` (skipped without a `sid` or a
-			// store), fail-closed, with requirements judged on the token's own
-			// `amr`. Subject revocation is `verifyPresented`'s; admission skips it
-			// for a token carrier.
-			const admit = async () =>
-				refusalFor(
+			// Admit the token's session, after the policy and before the rotation
+			// spends the presented token: the live session by `sid` (skipped
+			// without a `sid` or a store), fail-closed, with requirements judged
+			// on the token's own `amr`. Admission skips the revocation boundary for
+			// a token carrier, so the presented token is verified again after it:
+			// the subject's watermark is the last read, independent of any session,
+			// and a revocation that landed during the policy or the requirements
+			// mints nothing. Each refusal is answered as its first check.
+			const recheck = async (): Promise<GrantError | undefined> => {
+				const refusal = refusalFor(
 					await admitSession(admissionDeps, {
 						// `subjectStr` was refused above when the token carries no `sub`.
 						claim: tokenClaim({ sid, sub: subjectStr, amr: carriedAmr }),
 						action: "oauth.refresh" satisfies keyof typeof REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS,
 					}),
 				);
-			const refusal = await admit();
+				if (refusal !== undefined) return refusal;
+				const reverified = await verifyPresented(refreshTokenValue, issuer);
+				return reverified.ok ? undefined : reverified.result;
+			};
+			const refusal = await recheck();
 			if (refusal !== undefined) return { result: refusal };
 
 			// With rotation wired, a refresh token must carry `jti` and
@@ -643,23 +645,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 								Math.floor((capped - CAPPED_EXPIRY_DRIFT_MARGIN_MS) / 1000) - issuedAt,
 							);
 						}
-						// `issuedAt` was reserved before the store call, so measure what
-						// is left against the clock now: a cap at the end of the family's
-						// life, or a store slow enough to spend it, leaves a token that
-						// would be signed already expired.
-						if (issuedAt + refreshExpiresIn <= Math.floor(Date.now() / 1000)) {
-							logger?.info(
-								{ familyId: newFamilyId, clientId: authenticatedClientId },
-								"refresh_token_family_lifetime_exhausted",
-							);
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "refresh token family has reached its lifetime",
-								},
-							};
-						}
 						break;
 					}
 					case "replayed": {
@@ -781,17 +766,33 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 					}
 				}
 
-				// The watermark and the session's admission again, after the
+				// The session's admission and the watermark again, after the
 				// rotation's await and before signing: a revocation or a session
-				// end that landed meanwhile mints nothing, refused and mapped as
-				// the first checks.
-				const reverified = await verifyPresented(refreshTokenValue, issuer);
-				const refusalAfter = reverified.ok ? await admit() : reverified.result;
+				// end that landed meanwhile mints nothing.
+				const refusalAfter = await recheck();
 				if (refusalAfter !== undefined) {
 					// A committed rotation spent the presented token and reserved one
 					// never signed; the family is revoked so nothing rotates it on.
 					if (rotationCommitted) await revokeRotatedFamily(newFamilyId, authenticatedClientId);
 					return { result: refusalAfter };
+				}
+
+				// `issuedAt` was reserved before the store call, so measure what is
+				// left against the clock now, after every await: a cap at the end of
+				// the family's life, or a store slow enough to spend it, leaves a
+				// token that would be signed already expired.
+				if (rotationCommitted && issuedAt + refreshExpiresIn <= Math.floor(Date.now() / 1000)) {
+					logger?.info(
+						{ familyId: newFamilyId, clientId: authenticatedClientId },
+						"refresh_token_family_lifetime_exhausted",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "refresh token family has reached its lifetime",
+						},
+					};
 				}
 			}
 

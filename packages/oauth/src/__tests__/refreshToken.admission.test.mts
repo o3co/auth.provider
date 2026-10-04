@@ -525,7 +525,8 @@ describe("the refresh grant — the subject's revocation and the session are rea
 			revokeBefore: async () => {},
 			revokedBefore: async () => {
 				reads += 1;
-				if (reads > 1) throw new Error("redis down");
+				// Read at verification, after the admission, and after the rotation.
+				if (reads > 2) throw new Error("redis down");
 				return null;
 			},
 		};
@@ -536,6 +537,64 @@ describe("the refresh grant — the subject's revocation and the session are rea
 			errorDescription: "revocation store unavailable",
 		});
 		expect(rotation.rotate).toHaveBeenCalledTimes(1);
+	});
+
+	it("a subject revocation landing while a requirement evaluates mints nothing, before or after the rotation", async () => {
+		for (const revokingCall of [1, 2]) {
+			const family = await registeredFamily();
+			const revocation = createInMemorySubjectRevocation();
+			let calls = 0;
+			const requirement = fixture(() => ({ outcome: "met" }));
+			const { handler } = makeGrant({
+				subjectRevocation: revocation,
+				requirements: [
+					{
+						...requirement,
+						async admit(input) {
+							calls += 1;
+							if (calls === revokingCall) await revokeNow(revocation);
+							return requirement.admit(input);
+						},
+					},
+				],
+				family: { rotation: family.rotation, revocation: family.revocation },
+			});
+			expect(await refused(handler, await refreshToken({ sid: undefined }))).toEqual(
+				INVALID_REFRESH_TOKEN,
+			);
+			// Before the rotation the family is untouched; after it, revoked.
+			expect(await family.revocation.isFamilyRevoked("fam-1")).toBe(revokingCall === 2);
+		}
+	});
+
+	it("a family lifetime the re-checks spend mints nothing", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			let reads = 0;
+			const { handler } = makeGrant({
+				userSessionStore: storeAnswering(async () => {
+					reads += 1;
+					// The read after the rotation outlasts what the family has left.
+					if (reads === 2) vi.setSystemTime(Date.now() + 10_000);
+					return record();
+				}),
+				family: {
+					rotation: {
+						register: async () => {},
+						rotate: async () => ({ outcome: "rotated", cappedExpiresAtMs: Date.now() + 3_000 }),
+					},
+					revocation: { revokeFamily: async () => {}, isFamilyRevoked: async () => false },
+				},
+			});
+			expect(await refused(handler, await refreshToken())).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "refresh token family has reached its lifetime",
+			});
+			expect(reads).toBe(2);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("a refresh nothing revoked still mints, reading the revocation after the policy and after the rotation", async () => {
