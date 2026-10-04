@@ -15,11 +15,12 @@
  */
 
 /**
- * WebAuthn deployer configuration schema.
+ * WebAuthn deployer configuration schema: `webauthn {}`, `webauthnModule`'s own section.
  *
- * A bootstrap module parses the `webauthn` section with `webauthnConfigSchema` and supplies it
- * through the `webauthnConfig` ComponentMap slot; core does not merge it into AppConfigSchema.
- * The schema has no `.default()`: every default lives in `packages/webauthn/config/reference.conf`
+ * Boot parses the section with `webauthnConfigSchema` before any factory runs, and the module
+ * fills the `webauthnConfig` ComponentMap slot from it. Every object level refuses a key it does
+ * not declare, naming its path. The schema has no `.default()`: every default lives in
+ * `packages/webauthn/config/reference.conf`
  * (packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md).
  *
  * A HOCON `${?VAR}` substitution is always a string, so every leaf an environment variable can
@@ -141,7 +142,7 @@ const originEntry = z.string().superRefine((entry, ctx) => {
 	if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
 
-export const webauthnConfigSchema = z.object({
+export const webauthnConfigSchema = z.strictObject({
 	/** Relying Party ID — the effective domain, e.g. "example.com". */
 	rpId: z.string().min(1),
 	/** Human-readable Relying Party name shown to the user during ceremony. */
@@ -186,14 +187,14 @@ export const webauthnConfigSchema = z.object({
 	/** UserVerificationRequirement (W3C WebAuthn §5.8.6). Default "preferred". */
 	userVerification: z.enum(["required", "preferred", "discouraged"]),
 	/** Rate limits for the module's own endpoints, one entry per endpoint. */
-	rateLimit: z.object({
+	rateLimit: z.strictObject({
 		/**
 		 * `POST /oauth/webauthn/authentication/options`, which is unauthenticated and writes a
 		 * challenge per request: `limit` requests per `windowSeconds` per source IP. Defaults 30 per
 		 * 60 s. Feeds core as a `RateLimitSpec`; like core's `rateLimitSpecSchema`, the window is at
 		 * most one year, since no limiter can apply a window past the Date range.
 		 */
-		authenticationOptions: z.object({
+		authenticationOptions: z.strictObject({
 			limit: wholeNumberInRangeFromEnv(1),
 			windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
 		}),
@@ -202,7 +203,9 @@ export const webauthnConfigSchema = z.object({
 
 export type WebAuthnConfig = z.infer<typeof webauthnConfigSchema>;
 
-// Declares the typed `webauthnConfig` ComponentMap slot. Augments the package name, not a relative
+// Declares the typed `webauthnConfig` ComponentMap slot: the relying party and the rest of the
+// section, which `webauthnModule` provides from its section and names `authoritative`. A
+// composition without that module fills it itself. Augments the package name, not a relative
 // path, as every cross-package ComponentMap augmentation does.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

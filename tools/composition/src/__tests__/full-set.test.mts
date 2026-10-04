@@ -189,7 +189,6 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 
 /** The modules a deployment writes itself, beside the packages' (see the fixture). */
 const DEPLOYMENT_MODULES = [
-	"deployment:webauthn-config",
 	"deployment:grant-policy",
 	"deployment:requirement-page",
 	"deployment:requirement-bare",

@@ -42,7 +42,7 @@ import {
 import express from "express";
 import supertest from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, testTokenSettings, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
 vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAttestation: vi.fn(),
@@ -128,10 +128,6 @@ async function boot(stores: Stores, logger: SpyLogger): Promise<express.Express>
 		modules: [
 			webauthnModule,
 			defineModule({
-				name: "test:webauthn-outage-config",
-				provides: { webauthnConfig: () => webauthnConfig },
-			}),
-			defineModule({
 				name: "test:webauthn-outage-key-store",
 				provides: { keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!") },
 			}),
@@ -155,8 +151,9 @@ async function boot(stores: Stores, logger: SpyLogger): Promise<express.Express>
 			}),
 		],
 		bootstrapComponents: {
-			config,
+			config: withWebAuthnSection(config, webauthnConfig),
 			pathResolver: (p: string) => p,
+			oauthTokenSettings: testTokenSettings({ issuer: "https://test.example" }),
 			logger: logger as unknown as Logger,
 		} as never,
 	});
