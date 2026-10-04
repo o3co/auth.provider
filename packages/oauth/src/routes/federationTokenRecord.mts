@@ -52,23 +52,50 @@ export const readRecord = async (
 	caller: FederationTokenCaller,
 	step: "get" | "get_after_lock" | "get_after_conflict",
 ): Promise<StoredRecord | null> => {
+	const read = await readStored(ctx, caller, step);
+	if (read === null) answerUnlinkedRecord(ctx);
+	return read ?? null;
+};
+
+/**
+ * Confirms the record is still as `read` found it, before a token held from
+ * `read` is handed on with no write that confirmed it. Returns `null` when it
+ * is; otherwise answers as a dropped refresh is answered, or `503` when the
+ * store cannot answer, and returns that response.
+ */
+export const answerIfChanged = async (
+	ctx: FederationTokenContext,
+	caller: FederationTokenCaller,
+	read: StoredRecord,
+): Promise<Response | null> => {
+	const found = await readStored(ctx, caller, "get_before_serve");
+	if (found === undefined) return ctx.res;
+	if (found === null) return answerDiscardedRefresh(ctx, caller, "missing");
+	if (found.generation !== read.generation) return answerDiscardedRefresh(ctx, caller, "conflict");
+	return null;
+};
+
+/**
+ * The versioned read: the record, `null` when there is none, or `undefined`
+ * once a store that cannot answer, or answers outside its contract, is
+ * answered `503`.
+ */
+const readStored = async (
+	ctx: FederationTokenContext,
+	caller: FederationTokenCaller,
+	step: "get" | "get_after_lock" | "get_after_conflict" | "get_before_serve",
+): Promise<StoredRecord | null | undefined> => {
 	const { opts, res, federation, storeUnavailable } = ctx;
-	let read: StoredRecord | null;
 	try {
-		read = readVersioned(await opts.federationTokenStore.getVersioned(caller.sid, ctx.name));
+		return readVersioned(await opts.federationTokenStore.getVersioned(caller.sid, ctx.name));
 	} catch (error) {
 		storeUnavailable(federation, "federation_token", step, error);
 		res.status(503).json({
 			error: "temporarily_unavailable",
 			error_description: "federation token store unavailable",
 		});
-		return null;
+		return undefined;
 	}
-	if (read === null) {
-		answerUnlinkedRecord(ctx);
-		return null;
-	}
-	return read;
 };
 
 /**

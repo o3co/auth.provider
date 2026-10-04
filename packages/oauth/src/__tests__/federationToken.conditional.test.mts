@@ -396,6 +396,147 @@ describe("federation token route — a refresh never overwrites a relink that la
 	});
 });
 
+describe("federation token route — a record with no finite expiry hands on its stored token only while it is still the record the refresh was made from", () => {
+	/** Linked with no finite expiry: refreshed because it holds a refresh token. */
+	const linkedNoExpiry = (): FederationTokens => ({ ...linkA(), expiresAt: null });
+
+	it.each([
+		["no refresh token", {}],
+		["the unchanged refresh token", { refreshToken: "a-rt" }],
+	])(
+		"answers 404 when a logout lands during a refresh answering a refused lifetime and %s",
+		async (_label, rotation) => {
+			const r = await route({
+				seed: linkedNoExpiry(),
+				refresh: async (store) => {
+					await store.delete(SID, NAME);
+					return { accessToken: "new-at", expiresIn: Number.NaN, ...rotation };
+				},
+			});
+
+			const res = await r.post();
+
+			expect(res.status).toBe(404);
+			expect(res.body.error).toBe("federation_not_linked");
+			expect(res.body.access_token).toBeUndefined();
+			expect(await r.store.get(SID, NAME)).toBeNull();
+			expect(audited(r, "federation.token.success")).toEqual([]);
+			expect(audited(r, "federation.token.refresh_failed")).toEqual([]);
+			expectBestEffortWarn(
+				r.logger,
+				"federation_token_refresh_discarded",
+				{ federation: NAME, reason: "record_gone" },
+				null,
+			);
+		},
+	);
+
+	it.each([
+		["no refresh token", {}],
+		["the unchanged refresh token", { refreshToken: "a-rt" }],
+	])(
+		"answers the relink when one lands during a refresh answering a refused lifetime and %s",
+		async (_label, rotation) => {
+			const b = linkB();
+			const r = await route({
+				seed: linkedNoExpiry(),
+				refresh: async (store) => {
+					await store.delete(SID, NAME);
+					await store.attach(SID, NAME, b);
+					return { accessToken: "new-at", expiresIn: Number.NaN, ...rotation };
+				},
+			});
+
+			const res = await r.post();
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("b-at");
+			expect(await r.store.get(SID, NAME)).toEqual(b);
+			expect(r.refreshToken).toHaveBeenCalledTimes(1);
+			expect(audited(r, "federation.token.refresh_failed")).toEqual([]);
+			expect(audited(r, "federation.token.success")).toEqual([
+				[expect.objectContaining({ details: { federation: NAME, refreshed: false } })],
+			]);
+			expectBestEffortWarn(
+				r.logger,
+				"federation_token_refresh_discarded",
+				{ federation: NAME, reason: "record_replaced" },
+				null,
+			);
+		},
+	);
+
+	it("answers 503 with no second upstream call when the relink that landed is itself due", async () => {
+		const due = { ...linkB(), expiresAt: new Date(Date.now() - 1000) };
+		const r = await route({
+			seed: linkedNoExpiry(),
+			refresh: async (store) => {
+				await store.attach(SID, NAME, due);
+				return { accessToken: "new-at", expiresIn: Number.NaN };
+			},
+		});
+
+		const res = await r.post();
+
+		expect(res.status).toBe(503);
+		expect(res.body.error_description).toBe(
+			"the federation token was replaced concurrently; retry",
+		);
+		expect(r.refreshToken).toHaveBeenCalledTimes(1);
+		expect(await r.store.get(SID, NAME)).toEqual(due);
+	});
+
+	it("still answers its stored token when nothing changed the record", async () => {
+		const r = await route({
+			seed: linkedNoExpiry(),
+			refresh: async () => ({ accessToken: "new-at", expiresIn: Number.NaN }),
+		});
+
+		const res = await r.post();
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("a-at");
+		expect(await r.store.get(SID, NAME)).toEqual(linkedNoExpiry());
+		expect(audited(r, "federation.token.refresh_failed")).toHaveLength(1);
+	});
+
+	it.each([
+		[
+			"a rejection",
+			async () => {
+				throw storeReplyError();
+			},
+			"ReplyError",
+		],
+		["a malformed answer", async () => ({ value: linkedNoExpiry() }), "TypeError"],
+	])(
+		"answers 503 and hands nothing on when the store cannot confirm the record: %s",
+		async (_label, answer, errName) => {
+			const r = await route({
+				seed: linkedNoExpiry(),
+				refresh: async (store) => {
+					store.getVersioned = vi.fn(answer) as unknown as Store["getVersioned"];
+					return { accessToken: "new-at", expiresIn: Number.NaN };
+				},
+			});
+
+			const res = await r.post();
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			expect(res.body.error_description).toBe("federation token store unavailable");
+			expect(res.body.access_token).toBeUndefined();
+			expect(audited(r, "federation.token.success")).toEqual([]);
+			expectOutageLine(
+				r.logger,
+				"federation_token_store_unavailable",
+				{ federation: NAME, store: "federation_token", step: "get_before_serve" },
+				errName,
+			);
+		},
+	);
+});
+
 describe("federation token route — it never removes a link from the session's index itself", () => {
 	it("answers a link with no record 404, leaving the index alone", async () => {
 		const r = await route({ seed: null });
