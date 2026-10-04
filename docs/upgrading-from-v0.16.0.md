@@ -306,7 +306,10 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   a composition of your own installs `redisAttemptCounterModule` from
   `@o3co/auth-provider-redis`, whose client the template's `redis-clients`
   module provides as `attemptCounterClient`. Its Redis must run
-  `maxmemory-policy noeviction` (the default), or the module refuses the boot.
+  `maxmemory-policy noeviction` (the default). The module refuses the boot on
+  any other policy it reads; a server that will not say boots with the
+  warning `attempt_counter_durability_unchecked`, and the policy is then
+  yours to confirm.
 
 The boot refusals you can meet, with their messages, are in
 [operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).
