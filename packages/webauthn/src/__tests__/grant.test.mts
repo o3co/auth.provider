@@ -32,10 +32,12 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
-	type OAuthTokenSettings,
 	type WebAuthnCredential,
 } from "@o3co/auth-provider-core";
-import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+} from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -57,7 +59,7 @@ vi.mock("../internal/verification.mjs", () => ({
 
 import type { WebAuthnConfig } from "#/config.mjs";
 import { createTestWebAuthnConfig } from "#/testing/index.mjs";
-import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
+import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE, type WebAuthnGrantDeps } from "../grant.mjs";
 import { verifyWebAuthnAssertion } from "../internal/verification.mjs";
 import { webauthnModule } from "../module.mjs";
 
@@ -105,18 +107,16 @@ function makeCredential(overrides?: Partial<WebAuthnCredential>): WebAuthnCreden
 	};
 }
 
-/** Build a minimal GrantDependencies for webauthn grant. */
+/** Build minimal deps for the webauthn grant. */
 function makeBaseDeps(
 	credentialStore = createMemoryWebAuthnCredentialStore(),
 	ceremony: ChallengeCeremony = makeConsumedCeremony(),
-): GrantDependencies & {
-	oauthTokenSettings: OAuthTokenSettings;
+): WebAuthnGrantDeps & {
 	webauthnCredentialStore: ReturnType<typeof createMemoryWebAuthnCredentialStore>;
-	challengeCeremony: ChallengeCeremony;
 	webauthnConfig: WebAuthnConfig;
 } {
 	return {
-		config: {} as GrantDependencies["config"],
+		tokenBindingSettings: createTestTokenBindingSettings(),
 		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://test.example" }),
 		keyStore,
 		webauthnCredentialStore: credentialStore,

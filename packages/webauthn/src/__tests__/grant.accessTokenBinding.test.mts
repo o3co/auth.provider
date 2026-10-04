@@ -41,11 +41,13 @@ import {
 	createMemoryWebAuthnCredentialStore,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type TokenBinding,
 	type WebAuthnCredential,
 } from "@o3co/auth-provider-core";
-import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+} from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -129,7 +131,7 @@ async function makeDeps(): Promise<WebAuthnDeps> {
 	const credentialStore = createMemoryWebAuthnCredentialStore();
 	await credentialStore.registerCredential(makeCredential());
 	return {
-		config: {} as GrantDependencies["config"],
+		tokenBindingSettings: createTestTokenBindingSettings(),
 		oauthTokenSettings: tokenSettings(),
 		keyStore,
 		webauthnCredentialStore: credentialStore,

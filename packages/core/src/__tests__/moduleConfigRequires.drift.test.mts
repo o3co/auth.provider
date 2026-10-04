@@ -70,7 +70,6 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	"packages/oauth -> oauth-session",
 	"packages/oauth -> subject-revocation-service",
 	"packages/session -> session",
-	"packages/webauthn -> webauthn",
 	// The standalone template's deprecated `stores` bundle.
 	"templates/standalone -> stores",
 ];

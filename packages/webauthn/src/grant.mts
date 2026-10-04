@@ -46,7 +46,6 @@ import {
 	ownedConfirmation,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
-	resolveTokenBindingSettings,
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -69,11 +68,12 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 // ---------------------------------------------------------------------------
 
 /**
- * What the WebAuthn grant reads: the shared grant slots (`keyStore` to mint, `config` for core's
- * token-binding settings alone, `grantPolicy`, `refreshTokenFamilyRotation`, `logger`), the
- * credential store and challenge ceremony, the `oauthTokenSettings` slot (the token lifetimes and
- * the resource-indicator switch, never read from `config`), and the RP fields of `webauthnConfig`
- * — `webauthnModule` hands it its own section there.
+ * What the WebAuthn grant reads: the shared grant slots (`keyStore` to mint, `grantPolicy`,
+ * `refreshTokenFamilyRotation`, `logger`), the credential store and challenge ceremony, the
+ * `oauthTokenSettings` slot (the token lifetimes and the resource-indicator switch), core's
+ * `tokenBindingSettings` slot (whether a confidential client's refresh token is bound), and the
+ * RP fields of `webauthnConfig` — `webauthnModule` hands it its own section there. Nothing is
+ * read from the whole configuration.
  *
  * `webauthnModule` hands its deps over whole and checks with `satisfies` that every key here is a
  * slot it declares; `grant.types.test.mts` pins that the `webauthnConfig` fields exist on
@@ -83,9 +83,14 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 export interface WebAuthnGrantDeps
 	extends Pick<
 			GrantDependencies,
-			"config" | "keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "logger"
+			"keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "logger"
 		>,
-		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony" | "oauthTokenSettings"> {
+		ProviderDeps<
+			| "webauthnCredentialStore"
+			| "challengeCeremony"
+			| "oauthTokenSettings"
+			| "tokenBindingSettings"
+		> {
 	readonly webauthnConfig: {
 		readonly rpId: string;
 		readonly origin: readonly string[];
@@ -119,13 +124,19 @@ export interface WebAuthnGrantDeps
  * @returns GrantHandler compatible with GrantRegistry.
  */
 export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
-	const { config, keyStore } = deps;
+	const { keyStore } = deps;
 	// The token settings are read once, here, from the `oauthTokenSettings` slot alone, checked
 	// whole first: a hand-built value the check refuses, or none, fails at composition, naming
 	// the slot, before any challenge is consumed.
 	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
 	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
 	const refreshTokenExpiresIn = tokenSettings.refreshTokenExpiresIn;
+	// The binding rule is read once, here, from core's `tokenBindingSettings` slot, which core
+	// fills frozen from `core.tokenBinding`: a deps built without it fails at composition too.
+	if (deps.tokenBindingSettings === undefined) {
+		throw new TypeError("webauthn grant: the tokenBindingSettings slot is not filled");
+	}
+	const bindConfidentialClients = deps.tokenBindingSettings.bindConfidentialClientRefreshTokens;
 	// One logger for every line this grant writes. The module hands over the
 	// deployment's; a handler built without one still reports its outages.
 	const logger = deps.logger ?? consoleLogger;
@@ -460,8 +471,6 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				// on purpose: a confidential client re-authenticates at every refresh, so RFC 9449 §5
 				// leaves its RT unbound rather than pinned to one key for the RT's lifetime.
 				const isPublicClient = client.tokenEndpointAuthMethod === "none";
-				const bindConfidentialClients =
-					resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 				const bindRefreshToken =
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
