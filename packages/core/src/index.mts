@@ -1233,6 +1233,43 @@ export {
 	createSessionRPRegistryFactory,
 	createUserSessionStoreFactory,
 } from "./user-sessions/factory.mjs";
+// The session lifecycle port (active → closing → closed), its readers and
+// its in-process store. Nothing reads the slot yet.
+export {
+	createInMemorySessionLifecycleStore,
+	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_ENTRIES,
+	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS,
+	type InMemorySessionLifecycleStoreOptions,
+} from "./user-sessions/lifecycle/memory.mjs";
+export {
+	checkSessionCloseRequest,
+	checkSessionParticipant,
+	readSessionCloseAnswer,
+	readSessionJoinAnswer,
+	readSessionLifecycleListing,
+	readSessionOpenAnswer,
+	readVersionedSessionLifecycle,
+} from "./user-sessions/lifecycle/readers.mjs";
+export {
+	SESSION_CLOSE_CAUSES,
+	SESSION_LIFECYCLE_MAX_KEY_LENGTH,
+	SESSION_LIFECYCLE_MAX_LISTING,
+	SESSION_LIFECYCLE_STATES,
+	SESSION_PARTICIPANT_KINDS,
+	SESSION_PARTICIPANT_MAX_DATA_LENGTH,
+	type SessionClose,
+	type SessionCloseAnswer,
+	type SessionCloseCause,
+	type SessionCloseRequest,
+	type SessionJoinAnswer,
+	type SessionLifecycleRecord,
+	type SessionLifecycleState,
+	type SessionLifecycleStore,
+	type SessionOpenAnswer,
+	type SessionParticipant,
+	type SessionParticipantKind,
+	sessionCloseItemOf,
+} from "./user-sessions/lifecycle/types.mjs";
 export { createInMemorySessionFamilyIndex } from "./user-sessions/memory/sessionFamilyIndex.mjs";
 export { createInMemorySessionFederationIndex } from "./user-sessions/memory/sessionFederationIndex.mjs";
 export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";
