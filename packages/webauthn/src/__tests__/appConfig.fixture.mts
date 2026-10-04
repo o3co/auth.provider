@@ -17,10 +17,17 @@
 /**
  * `makeValidAppConfig()` with what a resolution of the package's reference
  * under an environment that sets none of its variables would capture beside
- * core's: every name the WebAuthn module declares renamed, `null`.
+ * core's: every name the WebAuthn module declares renamed, `null`. Beside it,
+ * what a test boots `webauthnModule` with: its section in the configuration
+ * and the `oauthTokenSettings` slot it requires.
  */
 
-import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
+import type { OAuthTokenSettings } from "@o3co/auth-provider-core";
+import {
+	createTestOAuthTokenSettings,
+	makeValidAppConfig,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import { webauthnModule } from "../module.mjs";
 
 export function makeAppConfig(): ReturnType<typeof makeValidAppConfig> {
@@ -33,3 +40,16 @@ export function makeAppConfig(): ReturnType<typeof makeValidAppConfig> {
 		},
 	};
 }
+
+/** `config` with `section` as its `webauthn` section, which `webauthnModule` parses as its own. */
+export const withWebAuthnSection = <C extends object>(config: C, section: unknown): C =>
+	({ ...config, webauthn: section }) as C;
+
+/**
+ * The `oauthTokenSettings` slot `webauthnModule` requires, for the issuer
+ * `makeAppConfig()` names unless `issuer` is given.
+ */
+export const testTokenSettings = (
+	overrides: Parameters<typeof createTestOAuthTokenSettings>[0] = {},
+): OAuthTokenSettings =>
+	createTestOAuthTokenSettings({ issuer: makeValidAppConfig().oauth.jwt.issuer, ...overrides });

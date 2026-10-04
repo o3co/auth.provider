@@ -230,24 +230,12 @@ const requireStore = (
 };
 
 /**
- * Both routes are throttled before client authentication, so
- * that repeated unauthenticated hits are bounded before they reach a
- * repository lookup — and what happens when the limiter backend is down is the
- * limiter's own policy (`RateLimiter.failMode`), not this module's to choose.
+ * The deployment's limiter, when it wires one: both routers throttle on it,
+ * and without one they let requests through. Its absence is declared under
+ * core's policy for the slot, not refused here.
  */
-const requireLimiter = (
-	deps: FederationGrantsModuleDeps,
-): NonNullable<FederationGrantsModuleDeps["rateLimiter"]> => {
-	if (deps.rateLimiter === undefined) {
-		throw new Error(
-			"federationGrantsModule: federation-grants.enabled = true requires a rateLimiter " +
-				"component. These routes take an opaque grant id in the path and answer the " +
-				"same 404 for an unknown one, for another client's and for another subject's " +
-				"— which is only a defence while the number of guesses is bounded.",
-		);
-	}
-	return deps.rateLimiter;
-};
+const limiterOf = (deps: FederationGrantsModuleDeps) =>
+	deps.rateLimiter === undefined ? {} : { rateLimiter: deps.rateLimiter };
 
 /**
  * Can this deployment act on each connection for a user who is not present?
@@ -497,7 +485,6 @@ export const federationGrantsModule = defineModule<
 					subjectRevocation: deps.subjectRevocation,
 					federationGrantStore: store,
 				});
-				const rateLimiter = requireLimiter(deps);
 				const limits = resolveFederationGrantRetrievalLimits(deps.section);
 				const connections = resolveFederationGrantConnections(deps.section, deps.config);
 				requireDelegatedCapability(deps, connections);
@@ -544,7 +531,7 @@ export const federationGrantsModule = defineModule<
 						},
 						clientRepository: deps.clientRepository,
 						issuer: issuerOf(deps),
-						rateLimiter,
+						...limiterOf(deps),
 						...(deps.replaySeenSet === undefined ? {} : { replaySeenSet: deps.replaySeenSet }),
 						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
 						...(deps.logger === undefined ? {} : { logger: deps.logger }),
@@ -598,7 +585,7 @@ export const federationGrantsModule = defineModule<
 						login: acquisition.login,
 						csrfGuard: requireCsrfGuard(deps),
 						issuer: issuerOf(deps),
-						rateLimiter: requireLimiter(deps),
+						...limiterOf(deps),
 						background: deps.federationGrantBackground,
 						// The GRANTS boundary, for the callback's backstop and re-read.
 						grantsBoundary: boundaryFor(revocation),

@@ -607,7 +607,7 @@ describe("the MFA routes' flood guard without a shared rate limiter", () => {
 		...configFor("required"),
 		...coreConfigForTests({
 			expected: ["mfa"],
-			declaredAbsent: ["auditSink"],
+			declaredAbsent: ["auditSink", "rateLimiter"],
 			...(deploymentMode === undefined ? {} : { deploymentMode }),
 		}),
 	});

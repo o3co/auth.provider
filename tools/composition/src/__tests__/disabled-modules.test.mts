@@ -31,7 +31,7 @@ import {
 	makeValidCoreConfig,
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
-import { deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import { deviceAuthorizationGrantModule } from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { federationGrantsModule } from "@o3co/auth-provider-federation-grants";
 import {
@@ -72,8 +72,8 @@ const CASES: readonly Case[] = [
 	["mtls", () => shipped(mtlsModule), () => mtlsModule],
 	[
 		"device-grant",
-		() => shipped(deviceGrantModule({ config: makeValidCoreConfig() as never })),
-		(config) => deviceGrantModule({ config: config as never }),
+		() => shipped(deviceAuthorizationGrantModule),
+		() => deviceAuthorizationGrantModule,
 	],
 	[
 		"oauth-session",

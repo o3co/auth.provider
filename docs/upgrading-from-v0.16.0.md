@@ -222,13 +222,12 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   boot (`config-validation-failed`), naming the section or block that holds it
   and the key, where it used to be ignored. Before you upgrade, check every
   key you set against the module's README, and correct or delete the ones it
-  does not list. The section that still accepts an unknown key is `webauthn`
-  (the section and its `rateLimit` blocks). `session-store.storage` holds
-  `type` and the `redis` block alone, so a block for another storage type
-  (`memory {}`, say) is refused — delete it (#1339). `mfa`, at every level,
-  and `mfa-totp-factor` refuse one too (#1329): an empty `mfa.factors` block an
-  older configuration leaves behind (the TOTP factor's old path, its
-  variables unset) is such a key — delete it. The keys under `audit-sink` are the
+  does not list. `session-store.storage` holds `type` and the `redis` block
+  alone, so a block for another storage type (`memory {}`, say) is refused —
+  delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
+  too (#1329): an empty `mfa.factors` block an older configuration leaves
+  behind (the TOTP factor's old path, its variables unset) is such a key —
+  delete it. So does `webauthn`, at every level (#1336). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -266,6 +265,69 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   enabled `core.federations` entries with the same `callbackURL` refuse the
   boot (`config-validation-failed` at `core.federations.<name>.callbackURL`).
   Only one of them could complete a login. Give each its own.
+- **BREAKING: a composition with no rate limiter says so (#807).** When no
+  module provides `rateLimiter` and an installed module reads it, the boot is
+  refused (`component-absence-undeclared`, naming `rateLimiter`) unless
+  `core.declaredAbsent` lists it: `core.declaredAbsent = ["rateLimiter"]`,
+  beside `"auditSink"` if you list that. Declared absent, a route that keys
+  the limiter lets every request through unless its module falls back to a
+  per-process limiter (WebAuthn authentication options and the MFA routes
+  do), so request-volume limits on the others are then for what
+  sits in front of the provider. The template wires a limiter
+  (`adapters.rateLimiter`), so a scaffold needs nothing.
+- **Federation grants no longer require a rate limiter (#807).** With
+  `federation-grants.enabled = true` and no `rateLimiter` wired, the module
+  no longer refuses the boot itself; its client routes and browser pages let
+  every request through, and core's policy for the slot applies instead: list
+  `"rateLimiter"` in `core.declaredAbsent`. With a limiter wired, both are
+  throttled as before.
+- **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
+  refused (#807).** `core-rate-limiter-memory.limits` and
+  `redis-rate-limiter.limits` may not name either prefix: each is a verifier's
+  own attempt limit, which no limiter module's configuration may loosen. A limiter built with
+  `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` reads no
+  contributed budget and keeps the `limits` it is given.
+  The boot is refused (`config-validation-failed`, naming the key and the
+  setting). Move the numbers to the module's own setting:
+  `session.rateLimit.login` for login, `device-grant.rateLimit` for device
+  verification.
+- **BREAKING: the login's limit is its own, counted on an attempt counter
+  (#807).** `POST /session/login` is limited by `session.rateLimit.login`
+  alone, counted per client IP on the `attemptCounter` slot; no rate limiter
+  takes part. The setting keeps its name, shape and default (20 per
+  900000 ms); `windowMs` above a day (86400000) now refuses the boot
+  (`config-validation-failed` at `session.rateLimit.login.windowMs`), and a
+  window that is not whole seconds is read rounded up. A limiter's
+  `limits.login` no longer applies: set `session.rateLimit.login`. The
+  session module claims the `login` prefix with no budget, so the limiter
+  answers its `defaultLimit` if anything else keys it.
+- **BREAKING: device verification's limit is its own, counted on an attempt
+  counter (#807).** `POST /oauth/device/verification` is limited by
+  `device-grant.rateLimit` alone, counted per signed-in subject on the
+  `attemptCounter` slot; no rate limiter takes part. The setting keeps its
+  name, shape and default (5 per 300 s); `windowSeconds` above a day (86400)
+  now refuses the boot (`config-validation-failed` at
+  `device-grant.rateLimit.windowSeconds`). A limiter's
+  `limits.device_verification` no longer applies. An enabled grant no longer
+  requires a `rateLimiter`: without one `/oauth/device_authorization` lets
+  every request through, and `core.declaredAbsent` lists `"rateLimiter"`.
+- **BREAKING: more than one replica needs a shared attempt counter (#807).**
+  With no `attemptCounter` wired the login, and an enabled device grant's
+  verification, count their attempts per process:
+  `core.deployment.mode = "multi"` refuses the boot
+  (`contribute-factory-failed`, its cause naming `attemptCounter` and
+  `"login"` or `"device_verification"`), an unset mode warns
+  `attempt_counter_not_shared`, `single` is silent. A shared limiter no
+  longer covers either. In the standalone
+  template set `adapters.attemptCounter = "redis"`
+  (`ADAPTERS_ATTEMPT_COUNTER=redis`; a new selection, `memory` by default);
+  a composition of your own installs `redisAttemptCounterModule` from
+  `@o3co/auth-provider-redis`, whose client the template's `redis-clients`
+  module provides as `attemptCounterClient`. Its Redis must run
+  `maxmemory-policy noeviction` (the default). The module refuses the boot on
+  any other policy it reads; a server that will not say boots with the
+  warning `attempt_counter_durability_unchecked`, and the policy is then
+  yours to confirm.
 
 The boot refusals you can meet, with their messages, are in
 [operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).
@@ -352,6 +414,31 @@ The boot refusals you can meet, with their messages, are in
   `Object.prototype` member refuses the boot (`contribution-malformed`).
 
 ### Passkeys, users and sessions
+
+- **BREAKING: the login fails closed when its attempt counter is down
+  (#807).** `POST /session/login` answers `503 service_unavailable`
+  "Attempt counter temporarily unavailable" while the counter cannot answer,
+  whatever `redis-rate-limiter.failMode` says — `open` no longer lets logins
+  through an outage. It was "Rate limiter temporarily unavailable", or no
+  limit under `open`. Operators see `attempt_counter_unavailable` (error)
+  instead of `rate_limiter_failed_closed` / `_open`; the audit event stays
+  `rate_limit.unavailable` (`tag: "login"`), its `details` gaining
+  `failure`. A refused login is still `429 rate_limited`, now with
+  `Retry-After` and `Cache-Control: no-store` and without `RateLimit-*`
+  headers. The per-process warning is `attempt_counter_not_shared`, no longer
+  `login_rate_limiter_not_shared`.
+- **BREAKING: device verification fails closed when its attempt counter is
+  down (#807).** `POST /oauth/device/verification` answers
+  `503 service_unavailable` "Attempt counter temporarily unavailable" for
+  every action while the counter cannot answer, whatever
+  `redis-rate-limiter.failMode` says. It was "Rate limiter temporarily
+  unavailable", or no limit under `open`. Operators see
+  `attempt_counter_unavailable` (error, `tag: "device_verification"`) instead
+  of `rate_limiter_failed_closed` / `_open`; the audit event stays
+  `rate_limit.unavailable`, its `details` gaining `failure`. A refused
+  attempt is still `429 slow_down`, logged `device_verification_rate_limited`
+  and audited `device.rate_limited`, now with `Retry-After` and
+  `Cache-Control: no-store`.
 
 - **WebAuthn.** An assertion whose user handle is not its credential owner's
   canonical handle is `400 invalid_grant` (`user_handle_mismatch`) (#863); one
@@ -513,13 +600,14 @@ modules fills them.
   the type instead (`overrides.federationTypes.<type>`, with its own
   `redirectPolicy`).
 - **Rate limits.** The module that keys a prefix contributes its budget
-  (`rateLimitBudgets`); the bundled limiters seed none (#782). An override
-  that loosens a budget refuses the boot. In code: the `failMode` options are
+  (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
+  overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot
+  (`contribution-kind-guarded`, #807). In code: the `failMode` options are
   gone from `createDeviceVerificationHandler`, the federation-grants routers,
   `RateLimitGuardOptions` and `RateLimitPolicyOptions`; `checkWithFailMode`
   takes a policy from `createRateLimitPolicy` and refuses any other object;
-  `memoryRateLimiterModule`, `redisRateLimiterModule`, `deviceGrantModule`
-  and `webauthnModule` require `rateLimitBudgetResolver`, which a hand-built
+  `memoryRateLimiterModule`, `redisRateLimiterModule` and `webauthnModule`
+  require `rateLimitBudgetResolver`, which a hand-built
   deps object for their factories carries. `createDeviceVerificationHandler`'s
   `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
   `revokedBefore` (#717).
@@ -533,6 +621,30 @@ modules fills them.
   missing component. A deps object handed to the module's factories carries
   `oauthTokenSettings`; `config` is no longer read. Disabled, the module
   requires nothing.
+- **BREAKING: `webauthnModule` provides the `webauthnConfig` slot from its
+  own section, and requires `oauthTokenSettings` (#728).** Boot parses the
+  `webauthn` section with `webauthnConfigSchema` — the same rules for the
+  relying party's id and origins, now strict at every level — and the module
+  provides the result as the slot, naming it `authoritative`. Remove the
+  bridge module a composition wrote to fill the slot from `config.webauthn`:
+  beside `webauthnModule`, a module providing the slot refuses the boot
+  (`duplicate-provides`), as do a `bootstrapComponents` entry
+  (`bootstrap-component-collision`) and an `overrideComponents` entry
+  (`authoritative-component-overridden`). A composition that hard-coded the
+  slot writes those values in the `webauthn` section instead. Without
+  `webauthnModule` (the WebAuthn second factor alone), the composition still
+  fills the slot itself. The module's grant reads the token lifetimes and the
+  resource-indicator switch from the `oauthTokenSettings` slot alone and no
+  longer falls back to `oauth.accessToken`, `oauth.refreshToken.expiresIn`
+  or `oauth.resourceIndicator.enabled`: with `oauthModule` installed nothing
+  changes; a composition without it puts an `oauthTokenSettings` value in
+  `bootstrapComponents`, or the boot is refused for the missing component.
+  In code: `createWebAuthnGrant` requires `oauthTokenSettings` and throws a
+  `RangeError` naming it when it is missing; a deps object handed to the
+  module's factories carries the parsed section as `section` and
+  `oauthTokenSettings`, and no `webauthnConfig`; `webauthnConfigSchema`
+  refuses a key it does not declare, `allowCredentialsForKnownUser` included.
+  The module still requires `config`, for core's `core.tokenBinding` alone.
 - **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
   section's defaults live only in the package's `config/reference.conf`. A
   configuration that layers the modules' references (`moduleReferences`, as
@@ -541,6 +653,46 @@ modules fills them.
   `replayStoreTtlSeconds` and `nonce { required, ttlSeconds }` — or the boot
   is refused naming the missing key; an absent section, or one without
   `enabled`, is off. Parsed directly, an absent section is `undefined`.
+- **BREAKING: `createDeviceVerificationHandler` takes an attempt limit, not a
+  rate limiter (#807).** Its `rateLimiter` option is gone, and so is
+  `DeviceGrantDependencies.rateLimiter`; it takes `attemptLimit`
+  (`{ limit, windowSeconds }`), an optional `attemptCounter` and
+  `deploymentMode`. The module requires `deploymentMode` instead of
+  `rateLimitBudgetResolver` and reads `attemptCounter`, so a deps object
+  handed to its factories carries them. `DEVICE_VERIFICATION_RATE_LIMIT_PREFIX`
+  is now `DEVICE_VERIFICATION_ATTEMPT_TAG` (still `"device_verification"`),
+  and `isDeviceVerificationRateLimitSpec` is removed: core's `isAttemptSpec`
+  judges the limit.
+- **BREAKING: the device grant is one module, `deviceAuthorizationGrantModule`,
+  switched by its own section (#728).** List it as it is: it reads
+  `device-grant.enabled` from the configuration boot parses, and an absent
+  section or key is off. `deviceGrantModule({ config })` is deprecated: it
+  ignores its argument and returns that module, so a composition calling it
+  still boots. The refusal of a module built from a configuration that
+  disagrees with the booted one about `device-grant.enabled` is gone, and a
+  composition root no longer reads that key before boot.
+- **BREAKING: an enabled device grant requires `oauthTokenSettings`, and no
+  longer reads the configuration (#728).** It takes the issuer client
+  authentication holds an assertion's audience to, the access-token lifetime
+  it mints and `requireEmailVerified` from the slot alone, and no longer
+  falls back to `oauth.jwt.issuer`, `oauth.accessToken` or
+  `oauth.requireEmailVerified` when no module provides it. With `oauthModule`
+  installed nothing changes. A composition with the grant enabled and without
+  `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`,
+  or the boot is refused for the missing component. A deps object handed to
+  the module's factories carries `oauthTokenSettings` and `section`; `config`
+  is no longer read. Disabled, the module requires nothing.
+- **BREAKING: `deviceGrantConfigSchema` fills no default (#728).** The
+  `device-grant` section's defaults live only in the package's
+  `config/reference.conf`. A configuration that layers the modules'
+  references sees no change. One built by hand writes every key of a
+  `device-grant` section it sets — `verificationUriComplete`,
+  `codeLifetimeSeconds`, `pollingIntervalSeconds` and
+  `rateLimit { limit, windowSeconds }` — or the boot is refused naming the
+  missing key. This holds with the grant off too: `device-grant { enabled =
+  false }` alone, without the package's `reference.conf`, is refused; delete
+  the section or layer the reference. Parsed directly, an absent section is
+  `undefined`.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
@@ -735,8 +887,7 @@ with what a store of yours records and refuses. Per port:
   ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
 - **`RateLimiter`.** One that declares no `failMode` fails closed, whatever
   `redis-rate-limiter.failMode` says (formerly `rateLimit.failMode`, now a
-  retired path that refuses the boot); a wrapper forwards `failMode` and
-  `defaultLimit` (#782).
+  retired path that refuses the boot); a wrapper forwards `failMode` (#782).
 - **Redis clients of your own.** `SubjectRevocationClient` implements
   `advanceRevocationBoundaries`, and `setRevocationBoundaries` is gone (#993):
   add the method on the current release first.

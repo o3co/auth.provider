@@ -26,7 +26,6 @@ import {
 	LOGIN_RETURN_PARAMETER,
 	type Logger,
 	loginPageCarriesReturn,
-	MAX_DURATION_MS,
 	type SessionCookiePolicy,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	wholeNumberInRangeFromEnv,
@@ -42,7 +41,7 @@ import {
 } from "./csrf.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
 import { createLoginEntry } from "./login-entry.mjs";
-import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "./loginBudget.mjs";
+import { LOGIN_ATTEMPT_TAG, MAX_LOGIN_WINDOW_MS } from "./loginAttempts.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
 
@@ -52,7 +51,7 @@ const sessionConfigSchema = CoreConfigSchema.pick({ core: true });
 /**
  * The schema of `session {}`, the module's own section, strict at every
  * level: where `POST /session/login` may send a browser back to, the CSRF
- * policy, the login page and the login's rate-limit budget. The session
+ * policy, the login page and the login's attempt limit. The session
  * cookie and its store are the session store's (`session-store {}`), read
  * here through the `sessionCookiePolicy` slot. Each leaf reads the string an
  * environment variable carries.
@@ -97,17 +96,17 @@ export const sessionSectionSchema = z
 			})
 			.strict(),
 		/**
-		 * `POST /session/login`'s brute-force budget, `windowMs` in
-		 * milliseconds, which the module contributes as the `login` budget
-		 * every limiter reads: required (the package's reference ships 20 per
-		 * 15 minutes). Zero would turn the guard into a no-op that still looks
+		 * `POST /session/login`'s own attempt limit, `windowMs` in milliseconds
+		 * up to a day, counted on the `attemptCounter` slot's counter, never a
+		 * rate limiter's: required (the package's reference ships 20 per 15
+		 * minutes). Zero would turn the guard into a no-op that still looks
 		 * configured.
 		 */
 		rateLimit: z
 			.object({
 				login: z
 					.object({
-						windowMs: wholeNumberInRangeFromEnv(1, MAX_DURATION_MS),
+						windowMs: wholeNumberInRangeFromEnv(1, MAX_LOGIN_WINDOW_MS),
 						limit: wholeNumberInRangeFromEnv(1),
 					})
 					.strict(),
@@ -122,7 +121,7 @@ type SessionSection = z.output<typeof sessionSectionSchema>;
 /**
  * The module's section, with the paths it moved from: the login page from
  * `endpoints.login.url` (its variable renamed `SESSION_LOGIN_PAGE_URL`) and
- * the login's budget from `rateLimit.login`, which no variable binds.
+ * the login's attempt limit from `rateLimit.login`, which no variable binds.
  */
 const SECTION = {
 	schema: sessionSectionSchema,
@@ -191,8 +190,8 @@ const csrfGuardOf = (
  * planner-derived `federationProviders`,
  * `federationRedirectPolicyResolver` and `sessionRequirementResolver`
  * (password login and the federation link routes go through admission), and
- * `deploymentMode` (the login throttle's per-process fallback is refused
- * under `multi`, so a mode read as absent must not lift that).
+ * `deploymentMode` (counting login attempts per process is refused under
+ * `multi`, so a mode read as absent must not lift that).
  *
  * `provides` what other packages need of the browser session through
  * core-owned slot contracts, so none imports this package: `csrfGuard` and
@@ -212,7 +211,7 @@ export const sessionModule = defineModule<
 	| "federationRedirectPolicyResolver"
 	| "sessionRequirementResolver"
 	| "deploymentMode",
-	"logger" | "rateLimiter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation",
+	"logger" | "attemptCounter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation",
 	typeof sessionSectionSchema
 >({
 	name: "session",
@@ -232,12 +231,12 @@ export const sessionModule = defineModule<
 		"deploymentMode",
 	],
 	// All optional so a composition without them still boots: without
-	// `rateLimiter` the router uses a per-process in-memory limiter (and
-	// warns); without `auditSink` no events are emitted; without
+	// `attemptCounter` the login's attempts are counted per process where the
+	// deployment mode allows it; without `auditSink` no events are emitted; without
 	// `subjectSessionIndex`, `revokeAllForSubject` reports the capability as
 	// unavailable; `subjectRevocation` is the boundary the link routes'
 	// admission reads when wired.
-	optional: ["logger", "rateLimiter", "auditSink", "subjectSessionIndex", "subjectRevocation"],
+	optional: ["logger", "attemptCounter", "auditSink", "subjectSessionIndex", "subjectRevocation"],
 	// Optional to wire, not optional to decide: an unfilled `auditSink` must be
 	// declared (`auditSink` in `core.declaredAbsent`), and absent subject-level
 	// revocation must be declared (`oauth.revocation.subject = "unsupported"`),
@@ -275,11 +274,9 @@ export const sessionModule = defineModule<
 	contributes: {
 		// What the link flow's start and callback admit.
 		admissionActions: SESSION_ADMISSION_ACTIONS,
-		// `/session/login`'s budget, `session.rateLimit.login`, for every
-		// limiter to read; an operator's `limits.login` on the limiter wins.
-		rateLimitBudgets: {
-			[LOGIN_RATE_LIMIT_PREFIX]: (deps) => readLoginRateLimitBudget(deps.section),
-		},
+		// The `login` prefix is claimed with no budget: no limiter decides the
+		// login's limit, which the attempt guard counts.
+		rateLimitBudgets: { [LOGIN_ATTEMPT_TAG]: () => null },
 		routes: [
 			(deps) => {
 				return {
@@ -299,7 +296,7 @@ export const sessionModule = defineModule<
 						sessionFederationIndex: deps.sessionFederationIndex,
 						// The CSRF token's signer, the one `csrfGuard` signs with.
 						csrfTokenSigner: deps.csrfTokenSigner,
-						...(deps.rateLimiter ? { rateLimiter: deps.rateLimiter } : {}),
+						...(deps.attemptCounter ? { attemptCounter: deps.attemptCounter } : {}),
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,

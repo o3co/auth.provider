@@ -39,8 +39,9 @@ responsibilities:
 
 - the `/session` routes and their answers; the CSRF policy for them
   (`session.csrf.*`), which other packages run through the `csrfGuard` slot;
-  the login rate-limit guard's wiring and its budget (`session.rateLimit.login`, which
-  the session module contributes as the `login` budget); the redirect
+  the login's own attempt limit (`session.rateLimit.login`), counted through
+  core's attempt guard on the `attemptCounter` slot, never a rate limiter's
+  budgets; the redirect
   allowlists (`session.redirectAllowlist`, `core.federations.<name>.redirectAllowlist`);
 - what the modules provide other packages through slots whose contracts
   are core's: `csrfGuard`, `loginEntry` and `loginCompletion`, and
@@ -218,7 +219,7 @@ composition root layers because the modules declare it.
 | `session.redirectAllowlist` | | `[]` | [Redirect allowlists](#redirect-allowlists) |
 | `session.csrf.trustedOrigins`, `.ttlSeconds` | `SESSION_CSRF_TTL_SECONDS` (`ttlSeconds`) | `[]`, `7200` | [CSRF](#csrf-on-the-state-changing-routes) |
 | `session.loginPage.url` | `SESSION_LOGIN_PAGE_URL` | `/login` | Required. The page the `loginEntry` slot names: a path or an absolute URL, with no `redirect_to` of its own |
-| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | Required. `POST /session/login`'s budget, which the module contributes as `login` |
+| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | Required. `POST /session/login`'s own attempt limit: `windowMs` a whole number of milliseconds up to a day (86400000), read as whole seconds rounded up; `limit` a positive whole number |
 
 Each section is strict at every level: a key it does not declare refuses boot,
 naming it. `session-store.storage` holds `type` and the `redis` block alone, so
@@ -380,14 +381,14 @@ The manifest ([`src/module.mts`](src/module.mts)):
   (`routes/Session.mts`, `routes/Federation.mts`) takes the resolver as the
   required `requirements` option and throws without it; a test builds one with
   core's `resolverForTests`. And `deploymentMode`, which core fills from
-  `core.deployment.mode`: the login throttle's per-process fallback is refused under
+  `core.deployment.mode`: counting login attempts per process is refused under
   `multi`, so the mode is required rather than read as absent. The session
   router built by hand also takes the signer as the required `csrfTokenSigner`
   option, and throws without it, and the mode as the required `deploymentMode`
   option, where a value that is none of the three, absence included, is a
   TypeError at construction. `sessionRPRegistry` and `sessionFamilyIndex`, the
   other two session stores, are `oauth`'s.
-- `optional`: `logger`, `rateLimiter`, `auditSink`, `subjectSessionIndex`,
+- `optional`: `logger`, `attemptCounter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads).
   `auditSink` unwired must be declared with `core.declaredAbsent = ["auditSink"]`, and
   `subjectSessionIndex` and `subjectRevocation` unwired with
@@ -434,16 +435,23 @@ The manifest ([`src/module.mts`](src/module.mts)):
 - `redirect_to`, when sent, must be on `session.redirectAllowlist` (see
   [Redirect allowlists](#redirect-allowlists)) and is stored as
   `req.session.redirectTo`; nothing in this package redirects to it.
-- The brute-force guard runs on the shared `rateLimiter` (prefix `login`, keyed
-  by client IP) with `session.rateLimit.login`'s window and limit — the session module
-  contributes them as the `login` budget, which a limiter's own `limits.login`
-  overrides — answering `429` when it denies and following the limiter's own
-  `failMode` when the limiter fails. With no
-  `rateLimiter` wired the route falls back to a per-process limiter: boot is
-  refused under `core.deployment.mode = "multi"`, a `login_rate_limiter_not_shared`
-  warning is logged when the mode is unset, and nothing is said under
-  `"single"`. The mode is core's `deploymentMode` slot, which the module
-  requires; the router reads nothing of `deployment` itself.
+- The login's attempt limit runs before the credentials are read: one attempt
+  per request, keyed `login:ip:<client IP>`, counted against
+  `session.rateLimit.login` by core's attempt guard (`createAttemptGuard`) on
+  the `attemptCounter` slot's counter. No rate limiter takes part: a limiter's
+  `limits`, `defaultLimit` and `failMode` neither loosen nor replace it, and
+  the module claims the `login` prefix with no budget. A refused attempt is
+  `429 rate_limited` with `Retry-After` and `Cache-Control: no-store`, and no
+  `RateLimit-*` headers, which would tell a guesser how many guesses are left.
+  A counter that throws, does not answer within two seconds, or answers
+  something core cannot read is `503 service_unavailable` whatever any
+  limiter declares, logged as `attempt_counter_unavailable` and audited as
+  `rate_limit.unavailable` (`tag: "login"`). With no `attemptCounter` wired
+  the guard counts per process: boot is refused under
+  `core.deployment.mode = "multi"`, an `attempt_counter_not_shared` warning is
+  logged when the mode is unset, and nothing is said under `"single"`. The
+  mode is core's `deploymentMode` slot, which the module requires; the router
+  reads nothing of `deployment` itself. A refused attempt is not audited.
 
 #### When a requirement interrupts the login
 
@@ -1379,7 +1387,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, the cookie policy refuses whatever would break the contract, over every combination of the cookie's attributes, and a name or domain it refuses is refused at validation with its message; an override of the policy beside the store's module refuses boot, and a composition without the module fills the slot |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
 | [`src/__tests__/renewSession.test.mts`](src/__tests__/renewSession.test.mts) | the session renewal over express-session's `MemoryStore`: the signed-in state and a fresh nonce alone on the new id, the old id destroyed, a failed `regenerate` or `save` answered as the cookie session's outage with nothing written; and the race — a request in flight on the old id puts it back after the renewal, and core's admission refuses it once the escalation carries the nonce |
-| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
+| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginAttempts.test.mts`](src/routes/__tests__/loginAttempts.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login's attempt limit |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | the link start and callback on session admission: each outcome's answer, the subject recorded beside the `sid`, what a requirement is asked, the pre-upgrade transaction |

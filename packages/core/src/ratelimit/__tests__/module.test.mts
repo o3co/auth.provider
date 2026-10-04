@@ -4,8 +4,18 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import type { BootstrapMap } from "#/boot/types.mjs";
+import { BootError } from "#/boot/types.mjs";
+import { validateManifests } from "#/boot/validate-manifests.mjs";
 import type { RateLimiter } from "#/ratelimit/types.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { memoryRateLimiterModule } from "../module.mjs";
+
+/** The prefixes a verifier limits itself, and the setting each is made at. */
+const VERIFIER_PREFIXES = [
+	["login", "session.rateLimit.login"],
+	["device_verification", "device-grant.rateLimit"],
+] as const;
 
 describe("memoryRateLimiterModule", () => {
 	it("has the canonical name", () => {
@@ -72,10 +82,55 @@ describe("memoryRateLimiterModule", () => {
 		expect(c.allowed).toBe(false);
 	});
 
+	it.each(VERIFIER_PREFIXES)(
+		"refuses a limits entry for %s, a verifier's own limit, in its section's schema, naming the key and the setting",
+		(prefix, setting) => {
+			const parsed = memoryRateLimiterModule.section?.schema.safeParse({
+				limits: {
+					[prefix]: { limit: 5, windowSeconds: 60 },
+					token: { limit: 5, windowSeconds: 60 },
+				},
+			});
+			expect(parsed?.success).toBe(false);
+			expect(parsed?.error?.issues).toEqual([
+				expect.objectContaining({
+					path: ["limits", prefix],
+					message: expect.stringContaining(setting),
+				}),
+			]);
+		},
+	);
+
+	it.each(VERIFIER_PREFIXES)(
+		"refuses boot on core-rate-limiter-memory.limits.%s, naming its path and the setting",
+		(prefix, setting) => {
+			const config = {
+				...makeValidCoreConfig(),
+				"core-rate-limiter-memory": { limits: { [prefix]: { limit: 5, windowSeconds: 60 } } },
+			};
+			let err: unknown;
+			try {
+				validateManifests({
+					modules: [memoryRateLimiterModule],
+					bootstrapComponents: {
+						config: config as never,
+						pathResolver: (s: string) => s,
+					} satisfies Record<string, unknown> as BootstrapMap,
+				});
+			} catch (caught) {
+				err = caught;
+			}
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe("config-validation-failed");
+			expect((err as BootError).message).toContain(`core-rate-limiter-memory.limits.${prefix}`);
+			expect((err as BootError).message).toContain(setting);
+		},
+	);
+
 	it("limits a prefix by the budget its owner contributed, read at each check, under its own limits entry", async () => {
 		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
 		const cfg = {
-			limits: { login: { limit: 4, windowSeconds: 45 } },
+			limits: { token: { limit: 4, windowSeconds: 45 } },
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 			maxBuckets: 10_000,
 		};
@@ -93,8 +148,9 @@ describe("memoryRateLimiterModule", () => {
 		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(2);
 		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(true);
 		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
-		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
-		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
+		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(20);
+		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
+		expect((await limiter.check("authorize:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
 	});
 
 	it("reads no owner's key: a prefix nothing contributes a budget for falls to its defaultLimit", async () => {

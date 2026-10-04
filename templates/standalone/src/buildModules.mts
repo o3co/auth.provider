@@ -38,6 +38,7 @@ import {
 } from "@o3co/auth-provider-oauth";
 import {
 	redisAccessTokenDenylistModule,
+	redisAttemptCounterModule,
 	redisCodeRepositoryModule,
 	redisConsentStoreModule,
 	redisFederationGrantIntentStoreModule,
@@ -210,6 +211,7 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 	const usingRedisAnywhere =
 		refreshTokenFamilyUsesRedis ||
 		adapters.rateLimiter === "redis" ||
+		adapters.attemptCounter === "redis" ||
 		adapters.userSessionStores === "redis" ||
 		adapters.codeRepository === "redis" ||
 		adapters.accessTokenDenylist === "redis" ||
@@ -236,6 +238,11 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 
 	const rateLimiterModules: Module[] =
 		adapters.rateLimiter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
+
+	// `memory` installs no counter: the login's attempt guard counts per
+	// process, which `core.deployment.mode = "multi"` refuses.
+	const attemptCounterModules: Module[] =
+		adapters.attemptCounter === "redis" ? [redisAttemptCounterModule] : [];
 
 	// Mutually exclusive: both modules provide the `codeRepository` slot, and
 	// including both would be a boot-time slot collision.
@@ -373,6 +380,7 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		...federationGrantIntentStoreModules,
 		...sessionStoresModules,
 		...rateLimiterModules,
+		...attemptCounterModules,
 		...codeRepositoryModules,
 		...accessTokenDenylistModules,
 		...replaySeenSetModules,

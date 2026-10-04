@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-10-03
+最終更新: 2026-10-05
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -239,7 +239,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 グラントに渡されたブラウザーセッションは、トークンに署名する前に core のアドミッションを通して `oauth.session_grant` として読まれる（[セッションアドミッション](#セッションアドミッション)）。認証されていない Cookie は `401 unauthorized`、ユーザーを名指さない Cookie はストアの有無にかかわらず `400 invalid_grant`。`userSessionStore` が配線されているとき、Cookie は空でない `sid` を持たなければならず（`400 invalid_grant`、"session identifier (sid) is required"）、それが名指す生存中の `UserSession` のサブジェクトは Cookie のユーザーでなければならない: 無い、`expiresAt` を過ぎた、別のサブジェクトを答える、あるいは（`subjectRevocation` が配線されていれば）サブジェクトのセッションが失効される前に確立されたセッションは `400 invalid_grant` / `session_invalid`、ストアの障害は `503 temporarily_unavailable` で、アドミッションが `session_admission_unavailable` として 1 度だけログに出す。セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant` で、ステップアップで満たせるなら `step_up: "<要件>"` を添える — RFC 6749 のコードなので既存のクライアントは対応付けを保ち、更新されたクライアントはこのメンバーで動ける。`userSessionStore` が無ければ、グラントはブラウザーセッションだけを頼りにする。検証済みの DPoP / mTLS バインディングはアクセストークンの `cnf` に保持される: DPoP は `token_type=DPoP`、mTLS は `Bearer` のままで、リソースサーバーは対応する証明を検証しなければならない。
 
-`grantPolicy` が配線されていれば、アドミッションとスコープの確認の後、署名の前に、`grantType: "session"`、認証済みクライアント、セッションのサブジェクト、要求されたスコープ（`scope` を省略したときは無し）で参照する。ポリシーは絞ることしかできない: deny はポリシー自身の `error` で `400`、例外を投げたポリシーは `503 temporarily_unavailable`、要求されたスコープを超える `grantedScope` やグラント自身が発行する audience（クライアントの `allowedAudiences`、それが空ならクライアント ID）の外の `grantedAudience` は `500 server_error`。その範囲内の `grantedAudience` がトークンの `aud` になる。
+`grantPolicy` が配線されていれば、アドミッションとスコープの確認の後、署名の前に、`grantType: "session"`、認証済みクライアント、セッションのサブジェクト、要求されたスコープ（`scope` を省略したときは無し）で参照する。ポリシーは絞ることしかできない: deny はポリシー自身の `error` で `400`、例外を投げたポリシーは `503 temporarily_unavailable`、要求されたスコープを超える `grantedScope` やグラント自身が発行する audience（クライアントの `allowedAudiences`、それが空ならクライアント ID）の外の `grantedAudience` は `500 server_error`。その範囲内の `grantedAudience` がトークンの `aud` になる。ポリシーが答えた後、署名の前にアドミッション全体 — 生きているセッションの読み取り、取り消しの境界、登録されたすべての要件 — をもう一度通し、そこでの拒否や障害は最初のアドミッションと同じように答える。ポリシーの評価中に取り消された、または終わったセッションでは何も発行しない。
 
 ### `client_credentials`
 

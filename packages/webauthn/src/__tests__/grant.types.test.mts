@@ -34,7 +34,6 @@ import { webauthnModule } from "#/module.mjs";
 // block keeps the negative assertion from executing.
 
 const REQUIRES = [
-	"webauthnConfig",
 	"webauthnCredentialStore",
 	"challengeStore",
 	"challengeCeremony",
@@ -46,6 +45,8 @@ const REQUIRES = [
 	// The contributed budgets, which the options route's mismatch warning reads; the
 	// grant does not read it.
 	"rateLimitBudgetResolver",
+	// What the grant reads of `oauth {}`.
+	"oauthTokenSettings",
 ] as const;
 const OPTIONAL = [
 	"grantPolicy",
@@ -53,8 +54,6 @@ const OPTIONAL = [
 	"auditSink",
 	"logger",
 	"refreshTokenFamilyRotation",
-	// What the grant reads of `oauth {}`.
-	"oauthTokenSettings",
 ] as const;
 type ModuleDeps = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
@@ -69,9 +68,11 @@ describe("the webauthn grant declares the slots it reads", () => {
 		// them four session stores, `subjectRevocation` and
 		// `refreshTokenFamilyRevocation`, none of which webauthnModule declares:
 		// a read of one would have compiled and seen `undefined` forever.
-		// `webauthnConfig` is the module's slot, narrowed to the four fields
-		// the assertion check reads.
-		expectTypeOf<keyof WebAuthnGrantDeps>().toMatchTypeOf<keyof ModuleDeps>();
+		// `webauthnConfig` is the module's own section, which it hands over
+		// in its place (the fields it reads are pinned below).
+		expectTypeOf<Exclude<keyof WebAuthnGrantDeps, "webauthnConfig">>().toMatchTypeOf<
+			keyof ModuleDeps
+		>();
 		expect(true).toBe(true);
 	});
 

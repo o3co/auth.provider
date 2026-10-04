@@ -21,8 +21,9 @@
  * written and its token answered. A record with no finite expiry, refreshed
  * because it holds a refresh token, keeps answering its stored token when the
  * answer's lifetime is refused, as it did before it was due. Every write lands only on the record the
- * refresh was made from; a refresh whose record was removed or rewritten
- * meanwhile is dropped, never written over what replaced it.
+ * refresh was made from, and a stored token is answered only from it; a
+ * refresh whose record was removed or rewritten meanwhile is dropped, never
+ * written over what replaced it.
  */
 
 import { canonicalScope, emitAuditEvent, loggableError } from "@o3co/auth-provider-core";
@@ -31,6 +32,7 @@ import type { FederationTokenCaller, FederationTokenContext } from "./federation
 import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import {
 	answerDiscardedRefresh,
+	answerIfChanged,
 	replaceRecord,
 	type StoredRecord,
 } from "./federationTokenRecord.mjs";
@@ -69,8 +71,11 @@ export const recordRefresh = async (
 	 * rewritten since (a relink, or another refresh) is left as it is, since
 	 * an equal refresh token does not make it the same connection, and that
 	 * outcome is returned so the refusal is answered as a dropped refresh.
+	 * `updated` once kept; `undefined` when nothing was written.
 	 */
-	const keepRotatedRefreshToken = async (): Promise<"missing" | "conflict" | undefined> => {
+	const keepRotatedRefreshToken = async (): Promise<
+		"updated" | "missing" | "conflict" | undefined
+	> => {
 		if (rotatedRefreshToken !== undefined && rotatedRefreshToken !== currentTokens.refreshToken) {
 			try {
 				const outcome = await replaceRecord(ctx, caller, current, {
@@ -89,8 +94,8 @@ export const recordRefresh = async (
 						},
 						"federation_token_keep_rotated_skipped",
 					);
-					return outcome;
 				}
+				return outcome;
 			} catch (error) {
 				logger.warn(
 					{ federation, store: "federation_token", step: "replace_if", err: loggableError(error) },
@@ -103,8 +108,15 @@ export const recordRefresh = async (
 
 	// The adapter answered something this route cannot read as a token.
 	if (accessToken === undefined || !lifetime.accepted || tokenTypeIsBroken) {
-		const dropped = await keepRotatedRefreshToken();
-		if (dropped !== undefined) return answerDiscardedRefresh(ctx, caller, dropped);
+		const kept = await keepRotatedRefreshToken();
+		if (kept === "missing" || kept === "conflict") return answerDiscardedRefresh(ctx, caller, kept);
+		const servesStored = !lifetime.accepted && currentTokens.expiresAt === null;
+		// The stored token is handed on only from the record the refresh was
+		// made from; a kept rotation already confirmed it by its write.
+		if (servesStored && kept !== "updated") {
+			const changed = await answerIfChanged(ctx, caller, current);
+			if (changed !== null) return changed;
+		}
 		emitAuditEvent(opts.auditSink, {
 			timestamp: new Date(),
 			type: "federation.token.refresh_failed",
@@ -119,7 +131,7 @@ export const recordRefresh = async (
 						reason: accessToken === undefined ? "no_access_token" : "invalid_token_type",
 					},
 		});
-		if (!lifetime.accepted && currentTokens.expiresAt === null) {
+		if (servesStored) {
 			if (!isDisclosable(currentTokens)) {
 				return refuseUndisclosableTokenType(ctx, caller, currentTokens.tokenType);
 			}
@@ -163,8 +175,8 @@ export const recordRefresh = async (
 	// The refresh worked but its token may not be handed on. Keep the
 	// rotated refresh token so fixing the upstream needs no re-consent.
 	if (!isDisclosable(updatedTokens)) {
-		const dropped = await keepRotatedRefreshToken();
-		if (dropped !== undefined) return answerDiscardedRefresh(ctx, caller, dropped);
+		const kept = await keepRotatedRefreshToken();
+		if (kept === "missing" || kept === "conflict") return answerDiscardedRefresh(ctx, caller, kept);
 		return refuseUndisclosableTokenType(ctx, caller, nextTokenType);
 	}
 
