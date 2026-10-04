@@ -41,6 +41,7 @@ import {
 	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 	DeviceCodeStoreError,
+	memoryRateLimiterModule,
 } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
@@ -250,6 +251,35 @@ describe("the device-grant module — boot", () => {
 		// that leaves it off must never trip settings it does not use.
 		const handle = await boot({});
 		await handle.dispose();
+	});
+
+	it("refuses a limiter section's limits.device_verification, naming device-grant.rateLimit", async () => {
+		// The verification's attempt limit is the module's own setting; the
+		// module's claim declares it, so no limiter's limits may loosen it.
+		const bootstrap = makeBoot({ withRateLimiter: false });
+		const err = await createApp({
+			modules: [deviceAuthorizationGrantModule, memoryRateLimiterModule],
+			bootstrapComponents: {
+				...bootstrap,
+				config: {
+					...bootstrap.config,
+					[memoryRateLimiterModule.name]: {
+						limits: { device_verification: { limit: 50, windowSeconds: 60 } },
+						defaultLimit: { limit: 60, windowSeconds: 60 },
+						maxBuckets: 100,
+					},
+				} as never,
+			},
+		}).then(
+			() => undefined,
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain(
+			`${memoryRateLimiterModule.name}.limits.device_verification`,
+		);
+		expect((err as BootError).message).toContain("set device-grant.rateLimit instead");
 	});
 
 	it("refuses to boot enabled without a verificationUri", async () => {

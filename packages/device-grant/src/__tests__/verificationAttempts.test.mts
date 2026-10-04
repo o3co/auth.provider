@@ -97,6 +97,14 @@ describe("the device-grant module and the rate limiter", () => {
 		).toBeNull();
 	});
 
+	it("declares the prefix a verifier's own limit, made at device-grant.rateLimit", () => {
+		const claim =
+			deviceAuthorizationGrantModule.contributes?.rateLimitBudgets?.[
+				DEVICE_VERIFICATION_ATTEMPT_TAG
+			];
+		expect(claim?.verifier).toEqual({ setting: "device-grant.rateLimit" });
+	});
+
 	it("reads the attemptCounter slot and the deployment mode, and no contributed budget", () => {
 		expect(deviceAuthorizationGrantModule.optional).toContain("attemptCounter");
 		expect(deviceAuthorizationGrantModule.requires).toContain("deploymentMode");
