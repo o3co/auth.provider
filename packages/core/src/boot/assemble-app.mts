@@ -720,7 +720,8 @@ export function assembleApp(
 		}
 		if (mechanisms.length > 0) {
 			// Core's own policy, for core's own extension point: read from the
-			// configuration in every composition, never from a slot.
+			// configuration in every composition with the reader boot fills the
+			// `tokenBindingSettings` slot with, never from a module's slot.
 			const dispatchPolicy: DispatchPolicy = resolveTokenBindingSettings(
 				(frozen.components as Record<string, unknown>).config,
 			).dispatchPolicy;

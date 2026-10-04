@@ -74,7 +74,9 @@ export type { FederationProvider };
  * the contribution kind of the same stem; `federationRedirectPolicies` is
  * typed in `@o3co/auth-provider-session`. `deploymentMode` is the
  * configuration's `core.deployment.mode` (`deployment/mode.mts`), typed with its
- * slot in `deployment/types.mts`.
+ * slot in `deployment/types.mts`; `tokenBindingSettings` is its
+ * `core.tokenBinding` (`resolveTokenBindingSettings`), typed with its slot in
+ * `middleware/tokenBinding.mts`.
  *
  * Immutability rests on the `ReadonlySet<string>` type. `Object.freeze` does
  * not stop the built-in Set methods from mutating `[[SetData]]`, so a cast to
@@ -101,6 +103,10 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		// host that set it would be a second statement of the replica count,
 		// beside the one the replica-safety guard reads.
 		"deploymentMode",
+		// Filled the same way, from `core.tokenBinding`: a module or host that
+		// set it would be a second source of the token-binding settings, beside
+		// the one boot's dispatch policy reads.
+		"tokenBindingSettings",
 	]),
 );
 

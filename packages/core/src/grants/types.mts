@@ -222,7 +222,15 @@ export interface GrantHandler {
  * - `oauthTokenSettings`: the issuer, lifetimes and switches a grant reads of
  *   the oauth module's settings, held whole with `checkOAuthTokenSettings`
  *   rather than read from `config`; absent in a composition without the
- *   oauth module. `config` stays required while grants still read it.
+ *   oauth module.
+ * - `tokenBindingSettings`: core's token-binding settings (the dispatch
+ *   policy, and whether a confidential client's refresh token is bound),
+ *   which boot fills for every composition from `core.tokenBinding`; a grant
+ *   whose module requires the slot reads them from it rather than from
+ *   `config`. Optional here only so that deps a test builds by hand need not
+ *   carry it.
+ *
+ * `config` stays required while grants still read it.
  */
 export type GrantDependencies = ProviderDeps<
 	"config" | "keyStore",
@@ -236,6 +244,7 @@ export type GrantDependencies = ProviderDeps<
 	| "subjectRevocation"
 	| "logger"
 	| "oauthTokenSettings"
+	| "tokenBindingSettings"
 >;
 
 /**

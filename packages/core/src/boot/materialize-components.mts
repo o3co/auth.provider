@@ -23,6 +23,7 @@
  */
 
 import { deploymentModeOf } from "../deployment/mode.mjs";
+import { resolveTokenBindingSettings } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import { prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { auditSlotFor } from "./audit-fan-out.mjs";
@@ -116,7 +117,8 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 /**
  * Stage 3 of the boot planner. Seeds `bootstrapComponents`, applies
  * `overrideComponents`, fills `deploymentMode` from the configuration's
- * `core.deployment.mode`, injects the synthetic projections of
+ * `core.deployment.mode` and `tokenBindingSettings` from its
+ * `core.tokenBinding`, injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
  * provider factory in `plan.providerActivations` order. The `auditSink`
@@ -168,6 +170,10 @@ export async function materializeComponents(
 	// replica-safety guard decided by. Stage 1 refuses the key from every
 	// other source.
 	components.deploymentMode = deploymentModeOf(bootstrapComponents.config);
+	// Core's token-binding settings, frozen, from the same configuration with
+	// core's one reader of the section — what boot's dispatch policy is too.
+	// Stage 1 refuses the key from every other source.
+	components.tokenBindingSettings = resolveTokenBindingSettings(bootstrapComponents.config);
 
 	// Synthetic projections are stable read-through views of the collectors
 	// stage 4 fills, so a provider that requires one gets the object the world

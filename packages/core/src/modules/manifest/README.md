@@ -1,6 +1,6 @@
 # modules/manifest
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 ## Responsibility
 
@@ -8,7 +8,7 @@ The vocabulary a module is written in: `defineModule`, `ModuleSpec` / `Module`, 
 
 Which mechanism a new policy is written on — a contribution that adds behaviour, a slot that fills a port, a contribution kind that changes a core decision, or, outside this vocabulary, a capability an adapter opts into — is chosen by the four axes in [AGENTS.md](../../../../../AGENTS.md#extension-surface-four-axes).
 
-It decides nothing at runtime. `defineModule` returns its argument unchanged; every check on a manifest — uniqueness, closure, collisions, pairing, declared absence, replica safety — is a stage-1 row in [`../../boot/`](../../boot/README.md), and so is the parse of a module's section. It owns no slot's value type either: `ComponentMap` is an empty interface that the directory owning a value augments (`../../repositories/ClientRepository.mts` for `clientRepository`, `../../boot/types.mts` for `config` / `pathResolver` / the two registrars, `synthetic-keys.mts` for the resolvers, `../../deployment/types.mts` for `deploymentMode`).
+It decides nothing at runtime. `defineModule` returns its argument unchanged; every check on a manifest — uniqueness, closure, collisions, pairing, declared absence, replica safety — is a stage-1 row in [`../../boot/`](../../boot/README.md), and so is the parse of a module's section. It owns no slot's value type either: `ComponentMap` is an empty interface that the directory owning a value augments (`../../repositories/ClientRepository.mts` for `clientRepository`, `../../boot/types.mts` for `config` / `pathResolver` / the two registrars, `synthetic-keys.mts` for the resolvers, `../../deployment/types.mts` for `deploymentMode`, `../../middleware/tokenBinding.mts` for `tokenBindingSettings`).
 
 It is separate from `boot/` so that a module is written against the vocabulary without the planner: this directory is its own package subpath (`./modules/manifest`) and is re-exported from the package root, which is where every package that authors a manifest imports it from, and the dependency runs one way — `boot/` imports it and it imports nothing of `boot/`.
 
