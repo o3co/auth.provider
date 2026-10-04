@@ -1660,7 +1660,7 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 		expect(seen).toBe("use");
 	});
 
-	it("the stores: deps.userSessionStore and deps.subjectRevocation are read once each, the record, the boundary and the step-up capability all off that one read", async () => {
+	it("the stores: deps.userSessionStore and deps.subjectRevocation are read once each, the record, the boundary and the step-up capability of both readings all off that one read", async () => {
 		let storeReads = 0;
 		let revocationReads = 0;
 		let boundaryAsked = 0;
@@ -1688,7 +1688,8 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 			},
 		};
 		expect(await admitSession(counting, request())).toMatchObject({ outcome: "admitted" });
-		expect(boundaryAsked).toBe(1);
+		// A requirement was asked: the boundary is read again after it answered.
+		expect(boundaryAsked).toBe(2);
 		expect(seen?.session?.secondFactorRecordable).toBe(true);
 		expect(storeReads).toBe(1);
 		expect(revocationReads).toBe(1);

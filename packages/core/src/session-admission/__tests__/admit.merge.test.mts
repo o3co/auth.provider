@@ -635,7 +635,7 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 		});
 	});
 
-	it("reads the store's capability once, as admission reads the record into its view, and never without a record", async () => {
+	it("reads the store's capability once per reading of a live record — the view's from the first — and never without a record", async () => {
 		let reads = 0;
 		const counting = (record: UserSession): UserSessionStore =>
 			Object.defineProperty(storeOf(record), "recordSecondFactor", {
@@ -651,7 +651,8 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 			expect(admission, JSON.stringify(acrValues)).toMatchObject({
 				view: { secondFactorRecordable: true },
 			});
-			expect(reads, JSON.stringify(acrValues)).toBe(1);
+			// The requirement was asked, so the record is read a second time.
+			expect(reads, JSON.stringify(acrValues)).toBe(2);
 		}
 		reads = 0;
 		const gone = await admitSession(
