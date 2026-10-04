@@ -500,6 +500,53 @@ describe("federation token route — a record with no finite expiry hands on its
 		expect(audited(r, "federation.token.refresh_failed")).toHaveLength(1);
 	});
 
+	it("still answers its stored token when keeping the rotated refresh token failed and nothing changed the record", async () => {
+		const r = await route({
+			seed: linkedNoExpiry(),
+			refresh: async () => ({
+				accessToken: "new-at",
+				expiresIn: Number.NaN,
+				refreshToken: "rotated-rt",
+			}),
+		});
+		r.store.replaceIf = vi.fn().mockRejectedValue(storeReplyError());
+
+		const res = await r.post();
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("a-at");
+		expectBestEffortWarn(r.logger, "federation_token_keep_rotated_failed", {
+			federation: NAME,
+			store: "federation_token",
+			step: "replace_if",
+		});
+	});
+
+	it("answers 503, not the stored token, when keeping the rotated refresh token landed but its answer was lost", async () => {
+		const r = await route({
+			seed: linkedNoExpiry(),
+			refresh: async () => ({
+				accessToken: "new-at",
+				expiresIn: Number.NaN,
+				refreshToken: "rotated-rt",
+			}),
+		});
+		const replaceIf = r.store.replaceIf.bind(r.store);
+		r.store.replaceIf = async (...args) => {
+			await replaceIf(...args);
+			throw storeReplyError();
+		};
+
+		const res = await r.post();
+
+		expect(res.status).toBe(503);
+		expect(res.body.error_description).toBe(
+			"the federation token was replaced concurrently; retry",
+		);
+		expect(res.body.access_token).toBeUndefined();
+		expect((await r.store.get(SID, NAME))?.refreshToken).toBe("rotated-rt");
+	});
+
 	it.each([
 		[
 			"a rejection",
