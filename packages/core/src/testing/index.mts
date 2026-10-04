@@ -177,4 +177,9 @@ export {
 	type SessionCookiePolicyContractInput,
 	sessionCookiePolicyContract,
 } from "./slots/sessionCookiePolicy.mjs";
+export {
+	createTestTokenBindingSettings,
+	type TokenBindingSettingsContractInput,
+	tokenBindingSettingsContract,
+} from "./slots/tokenBindingSettings.mjs";
 export type { TestInspect } from "./test-inspect.mjs";
