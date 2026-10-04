@@ -433,6 +433,9 @@ describe("sessionLifecycleStoreContract refuses a broken store", () => {
 				participants: record.participants.map((p) => ({ ...p, joinedAt: 0 })),
 			}),
 			(record: SessionLifecycleRecord) => Object.assign(new Record(), record),
+			(record: SessionLifecycleRecord) =>
+				Object.defineProperty({ ...record }, "hidden", { value: true, enumerable: false }),
+			(record: SessionLifecycleRecord) => ({ ...record, [Symbol("extra")]: true }),
 		]) {
 			const refused = await refusedBy(reshape(change));
 			expect(refused).toContain(CASE.join);

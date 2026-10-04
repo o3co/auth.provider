@@ -171,7 +171,7 @@ const isPlain = (value: unknown): value is Record<string, unknown> => {
 function assertShape(value: unknown, keys: readonly string[], what: string): void {
 	assert.ok(isPlain(value), `${what} is a plain object`);
 	assert.deepStrictEqual(
-		Object.keys(value).sort(),
+		Reflect.ownKeys(value).map(String).sort(),
 		[...keys].sort(),
 		`${what} names exactly its keys`,
 	);

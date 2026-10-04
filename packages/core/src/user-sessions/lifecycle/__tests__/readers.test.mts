@@ -339,6 +339,8 @@ describe("readSessionLifecycleListing", () => {
 		expect(() => readSessionLifecycleListing(["b", "a"], 5)).toThrow(TypeError);
 		expect(() => readSessionLifecycleListing(["a"], 5, "a")).toThrow(TypeError);
 		expect(() => readSessionLifecycleListing(["a"], 5, "b")).toThrow(TypeError);
+		// A lone surrogate has no UTF-8 of its own: it would collide with "\ufffd".
+		expect(() => readSessionLifecycleListing(["\ud800"], 5)).toThrow(TypeError);
 	});
 
 	it("refuses more than the limit, a sid named twice, a sid that is no key, and no array", () => {
@@ -371,6 +373,7 @@ describe("checkSessionParticipant", () => {
 			{ kind: "rp", id: "", data: "" },
 			{ kind: "rp", id: "x".repeat(SESSION_LIFECYCLE_MAX_KEY_LENGTH + 1), data: "" },
 			{ kind: "rp", id: 7, data: "" },
+			{ kind: "rp", id: "lone\udc00", data: "" },
 			{ kind: "rp", id: "a" },
 			{ kind: "rp", id: "a", data: "d".repeat(SESSION_PARTICIPANT_MAX_DATA_LENGTH + 1) },
 			throwing({ kind: "rp", data: "" }, "id"),

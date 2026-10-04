@@ -52,8 +52,15 @@ import {
 /** A step name: 1 to 64 of `a`–`z`, `0`–`9` and `_`, a letter first. */
 const STEP_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
+/** A lone surrogate: it has no UTF-8 of its own, so two keys holding one could share their bytes. */
+const LONE_SURROGATE = /\p{Cs}/u;
+
+/** 1 to 512 characters of well-formed UTF-16, so that its UTF-8 bytes name it alone. */
 const isKey = (value: unknown): value is string =>
-	typeof value === "string" && value.length > 0 && value.length <= SESSION_LIFECYCLE_MAX_KEY_LENGTH;
+	typeof value === "string" &&
+	value.length > 0 &&
+	value.length <= SESSION_LIFECYCLE_MAX_KEY_LENGTH &&
+	!LONE_SURROGATE.test(value);
 
 const isOneOf = <T extends string>(values: readonly T[], value: unknown): value is T =>
 	(values as readonly unknown[]).includes(value);
@@ -313,7 +320,7 @@ export function checkSessionCloseRequest(request: SessionCloseRequest): SessionC
 	return Object.freeze({ cause, steps, perParticipant, retainMs: retainMs as number });
 }
 
-/** A sid or sub the port admits: 1 to 512 characters; a RangeError otherwise. */
+/** A sid or sub the port admits: 1 to 512 characters, no lone surrogate; a RangeError otherwise. */
 export function checkSessionLifecycleKey(value: string, name: string): string {
 	if (!isKey(value)) {
 		throw new RangeError(
@@ -337,11 +344,11 @@ export function checkSessionCloseItem(value: string): string {
 	return value;
 }
 
-/** A listing's cursor the port admits: a string of at most 512 characters, `""` the start; a RangeError otherwise. */
+/** A listing's cursor the port admits: `""`, the start, or a key; a RangeError otherwise. */
 export function checkSessionListingCursor(value: string): string {
-	if (typeof value !== "string" || value.length > SESSION_LIFECYCLE_MAX_KEY_LENGTH) {
+	if (value !== "" && !isKey(value)) {
 		throw new RangeError(
-			`session lifecycle: after must be a string of at most ${SESSION_LIFECYCLE_MAX_KEY_LENGTH} characters`,
+			`session lifecycle: after must be "" or 1 to ${SESSION_LIFECYCLE_MAX_KEY_LENGTH} characters of well-formed text`,
 		);
 	}
 	return value;

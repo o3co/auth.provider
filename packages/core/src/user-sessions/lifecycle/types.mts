@@ -51,7 +51,10 @@ export const SESSION_CLOSE_CAUSES = Object.freeze([
 ] as const);
 export type SessionCloseCause = (typeof SESSION_CLOSE_CAUSES)[number];
 
-/** The longest sid, sub or participant id, in characters. */
+/**
+ * The longest sid, sub or participant id, in characters. Each is well-formed
+ * text, no lone surrogate, so its UTF-8 bytes name it alone.
+ */
 export const SESSION_LIFECYCLE_MAX_KEY_LENGTH = 512;
 
 /** The longest participant `data`, in characters. */

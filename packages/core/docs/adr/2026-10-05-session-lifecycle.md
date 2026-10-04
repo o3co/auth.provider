@@ -81,7 +81,9 @@ whatever resumes pending work: closing sids in ascending order of their UTF-8
 bytes, after the cursor. Paging with the last sid answered reaches every
 record that stays closing, however many records whose work keeps failing
 stay ahead of it; an order by closing time would let a thousand stuck
-records hide every later one. It never names a record that left `closing`
+records hide every later one. A sid is well-formed text, no lone surrogate,
+so its UTF-8 bytes name it alone and the order is strict; a Redis adapter
+keeps the same order with `ZRANGEBYLEX`. It never names a record that left `closing`
 before the call began.
 
 **D7. The service is the port's only caller** (the next steps). It decides

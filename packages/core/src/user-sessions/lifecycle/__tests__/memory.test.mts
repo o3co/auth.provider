@@ -209,6 +209,7 @@ describe("createInMemorySessionLifecycleStore", () => {
 			await expect(store.open("", "u", later)).rejects.toThrow(RangeError);
 			await expect(store.open("x".repeat(513), "u", later)).rejects.toThrow(RangeError);
 			await expect(store.open("s", "", later)).rejects.toThrow(RangeError);
+			await expect(store.open("\ud800", "u", later)).rejects.toThrow(RangeError);
 			await expect(store.open("s", "u", new Date(Number.NaN))).rejects.toThrow(RangeError);
 			await expect(store.open("s", "u", "later" as never)).rejects.toThrow(RangeError);
 			const forged = Object.assign(new Date(Number.NaN), { getTime: () => Date.now() + HOUR });
@@ -297,5 +298,6 @@ describe("createInMemorySessionLifecycleStore", () => {
 		expect(await store.listClosing(1, "a")).toEqual(["b"]);
 		await expect(store.listClosing(1, "x".repeat(513))).rejects.toThrow(RangeError);
 		await expect(store.listClosing(1, 7 as never)).rejects.toThrow(RangeError);
+		await expect(store.listClosing(1, "\ud800")).rejects.toThrow(RangeError);
 	});
 });
