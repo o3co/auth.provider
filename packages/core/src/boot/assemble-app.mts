@@ -38,6 +38,7 @@ import {
 	type DispatchPolicy,
 	resolveTokenBindingSettings,
 	type TokenBindingMechanism,
+	type TokenBindingSettings,
 	tokenBindingMw,
 } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
@@ -719,11 +720,14 @@ export function assembleApp(
 			if (m !== null) mechanisms.push(m);
 		}
 		if (mechanisms.length > 0) {
-			// Core's own policy, for core's own extension point: read from the
-			// configuration in every composition with the reader boot fills the
-			// `tokenBindingSettings` slot with, never from a module's slot.
-			const dispatchPolicy: DispatchPolicy = resolveTokenBindingSettings(
-				(frozen.components as Record<string, unknown>).config,
+			// Core's own policy, for core's own extension point: the
+			// `tokenBindingSettings` slot boot filled from the configuration, so
+			// the policy mounted here is the one every reader of the slot sees.
+			// A world built without boot's stage 3 resolves it the same way.
+			const components = frozen.components as Record<string, unknown>;
+			const dispatchPolicy: DispatchPolicy = (
+				(components.tokenBindingSettings as TokenBindingSettings | undefined) ??
+				resolveTokenBindingSettings(components.config)
 			).dispatchPolicy;
 			const logger = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
 			const composed = tokenBindingMw({ mechanisms, dispatchPolicy, logger });

@@ -227,8 +227,8 @@ export interface GrantHandler {
  *   policy, and whether a confidential client's refresh token is bound),
  *   which boot fills for every composition from `core.tokenBinding`; a grant
  *   whose module requires the slot reads them from it rather than from
- *   `config`. Optional here only so that deps a test builds by hand need not
- *   carry it.
+ *   `config`. Optional because a factory is handed only the slots its module
+ *   lists; a grant whose module requires the slot always gets it.
  *
  * `config` stays required while grants still read it.
  */
