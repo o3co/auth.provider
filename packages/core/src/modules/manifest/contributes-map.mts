@@ -222,8 +222,21 @@ export type TokenBindingMechanismFactory<Deps> = (
  * switched off by the module's settings: absent from `rateLimitBudgetResolver`,
  * yet a second contribution is a duplicate. Absent is not unlimited: keys fall
  * to the limiter's `defaultLimit`. A module claims every prefix it keys.
+ *
+ * `verifier`, read once at stage 1, declares the prefix a verifier's own
+ * attempt limit, counted on the attempt counter and never by a limiter: a
+ * limiter module's own `limits` may not name it. Build the claim with
+ * `verifierLimitClaim`.
  */
-export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimitSpec | null>;
+export type RateLimitBudgetFactory<Deps> = ((deps: Deps) => Contributed<RateLimitSpec | null>) & {
+	readonly verifier?: VerifierLimitDeclaration;
+};
+
+/** What a verifier's claim of a rate-limit prefix declares. */
+export interface VerifierLimitDeclaration {
+	/** The setting the limit is made at, which a refusal names (`session.rateLimit.login`). */
+	readonly setting: string;
+}
 
 /**
  * Declaration-merged map of contribution kinds. Packages and consumer plugins

@@ -17,25 +17,65 @@
 /**
  * The prefixes whose limit a verifier sets itself: the attempts a credential
  * check allows, counted on the attempt counter at the owner's setting and
- * never by a rate limiter. The bundled limiter modules' sections may not name
- * one in their `limits`; the builders and constructors take `limits` as given.
- * The setting each is made at is what a refusal points to. The one place core
- * names another package's prefix and setting.
+ * never by a rate limiter. The owning module declares each by claiming it
+ * with `verifierLimitClaim`, which names the setting; the bundled limiter
+ * modules' sections may not name one in their `limits`, and a refusal points
+ * to that setting. The builders and constructors take `limits` as given.
+ *
+ * Boot reads the declarations of every loaded module, switched on or off, at
+ * stage 1, and holds them for the section parse alone
+ * (`withVerifierLimitDeclarations`): a section is parsed before any module's
+ * switch is read.
  */
 
 import type { z } from "zod";
+import type {
+	RateLimitBudgetFactory,
+	VerifierLimitDeclaration,
+} from "../modules/manifest/contributes-map.mjs";
 
-const VERIFIER_LIMIT_SETTINGS: ReadonlyMap<string, string> = new Map([
+/**
+ * TRANSITIONAL: the prefixes core names itself until their owning modules
+ * declare them (`verifierLimitClaim`). A declared setting wins. Removed once
+ * the session and device-grant modules declare `login` and
+ * `device_verification`.
+ */
+const UNDECLARED_VERIFIER_LIMIT_SETTINGS: ReadonlyMap<string, string> = new Map([
 	["login", "session.rateLimit.login"],
 	["device_verification", "device-grant.rateLimit"],
 ]);
 
+/** The declarations boot holds while it parses the module sections. */
+let declaredWhileParsing: ReadonlyMap<string, string> | undefined;
+
+/**
+ * Runs `parse` with `declared` (prefix to setting) as the verifier limits a
+ * limiter section refuses, and restores what was held before. `parse` is
+ * synchronous, so no other parse sees them.
+ * @internal
+ */
+export function withVerifierLimitDeclarations<T>(
+	declared: ReadonlyMap<string, string>,
+	parse: () => T,
+): T {
+	const outer = declaredWhileParsing;
+	declaredWhileParsing = declared;
+	try {
+		return parse();
+	} finally {
+		declaredWhileParsing = outer;
+	}
+}
+
 /**
  * Where the limit under `prefix` is set when a verifier owns it — the
- * setting a refusal names — or `undefined` for any other prefix.
+ * setting a refusal names: the one `declared` holds (by default, what boot
+ * holds while parsing), else the transitional one, else `undefined`.
  */
-export const verifierLimitSetting = (prefix: string): string | undefined =>
-	VERIFIER_LIMIT_SETTINGS.get(prefix);
+export const verifierLimitSetting = (
+	prefix: string,
+	declared: ReadonlyMap<string, string> | undefined = declaredWhileParsing,
+): string | undefined => declared?.get(prefix) ?? UNDECLARED_VERIFIER_LIMIT_SETTINGS.get(prefix);
 
 /** Why a limiter's `limits` may not name `prefix`, or `undefined` when it may. */
 const verifierLimitProblem = (prefix: string): string | undefined => {
@@ -57,4 +97,16 @@ export function refuseVerifierLimitEntries(
 		const problem = verifierLimitProblem(prefix);
 		if (problem !== undefined) ctx.addIssue({ code: "custom", path: [prefix], message: problem });
 	}
+}
+
+/**
+ * A `rateLimitBudgets` claim of a prefix a verifier limits itself: no budget
+ * of its own (it answers `null`), and the declaration of the setting the
+ * limit is made at. Frozen.
+ */
+export function verifierLimitClaim(
+	declaration: VerifierLimitDeclaration,
+): RateLimitBudgetFactory<unknown> {
+	const verifier: VerifierLimitDeclaration = Object.freeze({ setting: declaration.setting });
+	return Object.freeze(Object.assign(() => null, { verifier }));
 }

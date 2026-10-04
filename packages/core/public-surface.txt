@@ -686,6 +686,7 @@
 . ValidatedToken type
 . VerificationUnavailableReason type
 . VerifiedJwt type
+. VerifierLimitDeclaration type
 . VerifyRevocation type
 . Versioned type
 . VersionedSet type
@@ -1098,6 +1099,7 @@
 . tokenTypeForConfirmation value
 . unrepresentedResources value
 . validatedClientRepository value
+. verifierLimitClaim value
 . verifyJwt value
 . vouchableAcrTable value
 . vouchedAmr value
@@ -1155,6 +1157,7 @@
 ./modules/manifest SessionRequirementFactory type
 ./modules/manifest TokenBindingMechanismFactory type
 ./modules/manifest TokenExchangeValidatorResolver type
+./modules/manifest VerifierLimitDeclaration type
 ./modules/manifest defineFederationType value
 ./modules/manifest defineModule value
 ./modules/manifest describeAbsenceDeclaration value
