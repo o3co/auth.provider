@@ -5,7 +5,6 @@
 
 import {
 	type AdapterBuilder,
-	assertNoVerifierLimits,
 	createRateLimitBudgetLookup,
 	defineModule,
 	MAX_DURATION_SECONDS,
@@ -119,13 +118,11 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 /**
  * AdapterFactory builder, over `client`, `limits`, `defaultLimit` and
  * `failMode` from its config and no contributed budget: those reach a limiter
- * through `redisRateLimiterModule`. A `limits` entry naming a verifier's
- * prefix is refused, as the module's section refuses it. Consumer wires:
+ * through `redisRateLimiterModule`. Consumer wires:
  *   factory.register("redis", redisRateLimiterBuilder);
  */
 export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ctx) => {
 	const cfg = config as unknown as RedisRateLimiterConfig;
-	assertNoVerifierLimits("createRedisRateLimiter", cfg.limits);
 	if (!cfg.client) {
 		throw new Error(
 			'Rate limiter "redis" requires config.client; the built-in limiter does not create its own redis client because RateLimiter has no disposal hook.',

@@ -225,6 +225,37 @@ describe("rateLimitBudgets — no module overrides a prefix", () => {
 	);
 });
 
+describe("rateLimitBudgets — an override is refused as the manifest was read", () => {
+	it("refuses an override a manifest answers only on its first read", async () => {
+		let reads = 0;
+		const shifting = {
+			name: "budget-replacer",
+			get overrides() {
+				reads += 1;
+				return reads === 1
+					? { rateLimitBudgets: { login: () => ({ limit: 1_000, windowSeconds: 1 }) } }
+					: {};
+			},
+		} as unknown as Module;
+
+		const err = await refusal(
+			createApp({
+				modules: [
+					defineModule({
+						name: "budget-owner",
+						contributes: { rateLimitBudgets: { login: () => ({ limit: 5, windowSeconds: 300 }) } },
+					}),
+					shifting,
+				],
+				bootstrapComponents: bootWith(),
+			}),
+		);
+
+		expect(err.reason).toBe("contribution-kind-guarded");
+		expect(err.details).toMatchObject({ kind: "rateLimitBudgets", name: "login" });
+	});
+});
+
 describe("rateLimitBudgets — the boot line", () => {
 	const spyLogger = () => ({
 		trace: vi.fn(),

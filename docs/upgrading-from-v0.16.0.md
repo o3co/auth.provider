@@ -275,8 +275,10 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   (`adapters.rateLimiter`), so a scaffold needs nothing.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
   refused (#807).** `core-rate-limiter-memory.limits` and
-  `redis-rate-limiter.limits` (and the builders' `limits`) may not name either
-  prefix: each is a verifier's own attempt limit, which no limiter may loosen.
+  `redis-rate-limiter.limits` may not name either prefix: each is a verifier's
+  own attempt limit, which no limiter may loosen. A limiter built with
+  `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` reads no
+  contributed budget and keeps the `limits` it is given.
   The boot is refused (`config-validation-failed`, naming the key and the
   setting). Move the numbers to the module's own setting:
   `session.rateLimit.login` for login, `device-grant.rateLimit` for device

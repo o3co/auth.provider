@@ -698,7 +698,6 @@
 . admitSession value
 . advertisedIssuer value
 . assertFederationGrantRetrievalLimits value
-. assertNoVerifierLimits value
 . assertRegistrableClientIds value
 . assertSecretEntropy value
 . assertUsableRateLimitSpecs value

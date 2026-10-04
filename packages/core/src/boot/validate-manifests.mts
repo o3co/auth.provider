@@ -986,30 +986,36 @@ function checkContributionShapes(
 					);
 				}
 			}
-			if (channel === "overrides") {
-				for (const prefix of Object.keys(m.overrides?.rateLimitBudgets ?? {})) {
-					const setting = verifierLimitSetting(prefix);
-					throw new BootError({
-						message:
-							`Module "${m.name}" overrides rateLimitBudgets "${prefix}", which no module may: a prefix is claimed by the module whose routes key it` +
-							(setting === undefined
-								? ", and a limiter's own limits decide what applies under it."
-								: `, and "${prefix}" is a verifier's own limit, set at ${setting}.`),
-						reason: "contribution-kind-guarded",
-						stage: "validateManifests",
-						details: {
-							reason: "contribution-kind-guarded",
-							kind: "rateLimitBudgets",
-							channel: "overrides",
-							module: m.name,
-							name: prefix,
-						},
-					});
-				}
-			}
 			const normalised = modules[index];
 			const entries =
 				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
+			// Read off the entries normalisation captured, which stage 4 applies.
+			for (const entry of entries ?? []) {
+				if (
+					channel !== "overrides" ||
+					entry.kind !== "rateLimitBudgets" ||
+					typeof entry.key !== "string"
+				) {
+					continue;
+				}
+				const setting = verifierLimitSetting(entry.key);
+				throw new BootError({
+					message:
+						`Module "${m.name}" overrides rateLimitBudgets "${entry.key}", which no module may: a prefix is claimed by the module whose routes key it` +
+						(setting === undefined
+							? ", and a limiter's own limits decide what applies under it."
+							: `, and "${entry.key}" is a verifier's own limit, set at ${setting}.`),
+					reason: "contribution-kind-guarded",
+					stage: "validateManifests",
+					details: {
+						reason: "contribution-kind-guarded",
+						kind: "rateLimitBudgets",
+						channel: "overrides",
+						module: m.name,
+						name: entry.key,
+					},
+				});
+			}
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
 				if (channel === "overrides") {

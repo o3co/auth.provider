@@ -1011,11 +1011,8 @@ export {
 	isUsableRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "./ratelimit/usableSpec.mjs";
-// A limiter's own `limits` never names a prefix a verifier limits itself.
-export {
-	assertNoVerifierLimits,
-	refuseVerifierLimitEntries,
-} from "./ratelimit/verifierLimits.mjs";
+// A limiter section's `limits` never names a prefix a verifier limits itself.
+export { refuseVerifierLimitEntries } from "./ratelimit/verifierLimits.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,

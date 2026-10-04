@@ -57,17 +57,3 @@ export function refuseVerifierLimitEntries(
 		if (problem !== undefined) ctx.addIssue({ code: "custom", path: [prefix], message: problem });
 	}
 }
-
-/**
- * Refuses, naming `who`, a limiter configuration whose `limits` names a
- * verifier's prefix. Anything that is not a record is the spec check's to
- * refuse.
- */
-export function assertNoVerifierLimits(who: string, limits: unknown): void {
-	if (typeof limits !== "object" || limits === null || Array.isArray(limits)) return;
-	for (const prefix of Object.keys(limits)) {
-		const problem = verifierLimitProblem(prefix);
-		if (problem !== undefined)
-			throw new RangeError(`${who}: limits.${prefix} is refused: ${problem}`);
-	}
-}

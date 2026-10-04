@@ -489,8 +489,10 @@ key's prefix, else the budget the prefix's owning module contributed
 (`rateLimitBudgetResolver`, read and checked at each check), else its
 `defaultLimit`, which it declares (`RateLimiter.defaultLimit`). Its `limits`
 may not name `login` or `device_verification`, a verifier's own attempt limit
-set at `session.rateLimit.login` and `device-grant.rateLimit`: the section and
-`redisRateLimiterBuilder` refuse such an entry.
+set at `session.rateLimit.login` and `device-grant.rateLimit`: the section
+refuses such an entry, and the contributed budget applies in its place.
+`redisRateLimiterBuilder` reads no contributed budget, and takes its `limits`
+as given.
 `redisRateLimiterModule` answers `redis-rate-limiter.failMode`, its own key, as
 the limiter's outage policy (`RateLimiter.failMode`), which the guard applies
 while Redis cannot answer; a value other than `"open"` or `"closed"` refuses
