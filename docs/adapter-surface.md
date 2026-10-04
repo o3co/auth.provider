@@ -266,7 +266,10 @@ refuses a module whose `requires` cannot be met.
 wire*, never *optional to decide*. The slots below carry an `AbsencePolicy`
 (#363; `packages/core/src/modules/manifest/absence-policy.mts`). Leaving one
 unfilled without writing its declaration refuses boot, naming the config line to
-write. This is deliberately stronger than defaulting to something harmless — a
+write. A slot filled with `undefined` (an `overrideComponents` or
+`bootstrapComponents` entry given as `undefined`, or a provider resolving to it)
+is unfilled: undeclared, it refuses boot the same way, once the providers have
+run and before anything serves; declared, it boots as an absent slot. This is deliberately stronger than defaulting to something harmless — a
 default hands a capability to a composition that never asked for it and calls
 that safety.
 

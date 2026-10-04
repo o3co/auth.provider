@@ -37,6 +37,7 @@ import type {
 	ContributionCollectorMap,
 } from "./types.mjs";
 import { BootError } from "./types.mjs";
+import { undeclaredAbsenceRefusal } from "./validate-manifests.mjs";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -134,6 +135,11 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * provided `oauthTokenSettings` the slot refuses is reported the same way,
  * after the provider's own cleanup too, unless the refusal is already a
  * BootError (a lifetime beyond the configuration's), which is thrown as it is.
+ *
+ * Once every provider has run, a slot in `undeclaredAbsenceSlots` filled with
+ * `undefined` (an override or bootstrap value given as `undefined`, or a
+ * factory resolving to it) is refused with `component-absence-undeclared`,
+ * after the cleanups of what is materialised.
  */
 export async function materializeComponents(
 	plan: BootPlan,
@@ -270,6 +276,19 @@ export async function materializeComponents(
 			componentKey,
 			auditSlot.provided(componentKey, held),
 		);
+	}
+
+	// A slot whose absence is undeclared must hold a value, whichever source
+	// filled it: one answering `undefined` is as unfilled as one nothing plans.
+	// A provider no active module reads is not run, and its slot stays unset.
+	const unfilled = plan.validated.undeclaredAbsenceSlots.find(
+		(slot) =>
+			Object.hasOwn(components, slot.componentKey) &&
+			components[slot.componentKey as string] === undefined,
+	);
+	if (unfilled !== undefined) {
+		await runCleanupsReverse(cleanups);
+		throw undeclaredAbsenceRefusal(unfilled, "materializeComponents");
 	}
 
 	return {
