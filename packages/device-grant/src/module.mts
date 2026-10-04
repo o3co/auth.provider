@@ -62,6 +62,7 @@ import {
 	loggableError,
 	MAX_ATTEMPT_WINDOW_SECONDS,
 	type ProviderDeps,
+	verifierLimitClaim,
 	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
@@ -485,10 +486,10 @@ export const deviceAuthorizationGrantModule = defineModule<
 	},
 	contributes: {
 		// Both prefixes are claimed with no budget: no limiter decides the
-		// verification's limit, which the attempt guard counts, and the
-		// device_authorization guard runs on the limiter's own limits.
+		// verification's limit, which the attempt guard counts at the declared
+		// setting, and the device_authorization guard runs on the limiter's own limits.
 		rateLimitBudgets: {
-			[DEVICE_VERIFICATION_ATTEMPT_TAG]: () => null,
+			[DEVICE_VERIFICATION_ATTEMPT_TAG]: verifierLimitClaim({ setting: "device-grant.rateLimit" }),
 			[DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX]: () => null,
 		},
 		// Absent while the grant is off — see the file header — `/oauth/token`
