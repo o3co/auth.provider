@@ -107,7 +107,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | `session.loginPage.url` | `SESSION_LOGIN_PAGE_URL` | `/login` | 必須。`loginEntry` スロットが示すページ: パスか絶対 URL で、自身の `redirect_to` を持たない |
 | `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | 必須。`POST /session/login` 自身の試行上限: `windowMs` は 1 日（86400000）以下のミリ秒の整数で、秒に切り上げて読む。`limit` は正の整数 |
 
-各セクションは厳格: 宣言されていないキーは、キーを名指しして起動を拒否する。これらのキーの移動元のパス — `session` の下の cookie とそのストアの各キー、`endpoints.login.url`、`rateLimit.login` — は、新しいパスとその環境変数を名指しして起動を拒否する（`config-path-relocated`）。一緒に改名された環境変数 — `SESSION_<KEY>` は `SESSION_STORE_<KEY>` へ、`ENDPOINTS_LOGIN_URL` は `SESSION_LOGIN_PAGE_URL` へ — は、旧名だけが設定されているか新名と違う値で設定されていると起動を拒否し（`environment-variable-renamed`）、同じ値ならどちらも起動する。
+各セクションはどの階層でも厳格: 宣言されていないキーは、キーを名指しして起動を拒否する。`session-store.storage` が持つのは `type` と `redis` ブロックだけなので、ほかのストレージ種別のブロックも拒否される。これらのキーの移動元のパス — `session` の下の cookie とそのストアの各キー、`endpoints.login.url`、`rateLimit.login` — は、新しいパスとその環境変数を名指しして起動を拒否する（`config-path-relocated`）。一緒に改名された環境変数 — `SESSION_<KEY>` は `SESSION_STORE_<KEY>` へ、`ENDPOINTS_LOGIN_URL` は `SESSION_LOGIN_PAGE_URL` へ — は、旧名だけが設定されているか新名と違う値で設定されていると起動を拒否し（`environment-variable-renamed`）、同じ値ならどちらも起動する。
 
 ## ブラウザセッションストア
 
