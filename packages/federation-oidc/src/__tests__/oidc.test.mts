@@ -674,10 +674,53 @@ describe("the freshness ask and the upstream's authentication instant", () => {
 		expect((await exchange(provider)).authTime).toEqual(new Date(authTime * 1000));
 	});
 
-	it("fails the login on an auth_time far ahead of the clock", async () => {
+	it("fails the login on an auth_time far ahead of the clock, before UserInfo, with no cause", async () => {
 		const { idp, provider } = await build();
 		idp.nonce = "nonce-1";
 		idp.idTokenClaims = { auth_time: Math.floor(Date.now() / 1000) + 3600 };
-		await expect(exchange(provider)).rejects.toThrow(/auth_time/);
+		const err = await exchange(provider).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(Error);
+		expect((err as Error).message).toMatch(/not a usable instant/);
+		expect((err as Error).cause).toBeUndefined();
+		expect(idp.requestsTo("/userinfo")).toHaveLength(0);
+	});
+
+	it.each([
+		["negative", -1],
+		["a string", "1700000000"],
+	])("fails the login on an auth_time that is %s, before UserInfo", async (_label, authTime) => {
+		// openid-client refuses these itself, before the adapter reads the claim.
+		const { idp, provider } = await build();
+		idp.nonce = "nonce-1";
+		idp.idTokenClaims = { auth_time: authTime };
+		await expect(exchange(provider)).rejects.toThrow();
+		expect(idp.requestsTo("/userinfo")).toHaveLength(0);
+	});
+
+	it("reports a fractional auth_time as its floored second", async () => {
+		const { idp, provider } = await build();
+		idp.nonce = "nonce-1";
+		const seconds = Math.floor(Date.now() / 1000) - 120;
+		idp.idTokenClaims = { auth_time: seconds + 0.75 };
+		expect((await exchange(provider)).authTime).toEqual(new Date(seconds * 1000));
+	});
+
+	it("widens how far ahead auth_time may be to clockToleranceSeconds when that is wider than core's skew", async () => {
+		const ahead = Math.floor(Date.now() / 1000) + 600;
+		const narrow = await build();
+		narrow.idp.nonce = "nonce-1";
+		narrow.idp.idTokenClaims = { auth_time: ahead };
+		await expect(exchange(narrow.provider)).rejects.toThrow(/not a usable instant/);
+		const wide = await build({ clockToleranceSeconds: 900 });
+		wide.idp.nonce = "nonce-1";
+		wide.idp.idTokenClaims = { auth_time: ahead };
+		expect((await exchange(wide.provider)).authTime).toEqual(new Date(ahead * 1000));
+	});
+
+	it("refuses a login ask that is not true", async () => {
+		const { provider } = await build();
+		for (const login of [false, "true", 1, null]) {
+			expect(() => ask(provider, { login } as never), String(login)).toThrow(RangeError);
+		}
 	});
 });
