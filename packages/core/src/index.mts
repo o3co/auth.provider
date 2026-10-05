@@ -180,9 +180,12 @@ export type {
 	UnknownContributionKindDetails,
 } from "./boot/index.mjs";
 // Boot planner — BootError catalogue, and the replica-safety guard, exported so
-// a custom composition root can run the same check. `replicaUnsafeReason` reads
-// a module's own `replicaSafety` declaration, so a deployment asserts on its
-// manifests rather than on the core-only name list.
+// a custom composition root can run the same check, handing it each module's
+// parsed section (`sections`) for a declaration made from the section.
+// `replicaUnsafeReason(module, section)` reads a module's own `replicaSafety`
+// declaration as boot does, so a deployment asserts on its manifests rather
+// than on the core-only name list; a declaration made from the section is
+// refused, not guessed, when no section is given.
 export {
 	BootError,
 	type CheckReplicaSafetyInput,

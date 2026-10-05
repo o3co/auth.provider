@@ -20,6 +20,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { replicaUnsafeReason } from "#/boot/replica-safety.mjs";
 import { createMemoryWebAuthnCredentialStore } from "#/webauthn-credentials/memory.mjs";
 import { memoryWebAuthnCredentialStoreModule } from "#/webauthn-credentials/module.mjs";
 
@@ -32,7 +33,7 @@ describe("the in-process WebAuthnCredentialStore", () => {
 describe("memoryWebAuthnCredentialStoreModule", () => {
 	it("declares itself replica-unsafe, saying what forks per replica", () => {
 		expect(memoryWebAuthnCredentialStoreModule.name).toBe("core-webauthn-credential-store-memory");
-		expect(memoryWebAuthnCredentialStoreModule.replicaSafety?.unsafe).toBe(true);
-		expect(memoryWebAuthnCredentialStoreModule.replicaSafety?.reason).toMatch(/fork per replica/);
+		expect(memoryWebAuthnCredentialStoreModule.replicaSafety).toMatchObject({ unsafe: true });
+		expect(replicaUnsafeReason(memoryWebAuthnCredentialStoreModule)).toMatch(/fork per replica/);
 	});
 });
