@@ -28,9 +28,11 @@
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
+	createInMemorySessionLifecycleStore,
 	type Logger,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	type SubjectRevocation,
@@ -123,6 +125,7 @@ interface Setup {
 	readonly record?: UserSession | null | Error;
 	readonly requirement?: SessionRequirement;
 	readonly subjectRevocation?: SubjectRevocation;
+	readonly sessionLifecycleStore?: SessionLifecycleStore;
 	readonly logger?: ReturnType<typeof spyLogger>;
 	/** Leave the store out of the deps, as no composition can (the module requires it). */
 	readonly noStore?: boolean;
@@ -172,6 +175,9 @@ function setup(options: Setup = {}) {
 		}),
 		...(options.noStore ? {} : { userSessionStore }),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
+		...(options.sessionLifecycleStore
+			? { sessionLifecycleStore: options.sessionLifecycleStore }
+			: {}),
 		...(options.logger ? { logger: options.logger as unknown as Logger } : {}),
 	});
 	const app = express();
@@ -213,9 +219,9 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 		});
 	});
 
-	it("may be given the revocation boundary, an audit sink and a logger, each absence decided", () => {
+	it("may be given the revocation boundary, the session lifecycle store, an audit sink and a logger, each absence decided", () => {
 		expect([...(module.optional ?? [])].sort()).toEqual(
-			["auditSink", "logger", "subjectRevocation"].sort(),
+			["auditSink", "logger", "sessionLifecycleStore", "subjectRevocation"].sort(),
 		);
 		expect(module.absencePolicies?.subjectRevocation).toBe(SUBJECT_REVOCATION_ABSENCE_POLICY);
 		expect(module.absencePolicies?.auditSink).toBe(AUDIT_SINK_ABSENCE_POLICY);
@@ -368,6 +374,25 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 			expect(res.body.subject).toBeNull();
 		},
 	);
+
+	it("sets no subject for a session whose lifecycle record is closing, and sets it while the record is active", async () => {
+		const lifecycle = createInMemorySessionLifecycleStore();
+		await lifecycle.open(SID, SUBJECT, new Date(Date.now() + 3_600_000));
+		const { app, subjectFor } = setup({ sessionLifecycleStore: lifecycle });
+		expect((await register(app)).body.subject).not.toBeNull();
+
+		await lifecycle.beginClose(SID, {
+			cause: "rp_logout",
+			steps: ["tokens"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+		subjectFor.mockClear();
+		const res = await register(app);
+		expect(res.status).toBe(200);
+		expect(res.body.subject).toBeNull();
+		expect(subjectFor).not.toHaveBeenCalled();
+	});
 
 	it("leaves a subject an earlier middleware set when the browser is not signed in: the bearer bridge keeps working", async () => {
 		const { app, get } = setup({ session: {}, preset: { userId: "bearer-user" } });

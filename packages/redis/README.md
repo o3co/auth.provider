@@ -1317,7 +1317,10 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   admits reads back as written. Each participant's join ordinal is kept beside
   it, written in the join's script when it first joins and kept by a repeat
   join, so participants are answered in the order each first joined, as the
-  port promises.
+  port promises; a participant with no ordinal is answered after those with
+  one, by its item's bytes. The reader refuses a record with a field outside
+  that list, so a new field needs a reader that tolerates it deployed before
+  any writer that writes it.
 - **Sixteen fixed shards.** A record lives at
   `${keyPrefix}{lc:<shard>}:s:<sid>` (`ss:lc:` by default; `<sid>` is base64url
   of its JSON), where `<shard>` is the 32-bit FNV-1a hash of the sid's UTF-8

@@ -432,13 +432,14 @@ const refreshTokenSchemaBase = z.object({
 	// `resolveRefreshTokenLifetime` holds a hand-built configuration to.
 	expiresIn: lifetimeSecondsSchema,
 	// Policy for refresh tokens whose `family_id` matches no family record.
-	// `"reject"` is the safe choice; `"accept"` is only for time-bounded
-	// migration windows. The default lives in `reference.conf`.
-	unknownFamilyPolicy: z.enum(["accept", "reject"]),
+	// Shape only, with no default: the oauth package owns the key and its
+	// default. The enum keeps any other string from reaching the refresh grant.
+	unknownFamilyPolicy: z.enum(["accept", "reject"]).optional(),
 	// Refresh tokens lacking `jti` or `family_id` while family rotation is wired
-	// are rejected. `"reject"` is the only value, so a stale
+	// are rejected. Shape only, with no default: the oauth package owns the key
+	// and its default. `"reject"` is the only value, so a stale
 	// `accept-with-warning` fails boot on this field.
-	legacyRtPolicy: z.enum(["reject"]),
+	legacyRtPolicy: z.enum(["reject"]).optional(),
 });
 
 /**

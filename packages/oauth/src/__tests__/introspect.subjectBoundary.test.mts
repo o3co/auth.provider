@@ -40,6 +40,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -104,7 +105,7 @@ const buildApp = async (subjectRevocation: SubjectRevocation) => {
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore,

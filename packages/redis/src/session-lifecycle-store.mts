@@ -173,7 +173,9 @@ const recordOf = (fields: Readonly<Record<string, string>>): Versioned<SessionLi
 	for (const [field, value] of Object.entries(fields)) {
 		if (field.startsWith("o:")) {
 			const ordinal = Number(value);
-			if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw malformed("a join ordinal");
+			if (!INTEGER.test(value) || !Number.isSafeInteger(ordinal) || ordinal < 1) {
+				throw malformed("a join ordinal");
+			}
 			ordinals.set(field.slice(2), ordinal);
 		} else if (field.startsWith("p:")) {
 			const item = field.slice(2);

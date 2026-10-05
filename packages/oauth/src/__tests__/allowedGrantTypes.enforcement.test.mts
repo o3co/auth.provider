@@ -40,6 +40,7 @@ import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const CLIENT_ID = "client-a";
 const CLIENT_SECRET = "secret-a";
@@ -121,7 +122,7 @@ const makeApp = async (
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
-		config:
+		...routerInputsOf(
 			options.requireGrantTypeAllowlist === undefined
 				? config
 				: ({
@@ -131,6 +132,7 @@ const makeApp = async (
 							requireGrantTypeAllowlist: options.requireGrantTypeAllowlist,
 						},
 					} as unknown as AppConfig),
+		),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
