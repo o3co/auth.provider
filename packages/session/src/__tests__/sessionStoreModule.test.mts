@@ -258,7 +258,7 @@ const redisConfig: SessionLikeConfig = {
 describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 	it("declares replica-unsafe state on the manifest when session-store.storage.type is memory", () => {
 		const m = sessionStoreModuleFor(memoryConfig as never) as unknown as Module;
-		expect(m.replicaSafety?.unsafe).toBe(true);
+		expect(m.replicaSafety).toMatchObject({ unsafe: true });
 		// The guard quotes this; it has to say what breaks, not "use redis".
 		expect(replicaUnsafeReason(m)).toBeDefined();
 		expect((replicaUnsafeReason(m) ?? "").length).toBeGreaterThan(40);

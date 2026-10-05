@@ -227,7 +227,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
   too (#1329): an empty `mfa.factors` block an older configuration leaves
   behind (the TOTP factor's old path, its variables unset) is such a key —
-  delete it. So does `webauthn`, at every level (#1336). The keys under `audit-sink` are the
+  delete it. So does `webauthn`, at every level (#1336), and so does
+  `session`, at every level (#728). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -560,6 +561,17 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **BREAKING: `sessionModule` reads the federations from the
+  `federationSettings` slot, not `config` (#728).** It requires core's
+  `federationSettings`, which core fills from `core.federations` in every
+  composition, and no longer requires `config` or declares a `configSchema`:
+  a composition booted with `createApp` sees no change. The federation routes
+  take each enabled federation's callback URL, and whether an installed one's
+  upstream `amr` counts, from the slot, and the origins an account link may
+  be started from out of the module's own section
+  (`session.csrf.trustedOrigins`). A deps object handed to the module's
+  factories by hand carries `federationSettings` (in a test,
+  `createTestFederationSettings()`) instead of `config`.
 - **BREAKING: an enabled TOTP factor requires the `oauthTokenSettings`
   slot (#1329).** `mfaTotpFactorModule` takes the deployment's issuer, which
   an unset `mfa-totp-factor.issuer` defaults to the host of, from the slot
@@ -568,6 +580,12 @@ modules fills them.
   is on provides the slot itself, or the boot is refused
   (`missing-required-component`, naming `oauthTokenSettings`). A factor
   switched off by `mfa-totp-factor.enabled = false` requires nothing.
+- **BREAKING: an enabled `authorization_code` grant with `subjectRevocation`
+  wired requires `userSessionStore`.** Without one the boot is refused
+  (`contribute-factory-failed`, naming both slots): wire a
+  `userSessionStore` (core's `memorySessionStoresModule` or
+  `redisSessionStoresModule`, which fill both), or remove
+  `subjectRevocation`. The standalone template wires both.
 - **The federation projections.** A name-keyed contribution factory (a
   `grants` or `mfaFactors` entry, say) that reads `federationProviders` or
   `federationRedirectPolicyResolver` while it runs refuses the boot
@@ -740,6 +758,15 @@ modules fills them.
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
+- **A manifest's `replicaSafety` may be a function of the module's section**
+  (#1371, #728). A declaration written as `{ unsafe: true, reason }` is read
+  as before. Code that reads the field off a `Module` (`module.replicaSafety.reason`)
+  no longer compiles, since the field may now be a function, and the exported
+  `ReplicaSafetyModuleRef.replicaSafety` widened the same way: ask
+  `replicaUnsafeReason(module, section)` instead, which answers both forms
+  and throws for a declaration made from the section when no section is
+  given. A composition root that runs `checkReplicaSafety` itself hands it
+  the parsed sections (`sections`) once any module declares from its section.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name

@@ -35,12 +35,14 @@
  *   `Bearer` for mTLS, RFC 8705 §3).
  * - With `subjectRevocation` wired, an approval whose `approvedAtMs` or
  *   approving session's `authTimeMs` is at or before the subject's sessions
- *   boundary (`coveredByRevocationBoundary`, with `verifyJwt`'s skew), or
+ *   boundary (`claimCoveredByRevocationBoundary`, in whole seconds with
+ *   `verifyJwt`'s skew, as `verifyJwt` compares `auth_time`), or
  *   that records either as none while a boundary is in force, is
  *   `invalid_grant`. The approval check alone is not enough: a stolen
  *   session could approve codes ahead and redeem them after the victim's
- *   credential change. An unreadable boundary is 503
- *   `temporarily_unavailable`.
+ *   credential change. The token's `iat` is fixed before the boundary is
+ *   read, so a boundary stamped while the read is answered covers the token.
+ *   An unreadable boundary is 503 `temporarily_unavailable`.
  * - A throwing `poll` is a store outage, answered 503
  *   `temporarily_unavailable` — none of the four codes is true of it. So is
  *   an answer `readPollOutcome` refuses (not an object, an unknown status, a
@@ -91,8 +93,8 @@ import type {
 import {
 	authTimeAt,
 	boundPolicyAudience,
+	claimCoveredByRevocationBoundary,
 	consoleLogger,
-	coveredByRevocationBoundary,
 	DEFAULT_CLOCK_SKEW_MS,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	evaluateGrantPolicy,
@@ -332,6 +334,12 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 				policyAudience = bounded.audience;
 			}
 
+			// The issuance instant, fixed before the boundary read, the last await
+			// before signing: a boundary stamped while that read is answered is at
+			// or after `iat`, so it covers the token. `auth_time` is read against
+			// the same instant and stamped as `iat` — see the file header.
+			const mintingNow = now();
+
 			// See the file header: a revocation stamped after the approving
 			// session authenticated, before this poll. `authTimeMs` is recorded no
 			// later than `approvedAtMs`, so a legitimate approval passes both.
@@ -343,10 +351,11 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					if (boundary !== null && !(boundary instanceof Date)) {
 						throw new TypeError("the sessions boundary is neither a date nor null");
 					}
+					// In whole seconds, as `verifyJwt` compares the token's `auth_time`.
 					const covered = (instantMs: number | undefined): boolean =>
 						instantMs === undefined ||
-						coveredByRevocationBoundary(
-							new Date(instantMs),
+						claimCoveredByRevocationBoundary(
+							Math.floor(instantMs / 1000),
 							boundary,
 							DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 						);
@@ -382,9 +391,6 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 				}
 			}
 
-			// One minting instant: `auth_time` is read against it and stamped as
-			// `iat`, so `auth_time` is never after `iat` — see the file header.
-			const mintingNow = now();
 			const { approvedAtMs } = authorization;
 			if (approvedAtMs !== undefined && approvedAtMs > mintingNow + DEFAULT_CLOCK_SKEW_MS) {
 				options.logger?.warn(

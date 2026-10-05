@@ -23,7 +23,13 @@
  * lockout to the skew.
  */
 
-import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
+import {
+	claimCoveredByRevocationBoundary,
+	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+	readSubjectRevocationBoundary,
+} from "../jwt/verify.mjs";
+import type { SubjectRevocation } from "./types.mjs";
 
 /**
  * `value`'s epoch milliseconds when it is a `Date` (of any realm) with a
@@ -70,4 +76,61 @@ export function clampSubjectRevocationBoundary(
 	return beforeMs > latestMs
 		? { boundary: new Date(latestMs), clamped: true }
 		: { boundary: new Date(beforeMs), clamped: false };
+}
+
+/**
+ * What {@link subjectBoundaryCovers} found: the subject's boundary covers the
+ * claim (refuse), does not (go on), or could not be read or compared
+ * (`cause`; answer it as an outage, never as either verdict).
+ */
+export type SubjectBoundaryAnswer =
+	| { readonly answer: "covered" }
+	| { readonly answer: "clear" }
+	| { readonly answer: "unavailable"; readonly cause: unknown };
+
+const COVERED: SubjectBoundaryAnswer = Object.freeze({ answer: "covered" });
+const CLEAR: SubjectBoundaryAnswer = Object.freeze({ answer: "clear" });
+
+/**
+ * Whether `subject`'s sessions boundary covers a claim in NumericDate seconds
+ * (an assertion's or a proof's issue time), for a grant that compares before
+ * it signs. One read of the boundary, compared by the rule and allowance
+ * `verifyJwt` applies to `iat` (`claimCoveredByRevocationBoundary`,
+ * `DEFAULT_SUBJECT_REVOCATION_SKEW_MS`).
+ *
+ * - No boundary in force: `clear`, whatever the claim.
+ * - A boundary in force and a claim that is absent or not a finite number:
+ *   `covered`, as `verifyJwt` refuses a token without `iat`: it cannot show
+ *   it postdates the boundary.
+ * - A read that throws, or a boundary that is not a `Date` with a finite
+ *   time: `unavailable`, whatever the claim.
+ *
+ * Call it as the last read before signing, after the issuance instant is
+ * fixed, so a revocation stamped while earlier steps ran is seen.
+ */
+export async function subjectBoundaryCovers(
+	subjectRevocation: Pick<SubjectRevocation, "revokedBefore">,
+	subject: string,
+	claimSeconds: number | undefined,
+): Promise<SubjectBoundaryAnswer> {
+	let boundary: Date | null;
+	try {
+		boundary = await readSubjectRevocationBoundary(subjectRevocation, subject);
+		if (boundary === null) return CLEAR;
+		checkSubjectRevocationInstant(boundary, "the sessions boundary");
+	} catch (cause) {
+		return { answer: "unavailable", cause };
+	}
+	if (typeof claimSeconds !== "number" || !Number.isFinite(claimSeconds)) return COVERED;
+	try {
+		return claimCoveredByRevocationBoundary(
+			claimSeconds,
+			boundary,
+			DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+		)
+			? COVERED
+			: CLEAR;
+	} catch (cause) {
+		return { answer: "unavailable", cause };
+	}
 }

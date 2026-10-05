@@ -17,12 +17,15 @@
 import {
 	createApp,
 	defineModule,
+	type Logger,
 	type SessionFamilyIndex,
+	type SessionLifecycleStore,
 	supportsSessionEnd,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { Redis } from "ioredis";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { RedisDurability } from "#/clients.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { redisSessionStoresModule } from "#/modules/redisSessionStores.mjs";
 import { testRedis } from "./support/redis.mjs";
@@ -45,7 +48,7 @@ const minBoot = (extra: Record<string, unknown>) =>
 	}) as never;
 
 describe("redisSessionStoresModule manifest", () => {
-	it("declares requires: 6 per-purpose client slots", () => {
+	it("declares requires: 7 per-purpose client slots", () => {
 		// The two subject slots are `requires`, not optional: filling neither
 		// would leave `revokeAllForSubject` answering `unavailable` and
 		// revoking nothing.
@@ -57,11 +60,12 @@ describe("redisSessionStoresModule manifest", () => {
 				"sessionFederationIndexClient",
 				"subjectSessionIndexClient",
 				"subjectRevocationClient",
+				"sessionLifecycleStoreClient",
 			]),
 		);
 	});
 
-	it("provides 6 components", () => {
+	it("provides 7 components", () => {
 		const provides = redisSessionStoresModule.provides as Record<string, unknown>;
 		expect(typeof provides.userSessionStore).toBe("function");
 		expect(typeof provides.sessionRPRegistry).toBe("function");
@@ -69,6 +73,7 @@ describe("redisSessionStoresModule manifest", () => {
 		expect(typeof provides.sessionFederationIndex).toBe("function");
 		expect(typeof provides.subjectSessionIndex).toBe("function");
 		expect(typeof provides.subjectRevocation).toBe("function");
+		expect(typeof provides.sessionLifecycleStore).toBe("function");
 	});
 
 	it("reads its own section, redis-session-stores, keyPrefix defaulting to ss:", () => {
@@ -170,5 +175,121 @@ describe("redisSessionStoresModule wiring", () => {
 				bootstrapComponents: { config: minBoot({}) } as never,
 			}),
 		).rejects.toMatchObject({ name: "BootError", reason: "missing-required-component" });
+	});
+});
+
+describe("redisSessionStoresModule's session lifecycle store", () => {
+	/** Brings `sessionLifecycleStore` into the boot, as a module that reads it would. */
+	const reader = defineModule({
+		name: "lifecycle-reader",
+		requires: ["sessionLifecycleStore"] as never,
+		contributes: {
+			routes: [
+				{
+					mountPath: "/__test_noop__",
+					id: "test-noop",
+					handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+				},
+			],
+		},
+	});
+
+	const report = (maxmemoryPolicy: string | undefined, refusal?: unknown): RedisDurability => ({
+		maxmemoryPolicy,
+		appendOnly: true,
+		snapshots: undefined,
+		refusal,
+	});
+
+	/** The shared clients, the lifecycle client's server answering `durability` with `answer`. */
+	const clientsReporting = (answer: () => Promise<RedisDurability>) => {
+		const clients = makeIoredisClients(raw);
+		return {
+			...clients,
+			sessionLifecycleStoreClient: { ...clients.sessionLifecycleStoreClient, durability: answer },
+		};
+	};
+
+	const silentLogger = (): Logger & { warn: ReturnType<typeof vi.fn> } => {
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: () => logger,
+		};
+		return logger as never;
+	};
+
+	it("provides a store over real Redis, its keys under the section's keyPrefix and lc:", async () => {
+		const handle = await createApp({
+			modules: [redisSessionStoresModule, reader],
+			bootstrapComponents: {
+				config: minBoot({ "redis-session-stores": { keyPrefix: "lcwire:" } }),
+				pathResolver: (p: string) => p,
+				...makeIoredisClients(raw),
+			} as never,
+		});
+		try {
+			const store = (handle.components as { sessionLifecycleStore?: SessionLifecycleStore })
+				.sessionLifecycleStore;
+			if (store === undefined) throw new Error("the module provided no sessionLifecycleStore");
+			const expiresAt = new Date(Date.now() + 60_000);
+			expect(await store.open("sid-lc-1", "sub-1", expiresAt)).toEqual({ outcome: "opened" });
+			expect((await store.read("sid-lc-1"))?.value).toMatchObject({
+				sub: "sub-1",
+				state: "active",
+			});
+			const keys = await raw.keys("lcwire:*");
+			expect(keys.length).toBeGreaterThan(0);
+			for (const key of keys) expect(key.startsWith("lcwire:lc:"), key).toBe(true);
+			expect(keys.some((key) => key.startsWith("lcwire:lc:{lc:"))).toBe(true);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses the boot on a server that may evict, naming the module and the store", async () => {
+		const refused = createApp({
+			modules: [redisSessionStoresModule, reader],
+			bootstrapComponents: {
+				config: minBoot({}),
+				pathResolver: (p: string) => p,
+				...clientsReporting(async () => report("volatile-lru")),
+			} as never,
+		});
+		await expect(refused).rejects.toMatchObject({
+			name: "BootError",
+			reason: "provides-factory-failed",
+			details: { module: "redis-session-stores", componentKey: "sessionLifecycleStore" },
+			cause: {
+				name: "RedisStoreEvictableError",
+				reason: "session-lifecycle-store-evictable",
+				maxmemoryPolicy: "volatile-lru",
+			},
+		});
+	});
+
+	it("boots on a policy it cannot read, warning once on the logger slot", async () => {
+		const logger = silentLogger();
+		const handle = await createApp({
+			modules: [redisSessionStoresModule, reader],
+			bootstrapComponents: {
+				config: minBoot({}),
+				pathResolver: (p: string) => p,
+				logger,
+				...clientsReporting(async () => report(undefined, new Error("NOPERM"))),
+			} as never,
+		});
+		try {
+			const unchecked = logger.warn.mock.calls.filter(
+				(call) => call[1] === "session_lifecycle_store_eviction_unchecked",
+			);
+			expect(unchecked).toHaveLength(1);
+		} finally {
+			await handle.dispose();
+		}
 	});
 });

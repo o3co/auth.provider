@@ -98,8 +98,9 @@ package's store module. What the split costs is stated in
   type is what a federation type's `redirectPolicy` answers — and its router
   consumes. It is the router's, which is why every adapter
   package takes this package as a peer dependency. A federation's entry is not
-  read here: core's `federationsOf` and `enabledFederationsOf` are the one
-  reading of `core.federations`, the router's callback URLs included. The pure
+  read here: core reads `core.federations` and hands the module what it reads
+  of each entry through the `federationSettings` slot, the router's callback
+  URLs included. The pure
   request helpers are not here: the router uses none of them, so they live in
   core beside the contract that tells adapters to use them.
 - The store: it is what `req.session` is, and the routes here are what write it;
@@ -202,7 +203,9 @@ store's module provides `csrfTokenSigner` with `createSessionCsrfTokenSigner`
 
 ## Configuration
 
-Each module reads its own section. The defaults and the environment variables
+Each module reads its own section, and nothing else of the configuration:
+what `sessionModule` needs of `core.federations` comes from core's
+`federationSettings` slot. The defaults and the environment variables
 are in the package's [`config/reference.conf`](config/reference.conf), which a
 composition root layers because the modules declare it.
 
@@ -364,10 +367,13 @@ registers is `404`.
 
 The manifest ([`src/module.mts`](src/module.mts)):
 
-- `requires`: `config`, `userRepository`, `userSessionStore`,
+- `requires`: `userRepository`, `userSessionStore`,
   `federationTokenStore`, `sessionFederationIndex`, `csrfTokenSigner` (what the
   CSRF token is signed and checked with; the session store's module provides
-  it), and the synthetic
+  it), core's `federationSettings` — its view of `core.federations`, which
+  core fills in every composition: each enabled entry's callback URL, and
+  whether an installed federation's upstream `amr` counts; the module reads
+  nothing of the configuration but its own section — and the synthetic
   `federationProviders` and `federationRedirectPolicyResolver`, which core
   builds from the federations it dispatches by type — for each enabled
   `core.federations` entry, the provider and the redirect policy the module
@@ -386,8 +392,15 @@ The manifest ([`src/module.mts`](src/module.mts)):
   router built by hand also takes the signer as the required `csrfTokenSigner`
   option, and throws without it, and the mode as the required `deploymentMode`
   option, where a value that is none of the three, absence included, is a
-  TypeError at construction. `sessionRPRegistry` and `sessionFamilyIndex`, the
-  other two session stores, are `oauth`'s.
+  TypeError at construction. The federation router built by hand takes
+  core's view of the federations as the required `federationSettings` option,
+  the transaction cookie's name as the required
+  `federationTransactionCookieName` (the module names it after the
+  `sessionCookiePolicy` slot's cookie), and where a link may start from as
+  `linkTrustedOrigins` (the module passes `session.csrf.trustedOrigins`; absent,
+  only this site's own pages), and throws without the first two.
+  `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
+  are `oauth`'s.
 - `optional`: `logger`, `attemptCounter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads).
   `auditSink` unwired must be declared with `core.declaredAbsent = ["auditSink"]`, and
@@ -741,11 +754,12 @@ string array; none of the bundled adapters does). By default it is kept in
 provider's. `trustUpstreamAmr = true`, beside `enabled` in the federation's
 entry, records it beside `fed`, where it counts, as every federation's did
 before the switch existed. The routes read each installed federation's switch
-once, when they are built, through core's `federationTrustsUpstreamAmr` — the
-reading `@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session
-records and what `/authorize` advertises agree; a switch that is neither
-`true` nor `false` refuses the composition (`RangeError`), and the schema
-coerces the spellings an environment variable delivers. Each federation's
+once, when they are built, from core's `federationSettings` slot, whose
+`trustsUpstreamAmr` is core's `federationTrustsUpstreamAmr` — the reading
+`@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session records and
+what `/authorize` advertises agree; a switch that is neither `true` nor
+`false` refuses the boot, and the schema coerces the spellings an environment
+variable delivers. Each federation's
 switch is kept by the name it is installed under, and a login takes the switch
 of the name its callback came in on, which is also the federation
 `authentication.federation` names. The decision is written into the session

@@ -115,3 +115,40 @@ expiry), the service (close runner, cause policy, the RP-notification
 contract, resumption), its Redis wiring, and oauth's notifier. Switch: the
 callers, one module at a time. Remove: the old fence and stores, once old
 nodes are gone and the longest session lifetime has passed.
+
+## Amendment 2026-10-05 — the Redis store: records and closing indexes in fixed shards
+
+The Redis store keeps a session's whole record in one hash with one expiry,
+so D5's single retention holds by construction. D6's listing needs an index
+of closing sids, and on Redis Cluster a script can write only keys of one
+slot, so where that index lives decides whether it is kept atomically.
+
+**Decision.** Records are spread over sixteen fixed shards: a sid's shard is
+the 32-bit FNV-1a hash of its UTF-8 bytes modulo 16, and each shard's records
+and its closing index (a sorted set of sids, every score 0, ordered by their
+bytes) share one hash tag. The closing commit adds the sid to its shard's
+index, and the completion that closes the record removes it, in the script
+that writes the record; nothing about the index is judged by a clock.
+`listClosing` merges the sixteen indexes in byte order after a plain-sid
+cursor, and checks each sid's record in its shard's own step, dropping an
+entry whose record is no longer closing (one that lapsed while closing). So
+paging reaches every record that stays closing, assuming only that
+acknowledged writes are not rolled back and nothing is evicted (the store's
+boot check refuses an eviction policy).
+
+The shard count is a constant of the key layout, not a setting: changing it
+moves every record, a breaking change with a migration. Sixteen spreads the
+store over up to sixteen Cluster primaries and keeps a listing to sixteen
+index reads per page.
+
+**Rejected: one slot per sid with a separate index.** An index on a slot of
+its own can only be kept by order: add the sid before the closing commit,
+then remove a stale entry once no close that added it can still commit,
+judged by write deadlines and a clock-skew allowance. That judgement needs
+clocks that never step backward. A record server whose clock steps back
+within the allowed skew still accepts a delayed closing commit after the
+listing judged its deadline passed and removed the entry, and the record is
+then closing with no entry, never listed again. Fencing each entry with a
+token on the record avoids the clock but adds a protocol with its own edge
+(a lapsed sid opened again). Fixed shards trade one slot per sid for an
+index kept in the same atomic step as the record.

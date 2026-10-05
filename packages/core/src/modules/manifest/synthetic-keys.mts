@@ -78,7 +78,9 @@ export type { FederationProvider };
  * `core.tokenBinding` (`resolveTokenBindingSettings`), typed with its slot in
  * `middleware/tokenBinding.mts`; `federationSettings` is its
  * `core.federations` (`boot/federation-settings.mts`), typed with its slot in
- * `federations/settings.mts`.
+ * `federations/settings.mts`; `outboundPolicy` is its `core.outbound`
+ * (`outboundPolicyOf`, `net/outbound-fetch.mts`), typed with its slot in
+ * `net/outbound-policy.mts`.
  *
  * Immutability rests on the `ReadonlySet<string>` type. `Object.freeze` does
  * not stop the built-in Set methods from mutating `[[SetData]]`, so a cast to
@@ -113,6 +115,10 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		// set it would be a second statement of the federations, beside the
 		// one boot dispatches by.
 		"federationSettings",
+		// Filled the same way, from `core.outbound`: a module or host that set
+		// it would be a second statement of the outbound policy, beside the one
+		// a fetch built from the configuration reads.
+		"outboundPolicy",
 	]),
 );
 

@@ -33,14 +33,6 @@ import type { LinkIntent } from "../federations/transaction.mjs";
 import { admissionUnavailable } from "../internal/cookieSession.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 
-/** Read `config.session.csrf.trustedOrigins` without assuming a full AppConfig. */
-export const readCsrfTrustedOrigins = (config: unknown): readonly string[] => {
-	const csrf = (config as { session?: { csrf?: { trustedOrigins?: unknown } } } | null | undefined)
-		?.session?.csrf;
-	const list = csrf?.trustedOrigins;
-	return Array.isArray(list) ? list.filter((o): o is string => typeof o === "string") : [];
-};
-
 /**
  * The link start's answer to a step-up: `403 step_up_required` with the
  * requirement and its registered page. The start is a browser navigation, so
