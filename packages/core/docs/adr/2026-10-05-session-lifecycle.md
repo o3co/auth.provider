@@ -187,10 +187,14 @@ so a close with work still outstanding has ended the session; it answers
 `pending`, distinct from `done`. `unavailable` means the commit did not land,
 or whether it did could not be read. A commit that finds no live record —
 the session's end passed on the store's clock before its record could be
-opened, or since it was read — has nothing to close: the close answers
-`done` with no relying party and no federation. How a route answers `pending` (the
-logout's 200 and a `logout.close_pending` audit event) is decided when that
-route switches.
+opened, or since it was read, which the clock skew between the hosts and
+the store allows while the user session is still read — has no record to
+save the work in. The close runs that work at once, in its phases, over the
+record the commit would have saved (the read record's participants, or
+none), without `completeIf`, and answers `done`; an item that fails makes it
+answer `unavailable`, so a later close runs it all again. How a route
+answers `pending` (the logout's 200 and a `logout.close_pending` audit
+event) is decided when that route switches.
 
 **D10. The close work, in phases.** An item runs only once no item of an
 earlier phase is pending in the record, so no phase runs over work an
