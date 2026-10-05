@@ -331,7 +331,9 @@ the grant enabled refuses to boot without a store, whatever the declaration says
 several. `core.deployment.mode = "multi"` with one wired refuses boot, naming each
 offender and what diverges per replica; `"single"` is silent; unset warns. The
 list of unsafe modules is drift-guarded (#304), so a new in-memory adapter cannot
-be silently replica-unsafe.
+be silently replica-unsafe. A module declares it on its manifest
+(`replicaSafety`); one whose section selects where its state lives declares it
+as a function of that section, which boot reads once after the parse.
 
 **Shutdown.** A component that holds a connection or a timer registers its
 teardown with `lifecycleRegistrar`; `dispose()` drains in reverse-topological

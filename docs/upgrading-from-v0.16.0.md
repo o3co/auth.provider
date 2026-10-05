@@ -752,6 +752,11 @@ modules fills them.
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
+- **A manifest's `replicaSafety` may be a function of the module's section**
+  (#1371, #728). A declaration written as `{ unsafe: true, reason }` is read
+  as before. Code that reads the field off a `Module` (`module.replicaSafety.reason`)
+  no longer compiles, since the field may now be a function: ask
+  `replicaUnsafeReason(module, section)` instead, which answers both forms.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name
