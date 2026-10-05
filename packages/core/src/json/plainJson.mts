@@ -62,20 +62,15 @@ const COPYING: unique symbol = Symbol("being copied");
 
 /** `value` as its plain JSON copy (see this file's header), or where it is not one. Never throws. */
 export function copyPlainJson(value: unknown): PlainJsonCopy {
-	let copy: unknown;
 	try {
-		copy = copyAt(value, "", new Map());
-	} catch (thrown) {
-		return { ok: false, at: thrown instanceof Refused ? thrown.at : "" };
-	}
-	try {
+		const copy = copyAt(value, "", new Map());
 		// Written once here, so a copy JSON cannot write — nesting a shared object
 		// keeps shallow for the copy, deep for JSON — is refused where it is taken.
 		JSON.stringify(copy);
-	} catch {
-		return { ok: false, at: "" };
+		return { ok: true, copy };
+	} catch (thrown) {
+		return { ok: false, at: thrown instanceof Refused ? thrown.at : "" };
 	}
-	return { ok: true, copy };
 }
 
 /** `value`'s copy at `at`; a read that throws there is a refusal there. */
