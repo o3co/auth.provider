@@ -232,10 +232,13 @@ export interface LogoutRouterOptions {
 /**
  * How a logout ended the session: `ended`, with the federations it joined,
  * the upstream end-session URI and the relying parties' front-channel
- * registrations (read only for an HTML answer); or `unavailable`, already
- * logged and audited, answered `503` with `description`.
+ * registrations (read only for an HTML answer); `absent`, a sid that names no
+ * session the lifecycle can hold, answered as a session already gone; or
+ * `unavailable`, already logged and audited, answered `503` with
+ * `description`.
  */
 type LogoutEnd =
+	| { readonly outcome: "absent" }
 	| {
 			readonly outcome: "ended";
 			readonly federations: readonly string[];
@@ -719,15 +722,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					return undefined;
 				}
 				if (client === null || client === undefined) return undefined;
-				return usableFrontchannelRP(
-					{
-						clientId,
-						frontchannelLogoutUri: client.frontchannelLogoutUri,
-						frontchannelLogoutSessionRequired: client.frontchannelLogoutSessionRequired,
-					},
-					"logout",
-					logger,
-				);
+				// Each field read through core's guarded read: a refused one drops this iframe alone.
+				return usableFrontchannelRP(client, "logout", logger);
 			}),
 		);
 		return usable.filter((rp): rp is UsableFrontchannelRP => rp !== undefined);
@@ -754,7 +750,15 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				? { federation: hinted, idToken: await readUpstreamIdToken(sid, hinted) }
 				: undefined;
 
-		const closed = await lifecycle.close(sid, "rp_logout");
+		let closed: Awaited<ReturnType<SessionLifecycle["close"]>>;
+		try {
+			closed = await lifecycle.close(sid, "rp_logout");
+		} catch (error) {
+			// The lifecycle refuses a sid it cannot hold as a key before it
+			// writes: no session of its can carry it.
+			if (error instanceof RangeError) return { outcome: "absent" };
+			throw error;
+		}
 		if (closed.outcome === "unavailable") {
 			// The lifecycle logged the error; this is the route's one line for its 503.
 			(opts.logger ?? console).error(
@@ -1037,6 +1041,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		const ended = opts.sessionLifecycle
 			? await endThroughLifecycle(opts.sessionLifecycle, req, sid, sub, upstreamRequest)
 			: await endThroughStores(req, sid, sub, session.expiresAt, upstreamRequest);
+		if (ended.outcome === "absent") {
+			await endBrowserSession(req, sid, opts.logger ?? console);
+			return res.status(200).json({ logged_out: true });
+		}
 		if (ended.outcome === "unavailable") {
 			return res.status(503).json({
 				error: "temporarily_unavailable",

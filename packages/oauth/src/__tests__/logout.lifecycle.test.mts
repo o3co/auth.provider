@@ -334,6 +334,24 @@ describe("/oauth/logout through the session lifecycle: the close's answer", () =
 		expect(browserSession.destroyed).toBe(false);
 	});
 
+	it("a sid the lifecycle cannot hold: the no-op answer, not a 500", async () => {
+		const lifecycle = fakeLifecycle({
+			close: async () => {
+				throw new RangeError("session lifecycle: sid must be 1 to 512 characters");
+			},
+		});
+		const { sink, events } = recordingSink();
+		const browserSession = { sid: SID, destroyed: false };
+		const app = buildApp({ lifecycle, auditSink: sink, browserSession });
+
+		const res = await postLogout(app);
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ logged_out: true });
+		expect(events).toEqual([]);
+		expect(browserSession.destroyed).toBe(true);
+	});
+
 	it("a session already gone: the no-op answer, and nothing is closed", async () => {
 		const lifecycle = fakeLifecycle();
 		const { sink, events } = recordingSink();
@@ -453,6 +471,95 @@ describe("/oauth/logout through the session lifecycle: back-channel", () => {
 	});
 });
 
+describe("/oauth/logout through the session lifecycle: a pending close", () => {
+	it("a second logout resumes it: the notice is sent again and the session closes", async () => {
+		const fetchImpl = vi
+			.fn(async () => new Response(null, { status: 200 }))
+			.mockResolvedValueOnce(new Response(null, { status: 503 }));
+		const clientRepository: ClientRepository = {
+			findById: vi.fn(async (id: string) =>
+				id === "rp-bc"
+					? ({
+							clientId: "rp-bc",
+							backchannelLogoutUri: "https://rp-bc.example/logout",
+						} as unknown as Awaited<ReturnType<ClientRepository["findById"]>>)
+					: null,
+			),
+			authenticate: vi.fn(),
+		};
+		const userSessionStore = createInMemoryUserSessionStore();
+		await userSessionStore.create({ ...baseSession });
+		const revocation = createRefreshTokenFamilyRevocation({
+			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
+			accessTokenHorizonMs: HOUR,
+		});
+		const sessionRPRegistry = createInMemorySessionRPRegistry();
+		const sessionFamilyIndex = createInMemorySessionFamilyIndex();
+		const sessionFederationIndex = createInMemorySessionFederationIndex();
+		const federationTokenStore = fedTokenStore();
+		const lifecycleStore = createInMemorySessionLifecycleStore();
+		const notifier = createSessionCloseNotifier({
+			clientRepository,
+			keyStore,
+			issuer: ISSUER,
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+		const lifecycle = createSessionLifecycle({
+			store: lifecycleStore,
+			userSessionStore,
+			refreshTokenFamilyRevocation: revocation,
+			federationTokenStore,
+			notifier: () => notifier,
+			sessionRPRegistry,
+			sessionFamilyIndex,
+			sessionFederationIndex,
+			retainMs: HOUR,
+			logger: { warn: () => undefined, error: () => undefined },
+		});
+		const rp = {
+			clientId: "rp-bc",
+			backchannelLogoutUri: "https://rp-bc.example/logout",
+			backchannelLogoutSessionRequired: true,
+			frontchannelLogoutUri: undefined,
+			frontchannelLogoutSessionRequired: undefined,
+			registeredAt: new Date(),
+		};
+		expect(await lifecycle.join(SID, { rp, familyId: "fam-bc" })).toEqual({ outcome: "joined" });
+		const { sink, events } = recordingSink();
+		const app = buildApp({
+			lifecycle,
+			sessionStore: userSessionStore,
+			stores: {
+				sessionRPRegistry,
+				sessionFamilyIndex,
+				sessionFederationIndex,
+				refreshTokenFamilyRevocation: revocation,
+			} as unknown as ReturnType<typeof untouchedStores>,
+			federationTokenStore,
+			clientRepository,
+			auditSink: sink,
+		});
+
+		const first = await postLogout(app);
+		expect(first.status).toBe(200);
+		expect(typesOf(events)).toEqual(["logout.close_pending", "logout.success"]);
+		expect(readVersionedSessionLifecycle(await lifecycleStore.read(SID))?.value.state).toBe(
+			"closing",
+		);
+		expect(await userSessionStore.get(SID)).not.toBeNull();
+
+		const second = await postLogout(app);
+		expect(second.status).toBe(200);
+		expect(second.body).toEqual({ logged_out: true });
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(readVersionedSessionLifecycle(await lifecycleStore.read(SID))?.value.state).toBe(
+			"closed",
+		);
+		expect(await userSessionStore.get(SID)).toBeNull();
+		expect(typesOf(events)).toEqual(["logout.close_pending", "logout.success", "logout.success"]);
+	});
+});
+
 describe("/oauth/logout through the session lifecycle: front-channel", () => {
 	const record = (fields: Record<string, unknown>) =>
 		fields as unknown as Awaited<ReturnType<ClientRepository["findById"]>>;
@@ -517,6 +624,40 @@ describe("/oauth/logout through the session lifecycle: front-channel", () => {
 		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
 			expect.objectContaining({ site: "logout", step: "find", clientId: "rp-down" }),
 			"client_repository_unavailable",
+		);
+	});
+
+	it("a registration whose front-channel field cannot be read drops that iframe alone", async () => {
+		const logger = createMockLogger();
+		const clientRepository: ClientRepository = {
+			findById: vi.fn(async (id: string) =>
+				id === "rp-bad"
+					? record({
+							clientId: "rp-bad",
+							get frontchannelLogoutUri(): string {
+								throw new Error("unreadable");
+							},
+						})
+					: record({ clientId: id, frontchannelLogoutUri: `https://${id}.example/fc` }),
+			),
+			authenticate: vi.fn(),
+		};
+		const lifecycle = fakeLifecycle({
+			close: vi.fn(async () => ({
+				outcome: "done" as const,
+				rps: ["rp-bad", "rp-good"],
+				federations: [],
+			})),
+		});
+		const app = buildApp({ lifecycle, clientRepository, logger });
+
+		const res = await postLogout(app, { Accept: "text/html" });
+
+		expect(res.status).toBe(200);
+		expect(res.text).toContain("rp-good.example/fc");
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ clientId: "rp-bad", reason: "unreadable" }),
+			"logout_frontchannel_uri_refused",
 		);
 	});
 

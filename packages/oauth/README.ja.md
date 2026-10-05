@@ -600,7 +600,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 - `done` — 終了の作業がすべて済んだ。ファミリーの失効、フェデレーショントークンとセッションのインデックスの削除、relying party への通知、`UserSession` の削除。
 - `pending` — 終了はコミットされ、作業の一部が残っている。セッションは終了している — 何も参加できず、どの liveness の読み取りも live と答えない — ので、ログアウトは成功として答え、`logout.success` と並べて `logout.close_pending`（`sid`）を監査する。そのセッションの後の終了か、ライフサイクルの巡回が作業を再開する。
-- `unavailable` — 終了がコミットされなかったか、されたかを読めなかった: `503 temporarily_unavailable`（"session store unavailable"）。ライフサイクルが `session_lifecycle_unavailable` として、ルートが `logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`）としてログに出し、`logout.cascade_failed`（`sid`、`store: "session_lifecycle"`）を監査する。ブラウザーのセッションは再試行のために残り、上流では何も終了しない。
+- `unavailable` — 終了がコミットされなかったか、されたかを読めなかった: `503 temporarily_unavailable`（"session store unavailable"）。ライフサイクルが `session_lifecycle_unavailable` として、ルートが `logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`）としてログに出し、`logout.cascade_failed`（`sid`、`store: "session_lifecycle"`）を監査する。この経路でのこのイベントは「終了をコミットできなかった（状態は変わっていないことがある）」という意味で、状態が残されたという意味ではない。ブラウザーのセッションは再試行のために残り、上流では何も終了しない。半分終了した状態になる場合が 1 つある: ライフサイクルは終了のコミットの前にセッションごとのストアの終了の印を書くので、印を書いた後にコミットが失敗すると、ログアウトの再試行が終了を完了するか印が失効するまで、そのセッションのコード交換は拒否される。
 
 ルートは自分ではバックチャネルの `logout_token` を送らない。ライフサイクルが [セッション終了の通知器](#セッション終了の通知器) を通して各 relying party に通知 1 件につき 1 回知らせる。フロントチャネルのページは、終了が答えた relying party ごとに、そのクライアント登録（`clientRepository.findById`）から読んだ iframe を持ち、HTML で答えるときだけ読む。登録が読めなければその relying party の iframe だけを落とし、`client_repository_unavailable`（`site: "logout"`）として 1 回ログに出す。上流の end-session 呼び出しは終了が答えた最初のフェデレーションに送り、終了の前に読んだ id_token は同じフェデレーションのために読んだときだけ添える。読み取りの後に参加したフェデレーションは、ヒントなしで上流で終了する。フェデレーションの一覧が読めなければ、ヒントなしで進む。既に消えたセッションは下と同じ `200` の no-op で、何も終了しない。
 
