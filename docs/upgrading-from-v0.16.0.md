@@ -587,6 +587,21 @@ modules fills them.
   (`session.csrf.trustedOrigins`). A deps object handed to the module's
   factories by hand carries `federationSettings` (in a test,
   `createTestFederationSettings()`) instead of `config`.
+- **BREAKING: the oauth module reads the federations from the
+  `federationSettings` slot, not `config`, and `createOAuthRouter` requires
+  `section` and `federationSettings` (#728).** `oauthEndpointsModule`
+  requires core's `federationSettings` in place of `config`: the `acr` table
+  `/authorize` answers from and discovery advertises reads which installed
+  federation trusts its upstream IdP's `amr` from the slot, which core fills
+  from `core.federations` in every composition, so a composition booted with
+  `createApp` sees no change. A router built by hand with `createOAuthRouter`
+  no longer takes `config`: pass the module's parsed section as `section`
+  (where you passed `config`, `section: config.oauth` as the oauth schema
+  parses it) and core's view of the federations as `federationSettings` (in
+  a test, `createTestFederationSettings()`). Without either the router
+  refuses to build, naming the option; it no longer falls back to the
+  `oauth {}` a `config` carries. A deps object handed to the module's
+  factories by hand carries `federationSettings` instead of `config`.
 - **BREAKING: an enabled TOTP factor requires the `oauthTokenSettings`
   slot (#1329).** `mfaTotpFactorModule` takes the deployment's issuer, which
   an unset `mfa-totp-factor.issuer` defaults to the host of, from the slot
@@ -970,8 +985,7 @@ modules fills them.
   it answers `oauthEndpointsModule` whatever it is handed, and never read its
   parameter. The module reads every `oauth.*` setting from its own parsed
   section; `createOAuthRouter` takes that section as `section` (typed
-  `OAuthSection`) and, without one, reads the `oauth {}` its `config`
-  carries, as before.
+  `OAuthSection`), which it requires (below).
 - **Signatures.** `renderFrontchannelLogoutHtml` takes
   `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
   requires a `grantPolicy` key, `undefined` for none (#1169); the federation

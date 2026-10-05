@@ -23,6 +23,7 @@ import { createSessionGrant, type SessionGrantDeps } from "#/grants/session.mjs"
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
 	COMPOUND_MTLS_BINDING,
@@ -98,7 +99,7 @@ async function buildApp(
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
-		config,
+		...routerInputsOf(config),
 		keyStore,
 		codeRepository,
 		clientRepository,

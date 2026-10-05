@@ -17,20 +17,20 @@
 /**
  * What the `/oauth` router resolves once, when it is built, and hands its
  * endpoints: the `oauth.*` options, read from the section `oauth` alone; the
- * acr table `/authorize` answers from,
- * the canonical issuer (one that is not canonical refuses the build) and the
+ * acr table `/authorize` answers from, which also reads core's view of the
+ * federations (`federationSettings`); the canonical issuer (one that is not canonical refuses the build) and the
  * one client repository every endpoint looks a client up in, which reads
  * registered clients through core's client-record boundary.
  */
 
 import {
-	type AppConfig,
 	advertisedIssuer,
 	type ClientRepository,
 	type ConsentStore,
 	checkCanonicalIssuer,
 	describeIssuerRejection,
 	type FederationProvider,
+	type FederationSettings,
 	type Logger,
 	type SessionRequirementResolver,
 	stepUpReach,
@@ -60,7 +60,7 @@ export interface RouterSettings {
 
 export const resolveRouterSettings = ({
 	section,
-	config,
+	federationSettings,
 	authorizationEndpoint,
 	requirements,
 	getFederationProviders,
@@ -72,10 +72,10 @@ export const resolveRouterSettings = ({
 	/** `oauth {}`: every `oauth.*` option the router reads. */
 	readonly section: unknown;
 	/**
-	 * The configuration, for what the acr table reads beyond `oauth {}`: which
-	 * installed federation trusts its upstream IdP's `amr`.
+	 * Core's view of `core.federations`, for what the acr table reads beyond
+	 * `oauth {}`: which installed federation trusts its upstream IdP's `amr`.
 	 */
-	readonly config: AppConfig;
+	readonly federationSettings: FederationSettings;
 	/** Whether `/authorize` is mounted. */
 	readonly authorizationEndpoint: boolean;
 	readonly requirements: SessionRequirementResolver;
@@ -105,7 +105,7 @@ export const resolveRouterSettings = ({
 		const acrValues = vouchableAcrValues(
 			options.acrValues,
 			getFederationProviders(),
-			config,
+			federationSettings,
 			reach,
 		);
 		logUnsatisfiableAcrValues(acrValues.dropped, reach, logger);
