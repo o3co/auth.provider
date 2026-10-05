@@ -61,9 +61,11 @@ export interface ChallengeStore {
 	 * repeatedly.
 	 *
 	 * The expiresAtMs answered is never later than the issued expiry, beyond
-	 * the time the store took to record it: an adapter that rebuilds it from
-	 * a remaining life (Redis `PTTL`) adds that life to an instant read before
-	 * asking, so a slow reply makes it earlier, never later.
+	 * the time the store took to record it, on the clock of the host that
+	 * reads it: an adapter that rebuilds it from a remaining life (Redis
+	 * `PTTL`) adds that life to an instant read before asking, so a slow
+	 * reply makes it earlier, never later. Hosts' clocks differ by what the
+	 * deployment's skew allowance covers.
 	 * `ChallengeCeremony` uses it for the following `markSeen` TTL and reports
 	 * it on the `consumed` outcome; the security window stays TTL-bounded.
 	 */
