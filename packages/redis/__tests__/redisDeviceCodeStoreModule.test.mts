@@ -39,8 +39,8 @@ afterAll(async () => {
 /**
  * Stands in for an enabled `deviceAuthorizationGrantModule`, which this
  * package does not depend on: the grant cannot run without a store, so the
- * stand-in requires the slot, and a boot here fails without one as a
- * composition with the grant enabled does. The route contribution is what
+ * stand-in requires the slot, and a boot here fails without one, as the
+ * enabled grant does (through its own check). The route contribution is what
  * puts it in the closure root.
  */
 const deviceGrantStandIn = defineModule({
@@ -157,6 +157,10 @@ describe("redisDeviceCodeStoreModule wiring", () => {
 					pathResolver: (p: string) => p,
 				} as never,
 			}),
-		).rejects.toMatchObject({ name: "BootError", reason: "missing-required-component" });
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "missing-required-component",
+			details: { missingKey: "deviceCodeStoreClient" },
+		});
 	});
 });
