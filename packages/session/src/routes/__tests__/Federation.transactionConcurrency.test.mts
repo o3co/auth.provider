@@ -29,7 +29,7 @@
 
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import { codeChallenge } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -173,7 +173,7 @@ function buildApp() {
 	app.use(
 		createRouter(express, {
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
-			config: { "session-store": { name: "harness.session" } } as never,
+			federationSettings: createTestFederationSettings(),
 			federationProviders: new Map<string, FederationProvider>([["apple", apple]]),
 			federationRedirectPolicyResolver: new Map([["apple", makePermissivePolicy()]]) as never,
 			providerCallbackUrls: new Map([["apple", CALLBACK_URL]]),
