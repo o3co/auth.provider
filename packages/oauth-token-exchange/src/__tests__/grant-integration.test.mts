@@ -1890,7 +1890,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 describe("absence policy", () => {
 	it("carries the shared ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY constant, by identity", async () => {
 		// Identity, not shape: the declared-absence guard refuses modules whose
-		// policies for one key disagree; sharing oauthModule's constant makes
+		// policies for one key disagree; sharing oauthEndpointsModule's constant makes
 		// disagreement impossible by construction.
 		const { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } = await import("@o3co/auth-provider-core");
 		const { tokenExchangeModule } = await import("#/module.mjs");
@@ -1901,11 +1901,11 @@ describe("absence policy", () => {
 });
 
 describe("tokenExchangeModule's contributions read oauthTokenSettings, never the configuration", () => {
-	// Beside oauthModule the slot is derived from the same `oauth {}` the
+	// Beside oauthEndpointsModule the slot is derived from the same `oauth {}` the
 	// configuration carries, and nothing substitutes it, so the two cannot
 	// disagree there. Which one a contribution reads shows only here, where
 	// the deps hand it a configuration that disagrees with the slot — as a
-	// composition without oauthModule, which fills the slot itself, may.
+	// composition without oauthEndpointsModule, which fills the slot itself, may.
 	const SLOT_ISSUER = "https://slot.example";
 	const configWith = (jwt: Record<string, unknown> = {}) => {
 		const base = makeValidAppConfig();

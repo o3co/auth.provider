@@ -16,7 +16,7 @@
 
 /**
  * A browser session with Google linked, on the standalone composed as a
- * deployment does: `oauthModule`, the session module and the real Google
+ * deployment does: `oauthEndpointsModule`, the session module and the real Google
  * adapter — the Google federation type `buildModules` lists, handed the
  * shipped `core.federations.google` entry — booted through `createApp` under
  * the shipped configuration.

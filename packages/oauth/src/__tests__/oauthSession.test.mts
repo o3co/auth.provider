@@ -27,7 +27,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { oauthSessionGrantModule, oauthSessionModule } from "#/oauthSession.mjs";
+import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { capturing, withGrants } from "./_helpers/sections.mjs";
 
 afterEach(() => {
@@ -220,14 +220,6 @@ describe("oauthSessionGrantModule", () => {
 		expect(oauthSessionGrantModule.requires).not.toContain("config");
 		expect(oauthSessionGrantModule.optional).not.toContain("config");
 		expect(oauthSessionGrantModule.optional).not.toContain("oauthTokenSettings");
-	});
-
-	it("is what the deprecated oauthSessionModule returns, whatever it is handed", () => {
-		expect(oauthSessionModule()).toBe(oauthSessionGrantModule);
-		for (const session of [true, false]) {
-			const config = withGrants(makeValidAppConfig(), { session });
-			expect(oauthSessionModule({ config })).toBe(oauthSessionGrantModule);
-		}
 	});
 
 	it("mints with the lifetime the oauthTokenSettings slot holds, not one of the configuration's", async () => {

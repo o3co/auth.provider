@@ -1684,7 +1684,7 @@ describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () =
 });
 
 /*
- * This module reads `subjectRevocation` on its own, as `oauthModule` does: a
+ * This module reads `subjectRevocation` on its own, as `oauthEndpointsModule` does: a
  * composition can mount the grants without the routes, and would otherwise
  * boot with the watermark unfilled and undeclared, `verifyJwt` skipping the
  * check and the refresh-redemption gate inert, with nothing saying so.

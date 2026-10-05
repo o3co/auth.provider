@@ -833,10 +833,10 @@ export type BootErrorReason =
 // ---------------------------------------------------------------------------
 
 /**
- * A `modules` entry is a function — a module factory such as
- * `deviceGrantModule` listed without being called. `Module` requires only a
- * `name`, which every function has, so the compiler accepts it; boot would
- * otherwise take it as a manifest that contributes nothing.
+ * A `modules` entry is a function — a module factory listed without being
+ * called. `Module` requires only a `name`, which every function has, so the
+ * compiler accepts it; boot would otherwise take it as a manifest that
+ * contributes nothing.
  */
 export interface ModuleFactoryNotCalledDetails {
 	readonly reason: "module-factory-not-called";

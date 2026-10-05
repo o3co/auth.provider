@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-10-05
+最終更新: 2026-10-06
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージの type がプロバイダーと並べて作るリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -10,7 +10,7 @@
 
 1. **`/session` ルート** — `sessionModule`。パスワードログイン、ログアウト、CSRF トークンのルート、フェデレーションの開始ルートとコールバックルート。パスワード検証または上流 IdP の応答を `UserSession` レコードと認証済みの express session に変え — どちらも一つの関数 [`establishSession`](#セッションの確立) を通して。この関数は core の [セッションアドミッション](../core/src/session-admission/README.md) が確立したものを書き、セッション requirement の完了（MFA パッケージのもの）もこれを呼ぶ — ログアウトでそれを取り消す。パスワードログインは何かを書く前に登録済みのセッション requirement に問い合わせ、requirement はそれを [中断する](#requirement-がログインを中断するとき) ことがある。
 2. **フェデレーションアダプターのツールキット** — アダプターパッケージが、自分が差し込まれるルーターから import するもの: `createFederationRedirectPolicy` とその元になる許可リストの規則。アダプターが上流への要求を組み立てるヘルパー — `codeChallenge`、`callbackUrlForExchange`、`FederationClientSecret` / `resolveClientSecret` — は core のもの。
-3. **ブラウザセッションストア** — `sessionStoreModule`（と、同じモジュールが replica safety を `config` から宣言する `sessionStoreModuleFor(config)`）と `createSessionStoreFactory` / `registerBuiltinSessionStores`。express-session ミドルウェア、その cookie、そのストア（memory、または `connect-redis` 経由の Redis）。
+3. **ブラウザセッションストア** — `sessionStoreModule` と `createSessionStoreFactory` / `registerBuiltinSessionStores`。express-session ミドルウェア、その cookie、そのストア（memory、または `connect-redis` 経由の Redis）。
 
 **持つもの:**
 
@@ -118,7 +118,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 - **マウント順はリスト順。ただしこのルートを名指しするルートは別。** このルートは `before` / `after` を宣言しない。デプロイが含まないかもしれないルート（`oauth` だけのデプロイには `sessionModule` が無い）を名指しすると `route-order-target-missing` で起動に失敗するからである。したがって **`req.session` を読むすべてのモジュールより前に** 並べる。これより前に並べたモジュールはセッションを読めず、起動時にそれを検査するものは無い。standalone テンプレートはこれを先頭に置いている。例外は逆向きの宣言である: federation grants が有効なとき、そのブラウザ向けルートは `after: ["session-middleware"]` を宣言するので、どちらがどこに並んでいてもこのルートの後にマウントされ、その id のルートが無い組み立ては `route-order-target-missing` で起動に失敗する。
 - **ブラウザが保持しない cookie は設定の検証で拒否される**（`config-validation-failed`、issue がキーを名指しする）: `__Host-` の名前 — デフォルトの `__Host-auth.session` — で `session-store.secure = true` かつ `session-store.domain = null` でないもの、`__Secure-` の名前で `session-store.secure = true` でないもの（どちらの接頭辞も、ブラウザと同じく大文字小文字を問わない）、RFC 6265 のトークンでない `session-store.name`、ホスト名でない `session-store.domain`（先頭のドット一つは可。スキーム、ポート、パスは不可）、`session-store.secure = true` でない `session-store.sameSite = "none"`、1 ms から 1 年の範囲外の `session-store.maxAge`。平文 HTTP で動かすときは `session-store.secure = false` と、接頭辞の無い名前（`auth.sid`）を設定する。
 - **新しいセッションに渡す cookie は `sessionCookiePolicy` のもの:** ルートはスロットが持つポリシーから express-session をマウントする。保存済みのセッションは作られたときの cookie の属性を保つ（express-session はレコードから cookie を組み立て直す）ので、これらの設定を厳しくしたときはセッションストアを空にし、すべてのブラウザに新しい cookie でサインインし直させる。
-- **`memory` は `core.deployment.mode = "multi"` で拒否される。** express-session の `MemoryStore` はレプリカごとに分岐する: あるレプリカが処理したログインは他のレプリカに知られず、ログアウトは到達したレプリカ上しか消さず、再起動ですべてのセッションが失われる。`sessionStoreModule` は replica safety を自分のパース済みセクションから宣言する: `session-store.storage.type` が `memory` なら replica-unsafe、それ以外の種別なら何も宣言しない。そのため core の replica-safety ガードが起動時に他の違反と並べて名指しで拒否し、`core.deployment.mode` が未設定なら警告し、`"single"` なら何も言わない。`sessionStoreModuleFor(config)` は同じモジュールが同じことを、組み立て時に読んだ `config` から宣言するもので、起動がパースするセクションは見ない。`sessionStoreModule` を並べる。ルートファクトリーも実行時に同じ組み合わせを拒否する（`replica-unsafe-adapter`）。起動したものと別の config から組み立てたモジュールのためである。どちらの形も core の `deploymentMode` スロット（core が `core.deployment.mode` から埋める）を requires し、`deployment` を自分では読まない。スロットの値が `single`、`multi`、`unset` のどれでもなければ TypeError になる。
+- **`memory` は `core.deployment.mode = "multi"` で拒否される。** express-session の `MemoryStore` はレプリカごとに分岐する: あるレプリカが処理したログインは他のレプリカに知られず、ログアウトは到達したレプリカ上しか消さず、再起動ですべてのセッションが失われる。`sessionStoreModule` は replica safety を自分のパース済みセクションから宣言する: `session-store.storage.type` が `memory` なら replica-unsafe、それ以外の種別なら何も宣言しない。そのため core の replica-safety ガードが起動時に他の違反と並べて名指しで拒否し、`core.deployment.mode` が未設定なら警告し、`"single"` なら何も言わない。ガードはどのルートを組み立てるよりも前に、ルートがマウントするのと同じセクションで判断するので、モジュール自身はモードを読まない: `deploymentMode` を requires せず、`deployment` も読まない。
 - **Redis ストアは自前の接続を開く。** `session-store.storage.redis.url`（設定されていれば `password` も）への `redis`（node-redis）クライアントを `connect-redis` の `RedisStore` の下に置く。readiness registrar が配線されていれば probe `session-store`（`PING`）を登録し、Redis を失ったレプリカはトラフィックを受けなくなる。lifecycle registrar が配線されていれば `AppHandle.dispose()` がクライアントを quit する。クライアントの `error` イベントはプロセスを落とさず `session_store_redis_error` としてログに出る。再接続は node-redis の仕事。`url` が無ければ起動に失敗し、`redis` か `connect-redis` のパッケージが無くても起動に失敗する（[インストール](#インストール) を参照）。
 - **フェデレーショントランザクションは同じストアを共有する。** キーの接頭辞は `fedtx:` — [トランザクション cookie](#トランザクション-cookie) を参照。
 - **答えられないストアは `500` ではなく障害である。** リクエストのセッションをストアが読み込めない（到達できない、またはタイムアウトする）とき、そのリクエストはどのルートも動く前に `503 temporarily_unavailable` で答えられる。ルートが答えたあとでセッションの保存や有効期限の更新ができないときは、その答えがそのまま残る。どちらも error レベルで 1 行、`session_middleware_store_unavailable`（`store: "cookie_session"`、`step`: `load` または `save`、エラーの射影）としてログに出て、それ以上先へは渡らない — express-session はこれを `next(err)` に渡しており、ルートの前ならターミナルハンドラーの `500`、後なら Express の最終ハンドラーに届いていた（[`src/internal/cookieSession.mts`](src/internal/cookieSession.mts)）。このパッケージのルートは、それが重要な場所 — ログイン、フェデレーションの開始とコールバック — では答える前に自分でセッションを保存するので、そこでの保存の失敗はルート自身の `503` になる。cookie ストアの障害を答えたルートはリクエストのセッションを手放すので、express-session が応答の終わりに失敗中のストアへもう一度書くことはない。
@@ -137,7 +137,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | GET | `/session/csrf` | double-submit CSRF トークンの発行 |
 | POST | `/session/login` | パスワードログイン |
 | POST | `/session/logout` | ブラウザセッションの終了 — [無効化するもの](#post-sessionlogout-が無効化するもの) を参照 |
-| GET | `/session/oauth/federation/:name` | フェデレーションの開始（`?redirect_to=`、`?link=1`） |
+| GET | `/session/oauth/federation/:name` | フェデレーションの開始（`?redirect_to=`、`?link=1`、鮮度のヒント `?prompt=` — `login` だけを数える — と `?max_age=`、2^53−1 以下の負でない整数。繰り返しや不正なヒントは `400 invalid_request`） |
 | GET | `/session/oauth/federation/:name/callback` | `query` フェデレーションのコールバック。`form_post` フェデレーションには `405`（`Allow: POST`） |
 | POST | `/session/oauth/federation/:name/callback` | `form_post` フェデレーションのコールバック。`query` フェデレーションには `405`（`Allow: GET`） |
 

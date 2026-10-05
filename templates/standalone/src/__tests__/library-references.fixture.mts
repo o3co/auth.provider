@@ -31,7 +31,7 @@ import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-c
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import {
 	oauthAuthorizationGrantsModule,
-	oauthModule,
+	oauthEndpointsModule,
 	oauthSessionGrantModule,
 } from "@o3co/auth-provider-oauth";
 import {
@@ -57,7 +57,7 @@ import type { Adapters, MfaSwitch } from "../sections.mjs";
 
 /** The oauth package's modules: none reads the configuration it is handed. */
 const OAUTH_MODULES = [
-	oauthModule({ config: {} as never }),
+	oauthEndpointsModule,
 	oauthSessionGrantModule,
 	oauthAuthorizationGrantsModule,
 ];

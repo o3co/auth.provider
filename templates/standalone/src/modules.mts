@@ -368,7 +368,7 @@ export const inMemoryFederationTokenStoreModule: Module = defineModule({
  * route that emits a security event reads, with the sink the composition
  * root's `adapters.auditSink` names: the template's `"logger"` (its default)
  * or one of core's built-ins, with that sink's options from
- * `audit-sink.<name>`. The slot is `optional` on `oauthModule`,
+ * `audit-sink.<name>`. The slot is `optional` on `oauthEndpointsModule`,
  * `sessionModule` and `webauthnModule`, and `emitAuditEvent` is a no-op when
  * it is empty, so this module is always in the manifest; a name no builder is
  * registered under refuses boot. The sink's options moved from `audit.sink`.
@@ -587,7 +587,7 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		},
 		// Required by `redisDeviceCodeStoreModule`. This template does not mount
 		// the device grant; the slot is provided anyway, so a deployment that
-		// adds `deviceGrantModule` with the Redis store is not refused at boot
+		// adds `deviceAuthorizationGrantModule` with the Redis store is not refused at boot
 		// (`missing-required-component`) for a client slot nothing provided.
 		deviceCodeStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)

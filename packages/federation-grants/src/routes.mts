@@ -89,7 +89,7 @@ const BODY_LIMIT_BYTES = 16 * 1024;
  * declared oversized body is refused unread and the bound holds even if
  * another module's parser under `/oauth` runs first (`body-parser` does not
  * parse a body twice, so the `limit` below would be skipped). See README,
- * "Beside `oauthModule`".
+ * "Beside `oauthEndpointsModule`".
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
 	const declared = Number(req.headers["content-length"]);
@@ -221,7 +221,7 @@ export const undecodablePath = (error: unknown): boolean =>
  * will. It recognises body-parser's `http-errors` (`expose` with a 4xx
  * `status`, then `type`) and an undecodable path, and is only applied where
  * these are the errors that can arrive (`parserRefusals`). See README,
- * "Beside `oauthModule`".
+ * "Beside `oauthEndpointsModule`".
  */
 export const parserRefusal = (
 	error: unknown,

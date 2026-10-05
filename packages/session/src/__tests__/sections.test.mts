@@ -41,11 +41,7 @@ import { makeValidAppConfig, packageReferenceProblems } from "@o3co/auth-provide
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { sessionModule, sessionSectionSchema } from "#/module.mjs";
-import {
-	sessionStoreConfigSchema,
-	sessionStoreModule,
-	sessionStoreModuleFor,
-} from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreConfigSchema, sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSession, withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 /** The package's defaults, as a composition root finds them. */
@@ -189,36 +185,27 @@ describe("the paths the settings moved from, on the manifests", () => {
 		});
 	});
 
-	it("session-store: each key of the cookie and its store from session, whichever form of the module", () => {
-		const forms = [
-			sessionStoreModule,
-			sessionStoreModuleFor(makeValidAppConfig() as never),
-			sessionStoreModuleFor(
-				withStore(makeValidAppConfig(), { storage: { type: "redis" } }) as never,
+	it("session-store: each key of the cookie and its store from session", () => {
+		expect(sessionStoreModule.section?.relocatedFrom).toEqual({
+			"session.secret": "secret",
+			"session.name": "name",
+			"session.maxAge": "maxAge",
+			"session.secure": "secure",
+			"session.sameSite": "sameSite",
+			"session.domain": "domain",
+			"session.storage": { to: "storage", environmentVariable: null },
+			"session.storage.type": "storage.type",
+			"session.storage.redis.url": "storage.redis.url",
+			"session.storage.redis.password": "storage.redis.password",
+		});
+		expect(sessionStoreModule.section?.renamedVariables).toEqual(
+			Object.fromEntries(
+				RENAMED.filter(([from]) => from !== "ENDPOINTS_LOGIN_URL").map(([from, , old]) => [
+					from,
+					old,
+				]),
 			),
-		];
-		for (const module of forms) {
-			expect(module.section?.relocatedFrom).toEqual({
-				"session.secret": "secret",
-				"session.name": "name",
-				"session.maxAge": "maxAge",
-				"session.secure": "secure",
-				"session.sameSite": "sameSite",
-				"session.domain": "domain",
-				"session.storage": { to: "storage", environmentVariable: null },
-				"session.storage.type": "storage.type",
-				"session.storage.redis.url": "storage.redis.url",
-				"session.storage.redis.password": "storage.redis.password",
-			});
-			expect(module.section?.renamedVariables).toEqual(
-				Object.fromEntries(
-					RENAMED.filter(([from]) => from !== "ENDPOINTS_LOGIN_URL").map(([from, , old]) => [
-						from,
-						old,
-					]),
-				),
-			);
-		}
+		);
 	});
 });
 

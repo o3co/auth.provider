@@ -21,7 +21,7 @@
  * `cascadeLogout`, an ordered four-store sequence this package owns, and core
  * cannot import it without inverting the package dependency.
  *
- * Installed explicitly, not folded into `oauthModule`: those routes work in a
+ * Installed explicitly, not folded into `oauthEndpointsModule`: those routes work in a
  * deployment with no session stores at all, and requiring the whole cascade
  * from the module that serves `/oauth/token` would break such deployments.
  *

@@ -346,12 +346,12 @@ export const oauthAuthorizationGrantsModule = defineModule<
 	optional: OPTIONAL,
 	// `subjectRevocation` is optional to wire, not optional to decide.
 	// This module reads the slot on its own, so a composition that mounts
-	// it without `oauthModule` (the grants alone, no routes) would
+	// it without `oauthEndpointsModule` (the grants alone, no routes) would
 	// otherwise boot with the watermark unfilled and undeclared.
 	absencePolicies: {
 		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
 		// The same rule for the audit sink admission emits through,
-		// declared here as `oauthModule` declares it, for the same reason.
+		// declared here as `oauthEndpointsModule` declares it, for the same reason.
 		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 	},
 	contributes: {

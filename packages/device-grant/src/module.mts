@@ -544,7 +544,7 @@ export const deviceAuthorizationGrantModule = defineModule<
 						}),
 					);
 				}
-				// Router-level body parsing, matching `oauthModule` and the
+				// Router-level body parsing, matching `oauthEndpointsModule` and the
 				// WebAuthn routes: `createApp` installs no global parser. A
 				// declared oversized body is refused before it is read.
 				router.all("/", withinBodyLimit);
@@ -652,12 +652,3 @@ export const deviceAuthorizationGrantModule = defineModule<
 		],
 	},
 });
-
-/**
- * Returns {@link deviceAuthorizationGrantModule}; the argument is ignored.
- *
- * @deprecated List {@link deviceAuthorizationGrantModule} instead.
- */
-export const deviceGrantModule = (_params?: {
-	readonly config?: unknown;
-}): typeof deviceAuthorizationGrantModule => deviceAuthorizationGrantModule;

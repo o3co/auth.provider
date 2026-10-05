@@ -67,7 +67,7 @@ import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
 import type { AuthorizationResponse } from "./authorizationResponse.mjs";
 
-/** The action the consent step admits, as `oauthModule` registers it. */
+/** The action the consent step admits, as `oauthEndpointsModule` registers it. */
 const CONSENT_ACTION = "oauth.consent" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
 
 /**
