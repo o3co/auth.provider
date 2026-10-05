@@ -48,6 +48,7 @@ export type {
 	ContributeAndOverrideSameKeyDetails,
 	ContributeFactoryFailedDetails,
 	ContributionCollectorMap,
+	ContributionContainer,
 	ContributionEntry,
 	ContributionKind,
 	ContributionKindGuardedDetails,

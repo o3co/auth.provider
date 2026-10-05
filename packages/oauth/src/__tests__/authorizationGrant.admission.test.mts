@@ -51,6 +51,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 
 const SID = "sid-1";
@@ -177,7 +178,7 @@ const makeGrant = (opts: {
 		return sign(options);
 	});
 	const handler = createAuthorizationGrant({
-		config,
+		...grantSettingsFrom(config),
 		keyStore,
 		codeRepository,
 		clientRepository,

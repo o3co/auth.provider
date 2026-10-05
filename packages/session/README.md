@@ -455,7 +455,10 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `session.rateLimit.login` by core's attempt guard (`createAttemptGuard`) on
   the `attemptCounter` slot's counter. No rate limiter takes part: a limiter's
   `limits`, `defaultLimit` and `failMode` neither loosen nor replace it, and
-  the module claims the `login` prefix with no budget. A refused attempt is
+  the module claims the `login` prefix with core's
+  `verifierLimitClaim({ setting: "session.rateLimit.login" })`: no budget, so
+  no other module can set one, and the bundled limiter modules refuse a
+  `limits.login` entry, naming this key. A refused attempt is
   `429 rate_limited` with `Retry-After` and `Cache-Control: no-store`, and no
   `RateLimit-*` headers, which would tell a guesser how many guesses are left.
   A counter that throws, does not answer within two seconds, or answers

@@ -220,7 +220,10 @@ export interface MfaLoginCodeMail extends MfaFactorMail<"login_code"> {
 /** What a challenge answers: the state the coordinator keeps, if any, the page's response, and a login code to mail. */
 export interface MfaChallenge {
 	readonly state?: MfaFactorState;
-	/** What the page is answered: request options, where a code went. Never the code `mail` carries. */
+	/**
+	 * What the page is answered: request options, where a code went. Never the code `mail` carries.
+	 * A plain JSON-shaped object, like {@link MfaFactorState}; anything else is the factor's failure.
+	 */
 	readonly response: unknown;
 	readonly mail?: MfaLoginCodeMail;
 }
