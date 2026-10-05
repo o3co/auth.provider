@@ -24,8 +24,9 @@
  * A store that cannot answer is 503 temporarily_unavailable, never a verdict on the passkey. The
  * package README's SECURITY sections state the full rules.
  *
- * `auth_time` is the challenge's recorded issuance, never later than the redemption; for a
- * challenge recorded without one, one challenge lifetime before the redemption.
+ * `auth_time` is the challenge's recorded issuance; for a challenge recorded without a usable
+ * one (none, one that yields no claim, or one after the redemption, which is warned), one
+ * challenge lifetime before the redemption.
  *
  * With `subjectRevocation` wired, the subject's revocation boundary is read after every slow step
  * and before anything is registered or signed, and an authentication it covers
@@ -302,14 +303,27 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			}
 			// An assertion can be held until its challenge expires, so `auth_time` is the earliest
 			// instant the gesture could have been made, the challenge's issuance: never fresher than
-			// it was (RFC 9470 §6.1). A challenge recorded without one leaves the earliest issuance a
-			// challenge still live at the redemption could have had.
+			// it was (RFC 9470 §6.1). A challenge recorded without a usable one — none, one that
+			// yields no claim, or one after the redemption (the recording host's clock ahead of
+			// this one's, which is warned) — leaves the earliest issuance a challenge still live at
+			// the redemption could have had.
 			const issuedAtMs = ceremonyOutcome.issuedAtMs;
-			const authenticatedAtMs =
-				typeof issuedAtMs === "number" && Number.isFinite(issuedAtMs)
-					? Math.min(issuedAtMs, redeemedAtMs)
-					: redeemedAtMs - deps.webauthnConfig.challengeTtlMs;
-			const authTime = authTimeClaim(new Date(authenticatedAtMs));
+			let fromIssuance: number | undefined;
+			if (typeof issuedAtMs === "number" && Number.isFinite(issuedAtMs)) {
+				if (issuedAtMs > redeemedAtMs) {
+					logger.warn(
+						{
+							...(clientId === undefined ? {} : { clientId: auditErrorText(clientId) }),
+							aheadMs: issuedAtMs - redeemedAtMs,
+						},
+						"passkey_challenge_issued_ahead_of_clock",
+					);
+				} else {
+					fromIssuance = authTimeClaim(new Date(issuedAtMs));
+				}
+			}
+			const authTime =
+				fromIssuance ?? authTimeClaim(new Date(redeemedAtMs - deps.webauthnConfig.challengeTtlMs));
 
 			// ------------------------------------------------------------------
 			// Step 5: Atomic CAS sign-count update
