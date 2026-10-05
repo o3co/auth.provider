@@ -22,6 +22,7 @@
  */
 
 import type {
+	ExchangeTokenValidator,
 	GrantContext,
 	GrantDependencies,
 	GrantHandler,
@@ -54,6 +55,7 @@ import { readTokenRequest, type TokenRequest } from "./tokenRequest.mjs";
 import {
 	type ReportedBindings,
 	resolveValidators,
+	revalidate,
 	validateActor,
 	validateSubject,
 } from "./tokenValidation.mjs";
@@ -114,41 +116,31 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 
 			const validators = resolveValidators(tokenExchangeValidatorResolver, request);
 			if (isRefusal(validators)) return validators;
+			// The issued token's `iat`, fixed before the presented tokens are validated,
+			// so a subject revocation recorded after any watermark read here covers it.
+			const issuedAt = Math.floor(Date.now() / 1000);
 			const subject = await validateSubject(deps, ctx, request, validators.subjectValidator);
 			if (isRefusal(subject)) return subject;
 			const { subjectValidated, subjectBindings, issuedConfirmation } = subject;
 
-			// The refresh-token family rule — this grant's, not the validator's;
-			// see `familyRefusal`. After the sender-constraint matrices, so a cheap
-			// refusal still short-circuits ahead of the store read.
-			const subjectFamilyRefusal = await familyRefusal(deps, "subject", subjectBindings);
-			if (subjectFamilyRefusal) return subjectFamilyRefusal;
-			// The session rule, beside it: see `sessionRefusal`.
-			const subjectSessionRefusal = await sessionRefusal(
+			// After the sender-constraint matrices, so a cheap refusal still
+			// short-circuits ahead of the store reads.
+			const subjectStanding = await standingRefusal(
 				deps,
 				"subject",
 				subjectValidated,
 				subjectBindings,
 			);
-			if (subjectSessionRefusal) return subjectSessionRefusal;
+			if (subjectStanding) return subjectStanding;
 
 			const actor = await validateActor(deps, ctx, request, validators.actorValidator);
 			if (isRefusal(actor)) return actor;
 			const { actorValidated, actorBindings } = actor;
 			if (actorValidated && actorBindings) {
-				// The subject's family rule, applied to the actor: a revoked actor credential
-				// must not be recorded in `act` as a live delegation.
-				const actorFamilyRefusal = await familyRefusal(deps, "actor", actorBindings);
-				if (actorFamilyRefusal) return actorFamilyRefusal;
-				// And the session rule: an actor whose session a logout ended is
-				// not a live delegation either.
-				const actorSessionRefusal = await sessionRefusal(
-					deps,
-					"actor",
-					actorValidated,
-					actorBindings,
-				);
-				if (actorSessionRefusal) return actorSessionRefusal;
+				// A revoked or logged-out actor credential must not be recorded in
+				// `act` as a live delegation.
+				const actorStanding = await standingRefusal(deps, "actor", actorValidated, actorBindings);
+				if (actorStanding) return actorStanding;
 			}
 			const delegationRefused = delegationRefusal(deps, client, subjectValidated, actorValidated);
 			if (delegationRefused) return delegationRefused;
@@ -172,11 +164,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (isRefusal(issued)) return issued;
 			const { audienceForToken } = issued;
 
+			// The last check before minting: the token is minted only from presented
+			// tokens that still pass after the policy.
+			const presentedAgain = await presentedTokensRefusal(
+				deps,
+				request,
+				validators,
+				{ subjectValidated, subjectBindings },
+				{ actorValidated, actorBindings },
+			);
+			if (presentedAgain) return presentedAgain;
+
 			const issuedToken = await issueAccessToken(
 				deps,
 				ctx,
 				{ defaultExpiresIn, maxExpiresIn },
 				{
+					issuedAt,
 					client,
 					subjectValidated,
 					subjectBindings,
@@ -333,6 +337,63 @@ async function applyGrantPolicy(
 		}
 	}
 	return { grantedScope, grantedAudience };
+}
+
+/**
+ * The presented tokens held again, at the end of the exchange, to what can change
+ * while it runs: each token's validator (its denylist and watermark, when it
+ * reads them), then its family and session rules over the bindings the first
+ * validation read, which are the ones minted. In the first check's order, with
+ * its refusals and outages; `null` when both tokens still pass.
+ */
+async function presentedTokensRefusal(
+	deps: TokenExchangeDependencies,
+	{ subjectToken, actorToken }: Pick<TokenRequest, "subjectToken" | "actorToken">,
+	{
+		subjectValidator,
+		actorValidator,
+	}: {
+		readonly subjectValidator: ExchangeTokenValidator;
+		readonly actorValidator: ExchangeTokenValidator | null | undefined;
+	},
+	subject: {
+		readonly subjectValidated: ValidatedToken;
+		readonly subjectBindings: ReportedBindings;
+	},
+	actor: {
+		readonly actorValidated: ValidatedToken | null;
+		readonly actorBindings: ReportedBindings | null;
+	},
+): Promise<GrantHandlerResult | null> {
+	const subjectRefused =
+		(await revalidate(deps, "subject", subjectToken, subjectValidator)) ??
+		(await standingRefusal(deps, "subject", subject.subjectValidated, subject.subjectBindings));
+	if (subjectRefused) return subjectRefused;
+	const { actorValidated, actorBindings } = actor;
+	if (actorToken === null || !actorValidator || !actorValidated || !actorBindings) return null;
+	return (
+		(await revalidate(deps, "actor", actorToken, actorValidator)) ??
+		(await standingRefusal(deps, "actor", actorValidated, actorBindings))
+	);
+}
+
+/**
+ * A validated token's standing with this grant: the family rule, then the
+ * session rule. The refusal, or `null` when the token passes both.
+ */
+async function standingRefusal(
+	deps: Pick<
+		TokenExchangeDependencies,
+		"refreshTokenFamilyRevocation" | "userSessionStore" | "logger"
+	>,
+	role: "subject" | "actor",
+	validated: ValidatedToken,
+	bindings: ReportedBindings,
+): Promise<GrantHandlerResult | null> {
+	return (
+		(await familyRefusal(deps, role, bindings)) ??
+		(await sessionRefusal(deps, role, validated, bindings))
+	);
 }
 
 /**

@@ -40,6 +40,8 @@ import type { ReportedBindings } from "./tokenValidation.mjs";
 
 /** What the issued token is minted from. */
 export interface Issuance {
+	/** The issuance instant, epoch seconds: the minted `iat`, and what `exp` is measured from. */
+	readonly issuedAt: number;
 	readonly client: PublicClient;
 	readonly subjectValidated: ValidatedToken;
 	/** The subject's family and session, as read once at validation. */
@@ -56,6 +58,7 @@ export async function issueAccessToken(
 	ctx: GrantContext,
 	{ defaultExpiresIn, maxExpiresIn }: AccessTokenLifetime,
 	{
+		issuedAt,
 		client,
 		subjectValidated,
 		subjectBindings,
@@ -83,17 +86,18 @@ export async function issueAccessToken(
 	// chain of exchanges outlives its origin indefinitely. The built-in validator
 	// already rejects an expired subject, so this is the fail-closed backstop for
 	// contributed validators, placed here so the refusal order of a doubly invalid
-	// request is unchanged. The issuance instant is read once for both the cap and
-	// the minted `iat`/`exp`, so they cannot straddle a second and exceed the
-	// subject's `exp`.
-	const issuedAt = Math.floor(Date.now() / 1000);
+	// request is unchanged. The cap is measured from the issuance instant the minted
+	// `iat`/`exp` carry, so `exp` cannot pass the subject's; the expiry is judged
+	// at the minting clock, so a subject that expired while the exchange ran is
+	// refused.
 	const subjectExpiry = subjectValidated.claims.exp;
 	if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
-		const remaining = Math.floor(subjectExpiry - issuedAt);
 		// `<= 0` includes a token expiring within this second: capping would mint a dead
 		// token, so refuse instead.
-		if (remaining <= 0) return invalidRequest("subject_token has expired");
-		expiresIn = Math.min(expiresIn, remaining);
+		if (Math.floor(subjectExpiry - Math.floor(Date.now() / 1000)) <= 0) {
+			return invalidRequest("subject_token has expired");
+		}
+		expiresIn = Math.min(expiresIn, Math.floor(subjectExpiry - issuedAt));
 	}
 	// A subject token without `exp` leaves the lifetime above standing: `exp` is a
 	// property of the presented credential, and a validator returning none asserts a
