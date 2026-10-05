@@ -174,6 +174,8 @@ interface BuildOptions {
 	readonly transactionStore?: MfaTransactionStore;
 	readonly events?: AuditEvent[];
 	readonly logger?: Logger;
+	/** `mfa.manage.maxAgeSeconds`; 300 by default. */
+	readonly recentMfaMaxAgeSeconds?: number;
 }
 
 /** The requirement over `options`: TOTP and recovery codes installed, a mail sender wired, `when-mail`, no record held. */
@@ -188,7 +190,7 @@ function build(options: BuildOptions = {}) {
 		factorStore: factorStoreHolding(...(options.records ?? [])),
 		transactions: createLoginTransactions({ store: transactionStore, ttlSeconds: 600 }),
 		stepUpPage: PAGE,
-		recentMfaMaxAgeSeconds: 300,
+		recentMfaMaxAgeSeconds: options.recentMfaMaxAgeSeconds ?? 300,
 		logger: options.logger ?? silentLogger(),
 		...(events === undefined
 			? {}
@@ -464,15 +466,24 @@ describe("a subject with no counting factor, in a federated session whose upstre
 	}
 
 	it("holds the first-binding mark to when the session was established, not to the upstream's authentication", async () => {
-		// An upstream authentication before the mark, a callback after it: the
-		// mark distrusts sessions established before another one bound a factor.
+		// The upstream authenticated the user inside the mark's window, the
+		// callback established the session after it: the mark distrusts what
+		// was established before another session bound a factor, so this one
+		// is not distrusted. A window wide enough for both to be recent.
 		const transactionStore = createMemoryMfaTransactionStore();
-		const session = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 120_000 });
-		vi.spyOn(transactionStore, "firstBindingAt").mockImplementation(
-			async () => session.authTime.getTime() - DEFAULT_CLOCK_SKEW_MS - 1,
-		);
-		const { requirement } = build({ transactionStore, requireEmailProof: "never" });
+		const session = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 600_000 });
+		const mark = session.authTime.getTime() - DEFAULT_CLOCK_SKEW_MS - FIRST_BINDING_LEASE_MS - 1;
+		vi.spyOn(transactionStore, "firstBindingAt").mockImplementation(async () => mark);
+		const { requirement } = build({
+			transactionStore,
+			requireEmailProof: "never",
+			recentMfaMaxAgeSeconds: 900,
+		});
 		expect(await requirement.admit(inputFor(session))).toEqual(MET);
+		// The same mark against the upstream's time would distrust it.
+		expect(mark + DEFAULT_CLOCK_SKEW_MS + FIRST_BINDING_LEASE_MS).toBeGreaterThan(
+			session.authTime.getTime() - 600_000 + 1_000,
+		);
 	});
 });
 
