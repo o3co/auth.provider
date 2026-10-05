@@ -330,7 +330,7 @@ export interface RequirementInput {
 	readonly carrier: SessionClaim["carrier"];
 	/** The record's `sub` when one was read, else the claim's subject: `undefined` only on the code record's first read. */
 	readonly subject: string | undefined;
-	/** The action by its effective grade: an undeclared `remediation` arrives as `credential_change`. */
+	/** The action as registered, frozen; never a `remediation`, which no requirement is asked about. */
 	readonly action: AdmissionAction;
 	readonly asks: AdmissionAsks | undefined;
 	readonly now: Date;

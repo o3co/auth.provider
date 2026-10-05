@@ -1239,39 +1239,59 @@ describe("step 5 — the requirements", () => {
 		expect(seen).toEqual([]);
 	});
 
-	it("asks every requirement, as credential_change, about a remediation core issued to a requirement it does not hold, said once per process per name", async () => {
+	it("refuses, as a RangeError and asking no requirement, a remediation core issued to a requirement these do not hold", async () => {
 		const { logger, lines } = recordingLogger();
 		const seen: string[] = [];
 		const watching = (name: string) =>
 			met(name, {
 				admit: async ({ action }) => {
-					seen.push(`${name}:${action.name}:${action.grade}`);
+					seen.push(`${name}:${action.name}`);
 					return { outcome: "met" };
 				},
 			});
-		// Registered elsewhere — another composition's — so issued, but not to these.
+		// Registered elsewhere — another composition's, or another boot's — so issued, but not to these.
 		const elsewhere = met("elsewhere", { remediations: ["elsewhere.step_up"] });
 		resolverForTests([elsewhere], { actions: TEST_ACTIONS });
 		const undeclared = issuedRemediationActions(elsewhere)?.step_up as IssuedRemediationAction;
-		const first = deps({
+		const here = deps({
 			requirements: resolverForTests([watching("one"), watching("two")], { actions: TEST_ACTIONS }),
 			logger,
 		});
-		await admitSession(first, request({ action: undeclared }));
-		await admitSession(first, request({ action: undeclared }));
-		expect(seen).toEqual([
-			"one:elsewhere.step_up:credential_change",
-			"two:elsewhere.step_up:credential_change",
-			"one:elsewhere.step_up:credential_change",
-			"two:elsewhere.step_up:credential_change",
-		]);
-		expect(lines).toEqual([
-			{
-				level: "warn",
-				message: "session_admission_remediation_undeclared",
-				fields: { action: "elsewhere.step_up" },
+
+		await expect(admitSession(here, request({ action: undeclared }))).rejects.toThrow(RangeError);
+
+		expect(seen).toEqual([]);
+		expect(lines).toEqual([]);
+	});
+
+	it("hands every requirement the same frozen action, so one cannot change the grade the next reads", async () => {
+		const seen: string[] = [];
+		const rewriting = met("first", {
+			admit: async ({ action }) => {
+				expect(Object.isFrozen(action)).toBe(true);
+				try {
+					(action as { grade: string }).grade = "use";
+				} catch {
+					// A frozen object refuses the write in strict mode.
+				}
+				return { outcome: "met" };
 			},
-		]);
+		});
+		const reading = met("second", {
+			admit: async ({ action }) => {
+				seen.push(action.grade);
+				return { outcome: "met" };
+			},
+		});
+
+		await admitSession(
+			deps({
+				requirements: resolverForTests([rewriting, reading], { actions: TEST_ACTIONS }),
+			}),
+			request({ action: "test.change" }),
+		);
+
+		expect(seen).toEqual(["credential_change"]);
 	});
 
 	it("answers unavailable (the requirement's name) when a requirement throws, logged once: a requirement is never trusted to fail open", async () => {
@@ -1855,28 +1875,6 @@ describe("an action a consumer registered, passed by its name", () => {
 	});
 });
 
-describe("the undeclared-remediation line is capped", () => {
-	it("says each name once up to 256 names, then once for all", async () => {
-		const { logger, lines } = recordingLogger();
-		const with_ = deps({ logger });
-		for (let i = 0; i < 300; i++) {
-			// Issued to a requirement registered elsewhere, not to this resolver's.
-			const elsewhere = met(`route${i}`, { remediations: [`route${i}.step_up`] });
-			resolverForTests([elsewhere], { actions: TEST_ACTIONS });
-			await admitSession(
-				with_,
-				request({
-					action: issuedRemediationActions(elsewhere)?.step_up as IssuedRemediationAction,
-				}),
-			);
-		}
-		expect(lines.length).toBeLessThanOrEqual(257);
-		expect(lines.every((line) => typeof line.fields.action === "string")).toBe(true);
-		expect(lines.filter((line) => line.fields.overflow === true)).toHaveLength(1);
-		expect(lines[lines.length - 1]?.fields.overflow).toBe(true);
-	});
-});
-
 describe("step 6 — acr_values, with the reach of what is registered", () => {
 	const table = readAcrTable({ "urn:o3co:acr:mfa": ["mfa"], "urn:example:pwd": ["pwd"] });
 
@@ -2029,7 +2027,7 @@ describe("the caller's faults admitSession names, each driven", () => {
 		);
 	});
 
-	it("takes an action another resolver's requirement was issued as credential_change: an issued action is its own requirement's", async () => {
+	it("refuses an action another resolver's requirement was issued: an issued action is its own requirement's", async () => {
 		const owner = met("mfa", { remediations: ["mfa.step_up"] });
 		resolverForTests([owner], { actions: TEST_ACTIONS });
 		const seen: string[] = [];
@@ -2039,10 +2037,12 @@ describe("the caller's faults admitSession names, each driven", () => {
 				return { outcome: "met" };
 			},
 		});
-		await admitSession(
-			deps({ requirements: resolverForTests([other], { actions: TEST_ACTIONS }) }),
-			request({ action: issuedRemediationActions(owner)?.step_up as IssuedRemediationAction }),
-		);
-		expect(seen).toEqual(["credential_change"]);
+		await expect(
+			admitSession(
+				deps({ requirements: resolverForTests([other], { actions: TEST_ACTIONS }) }),
+				request({ action: issuedRemediationActions(owner)?.step_up as IssuedRemediationAction }),
+			),
+		).rejects.toThrow(RangeError);
+		expect(seen).toEqual([]);
 	});
 });
