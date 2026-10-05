@@ -676,12 +676,12 @@ Two low-level helpers used by the `authorization_code` grant and the `/oauth/use
 
 #### `generateIdToken`
 
-`generateIdToken(opts)` is in [`src/grants/idToken.mts`](src/grants/idToken.mts), with its options, `GenerateIdTokenOptions`, beside it; `expiresIn` defaults to 3600 s.
+`generateIdToken(opts)` is in [`src/grants/idToken.mts`](src/grants/idToken.mts), with its options, `GenerateIdTokenOptions`, beside it; `expiresIn` defaults to 3600 s. `issuedAt` (optional, whole epoch seconds) is the issuance instant: it sets `iat`, `exp` is measured from it, and `auth_time` is read against it. Without it, the clock is used. One that is not whole, non-negative epoch seconds is refused, as `generateToken` refuses it.
 
 Signs and returns an OIDC id_token JWT (OIDC Core §2). Claim composition:
 
 - `iss`, `sub`, `aud`, `exp`, `iat`, `jti` — standard JWT claims
-- `auth_time` — whole seconds since the epoch, from `opts.authTime` read against the clock that sets `iat` through `authTimeAt`, so never later than `iat`: an instant up to `DEFAULT_CLOCK_SKEW_MS` ahead is stamped as `iat`; one it cannot read (an invalid `Date`, one before the epoch, one further ahead) is a `RangeError`, and nothing is signed
+- `auth_time` — whole seconds since the epoch, from `opts.authTime` read against the instant that sets `iat` (`issuedAt`, else the clock) through `authTimeAt`, so never later than `iat`: an instant up to `DEFAULT_CLOCK_SKEW_MS` ahead is stamped as `iat`; one it cannot read (an invalid `Date`, one before the epoch, one further ahead) is a `RangeError`, and nothing is signed
 - `sid` — session identifier for back-channel logout
 - `azp` — authorized party, included when provided
 - `nonce` — reflected verbatim from the authorization request when provided
