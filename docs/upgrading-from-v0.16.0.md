@@ -644,7 +644,15 @@ modules fills them.
   module's factories carries the parsed section as `section` and
   `oauthTokenSettings`, and no `webauthnConfig`; `webauthnConfigSchema`
   refuses a key it does not declare, `allowCredentialsForKnownUser` included.
-  The module still requires `config`, for core's `core.tokenBinding` alone.
+- **BREAKING: the WebAuthn grant reads the binding rule from the
+  `tokenBindingSettings` slot, not `config` (#728).** `webauthnModule`
+  requires core's `tokenBindingSettings`, which core fills from
+  `core.tokenBinding` in every composition, and no longer requires `config`:
+  a composition booted with `createApp` sees no change. Deps built by hand
+  for `createWebAuthnGrant` or the module's grant factory carry
+  `tokenBindingSettings` (`resolveTokenBindingSettings(config)`; in a test,
+  `createTestTokenBindingSettings()`) instead of `config`; without it the
+  grant throws a `TypeError` naming the slot when it is built.
 - **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
   section's defaults live only in the package's `config/reference.conf`. A
   configuration that layers the modules' references (`moduleReferences`, as

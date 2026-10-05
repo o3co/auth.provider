@@ -54,8 +54,9 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
  * runs. The routes and the grant read that section; the module provides it as the
  * `webauthnConfig` slot, for the package's other readers (the WebAuthn second factor), and names
  * the slot `authoritative`. The token lifetimes and the resource-indicator switch come from the
- * `oauthTokenSettings` slot, which it requires. Each route has its own id for collision
- * detection and ordering.
+ * `oauthTokenSettings` slot, and the refresh-token binding rule from core's `tokenBindingSettings`
+ * slot, both of which it requires; it reads nothing of the whole configuration. Each route has
+ * its own id for collision detection and ordering.
  *
  * `POST /oauth/webauthn/authentication/options` is rate-limited by the module itself: core's
  * `createRateLimitGuard` under the `webauthn-authentication-options` tag, on the wired
@@ -69,11 +70,11 @@ export const webauthnModule = defineModule<
 	| "webauthnCredentialStore"
 	| "challengeStore"
 	| "challengeCeremony"
-	| "config"
 	| "keyStore"
 	| "deploymentMode"
 	| "rateLimitBudgetResolver"
-	| "oauthTokenSettings",
+	| "oauthTokenSettings"
+	| "tokenBindingSettings",
 	"grantPolicy" | "rateLimiter" | "auditSink" | "logger" | "refreshTokenFamilyRotation",
 	typeof webauthnConfigSchema,
 	"webauthnConfig"
@@ -99,9 +100,6 @@ export const webauthnModule = defineModule<
 		"webauthnCredentialStore",
 		"challengeStore",
 		"challengeCeremony",
-		// Core's own section alone: the grant reads `core.tokenBinding` through core's
-		// `resolveTokenBindingSettings`, which no slot carries.
-		"config",
 		"keyStore",
 		// The replica count core fills: the authentication/options route's per-process fallback
 		// is refused under `multi`. Required, so a mode read as absent cannot lift that refusal.
@@ -111,6 +109,9 @@ export const webauthnModule = defineModule<
 		// The token lifetimes and the resource-indicator switch, which the grant reads; the oauth
 		// module provides it, and a composition without that module fills it itself.
 		"oauthTokenSettings",
+		// Whether a confidential client's refresh token is bound, which the grant reads; core
+		// fills it from `core.tokenBinding` in every composition.
+		"tokenBindingSettings",
 	],
 	optional: [
 		// Required by the grant factory, which throws at boot without it; optional here only so

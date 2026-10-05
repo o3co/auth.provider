@@ -43,7 +43,10 @@ import {
 	type ReplaySeenSet,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
-import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+} from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -178,7 +181,7 @@ async function contributedGrant(stores: Stores, logger: Logger): Promise<GrantHa
 	const factory = webauthnModule.contributes?.grants?.[WEBAUTHN_GRANT_TYPE];
 	if (!factory) throw new Error("webauthnModule contributes no webauthn grant");
 	return factory({
-		config: {},
+		tokenBindingSettings: createTestTokenBindingSettings(),
 		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		webauthnCredentialStore: stores.credentialStore,

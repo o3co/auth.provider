@@ -30,7 +30,9 @@
  * unless its family was registered, and a family store that cannot answer is
  * a 503 that costs no signature; the DPoP `cnf.jkt` binding, on the same
  * public-client / `bindConfidentialClientRefreshTokens` gate
- * `authorization.mts` and `refreshToken.mts` apply; and the `auth_time` both
+ * `authorization.mts` and `refreshToken.mts` apply, the setting read from
+ * core's `tokenBindingSettings` slot and never from a configuration; and the
+ * `auth_time` both
  * tokens carry, never later than the challenge's issuance.
  *
  * `verifyWebAuthnAssertion` is mocked, as in grant.test.mts: its contract is
@@ -41,6 +43,7 @@
 import {
 	type ChallengeCeremony,
 	type ChallengeCeremonyOutcome,
+	createApp,
 	createChallengeCeremony,
 	createMemoryChallengeStore,
 	createMemoryRefreshTokenFamilyStore,
@@ -48,15 +51,21 @@ import {
 	createMemoryWebAuthnCredentialStore,
 	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
+	defineModule,
 	type GrantContext,
-	type GrantDependencies,
+	type GrantHandler,
+	type GrantHandlerResolver,
+	type GrantPolicyHook,
+	memoryChallengeStoreModule,
 	type RefreshTokenFamilyRotation,
-	resolveTokenBindingSettings,
 	type TokenBinding,
 	verifyJwt,
 	type WebAuthnCredential,
 } from "@o3co/auth-provider-core";
-import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+} from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -69,6 +78,7 @@ import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
 import { verifyWebAuthnAssertion } from "#/internal/verification.mjs";
 import { webauthnModule } from "#/module.mjs";
 import { createTestWebAuthnConfig } from "#/testing/index.mjs";
+import { makeAppConfig, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
 const mockVerifyAssertion = vi.mocked(verifyWebAuthnAssertion);
 
@@ -123,24 +133,6 @@ function makeConsumedCeremony(): ChallengeCeremony {
 	};
 }
 
-/**
- * The configuration the grant reads: core's token-binding section alone. The lifetimes come from
- * the `oauthTokenSettings` slot, never from here.
- */
-function makeConfig(
-	overrides: { readonly bindConfidentialClientRefreshTokens?: boolean } = {},
-): GrantDependencies["config"] {
-	return (overrides.bindConfidentialClientRefreshTokens === undefined
-		? {}
-		: {
-				core: {
-					tokenBinding: {
-						bindConfidentialClientRefreshTokens: overrides.bindConfidentialClientRefreshTokens,
-					},
-				},
-			}) as unknown as GrantDependencies["config"];
-}
-
 /** The slot the grant mints with: this file's issuer and lifetimes. */
 const tokenSettings = () =>
 	createTestOAuthTokenSettings({
@@ -151,13 +143,12 @@ const tokenSettings = () =>
 
 type WebAuthnDeps = Parameters<typeof createWebAuthnGrant>[0];
 
-async function makeDeps(
-	overrides: Partial<WebAuthnDeps> & { readonly config?: GrantDependencies["config"] } = {},
-): Promise<WebAuthnDeps> {
+/** The grant's deps: no configuration among them, the binding rule from core's slot. */
+async function makeDeps(overrides: Partial<WebAuthnDeps> = {}): Promise<WebAuthnDeps> {
 	const credentialStore = createMemoryWebAuthnCredentialStore();
 	await credentialStore.registerCredential(makeCredential());
 	return {
-		config: makeConfig(),
+		tokenBindingSettings: createTestTokenBindingSettings(),
 		keyStore,
 		webauthnCredentialStore: credentialStore,
 		challengeCeremony: makeConsumedCeremony(),
@@ -244,10 +235,9 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("createWebAuthnGrant — the oauthTokenSettings it reads", () => {
-	it("mints from the slot alone, with a configuration that carries no oauth key", async () => {
+	it("mints from the slot alone, with no configuration in its deps", async () => {
 		const tokens = await issue(
 			await makeDeps({
-				config: {} as GrantDependencies["config"],
 				oauthTokenSettings: createTestOAuthTokenSettings({
 					issuer: ISSUER,
 					accessTokenLifetime: { defaultExpiresIn: 111, maxExpiresIn: 111 },
@@ -262,7 +252,7 @@ describe("createWebAuthnGrant — the oauthTokenSettings it reads", () => {
 		expect((refresh.exp as number) - (refresh.iat as number)).toBe(2222);
 	});
 
-	it("is never built without the slot, naming it, whatever the configuration holds", async () => {
+	it("is never built without the slot, naming it", async () => {
 		const { oauthTokenSettings: _slot, ...deps } = await makeDeps({
 			oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
 		});
@@ -667,7 +657,11 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens", () => {
 
 	it("binds a confidential client's refresh token when the deployment opts in", async () => {
 		const tokens = await issue(
-			await makeDeps({ config: makeConfig({ bindConfidentialClientRefreshTokens: true }) }),
+			await makeDeps({
+				tokenBindingSettings: createTestTokenBindingSettings({
+					bindConfidentialClientRefreshTokens: true,
+				}),
+			}),
 			makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
 				tokenBinding: dpopBinding("PROOF-JKT"),
 			}),
@@ -676,32 +670,77 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens", () => {
 		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
 	});
 
-	it("binds a confidential client's refresh token exactly when core's resolveTokenBindingSettings says so", async () => {
-		// The setting applies across every binding mechanism, so it is core's;
-		// the slot carries none, and the grant reads core's reader.
-		for (const tokenBinding of [
-			undefined,
-			{},
-			{ bindConfidentialClientRefreshTokens: true },
-			{ bindConfidentialClientRefreshTokens: false },
-			// A configuration built by hand, which no schema coerced.
-			{ bindConfidentialClientRefreshTokens: "true" },
-			{ "dispatch-policy": "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
-		]) {
-			const config = (tokenBinding === undefined
-				? {}
-				: { core: { tokenBinding } }) as unknown as GrantDependencies["config"];
+	it.each([true, false])(
+		"binds a confidential client's refresh token exactly when the tokenBindingSettings slot says %s, with no configuration in its deps",
+		async (bindConfidentialClientRefreshTokens) => {
+			// The setting applies across every binding mechanism, so it is core's: core fills the
+			// slot from `core.tokenBinding`, and the grant reads the slot.
+			const deps = await makeDeps({
+				tokenBindingSettings: createTestTokenBindingSettings({
+					bindConfidentialClientRefreshTokens,
+				}),
+			});
+			expect(deps).not.toHaveProperty("config");
+
 			const tokens = await issue(
-				await makeDeps({ config }),
+				deps,
 				makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
 					tokenBinding: dpopBinding("PROOF-JKT"),
 				}),
 			);
+
 			const bound = decodePayload(tokens.refresh_token as string).cnf !== undefined;
-			expect(bound, JSON.stringify(tokenBinding)).toBe(
-				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens,
+			expect(bound).toBe(bindConfidentialClientRefreshTokens);
+		},
+	);
+
+	it.each([true, false])(
+		"reads the slot's %s, not a configuration handed beside it that says the opposite",
+		async (bindConfidentialClientRefreshTokens) => {
+			// A grant that fell back to `core.tokenBinding` would read the opposite and bind
+			// (or leave unbound) the other way.
+			const deps = {
+				...(await makeDeps({
+					tokenBindingSettings: createTestTokenBindingSettings({
+						bindConfidentialClientRefreshTokens,
+					}),
+				})),
+				config: {
+					core: {
+						tokenBinding: {
+							bindConfidentialClientRefreshTokens: !bindConfidentialClientRefreshTokens,
+						},
+					},
+				},
+			} as WebAuthnDeps;
+
+			const tokens = await issue(
+				deps,
+				makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
+					tokenBinding: dpopBinding("PROOF-JKT"),
+				}),
 			);
-		}
+
+			const bound = decodePayload(tokens.refresh_token as string).cnf !== undefined;
+			expect(bound).toBe(bindConfidentialClientRefreshTokens);
+		},
+	);
+
+	it("is never built without the tokenBindingSettings slot, naming it", async () => {
+		const { tokenBindingSettings: _slot, ...deps } = await makeDeps();
+		expect(() => createWebAuthnGrant(deps as never)).toThrow(/tokenBindingSettings/);
+	});
+
+	it.each([
+		["null", null],
+		["an empty object", {}],
+		[
+			"a non-boolean rule",
+			{ dispatchPolicy: "intent-explicit", bindConfidentialClientRefreshTokens: "true" },
+		],
+	])("is never built with %s in the tokenBindingSettings slot, naming it", async (_label, slot) => {
+		const deps = { ...(await makeDeps()), tokenBindingSettings: slot };
+		expect(() => createWebAuthnGrant(deps as never)).toThrow(/tokenBindingSettings/);
 	});
 
 	it("emits no cnf when the request carried no binding", async () => {
@@ -737,7 +776,7 @@ describe("webauthnModule — refresh-token family wiring", () => {
 		// Awaited, as the boot planner does: a contribution factory may answer
 		// with a promise.
 		const handler = await grantFactory({
-			config: makeConfig(),
+			tokenBindingSettings: createTestTokenBindingSettings(),
 			keyStore,
 			webauthnCredentialStore: credentialStore,
 			challengeCeremony: makeConsumedCeremony(),
@@ -764,4 +803,91 @@ describe("webauthnModule — refresh-token family wiring", () => {
 		expect(result.status).toBe(200);
 		expect(register).toHaveBeenCalledTimes(1);
 	});
+});
+
+// ---------------------------------------------------------------------------
+// The binding rule, from core's slot
+//
+// Core fills `tokenBindingSettings` from `core.tokenBinding` in every
+// composition; the module requires the slot and not the configuration, so
+// the grant `createApp` registers reads the rule from what core filled.
+// ---------------------------------------------------------------------------
+
+describe("webauthnModule — the tokenBindingSettings slot", () => {
+	it("requires tokenBindingSettings, and neither requires nor lists config", () => {
+		expect(webauthnModule.requires).toContain("tokenBindingSettings");
+		expect(webauthnModule.requires).not.toContain("config");
+		expect(webauthnModule.optional).not.toContain("config");
+	});
+
+	it.each([true, false])(
+		"hands the grant the slot core fills from core.tokenBinding: a confidential client's refresh token is bound exactly when it says %s",
+		async (bindConfidentialClientRefreshTokens) => {
+			const credentialStore = createMemoryWebAuthnCredentialStore();
+			await credentialStore.registerCredential(makeCredential());
+			const base = makeAppConfig();
+			const handle = await createApp({
+				modules: [
+					webauthnModule,
+					memoryChallengeStoreModule,
+					defineModule({
+						name: "test:webauthn-token-binding-slots",
+						provides: {
+							webauthnCredentialStore: () => credentialStore,
+							challengeCeremony: () => makeConsumedCeremony(),
+							keyStore: () => keyStore,
+							grantPolicy: (): GrantPolicyHook => ({
+								kind: "test-allow",
+								evaluate: async () => ({ outcome: "allow" }) as const,
+							}),
+						},
+					}),
+					// Makes the planner materialise the grant registry into the handle.
+					defineModule({
+						name: "test:webauthn-token-binding-activator",
+						requires: ["grantHandlerResolver"] as never,
+					}),
+				],
+				bootstrapComponents: {
+					config: withWebAuthnSection(
+						{
+							...base,
+							core: {
+								...base.core,
+								deployment: { mode: "single" },
+								tokenBinding: {
+									dispatchPolicy: "intent-explicit",
+									bindConfidentialClientRefreshTokens,
+								},
+							},
+						},
+						createTestWebAuthnConfig({ origin: [ISSUER] }),
+					),
+					pathResolver: (p: string) => p,
+					oauthTokenSettings: tokenSettings(),
+				} as never,
+			});
+			try {
+				const grant = (
+					(handle.components as Record<string, unknown>).grantHandlerResolver as
+						| GrantHandlerResolver
+						| undefined
+				)?.get(WEBAUTHN_GRANT_TYPE) as GrantHandler | undefined;
+				if (!grant) throw new Error("webauthnModule registered no grant");
+
+				const { result } = await grant.handle(
+					makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
+						tokenBinding: dpopBinding("PROOF-JKT"),
+					}),
+				);
+				if (!("tokens" in result))
+					throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+
+				const bound = decodePayload(result.tokens.refresh_token as string).cnf !== undefined;
+				expect(bound).toBe(bindConfidentialClientRefreshTokens);
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });
