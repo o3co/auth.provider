@@ -185,9 +185,16 @@ record. A participant's `data` is `""`: its kind and id are all it holds
 From the closing commit on, liveness answers `not_live` and nothing joins,
 so a close with work still outstanding has ended the session; it answers
 `pending`, distinct from `done`. `unavailable` means the commit did not land,
-or whether it did could not be read. How a route answers `pending` (the
-logout's 200 and a `logout.close_pending` audit event) is decided when that
-route switches.
+or whether it did could not be read. A commit that finds no live record —
+the session's end passed on the store's clock before its record could be
+opened, or since it was read, which the clock skew between the hosts and
+the store allows while the user session is still read — has no record to
+save the work in. The close runs that work at once, in its phases, over the
+record the commit would have saved (the read record's participants, or
+none), without `completeIf`, and answers `done`; an item that fails makes it
+answer `unavailable`, so a later close runs it all again. How a route
+answers `pending` (the logout's 200 and a `logout.close_pending` audit
+event) is decided when that route switches.
 
 **D10. The close work, in phases.** An item runs only once no item of an
 earlier phase is pending in the record, so no phase runs over work an
@@ -339,7 +346,7 @@ once the notifier would have registered, and only where
 filled it with is the host's. It is refused as before, as that module's
 provider failing (`provides-factory-failed`, naming
 `core-session-lifecycle`), its remedy now naming the contribution: install a
-module that contributes a `sessionCloseNotifiers` entry, as `oauthModule`
+module that contributes a `sessionCloseNotifiers` entry, as `oauthEndpointsModule`
 does.
 
 **D17. Join order, and the federations a logout reads first.** A record's

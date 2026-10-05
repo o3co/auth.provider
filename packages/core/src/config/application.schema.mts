@@ -819,8 +819,8 @@ export const fullSectionsSchema = z.object({
 	session: z.unknown().optional(),
 	rateLimit: z.unknown().optional(),
 	// The session store's section, parsed by its module. Mirrored for the key
-	// a composition root reads before it knows its modules — the storage its
-	// store module is built for — kept as written.
+	// a composition root may read before boot — the storage — kept as
+	// written.
 	"session-store": z
 		.object({
 			storage: z.object({ type: z.unknown().optional() }).passthrough().optional(),

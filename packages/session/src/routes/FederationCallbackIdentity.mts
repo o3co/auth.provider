@@ -25,10 +25,13 @@
  * exchange and `expiresAt` the reading's end. Otherwise: the adapter's
  * `expiresAt` and `obtainedAt` undefined. A lifetime that cannot be read, or an
  * `expiresAt` that is neither absent, `null` nor an instant, is a failed
- * exchange (502).
+ * exchange (502), as is an `authTime` core would not record (present but not
+ * an instant at or after the epoch, or further ahead than
+ * `DEFAULT_CLOCK_SKEW_MS`).
  */
 
 import {
+	DEFAULT_CLOCK_SKEW_MS,
 	type FederationProvider,
 	type FederationTokens,
 	type Logger,
@@ -47,15 +50,34 @@ export type LinkedTokenLifetime = Pick<FederationTokens, "expiresAt" | "obtained
 
 /**
  * The upstream's profile, the identity token it names, the local account it
- * resolves to (`null` for none), and the lifetime its access token is
- * recorded with.
+ * resolves to (`null` for none), the lifetime its access token is recorded
+ * with, and the upstream's authentication time as core records it.
  */
 export interface FederatedIdentity {
 	readonly profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
 	readonly identityToken: string;
 	readonly user: Awaited<ReturnType<UserRepository["authenticateByToken"]>>;
 	readonly lifetime: LinkedTokenLifetime;
+	readonly upstreamAuthTime: Date | undefined;
 }
+
+/**
+ * The adapter's `authTime` as core records it: absent, or a copy of an
+ * instant at or after the epoch no further ahead than `DEFAULT_CLOCK_SKEW_MS`.
+ * Throws for anything else, so the answer is a failed exchange rather than a
+ * value core refuses after the code was spent.
+ */
+const readUpstreamAuthTimeOf = (
+	profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>,
+): Date | undefined => {
+	const authTime: unknown = profile.authTime;
+	if (authTime === undefined) return undefined;
+	const ms = authTime instanceof Date ? authTime.getTime() : Number.NaN;
+	if (!(Number.isFinite(ms) && ms >= 0 && ms <= Date.now() + DEFAULT_CLOCK_SKEW_MS)) {
+		throw new Error("the adapter's authTime is not an instant this server records");
+	}
+	return new Date(ms);
+};
 
 /**
  * The lifetime a code exchange's answer gives the record, through core's
@@ -135,6 +157,7 @@ export const identifyFederatedUser = async (
 
 	let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
 	let lifetime: LinkedTokenLifetime;
+	let upstreamAuthTime: Date | undefined;
 	// An `expiresIn` counts from before the exchange: time the upstream took is not life left.
 	const calledAt = Date.now();
 	try {
@@ -153,6 +176,7 @@ export const identifyFederatedUser = async (
 		});
 		// An answer whose lifetime cannot be read is a failed exchange.
 		lifetime = readLinkedLifetime(profile, calledAt);
+		upstreamAuthTime = readUpstreamAuthTimeOf(profile);
 	} catch (err) {
 		// The upstream's verdict or outage, or an answer that cannot be read,
 		// not this server's: a warn. The error's cause chain can hold the
@@ -189,5 +213,5 @@ export const identifyFederatedUser = async (
 		return null;
 	}
 
-	return { profile, identityToken, user, lifetime };
+	return { profile, identityToken, user, lifetime, upstreamAuthTime };
 };

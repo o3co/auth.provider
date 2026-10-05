@@ -50,7 +50,7 @@ npm install @o3co/auth-provider-oauth @o3co/auth-provider-core express express-s
 peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-session@^1.17.0`。
 このパッケージは `accepts`、`jose`、`zod` に依存する。
 
-core が peer なのは、構成が core を 1 つだけ持つようにするため: コンポジションルートが `createApp` を import する core であり、他のパッケージの `declare module` による core の拡張が届く core である。express-session が peer なのは、ルーターがブラウザーセッションを読み、その型を拡張するから（`/authorize`、`session` グラント、ログアウト）。ブラウザーのフローを扱う構成は、下の例のとおり `@o3co/auth-provider-session` の `sessionStoreModuleFor(config)` でそれをマウントする。
+core が peer なのは、構成が core を 1 つだけ持つようにするため: コンポジションルートが `createApp` を import する core であり、他のパッケージの `declare module` による core の拡張が届く core である。express-session が peer なのは、ルーターがブラウザーセッションを読み、その型を拡張するから（`/authorize`、`session` グラント、ログアウト）。ブラウザーのフローを扱う構成は、下の例のとおり `@o3co/auth-provider-session` の `sessionStoreModule` でそれをマウントする。
 
 ## 組み込み方
 
@@ -62,13 +62,13 @@ import {
   oauthEndpointsModule,
   oauthSessionGrantModule,
 } from "@o3co/auth-provider-oauth";
-import { sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
     // express-session をマウントする。自前の順序指定を持たないので、
     // ブラウザーセッションを読むすべてのモジュールより前に並べること。
-    sessionStoreModuleFor(config),
+    sessionStoreModule,
     oauthEndpointsModule,
     oauthSessionGrantModule,
     oauthAuthorizationGrantsModule,
@@ -142,9 +142,9 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **モジュール** — [なぜ 4 つのモジュールか](#責務と役割)を参照。
 
-- `oauthEndpointsModule`（ファクトリーではなくモジュールの値） — [`module.mts`](./src/module.mts)。`oauthModule({ config })` は非推奨: `oauthEndpointsModule` を返し、引数を一度も読んでいない。
+- `oauthEndpointsModule`（ファクトリーではなくモジュールの値） — [`module.mts`](./src/module.mts)。
 - `oauthAuthorizationGrantsModule`（ファクトリーではなくモジュールの値）— [`oauthAuthorization.mts`](./src/oauthAuthorization.mts)。
-- `oauthSessionGrantModule`（ファクトリではなくモジュールの値）— [`oauthSession.mts`](./src/oauthSession.mts)。`oauthSessionModule({ config })` は非推奨: 引数を無視して `oauthSessionGrantModule` を返す。
+- `oauthSessionGrantModule`（ファクトリではなくモジュールの値）— [`oauthSession.mts`](./src/oauthSession.mts)。
 - `subjectRevocationServiceModule`（ファクトリではなくモジュールの値） — [`logout/subjectRevocationService.mts`](./src/logout/subjectRevocationService.mts)
 
 **ルーター。** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — 明示的なオプションから `/oauth` ルーターを組み立てる。`oauthEndpointsModule` が解決済みの deps と自分のセクション（`section`、型は `OAuthSection`）を渡して呼ぶものであり、ルーターを自分でマウントする composition root 向け。`section` と `federationSettings` は必須で、ルーターは設定を受け取らない: ルーターが読む `oauth.*` の設定はすべてその 1 つのセクションから来て、インストールされたフェデレーションのどれが上流 IdP の `amr` を信頼するかは、core の `core.federations` の見え方である `federationSettings` から来る（テストは `@o3co/auth-provider-core/testing` の `createTestFederationSettings` で作る）。どちらかが無ければ、ルーターはそれを名指して組み立てを拒否する。グラントレジストリは生成しない: `registry` は呼び出し元が渡す `get(grantType)` を持つ任意のオブジェクトで、同じ値がそのまま返る。`/oauth/token` はこれに対して振り分け、`/authorize` はこれが `authorization_code` グラントを持つときだけマウントされる。そのとき `codeRepository` は必須である。登録済みのグラントタイプが必要な呼び出し元は core の `grantHandlerResolver` を読むこと。`requirements` は必須である: boot プランナーが組み立てた `sessionRequirementResolver` で、`/authorize` と同意ステップはそれを通してセッションを読む。それが無い場合も、プランナーが組み立てていないものが渡された場合も、ルーターは組み立てを拒否する。この二つが許可を求めるアクションは `oauth.authorize` と `oauth.consent` で、`oauthEndpointsModule` が登録する。ルーターを自分でマウントする root は `OAUTH_ROUTER_ADMISSION_ACTIONS` を `contributes.admissionActions` に登録する。登録しなければ、ルーターはハンドラーとアクションを名指して組み立てを拒否する。テストは `@o3co/auth-provider-core/testing` の `resolverForTests` でリゾルバーを作り、それらを登録する。ルーターが読む登録済みクライアントはすべて、渡された `clientRepository` の上に置いた core のクライアントレコード境界（`validatedClientRepository`）を通して読む。Client ID Metadata Documents の有効・無効によらない。登録のスキーマが拒否するレコードは `client_record_refused` を warn で出し、検索は core のブランド付きの拒否（`isClientRecordRefused`）で reject する: `/authorize`・`/token`・`/introspect`・`/revoke`・同意は、読み取りが例外を投げたときと同じく `503 temporarily_unavailable` で答え、エラーの射影に `reason: "client_record_refused"` を載せた `client_repository_unavailable` をログに出す。ドキュメントが有効なときも同じである（[Client ID Metadata Documents](#client-id-metadata-documents-529)）。すでに境界の後ろにあるリポジトリはそのまま読み、二重にはラップしない。ドキュメントが有効なときは、渡されたセクションの `oauth.clientIdMetadataDocuments` から、ルーターがそのリポジトリの上に自分のドキュメントのフォールバックを置く。フォールバックは登録済みクライアントを自分で境界を通して読む。
@@ -298,7 +298,7 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **トークンが運ぶもの。** id_token は `auth_time` を常に持ち、`/authorize` の時点でセッションが保証していれば `amr`（`vouchedAmr`）を、`/authorize` が `acr_values` のリクエストを満たしたときは `acr` を持つ。どちらも `/authorize` で決まってコードが運ぶ（`CodeData.amr`、`CodeData.acr`）ので、コードの発行後にセッションが記録した第 2 要素は、そのコードのトークンのどれにも届かない。交換はなおアドミッションを通してセッションを読み、終わったセッションを拒否し、主体、`auth_time` と id_token のクレームを得る。`amr` を運ばないコード — 古いリリースが発行したもの、あるいは独自の `CodeRepository` が落としたもの — からは `amr` の無いトークンが生まれ、リフレッシュグラントはファミリーが終わるかユーザーが再びサインインするまで、`amr` の無いまま運び続ける。`mfa.mode = "required"` の下では、そのファミリーは最初のリフレッシュで拒否される（`400 invalid_grant`）。アクセストークンは `amr` と `acr` があればそれを写すので、`auth.policy-verifier` やリソースサーバーは id_token 無しでそれに基づいて判断できる — そして**リフレッシュを越えて写し続ける**: `authorization_code` グラントはリフレッシュトークンにも両方を刻み、`refresh_token` グラントは提示されたトークンから、自分が発行するアクセストークンとリフレッシュトークンへそれらを運ぶ。リフレッシュは認証を繰り返さないからである（OIDC Core §12.2 は `auth_time` を同じように扱う）。`auth_time` はトークンを発行する時計より後にならない（core の `authTimeAt`）: その時計よりスキュー（`DEFAULT_CLOCK_SKEW_MS`）の範囲で先にある `authTime` は発行する時計の時刻として、アクセス・リフレッシュ・id トークンに同じ値で刻まれ、それより先にあるものは、何かに署名する前に `authorization_code` の交換と `session` グラントを `400 invalid_grant` `session_invalid` で拒否する（交換のセッション読み取りによる他の拒否と同じく、コードはその時点で使用済みである）。この拒否は、どれだけ先にあるかを付けて `auth_time_ahead_of_clock` として warn に出る: 直すのはそのレプリカの時計である。`refresh_token` グラントは、引き継ぐ `auth_time` を提示されたトークンの `iat` と自身の発行時刻で抑える。イントロスペクションは、トークンの `auth_time` をそのトークンの `iat` より後にしない値で答える。`session` グラントは追跡中のセッションが保証するもの（`vouchedAmr`）を写し（`acr_values` の交渉が無いので `acr` は無い）、パスキーのグラント（`@o3co/auth-provider-webauthn`）はアクセストークンと同じくリフレッシュトークンにも `amr: ["hwk"]` を刻む。どのグラントもこれらのクレームを 1 つの形で読む — `amr` は空でない文字列の空でない配列、`acr` は空でない文字列（core の `wellFormedAmr` / `wellFormedAcr`） — そしてそれ以外は省く。したがって `amr: []` を記録したセッションは、最初のリフレッシュで消える `amr` ではなく、どのトークンにも `amr` を刻まない。どちらも持たないリフレッシュトークンからは、どちらも持たないトークンが生まれる。
 
-**`max_age`。** 負でない整数（それ以外は `invalid_request`）。空の `max_age=` は、値の無いパラメーターについて RFC 6749 §3.1 が求めるとおり、省略されたものとして扱う。`auth_time` が `max_age` 秒より古いセッション — `max_age=0` は常に古い — は、未認証のものとまったく同じくリクエストを往復させてログインページへ送られ、加えて 1 つだけ: 要求した時刻が**サーバー側に**記録される。戻ってきたとき、その時刻よりミリ秒単位で厳密に後に認証したセッションが求められた再認証であり、リクエストは進む — `max_age=0` も含めて。これがループを防ぐ。それより前に認証したセッションは、もう一度送り返されるのではなく `login_required` を返される。`prompt=none` では古いセッションは即座に `login_required`: 無言は無言である。id_token の `auth_time` が RP の検証するものであり、常に真実である。セッションの `authTime` は core の `authTimeAt` で時計に対して読む: `max_age` に対しては、クロックスキュー（`DEFAULT_CLOCK_SKEW_MS`）の範囲で先にある時刻は現在として読み、それより先にある時刻は読めず古い。要求に対しては、時計より 1 秒まで先にある時刻（`ASK_REPLICA_SKEW_MS`、レプリカ間で許すずれ: あるレプリカでのログインの戻りが、少しあとに別のレプリカに届く）は現在として読み、それより先にある時刻は比べない: この時計が確かめられない時計が刻んだものなので、要求が求めたログインを満たさず、そのようなセッションがステップアップの往復から戻ったなら 1 度ログインへ送られ、その後は `login_required` で拒否される。
+**`max_age`。** 負でない整数（それ以外は `invalid_request`）。空の `max_age=` は、値の無いパラメーターについて RFC 6749 §3.1 が求めるとおり、省略されたものとして扱う。`max_age` と `prompt=login` はセッションの**鮮度**（core の `sessionFreshness`）で判断する: パスワードログインなら `authTime`、フェデレーションログインなら `authTime` と上流 IdP がユーザーを最後に認証した時刻（検証済み id_token の `auth_time`。コールバックが記録する）の早いほう。上流が時刻を示さず、そのフェデレーションのコールバックが鮮度の要求を満たさない（`core.federations.<name>.callbackMeetsFreshness`、既定は `false`）なら、決して新しくない。鮮度が `max_age` 秒より古いセッション — `max_age=0` は常に古い — は、未認証のものとまったく同じくリクエストを往復させてログインページへ送られ、加えて 1 つだけ: 要求した時刻が**サーバー側に**記録される。戻ってきたとき、その時刻よりミリ秒単位で厳密に後に確立され、かつその時刻以降に新しいセッションが求められた再認証であり、リクエストは進む — `max_age=0` も含めて。これがループを防ぐ。それより前の鮮度しかないセッションは、もう一度送り返されるのではなく `login_required` を返される。上流の時刻が鮮度であるときは、`auth_time` が秒単位なので秒単位で比べ、要求と同じ秒のものは数える。これは IdP の時計がこちらより 1 秒未満遅れていても許すが、それ以上の遅れは本当の再ログインを要求より前のものとして読むので、IdP の時計は同期させておく（NTP）。`prompt=none` では古いセッションは即座に `login_required`: 無言は無言である。id_token の `auth_time` は**このプロバイダー**がセッションを確立した時刻であり、上流の認証時刻ではない: あとでそれから `max_age` を判断し直すクライアントは、フェデレーションのセッションの鮮度を過大に見積もる。セッションの鮮度は core の `authTimeAt` で時計に対して読む: `max_age` に対しては、クロックスキュー（`DEFAULT_CLOCK_SKEW_MS`）の範囲で先にある時刻は現在として読み、それより先にある時刻は読めず古い。要求に対しては、時計より 1 秒まで先にある時刻（`ASK_REPLICA_SKEW_MS`、レプリカ間で許すずれ: あるレプリカでのログインの戻りが、少しあとに別のレプリカに届く）は現在として読み、それより先にある時刻は比べない: この時計が確かめられない時計が刻んだものなので、要求が求めたログインを満たさず、そのようなセッションがステップアップの往復から戻ったなら 1 度ログインへ送られ、その後は `login_required` で拒否される。
 
 **`max_age` と要求。** 要求の期間の中では、要求のあとに行われたログインは、その後 `max_age` を過ぎていても新しいものとして扱う: リクエストが求めた往復は行われており、もう一度は求めない。id_token の `auth_time` はなおそのログインの時刻なので、より厳しい範囲が要るクライアントは、それを自分の `max_age` と比べる。
 
@@ -326,7 +326,7 @@ oauth.authorize.acrValues {
 
 **インストールされたものでは満たせないエントリーは boot で落とす**: `acr_values_supported` から外し、表に無い値と同じく `unmet_authentication_requirements` を返し — たまたまその値を持つセッションに対しても — エントリー（`acr`）と何も生み出さない値（`unproducible`）を添えて `acr_value_unsatisfiable` として一度だけ記録する。行は `warn` だが、第二要素だけが足りず、登録されたどのセッション要件もそれに届かないエントリーは `info` である: 多要素認証をインストールしない構成がそう選んだのであって、`mfa.mode` は関与しない。構成が満たせるもの: `pwd` は常に。フェデレーションがインストールされていれば `fed` — それを記録するのはフェデレーションのコールバックだけだからである。セクションが有効なインストール済みのフェデレーションが上流 IdP の `amr` を信頼していれば（`core.federations.<name>.trustUpstreamAmr = true`。フェデレーションのコールバックと同じく、core の `federationSettings` スロットにあるそのエントリーの `trustsUpstreamAmr` で読む）任意の値 — そのときコールバックは IdP が主張したものを `fed` の横に記録するからである。信頼しないフェデレーションの IdP はどのエントリーも満たさない。第二要素の値（`otp`、`hwk`、`swk`、`email`、`recovery`）と `mfa` は、登録されたセッション要件がそれに届くあいだ — モジュールが要求する `sessionRequirementResolver` 全体の和集合（セッション許可 ADR の D6）で、MFA モジュールの `mfa` 要件は有効な要素が加えるものに届く。どのリリースもまだそれを出荷していない。したがって信頼するフェデレーションも届く要件も無ければ、上の `mfa` と `passkey` のエントリーは落とされ、フェデレーションが一つも無ければ `fed` を必要とするエントリーも落とされる — どの要件も満たせないので、何が登録されていても warn である。与えられた `trustUpstreamAmr` が真偽値でなければ、モジュールを組み立てる前に合成は拒否される。無効なフェデレーションは誰もサインインさせないので、信頼するものとして数えない。上流の分割より前、あるいは信頼を取り消す前にセッションから発行されたものが運び続けるもの — コードの `acr`、リフレッシュトークンの `amr` と `acr` — は [運用ランブック](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust) にある。落とす判定はルーターを組むところとディスカバリーを contribute するところで、同じ入力から計算する（`src/acrValues.mts`）。
 
-**再認証を求められたら、どちらのログイン経路も再認証しなければならない。** デプロイが提供するログインページは `prompt=login` / `max_age` と目印を載せた `redirect_to` を受け取る。既に認証済みのブラウザーをそのまま送り返すページは、ループではなく `login_required` を受け取る。`POST /session/login` とフェデレーションコールバックは常に新しい `auth_time` を持つ*新しい*セッションを確立し、それが再認証である。
+**再認証を求められたら、どちらのログイン経路も再認証しなければならない。** デプロイが提供するログインページは `prompt=login` / `max_age` と目印を載せた `redirect_to` を受け取る。既に認証済みのブラウザーをそのまま送り返すページは、ループではなく `login_required` を受け取る。`POST /session/login` は新しい `auth_time` を持つ*新しい*セッションを確立し、それが再認証である。フェデレーションのコールバックも新しいセッションを確立するが、要求を満たすのは上流 IdP が時間内にユーザーを再認証したときだけである: ログインページは `prompt=login` / `max_age` をフェデレーションの開始（`GET /session/oauth/federation/:name?prompt=login&max_age=…`）に渡し、開始はそれを文書化している上流に渡し、セッションは上流が報告する `auth_time` を記録する。何も報告しない上流は、そのフェデレーションが `callbackMeetsFreshness = true` を設定しない限り、どの要求も満たさない。
 
 ## セッションアドミッション
 
@@ -570,7 +570,7 @@ OIDC のログアウトエンドポイントは、セッションカスケード
 
 ### セッション終了の通知器
 
-`oauthModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。ライフサイクルが入っているとき、`/oauth/logout` はそれを通してセッションを終了し（下記）、その relying party へのバックチャネルの通知はこの通知器が行う。`POST /oauth/federation/:name/logout` は今も自分の手順を走らせる。
+`oauthEndpointsModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。ライフサイクルが入っているとき、`/oauth/logout` はそれを通してセッションを終了し（下記）、その relying party へのバックチャネルの通知はこの通知器が行う。`POST /oauth/federation/:name/logout` は今も自分の手順を走らせる。
 
 - 通知を送る時点の登録で読んだ relying party の `backchannelLogoutUri` へ、OIDC Back-Channel Logout 1.0 の `logout_token` を 1 つ POST する。送り手と外向きの経路はログアウトルートのブロードキャストと同じである。トークンはキーストアが署名し、`iss` はモジュールの issuer（`oauth.jwt.issuer`）である。
 - トークンは、relying party が断っていない限り（`backchannelLogoutSessionRequired: false`）、何がセッションを終了させたかにかかわらず、そのセッションの `sid` を含む。

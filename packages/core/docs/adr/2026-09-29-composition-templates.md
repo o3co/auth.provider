@@ -46,7 +46,7 @@ packages' READMEs make claims about smaller compositions — the oauth README
 says login and the browser session are a package of their own "because an
 API-only deployment issues tokens without them" — that no composition in the
 repository exercises. Checked against the code, that one does not hold today:
-`oauthModule` requires a code repository and a login URL, mounts `/authorize`
+`oauthEndpointsModule` requires a code repository and a login URL, mounts `/authorize`
 and `/userinfo` unconditionally, and discovery requires the OpenID Connect
 fields (`packages/oauth/src/module.mts`, `packages/oauth/src/routes.mts`,
 `packages/core/src/discovery/buildDocument.mts`).

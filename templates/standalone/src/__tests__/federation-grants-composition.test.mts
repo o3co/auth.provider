@@ -323,7 +323,7 @@ describe("the standalone composes federation grants from its config", () => {
 		);
 		expect(installed).not.toContain("redis-federation-grant-store");
 		expect(installed).not.toContain("redis-federation-grant-intent-store");
-		// Listed ahead of oauthModule, as the template writes them: the
+		// Listed ahead of oauthEndpointsModule, as the template writes them: the
 		// template's choice, since each module parses its own bodies and the
 		// order does not change that; the browser half sits after the session
 		// middleware by its own `after`.

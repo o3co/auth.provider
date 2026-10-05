@@ -209,7 +209,7 @@ describe("adapter-surface absence policies", () => {
 
 	it("finds attachments at all — the scan is not vacuously passing", () => {
 		expect(source.attachments.length).toBeGreaterThan(3);
-		expect(source.attachments).toContain("deviceCodeStore -> DEVICE_CODE_STORE_ABSENCE_POLICY");
+		expect(source.attachments).toContain("auditSink -> AUDIT_SINK_ABSENCE_POLICY");
 	});
 
 	it("lists exactly the slots that carry a policy, with the policy each carries", () => {

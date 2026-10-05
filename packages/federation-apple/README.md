@@ -80,11 +80,11 @@ module requires no dependency.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { appleFederationTypeModule } from "@o3co/auth-provider-federation-apple";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config), // the form_post transaction lives in this store
+    sessionStoreModule, // the form_post transaction lives in this store
     sessionModule,
     appleFederationTypeModule(),
     // ... composition-root modules supplying userRepository and the session stores
@@ -325,6 +325,19 @@ What `exchangeCode` returns:
 | `authTime` | the verified id_token's `auth_time` as a `Date`, when Apple sends one; absent otherwise. A fraction is floored to its second; one that is not a non-negative number, or lies further ahead than the clock skew tolerated between hosts, fails the exchange |
 
 `mapClaims` maps `email`, `emailVerified`, `name` and `isPrivateEmail`.
+
+## Freshness: `prompt=login`, `max_age` and an MFA first binding
+
+`/authorize`'s `prompt=login` and `max_age`, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user: the id_token's `auth_time`. Apple's request has
+neither `prompt` nor `max_age`, so this adapter cannot ask for a new login, and
+a login whose id_token carries no `auth_time` reports none. With
+`core.federations.<name>.callbackMeetsFreshness` at its default `false`, such a
+session meets no `prompt=login` or `max_age` (`login_required`) and binds no
+first factor: the user is sent to log in again each time. To use them with Apple, set
+`core.federations.<name>.callbackMeetsFreshness = true`: the callback itself
+then counts as the authentication, which is the behaviour before 0.17.0.
 
 ## Refresh and logout
 

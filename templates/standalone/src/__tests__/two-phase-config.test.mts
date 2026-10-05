@@ -383,25 +383,25 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 
 	it("sees a file's first contents in both phases, though it is replaced between them", () => {
 		// Mounted configuration is commonly replaced atomically: read twice,
-		// boot could parse the Redis session store while phase one chose the
-		// memory one, and nothing would refuse the disagreement.
-		const operator = operatorLayer('session-store.storage.type = "redis"\n');
+		// boot could parse the federation-grants routes off while phase one
+		// installed them, and nothing would refuse the disagreement.
+		const operator = operatorLayer("federation-grants.enabled = true\n");
 		const own = readOwnLayers([operator, ...ownFiles("production")], { env });
-		writeFileSync(operator, 'session-store.storage.type = "memory"\n');
+		writeFileSync(operator, "federation-grants.enabled = false\n");
 		const switches = readSwitches(own);
 		const resolved = resolveForBoot(own, [], switches);
-		expect(valueAt(switches, "session-store.storage.type")).toBe("redis");
-		expect(valueAt(resolved, "session-store.storage.type")).toBe("redis");
+		expect(valueAt(switches, "federation-grants.enabled")).toBe(true);
+		expect(valueAt(resolved, "federation-grants.enabled")).toBe(true);
 	});
 
 	it("substitutes one snapshot of the environment in both phases", () => {
-		const changing: Record<string, string> = { ...env, SESSION_STORE_STORAGE_TYPE: "redis" };
+		const changing: Record<string, string> = { ...env, FEDERATION_GRANTS_ENABLED: "true" };
 		const own = readOwnLayers(ownFiles("production"), { env: changing });
-		changing.SESSION_STORE_STORAGE_TYPE = "memory";
+		changing.FEDERATION_GRANTS_ENABLED = "false";
 		const switches = readSwitches(own);
 		const resolved = resolveForBoot(own, [], switches);
-		expect(valueAt(switches, "session-store.storage.type")).toBe("redis");
-		expect(valueAt(resolved, "session-store.storage.type")).toBe("redis");
+		expect(valueAt(switches, "federation-grants.enabled")).toBe(true);
+		expect(valueAt(resolved, "federation-grants.enabled")).toBe("true");
 	});
 
 	it("reads the adapters from the same snapshot of the environment", () => {
