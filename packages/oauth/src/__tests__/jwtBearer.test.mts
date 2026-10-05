@@ -1199,7 +1199,10 @@ describe("jwt-bearer grant — the token never outlives the assertion", () => {
 			}).handle(ctx());
 			const { expiresIn, claims } = tokensOf(result);
 			expect(claims.exp as number).toBeLessThanOrEqual(expiresAt);
-			expect((claims.exp as number) - (claims.iat as number)).toBe(expiresIn);
+			// `expires_in` is the time left when the response is built, which
+			// this clock has moved past `iat`: never more than the lifetime.
+			expect(expiresIn).toBeGreaterThan(0);
+			expect(expiresIn).toBeLessThanOrEqual((claims.exp as number) - (claims.iat as number));
 		} finally {
 			spy.mockRestore();
 		}

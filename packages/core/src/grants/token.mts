@@ -26,7 +26,13 @@ export const formatObject = <T extends object>(data: T): Partial<T> => {
 
 export interface Token {
 	token: string;
+	/** The lifetime the token was signed with, in seconds from its `iat`. */
 	expiresIn?: number;
+	/**
+	 * The token's `exp`, in epoch seconds, as `generateToken` signed it. Absent
+	 * for a token with no `exp`, or one built by hand.
+	 */
+	readonly expiresAt?: number;
 	subject?: string;
 	scope?: string;
 	tokenType?: "at+jwt" | "rt+jwt";
@@ -58,6 +64,13 @@ export interface TokenResponse {
 /**
  * The RFC 6749 §5.1 token response for the tokens a grant minted.
  *
+ * `expires_in` is the access token's time left when the response is built:
+ * `max(0, min(expiresIn, expiresAt − floor(now)))` when the token carries
+ * `expiresAt`, else `expiresIn` as given. Never above the lifetime, even on a
+ * clock that stepped back. A lifetime that ran out while the request was
+ * handled answers `0` (the floor), not a negative number: every reader
+ * refuses that token by its `exp`, and the client asks again.
+ *
  * `token_type` is read off the access token's own confirmation, not handed
  * in, so the envelope cannot disagree with the `cnf` claim: a `cnf.jkt` token
  * advertised as Bearer gets presented as one, and RFC 9449 §7.1 has the
@@ -75,10 +88,16 @@ export const generateTokenResponse = ({
 		...formatObject({
 			scope: accessToken.scope,
 			refresh_token: refreshToken ? refreshToken.token : null,
-			expires_in: accessToken.expiresIn,
+			expires_in: secondsLeft(accessToken),
 			id_token: idToken ? idToken.token : undefined,
 		}),
 	};
+};
+
+/** See {@link generateTokenResponse}: the access token's time left, in whole seconds. */
+const secondsLeft = ({ expiresIn, expiresAt }: Token): number | undefined => {
+	if (expiresIn === undefined || expiresAt === undefined) return expiresIn;
+	return Math.max(0, Math.min(expiresIn, expiresAt - Math.floor(Date.now() / 1000)));
 };
 
 export interface GenerateTokenOptions {
@@ -182,7 +201,7 @@ export const generateToken = async (
 	// without a cast.
 	return {
 		token,
-		...(expiresIn !== undefined ? { expiresIn } : {}),
+		...(expiresIn !== undefined ? { expiresIn, expiresAt: now + expiresIn } : {}),
 		...(audience !== null && audience !== undefined ? { audience } : {}),
 		...(issuer !== null && issuer !== undefined ? { issuer } : {}),
 		...(subject !== null && subject !== undefined ? { subject } : {}),
