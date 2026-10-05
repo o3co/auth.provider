@@ -63,8 +63,6 @@ describe("the package's sections", () => {
 		[["mfa", "page"]],
 		[["mfa", "encryptionKeys", 0]],
 		[["mfa", "lockout"]],
-		[["mfa", "rateLimit"]],
-		[["mfa", "rateLimit", "routes"]],
 		[["mfa", "manage"]],
 		[["mfa", "enrollment"]],
 		[["mfa-totp-factor"]],

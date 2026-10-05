@@ -192,14 +192,19 @@ route switches.
 **D10. The close work, in phases.** An item runs only once no item of an
 earlier phase is pending in the record, so no phase runs over work an
 earlier one has not durably done:
-1. one item per family (`revokeFamily`), `revoke_bridged_families` (D14),
-   `remove_federation_tokens` (`federationTokenStore.removeBySid`) and
-   `remove_subject_session` (`subjectSessionIndex.removeSid`, where a subject
-   index is wired);
+1. one item per family (`revokeFamily`), `revoke_bridged_families` (D14)
+   and `remove_federation_tokens` (`federationTokenStore.removeBySid`);
 2. one item per relying party and `notify_bridged_rps` (D14), through
    `SessionCloseNotifier`; an item this code does not know waits here;
 3. `remove_session_indexes` (the per-session stores the bridge steps read);
-4. `delete_user_session`, last.
+4. `delete_user_session`;
+5. `remove_subject_session` (`subjectSessionIndex.removeSid`, where a
+   subject index is wired), last: a close still pending keeps the sid in
+   the subject's index, which a subject-wide revocation enumerates, so
+   where subject revocation closes through the lifecycle (#1455) a retry of
+   that revocation finds the sid and resumes its close. The index is read
+   only to enumerate the sessions to revoke, never as a sign that one is
+   live.
 
 The items of a phase run together, and one close run makes at most eight
 notices and family revocations at once (`CLOSE_CONCURRENCY`), those of the
@@ -224,7 +229,10 @@ whatever its cause (the first cause is kept). A sweep owned by core,
 time, stopped on dispose. Core's `reference.conf` ships 60, and a
 configuration without it reads 60 too; 0 turns the sweep off. A close
 left pending once its user session is gone has no later close to resume it,
-so without the sweep it would stay pending until the record lapses.
+so without the sweep it would stay pending until the record lapses. A
+subject index that keeps failing leaves records `closing` on their last item
+that only the sweep or their retention ends, so with
+`sweepIntervalSeconds = 0` they stay until they lapse.
 
 **D12. The cause policy.** Every cause runs the work of D10. `rp_logout`,
 `session_logout`, `subject_revocation` and `operator_reset` also tell the
