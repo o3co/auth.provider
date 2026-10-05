@@ -31,6 +31,12 @@ describe("readUpstreamAuthTime — an upstream id_token's auth_time", () => {
 		expect(readUpstreamAuthTime(0, NOW_MS)).toEqual(new Date(0));
 	});
 
+	it("floors a fractional value to its whole second: never an instant later than the claim", () => {
+		expect(readUpstreamAuthTime(NOW_S - 0.5, NOW_MS)).toEqual(new Date(NOW_MS - 1_000));
+		expect(readUpstreamAuthTime(NOW_S - 59.999, NOW_MS)).toEqual(new Date(NOW_MS - 60_000));
+		expect(readUpstreamAuthTime(0.5, NOW_MS)).toEqual(new Date(0));
+	});
+
 	it("answers an instant up to the clock skew tolerated between hosts ahead of the clock", () => {
 		const aheadS = NOW_S + DEFAULT_CLOCK_SKEW_MS / 1000;
 		expect(readUpstreamAuthTime(aheadS, NOW_MS)).toEqual(new Date(aheadS * 1000));
@@ -45,11 +51,14 @@ describe("readUpstreamAuthTime — an upstream id_token's auth_time", () => {
 		["a string", String(NOW_S)],
 		["a boolean", true],
 		["a negative number", -1],
-		["a fraction", NOW_S - 0.5],
+		["a negative fraction", -0.5],
 		["NaN", Number.NaN],
 		["Infinity", Number.POSITIVE_INFINITY],
 		["an unsafe integer", Number.MAX_SAFE_INTEGER + 1],
+		["one past the Date range", 8_640_000_000_001],
+		["a bigint", BigInt(NOW_S)],
 		["an object", { seconds: NOW_S }],
+		["an object with valueOf", { valueOf: () => NOW_S }],
 	])("answers invalid for a claim that is %s", (_label, claim) => {
 		expect(readUpstreamAuthTime(claim, NOW_MS)).toBe("invalid");
 	});
