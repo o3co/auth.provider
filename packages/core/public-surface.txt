@@ -618,6 +618,9 @@
 . SessionClose type
 . SessionCloseAnswer type
 . SessionCloseCause type
+. SessionCloseNotice type
+. SessionCloseNotifier type
+. SessionCloseOutcome type
 . SessionCloseRequest type
 . SessionCookiePolicy type
 . SessionData type
@@ -628,9 +631,14 @@
 . SessionFederationIndex type
 . SessionFederationIndexFactory type
 . SessionJoinAnswer type
+. SessionJoinOutcome type
+. SessionJoinRequest type
+. SessionLifecycle type
+. SessionLifecycleOptions type
 . SessionLifecycleRecord type
 . SessionLifecycleState type
 . SessionLifecycleStore type
+. SessionLiveness type
 . SessionMutation type
 . SessionOpenAnswer type
 . SessionParticipant type
@@ -644,6 +652,7 @@
 . SessionRequirement type
 . SessionRequirementFactory type
 . SessionRequirementResolver type
+. SessionResumeReport type
 . SessionView type
 . SignJwtOptions type
 . StepUpPage type
@@ -845,6 +854,7 @@
 . createRepositoryFactories value
 . createSessionFamilyIndexFactory value
 . createSessionFederationIndexFactory value
+. createSessionLifecycle value
 . createSessionRPRegistryFactory value
 . createSubjectRevocationService value
 . createSymmetricKeyStore value
@@ -1105,6 +1115,7 @@
 . sessionAuthentication value
 . sessionCloseItemOf value
 . sessionEmailProofAnswer value
+. sessionLifecycleModule value
 . shownConfigValue value
 . stepUpReach value
 . supportsClaimMapping value

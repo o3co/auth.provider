@@ -8,6 +8,9 @@ store and the callers' switch follow in the order below
 ([#1030](https://github.com/o3co/auth.provider/issues/1030)).
 
 - Written against: `develop` at `72ba648aa`.
+- Amended 2026-10-05: the service, its answers, the close work, resumption,
+  the cause policy, the relying-party notifier and the bridge (D8–D14).
+  Written against `develop` at `5871ff698`.
 
 ## Context
 
@@ -115,3 +118,86 @@ expiry), the service (close runner, cause policy, the RP-notification
 contract, resumption), its Redis wiring, and oauth's notifier. Switch: the
 callers, one module at a time. Remove: the old fence and stores, once old
 nodes are gone and the longest session lifetime has passed.
+
+## Amendment 2026-10-05 — the service
+
+**D8. The service and its answers.** `SessionLifecycle`
+(`src/user-sessions/lifecycle/service.mts`) fills the `sessionLifecycle`
+slot through `sessionLifecycleModule`, which nothing installs until the
+callers switch. `join(sid, { rp?, familyId?, federation? })` answers
+`joined`, `refused` or `unavailable`; on `refused` the service revokes the
+family and deletes that federation's tokens it was handed, and the caller
+hands out nothing. `close(sid, cause)` answers `done`, `pending` or
+`unavailable`, with the snapshot's relying parties and federations.
+`liveness(sid)` answers `live` with the user session, or `not_live`, or
+`unavailable`. `resumePending()` runs the close work of every closing
+record. A participant's `data` is `""`: its kind and id are all it holds
+(D7).
+
+**D9. A close whose commit landed answers `pending`, never `unavailable`.**
+From the closing commit on, liveness answers `not_live` and nothing joins,
+so a close with work still outstanding has ended the session; it answers
+`pending`, distinct from `done`. `unavailable` means the commit did not land,
+or whether it did could not be read. How a route answers `pending` (the
+logout's 200 and a `logout.close_pending` audit event) is decided when that
+route switches.
+
+**D10. The close work.** One item per family (`revokeFamily`), then
+`remove_federation_tokens` (`federationTokenStore.removeBySid`),
+`remove_subject_session` (`subjectSessionIndex.removeSid`, where a subject
+index is wired), one item per relying party (`SessionCloseNotifier`),
+`remove_session_indexes` (the per-session stores of D14), and
+`delete_user_session` last, run only once every other item is recorded.
+Each item that ran is recorded with `completeIf` at the generation read; a
+conflict re-reads the record and goes on with what is still pending, so two
+closes of one session and the sweep may overlap. A failed item stays
+pending and the record stays `closing`.
+
+**D11. Resumption.** A later close of the same sid resumes the saved work,
+whatever its cause (the first cause is kept). A sweep owned by core,
+`resumePending`, pages `listClosing` by its `after` cursor every
+`core.sessionLifecycle.sweepIntervalSeconds` — whole seconds, read through
+`configuredNumber`, refused at boot naming the key otherwise — one sweep at a
+time, stopped on dispose. Unwritten, there is no sweep: a deployment without
+relying parties leaves it so.
+
+**D12. The cause policy.** Every cause runs the work of D10. `rp_logout`,
+`session_logout`, `subject_revocation` and `operator_reset` also tell the
+relying parties; `expiry` tells none, as natural expiry never has. Without a
+notifier no relying-party item is saved.
+
+**D13. The relying-party notifier.** `SessionCloseNotifier`
+(`src/user-sessions/lifecycle/notifier.mts`, the `sessionCloseNotifier`
+slot) is core's contract; the module that issues to relying parties
+implements it. `notify` resolves once a notice is settled — delivered, or
+given up by its own policy — and rejects only to be tried again; it may be
+called more than once for one notice. `sessionLifecycleModule` refuses to
+boot where the `clientRepository` slot is filled and no notifier is. Boot
+orders modules, not components, so the module that fills the notifier must
+not itself require `sessionLifecycle`, and the closing record's `retainMs` —
+`oauth.refreshToken.expiresIn` plus `DEFAULT_CLOCK_SKEW_MS`, within the
+port's year, and 0 without a refresh-token lifetime — is read from the
+configuration, not from the oauth module's slot. The session grant joins
+nothing: it mints access tokens only, which die with liveness.
+
+**D14. The bridge to the per-session stores, and adoption.** While
+`SessionRPRegistry`, `SessionFamilyIndex` (with its end mark) and
+`SessionFederationIndex` are still read elsewhere, the service writes them
+too (`src/user-sessions/lifecycle/bridge.mts`). A join writes the relying
+party, then the family through `addFamilyIdUnlessEnded`, then the
+federation, before the lifecycle join; an `ended` refuses the join. A close
+writes the end mark (`endSession`) and lists the three stores before its
+commit, and joins what they hold to the record, so the snapshot holds what
+joined through them. A session with no lifecycle record is adopted — opened
+from its user session's subject and end: by a close always, since closing is
+never unsafe; by a join only where no end mark can be present — its family
+passed `addFamilyIdUnlessEnded`, or the family index keeps no mark. A join
+with no family, on an index that keeps the mark, cannot read it and is
+refused with nothing written: the conservative reading of "only when no old
+mark is present". Liveness of a session with no record reads its user
+session alone. The bridge and adoption go with the old stores; an absent
+record then reads as closed.
+
+The service's one read of a user session is a token-side site of the
+session-admission ADR's D9, registered in its guard; the token-side reads
+listed there move to `liveness` as their callers switch.

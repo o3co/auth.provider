@@ -1,0 +1,140 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * The module that fills the `sessionLifecycle` slot: the lifecycle service
+ * over the session stores, and the sweep that resumes pending closes when
+ * `core.sessionLifecycle.sweepIntervalSeconds` is written. It refuses to
+ * boot where relying parties are served (the `clientRepository` slot is
+ * filled) and no `sessionCloseNotifier` is wired, since a closed session's
+ * relying parties would then never be told.
+ *
+ * Boot orders modules, not components, so the module that fills
+ * `sessionCloseNotifier` must not itself require `sessionLifecycle`; and the
+ * refresh-token lifetime is read from the configuration, not from the oauth
+ * module's slot, for the same reason.
+ */
+
+import {
+	type RefreshTokenLifetimeSource,
+	resolveRefreshTokenLifetime,
+} from "../../config/application.schema.mjs";
+import { configuredNumber, shownConfigValue } from "../../config/configuredValue.mjs";
+import { MAX_DURATION_MS } from "../../config/durations.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
+import { consoleLogger } from "../../logging/consoleLogger.mjs";
+import { defineModule } from "../../modules/manifest/define-module.mjs";
+import { createSessionLifecycle } from "./service.mjs";
+import { startSessionLifecycleSweeper } from "./sweeper.mjs";
+
+const SWEEP_KEY = "core.sessionLifecycle.sweepIntervalSeconds";
+
+/** The longest sweep interval, in whole seconds: the longest delay a timer takes. */
+export const MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS = Math.floor(2_147_483_647 / 1000);
+
+/**
+ * `core.sessionLifecycle.sweepIntervalSeconds` in milliseconds, read as
+ * core's numbers are (`configuredNumber`); `undefined` when it is not
+ * written, which turns the sweep off. Anything but a whole number of
+ * seconds from 1 to {@link MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS} is
+ * a RangeError naming the key.
+ */
+export function readSessionLifecycleSweepIntervalMs(config: unknown): number | undefined {
+	const value = (
+		config as { core?: { sessionLifecycle?: { sweepIntervalSeconds?: unknown } } } | undefined
+	)?.core?.sessionLifecycle?.sweepIntervalSeconds;
+	if (value === undefined) return undefined;
+	const seconds = configuredNumber(value);
+	if (
+		seconds === undefined ||
+		!Number.isInteger(seconds) ||
+		seconds < 1 ||
+		seconds > MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS
+	) {
+		throw new RangeError(
+			`${SWEEP_KEY} must be a whole number of seconds from 1 to ${MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS} (got ${shownConfigValue(value)})`,
+		);
+	}
+	return seconds * 1000;
+}
+
+/**
+ * How long a closing record is kept from its closing commit: the
+ * refresh-token lifetime plus the clock skew it is accepted with, within the
+ * port's year; 0 where no refresh token is configured.
+ */
+const closingRetainMs = (config: unknown): number => {
+	const source = config as RefreshTokenLifetimeSource | undefined;
+	if (source?.oauth?.refreshToken?.expiresIn === undefined) return 0;
+	return Math.min(
+		MAX_DURATION_MS,
+		resolveRefreshTokenLifetime(source) * 1000 + DEFAULT_CLOCK_SKEW_MS,
+	);
+};
+
+export const sessionLifecycleModule = defineModule({
+	name: "core-session-lifecycle",
+	requires: [
+		"sessionLifecycleStore",
+		"userSessionStore",
+		"sessionRPRegistry",
+		"sessionFamilyIndex",
+		"sessionFederationIndex",
+		"refreshTokenFamilyRevocation",
+		"federationTokenStore",
+		"config",
+	] as const,
+	optional: [
+		"subjectSessionIndex",
+		"sessionCloseNotifier",
+		"clientRepository",
+		"logger",
+		"lifecycleRegistrar",
+	] as const,
+	provides: {
+		sessionLifecycle: (deps) => {
+			if (deps.clientRepository !== undefined && deps.sessionCloseNotifier === undefined) {
+				throw new Error(
+					"core-session-lifecycle: relying parties are served (the clientRepository slot is filled) " +
+						"and no sessionCloseNotifier is wired, so a closed session's relying parties would never " +
+						"be told. Install the module that provides sessionCloseNotifier.",
+				);
+			}
+			const intervalMs = readSessionLifecycleSweepIntervalMs(deps.config);
+			const logger = deps.logger ?? consoleLogger;
+			const lifecycle = createSessionLifecycle({
+				store: deps.sessionLifecycleStore,
+				userSessionStore: deps.userSessionStore,
+				refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+				federationTokenStore: deps.federationTokenStore,
+				...(deps.subjectSessionIndex === undefined
+					? {}
+					: { subjectSessionIndex: deps.subjectSessionIndex }),
+				...(deps.sessionCloseNotifier === undefined ? {} : { notifier: deps.sessionCloseNotifier }),
+				sessionRPRegistry: deps.sessionRPRegistry,
+				sessionFamilyIndex: deps.sessionFamilyIndex,
+				sessionFederationIndex: deps.sessionFederationIndex,
+				retainMs: closingRetainMs(deps.config),
+				logger,
+			});
+			if (intervalMs !== undefined) {
+				const sweeper = startSessionLifecycleSweeper(lifecycle, intervalMs, logger);
+				deps.lifecycleRegistrar?.register(() => sweeper.stop());
+			}
+			return lifecycle;
+		},
+	},
+});

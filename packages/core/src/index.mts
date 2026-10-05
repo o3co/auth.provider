@@ -1235,14 +1235,20 @@ export {
 	createSessionRPRegistryFactory,
 	createUserSessionStoreFactory,
 } from "./user-sessions/factory.mjs";
-// The session lifecycle port (active → closing → closed), its readers and
-// its in-process store. Nothing reads the slot yet.
+// The session lifecycle (active → closing → closed): the port, its readers
+// and its in-process store; the service, its module and the relying-party
+// notifier contract. Nothing installs the module yet.
 export {
 	createInMemorySessionLifecycleStore,
 	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_ENTRIES,
 	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS,
 	type InMemorySessionLifecycleStoreOptions,
 } from "./user-sessions/lifecycle/memory.mjs";
+export { sessionLifecycleModule } from "./user-sessions/lifecycle/module.mjs";
+export type {
+	SessionCloseNotice,
+	SessionCloseNotifier,
+} from "./user-sessions/lifecycle/notifier.mjs";
 export {
 	checkSessionCloseRequest,
 	checkSessionParticipant,
@@ -1252,6 +1258,16 @@ export {
 	readSessionOpenAnswer,
 	readVersionedSessionLifecycle,
 } from "./user-sessions/lifecycle/readers.mjs";
+export {
+	createSessionLifecycle,
+	type SessionCloseOutcome,
+	type SessionJoinOutcome,
+	type SessionJoinRequest,
+	type SessionLifecycle,
+	type SessionLifecycleOptions,
+	type SessionLiveness,
+	type SessionResumeReport,
+} from "./user-sessions/lifecycle/service.mjs";
 export {
 	SESSION_CLOSE_CAUSES,
 	SESSION_LIFECYCLE_MAX_KEY_LENGTH,

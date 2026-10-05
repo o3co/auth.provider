@@ -360,6 +360,11 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		why: `${TOKEN_SIDE}: the token-exchange grant's liveness read`,
 	},
 	{
+		file: "packages/core/src/user-sessions/lifecycle/service.mts",
+		sites: { get: 1 },
+		why: `${TOKEN_SIDE}: the session lifecycle's liveness read, which the token-side reads above move to, and the subject and end a join or a close adopts a session with no lifecycle record from`,
+	},
+	{
 		file: "packages/device-grant/src/grant.mts",
 		sites: { revokedBefore: 1 },
 		why: `${TOKEN_SIDE}: the device_code grant's boundary read at the poll`,
