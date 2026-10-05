@@ -61,7 +61,7 @@ const config = {
 	oauth: {
 		jwt: { secret: SECRET },
 		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject" },
+		refreshToken: { expiresIn: 86400 },
 		grants: { refresh_token: { enabled: true } },
 	},
 } as unknown as AppConfig;
@@ -145,7 +145,7 @@ const makeGrant = (opts: {
 		readonly rotation: RefreshTokenFamilyRotation;
 		readonly revocation: RefreshTokenFamilyRevocation | null;
 	};
-	config?: AppConfig;
+	unknownFamilyPolicy?: "accept" | "reject";
 }) => {
 	const rotation = vi.fn(
 		opts.family?.rotation.rotate ?? (async () => ({ outcome: "rotated" as const })),
@@ -155,8 +155,10 @@ const makeGrant = (opts: {
 			? ({ revokeFamily: vi.fn(async () => {}) } as never)
 			: opts.family.revocation;
 	const handler = createRefreshTokenGrant({
-		config: opts.config ?? config,
-		...grantSettingsFrom(opts.config ?? config),
+		...grantSettingsFrom(config),
+		...(opts.unknownFamilyPolicy === undefined
+			? {}
+			: { unknownFamilyPolicy: opts.unknownFamilyPolicy }),
 		keyStore: createSymmetricKeyStore(SECRET),
 		refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate: rotation },
 		...(familyRevocation === null ? {} : { refreshTokenFamilyRevocation: familyRevocation }),
@@ -640,13 +642,7 @@ describe("the refresh grant — the subject's revocation and the session are rea
 		const revokeFamily = vi.fn(async () => {});
 		const ended = endedDuringRotation(async () => ({ outcome: "unknown_family" }));
 		const { handler } = makeGrant({
-			config: {
-				...config,
-				oauth: {
-					...config.oauth,
-					refreshToken: { ...config.oauth.refreshToken, unknownFamilyPolicy: "accept" },
-				},
-			} as AppConfig,
+			unknownFamilyPolicy: "accept",
 			userSessionStore: ended.store,
 			family: {
 				rotation: ended.rotation,
