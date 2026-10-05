@@ -65,11 +65,7 @@ const mockConfig = {
 	oauth: {
 		jwt: { secret: SECRET },
 		accessToken: { expiresIn: 3600 },
-		refreshToken: {
-			expiresIn: 86400,
-			unknownFamilyPolicy: "reject",
-			legacyRtPolicy: "reject",
-		},
+		refreshToken: { expiresIn: 86400 },
 		grants: {
 			refresh_token: { enabled: true },
 		},
@@ -77,7 +73,6 @@ const mockConfig = {
 } as unknown as GrantDependencies["config"];
 
 const mockDeps: RefreshTokenGrantDeps = {
-	config: mockConfig,
 	...grantSettingsFrom(mockConfig),
 	keyStore,
 	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),

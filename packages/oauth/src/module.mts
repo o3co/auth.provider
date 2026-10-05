@@ -42,14 +42,19 @@ export { oauthSectionSchema };
 /**
  * The module's section, `oauth`, strict at every level (`./section.mts`), with
  * the package's defaults: the consent page moved from `endpoints.consent.url`,
- * and `ENDPOINTS_CONSENT_URL` and the Client ID Metadata Documents'
- * `OAUTH_CIMD_*` variables renamed after their paths (`OAUTH_CONSENT_PAGE_URL`,
- * `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`).
+ * `oauth.refreshToken.legacyRtPolicy` removed (a refresh token lacking `jti` or
+ * `family_id` while family rotation is wired is always refused, so the key
+ * set at all refuses boot), and `ENDPOINTS_CONSENT_URL` and the Client ID
+ * Metadata Documents' `OAUTH_CIMD_*` variables renamed after their paths
+ * (`OAUTH_CONSENT_PAGE_URL`, `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`).
  */
 const SECTION = {
 	schema: oauthSectionSchema,
 	reference: new URL("../config/reference.conf", import.meta.url),
-	relocatedFrom: { "endpoints.consent.url": "consentPage.url" },
+	relocatedFrom: {
+		"endpoints.consent.url": "consentPage.url",
+		"oauth.refreshToken.legacyRtPolicy": null,
+	},
 	renamedVariables: {
 		ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
 		OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",

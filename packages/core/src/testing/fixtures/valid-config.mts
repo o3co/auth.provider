@@ -138,11 +138,7 @@ export function makeValidCoreConfig() {
 			// the shipped literal sits on the deprecated `expiresIn`, and
 			// `resolveAccessTokenLifetime` reads it as a 3600 s default and max.
 			accessToken: { expiresIn: 3600 },
-			refreshToken: {
-				expiresIn: 86400,
-				unknownFamilyPolicy: "reject",
-				legacyRtPolicy: "reject",
-			},
+			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 			// Declares both subject-level revocation slots absent: this fixture
 			// has none, on purpose. A test of the declared-absence guard removes
