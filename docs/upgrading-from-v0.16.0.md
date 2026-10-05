@@ -1153,6 +1153,13 @@ with what a store of yours records and refuses. Per port:
   `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
   and the [test kit](../packages/test-kit/README.md).
+- **A second factor of your own (`MfaFactor`)** answers each challenge's and
+  enrollment start's `response` as a plain JSON-shaped object — no class
+  instance, list or `-0`, every own key an enumerable string, at any depth —
+  an `ok` that is the literal `true` or `false`, and a refusal `reason` its
+  type names (#1406). Any other answer is the factor's failure: a `503`.
+  `mfaFactorContract` in the test kit holds a factor to the same, and now
+  fails one that answers otherwise (#1442).
 
 ## Store implementer checklist (before switching to `required`)
 
