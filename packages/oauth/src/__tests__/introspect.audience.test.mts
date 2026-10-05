@@ -39,6 +39,7 @@ import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -129,7 +130,7 @@ async function buildApp(logger?: ReturnType<typeof createMockLogger>) {
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore,

@@ -297,9 +297,12 @@ it.
 `mfaFactorContract(input)` holds a factor, whatever its kind, to what the
 MFA coordinator relies on: a kind a hint can carry; `amrValues` it can vouch
 for — no primary's marker, no `mfa` — and `amrFor` answering at least one of
-them; boolean flags; state and data that survive the JSON round trip sealing
-puts them through, and are handed back after it; a code an enrollment or a
-challenge asks to be mailed only for the call's purpose —
+them; boolean flags; state, data and an enrollment's or a challenge's
+response that are each a plain object surviving the JSON round trip sealing
+puts them through, and handed back after it; `ok` the literal `true` on a
+completion or a verification that succeeds, and `false` on a refusal, with a
+reason its type names; a code an enrollment or a challenge asks to be mailed
+only for the call's purpose —
 `email_factor_enrollment` for an enrollment, `login_code` for a challenge —
 never empty, with an expiry after the call's time when it gives one, another
 code at each challenge, and in no form in the page's response; a login code
@@ -345,9 +348,11 @@ A code and an address are looked for in the
 strings an answer holds as a reader decodes them — object keys, map and set
 entries included — in any case, an address with its percent-escapes decoded
 too, never in its JSON text, so no escaping hides one. It enrolls at one instant and verifies an hour later,
-every call made for the account's `User.id` as its subject; state and data
-are held to the rule the coordinator seals them by — JSON values JSON gives
-back as they are, in plain or null-prototype objects.
+every call made for the account's `User.id` as its subject; state, data and
+a response are held to the rule the coordinator takes them by — a plain or
+null-prototype object of JSON values JSON gives back as they are, no `-0`,
+every own key an enumerable string, a list's own keys exactly its indices,
+an own getter read once.
 
 ```typescript
 import { mfaFactorContract } from "@o3co/auth-provider-test-kit";

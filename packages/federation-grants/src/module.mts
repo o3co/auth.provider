@@ -30,19 +30,26 @@
  * routes module's switch (`section.isEnabled`): off, the module registers
  * nothing — no route, admission action or rate-limit prefix — and reads none
  * of the feature's configuration or components.
+ *
+ * On, it provides `federationGrantPolicy` — what modules outside it read of
+ * the section — named `authoritative` and filled eagerly; off, it provides
+ * nothing, and a composition that holds no slot has grants off.
  */
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
+	checkFederationGrantPolicy,
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
 	defineModule,
 	durationFromEnv,
 	type FederationGrantConnection,
+	type FederationGrantPolicy,
 	type FederationGrantRefresher,
 	type ProviderDeps,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantAcquisitionLimits,
+	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,
 	type SupportsSessionsOnlyRevocation,
 	supportsDelegatedAuthorization,
@@ -290,6 +297,22 @@ const requireDelegatedCapability = (
 	}
 };
 
+/**
+ * The `federationGrantPolicy` this module provides, from its parsed section:
+ * the switch, and the keep policy as core's `resolveFederationGrantKeepPolicy`
+ * reads it, never allowed while the switch is off. The value says what the
+ * switch says — `true` whenever boot asks, since boot asks only a module its
+ * section switches on. Held to core's
+ * check, which answers it frozen.
+ */
+const grantPolicyOf = (section: FederationGrantsModuleDeps["section"]): FederationGrantPolicy => {
+	const enabled = section?.enabled === true;
+	return checkFederationGrantPolicy({
+		enabled,
+		allowKeepOnSubjectRevocation: enabled && resolveFederationGrantKeepPolicy(section),
+	});
+};
+
 /** The authorizer the connect flow sends a user upstream with: the connection's provider's. */
 const authorizerFor =
 	(deps: FederationGrantsModuleDeps) =>
@@ -413,7 +436,8 @@ export const federationGrantBackgroundModule = defineModule({
 export const federationGrantsModule = defineModule<
 	Requires,
 	Optional,
-	typeof federationGrantsConfigSchema
+	typeof federationGrantsConfigSchema,
+	"federationGrantPolicy"
 >({
 	name: "federation-grants",
 	// Each of the section's own keys moved from `federationGrants`; the grant
@@ -449,6 +473,23 @@ export const federationGrantsModule = defineModule<
 	// works while nobody is watching. Core's declared-absence guard enforces
 	// it while the module is on; switched off, it attaches nothing.
 	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
+	// What modules outside this one read of `federation-grants {}`: whether
+	// grants are on, and the keep policy in force. They take the slot instead
+	// of reading the section.
+	provides: {
+		federationGrantPolicy: (deps) => grantPolicyOf(deps.section),
+	},
+	// One source while this module is on: its own code reads the section, so
+	// an `overrideComponents` entry for the slot would split what the slot's
+	// readers see from what the module does; boot refuses it
+	// (`authoritative-component-overridden`). Switched off, the module claims
+	// nothing, and a host may fill the slot itself.
+	authoritative: ["federationGrantPolicy"],
+	// Eager: filled whenever this module is installed and on, whether or not
+	// an activated module reads it, so that what the composition holds — its
+	// components included — says grants are on exactly when they are. An
+	// absent slot reads as grants off.
+	lifecycle: { federationGrantPolicy: { eager: true } },
 	contributes: {
 		// What the browser half admits.
 		admissionActions: FEDERATION_GRANTS_ADMISSION_ACTIONS,

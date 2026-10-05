@@ -346,6 +346,11 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		});
 	});
 
+	it("takes sessionLifecycleStore as an optional slot: the lifecycle port the link routes' admission reads", () => {
+		expect(sessionModule.optional).toContain("sessionLifecycleStore");
+		expect(sessionModule.requires).not.toContain("sessionLifecycleStore");
+	});
+
 	it("takes subjectRevocation as an optional slot, under the one subject-revocation policy it attaches for subjectSessionIndex", () => {
 		expect(sessionModule.optional).toContain("subjectRevocation");
 		expect(sessionModule.requires).not.toContain("subjectRevocation");
