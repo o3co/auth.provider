@@ -250,7 +250,6 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// Read before the consume: a challenge still live when consumed, at or after this instant,
 			// was issued after `redeemedAtMs - challengeTtlMs`, and the gesture came after its issuance.
 			const redeemedAtMs = Date.now();
-			const challengeTtlMs = deps.webauthnConfig.challengeTtlMs;
 			let ceremonyOutcome: Awaited<ReturnType<typeof deps.challengeCeremony.consume>>;
 			try {
 				ceremonyOutcome = await deps.challengeCeremony.consume(
@@ -299,15 +298,8 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				};
 			}
 			// An assertion can be held until its challenge expires, so `auth_time` is the earliest
-			// instant the gesture could have been made, the challenge's issuance: never fresher than
-			// it was (RFC 9470 §6.1). A ceremony that reports no usable expiry leaves the earliest
-			// issuance a live challenge could have had.
-			const expiresAtMs = ceremonyOutcome.expiresAtMs;
-			const authenticatedAtMs =
-				typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs)
-					? Math.min(expiresAtMs - challengeTtlMs, redeemedAtMs)
-					: redeemedAtMs - challengeTtlMs;
-			const authTime = authTimeClaim(new Date(authenticatedAtMs));
+			// instant the gesture could have been made: never fresher than it was (RFC 9470 §6.1).
+			const authTime = authTimeClaim(new Date(redeemedAtMs - deps.webauthnConfig.challengeTtlMs));
 
 			// ------------------------------------------------------------------
 			// Step 5: Atomic CAS sign-count update
