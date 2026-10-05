@@ -250,7 +250,7 @@ describe("token_exchange — integration", () => {
 	// reads `deps.grantPolicy` in grant.mts to enforce fail-closed
 	// policy decisions on exchange requests. Other OAuth grants
 	// (createAuthorizationGrant / createRefreshTokenGrant) declare grantPolicy
-	// in oauthAuthorizationModule.optional; without declaring it here as well,
+	// in oauthAuthorizationGrantsModule's optional slots; without declaring it here as well,
 	// token-exchange would silently sit outside the policy gate while sibling
 	// grants are enforced — a structural inconsistency in the gate's coverage.
 	it("declares grantPolicy in optional so the grant-policy gate reaches token-exchange", async () => {

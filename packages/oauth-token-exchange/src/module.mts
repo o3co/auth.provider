@@ -61,7 +61,7 @@ const OPTIONAL = [
 	// opaque `null` would pre-empt the grant's answer.
 	"refreshTokenFamilyRevocation",
 	// The grant enforces the fail-closed grant-policy gate, as the sibling
-	// grants in oauthAuthorizationModule do; undeclared, token exchange would
+	// grants in oauthAuthorizationGrantsModule do; undeclared, token exchange would
 	// silently sit outside it.
 	"grantPolicy",
 	// Forwarded to the JWT verifier so its rejection and aud-skip warnings

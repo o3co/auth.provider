@@ -60,6 +60,7 @@ import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 const ISSUER = "https://auth.test";
 const CLIENT_ID = "rp";
@@ -141,6 +142,7 @@ async function buildApp(): Promise<Harness> {
 		createRefreshTokenGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			refreshTokenFamilyRotation: rotation,
 			refreshTokenFamilyRevocation: revocation,

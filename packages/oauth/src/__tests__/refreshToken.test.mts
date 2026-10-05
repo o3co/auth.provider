@@ -27,11 +27,12 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -79,6 +80,7 @@ const mockConfig = {
 
 const mockDeps: RefreshTokenGrantDeps = {
 	config: mockConfig,
+	...grantSettingsFrom(mockConfig),
 	keyStore,
 	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 };
@@ -268,12 +270,12 @@ describe("createRefreshTokenGrant", () => {
 			// deprecated `expiresIn` would mint a token with no `exp` at all.
 			const handler = createRefreshTokenGrant({
 				...mockDeps,
-				config: {
+				...grantSettingsFrom({
 					oauth: {
 						...mockConfig.oauth,
 						accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
 					},
-				} as unknown as GrantDependencies["config"],
+				}),
 			});
 			const { result } = await handler.handle({
 				body: { refresh_token: await makeRefreshToken(), expires_in: "7200" },
@@ -746,12 +748,12 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("is refused when it is built with a lifetime that is not a positive whole number of seconds, and no token is spent", async () => {
-			// The schema refuses such a value at boot; a configuration built by
-			// hand never meets it. `generateToken` refuses it too, but only after
-			// the rotation has committed — the presented token spent and no token
-			// issued in its place — and read per request, even a check
-			// ahead of the rotation answers every request with a 500. The grant
-			// reads both lifetimes when it is built instead.
+			// Boot refuses such a slot; one filled by hand never meets it.
+			// `generateToken` refuses it too, but only after the rotation has
+			// committed — the presented token spent and no token issued in its
+			// place — and read per request, even a check ahead of the rotation
+			// answers every request with a 500. The grant reads both lifetimes
+			// from the slot when it is built instead.
 			const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
 			// A revoked family is kept for as long as the access tokens it could
 			// have minted are accepted: the store wrappers take that horizon.
@@ -780,38 +782,37 @@ describe("createRefreshTokenGrant", () => {
 				metadata: {},
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
-			const withOAuth = (over: Record<string, unknown>): RefreshTokenGrantDeps => ({
+			const withSettings = (over: Record<string, unknown>): RefreshTokenGrantDeps => ({
 				...mockDeps,
-				config: {
-					...mockConfig,
-					oauth: { ...mockConfig.oauth, ...over },
-				} as GrantDependencies["config"],
+				oauthTokenSettings: { ...mockDeps.oauthTokenSettings, ...over } as never,
 				refreshTokenFamilyRotation: rotation,
 				refreshTokenFamilyRevocation: revocation,
 			});
 
 			const broken: Record<string, unknown>[] = [
-				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: 1.5 } },
-				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: Number.NaN } },
-				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: 0 } },
-				{ accessToken: { expiresIn: 1.5 } },
+				{ refreshTokenExpiresIn: 1.5 },
+				{ refreshTokenExpiresIn: Number.NaN },
+				{ refreshTokenExpiresIn: 0 },
+				{ accessTokenLifetime: { defaultExpiresIn: 1.5, maxExpiresIn: 3600 } },
 			];
 			for (const over of broken) {
 				let refused: unknown;
 				let handler: ReturnType<typeof createRefreshTokenGrant> | undefined;
 				try {
-					handler = createRefreshTokenGrant(withOAuth(over));
+					handler = createRefreshTokenGrant(withSettings(over));
 				} catch (err) {
 					refused = err;
 				}
 				await handler?.handle(ctx).catch(() => undefined);
 				expect(refused, JSON.stringify(over)).toBeInstanceOf(RangeError);
-				expect((refused as Error).message).toMatch(/oauth\.(refreshToken|accessToken)\.expiresIn/);
+				expect((refused as Error).message).toMatch(
+					/oauthTokenSettings\.(refreshTokenExpiresIn|accessTokenLifetime)/,
+				);
 			}
 
-			// Nothing was spent: the same token still refreshes under a sound
-			// configuration, rather than reading as a replay.
-			const { result } = await createRefreshTokenGrant(withOAuth({})).handle(ctx);
+			// Nothing was spent: the same token still refreshes under sound
+			// settings, rather than reading as a replay.
+			const { result } = await createRefreshTokenGrant(withSettings({})).handle(ctx);
 			expect(result.status).toBe(200);
 		});
 
@@ -1207,6 +1208,7 @@ describe("createRefreshTokenGrant", () => {
 			const deps: RefreshTokenGrantDeps = {
 				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				config: configWithUnknownPolicy("accept"),
+				...grantSettingsFrom(configWithUnknownPolicy("accept")),
 				keyStore: mockDeps.keyStore,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
 				logger,
@@ -1231,6 +1233,7 @@ describe("createRefreshTokenGrant", () => {
 			const deps: RefreshTokenGrantDeps = {
 				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				config: configWithUnknownPolicy("reject"),
+				...grantSettingsFrom(configWithUnknownPolicy("reject")),
 				keyStore: mockDeps.keyStore,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
 				logger,
@@ -1689,12 +1692,7 @@ describe("createRefreshTokenGrant", () => {
 		function depsWithAudiencePolicy(evaluate: GrantPolicyHook["evaluate"]): RefreshTokenGrantDeps {
 			return {
 				...mockDeps,
-				config: {
-					oauth: {
-						...mockDeps.config.oauth,
-						resourceIndicator: { enabled: true },
-					},
-				} as unknown as GrantDependencies["config"],
+				oauthTokenSettings: createTestOAuthTokenSettings({ resourceIndicatorEnabled: true }),
 				grantPolicy: createStubPolicy(evaluate),
 				// allowedAudiences lives on the authenticatedClient in the ctx — set per-test.
 			};
