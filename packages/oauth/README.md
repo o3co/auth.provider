@@ -907,6 +907,27 @@ The access token's lifetime is `min(oauth.accessToken.defaultExpiresIn, exp − 
 - **An assertion with no whole second left is refused** with `invalid_grant` / `assertion did not verify` — the answer every failed verification gets, so it tells a caller nothing about the handle behind it — and logged for the operator as `jwt_bearer_assertion_expired`. That covers an assertion past its `exp` that the entry's `clockToleranceSeconds` (default 60) still let verify: the tolerance absorbs clock skew for verification, but leaves no lifetime for a token to inherit. A steady rate of that line from one issuer is a clock out of step with this server's, or clients presenting assertions at the last moment.
 - **A custom `AssertionVerifier` reports `expiresAt`** whenever its credential expires. The field is optional, but omitting it asserts a credential with **no expiry**, and the configured lifetime then stands uncapped. Present, it must be a finite number: a numeric string, `null`, `NaN` or `Infinity` is refused as `invalid_grant`, never read as an expiry or as none. `createRegistryAssertionVerifier` and `createJwtAssertionVerifier` always report it, from the `exp` they require.
 
+### A subject revocation reaches assertions issued before it
+
+With `subjectRevocation` wired, every assertion must carry `iat` and `exp`, whether or not a boundary is in force and whichever verifier answered. Before the Store is asked, the grant refuses an assertion in any of these cases:
+
+- its verifier reports no usable `issuedAt` (`jwt_bearer_assertion_issued_at_unusable`);
+- its `issuedAt` is ahead of this server's clock by more than core's `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS` (300 s; `jwt_bearer_assertion_issued_at_ahead`);
+- it reports no usable `expiresAt` (`jwt_bearer_assertion_expiry_unusable`);
+- its `expiresAt` is not after `issuedAt` (`jwt_bearer_assertion_lifetime_empty`);
+- its `expiresAt − issuedAt` is over a day (core's `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`; `jwt_bearer_assertion_lifetime_exceeded`).
+
+A subject's boundary is kept a day, so a longer-lived assertion would outlive the boundary that covers it.
+
+The grant then reads the resolved subject's revocation boundary as its last read before signing, through core's `subjectBoundaryCovers`. It compares the assertion's `issuedAt`, taken as no later than the grant's own issuance second, using the rule and allowance `verifyJwt` applies to a token's `iat`. One at or before the boundary is refused (`jwt_bearer_assertion_revoked`). Every refusal above is the uniform `invalid_grant` / `assertion did not verify`.
+
+A boundary that cannot be read is `503 temporarily_unavailable` (`jwt_bearer_revocation_boundary_unavailable`). After the read, an assertion that expired during it is `invalid_grant` (`jwt_bearer_assertion_expired`). A token whose own lifetime the read used up is not signed; it is `503 temporarily_unavailable` (`jwt_bearer_issuance_outlasted_token_lifetime`), and a retry succeeds.
+
+The guarantee holds up to the issuer's clock skew, which the verifier's clock tolerance bounds: at most 300 s for the bundled verifiers. Without `subjectRevocation`, nothing changes.
+
+- **A custom `AssertionVerifier` reports `issuedAt` and `expiresAt`, and refuses an `iat` ahead of its clock by more than its clock tolerance.** With `subjectRevocation` wired, the grant refuses every assertion its verifier reports without either, or that lives longer than a day. `createRegistryAssertionVerifier` and `createJwtAssertionVerifier` report `issuedAt` whenever the assertion carries `iat`, and refuse one ahead of their clock beyond the entry's tolerance.
+- A subject revocation does not revoke the upstream issuer's credential. An assertion that issuer signs after the revocation is fresh authentication, and it is accepted.
+
 ## Tests
 
 The invariants above are pinned where they are implemented; a starting set:
