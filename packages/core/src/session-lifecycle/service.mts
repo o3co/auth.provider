@@ -264,6 +264,19 @@ const phaseOf = (item: string): number => {
 	return 1;
 };
 
+/**
+ * The work items a close of `participants` saves for `request`: its steps,
+ * then one per participant of the kinds it names. What the store's closing
+ * commit saves, and what a close with no record to save it in runs.
+ */
+const closeItemsOf = (
+	request: SessionCloseRequest,
+	participants: readonly SessionParticipant[],
+): string[] => [
+	...request.steps,
+	...participants.filter((p) => request.perParticipant.includes(p.kind)).map(sessionCloseItemOf),
+];
+
 /** The items to run next: those of the earliest phase still pending, not given up on in this run. */
 const nextItems = (pending: readonly string[], skipped: ReadonlySet<string>): string[] => {
 	const earliest = Math.min(...pending.map(phaseOf));
@@ -339,6 +352,12 @@ const participantsOf = (request: SessionJoinRequest): SessionParticipant[] => {
 	}
 	return participants;
 };
+
+/** Whether `a` and `b` are one session: the same subject, authentication time and end. */
+const sameSession = (a: UserSession, b: UserSession): boolean =>
+	a.sub === b.sub &&
+	a.authTime.getTime() === b.authTime.getTime() &&
+	a.expiresAt.getTime() === b.expiresAt.getTime();
 
 /** The most sids one page of the closing listing asks for. */
 const RESUME_PAGE = 100;
@@ -542,7 +561,11 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	 * read — has no record to save the work in, so the work runs here, in its
 	 * phases, over the record the commit would have saved: the read record's
 	 * participants, or none. Any item that fails throws, and the close
-	 * answers `unavailable`; a later close runs it all again.
+	 * answers `unavailable`; a later close runs it all again, except once the
+	 * user session is deleted: a close then finds neither a record nor a user
+	 * session and answers `done`, and an entry the last phase left in the
+	 * subject's index lapses at its retention or goes with a subject-wide
+	 * revocation.
 	 */
 	const begin = async (
 		sid: string,
@@ -575,13 +598,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			participants,
 			close: {
 				cause,
+				// Read by nothing: no store holds this record, and the work reads
+				// only its cause.
 				closingAt: new Date(),
-				pending: [
-					...request.steps,
-					...participants
-						.filter((p) => request.perParticipant.includes(p.kind))
-						.map(sessionCloseItemOf),
-				],
+				pending: closeItemsOf(request, participants),
 			},
 		};
 		await runUnsaved(sid, unsaved);
@@ -591,7 +611,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	/**
 	 * Runs the work of `record`, which no store holds, in its phases: each
 	 * phase only once every item of the earlier ones has run. Throws when an
-	 * item fails, leaving the later phases unrun.
+	 * item fails, leaving the later phases unrun. Nothing records what ran, so
+	 * a retry runs it all again only while the user session, deleted in the
+	 * phase before the last, is still there.
 	 */
 	const runUnsaved = async (sid: string, record: SessionLifecycleRecord): Promise<void> => {
 		const limit = callLimit(CLOSE_CONCURRENCY);
@@ -627,11 +649,28 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		if ((await bridge.join(sid, request, session.expiresAt, read === null)) === "refused") {
 			return false;
 		}
-		if (read === null) readSessionOpenAnswer(await store.open(sid, session.sub, session.expiresAt));
+		// Adopting, the open must land for this session: a record it refuses
+		// belongs to another session of the sid, or is closing.
+		if (
+			read === null &&
+			readSessionOpenAnswer(await store.open(sid, session.sub, session.expiresAt)).outcome !==
+				"opened"
+		) {
+			return false;
+		}
 		for (const participant of participants) {
 			if (readSessionJoinAnswer(await store.join(sid, participant)).outcome !== "joined") {
 				return false;
 			}
+		}
+		// Adopting, the join opened the record itself: a close that completed
+		// since the read above, and whose closed record then left the store,
+		// let the open land. The close deletes the user session before it
+		// closes the record, so the session read first, still read now, was
+		// never closed; one gone, or another created under the sid since, was.
+		if (read === null) {
+			const again = await userSessionOf(sid);
+			if (again === null || !sameSession(again, session)) return false;
 		}
 		return true;
 	};

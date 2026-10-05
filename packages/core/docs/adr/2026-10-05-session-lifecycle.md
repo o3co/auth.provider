@@ -192,7 +192,11 @@ the store allows while the user session is still read — has no record to
 save the work in. The close runs that work at once, in its phases, over the
 record the commit would have saved (the read record's participants, or
 none), without `completeIf`, and answers `done`; an item that fails makes it
-answer `unavailable`, so a later close runs it all again. How a route
+answer `unavailable`, so a later close runs it all again — except once the
+user session is deleted: a close then finds neither a record nor a user
+session and answers `done`, and an entry the last phase left in the
+subject's index lapses at its retention or goes with a subject-wide
+revocation. How a route
 answers `pending` (the logout's 200 and a `logout.close_pending` audit
 event) is decided when that route switches.
 
@@ -284,8 +288,15 @@ never unsafe; by a join only where no end mark can be present — its family
 passed `addFamilyIdUnlessEnded`, or the family index keeps no mark. A join
 with no family, on an index that keeps the mark, cannot read it and is
 refused with nothing written: the conservative reading of "only when no old
-mark is present". Liveness of a session with no record reads its user
-session alone. The bridge and adoption go with the old stores; an absent
+mark is present". A join that adopts is refused when the store refuses its
+open, and reads the user session again once it has opened the record and
+joined: a close that completed since its first read, and whose closed
+record then left the store, let the open land, and the close deleted the
+user session before it closed the record, so a join that finds it gone, or
+finds another session created under the sid since (another subject,
+authentication time or end), is refused and withdrawn like one the record
+refuses.
+Liveness of a session with no record reads its user session alone. The bridge and adoption go with the old stores; an absent
 record then reads as closed.
 
 Two known limitations of the bridge are accepted as interim. It exists only
