@@ -17,7 +17,7 @@
 /**
  * The one reading of a `core.federations` entry of type `google`: the keys it
  * carries beside the ones core owns (`enabled`, `type`, `trustUpstreamAmr`,
- * `callbackURL`), as a strict, flat schema. A key written `null` reads as
+ * `callbackMeetsFreshness`, `callbackURL`), as a strict, flat schema. A key written `null` reads as
  * absent, and an absent key stays absent: what it means — offline access,
  * the RFC 9207 `iss` required, no `redirect_to` accepted — is the provider's
  * and the redirect policy's reading, never a default filled in here.

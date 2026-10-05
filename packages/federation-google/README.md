@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-google
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 Google federation provider for `auth.provider`: sign-in with a Google account
 through Google's OpenID Connect endpoints, with token refresh, upstream logout
@@ -147,6 +147,10 @@ configuration's to move. It stays a `GoogleProviderConfig` field.
   `access_type=offline` with `prompt=consent` (see below), and the `nonce` the
   session router minted. There is no request without a nonce:
   `buildAuthorizationUrl` and `exchangeCode` both throw when it is missing.
+  A freshness ask (`prompt=login`, `max_age`) is **not forwarded**: Google's
+  OpenID Connect documentation lists `prompt` values `none`, `consent` and
+  `select_account` only, and no `max_age` parameter. The request is the same
+  with or without one.
 - **Code exchange:** at Google's token endpoint, the client secret in the
   request body (`client_secret_post`, `openid-client`'s default), with the PKCE
   verifier. The callback's `iss` is checked first (below). The id_token's signature is
@@ -170,6 +174,7 @@ What `exchangeCode` returns:
 | `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when Google sent no `expires_in`** (Google documents it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
 | `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when Google sent none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
+| `authTime` | the verified id_token's `auth_time` as a `Date`, when Google sent one; absent otherwise (Google sends it only when it is requested and enabled for the client, and this adapter does not request it). Never read from UserInfo. One that is not whole seconds since the epoch, or lies further ahead than the clock skew tolerated between hosts, fails the exchange |
 
 `mapClaims` maps `email`, `emailVerified`, `name`, `picture` and `hd`; the session
 package promotes only `email`, `name` and `picture`, and only where the local
