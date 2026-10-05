@@ -1,6 +1,6 @@
 # @o3co/auth-provider-device-grant
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
@@ -77,7 +77,8 @@ writes every key of the section, or boot refuses naming the missing key.
 boot, and no environment variable binds one.
 The section's old path, `oauth.deviceAuthorization`, refuses boot
 (`config-path-relocated`) naming each key's new path
-(`oauth.deviceAuthorization.verification-uri` → `device-grant.verificationUri`).
+(`oauth.deviceAuthorization.verification-uri` → `device-grant.verificationUri`);
+`store` is refused as removed, at either path ([Storage](#storage)).
 
 ## Quick start
 
@@ -339,7 +340,7 @@ Two things about the Redis adapter are worth knowing before choosing it:
 
 The standalone template provides `deviceCodeStoreClient` from its shared ioredis connection but does not mount this grant; a deployment that adds `deviceAuthorizationGrantModule` to that manifest selects `redisDeviceCodeStoreModule` alongside it.
 
-Enabling the grant without any store fails boot naming `device-grant.store`; the module refuses to boot without a store whatever that key says. A deployment that leaves the grant off needs no store and no declaration.
+**Enabling the grant requires a `deviceCodeStore` component**, so boot fails without one (`enabled = true requires a deviceCodeStore component`). The slot carries no absence policy: the grant cannot run without a store, and with the grant off the module reads nothing, so there is no absence to declare. `device-grant.store`, at any value and at its old path `oauth.deviceAuthorization.store`, is refused as a removed key (`config-path-relocated`).
 
 Every field of the `DeviceAuthorization` an adapter hands back is a required key: `requestedScope`, `subject`, `grantedScope`, `approvedAtMs`, `amr` and `authTimeMs` hold `undefined` where there is none, so a read-back that forgets one is a compile error rather than a dropped field; `create`'s `requestedScope` is a required key the same way ([Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md)). The conformance suite compares the whole record with `toStrictEqual`, which also catches the two scope lists swapped.
 

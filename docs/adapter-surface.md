@@ -219,7 +219,7 @@ provider does not run and the slot is left unfilled.
 | `challengeStore` | `ChallengeStore` | optional | `core/challenges/types.mts` | In-flight WebAuthn ceremony challenges. |
 | `clientRepository` | `ClientRepository` | required | `core/repositories/ClientRepository.mts` | Registered OAuth clients. Read-only from this library's side. |
 | `codeRepository` | `CodeRepository` | optional | `core/repositories/CodeRepository.mts` | Authorization codes. Single-use, and replica-shared in any deployment that scales. Required with the `authorization_code` grant, which redeems the codes `/authorize` issues into it; a composition without that grant wires none. A record round-trips `amr`, what the session vouched for at `/authorize`, which the grant stamps on the code's tokens; one that drops it issues them without `amr`, which their refresh family carries until it ends (under `mfa.mode = "required"`, refused at its first refresh). |
-| `deviceCodeStore` | `DeviceCodeStore` | optional | `core/device-authorization/types.mts` | Pending RFC 8628 device authorizations. Written as atomic operations rather than read-then-write pairs: `poll` reads the status *and* consumes an approval in one step, because two concurrent polls that both observe `approved` mint two tokens from one human approval. Absence must be declared (#298). |
+| `deviceCodeStore` | `DeviceCodeStore` | optional | `core/device-authorization/types.mts` | Pending RFC 8628 device authorizations. Written as atomic operations rather than read-then-write pairs: `poll` reads the status *and* consumes an approval in one step, because two concurrent polls that both observe `approved` mint two tokens from one human approval. Required by `device-grant` while the grant is on; it carries no absence policy, since the grant cannot run without one and reads nothing of it while off. |
 | `federationProviders` | `ReadonlyMap<string, FederationProvider>` | optional | `core/modules/manifest/synthetic-keys.mts` | Upstream IdP protocol adapters, one per enabled `core.federations` entry, built by the factory of the type the entry names. The value type is the adapter port in `core/src/federations/types.mts`; it read `unknown` until that contract moved into core (#626 P1). |
 | `federationRedirectPolicies` | `{ readonly [name: string]: FederationRedire…` | optional | `session/federations/contributes.mts` | The kind each federation's `redirect_to` allowlist registers under, declared by `session` for its type. Boot registers each beside its provider, from the type its `core.federations` entry names; no module contributes or overrides it (`contribution-kind-guarded`). |
 | `federationTokenStore` | `FederationTokenStore` | optional | `core/federation-tokens/types.mts` | Upstream tokens held on behalf of a session. Encrypted at rest by the bundled adapter. One record per `(sid, federationName)` with a store generation, under the record rules of [Conditional writes](#conditional-writes): `getVersioned` answers the record and its generation from one snapshot, `replaceIf` and `removeIf` write only at the generation the caller read, and every write (`attach`, `replaceIf`) issues a fresh one; `delete` and `removeBySid` stay unconditional and always win. Live means within the store's retention, never `tokens.expiresAt`. The three conditional members are required. Bundled adapters: memory (core) and Redis (the generation in the record's wrapper, minted into a record written without one by its first versioned read; one script per record write and conditional member, `attach` and each conditional write refused at or after its deadline and keeping its answer for a resent copy under a replay key until the declared clock skew past it, so its write lifetime W is 2 s; a `late` answer rejects as an unknown outcome; it assumes acknowledged writes are not rolled back, and a `noeviction` server, which its module holds it to at boot; the redis README, "Conditional writes", states each). Suite `federationTokenStoreConditionalContract` (`@o3co/auth-provider-test-kit`). |
@@ -301,7 +301,6 @@ that safety.
 | `accessTokenDenylist` | `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` | `oauth.revocation.accessToken = "unsupported"` |
 | `subjectRevocation` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
 | `subjectSessionIndex` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
-| `deviceCodeStore` | `DEVICE_CODE_STORE_ABSENCE_POLICY` | `device-grant.store = "unsupported"` |
 | `rateLimiter` | `RATE_LIMITER_ABSENCE_POLICY` | `core.declaredAbsent = ["rateLimiter"]` |
 
 Core attaches `RATE_LIMITER_ABSENCE_POLICY` itself, wherever a module reads
@@ -324,15 +323,21 @@ holds. `isAbsenceDeclared` is the one reading of a declaration, and
 
 The subject-revocation pair shares one policy on purpose: two components, one
 capability, so a deployment without them has one thing to declare rather than
-two. `deviceCodeStore` joined with #443, which this paragraph missed while it
-still said "three"; the table is now checked against the manifests that attach
-each policy, the same way the slot table is (#458).
+two. The table is checked against the manifests that attach each policy, the
+same way the slot table is (#458).
 
 A declaration says why a slot is empty; it does not stand in for the component
-where a feature needs it. `device-grant.store = "unsupported"` is
-for a deployment that leaves the grant off — `deviceAuthorizationGrantModule` with
-the grant enabled refuses to boot without a store, whatever the declaration says
-(#626).
+where a feature needs it. A slot a feature cannot run without carries no
+policy: `deviceCodeStore` is required by `deviceAuthorizationGrantModule` while
+the grant is on and read by nothing while it is off, so there is no absence to
+declare, and `device-grant.store` refuses boot as a removed key.
+
+A policy declared in source that no bundled module attaches is listed apart,
+with the config line it names, and checked the same way:
+
+| Policy | Names | Attached by |
+| --- | --- | --- |
+| `DEVICE_CODE_STORE_ABSENCE_POLICY` | `device-grant.store = "unsupported"` | No module. Core still exports it; the key it names is refused as removed. |
 
 **Replica safety.** In-process state stores are correct on one node and wrong on
 several. `core.deployment.mode = "multi"` with one wired refuses boot, naming each

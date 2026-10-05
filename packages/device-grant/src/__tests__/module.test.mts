@@ -402,33 +402,53 @@ describe("the device-grant module — boot", () => {
 		await handle.dispose();
 	});
 
-	it("refuses to boot without a device code store, naming the config key", async () => {
-		// Optional to wire, not optional to decide: a composition with no
-		// store cannot authorize any device at all, so the failure belongs at
-		// boot rather than on the first request.
+	it("refuses to boot enabled without a device code store, naming the component", async () => {
+		// Optional to wire, required once the grant is on: a composition with
+		// no store cannot authorize any device at all, so the failure belongs at
+		// boot rather than on the first request, beside `rateLimiter` and
+		// `verificationUri`.
 		await expect(boot({ deviceGrant: ENABLED, withStore: false })).rejects.toThrow(
-			/device-grant\.store/,
+			/enabled = true requires a deviceCodeStore component/,
 		);
 	});
 
-	it("boots with the grant off and no store, with or without the declaration: a switched-off module declares no absence policy", async () => {
-		for (const deviceGrant of [{ enabled: false }, { enabled: false, store: "unsupported" }]) {
-			const handle = await boot({ deviceGrant, withStore: false, withoutAuditDeclaration: true });
-			await handle.dispose();
-		}
+	it("boots with the grant off and no store, declaring nothing: a switched-off module requires nothing", async () => {
+		const handle = await boot({
+			deviceGrant: { enabled: false },
+			withStore: false,
+			withoutAuditDeclaration: true,
+		});
+		await handle.dispose();
 	});
 
-	it("refuses to boot enabled with the store declared absent, naming the component", async () => {
-		// `store = "unsupported"` says why the slot is empty; it does not make
-		// the grant work without one. An enabled grant with no store would
-		// boot and mount endpoints that throw on the first request; the
-		// refusal belongs at boot, beside `rateLimiter` and `verification-uri`.
-		// The phrase is the module's own, not the stage-1 policy message,
-		// which also names `deviceCodeStore`.
-		await expect(
-			boot({ deviceGrant: { ...ENABLED, store: "unsupported" }, withStore: false }),
-		).rejects.toThrow(/enabled = true requires a deviceCodeStore component/);
-	});
+	it.each([
+		["off", "unsupported", { enabled: false }],
+		["off", "redis", { enabled: false }],
+		["on", "unsupported", ENABLED],
+		["on", true, ENABLED],
+	])(
+		"refuses device-grant.store with the grant %s, at %j, as a removed key",
+		async (_, store, deviceGrant) => {
+			// No value of it declares anything: the grant needs a store while on
+			// and nothing while off. Ignored, a stale line would read as a
+			// decision the deployment still makes.
+			const refusal = await boot({ deviceGrant: { ...deviceGrant, store } }).then(
+				async (handle) => {
+					await handle.dispose();
+					return undefined;
+				},
+				(err: unknown) => err as { reason?: unknown; message?: string; details?: unknown },
+			);
+			expect(refusal).toMatchObject({
+				name: "BootError",
+				reason: "config-path-relocated",
+				details: {
+					relocated: [{ module: "device-grant", from: "device-grant.store", to: null }],
+				},
+			});
+			expect(refusal?.message).toMatch(/device-grant\.store was removed/);
+		},
+	);
 
 	it("boots with everything wired, without oauthEndpointsModule", async () => {
 		// The routes declare no ordering edge — each module under `/oauth`

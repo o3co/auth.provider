@@ -80,7 +80,6 @@ describe("the device-grant section", () => {
 						shippedDeviceGrantSection({
 							enabled: true,
 							verificationUri: "https://example.test/device",
-							store: "unsupported",
 						}),
 					],
 				},
