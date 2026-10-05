@@ -32,6 +32,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
+import { tokenSessionLiveness } from "../sessionLiveness.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
@@ -196,7 +197,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		let session: UserSession | null = null;
 		if (sessionLifecycle) {
 			// The lifecycle logs its own error; this line carries none.
-			const liveness = await sessionLifecycle.liveness(livenessSid);
+			const liveness = await tokenSessionLiveness(sessionLifecycle, livenessSid);
 			if (liveness.outcome === "unavailable") {
 				opts.logger?.error({ store: "session_lifecycle" }, "userinfo_store_unavailable");
 				return res.status(503).json({

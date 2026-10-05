@@ -27,9 +27,18 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
+	createInMemorySessionRPRegistry,
+	createInMemoryUserSessionStore,
+	createMemoryRefreshTokenFamilyStore,
+	createRefreshTokenFamilyRevocation,
+	createSessionLifecycle,
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type FederationTokens,
+	SESSION_LIFECYCLE_MAX_KEY_LENGTH,
 	type SessionFederationIndex,
 	type SessionLifecycle,
 	type SessionLiveness,
@@ -94,6 +103,30 @@ function lifecycleAnswering(answer: SessionLiveness) {
 			unavailable: 0,
 		})),
 	} satisfies SessionLifecycle;
+}
+
+/** A sid no session lifecycle key can be: one character too long. */
+const UNKEYABLE_SID = "s".repeat(SESSION_LIFECYCLE_MAX_KEY_LENGTH + 1);
+
+/** Core's own lifecycle over in-memory stores. */
+function coreLifecycle(): SessionLifecycle {
+	return createSessionLifecycle({
+		store: createInMemorySessionLifecycleStore(),
+		userSessionStore: createInMemoryUserSessionStore(),
+		refreshTokenFamilyRevocation: createRefreshTokenFamilyRevocation({
+			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
+			accessTokenHorizonMs: 3_600_000,
+		}),
+		federationTokenStore: {
+			removeBySid: vi.fn(),
+			delete: vi.fn(),
+		} as unknown as FederationTokenStore,
+		sessionRPRegistry: createInMemorySessionRPRegistry(),
+		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+		sessionFederationIndex: createInMemorySessionFederationIndex(),
+		retainMs: 0,
+		logger: { warn: () => undefined, error: () => undefined },
+	});
 }
 
 /** A user session store that still holds the session: the lifecycle's answer must decide. */
@@ -207,6 +240,15 @@ describe("/oauth/introspect through the session lifecycle", () => {
 		expect(lifecycle.liveness).toHaveBeenCalledExactlyOnceWith("sid-origin");
 	});
 
+	it("a sid the lifecycle cannot hold as a key names no live session: active:false", async () => {
+		const app = await buildApp({ lifecycle: coreLifecycle(), userSessionStore: holdingStore() });
+
+		const res = await introspect(app, await mintAccessToken({ sid: UNKEYABLE_SID }));
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ active: false });
+	});
+
 	it("a lifecycle that cannot answer: 503, one error line, audited as a store outage", async () => {
 		const { sink, events } = recordingSink();
 		const logger = createMockLogger();
@@ -294,6 +336,16 @@ describe("/oauth/userinfo through the session lifecycle", () => {
 		expect(lifecycle.liveness).toHaveBeenCalledExactlyOnceWith("sid-origin");
 	});
 
+	it("a sid the lifecycle cannot hold as a key names no live session: 401 session_invalid", async () => {
+		const res = await userinfo(
+			buildApp({ lifecycle: coreLifecycle(), userSessionStore: holdingStore() }),
+			{ sid: UNKEYABLE_SID },
+		);
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "session_invalid" });
+	});
+
 	it("a lifecycle that cannot answer: 503 with no claims, one error line", async () => {
 		const logger = createMockLogger();
 		const res = await userinfo(
@@ -378,12 +430,12 @@ describe("POST /oauth/federation/:name/token through the session lifecycle", () 
 		return app;
 	}
 
-	const fedToken = async (app: express.Express) =>
+	const fedToken = async (app: express.Express, sid: string = SID) =>
 		request(app)
 			.post("/oauth/federation/google/token")
 			.set(
 				"Authorization",
-				`Bearer ${await mintAccessToken({ azp: "client-1", family_id: "fam-1" })}`,
+				`Bearer ${await mintAccessToken({ sid, azp: "client-1", family_id: "fam-1" })}`,
 			)
 			.send();
 
@@ -404,6 +456,16 @@ describe("POST /oauth/federation/:name/token through the session lifecycle", () 
 				lifecycle: lifecycleAnswering({ outcome: "not_live" }),
 				userSessionStore: holdingStore(),
 			}),
+		);
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "session not found" });
+	});
+
+	it("a sid the lifecycle cannot hold as a key names no live session: 401", async () => {
+		const res = await fedToken(
+			buildApp({ lifecycle: coreLifecycle(), userSessionStore: holdingStore() }),
+			UNKEYABLE_SID,
 		);
 
 		expect(res.status).toBe(401);
