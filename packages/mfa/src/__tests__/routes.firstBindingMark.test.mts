@@ -83,7 +83,11 @@ const LEASE_MS = 80_000;
 const LIFETIME_MS = 1_200_000 + 2 * DEFAULT_CLOCK_SKEW_MS + LEASE_MS;
 
 /** Boots `mode` with no mail sender, so no first binding asks the account-email proof; alice's witness as `enrolled` says. */
-async function composed(mode: "optional" | "required", enrolled?: true) {
+async function composed(
+	mode: "optional" | "required",
+	enrolled?: true,
+	mfa: Record<string, unknown> = {},
+) {
 	const factorStore = createMemoryMfaFactorStore();
 	const transactionStore = createMemoryMfaTransactionStore();
 	const entries = directoryEntries();
@@ -91,7 +95,7 @@ async function composed(mode: "optional" | "required", enrolled?: true) {
 	if (alice !== undefined && enrolled === true) alice.mfaEnrolled = true;
 	const users = new WitnessingUserRepository(entries);
 	const booted = await boot({
-		config: configFor(mode, { enrollment: { requireEmailProof: "never" } }),
+		config: configFor(mode, { enrollment: { requireEmailProof: "never" }, ...mfa }),
 		factorStore,
 		transactionStore,
 		userRepository: users,
@@ -254,6 +258,61 @@ describe("a first binding in a session after the subject's first binding elsewhe
 		const res = await bindFromAccount(fresh.agent);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
+	});
+});
+
+describe("the mark under another mfa.storeTimeoutMs", () => {
+	it("distrusts a sign-in within the skew and the lease that setting makes, answers Retry-After until they pass, and admits one past them", async () => {
+		// 10 000 ms per Store call: a factor-set lease of 16 calls' time.
+		const lease = 160_000;
+		const { app, factorStore, transactionStore, users } = await composed("required", undefined, {
+			storeTimeoutMs: 10_000,
+		});
+		const stale = await beginFirstBinding(app);
+		const begun = await beginEnrollment(stale.agent, stale.transaction, "totp");
+		freezeClock(T0 + 30_000);
+		const other = await beginFirstBinding(app);
+		const otherBegun = await beginEnrollment(other.agent, other.transaction, "totp");
+		expect(
+			(
+				await completeEnrollment(
+					other.agent,
+					other.transaction,
+					totpProofOf(otherBegun.body.secret),
+				)
+			).status,
+		).toBe(200);
+		expect((await transactionStore.firstBindingAt(ALICE.id, T0 + 30_000)) ?? 0).toBe(T0 + 30_000);
+		await loseFactors(factorStore);
+		await forgetWitness(users);
+		freezeClock(T0 + 60_000);
+
+		const refused = await completeEnrollment(
+			stale.agent,
+			stale.transaction,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(refused.status).toBe(401);
+		expect(refused.headers["retry-after"]).toBe(
+			String(Math.ceil((30_000 + DEFAULT_CLOCK_SKEW_MS + lease + 1 - 60_000) / 1000)),
+		);
+
+		// A login authenticated within the default lease's reach but inside this one is still distrusted.
+		freezeClock(T0 + 30_000 + DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 1);
+		const within = await beginFirstBinding(app);
+		const withinBegun = await beginEnrollment(within.agent, within.transaction, "totp");
+		expect(withinBegun.status).toBe(401);
+
+		freezeClock(T0 + 30_000 + DEFAULT_CLOCK_SKEW_MS + lease + 1);
+		const fresh = await beginFirstBinding(app);
+		const freshBegun = await beginEnrollment(fresh.agent, fresh.transaction, "totp");
+		const bound = await completeEnrollment(
+			fresh.agent,
+			fresh.transaction,
+			totpProofOf(freshBegun.body.secret),
+		);
+		expect(bound.status, JSON.stringify(bound.body)).toBe(200);
 	});
 });
 
@@ -559,7 +618,7 @@ describe("noting the mark", () => {
 		}
 	});
 
-	it("dates the mark when it is noted, not when the request began: a sign-in in the skew after a stalled first binding's note, past the skew after its start, is distrusted", async () => {
+	it("dates the mark when it is noted, not when the request began: a sign-in within the skew and a lease after a stalled first binding's note, past them after its start, is distrusted", async () => {
 		const { app, factorStore, transactionStore, userSessionStore, users } =
 			await composed("optional");
 		const { agent } = await signIn(app, userSessionStore);
@@ -586,8 +645,8 @@ describe("noting the mark", () => {
 		vi.mocked(factorStore.list).mockRestore();
 		await loseFactors(factorStore);
 		await forgetWitness(users);
-		// Signed in past T0 + skew, within the skew after the note.
-		freezeClock(T0 + DEFAULT_CLOCK_SKEW_MS + 30_000);
+		// Signed in past T0 + skew + lease, within the skew and the lease after the note.
+		freezeClock(T0 + DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 30_000);
 		const later = await signIn(app, userSessionStore);
 
 		const res = await enrollFromAccount(later.agent, "totp");

@@ -45,14 +45,14 @@ export const SEALING = createMfaSealing({
 	ring: [{ id: "requirement-suite", key: randomBytes(32) }],
 });
 
-/** A factor-set write's lease at the default `mfa.storeTimeoutMs`: 16 × 5000 ms. */
+/** A factor-set write's lease at the default `mfa.storeTimeoutMs`, which the mark below is built with: 16 × 5000 ms. */
 export const FIRST_BINDING_LEASE_MS = 80_000;
 
 /** The first-binding mark at the default settings, as the module builds it. */
 export const FIRST_BINDING_MARK = createFirstBindingMark({
 	manageMaxAgeSeconds: 300,
 	transactionTtlSeconds: 600,
-	leaseMs: FIRST_BINDING_LEASE_MS,
+	storeTimeoutMs: 5_000,
 });
 
 /** A transaction store that holds no subject's first-binding mark, and the mark it would be judged by. */

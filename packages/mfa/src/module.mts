@@ -114,7 +114,6 @@ import {
 	boundedRecoverySetFloor,
 	createMfaFactorSet,
 	createMfaSubjectLeases,
-	leaseMsFor,
 	type MfaSubjectLeases,
 } from "./factorSet.mjs";
 import { createFirstBindingMark, type FirstBindingMark } from "./firstBindingMark.mjs";
@@ -479,7 +478,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 					const firstBindingMark = createFirstBindingMark({
 						manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
 						transactionTtlSeconds: settings.transactionTtlSeconds,
-						leaseMs: leaseMsFor(settings.storeTimeoutMs),
+						storeTimeoutMs: settings.storeTimeoutMs,
 					});
 					const requirement = createMfaRequirement({
 						mode,

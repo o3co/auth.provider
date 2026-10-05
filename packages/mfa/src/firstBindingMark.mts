@@ -36,19 +36,46 @@
  */
 
 import { DEFAULT_CLOCK_SKEW_MS, readFirstBindingAt } from "@o3co/auth-provider-core";
+import { checkFactorSetStoreTimeout, leaseMsFor } from "./factorSet.mjs";
 
-/** The settings a mark's lifetime is read from: `mfa.manage.maxAgeSeconds`, `mfa.transactionTtlSeconds` and a factor-set write's lease. */
+/**
+ * The settings a mark is read from: `mfa.manage.maxAgeSeconds`,
+ * `mfa.transactionTtlSeconds` and `mfa.storeTimeoutMs`, whose factor-set
+ * lease (`leaseMsFor`) is the one the factor set's writes take.
+ */
 export interface FirstBindingMarkSettings {
 	readonly manageMaxAgeSeconds: number;
 	readonly transactionTtlSeconds: number;
-	/** How long a factor-set write's lease stands, in milliseconds (`leaseMsFor`). */
-	readonly leaseMs: number;
+	readonly storeTimeoutMs: number;
 }
+
+/** A window setting, as a whole number of seconds from 1; else a `RangeError` naming it. */
+const checkWindowSeconds = (value: number, name: string): number => {
+	if (!Number.isSafeInteger(value) || value < 1) {
+		throw new RangeError(`${name}: ${String(value)} is not a whole number of seconds from 1`);
+	}
+	return value;
+};
+
+/** `settings` checked, with the factor-set lease its `storeTimeoutMs` makes. */
+const readSettings = (
+	settings: FirstBindingMarkSettings,
+): { readonly windowMs: number; readonly leaseMs: number } => {
+	const manage = checkWindowSeconds(settings.manageMaxAgeSeconds, "mfa.manage.maxAgeSeconds");
+	const transaction = checkWindowSeconds(
+		settings.transactionTtlSeconds,
+		"mfa.transactionTtlSeconds",
+	);
+	return {
+		windowMs: Math.max(manage, 2 * transaction) * 1000,
+		leaseMs: leaseMsFor(checkFactorSetStoreTimeout(settings.storeTimeoutMs)),
+	};
+};
 
 /** How long a mark noted now stands, in whole milliseconds (see this file's header). */
 export function firstBindingMarkLifetimeMs(settings: FirstBindingMarkSettings): number {
-	const windowSeconds = Math.max(settings.manageMaxAgeSeconds, 2 * settings.transactionTtlSeconds);
-	return windowSeconds * 1000 + 2 * DEFAULT_CLOCK_SKEW_MS + settings.leaseMs;
+	const { windowMs, leaseMs } = readSettings(settings);
+	return windowMs + 2 * DEFAULT_CLOCK_SKEW_MS + leaseMs;
 }
 
 /**
@@ -105,10 +132,10 @@ function distrustedByFirstBinding(
 	return !(typeof authTimeMs === "number" && authTimeMs > distrustedUntil(markAtMs, leaseMs));
 }
 
-/** The mark over `settings` (see this file's header). */
+/** The mark over `settings` (see this file's header); a setting out of its range is a `RangeError` naming it. */
 export function createFirstBindingMark(settings: FirstBindingMarkSettings): FirstBindingMark {
 	const lifetimeMs = firstBindingMarkLifetimeMs(settings);
-	const { leaseMs } = settings;
+	const { leaseMs } = readSettings(settings);
 	return Object.freeze({
 		lifetimeMs,
 		readCoversMs: lifetimeMs - DEFAULT_CLOCK_SKEW_MS - leaseMs,

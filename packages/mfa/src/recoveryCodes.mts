@@ -36,9 +36,10 @@
  *   sign-in — one made before a first binding, which admission may have taken
  *   on a recent primary while no factor stood; said at info
  *   (`mfa_first_binding_distrusted`). A mark that cannot be read is `503`.
- *   The distrust is widened by one lease — the owner's factor may land up to
- *   a lease after its mark, and a sign-in in that stretch on a clock up to
- *   the skew ahead must not pass. Every mark distrusts, so it also refuses,
+ *   The mark distrusts up to the skew and one lease after it, as every
+ *   reader of it does — the owner's factor may land up to a lease after its
+ *   mark, and a sign-in in that stretch on a clock up to the skew ahead must
+ *   not pass. Every mark distrusts, so it also refuses,
  *   until the sign-in is later than the mark plus the skew and a lease: the session that bound the first
  *   factor (it got codes then), one whose login reconciled the witness, one
  *   signed in before a binding and stepped up after it, and a fresh MFA login

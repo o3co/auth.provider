@@ -31,12 +31,16 @@ import {
 import { MFA_TRANSACTION_TTL_SECONDS } from "#/transactions.mjs";
 
 const NOW = 1_800_000_010_000;
+/** The default `mfa.storeTimeoutMs`, and the factor-set lease it makes: 16 Store calls' time. */
+const STORE_TIMEOUT_MS = 5_000;
 const LEASE_MS = 80_000;
+/** The longest `mfa.storeTimeoutMs`: its lease is core's longest subject lease, ten minutes. */
+const LONGEST_STORE_TIMEOUT_MS = 37_500;
 /** The mark at the default settings: a factor-set lease of 16 × the 5000 ms Store timeout. */
 const MARK = createFirstBindingMark({
 	manageMaxAgeSeconds: 300,
 	transactionTtlSeconds: 600,
-	leaseMs: LEASE_MS,
+	storeTimeoutMs: STORE_TIMEOUT_MS,
 });
 
 describe("the mark's lifetime", () => {
@@ -50,7 +54,7 @@ describe("the mark's lifetime", () => {
 			const lifetime = firstBindingMarkLifetimeMs({
 				manageMaxAgeSeconds,
 				transactionTtlSeconds,
-				leaseMs: 80_000,
+				storeTimeoutMs: STORE_TIMEOUT_MS,
 			});
 			expect(lifetime).toBe(expected + 2 * DEFAULT_CLOCK_SKEW_MS + 80_000);
 			expect(Number.isSafeInteger(lifetime)).toBe(true);
@@ -61,7 +65,7 @@ describe("the mark's lifetime", () => {
 		const lifetime = firstBindingMarkLifetimeMs({
 			manageMaxAgeSeconds: MFA_RECENT_WINDOW_SECONDS.min,
 			transactionTtlSeconds: MFA_TRANSACTION_TTL_SECONDS.min,
-			leaseMs: 600_000,
+			storeTimeoutMs: LONGEST_STORE_TIMEOUT_MS,
 		});
 		expect(lifetime - DEFAULT_CLOCK_SKEW_MS - 600_000).toBeGreaterThanOrEqual(60_000);
 	});
@@ -70,7 +74,7 @@ describe("the mark's lifetime", () => {
 		const lifetime = firstBindingMarkLifetimeMs({
 			manageMaxAgeSeconds: 300,
 			transactionTtlSeconds: 600,
-			leaseMs: LEASE_MS,
+			storeTimeoutMs: STORE_TIMEOUT_MS,
 		});
 		expect(MARK.lifetimeMs).toBe(lifetime);
 		expect(MARK.readCoversMs).toBe(lifetime - DEFAULT_CLOCK_SKEW_MS - LEASE_MS);
@@ -81,9 +85,32 @@ describe("the mark's lifetime", () => {
 			firstBindingMarkLifetimeMs({
 				manageMaxAgeSeconds: MFA_RECENT_WINDOW_SECONDS.max,
 				transactionTtlSeconds: MFA_TRANSACTION_TTL_SECONDS.max,
-				leaseMs: 600_000,
+				storeTimeoutMs: LONGEST_STORE_TIMEOUT_MS,
 			}),
 		).toBeLessThanOrEqual(MFA_CLOCK_SKEW_ALLOWANCE_MS);
+	});
+});
+
+describe("its settings", () => {
+	it("take the factor-set lease from mfa.storeTimeoutMs as the factor set's writes do, and refuse one out of range, naming it", () => {
+		const settings = { manageMaxAgeSeconds: 300, transactionTtlSeconds: 600 };
+		expect(
+			createFirstBindingMark({ ...settings, storeTimeoutMs: 10_000 }).retryAfterMs(NOW, NOW),
+		).toBe(DEFAULT_CLOCK_SKEW_MS + 160_000 + 1);
+		for (const storeTimeoutMs of [Number.NaN, 0, -1, 1.5, LONGEST_STORE_TIMEOUT_MS + 1]) {
+			expect(
+				() => createFirstBindingMark({ ...settings, storeTimeoutMs }),
+				String(storeTimeoutMs),
+			).toThrow(/^mfa\.storeTimeoutMs: /);
+		}
+		for (const [key, value] of [
+			["manageMaxAgeSeconds", Number.NaN],
+			["transactionTtlSeconds", 0],
+		] as const) {
+			expect(() =>
+				createFirstBindingMark({ ...settings, storeTimeoutMs: STORE_TIMEOUT_MS, [key]: value }),
+			).toThrow(RangeError);
+		}
 	});
 });
 
