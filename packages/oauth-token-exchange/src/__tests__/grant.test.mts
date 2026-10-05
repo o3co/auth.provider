@@ -33,7 +33,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import {
@@ -44,6 +44,10 @@ import {
 	tokenSettings,
 	tokensOf,
 } from "./fixtures.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -186,6 +190,8 @@ describe("createTokenExchangeGrant — the lifetime it mints with, read when it 
 	});
 
 	it("reads no configuration: built from its token settings alone, it mints their default lifetime", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const g = buildGrant({
 			oauthTokenSettings: createTestOAuthTokenSettings({
 				issuer: ISSUER,

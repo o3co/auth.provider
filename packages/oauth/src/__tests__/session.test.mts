@@ -17,9 +17,13 @@
 import { createSymmetricKeyStore, type GrantContext } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 type SessionGrantDeps = Parameters<typeof createSessionGrant>[0];
 
@@ -69,6 +73,8 @@ describe("createSessionGrant — the token settings it mints with, read when it 
 	});
 
 	it("reads nothing of a whole configuration it is handed", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		// Settings at a configuration's paths that the slot contradicts: only
 		// the slot's are read.
 		const config = {
@@ -172,6 +178,8 @@ describe("createSessionGrant", () => {
 		});
 
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			// `expires_in` is the time left when answered: read on a frozen clock.
+			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 			const handler = createSessionGrant(
 				makeDeps({
 					oauthTokenSettings: createTestOAuthTokenSettings({

@@ -514,7 +514,16 @@ export interface SubjectRevocation {
 	 * time (`checkSubjectRevocationInstant`).
 	 */
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
-	/** The sessions watermark, or `null` when this subject has none in force. */
+	/**
+	 * The sessions watermark, or `null` when this subject has none in force.
+	 *
+	 * A read sees every write of this store that has resolved: once
+	 * `revokeBefore` (or `revokeSessionsBefore`) resolves, every read
+	 * answers that boundary or a later one. An adapter does not answer from a
+	 * replica that may lag its writes: a revocation stamps its boundary again
+	 * once the first write resolves, and a read that misses either lets
+	 * through what they cover.
+	 */
 	revokedBefore(subject: string): Promise<Date | null>;
 }
 

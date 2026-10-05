@@ -6,7 +6,7 @@ Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) �
 
 Optional. Nothing here is active until `federation-grants.enabled = true`.
 
-Its settings are the module's own section, `federation-grants {}`, strict, with their defaults in the package's [`config/reference.conf`](config/reference.conf), which the module declares and a composition root layers. The grant stores' settings — their retention, the Redis store's key ring and key prefix — are the stores' own sections (`core-federation-grant-store-memory`, `redis-federation-grant-store`, `redis-federation-grant-intent-store`). A key still written under `federationGrants`, the section's old path, refuses boot naming its new one.
+Its settings are the module's own section, `federation-grants {}`, strict, with their defaults in the package's [`config/reference.conf`](config/reference.conf), which the module declares and a composition root layers. It reads nothing else of the configuration: the issuer comes from the `oauthTokenSettings` slot and the federations from `federationSettings`. The grant stores' settings — their retention, the Redis store's key ring and key prefix — are the stores' own sections (`core-federation-grant-store-memory`, `redis-federation-grant-store`, `redis-federation-grant-intent-store`). A key still written under `federationGrants`, the section's old path, refuses boot naming its new one.
 
 The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — see its README's "Federation Grants" — and [`docs/offline-access.md`](docs/offline-access.md) says what each IdP needs before it will issue a refresh token.
 
@@ -16,7 +16,7 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 
 **Owns:**
 
-- the client routes: the order of their guards (correlation id, throttle, body bound and parsing, client authentication), their answers and their error identifiers;
+- the client routes: the order of their guards (correlation id, throttle, body bound and parsing, client authentication, and on a first-time lodging the throttle keyed on the client), their answers and their error identifiers;
 - the browser half: the connect handle, the consent page's contract, and the checks the callback runs before a grant is activated;
 - the boot refusals of an enabled feature that is missing what it needs;
 - the shutdown drain of work still in flight after a response (`federationGrantBackgroundModule`).
@@ -27,7 +27,8 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 - the stores themselves — core's memory modules and `@o3co/auth-provider-redis`;
 - the upstream authorization and refresh calls — the federation adapter's delegated-authorization capability, which only `@o3co/auth-provider-federation-oidc` implements ([`docs/offline-access.md`](docs/offline-access.md));
 - the consent page — the deployment's;
-- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`; and the issuer every URL here is built on — the oauth module's, read through the `oauthTokenSettings` slot when a composition holds it and from `oauth.jwt.issuer` when not ([#728](https://github.com/o3co/auth.provider/issues/728));
+- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`; and the issuer every URL here is built on — the oauth module's, read through the `oauthTokenSettings` slot, which the module requires while the feature is on: a composition without `oauthModule` fills it itself ([#728](https://github.com/o3co/auth.provider/issues/728));
+- the federations a connection names — `core.federations`, read through the `federationSettings` slot core fills for every composition: whether each is configured and on, and the issuer and client id a grant's identity is pinned to;
 - the browser session, login and the CSRF policy — `@o3co/auth-provider-session` (the `session-middleware` route, the login page through the `loginEntry` slot its session module provides, and the policy the consent answer is held to through its `csrfGuard` slot);
 - whether the session behind the browser's cookie may go on — core's session admission (`admitSession`, [the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)): the durable session, the subject's sessions boundary and the registered session requirements. The browser half asks it at every step and keeps the flow's own checks ([below](#the-browser-half-connect-and-consent)).
 
@@ -66,6 +67,9 @@ const app = await createApp({
     // …and the session modules you already run: the browser half mounts after
     // `session-middleware`, admits the durable session behind the cookie, and
     // holds the consent answer to the session module's `csrfGuard`.
+    // And `oauthModule`, which provides the `oauthTokenSettings` slot the
+    // routes take their issuer from; a composition without it puts the slot
+    // in `bootstrapComponents`.
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve, clientRepository, keyStore },
 });
@@ -98,9 +102,10 @@ which audits only the backstop revocation it writes, and no denial — the
 `revokeAllForSubject`, the subject revocation service) the caller's own, or
 one generated for the call when the caller gives none, so that a pass over a
 subject's grants reads as one operation in the sink (#618). Recording and
-delivery are the deployment's: the module refuses to boot with the feature
-enabled and no `auditSink` unless `core.declaredAbsent = ["auditSink"]` declares the
-capability absent on purpose — the product-wide declaration, which opts the
+delivery are the deployment's: the module attaches core's audit-sink absence
+policy (`AUDIT_SINK_ABSENCE_POLICY`), so boot refuses the feature enabled with
+no `auditSink` (`component-absence-undeclared`) unless
+`core.declaredAbsent = ["auditSink"]` declares the capability absent on purpose — the product-wide declaration, which opts the
 whole provider out of audit and which the standalone does not offer. A Store
 that drives a revocation through the library without passing `audit` records
 nothing of it, by the same choice.
@@ -196,7 +201,14 @@ say what each one means and what to do.
 - **The throttles** log and audit a limiter outage through core with the
   deployment's own logger and sink — `rate_limiter_failed_closed` /
   `rate_limiter_failed_open` and `rate_limit.unavailable`, tagged
-  `federation_grants` or `federation_grants_browser`. While the feature is on,
+  `federation_grants` or `federation_grants_browser`. The client routes are
+  throttled under `federation_grants:ip:<ip>` before client authentication,
+  and a first-time lodging (`POST /oauth/federation-grants`) also under
+  `federation_grants:client:<client_id>` after it: a lodging writes records
+  for any subject the client names, so one client's lodgings are counted
+  across every address it calls from. Its refusal (`429` or `503`) carries
+  none of the IP throttle's `RateLimit-*` headers, which describe a budget
+  that allowed the request. While the feature is on,
   the module claims both prefixes with no budget of its own
   (`rateLimitBudgets`): the limiter's `limits` entry or its default applies,
   and no other module can set a budget for them. Request volume is the
@@ -210,7 +222,7 @@ say what each one means and what to do.
 Exported from [`src/index.mts`](src/index.mts); the linked file holds each definition and its doc comment:
 
 - `federationGrantsModules` — the pair to install — and its two halves `federationGrantsModule` and `federationGrantBackgroundModule`, with `federationGrantsConfigSchema` — [`module.mts`](src/module.mts).
-- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication), for a root that mounts them itself; and a 404 that names no feature, for a root that mounts the path itself while the feature is off. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`.
+- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication, the client's throttle on a lodging), for a root that mounts them itself; and a 404 that names no feature, for a root that mounts the path itself while the feature is off. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`.
 - `createFederationGrantTokenHandler`, `FederationGrantTokenHandlerOptions` — [`tokenRoute.mts`](src/tokenRoute.mts); `createFederationGrantStatusHandler`, `FederationGrantStatusHandlerOptions` — [`statusRoute.mts`](src/statusRoute.mts). Single handlers, without that chain.
 - `createFederationGrantBackground`, `FederationGrantBackground`, `federationGrantsCleanupTailMs` — [`background.mts`](src/background.mts). The shutdown registry, and the tail its drain is registered with ([below](#shutting-down-without-losing-a-rotated-credential)).
 - `FEDERATION_GRANTS_MOUNT_PATH` — [`types.mts`](src/types.mts).
@@ -285,6 +297,7 @@ keep `offline_access` where the connection lists it.
 | `scope` outside the connection / without `openid` / without `offline_access` / a subset where subsets are off | 400 | `invalid_scope` | `scope_exceeded` / `openid_required` / `offline_access_required` / `scope_subsets_not_allowed` |
 | The client may not use this connection — whether or not it exists | 403 | `access_denied` | `connection_not_permitted` |
 | Sixteen live first-time intents for this client and this user | 429 | `rate_limited` | `intent_limit` |
+| This deployment's own throttle, keyed on the authenticated client (`federation_grants:client:<client_id>`) | 429 | `rate_limited` | `provider` |
 | The connection is not configured | 503 | `temporarily_unavailable` | `connection_not_configured` |
 | A store could not be read or written | 503 | `temporarily_unavailable` | `storage` |
 | Admitted as the process began shutting down | 503 | `service_unavailable` | `shutting_down` |

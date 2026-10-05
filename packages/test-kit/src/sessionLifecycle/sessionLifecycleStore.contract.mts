@@ -343,6 +343,25 @@ export function sessionLifecycleStoreContract(
 			assert.equal(after.value.state, "active");
 		}),
 
+		test("participants are answered in the order each first joined, a repeat join not moving one, and the closing snapshot keeps it", async (store, harness) => {
+			const { sid } = await opened(store, harness, "order");
+			// Not the order of the items' bytes, so a store that sorts by them fails.
+			const joining = [
+				participant("federation", "oidc"),
+				participant("rp", "zeta"),
+				participant("federation", "apple"),
+				participant("family", "f1"),
+			];
+			for (const p of joining) assert.equal(await store.join(sid, p), "joined");
+			assert.equal(await store.join(sid, participant("federation", "oidc", "again")), "joined");
+			const order = ["federation:oidc", "rp:zeta", "federation:apple", "family:f1"];
+			const live = await store.live(sid);
+			assert.deepStrictEqual(live.value.participants.map(sessionCloseItemOf), order);
+			const closed = await store.close(sid);
+			assert.ok(closed.outcome !== "missing", "the close found the record");
+			assert.deepStrictEqual(closed.record.participants.map(sessionCloseItemOf), order);
+		}),
+
 		test("a join, a close or a completion of a sid with no record answers missing and creates nothing", async (store, harness) => {
 			const sid = freshSid("missing");
 			const { sid: other } = await opened(store, harness, "missing-other");

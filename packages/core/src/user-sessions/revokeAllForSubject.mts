@@ -25,6 +25,7 @@ import type { FederationGrant } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
+import { stampSubjectBoundary } from "./stampSubjectBoundary.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
 /**
@@ -67,6 +68,13 @@ export interface RevokeAllForSubjectFailure {
 	readonly sid?: string;
 	/** The grant the failing call concerned, for the per-grant operations. */
 	readonly grantId?: string;
+	/**
+	 * Which of a boundary's two writes threw (`revokeBefore`,
+	 * `revokeSessionsBefore`): `1`, the first; `2`, the one made after it
+	 * took effect, when a boundary may be in force without covering what was
+	 * minted while the first was in flight. Run the revocation again.
+	 */
+	readonly stamp?: 1 | 2;
 	readonly error: unknown;
 }
 
@@ -109,7 +117,12 @@ export interface RevokeAllForSubjectResult {
 	readonly sessionsRevoked: readonly string[];
 	/** Session ids whose cascade failed — still live, safe to retry. */
 	readonly sessionsFailed: readonly string[];
-	/** Whether the access-token watermark was written. */
+	/**
+	 * Whether the access-token watermark was written. It is written twice, the
+	 * second time once the first has settled; true when either write took
+	 * effect. A write that threw is in `failures` with its `stamp`, and
+	 * `complete` is then `false`.
+	 */
 	readonly tokensRevoked: boolean;
 	/**
 	 * Whether a grant store was supplied, and the grant pass therefore ran.
@@ -161,7 +174,13 @@ export interface RevokeAllForSubjectResult {
  *     perhaps alive": a live session with no usable token can be cleaned up
  *     on retry; a live token is the thing being revoked.
  *
- * **This never throws.** The caller has already written the new credential
+ * It is stamped again once that write has taken effect
+ * (`stampSubjectBoundary`), so it also covers a token minted while the write
+ * was in flight.
+ *
+ * **This never throws** once it has checked its arguments (a `RangeError`
+ * for a `watermarkTtlMs` that is not a positive whole number of
+ * milliseconds, before anything is written). The caller has already written the new credential
  * and has no undo, so an exception would replace a partial result it could
  * act on (retry these sids, alert on that outage) with nothing. Every store
  * failure is reported, and `complete` is the one field to check.
@@ -173,6 +192,11 @@ export interface RevokeAllForSubjectResult {
 export async function revokeAllForSubject(
 	opts: RevokeAllForSubjectOptions,
 ): Promise<RevokeAllForSubjectResult> {
+	if (!(Number.isSafeInteger(opts.watermarkTtlMs) && opts.watermarkTtlMs > 0)) {
+		throw new RangeError(
+			`revokeAllForSubject: watermarkTtlMs must be a positive whole number of milliseconds, and was ${String(opts.watermarkTtlMs)}`,
+		);
+	}
 	const now = opts.now ?? Date.now;
 	const unavailable: RevokeAllForSubjectCapability[] = [];
 	const failures: RevokeAllForSubjectFailure[] = [];
@@ -182,21 +206,21 @@ export async function revokeAllForSubject(
 	if (opts.subjectRevocation === undefined) {
 		unavailable.push("subjectRevocation");
 	} else {
-		const at = now();
-		try {
-			await opts.subjectRevocation.revokeBefore(
-				opts.subject,
-				new Date(at),
-				new Date(at + opts.watermarkTtlMs),
-			);
-			tokensRevoked = true;
-		} catch (error) {
+		const revocation = opts.subjectRevocation;
+		const stamped = await stampSubjectBoundary(
+			(before, expiresAt) => revocation.revokeBefore(opts.subject, before, expiresAt),
+			now,
+			opts.watermarkTtlMs,
+		);
+		tokensRevoked = stamped.written;
+		if (stamped.failure !== undefined) {
+			const { error, stamp } = stamped.failure;
 			// Reported, not thrown, and the cascade below still runs: a watermark
 			// that could not be written does not make the subject's sessions any
 			// less worth killing, and returning here would revoke nothing at all.
-			failures.push({ capability: "subjectRevocation", operation: "revokeBefore", error });
+			failures.push({ capability: "subjectRevocation", operation: "revokeBefore", stamp, error });
 			opts.logger?.error(
-				{ err: loggableError(error), subject: opts.subject },
+				{ err: loggableError(error), subject: opts.subject, stamp },
 				"revoke_all_watermark_failed",
 			);
 		}

@@ -49,7 +49,7 @@ import {
 	createTestTokenBindingSettings,
 } from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAssertion: vi.fn(),
@@ -59,6 +59,10 @@ vi.mock("#/internal/verification.mjs", () => ({
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
 import { verifyWebAuthnAssertion } from "#/internal/verification.mjs";
 import { createTestWebAuthnConfig } from "#/testing/index.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const mockVerifyAssertion = vi.mocked(verifyWebAuthnAssertion);
 
@@ -279,6 +283,8 @@ describe("createWebAuthnGrant — access-token confirmation", () => {
 
 describe("createWebAuthnGrant — unbound requests", () => {
 	it("emits no cnf and only access_token, expires_in and token_type, for a client that demands nothing", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const tokens = await issue(
 			await makeDeps(),
 			makeCtx(makeClient({ allowedGrantTypes: [WEBAUTHN_GRANT_TYPE] })),
@@ -291,6 +297,8 @@ describe("createWebAuthnGrant — unbound requests", () => {
 	});
 
 	it("mints the slot's default lifetime and ignores an expires_in request parameter", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const deps = await makeDeps();
 		const tokens = await issue(
 			{

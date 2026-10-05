@@ -210,6 +210,20 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `oauth.authorize.acrValues.<key>`), naming the key, every such key in one
   boot. Rename the entry to a value a client can send, such as a URN
   (`urn:example:acr:mfa`), and tell the relying parties that asked for it.
+  Core's schema and the oauth module's (`oauthSectionSchema`) refuse the
+  same keys with the same message, so a section parsed with either alone —
+  a composition root's own check, a test — is refused as boot refuses it.
+- **BREAKING: an empty `oauth.consentPage.url` refuses the boot (#728).** An
+  `ENDPOINTS_CONSENT_URL` (now `OAUTH_CONSENT_PAGE_URL`) exported empty
+  (`ENDPOINTS_CONSENT_URL=` in a `.env`, a compose file or a ConfigMap) used
+  to boot, and every client that
+  is not first-party was then redirected to `?challenge=<id>` relative to
+  `/oauth/authorize` — a page that is not there. The old name is first
+  refused as renamed (`environment-variable-renamed`); renamed to
+  `OAUTH_CONSENT_PAGE_URL` and still exported empty or blank, it now refuses
+  the boot (`config-validation-failed` at `oauth.consentPage.url`), as an
+  empty `session.loginPage.url` already did. Unset the variable to keep the
+  default, `/consent`, or set it to your consent page.
 - **BREAKING: `oauth {}` refuses a key it does not declare, at every level
   (#728).** Wherever the oauth module is installed (the standalone template
   installs it), a key under `oauth` that its schema does not declare — a
@@ -237,8 +251,13 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
   too (#1329): an empty `mfa.factors` block an older configuration leaves
   behind (the TOTP factor's old path, its variables unset) is such a key —
-  delete it. So does `webauthn`, at every level (#1336), and so does
-  `session`, at every level (#728). The keys under `audit-sink` are the
+  delete it. So do `webauthn`, at every level (#1336), `session`, at every
+  level (#728), and `federation-grants`, at every level: the keys under
+  `federation-grants.connections` are the connections you name, and a
+  connection's `authorizationParams` the upstream's parameters, so those stay
+  open. So do `oauth-session` and `oauth-authorization`, the latter at every
+  level: `grants` holds the four grants' blocks alone, and each block
+  `enabled` alone (#728). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -292,6 +311,14 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   every request through, and core's policy for the slot applies instead: list
   `"rateLimiter"` in `core.declaredAbsent`. With a limiter wired, both are
   throttled as before.
+- **BREAKING: a first-time federation-grant lodging is also limited per client
+  (#628).** After client authentication, `POST /oauth/federation-grants` asks
+  the limiter again under `federation_grants:client:<client_id>`. One client
+  lodging for many subjects, behind several egress IPs for example, is now
+  capped at `limits.federation_grants` (else `defaultLimit`) across all of its
+  addresses, and refused `429 rate_limited` / `provider` beyond it. The
+  bundled limiters apply that one `limits.federation_grants` to the IP keys
+  and the client keys alike; raise it if such a client lodges faster.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
   refused (#807).** `core-rate-limiter-memory.limits` and
   `redis-rate-limiter.limits` may not name either prefix: each is a verifier's
@@ -627,6 +654,29 @@ modules fills them.
   federation's redirect policy through `federationRedirectPolicies` overrides
   the type instead (`overrides.federationTypes.<type>`, with its own
   `redirectPolicy`).
+- **BREAKING: a contribution kind's container is its kind's shape (#911).**
+  In `contributes` and in `overrides`, a name-keyed kind (`grants`,
+  `tokenExchangeValidators`, `mfaFactors`, `sessionRequirements`,
+  `rateLimitBudgets`, `federationTypes`, `admissionActions`,
+  `sessionCloseNotifiers`, and a kind of your own whose collector is
+  name-keyed) takes a record, and a list-shaped kind (`routes`,
+  `auditHooks`, `grantPolicyHooks`, `grantMiddleware`,
+  `tokenBindingMechanisms`, `discoveryMetadata`, and a list-shaped kind of
+  your own) takes an array. A manifest that bypasses `ContributesMap`'s
+  types — written in JavaScript, or cast — with an array under a name-keyed
+  kind used to boot with those contributions dropped, filed under keys no
+  reader reaches, or to fail with a plain `TypeError` when they were
+  overrides or a factory failed; a record under a list-shaped kind failed
+  with a `TypeError`, and `null` or a function was ignored for most kinds.
+  Each is now refused before any factory runs (`contribution-malformed`,
+  naming the module, the kind, the channel and what the container was).
+  A record is a plain object — a literal, or `Object.create(null)`; a class
+  instance, a `Map` or an object with another prototype is refused too,
+  though `ContributesMap`'s types accept it. Write the kind's shape as a
+  literal record or array. An array under `overrides.sessionCloseNotifiers`
+  is now refused for its container (`contribution-malformed`) before the
+  override guard (`contribution-kind-guarded`) that a record there still
+  meets.
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
   overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot
@@ -760,6 +810,68 @@ modules fills them.
   throws a `RangeError` naming it when it is missing or breaks the slot's
   contract; `SessionGrantDeps` no longer has `config` (in a test,
   `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
+- **BREAKING: the authorization_code, refresh_token, client_credentials and
+  jwt-bearer grants are one module, `oauthAuthorizationGrantsModule`,
+  switched by its own section (#728).** List it as it is: it reads each
+  `oauth-authorization.grants.<grant>.enabled` from the configuration boot
+  parses, and an absent section or key is off. `oauthAuthorizationModule({
+  config })` is removed: list `oauthAuthorizationGrantsModule` in its place.
+  The refusal of a module built from a configuration that disagrees with the
+  booted one about a grant's switch is gone, and the standalone template no longer reads
+  `oauth-authorization.grants` before boot (its `SWITCHES` no longer lists
+  it). A grant switched off registers nothing, but while the module is on it
+  still claims its grant type: a composition that pairs the module with its
+  own `client_credentials`, `refresh_token` or jwt-bearer grant, this
+  module's switch for it off, is refused (`duplicate-contribute`) where it
+  used to boot — and an override of a switched-off grant is refused
+  (`override-target-missing`). Drop your grant, or switch every grant of
+  this module off; with every grant off the
+  module registers and requires nothing — no slot, and no `subjectRevocation`
+  or `auditSink` absence policy. While any grant is on, the module declares
+  both session-bound grants' actions (`oauth.code_exchange`,
+  `oauth.refresh`), whichever is on. Its schema,
+  `oauthAuthorizationConfigSchema`, fills no default: the package's
+  `config/reference.conf` ships every switch off.
+- **BREAKING: an enabled oauth-authorization grant requires
+  `oauthTokenSettings` and `tokenBindingSettings`, and reads its settings
+  from them, not from the configuration (#728).** The grants take the
+  issuer, the lifetimes they mint, `legacyTypAccept`, whether resource
+  indicators are enforced and `requireEmailVerified` from
+  `oauthTokenSettings`, and the refresh-token binding rule
+  (`bindConfidentialClientRefreshTokens`) from core's `tokenBindingSettings`,
+  which boot always fills. With `oauthModule` installed nothing changes. A
+  composition with a grant on and without `oauthModule` puts an
+  `oauthTokenSettings` value in `bootstrapComponents`, or the boot is refused
+  for the missing component. The id_token's `iss` is the slot's issuer, so
+  an id_token is issued whenever `openid` is granted and a session is read;
+  before, a configuration built by hand without `oauth.jwt.issuer` got none.
+  The refresh grant still reads `oauth.refreshToken.unknownFamilyPolicy` from
+  `config`, so the module still requires `config`. A deps object handed to
+  the module's grant factories carries `section`, `oauthTokenSettings` and
+  `tokenBindingSettings`; a factory refuses a missing or broken
+  `oauthTokenSettings` with a `RangeError` naming it, and a
+  `tokenBindingSettings` whose rule is not a boolean with a `TypeError`.
+- **BREAKING: enabled federation grants require `oauthTokenSettings`, and
+  `federationGrantsModule` no longer reads the configuration (#728).** It
+  takes the issuer every route, `connect_uri` and callback check is built on
+  from the slot alone, and no longer falls back to `oauth.jwt.issuer` when no
+  module provides it. With `oauthModule` installed nothing changes. A
+  composition with `federation-grants.enabled = true` and without
+  `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`,
+  or the boot is refused for the missing component. The federations a
+  connection names — whether each is configured and on, its `issuer` and
+  `clientId` — come from core's `federationSettings` slot, which core fills
+  from `core.federations` in every composition: nothing to do under
+  `createApp`, and the refusals are unchanged. A deps object handed to the
+  module's route factories carries `oauthTokenSettings`,
+  `federationSettings` and `section`; `config` is no longer read. The audit
+  sink's declared absence is now core's guard: enabled with no `auditSink`
+  and no `core.declaredAbsent = ["auditSink"]`, the boot is refused at
+  manifest validation with core's `component-absence-undeclared`
+  (`consumedBy` naming `federation-grants`), ahead of the module's other
+  refusals, and no longer with the module's own
+  `federationGrantsModule: … with no auditSink component` error; match on
+  the reason. Disabled, the module requires nothing.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
@@ -978,6 +1090,11 @@ with what a store of yours records and refuses. Per port:
 - **`RateLimiter`.** One that declares no `failMode` fails closed, whatever
   `redis-rate-limiter.failMode` says (formerly `rateLimit.failMode`, now a
   retired path that refuses the boot); a wrapper forwards `failMode` (#782).
+  It also meets a second key shape (#628): `federation_grants:client:<client_id>`,
+  with `ctx.clientId` set, on a first-time federation-grant lodging, beside
+  `federation_grants:ip:<ip>`. Its prefix is the same, so a limiter that
+  budgets by prefix applies one budget to both; one that wants a separate
+  per-client budget tells the `:client:` keys apart.
 - **Redis clients of your own.** `SubjectRevocationClient` implements
   `advanceRevocationBoundaries`, and `setRevocationBoundaries` is gone (#993):
   add the method on the current release first.

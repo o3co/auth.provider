@@ -44,6 +44,7 @@ import { createTokenHandler } from "#/routes/token.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 vi.mock("#/logout/sessionEnd.mjs", async (importOriginal) => {
@@ -90,7 +91,7 @@ describe("createAuthorizationGrant — a throw after the family is registered", 
 		const revokeFamily = vi.fn(async () => {});
 		const handler = createAuthorizationGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-			config,
+			...grantSettingsFrom(config),
 			keyStore: createSymmetricKeyStore("test-secret"),
 			codeRepository: {
 				consumeByCode: vi.fn(async () =>

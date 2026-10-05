@@ -165,11 +165,13 @@ const applyGrantPolicy = async (
 			// RFC 6749 §4.1.2.1 makes `error` 1*NQSCHAR. The policy's code goes
 			// out as given when it is one; otherwise the redirect says
 			// `access_denied` — the authorization server refused — and the code
-			// is logged, sanitised, for the operator who wrote the policy.
+			// is logged, sanitised, for the operator who wrote the policy; one
+			// that is not a string, by its type, as core's `policyDenied` does.
 			let error = reading.decision.error;
 			if (!isWellFormedErrorCode(error)) {
+				const code: unknown = error;
 				ctx.opts.logger.warn(
-					{ error: auditErrorText(String(error)) },
+					{ error: auditErrorText(code) ?? `(${typeof code})` },
 					"authorize_policy_deny_error_malformed",
 				);
 				error = "access_denied";
@@ -264,6 +266,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	// resolver, and the vouchable acr table the router computed once.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: opts.userSessionStore,
+		sessionLifecycleStore: opts.sessionLifecycleStore,
 		subjectRevocation: opts.subjectRevocation,
 		requirements: checkResolver(opts.requirements, "createAuthorizeHandler", [AUTHORIZE_ACTION]),
 		acrTable: opts.oauth.acrValues,

@@ -35,6 +35,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 // A limiter outage is answered by the limiter's own `failMode`; the mock
@@ -928,7 +929,7 @@ describe("oauth routes — hooks", () => {
 			const { createAuthorizationGrant } = await import("#/grants/authorization.mjs");
 			const deps = {
 				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-				config: mockConfig,
+				...grantSettingsFrom(mockConfig),
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 				codeRepository: codeRepo,
 				clientRepository: {

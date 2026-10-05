@@ -1095,11 +1095,31 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				"the same refresh token beside another access token, as an IdP that does not rotate leaves it",
 				SECRET,
 				"at-theirs",
+				{},
 			],
-			["another refresh token beside the same access token", `${SECRET}-theirs`, "at-1"],
-		])(
+			["another refresh token beside the same access token", `${SECRET}-theirs`, "at-1", {}],
+			// The same strings, written by another call: its own per-write facts.
+			[
+				"the same tokens, obtained by a call that began at another instant",
+				SECRET,
+				"at-1",
+				{ obtainedAtOffsetMs: -1_000 },
+			],
+			["the same tokens, with another issued lifetime", SECRET, "at-1", { issuedLifetime: 1800 }],
+			[
+				"the same tokens, ending at another instant",
+				SECRET,
+				"at-1",
+				{ effectiveExpiresAtOffsetMs: -60_000 },
+			],
+		] as const)(
 			"is a loss when the write never landed and somebody else's did — %s",
-			async (_, refreshToken, accessToken) => {
+			async (_, refreshToken, accessToken, theirs) => {
+				const differs = theirs as {
+					readonly obtainedAtOffsetMs?: number;
+					readonly issuedLifetime?: number;
+					readonly effectiveExpiresAtOffsetMs?: number;
+				};
 				await h.seed();
 				setNow(DUE);
 				// No rotation: what this call tries to store keeps the stored refresh token.
@@ -1115,9 +1135,11 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 							accessToken: {
 								value: accessToken,
 								tokenType: "Bearer",
-								obtainedAt: now(),
-								issuedLifetime: 3600,
-								effectiveExpiresAt: new Date(now().getTime() + HOUR),
+								obtainedAt: new Date(now().getTime() + (differs.obtainedAtOffsetMs ?? 0)),
+								issuedLifetime: differs.issuedLifetime ?? 3600,
+								effectiveExpiresAt: new Date(
+									now().getTime() + HOUR + (differs.effectiveExpiresAtOffsetMs ?? 0),
+								),
 								scopes: [...SCOPES],
 							},
 						},

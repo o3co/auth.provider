@@ -66,6 +66,7 @@ import type {
 	CookieCarrier,
 	DeploymentMode,
 	Logger,
+	SessionLifecycleStore,
 	SessionRequirementResolver,
 	SubjectRevocation,
 	UserSessionStore,
@@ -257,6 +258,8 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 * composition that declared subject-level revocation absent has none.
 	 */
 	readonly subjectRevocation?: SubjectRevocation;
+	/** The session lifecycle port admission reads after a live record, when wired. */
+	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 }
 
 export const createDeviceVerificationHandler = (
@@ -283,6 +286,7 @@ export const createDeviceVerificationHandler = (
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: options.userSessionStore,
 		subjectRevocation: options.subjectRevocation,
+		sessionLifecycleStore: options.sessionLifecycleStore,
 		requirements,
 		acrTable: NO_ACR_TABLE,
 		logger: coreLogger(options.logger),

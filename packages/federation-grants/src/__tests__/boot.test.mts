@@ -54,6 +54,11 @@ import {
 	federationGrantsModules,
 } from "#/index.mjs";
 import {
+	type FederationGrantsModuleDeps,
+	federationGrantsConfigSchema,
+	federationGrantsModule,
+} from "#/module.mjs";
+import {
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
 	callbackUrlFor,
@@ -230,8 +235,11 @@ interface Setup {
 	 * `"without-check"`, a guard with no `check` to ask.
 	 */
 	readonly withCsrfGuard?: boolean | "without-check";
-	/** The oauthTokenSettings the composition holds; none by default. */
-	readonly tokenSettingsIssuer?: string;
+	/**
+	 * The issuer of the oauthTokenSettings the composition holds, the
+	 * configuration's by default; `null` holds none.
+	 */
+	readonly tokenSettingsIssuer?: string | null;
 	/** Where the memory store's cleanup records that it ran; no cleanup by default. */
 	readonly storeClosed?: string[];
 	/** A registry the host supplies through `overrideComponents`, in place of the module's. */
@@ -320,15 +328,23 @@ const boot = (setup: Setup) => {
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
-			...(setup.tokenSettingsIssuer === undefined
-				? {}
-				: {
-						oauthTokenSettings: createTestOAuthTokenSettings({ issuer: setup.tokenSettingsIssuer }),
-					}),
 			...(() => {
-				const { federationGrantIntentStore, userRepository, loginEntry, csrfGuard } =
-					acquisitionComponents();
+				const {
+					oauthTokenSettings,
+					federationGrantIntentStore,
+					userRepository,
+					loginEntry,
+					csrfGuard,
+				} = acquisitionComponents();
 				return {
+					...(setup.tokenSettingsIssuer === null
+						? {}
+						: {
+								oauthTokenSettings:
+									setup.tokenSettingsIssuer === undefined
+										? oauthTokenSettings
+										: createTestOAuthTokenSettings({ issuer: setup.tokenSettingsIssuer }),
+							}),
 					...(setup.withIntentStore === false ? {} : { federationGrantIntentStore }),
 					...(setup.withCsrfGuard === false
 						? {}
@@ -566,10 +582,21 @@ describe("enabling the feature", () => {
 		await expect(boot({ provider: formPost })).rejects.toThrow(/form_post/);
 	});
 
-	it("refuses to discard every disclosure without being told to, naming core.declaredAbsent", async () => {
-		await expect(boot({ withAudit: false })).rejects.toThrow(
-			/list "auditSink" in core\.declaredAbsent/,
+	it("refuses to discard every disclosure without being told to, by core's absence policy naming core.declaredAbsent", async () => {
+		const error = await boot({ withAudit: false }).then(
+			() => undefined,
+			(thrown: unknown) => thrown,
 		);
+		expect(error).toBeInstanceOf(BootError);
+		expect(error).toMatchObject({
+			reason: "component-absence-undeclared",
+			details: { componentKey: "auditSink", absentValue: "auditSink" },
+		});
+		expect((error as BootError).details).toHaveProperty(
+			"consumedBy",
+			expect.arrayContaining(["federation-grants"]),
+		);
+		expect((error as Error).message).toMatch(/list "auditSink" in core\.declaredAbsent/);
 	});
 
 	it('does not take audit.sink.type = "none", where the declaration was, as the declaration', async () => {
@@ -743,6 +770,44 @@ describe("what creating a grant needs", () => {
 		await expect(boot({ grants: { consent: {} } })).rejects.toThrow(
 			/federation-grants\.consent\.url/,
 		);
+	});
+
+	it("refuses to boot enabled without oauthTokenSettings, naming the slot", async () => {
+		// The issuer every route and callback is built on is the slot's alone:
+		// a composition without the oauth module fills it, and nothing reads
+		// `oauth.jwt.issuer` off the configuration in its place.
+		await expect(boot({ tokenSettingsIssuer: null })).rejects.toThrow(/oauthTokenSettings/);
+	});
+
+	it("boots disabled without oauthTokenSettings: switched off, the module requires nothing", async () => {
+		const handle = await boot({ enabled: false, tokenSettingsIssuer: null });
+		await handle.dispose();
+	});
+
+	it("builds both halves from its section and slots, with no configuration in its deps", async () => {
+		const handle = await boot({});
+		try {
+			const {
+				config: _none,
+				lifecycleRegistrar: _registered,
+				...components
+			} = handle.components as Record<string, unknown>;
+			const deps = {
+				...components,
+				section: federationGrantsConfigSchema.parse({
+					enabled: true,
+					connections: { calendar: CONNECTION },
+					...ACQUISITION_GRANT_SETTINGS,
+				}),
+			} as unknown as FederationGrantsModuleDeps;
+			const routes = federationGrantsModule.contributes?.routes ?? [];
+			expect(routes).toHaveLength(2);
+			for (const route of routes) {
+				expect(() => (route as (deps: FederationGrantsModuleDeps) => unknown)(deps)).not.toThrow();
+			}
+		} finally {
+			await handle.dispose();
+		}
 	});
 
 	it("holds every connection's callback to the origin of the oauthTokenSettings issuer, over the configuration's", async () => {
