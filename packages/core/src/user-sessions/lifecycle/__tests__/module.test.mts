@@ -71,6 +71,7 @@ const boot = (
 		readonly sweepIntervalSeconds?: unknown;
 		readonly components?: Record<string, unknown>;
 		readonly overrides?: Record<string, unknown>;
+		readonly activated?: boolean;
 	} = {},
 ) => {
 	const config = makeValidCoreConfig();
@@ -80,7 +81,7 @@ const boot = (
 			: { sessionLifecycleSweepIntervalSeconds: options.sweepIntervalSeconds },
 	).core;
 	return createApp({
-		modules: MODULES,
+		modules: options.activated === false ? MODULES.filter((m) => m !== activator) : MODULES,
 		bootstrapComponents: {
 			config: { ...config, core },
 			pathResolver: (p: string) => p,
@@ -118,6 +119,24 @@ describe("sessionLifecycleModule", () => {
 		).rejects.toThrow(/sessionCloseNotifier/);
 	});
 
+	it("is built at boot with nothing requiring the slot", async () => {
+		const handle = await boot({ activated: false });
+		expect(
+			typeof ((handle.components as Record<string, unknown>).sessionLifecycle as SessionLifecycle)
+				.close,
+		).toBe("function");
+		await handle.dispose();
+	});
+
+	it("refuses relying parties without a notifier with nothing requiring the slot", async () => {
+		await expect(
+			boot({
+				activated: false,
+				components: { clientRepository: new InMemoryClientRepository(new Map()) },
+			}),
+		).rejects.toThrow(/sessionCloseNotifier/);
+	});
+
 	it("boots with relying parties and a notifier", async () => {
 		const handle = await boot({
 			components: {
@@ -151,6 +170,7 @@ describe("sessionLifecycleModule", () => {
 			const handle = await boot({
 				sweepIntervalSeconds: "30",
 				overrides: { sessionLifecycleStore: counting.store },
+				activated: false,
 			});
 			expect(counting.listings()).toBe(0);
 			await vi.advanceTimersByTimeAsync(30_000);

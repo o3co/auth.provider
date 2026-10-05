@@ -104,6 +104,9 @@ export const sessionLifecycleModule = defineModule({
 		"logger",
 		"lifecycleRegistrar",
 	] as const,
+	// Eager: installed, the module refuses a composition without a notifier
+	// and starts its sweep at boot, whether or not anything requires the slot.
+	lifecycle: { sessionLifecycle: { eager: true } },
 	provides: {
 		sessionLifecycle: (deps) => {
 			if (deps.clientRepository !== undefined && deps.sessionCloseNotifier === undefined) {

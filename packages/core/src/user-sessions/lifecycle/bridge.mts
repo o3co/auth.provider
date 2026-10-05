@@ -20,9 +20,9 @@
  * mark, `SessionFederationIndex`), written beside the record while code that
  * knows only them still runs. A join writes their fence, the relying party
  * before the family, so a close that began through them lists it or refuses
- * it; a close writes their end mark before it lists them, so what joined
- * through them is closed too and nothing joins through them after. Only the
- * lifecycle service calls it.
+ * it; a close writes their end mark before its commit, so nothing joins
+ * through them after, and its work reads them when it runs, so what joined
+ * through them is closed too. Only the lifecycle service calls it.
  */
 
 import {
@@ -32,7 +32,6 @@ import {
 	type SessionRPRegistry,
 	supportsSessionEnd,
 } from "../types.mjs";
-import type { SessionParticipant } from "./types.mjs";
 
 export interface SessionStoresBridgeStores {
 	readonly sessionRPRegistry: SessionRPRegistry;
@@ -48,6 +47,12 @@ export interface SessionStoresBridgeStores {
  */
 export type BridgedJoin = "written" | "refused";
 
+/** What the old stores list once a close has written the end mark: relying parties by `client_id`, and federations. */
+export interface BridgedClose {
+	readonly rps: readonly string[];
+	readonly federations: readonly string[];
+}
+
 export interface SessionStoresBridge {
 	/**
 	 * Writes a join to the old stores: the relying party, then the family past
@@ -60,17 +65,15 @@ export interface SessionStoresBridge {
 		expiresAt: Date,
 		adopting: boolean,
 	): Promise<BridgedJoin>;
-	/** Writes the old end mark, then answers every participant the old stores hold. */
-	close(sid: string, expiresAt: Date): Promise<readonly SessionParticipant[]>;
+	/** Writes the old end mark, then answers the relying parties and federations the old stores list. */
+	close(sid: string, expiresAt: Date): Promise<BridgedClose>;
+	/** The families the old family index lists, marking the session ended again where it keeps the mark. */
+	families(sid: string, expiresAt: Date): Promise<readonly string[]>;
+	/** The relying parties the old registry lists, by `client_id`. */
+	relyingParties(sid: string): Promise<readonly string[]>;
 	/** Removes the session's entries from the old stores; the end mark stays. */
 	remove(sid: string): Promise<void>;
 }
-
-const participant = (kind: SessionParticipant["kind"], id: string): SessionParticipant => ({
-	kind,
-	id,
-	data: "",
-});
 
 export function createSessionStoresBridge(stores: SessionStoresBridgeStores): SessionStoresBridge {
 	const { sessionRPRegistry, sessionFamilyIndex, sessionFederationIndex } = stores;
@@ -99,18 +102,23 @@ export function createSessionStoresBridge(stores: SessionStoresBridgeStores): Se
 		},
 
 		async close(sid, expiresAt) {
-			const families = supportsSessionEnd(sessionFamilyIndex)
-				? await sessionFamilyIndex.endSession(sid, expiresAt)
-				: await sessionFamilyIndex.listFamilyIds(sid);
+			if (supportsSessionEnd(sessionFamilyIndex))
+				await sessionFamilyIndex.endSession(sid, expiresAt);
 			const [rps, federations] = await Promise.all([
 				sessionRPRegistry.listRPs(sid),
 				sessionFederationIndex.listFederations(sid),
 			]);
-			return [
-				...rps.map((rp) => participant("rp", rp.clientId)),
-				...families.map((familyId) => participant("family", familyId)),
-				...federations.map((name) => participant("federation", name)),
-			];
+			return { rps: rps.map((rp) => rp.clientId), federations: [...federations] };
+		},
+
+		families(sid, expiresAt) {
+			return supportsSessionEnd(sessionFamilyIndex)
+				? sessionFamilyIndex.endSession(sid, expiresAt)
+				: sessionFamilyIndex.listFamilyIds(sid);
+		},
+
+		async relyingParties(sid) {
+			return (await sessionRPRegistry.listRPs(sid)).map((rp) => rp.clientId);
 		},
 
 		async remove(sid) {

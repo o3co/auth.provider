@@ -142,16 +142,23 @@ or whether it did could not be read. How a route answers `pending` (the
 logout's 200 and a `logout.close_pending` audit event) is decided when that
 route switches.
 
-**D10. The close work.** One item per family (`revokeFamily`), then
-`remove_federation_tokens` (`federationTokenStore.removeBySid`),
-`remove_subject_session` (`subjectSessionIndex.removeSid`, where a subject
-index is wired), one item per relying party (`SessionCloseNotifier`),
-`remove_session_indexes` (the per-session stores of D14), and
-`delete_user_session` last, run only once every other item is recorded.
+**D10. The close work, in phases.** An item runs only once no item of an
+earlier phase is pending in the record, so no phase runs over work an
+earlier one has not durably done:
+1. one item per family (`revokeFamily`), `revoke_bridged_families` (D14),
+   `remove_federation_tokens` (`federationTokenStore.removeBySid`) and
+   `remove_subject_session` (`subjectSessionIndex.removeSid`, where a subject
+   index is wired);
+2. one item per relying party and `notify_bridged_rps` (D14), through
+   `SessionCloseNotifier`; an item this code does not know waits here;
+3. `remove_session_indexes` (the per-session stores the bridge steps read);
+4. `delete_user_session`, last.
+
 Each item that ran is recorded with `completeIf` at the generation read; a
 conflict re-reads the record and goes on with what is still pending, so two
-closes of one session and the sweep may overlap. A failed item stays
-pending and the record stays `closing`.
+closes of one session and the sweep may overlap. A failed item, or one whose
+completion could not be recorded, stays pending and the record stays
+`closing`; the other items of its phase still run.
 
 **D11. Resumption.** A later close of the same sid resumes the saved work,
 whatever its cause (the first cause is kept). A sweep owned by core,
@@ -177,8 +184,13 @@ orders modules, not components, so the module that fills the notifier must
 not itself require `sessionLifecycle`, and the closing record's `retainMs` —
 `oauth.refreshToken.expiresIn` plus `DEFAULT_CLOCK_SKEW_MS`, within the
 port's year, and 0 without a refresh-token lifetime — is read from the
-configuration, not from the oauth module's slot. The session grant joins
-nothing: it mints access tokens only, which die with liveness.
+configuration, not from the oauth module's slot. That read is a known
+coupling to the oauth module's section; it moves to a core slot when oauth
+exposes token lifetimes through one that the lifecycle module can read
+without a cycle. The module is eager: installed, it is built at boot whether
+or not anything requires the slot, so the refusal and the sweep do not wait
+for a consumer. The session grant joins nothing: it mints access tokens
+only, which die with liveness.
 
 **D14. The bridge to the per-session stores, and adoption.** While
 `SessionRPRegistry`, `SessionFamilyIndex` (with its end mark) and
@@ -186,9 +198,14 @@ nothing: it mints access tokens only, which die with liveness.
 too (`src/user-sessions/lifecycle/bridge.mts`). A join writes the relying
 party, then the family through `addFamilyIdUnlessEnded`, then the
 federation, before the lifecycle join; an `ended` refuses the join. A close
-writes the end mark (`endSession`) and lists the three stores before its
-commit, and joins what they hold to the record, so the snapshot holds what
-joined through them. A session with no lifecycle record is adopted — opened
+writes the end mark (`endSession`) before its commit, so nothing joins
+through them after. What joined through them is not imported into the
+record, since an import would be a join and could be refused (by capacity,
+or by the session's end passing): two steps read them when they run instead.
+`revoke_bridged_families` revokes every family the index lists that is not
+the record's own, and `notify_bridged_rps` tells every relying party the
+registry lists that is not the record's own. The close that commits also
+answers the relying parties and federations they listed after the mark. A session with no lifecycle record is adopted — opened
 from its user session's subject and end: by a close always, since closing is
 never unsafe; by a join only where no end mark can be present — its family
 passed `addFamilyIdUnlessEnded`, or the family index keeps no mark. A join

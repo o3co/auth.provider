@@ -24,8 +24,9 @@
  *
  * A close commits first and then runs its work. Every item is safe to run
  * more than once and is recorded at the generation read, so two closes of one
- * session and the sweep may overlap. The user session is deleted last, once
- * every other item is recorded; a failed item keeps the record closing.
+ * session and the sweep may overlap. Items run in phases, each only once the
+ * earlier ones are recorded, and the user session is deleted last; a failed
+ * item keeps the record closing.
  */
 
 import {
@@ -48,7 +49,7 @@ import type {
 	UserSession,
 	UserSessionStore,
 } from "../types.mjs";
-import { createSessionStoresBridge } from "./bridge.mjs";
+import { type BridgedClose, createSessionStoresBridge } from "./bridge.mjs";
 import type { SessionCloseNotifier } from "./notifier.mjs";
 import {
 	checkSessionLifecycleKey,
@@ -97,7 +98,8 @@ export type SessionJoinOutcome =
  * from it on and nothing joins — while work is still outstanding; a later
  * close of the session or the sweep resumes it. Both carry the relying
  * parties (`client_id`) and federations of the snapshot, in no promised
- * order. `unavailable`: the closing commit did not land, or whether it did
+ * order, and, from the call that made the closing commit, those the
+ * per-session stores listed. `unavailable`: the closing commit did not land, or whether it did
  * could not be read.
  */
 export type SessionCloseOutcome =
@@ -157,6 +159,8 @@ export interface SessionLifecycleOptions {
 }
 
 /** The session-wide close work items. */
+const REVOKE_BRIDGED_FAMILIES = "revoke_bridged_families";
+const NOTIFY_BRIDGED_RPS = "notify_bridged_rps";
 const REMOVE_FEDERATION_TOKENS = "remove_federation_tokens";
 const REMOVE_SUBJECT_SESSION = "remove_subject_session";
 const REMOVE_SESSION_INDEXES = "remove_session_indexes";
@@ -169,7 +173,7 @@ const RP_ITEM = sessionCloseItemOf({ kind: "rp", id: "" });
  * What each cause runs beyond the work every close runs (revoke the
  * families, remove the federation tokens, the subject's entry and the
  * per-session indexes, delete the user session): whether it tells the
- * relying parties.
+ * relying parties, those of the record and those of the per-session stores.
  */
 const CLOSE_POLICY: Readonly<Record<SessionCloseCause, { readonly tellsRelyingParties: boolean }>> =
 	Object.freeze({
@@ -182,29 +186,30 @@ const CLOSE_POLICY: Readonly<Record<SessionCloseCause, { readonly tellsRelyingPa
 	});
 
 /**
- * The order items run in: the families first, so no refresh outlives the
- * close; the relying parties after the provider's own state; an item this
- * code does not know after those; the user session's delete last.
+ * The phase an item runs in. An item runs only once no item of an earlier
+ * phase is pending in the record, so a later phase never runs over work an
+ * earlier one has not durably done: revocations and removals first, then
+ * the relying parties (and an item this code does not know), then the
+ * per-session indexes the bridge steps read, and the user session last.
  */
-const rankOf = (item: string): number => {
-	if (item.startsWith(FAMILY_ITEM)) return 0;
-	if (item === REMOVE_FEDERATION_TOKENS) return 1;
-	if (item === REMOVE_SUBJECT_SESSION) return 2;
-	if (item.startsWith(RP_ITEM)) return 3;
-	if (item === REMOVE_SESSION_INDEXES) return 4;
-	if (item === DELETE_USER_SESSION) return 6;
-	return 5;
+const phaseOf = (item: string): number => {
+	if (
+		item.startsWith(FAMILY_ITEM) ||
+		item === REVOKE_BRIDGED_FAMILIES ||
+		item === REMOVE_FEDERATION_TOKENS ||
+		item === REMOVE_SUBJECT_SESSION
+	) {
+		return 0;
+	}
+	if (item === REMOVE_SESSION_INDEXES) return 2;
+	if (item === DELETE_USER_SESSION) return 3;
+	return 1;
 };
 
-/** The next item to run: not failed in this run, and the user session's delete only once nothing else is pending. */
-const nextItem = (pending: readonly string[], failed: ReadonlySet<string>): string | undefined => {
-	let next: string | undefined;
-	for (const item of pending) {
-		if (failed.has(item)) continue;
-		if (item === DELETE_USER_SESSION && pending.length > 1) continue;
-		if (next === undefined || rankOf(item) < rankOf(next)) next = item;
-	}
-	return next;
+/** The next item to run: of the earliest phase still pending, and not given up on in this run. */
+const nextItem = (pending: readonly string[], skipped: ReadonlySet<string>): string | undefined => {
+	const earliest = Math.min(...pending.map(phaseOf));
+	return pending.find((item) => phaseOf(item) === earliest && !skipped.has(item));
 };
 
 /** `record` with `item` recorded done, closed once nothing is pending. */
@@ -260,21 +265,22 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	const logger = options.logger ?? consoleLogger;
 	const bridge = createSessionStoresBridge(options);
 
-	const steps = [
-		REMOVE_FEDERATION_TOKENS,
-		...(subjectSessionIndex === undefined ? [] : [REMOVE_SUBJECT_SESSION]),
-		REMOVE_SESSION_INDEXES,
-		DELETE_USER_SESSION,
-	];
-	const requestFor = (cause: SessionCloseCause): SessionCloseRequest => ({
-		cause,
-		steps,
-		perParticipant:
-			CLOSE_POLICY[cause].tellsRelyingParties && notifier !== undefined
-				? ["family", "rp"]
-				: ["family"],
-		retainMs,
-	});
+	const requestFor = (cause: SessionCloseCause): SessionCloseRequest => {
+		const tells = CLOSE_POLICY[cause].tellsRelyingParties && notifier !== undefined;
+		return {
+			cause,
+			steps: [
+				REVOKE_BRIDGED_FAMILIES,
+				REMOVE_FEDERATION_TOKENS,
+				...(subjectSessionIndex === undefined ? [] : [REMOVE_SUBJECT_SESSION]),
+				...(tells ? [NOTIFY_BRIDGED_RPS] : []),
+				REMOVE_SESSION_INDEXES,
+				DELETE_USER_SESSION,
+			],
+			perParticipant: tells ? ["family", "rp"] : ["family"],
+			retainMs,
+		};
+	};
 
 	/**
 	 * The service's one read of a user session: liveness answers it, and a
@@ -286,18 +292,36 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		logger.warn({ operation, sid, err: loggableError(error) }, "session_lifecycle_unavailable");
 	};
 
+	/** Tells relying party `clientId` that the closing `record` closed. */
+	const tell = (sid: string, record: SessionLifecycleRecord, clientId: string): Promise<void> => {
+		if (notifier === undefined) throw new Error("no sessionCloseNotifier is wired");
+		const cause = record.close?.cause;
+		if (cause === undefined) throw new Error("the record holds no close");
+		return notifier.notify({ sid, sub: record.sub, clientId, cause });
+	};
+
 	/** The work `item` names, for the closing `record`. */
 	const work = async (sid: string, record: SessionLifecycleRecord, item: string): Promise<void> => {
 		if (item.startsWith(FAMILY_ITEM)) {
 			return refreshTokenFamilyRevocation.revokeFamily(item.slice(FAMILY_ITEM.length));
 		}
-		if (item.startsWith(RP_ITEM)) {
-			if (notifier === undefined) throw new Error("no sessionCloseNotifier is wired");
-			const cause = record.close?.cause;
-			if (cause === undefined) throw new Error("the record holds no close");
-			return notifier.notify({ sid, sub: record.sub, clientId: item.slice(RP_ITEM.length), cause });
-		}
+		if (item.startsWith(RP_ITEM)) return tell(sid, record, item.slice(RP_ITEM.length));
 		switch (item) {
+			case REVOKE_BRIDGED_FAMILIES: {
+				// The record's own participants have items of their own.
+				const own = new Set(idsOf(record, "family"));
+				for (const familyId of await bridge.families(sid, record.expiresAt)) {
+					if (!own.has(familyId)) await refreshTokenFamilyRevocation.revokeFamily(familyId);
+				}
+				return;
+			}
+			case NOTIFY_BRIDGED_RPS: {
+				const own = new Set(idsOf(record, "rp"));
+				for (const clientId of await bridge.relyingParties(sid)) {
+					if (!own.has(clientId)) await tell(sid, record, clientId);
+				}
+				return;
+			}
 			case REMOVE_FEDERATION_TOKENS:
 				return federationTokenStore.removeBySid(sid);
 			case REMOVE_SUBJECT_SESSION:
@@ -337,18 +361,19 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		let generation = start.generation;
 		/** Items this run did that are not yet recorded. */
 		const done = new Set<string>();
-		const failed = new Set<string>();
+		/** Items this run gave up on: their work, or recording it, failed. They stay pending. */
+		const skipped = new Set<string>();
 		// Each conflict means another run recorded an item, so there are no
 		// more conflicts than items.
 		let conflictsLeft = start.value.close?.pending.length ?? 0;
 		while (record.state === "closing") {
 			const pending = record.close?.pending ?? [];
 			const unrecorded = pending.find((item) => done.has(item));
-			const item = unrecorded ?? nextItem(pending, failed);
+			const item = unrecorded ?? nextItem(pending, skipped);
 			if (item === undefined) return "pending";
 			if (unrecorded === undefined) {
 				if (!(await ran(sid, record, item))) {
-					failed.add(item);
+					skipped.add(item);
 					continue;
 				}
 				done.add(item);
@@ -357,8 +382,12 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			try {
 				answer = readConditionalReplaceAnswer(await store.completeIf(sid, generation, item));
 			} catch (error) {
+				// Still pending: a later run does it again. The other items of its
+				// phase go on.
 				unavailable("complete", sid, error);
-				return "pending";
+				done.delete(item);
+				skipped.add(item);
+				continue;
 			}
 			if (answer.outcome === "updated") {
 				done.delete(item);
@@ -384,33 +413,35 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
 	/**
 	 * The closing commit of a record not yet closing (`record`, or none): the
-	 * per-session stores' end mark first, what joined through them added, an
-	 * absent record adopted from the user session, then the commit. `null`
-	 * when there is neither a record nor a user session to close.
+	 * per-session stores' end mark first, an absent record adopted from the
+	 * user session, then the commit. What joined through the per-session
+	 * stores is not imported: the bridge steps read those stores when they
+	 * run. Answers the record and what the per-session stores listed after the
+	 * mark; `null` when there is neither a record nor a user session to close.
 	 */
 	const begin = async (
 		sid: string,
 		cause: SessionCloseCause,
 		record: SessionLifecycleRecord | undefined,
-	): Promise<Versioned<SessionLifecycleRecord> | null> => {
+	): Promise<{
+		readonly closing: Versioned<SessionLifecycleRecord>;
+		readonly bridged: BridgedClose;
+	} | null> => {
 		let end: { readonly sub: string; readonly expiresAt: Date } | undefined = record;
 		if (end === undefined) {
 			const session = await userSessionOf(sid);
 			if (session === null) return null;
 			end = { sub: session.sub, expiresAt: session.expiresAt };
 		}
-		const joinedBefore = await bridge.close(sid, end.expiresAt);
+		const bridged = await bridge.close(sid, end.expiresAt);
 		if (record === undefined) readSessionOpenAnswer(await store.open(sid, end.sub, end.expiresAt));
-		for (const participant of joinedBefore) {
-			if (readSessionJoinAnswer(await store.join(sid, participant)).outcome !== "joined") break;
-		}
 		const answer = readSessionCloseAnswer(await store.beginClose(sid, requestFor(cause)));
 		if (answer.outcome === "missing") {
 			throw new Error(
 				"no lifecycle record to close: the session's end has passed on the store's clock",
 			);
 		}
-		return { value: answer.record, generation: answer.generation };
+		return { closing: { value: answer.record, generation: answer.generation }, bridged };
 	};
 
 	/** Whether everything `request` names joined `sid`; written beside the per-session stores. */
@@ -479,23 +510,28 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 				);
 			}
 			let closing: Versioned<SessionLifecycleRecord>;
+			let bridged: BridgedClose = { rps: [], federations: [] };
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
-				const begun =
-					read !== null && read.value.state !== "active"
-						? read
-						: await begin(sid, cause, read?.value);
-				if (begun === null) return { outcome: "done", rps: [], federations: [] };
-				closing = begun;
+				if (read !== null && read.value.state !== "active") {
+					closing = read;
+				} else {
+					const begun = await begin(sid, cause, read?.value);
+					if (begun === null) return { outcome: "done", rps: [], federations: [] };
+					({ closing, bridged } = begun);
+				}
 			} catch (error) {
 				unavailable("close", sid, error);
 				return { outcome: "unavailable" };
 			}
 			const outcome = closing.value.state === "closed" ? "done" : await finish(sid, closing);
+			const union = (own: readonly string[], listed: readonly string[]): string[] => [
+				...new Set([...own, ...listed]),
+			];
 			return {
 				outcome,
-				rps: idsOf(closing.value, "rp"),
-				federations: idsOf(closing.value, "federation"),
+				rps: union(idsOf(closing.value, "rp"), bridged.rps),
+				federations: union(idsOf(closing.value, "federation"), bridged.federations),
 			};
 		},
 

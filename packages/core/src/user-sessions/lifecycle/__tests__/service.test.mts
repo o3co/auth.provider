@@ -63,6 +63,8 @@ interface HarnessOptions {
 	readonly store?: (inner: SessionLifecycleStore) => SessionLifecycleStore;
 	/** A family index without the session-end capability: it keeps no end mark. */
 	readonly familyIndexWithoutEnd?: boolean;
+	/** The lifecycle store's options. */
+	readonly lifecycleStore?: { readonly maxParticipants?: number; readonly now?: () => number };
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -81,7 +83,7 @@ function harness(options: HarnessOptions = {}) {
 		calls.push(call);
 	};
 
-	const inner = createInMemorySessionLifecycleStore();
+	const inner = createInMemorySessionLifecycleStore(options.lifecycleStore ?? {});
 	const store = options.store === undefined ? inner : options.store(inner);
 	const sessions = createInMemoryUserSessionStore();
 	const userSessionStore: UserSessionStore = {
@@ -338,13 +340,16 @@ describe("close", () => {
 			rps: ["a"],
 			federations: ["google"],
 		});
-		expect(h.calls).toEqual([
-			"revoke_family:f1",
+		expect([...h.calls].sort()).toEqual([
+			"delete_user_session",
+			"notify:a",
 			"remove_federation_tokens:sid-1",
 			"remove_subject_session:sid-1",
-			"notify:a",
-			"delete_user_session",
+			"revoke_family:f1",
 		]);
+		// Revocations and removals first, then the relying parties, the user session last.
+		expect(h.calls.indexOf("notify:a")).toBeGreaterThan(h.calls.indexOf("revoke_family:f1"));
+		expect(h.calls.at(-1)).toBe("delete_user_session");
 		expect(h.notices).toEqual([{ sid: SID, sub: SUB, clientId: "a", cause: "rp_logout" }]);
 		expect((await h.read())?.value.state).toBe("closed");
 		expect(await h.sessions.get(SID)).toBeNull();
@@ -374,9 +379,16 @@ describe("close", () => {
 		const record = await h.read();
 		expect(record?.value.state).toBe("closing");
 		expect(record?.value.close?.pending).toEqual(
-			expect.arrayContaining(["family:f1", "delete_user_session"]),
+			expect.arrayContaining([
+				"family:f1",
+				"rp:a",
+				"remove_session_indexes",
+				"delete_user_session",
+			]),
 		);
-		expect(record?.value.close?.pending).not.toContain("rp:a");
+		// Nothing of a later phase runs over a revocation not yet recorded.
+		expect(h.notices).toEqual([]);
+		expect(await h.sessionFamilyIndex.listFamilyIds(SID)).toEqual(["f1"]);
 		expect(await h.sessions.get(SID)).not.toBeNull();
 		expect(h.calls).not.toContain("delete_user_session");
 	});
@@ -407,8 +419,10 @@ describe("close", () => {
 		expect(await h.sessions.get(SID)).not.toBeNull();
 		expect([...((await h.read())?.value.close?.pending ?? [])].sort()).toEqual([
 			"delete_user_session",
+			"remove_session_indexes",
 			"rp:a",
 		]);
+		expect((await h.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual(["a"]);
 	});
 
 	it("answers unavailable when the closing commit cannot land, having run nothing", async () => {
@@ -469,6 +483,26 @@ describe("close", () => {
 		expect((await h.read())?.value.state).toBe("closed");
 	});
 
+	it("closes a session whose last join the lifecycle store refused for capacity", async () => {
+		const h = harness({ lifecycleStore: { maxParticipants: 1 } });
+		await h.establish();
+		expect(await h.lifecycle.join(SID, { familyId: "f1" })).toEqual({ outcome: "joined" });
+		expect(await h.lifecycle.join(SID, { familyId: "f2" })).toEqual({ outcome: "unavailable" });
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		expect([...h.revoked].sort()).toEqual(["f1", "f2"]);
+		expect((await h.read())?.value.state).toBe("closed");
+	});
+
+	it("revokes what joined through the old stores when the close comes after the session's end", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish();
+		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old-node", expiresAt);
+		now = expiresAt.getTime() + 1;
+		expect((await h.lifecycle.close(SID, "expiry")).outcome).toBe("done");
+		expect(h.revoked.has("f-old-node")).toBe(true);
+	});
+
 	it("closes what joined through the old stores beside an existing record", async () => {
 		const h = harness();
 		const expiresAt = await h.establish();
@@ -485,7 +519,7 @@ describe("close", () => {
 				store: (inner) => ({
 					...inner,
 					completeIf: async (sid, expected, item) => {
-						if (failNextCompletion) {
+						if (failNextCompletion && item === "family:f1") {
 							failNextCompletion = false;
 							throw new Error("lifecycle store down");
 						}
@@ -501,6 +535,24 @@ describe("close", () => {
 			expect(h.calls.filter((call) => call === "revoke_family:f1")).toHaveLength(2);
 			expect(h.revoked.has("f1")).toBe(true);
 			expect((await h.read())?.value.state).toBe("closed");
+		});
+
+		it("goes on with the other items when one completion cannot be recorded", async () => {
+			const h = harness({
+				store: (inner) => ({
+					...inner,
+					completeIf: async (sid, expected, item) => {
+						if (item === "family:f1") throw new Error("lifecycle store down");
+						return inner.completeIf(sid, expected, item);
+					},
+				}),
+			});
+			await h.establish();
+			await joinAll(h);
+			expect(await h.lifecycle.join(SID, { familyId: "f2" })).toEqual({ outcome: "joined" });
+			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+			expect(h.revoked.has("f2")).toBe(true);
+			expect((await h.read())?.value.close?.pending).not.toContain("family:f2");
 		});
 
 		it("lets two closes run at once, each recording what the other has not", async () => {
