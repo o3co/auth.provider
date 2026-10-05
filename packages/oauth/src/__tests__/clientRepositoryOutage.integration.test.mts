@@ -51,6 +51,7 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const ISSUER = "https://auth.example.com";
 const TOKEN_ENDPOINT = `${ISSUER}/oauth/token`;
@@ -101,7 +102,7 @@ async function buildApp(outage: Outage): Promise<{ app: express.Express; logger:
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
-		config,
+		...routerInputsOf(config),
 		clientRepository: repositoryWith(outage),
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!", "v0"),

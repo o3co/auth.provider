@@ -160,7 +160,6 @@ export const SWITCHES: readonly string[] = [
 	"core.sessionRequirements",
 	"federation-grants.enabled",
 	"session-store.storage",
-	"oauth-authorization.grants",
 	"oauth.accessToken",
 ];
 

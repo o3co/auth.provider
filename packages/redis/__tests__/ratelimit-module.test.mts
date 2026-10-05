@@ -3,7 +3,18 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import type { RateLimiter } from "@o3co/auth-provider-core";
+import {
+	BootError,
+	createApp,
+	defineModule,
+	type RateLimiter,
+	verifierLimitClaim,
+} from "@o3co/auth-provider-core";
+import {
+	CORE_RELOCATIONS,
+	makeValidAppConfig,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { redisRateLimiterModule } from "#/ratelimit.mjs";
 
@@ -60,21 +71,48 @@ describe("redisRateLimiterModule", () => {
 		["login", "session.rateLimit.login"],
 		["device_verification", "device-grant.rateLimit"],
 	])(
-		"refuses a limits entry for %s, a verifier's own limit, in its section's schema, naming the key and the setting",
-		(prefix, setting) => {
-			const parsed = redisRateLimiterModule.section?.schema.safeParse({
-				limits: {
-					[prefix]: { limit: 5, windowSeconds: 60 },
-					token: { limit: 5, windowSeconds: 60 },
-				},
-			});
-			expect(parsed?.success).toBe(false);
-			expect(parsed?.error?.issues).toEqual([
-				expect.objectContaining({
-					path: ["limits", prefix],
-					message: expect.stringContaining(setting),
+		"refuses boot on a limits entry for %s while a module declares it a verifier's own limit, naming the key and the setting",
+		async (prefix, setting) => {
+			const modules = [
+				redisRateLimiterModule,
+				defineModule({
+					name: "verifier-owner",
+					contributes: { rateLimitBudgets: { [prefix]: verifierLimitClaim({ setting }) } },
 				}),
-			]);
+			];
+			const err = await createApp({
+				modules,
+				bootstrapComponents: {
+					config: {
+						...makeValidAppConfig(),
+						"renamed-variables": renamedVariableCaptures({
+							modules,
+							core: CORE_RELOCATIONS,
+							env: {},
+						}),
+						"redis-rate-limiter": { limits: { [prefix]: { limit: 5, windowSeconds: 60 } } },
+					},
+					pathResolver: (s: string) => s,
+				} as never,
+			}).then(
+				() => undefined,
+				(caught: unknown) => caught,
+			);
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe("config-validation-failed");
+			expect((err as BootError).message).toContain(`redis-rate-limiter.limits.${prefix}`);
+			expect((err as BootError).message).toContain(setting);
+		},
+	);
+
+	it.each(["login", "device_verification"])(
+		"accepts a limits entry for %s in its section's schema when nothing declares it: only declarations count",
+		(prefix) => {
+			expect(
+				redisRateLimiterModule.section?.schema.safeParse({
+					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+				})?.success,
+			).toBe(true);
 		},
 	);
 

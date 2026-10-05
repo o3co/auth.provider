@@ -244,6 +244,7 @@
 . FederationGrantLodgingResult type
 . FederationGrantLodgingStepFailure type
 . FederationGrantOpened type
+. FederationGrantPolicy type
 . FederationGrantReauthorizationReason type
 . FederationGrantReauthorizationRequest type
 . FederationGrantReauthorizationResult type
@@ -638,6 +639,7 @@
 . SessionFamilyIndexFactory type
 . SessionFederationIndex type
 . SessionFederationIndexFactory type
+. SessionFederations type
 . SessionJoinAnswer type
 . SessionJoinOutcome type
 . SessionJoinRequest type
@@ -760,6 +762,7 @@
 . checkCanonicalIssuer value
 . checkConfiguredMfaLockoutPolicy value
 . checkDeploymentMode value
+. checkFederationGrantPolicy value
 . checkFirstBindingNote value
 . checkFirstBindingQuestion value
 . checkMfaLockoutPolicy value
@@ -1233,6 +1236,7 @@
 ./testing FakeIdpRequest type
 ./testing FederationEntryForTests type
 ./testing FederationForTests type
+./testing FederationGrantPolicyContractInput type
 ./testing FederationSettingsContractInput type
 ./testing FederationTypeForTestsOptions type
 ./testing GrantRegistry value
@@ -1289,6 +1293,7 @@
 ./testing createTestApp value
 ./testing createTestCsrfGuard value
 ./testing createTestCsrfTokenSigner value
+./testing createTestFederationGrantPolicy value
 ./testing createTestFederationSettings value
 ./testing createTestHttpSettings value
 ./testing createTestLoginEntry value
@@ -1302,6 +1307,7 @@
 ./testing csrfGuardContract value
 ./testing csrfTokenSignerContract value
 ./testing deploymentModeContract value
+./testing federationGrantPolicyContract value
 ./testing federationSettingsContract value
 ./testing federationTypeForTests value
 ./testing httpSettingsContract value

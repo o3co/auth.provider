@@ -46,7 +46,11 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestFederationSettings,
+	createTestLoginEntry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -60,6 +64,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -70,12 +75,8 @@ const REDIRECT_URI = "https://app.example/cb";
 const VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url");
 
-const makeConfig = (
-	oauthOverrides: Record<string, unknown>,
-	federations: Record<string, unknown> = {},
-): AppConfig =>
+const makeConfig = (oauthOverrides: Record<string, unknown>): AppConfig =>
 	({
-		core: { federations },
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
@@ -120,7 +121,8 @@ const makeApp = async (opts: {
 	logger?: Logger;
 	/**
 	 * Install one federation, as a federation module's contribution would —
-	 * `"trusted"` with `core.federations.google.trustUpstreamAmr = true` (the MFA
+	 * `"trusted"` with core's `federationSettings` holding its upstream `amr`
+	 * as counting (`core.federations.google.trustUpstreamAmr = true`, the MFA
 	 * ADR's D13), `"untrusted"` with the switch absent.
 	 */
 	federation?: "trusted" | "untrusted";
@@ -164,12 +166,12 @@ const makeApp = async (opts: {
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
-		config: makeConfig(
-			opts.oauth ?? {},
+		...routerInputsOf(makeConfig(opts.oauth ?? {})),
+		federationSettings: createTestFederationSettings(
 			opts.federation === "trusted"
-				? { google: { type: "google", enabled: true, trustUpstreamAmr: true } }
+				? { google: { type: "google", trustsUpstreamAmr: true } }
 				: opts.federation === "untrusted"
-					? { google: { type: "google", enabled: true } }
+					? { google: { type: "google" } }
 					: {},
 		),
 		clientRepository,
@@ -770,6 +772,43 @@ describe("/authorize — policy evaluation edges", () => {
 			const params = redirectParams(await authorize(app, baseQuery));
 			expect(params.get("error")).toBe("access_denied");
 			expect(params.get("error_description")).toBe("no");
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ error: logged },
+				"authorize_policy_deny_error_malformed",
+			);
+		},
+	);
+
+	it.each([
+		["a Symbol", Symbol("code"), "(symbol)"],
+		["an object with no prototype", Object.create(null), "(object)"],
+		[
+			"an object whose toString throws",
+			{
+				toString: () => {
+					throw new Error("no");
+				},
+			},
+			"(object)",
+		],
+		["a number", 7, "(number)"],
+	])(
+		"answers access_denied for a deny code that is %s, logging its type and not the value",
+		async (_label, code, logged) => {
+			const logger = createMockLogger();
+			const { app } = await makeApp({
+				logger,
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () => ({
+						outcome: "deny",
+						error: code as string,
+						errorDescription: "no",
+					}),
+				},
+			});
+			const params = redirectParams(await authorize(app, baseQuery));
+			expect(params.get("error")).toBe("access_denied");
 			expect(logger.warn).toHaveBeenCalledWith(
 				{ error: logged },
 				"authorize_policy_deny_error_malformed",
@@ -2293,7 +2332,7 @@ describe("/authorize — the acr table at boot", () => {
 		const { router } = await createOAuthRouter(express, {
 			loginEntry: createTestLoginEntry(),
 			registry: authorizationServerRegistry(),
-			config: makeConfig({ authorize: { acrValues } }),
+			...routerInputsOf(makeConfig({ authorize: { acrValues } })),
 			requirements: resolverForTests(
 				[
 					{

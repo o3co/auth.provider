@@ -33,14 +33,14 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
-	resolveTokenBindingSettings,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestTokenBindingSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
 	COMPOUND_MTLS_BINDING,
@@ -111,22 +111,14 @@ function makeDeps(
 ) {
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config:
-			options.bindConfidentialClientRefreshTokens === undefined
-				? mockConfig
-				: ({
-						...(mockConfig as unknown as Record<string, unknown>),
-						core: {
-							...(mockConfig as unknown as { core?: Record<string, unknown> }).core,
-							// `dispatchPolicy` is required by core's schema and comes from
-							// reference.conf in a real deployment. Restated here so the
-							// stub stays a shape the schema would accept.
-							tokenBinding: {
-								dispatchPolicy: "intent-explicit",
-								bindConfidentialClientRefreshTokens: options.bindConfidentialClientRefreshTokens,
-							},
-						},
-					} as unknown as GrantDependencies["config"]),
+		...grantSettingsFrom(mockConfig),
+		...(options.bindConfidentialClientRefreshTokens === undefined
+			? {}
+			: {
+					tokenBindingSettings: createTestTokenBindingSettings({
+						bindConfidentialClientRefreshTokens: options.bindConfidentialClientRefreshTokens,
+					}),
+				}),
 		keyStore: createSymmetricKeyStore("test-secret-ac"),
 		codeRepository: {
 			consumeByCode: consumeByCodeImpl,
@@ -398,30 +390,25 @@ describe("confidential-client RT binding — opt-in, authorization_code", () => 
 		expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
 	});
 
-	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's", async () => {
-		const base = mockConfig as unknown as { core?: Record<string, unknown> };
-		for (const tokenBinding of [
-			undefined,
-			{},
-			{ bindConfidentialClientRefreshTokens: true },
-			{ bindConfidentialClientRefreshTokens: false },
-			// A configuration built by hand, which no schema coerced.
-			{ bindConfidentialClientRefreshTokens: "true" },
-			{ dispatchPolicy: "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
+	it("binds exactly when core's tokenBindingSettings slot says so: the setting is core's", async () => {
+		for (const tokenBindingSettings of [
+			createTestTokenBindingSettings(),
+			createTestTokenBindingSettings({ bindConfidentialClientRefreshTokens: true }),
+			createTestTokenBindingSettings({ bindConfidentialClientRefreshTokens: false }),
+			createTestTokenBindingSettings({
+				dispatchPolicy: "strict-mutual-exclusion",
+				bindConfidentialClientRefreshTokens: true,
+			}),
 		]) {
-			const config = {
-				...base,
-				core: { ...base.core, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
-			} as unknown as GrantDependencies["config"];
 			const { result } = await createAuthorizationGrant({
 				...makeDeps(vi.fn().mockResolvedValue({ ...validCode })),
-				config,
+				tokenBindingSettings,
 			}).handle(dpopCtx());
 			expect(result.status).toBe(200);
 			if (!("tokens" in result)) expect.fail("Expected tokens in result");
 			const bound = decodePayload(result.tokens.refresh_token as string).cnf !== undefined;
-			expect(bound, JSON.stringify(tokenBinding)).toBe(
-				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens,
+			expect(bound, JSON.stringify(tokenBindingSettings)).toBe(
+				tokenBindingSettings.bindConfidentialClientRefreshTokens,
 			);
 		}
 	});

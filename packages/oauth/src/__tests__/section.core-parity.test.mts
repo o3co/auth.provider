@@ -29,7 +29,7 @@
  * This file goes when core's schema stops declaring `oauth {}`.
  */
 
-import { CoreConfigSchema } from "@o3co/auth-provider-core";
+import { CoreConfigSchema, checkAcrValueName } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { oauthSectionSchema } from "#/section.mjs";
 
@@ -122,6 +122,10 @@ const CASES: ReadonlyArray<readonly [path: string, value: unknown]> = [
 	["authorize.acrValues", { "urn:x": [] }],
 	["authorize.acrValues", { "urn:x": ["pwd", ["hwk"]] }],
 	["authorize.acrValues", "urn:x"],
+	["authorize.acrValues", { "urn:x pwd": ["pwd"] }],
+	["authorize.acrValues", { 'urn:"x"': ["pwd"], "urn:x\\y": ["pwd"], "urn:é": ["pwd"] }],
+	["authorize.acrValues", { "urn:x\tpwd": ["pwd"], "urn:ok": ["pwd"], "urn:none": [] }],
+	["authorize.acrValues", { "": ["pwd"] }],
 	["nonce.maxLength", "512"],
 	["nonce.maxLength", 0],
 	["nonce.maxLength", "+5"],
@@ -146,6 +150,18 @@ describe("the module's schema and core's agree on every key both declare", () =>
 		const input = withValue(path, value);
 		expect(outcome(oauthSectionSchema, input)).toEqual(outcome(coreOauth, input));
 	});
+});
+
+describe("both refuse an acr value name /authorize can never be asked for, in one wording", () => {
+	it.each(["urn:x pwd", "urn:x\tpwd", "urn:x\n", 'urn:"x"', "urn:x\\y", "urn:é"])(
+		"%j: one issue at the key, checkAcrValueName's message, from each schema",
+		(key) => {
+			const input = withValue("authorize.acrValues", { [key]: ["pwd"] });
+			const expected = { issues: [`authorize.acrValues.${key}: ${checkAcrValueName(key)}`] };
+			expect(outcome(oauthSectionSchema, input)).toEqual(expected);
+			expect(outcome(coreOauth, input)).toEqual(expected);
+		},
+	);
 });
 
 describe("what core retired from the section stays core's", () => {
