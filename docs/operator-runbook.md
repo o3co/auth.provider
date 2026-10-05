@@ -98,15 +98,13 @@ Three things the guard cannot do:
   (`templates/standalone/src/modules.mts`) — carry the declaration since #455,
   so `multi` refuses them by name; before #455 they booted. Three more joined
   them in #474 and are refused the same way: express-session's own store under
-  `SESSION_STORE_STORAGE_TYPE=memory`, and the WebAuthn-options rate limiter
-  when no shared `rateLimiter` is wired, and so is the MFA routes' limiter
-  when the MFA module is installed. The login's attempt limit, and an enabled
+  `SESSION_STORE_STORAGE_TYPE=memory`, and the MFA routes' limiter when the
+  MFA module is installed and no shared `rateLimiter` is wired. The login's attempt limit, and an enabled
   device grant's verification limit, are refused too when no shared
   `attemptCounter` is wired (`adapters.attemptCounter = "memory"` in the
   standalone template). With the mode **unset**
   express-session's store joins the single `replica_unsafe_adapters` warning,
   and the others warn on their own (`attempt_counter_not_shared`,
-  `webauthn_authentication_options_rate_limiter_not_shared`,
   `mfa_rate_limiter_not_shared`, [§4](#4-alerts)).
 - **It does not see state inside a component you build and hand in.** The
   jwt-bearer trust registry is one: `createMemoryAssertionIssuerRegistry` lives
@@ -459,7 +457,7 @@ Module-level messages that arrive wrapped in a factory failure:
   slot — the factor could send no code. Wire a mail sender (your own, or
   `@o3co/auth-provider-standard`'s SMTP sender), or switch the factor off;
   off, the module boots without a sender.
-- Per-process rate-limit fallbacks under `core.deployment.mode = "multi"` (#474): `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /oauth/webauthn/authentication/options`, and `… for the MFA routes` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `adapters.rateLimiter = "redis"` or set `single` (`packages/webauthn/src/module.mts`, `packages/mfa/src/module.mts`).
+- Per-process rate-limit fallbacks under `core.deployment.mode = "multi"` (#474): `core.deployment.mode is "multi" but no shared rateLimiter is wired for the MFA routes` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `adapters.rateLimiter = "redis"` or set `single` (`packages/mfa/src/module.mts`).
 - The login's attempts, or an enabled device grant's verification attempts, counted per process under `core.deployment.mode = "multi"`: `contribute-factory-failed` whose `cause` is an `Error` reading `createAttemptGuard: core.deployment.mode is "multi" but no shared attemptCounter is wired for "login"` (or `"device_verification"`, built by `packages/device-grant/src/verificationEndpoint.mts`). Wire an attempt counter — `adapters.attemptCounter = "redis"` (`ADAPTERS_ATTEMPT_COUNTER=redis`) in the standalone template, `redisAttemptCounterModule` elsewhere — or set `single` (`packages/core/src/ratelimit/attemptGuard.mts`, built by `packages/session/src/routes/Session.mts`). `redisAttemptCounterModule` itself refuses a server whose `maxmemory-policy` it reads as anything but `noeviction` (`attempt-counter-evictable`); a server that will not answer the question boots with `attempt_counter_durability_unchecked` ([§4](#4-alerts)), so confirm the policy there.
 - The `authorization_code` grant with `subjectRevocation` wired and no `userSessionStore`: `The authorization_code grant is enabled (oauth-authorization.grants.authorizationCode.enabled) and subjectRevocation is wired, but userSessionStore is not wired` — `contribute-factory-failed`, naming the module, kind `grants` and `authorization_code` (`packages/oauth/src/oauthAuthorization.mts`). Wire a `userSessionStore` — `adapters.userSessionStores` in the standalone template wires it with `subjectRevocation`; core's `memorySessionStoresModule` or `redisSessionStoresModule` elsewhere — or remove `subjectRevocation`. The other grants are unaffected.
 - DPoP with no seen-set: `dpopModule: dpop.enabled = true requires a replaySeenSet component`, in every `core.deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
@@ -615,16 +613,16 @@ Two cross-cutting facts about these rows:
   that implements only `incrementWithTtl` — still gets `RateLimit-Limit` /
   `RateLimit-Remaining` and no `Retry-After`
   (`packages/core/src/ratelimit/guard.mts`).
-- **`/session/login`, device verification, the WebAuthn options route and the MFA routes never run unguarded.**
+- **`/session/login`, device verification and the MFA routes never run unguarded.**
   The login and device verification count their attempts per process when no
-  `attemptCounter` is wired, and the other two fall back to a per-process memory limiter when no
+  `attemptCounter` is wired, and the MFA routes fall back to a per-process memory limiter when no
   `rateLimiter` is; each says so once at boot (`attempt_counter_not_shared`,
-  `webauthn_authentication_options_rate_limiter_not_shared`,
   `mfa_rate_limiter_not_shared`) — when
   `core.deployment.mode` is unset. Under `"multi"` the fallback is refused at boot
   like every other per-process store (#474, see [Boot refusals you will meet](#boot-refusals-you-will-meet)); under
-  `"single"` it is silent. The OAuth endpoints, by contrast, run with no
-  limiter at all in that case (`packages/oauth/src/routes.mts`).
+  `"single"` it is silent. The OAuth endpoints and the WebAuthn options route,
+  by contrast, run with no limiter at all in that case
+  (`packages/oauth/src/routes.mts`, `packages/webauthn/src/module.mts`).
 
 ### Keeping MFA factors in the Store
 
@@ -1632,9 +1630,7 @@ stream — its level is fixed at `info`.
 | `rate_limit_fail_mode_not_applied` (warn — `configured`, `limiter`) | `core/src/boot/apply-contributions.mts` | `rateLimit.failMode` — the old path of `redis-rate-limiter.failMode`, which only the Redis limiter's module refuses — says `"open"` and the wired limiter applies another policy. Give the deployment's limiter the policy itself, or remove the key. The new path, `redis-rate-limiter.failMode`, written without the Redis limiter's module, is reported by nothing: `config_sections_ignored` does not name it, as core's schema mirrors the Redis stores' sections and counts them as owned. `RATE_LIMIT_FAIL_MODE`, the old variable, no longer binds `rateLimit.failMode`, so it does not trigger this warning: only the Redis limiter's module refuses it, and with another limiter `environment_variables_not_applied` names it whenever the Redis package's `reference.conf` is layered |
 | `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `core.deployment.mode` is unset; set it |
 | `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`, `replayTtlSeconds`, `requiredTtlSeconds`) | `dpop/src/verifier.mts` | `dpop.replayStoreTtlSeconds` is below `2 × iatWindowSeconds + 1`: a proof can outlive its replay record and be replayed while still inside its acceptance window. Raise it to `requiredTtlSeconds` or more. It was a sentence, with `reason: "replay_ttl_below_iat_window"` |
-| `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `webauthn/src/module.mts` | no shared `rateLimiter` and `core.deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
 | `attempt_counter_not_shared` (warn — `tag`, `limit`, `windowSeconds`) | `core/src/ratelimit/attemptGuard.mts` | no shared `attemptCounter` and `core.deployment.mode` unset; `tag`'s attempts (`login`: `session.rateLimit.login`; `device_verification`: `device-grant.rateLimit`) are counted per process (`"multi"` refuses boot instead, `"single"` is silent). Wire `adapters.attemptCounter = "redis"` |
-| `webauthn_authentication_options_budget_mismatch` (warn — `key`, `contributed`, `webauthnConfig`) | `webauthn/src/module.mts` | a shared `rateLimiter` is wired, and the contributed budget for `webauthn-authentication-options` (`contributed`: the one registered under the prefix; `null` when there is none) differs from the key's own values (`webauthnConfig`: `webauthn.rateLimit.authenticationOptions`, what the per-process fallback is built from, and what backs the `RateLimit-*` headers only for an adapter that reports no `limit`). The module contributes the key itself and no module may override the budget (boot refuses one, `contribution-kind-guarded`), so the two agree in a composition that boots. The route runs on an explicit `limits.webauthn-authentication-options` in the limiter's section if there is one, otherwise on the contributed budget, otherwise on the limiter's default. An explicit `limits` entry is not compared. Check `rate_limit_budgets_registered` for the budget registered under the prefix and the module that claimed it |
 | `jwt_verify_aud_skipped`, `jwt_verify_iss_skipped` (warn, once per logger) | `core/src/jwt/verify.mts` | a verification surface is not pinning `aud`/`iss` |
 | `jwt_verify_legacy_typ` (warn) | `core/src/jwt/verify.mts` | `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is admitting typ-less tokens; close the window |
 | `federationTokenStore: in-memory adapter is for dev/test only …` (warn) | `core/src/federation-tokens/factory.mts` | the standalone builds this store in memory unless `adapters.federationTokenStore = "redis"` (`ADAPTERS_FEDERATION_TOKEN_STORE=redis`) is set (#456) |

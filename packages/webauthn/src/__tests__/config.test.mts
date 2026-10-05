@@ -16,7 +16,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AppConfigSchema, MAX_DURATION_SECONDS } from "@o3co/auth-provider-core";
+import { AppConfigSchema } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { webauthnConfigSchema } from "../config.mjs";
@@ -41,7 +41,6 @@ const VALID = {
 	attestationPreference: "none",
 	userVerification: "preferred",
 	challengeTtlMs: 120_000,
-	rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
 };
 
 const without = (key: keyof typeof VALID) => {
@@ -71,7 +70,6 @@ describe("webauthnConfigSchema", () => {
 		).toBe(false);
 	});
 
-	// The endpoint's own throttle.
 	describe("authentication/options security knobs", () => {
 		it("carries no allowCredentialsForKnownUser: the key is refused as one the schema does not declare", () => {
 			const result = webauthnConfigSchema.safeParse({
@@ -87,45 +85,15 @@ describe("webauthnConfigSchema", () => {
 			]);
 		});
 
-		it("rateLimit.authenticationOptions is required", () => {
-			expect(webauthnConfigSchema.safeParse(without("rateLimit")).success).toBe(false);
-		});
-
-		it("coerces the HOCON/env string form into numbers", () => {
-			const parsed = webauthnConfigSchema.parse({
+		it("carries no rateLimit: the key is refused as one the schema does not declare", () => {
+			const result = webauthnConfigSchema.safeParse({
 				...VALID,
-				rateLimit: { authenticationOptions: { limit: "45", windowSeconds: "120" } },
+				rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
 			});
-			expect(parsed.rateLimit.authenticationOptions).toEqual({ limit: 45, windowSeconds: 120 });
-		});
-
-		it("rejects a non-positive limit or window", () => {
-			for (const bad of [
-				{ limit: 0, windowSeconds: 60 },
-				{ limit: 30, windowSeconds: 0 },
-				{ limit: -1, windowSeconds: 60 },
-				{ limit: 1.5, windowSeconds: 60 },
-			]) {
-				expect(
-					webauthnConfigSchema.safeParse({ ...VALID, rateLimit: { authenticationOptions: bad } })
-						.success,
-				).toBe(false);
-			}
-		});
-
-		it("holds the window to a year, the ceiling of every duration an operator writes", () => {
-			// Past the Date range it reached the per-process limiter, which
-			// refused it when the route was built, under its own name. Refused
-			// here, the error names this key, before anything is built.
-			const window = (windowSeconds: unknown) =>
-				webauthnConfigSchema.safeParse({
-					...VALID,
-					rateLimit: { authenticationOptions: { limit: 30, windowSeconds } },
-				}).success;
-			expect(window(31_536_000)).toBe(true);
-			for (const bad of [31_536_001, 1e13, "31536001"]) {
-				expect(window(bad), String(bad)).toBe(false);
-			}
+			expect(result.success).toBe(false);
+			expect(result.error?.issues).toEqual([
+				expect.objectContaining({ code: "unrecognized_keys", keys: ["rateLimit"] }),
+			]);
 		});
 	});
 
@@ -558,12 +526,16 @@ describe("core's AppConfigSchema passes through every key webauthnConfigSchema r
 		const removed = Object.entries(webauthnModule.section?.relocatedFrom ?? {})
 			.filter(([, to]) => to === null)
 			.map(([from]) => from.replace(/^webauthn\./, ""));
-		expect(removed).toEqual(["allowCredentialsForKnownUser"]);
-		expect(keyPaths(coreSection).sort()).toEqual(
-			[...keyPaths(webauthnConfigSchema), ...removed].sort(),
-		);
-		// Not vacuous: the walk reached the nested rate-limit spec.
-		expect(keyPaths(webauthnConfigSchema)).toContain("rateLimit.authenticationOptions.limit");
+		expect(removed).toEqual(["allowCredentialsForKnownUser", "rateLimit"]);
+		// Below a removed key, core's shape is its own: the refusal names the key, whatever is under it.
+		const underRemoved = (path: string) => removed.some((key) => path.startsWith(`${key}.`));
+		expect(
+			keyPaths(coreSection)
+				.filter((path) => !underRemoved(path))
+				.sort(),
+		).toEqual([...keyPaths(webauthnConfigSchema), ...removed].sort());
+		// Not vacuous: the walk reached a key below the section's top level.
+		expect(keyPaths(coreSection)).toContain("rateLimit.authenticationOptions");
 	});
 });
 
@@ -580,22 +552,6 @@ describe("webauthnConfigSchema reads each number setting in decimal digits", () 
 			"challengeTtlMs",
 			(value) => ({ ...VALID, challengeTtlMs: value }),
 			"must be a whole number of at least 1, in decimal digits",
-		],
-		[
-			"rateLimit.authenticationOptions.limit",
-			(value) => ({
-				...VALID,
-				rateLimit: { authenticationOptions: { limit: value, windowSeconds: 60 } },
-			}),
-			"must be a whole number of at least 1, in decimal digits",
-		],
-		[
-			"rateLimit.authenticationOptions.windowSeconds",
-			(value) => ({
-				...VALID,
-				rateLimit: { authenticationOptions: { limit: 30, windowSeconds: value } },
-			}),
-			`must be a whole number from 1 to ${MAX_DURATION_SECONDS}, in decimal digits`,
 		],
 	];
 
@@ -642,17 +598,5 @@ describe("webauthnConfigSchema reads each number setting in decimal digits", () 
 			expect(result.error?.issues ?? []).toEqual([]);
 			expect(readAt(result.data, path)).toBe(60);
 		});
-	});
-
-	it("refuses a windowSeconds past one year", () => {
-		const [, set, message] = KEYS[2] ?? [];
-		expect(
-			set === undefined
-				? []
-				: issuesAt(
-						webauthnConfigSchema.safeParse(set(MAX_DURATION_SECONDS + 1)),
-						"rateLimit.authenticationOptions.windowSeconds",
-					),
-		).toEqual([message]);
 	});
 });
