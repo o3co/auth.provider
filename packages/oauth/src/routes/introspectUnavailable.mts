@@ -70,7 +70,7 @@ export const createIntrospectUnavailableAnswers = ({
 	 * is core's `auditedError` (the error's name and code, never its message);
 	 * the log line carries the rest. Core's session lifecycle answers its
 	 * outage with no error, which it logs itself: that line and event carry
-	 * none.
+	 * none, unless the lifecycle threw.
 	 */
 	const answerStoreUnavailable = (
 		req: Request,
@@ -84,11 +84,13 @@ export const createIntrospectUnavailableAnswers = ({
 			| {
 					readonly store: "session_lifecycle";
 					readonly details: Readonly<Record<string, string>>;
+					/** Present when the lifecycle threw; absent when it answered `unavailable`. */
+					readonly cause?: unknown;
 			  },
 	): Response => {
-		const cause = "cause" in outage ? { cause: outage.cause } : undefined;
+		const caught = "cause" in outage;
 		logger.error(
-			{ store: outage.store, ...(cause ? { err: loggableError(cause.cause) } : {}) },
+			{ store: outage.store, ...(caught ? { err: loggableError(outage.cause) } : {}) },
 			"introspect_store_unavailable",
 		);
 		emitAuditEvent(auditSink, {
@@ -96,7 +98,7 @@ export const createIntrospectUnavailableAnswers = ({
 			type: "introspect.store_unavailable",
 			ip: req.ip,
 			userAgent: req.get("user-agent"),
-			details: { ...outage.details, ...(cause ? { cause: auditedError(cause.cause) } : {}) },
+			details: { ...outage.details, ...(caught ? { cause: auditedError(outage.cause) } : {}) },
 		});
 		return res.status(503).json({
 			error: "temporarily_unavailable",

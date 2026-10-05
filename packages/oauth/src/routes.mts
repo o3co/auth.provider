@@ -52,6 +52,7 @@ import {
 	type SessionFederationIndex,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
+	type SessionLiveness,
 	type SessionRequirementResolver,
 	type SessionRPRegistry,
 	type SubjectRevocation,
@@ -276,14 +277,25 @@ const createIntrospectHandler = ({
 			// still there.
 			const sid = livenessSidOf(payload as Record<string, unknown>);
 			if (sid !== null && sessionLifecycle) {
-				const liveness = await sessionLifecycle.liveness(sid);
+				let liveness: SessionLiveness;
+				try {
+					liveness = await sessionLifecycle.liveness(sid);
+				} catch (cause) {
+					// A lifecycle filled by the host may throw: an outage all the same.
+					return answerStoreUnavailable(req, res, {
+						store: "session_lifecycle",
+						details: { sid },
+						cause,
+					});
+				}
 				if (liveness.outcome === "unavailable") {
 					return answerStoreUnavailable(req, res, {
 						store: "session_lifecycle",
 						details: { sid },
 					});
 				}
-				if (liveness.outcome === "not_live") {
+				// A live session of another subject is not this token's session.
+				if (liveness.outcome === "not_live" || liveness.session.sub !== payload.sub) {
 					emitAuditEvent(auditSink, {
 						timestamp: new Date(),
 						type: "introspect.session_invalid",

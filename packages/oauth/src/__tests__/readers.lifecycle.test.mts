@@ -106,6 +106,16 @@ function lifecycleAnswering(answer: SessionLiveness) {
 	} satisfies SessionLifecycle;
 }
 
+/** A lifecycle whose liveness throws, as one a host fills the slot with may. */
+function throwingLifecycle() {
+	const lifecycle = lifecycleAnswering({ outcome: "not_live" });
+	lifecycle.liveness.mockRejectedValue(new Error("lifecycle exploded"));
+	return lifecycle;
+}
+
+/** The live session of a subject other than the token's. */
+const otherSubjectSession: UserSession = { ...liveSession, sub: "u-other" };
+
 /** A sid no session lifecycle key can be: one character too long. */
 const UNKEYABLE_SID = "s".repeat(SESSION_LIFECYCLE_MAX_KEY_LENGTH + 1);
 
@@ -250,6 +260,47 @@ describe("/oauth/introspect through the session lifecycle", () => {
 		expect(res.body).toEqual({ active: false });
 	});
 
+	it("a lifecycle that throws: 503, never active:false, logged with the error's projection and audited", async () => {
+		const { sink, events } = recordingSink();
+		const logger = createMockLogger();
+		const app = await buildApp({
+			lifecycle: throwingLifecycle(),
+			userSessionStore: holdingStore(),
+			auditSink: sink,
+			logger,
+		});
+
+		const res = await introspect(app, await mintAccessToken());
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ store: "session_lifecycle", err: expect.any(Object) }),
+			"introspect_store_unavailable",
+		);
+		expect(events.map((e) => e.type)).toEqual(["introspect.store_unavailable"]);
+		expect(events[0]?.details).toMatchObject({ sid: SID, cause: expect.anything() });
+	});
+
+	it("a live session of another subject: active:false", async () => {
+		const { sink, events } = recordingSink();
+		const app = await buildApp({
+			lifecycle: lifecycleAnswering({ outcome: "live", session: otherSubjectSession }),
+			userSessionStore: holdingStore(),
+			auditSink: sink,
+		});
+
+		const res = await introspect(app, await mintAccessToken());
+
+		expect(res.body).toEqual({ active: false });
+		expect(events.map((e) => [e.type, e.details])).toEqual([
+			["introspect.session_invalid", { sid: SID }],
+		]);
+	});
+
 	it("a lifecycle that cannot answer: 503, one error line, audited as a store outage", async () => {
 		const { sink, events } = recordingSink();
 		const logger = createMockLogger();
@@ -341,6 +392,35 @@ describe("/oauth/userinfo through the session lifecycle", () => {
 		const res = await userinfo(
 			buildApp({ lifecycle: coreLifecycle(), userSessionStore: holdingStore() }),
 			{ sid: UNKEYABLE_SID },
+		);
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "session_invalid" });
+	});
+
+	it("a lifecycle that throws: 503 with no claims, logged with the error's projection", async () => {
+		const logger = createMockLogger();
+		const res = await userinfo(
+			buildApp({ lifecycle: throwingLifecycle(), userSessionStore: holdingStore(), logger }),
+		);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ store: "session_lifecycle", err: expect.any(Object) }),
+			"userinfo_store_unavailable",
+		);
+	});
+
+	it("a live session of another subject: 401 session_invalid, no claims", async () => {
+		const res = await userinfo(
+			buildApp({
+				lifecycle: lifecycleAnswering({ outcome: "live", session: otherSubjectSession }),
+				userSessionStore: holdingStore(),
+			}),
 		);
 
 		expect(res.status).toBe(401);
@@ -467,6 +547,40 @@ describe("POST /oauth/federation/:name/token through the session lifecycle", () 
 		const res = await fedToken(
 			buildApp({ lifecycle: coreLifecycle(), userSessionStore: holdingStore() }),
 			UNKEYABLE_SID,
+		);
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "session not found" });
+	});
+
+	it("a lifecycle that throws: 503, logged with the error's projection", async () => {
+		const logger = createMockLogger();
+		const res = await fedToken(
+			buildApp({ lifecycle: throwingLifecycle(), userSessionStore: holdingStore(), logger }),
+		);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				federation: "google",
+				store: "session_lifecycle",
+				step: "liveness",
+				err: expect.any(Object),
+			}),
+			"federation_token_store_unavailable",
+		);
+	});
+
+	it("a live session of another subject: 401 session not found", async () => {
+		const res = await fedToken(
+			buildApp({
+				lifecycle: lifecycleAnswering({ outcome: "live", session: otherSubjectSession }),
+				userSessionStore: holdingStore(),
+			}),
 		);
 
 		expect(res.status).toBe(401);

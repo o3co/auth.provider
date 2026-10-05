@@ -26,6 +26,7 @@ import {
 	emitAuditEvent,
 	logClientRepositoryUnavailable,
 	loggableError,
+	type SessionLiveness,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
@@ -103,7 +104,21 @@ const checkCallerStanding = async (
 	// a session whose close has committed is not live.
 	let live: boolean;
 	if (opts.sessionLifecycle) {
-		const liveness = await opts.sessionLifecycle.liveness(sid);
+		let liveness: SessionLiveness;
+		try {
+			liveness = await opts.sessionLifecycle.liveness(sid);
+		} catch (error) {
+			// A lifecycle filled by the host may throw: an outage all the same.
+			logger.error(
+				{ federation, store: "session_lifecycle", step: "liveness", err: loggableError(error) },
+				"federation_token_store_unavailable",
+			);
+			res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			return false;
+		}
 		if (liveness.outcome === "unavailable") {
 			// The lifecycle logs its own error; this line carries none.
 			logger.error(
@@ -116,7 +131,8 @@ const checkCallerStanding = async (
 			});
 			return false;
 		}
-		live = liveness.outcome === "live";
+		// A live session of another subject is not this token's session.
+		live = liveness.outcome === "live" && liveness.session.sub === sub;
 	} else {
 		try {
 			live = (await opts.userSessionStore.get(sid)) !== null;

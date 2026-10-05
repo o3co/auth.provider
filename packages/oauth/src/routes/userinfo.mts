@@ -25,6 +25,7 @@ import {
 	type RefreshTokenFamilyRevocation,
 	readIssuedScope,
 	type SessionLifecycle,
+	type SessionLiveness,
 	type SubjectRevocation,
 	type UserSession,
 	type UserSessionStore,
@@ -195,16 +196,31 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		// is answered as the outage it is, not as an invalid token.
 		let session: UserSession | null = null;
 		if (sessionLifecycle) {
-			// The lifecycle logs its own error; this line carries none.
-			const liveness = await sessionLifecycle.liveness(livenessSid);
+			let liveness: SessionLiveness;
+			try {
+				liveness = await sessionLifecycle.liveness(livenessSid);
+			} catch (err) {
+				// A lifecycle filled by the host may throw: an outage all the same.
+				opts.logger?.error(
+					{ store: "session_lifecycle", err: loggableError(err) },
+					"userinfo_store_unavailable",
+				);
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "session store unavailable",
+				});
+			}
 			if (liveness.outcome === "unavailable") {
+				// The lifecycle logs its own error; this line carries none.
 				opts.logger?.error({ store: "session_lifecycle" }, "userinfo_store_unavailable");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "session store unavailable",
 				});
 			}
-			session = liveness.outcome === "live" ? liveness.session : null;
+			// A live session of another subject is not this token's session.
+			session =
+				liveness.outcome === "live" && liveness.session.sub === sub ? liveness.session : null;
 		} else if (userSessionStore) {
 			try {
 				session = await userSessionStore.get(livenessSid);
