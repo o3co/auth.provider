@@ -637,6 +637,7 @@
 . SessionFamilyIndexFactory type
 . SessionFederationIndex type
 . SessionFederationIndexFactory type
+. SessionFederations type
 . SessionJoinAnswer type
 . SessionJoinOutcome type
 . SessionJoinRequest type

@@ -37,11 +37,12 @@ import {
 	type GrantResult,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "#/grants/jwtBearer.mjs";
-import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
 	COMPOUND_MTLS_BINDING,
@@ -73,11 +74,17 @@ const build = (opts: {
 	verifier?: AssertionVerifier;
 	userRepository?: UserRepository;
 	logger?: unknown;
+	/** The configuration the slot is filled from, as a composition fills it. */
 	config?: AppConfig;
+	/** The slot itself, over what `config` fills it with. */
+	oauthTokenSettings?: unknown;
 	grantPolicy?: GrantPolicyHook;
 }) =>
 	createJwtBearerGrant({
-		config: opts.config ?? config,
+		...grantSettingsFrom(opts.config ?? config),
+		...(opts.oauthTokenSettings === undefined
+			? {}
+			: { oauthTokenSettings: opts.oauthTokenSettings }),
 		keyStore,
 		assertionVerifier: opts.verifier ?? verifierFor({ subjectHandle: "device:abc" }),
 		userRepository: opts.userRepository ?? userRepoFor({ id: "u-1" }),
@@ -1347,15 +1354,17 @@ describe("jwt-bearer grant — the lifetime it mints with, read when it is built
 			.setExpirationTime("5m")
 			.sign(idp.privateKey);
 
-		for (const accessToken of [{ expiresIn: 1.5 }, { expiresIn: 0 }, {}]) {
+		for (const accessTokenLifetime of [
+			{ defaultExpiresIn: 1.5, maxExpiresIn: 300 },
+			{ defaultExpiresIn: 0, maxExpiresIn: 300 },
+			{},
+		]) {
 			let refused: unknown;
 			let grant: ReturnType<typeof build> | undefined;
 			try {
 				grant = build({
 					verifier,
-					config: {
-						oauth: { jwt: { issuer: "https://auth.example" }, accessToken },
-					} as unknown as AppConfig,
+					oauthTokenSettings: { ...createTestOAuthTokenSettings(), accessTokenLifetime },
 				});
 			} catch (err) {
 				refused = err;
@@ -1378,8 +1387,8 @@ describe("jwt-bearer grant — the lifetime it mints with, read when it is built
 			expect(await seen.contains("jwt-bearer:id-jag:https://idp.example", "jti-lifetime")).toBe(
 				false,
 			);
-			expect(refused, JSON.stringify(accessToken)).toBeInstanceOf(RangeError);
-			expect((refused as Error).message).toMatch(/oauth\.accessToken/);
+			expect(refused, JSON.stringify(accessTokenLifetime)).toBeInstanceOf(RangeError);
+			expect((refused as Error).message).toMatch(/oauthTokenSettings\.accessTokenLifetime/);
 		}
 	});
 });
@@ -1390,22 +1399,20 @@ describe("jwt-bearer grant — the lifetime it mints with, read when it is built
  * verifier: the only possible default is one that accepts things.
  */
 describe("jwt-bearer grant — enabling it without a verifier", () => {
-	const configWith = (enabled: boolean) =>
-		({
-			...(makeValidAppConfig() as unknown as Record<string, unknown>),
-			"oauth-authorization": { grants: { jwtBearer: { enabled } } },
-		}) as never;
+	/** The module's section, as boot parses it, with the jwt-bearer switch `enabled`. */
+	const sectionWith = (enabled: boolean) => ({ grants: { jwtBearer: { enabled } } });
 
-	/** The contributed grant factories, or `{}` when the module contributes none. */
-	const grantsOf = (enabled: boolean): Record<string, (d: unknown) => unknown> => {
-		const mod = oauthAuthorizationModule({ config: configWith(enabled) });
-		const contributed = mod.contributes?.grants;
-		return (contributed ?? {}) as Record<string, (d: unknown) => unknown>;
-	};
+	/** The module's contributed grant factories. */
+	const grantsOf = (): Record<string, (d: unknown) => unknown> =>
+		(oauthAuthorizationGrantsModule.contributes?.grants ?? {}) as Record<
+			string,
+			(d: unknown) => unknown
+		>;
 
 	/** Everything the grant needs except the one slot under test. */
 	const depsWithout = (missing: "assertionVerifier" | "userRepository") => ({
-		config: configWith(true),
+		section: sectionWith(true),
+		oauthTokenSettings: createTestOAuthTokenSettings(),
 		keyStore,
 		...(missing === "assertionVerifier"
 			? { userRepository: userRepoFor({ id: "u-1" }) }
@@ -1413,7 +1420,7 @@ describe("jwt-bearer grant — enabling it without a verifier", () => {
 	});
 
 	it("refuses to build the grant when the verifier is missing", () => {
-		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
+		const factory = grantsOf()[JWT_BEARER_GRANT_TYPE];
 		expect(factory).toBeDefined();
 		expect(() => factory?.(depsWithout("assertionVerifier"))).toThrow(
 			/no assertionVerifier is wired/,
@@ -1421,7 +1428,7 @@ describe("jwt-bearer grant — enabling it without a verifier", () => {
 	});
 
 	it("names both ways out — wire one, or disable the grant", () => {
-		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
+		const factory = grantsOf()[JWT_BEARER_GRANT_TYPE];
 		expect(factory).toBeDefined();
 		let message = "did not throw";
 		try {
@@ -1437,23 +1444,26 @@ describe("jwt-bearer grant — enabling it without a verifier", () => {
 		// The grant resolves the verified handle through `authenticateByToken`;
 		// without it the first request would fail at the call rather than at
 		// boot, which is the wrong place to learn about a wiring gap.
-		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
+		const factory = grantsOf()[JWT_BEARER_GRANT_TYPE];
 		expect(() => factory?.(depsWithout("userRepository"))).toThrow(/no userRepository is wired/);
 	});
 
 	it("does not register the grant at all when it is not enabled", () => {
 		// Secure-default opt-in: a deployment that says nothing gets nothing.
-		expect(grantsOf(false)[JWT_BEARER_GRANT_TYPE]).toBeUndefined();
+		const factory = grantsOf()[JWT_BEARER_GRANT_TYPE];
+		expect(factory?.({ section: sectionWith(false) })).toBeNull();
+		expect(factory?.({ section: undefined })).toBeNull();
 	});
 
 	it("builds the grant when both slots are wired, handing the factory the narrowed values", () => {
 		// The module lists `assertionVerifier` and `userRepository` optional,
 		// the grant requires them, and the two checks above narrow them: this is
 		// where the wiring either passes them on or drops them.
-		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
+		const factory = grantsOf()[JWT_BEARER_GRANT_TYPE];
 		expect(factory).toBeDefined();
 		const handler = factory?.({
-			config: configWith(true),
+			section: sectionWith(true),
+			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			assertionVerifier: verifierFor({ subjectHandle: "d" }),
 			userRepository: userRepoFor({ id: "u-1" }),

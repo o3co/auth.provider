@@ -669,6 +669,94 @@ describe("the cause policy", () => {
 	});
 });
 
+describe("federations", () => {
+	it("lists the federations in the order they joined, the per-session index's first, once each", async () => {
+		const h = harness();
+		const expiresAt = await h.establish();
+		expect(await h.lifecycle.join(SID, { familyId: "f1", federation: "oidc" })).toEqual({
+			outcome: "joined",
+		});
+		expect(await h.lifecycle.join(SID, { familyId: "f2", federation: "apple" })).toEqual({
+			outcome: "joined",
+		});
+		await h.sessionFederationIndex.addFederation(SID, "github", expiresAt);
+		// Every join wrote the index before the record, so the index holds
+		// them all, in join order.
+		expect(await h.lifecycle.federations(SID)).toEqual({
+			outcome: "listed",
+			federations: ["oidc", "apple", "github"],
+		});
+	});
+
+	it("lists an older federation only the per-session index holds before the record's newer one", async () => {
+		const h = harness();
+		const expiresAt = await h.establish(SID, { open: false });
+		// Joined through the per-session stores alone, before the lifecycle.
+		await h.sessionFederationIndex.addFederation(SID, "github", expiresAt);
+		// A later join through the service adopts the record with a newer one.
+		expect(await h.lifecycle.join(SID, { familyId: "f1", federation: "oidc" })).toEqual({
+			outcome: "joined",
+		});
+		expect(await h.lifecycle.federations(SID)).toEqual({
+			outcome: "listed",
+			federations: ["github", "oidc"],
+		});
+		const closed = await h.lifecycle.close(SID, "rp_logout");
+		expect(closed.outcome === "unavailable" ? undefined : closed.federations).toEqual([
+			"github",
+			"oidc",
+		]);
+	});
+
+	it("lists the per-session index's alone for a session with no record", async () => {
+		const h = harness();
+		const expiresAt = await h.establish(SID, { open: false });
+		await h.sessionFederationIndex.addFederation(SID, "google", expiresAt);
+		expect(await h.lifecycle.federations(SID)).toEqual({
+			outcome: "listed",
+			federations: ["google"],
+		});
+	});
+
+	it("lists what the close answers for the same session", async () => {
+		const h = harness();
+		await h.establish();
+		await joinAll(h);
+		const listed = await h.lifecycle.federations(SID);
+		const closed = await h.lifecycle.close(SID, "rp_logout");
+		expect(listed.outcome).toBe("listed");
+		expect(closed.outcome).not.toBe("unavailable");
+		expect(closed.outcome === "unavailable" ? undefined : closed.federations).toEqual(
+			listed.outcome === "listed" ? listed.federations : undefined,
+		);
+		expect(listed.outcome === "listed" ? listed.federations : []).toEqual(["google"]);
+	});
+
+	it("is unavailable when the lifecycle store or the index cannot answer", async () => {
+		const h = harness({
+			store: (inner) => ({
+				...inner,
+				read: async () => {
+					throw new Error("lifecycle store down");
+				},
+			}),
+		});
+		await h.establish();
+		expect(await h.lifecycle.federations(SID)).toEqual({ outcome: "unavailable" });
+		const g = harness();
+		await g.establish();
+		g.sessionFederationIndex.listFederations = async () => {
+			throw new Error("index down");
+		};
+		expect(await g.lifecycle.federations(SID)).toEqual({ outcome: "unavailable" });
+	});
+
+	it("refuses a sid the port cannot hold with a RangeError", async () => {
+		const h = harness();
+		await expect(h.lifecycle.federations("")).rejects.toThrow(RangeError);
+	});
+});
+
 describe("liveness", () => {
 	it("is live, with the user session, while the record is active", async () => {
 		const h = harness();

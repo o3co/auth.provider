@@ -53,6 +53,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -150,6 +151,7 @@ async function buildApp(lookup: "up" | "down"): Promise<Harness> {
 		"refresh_token",
 		createRefreshTokenGrant({
 			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			logger,
 			sessionRequirementResolver: resolverForTests([]),

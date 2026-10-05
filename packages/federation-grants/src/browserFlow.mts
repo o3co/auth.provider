@@ -36,6 +36,7 @@ import {
 	type LoginEntry,
 	type RateLimiter,
 	recordAuditEvent,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type SupportsDelegatedAuthorization,
@@ -73,6 +74,8 @@ export interface FederationGrantBrowserRouterOptions {
 	 * authenticated after. The grants boundary is `grantsBoundary`.
 	 */
 	readonly subjectRevocation: SubjectRevocation;
+	/** The session lifecycle port admission reads after a live record, when wired. */
+	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 	/**
 	 * The `sessionRequirementResolver` the boot planner built (`resolverForTests` in
 	 * tests): the session requirements admission asks. Admission refuses any other
@@ -195,6 +198,7 @@ export function createBrowserFlow(
 	const admissionFor = (flow: LogFields): AdmissionDeps => ({
 		userSessionStore: options.userSessionStore,
 		subjectRevocation,
+		sessionLifecycleStore: options.sessionLifecycleStore,
 		requirements,
 		acrTable: NO_ACR_TABLE,
 		logger: log.bound(flow),

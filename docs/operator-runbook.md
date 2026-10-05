@@ -1733,7 +1733,7 @@ check this page, so when the two disagree, the constant is right:
 `federation.token.upstream_ineligible`,
 `introspect.family_revoked`, `introspect.session_invalid`,
 `introspect.store_unavailable`,
-`logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
+`logout.cascade_failed`, `logout.close_pending`, `logout.family_revoked`, `logout.success`,
 `mfa.challenge.sent`, `mfa.email_address_mismatch`,
 `mfa.enrollment_state_inconsistent`,
 `mfa.factor.enrolled`, `mfa.factor.removed`, `mfa.first_binding_conflict`,
@@ -2399,7 +2399,7 @@ lists every breaking change since, and which of the steps below each needs.
    | `oauth.refreshToken.legacyRtPolicy = "accept-with-warning"` | enum shrunk to `"reject"` | Zod `invalid_enum_value` naming the survivors |
    | flat `oauth.jwt.algorithm` / `kid` / `secret` / key fields | moved | `oauth.jwt has legacy flat fields (…). Migrate to the key store's section: key-store.local.<field>.` |
    | `webauthn.allowCredentialsForKnownUser` (and `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`, any value) | removed | `webauthn.allowCredentialsForKnownUser was removed` (`config-path-relocated`), and the variable set at all `environment-variable-renamed`, wherever `webauthnModule` is installed: `authentication/options` lists no credentials and the grant refuses an assertion without a user handle (`user_handle_missing`), so non-discoverable (non-resident) keys no longer sign in; re-enroll those users with discoverable credentials, then delete the key and the variable |
-   | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`, any value) | removed | `oauth.grants.authorization_code.pkce.<key> was removed` (`config-path-relocated`), and the variable set at all `environment-variable-renamed`, wherever `oauthAuthorizationModule` is installed: S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`); delete the key and the variable |
+   | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`, any value) | removed | `oauth.grants.authorization_code.pkce.<key> was removed` (`config-path-relocated`), and the variable set at all `environment-variable-renamed`, wherever `oauthAuthorizationGrantsModule` is installed: S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`); delete the key and the variable |
    | `repositories.code.type` (and `CLIENT_CODE_TYPE`) | moved to `adapters.codeRepository` | refused before boot, naming `adapters.codeRepository` and `ADAPTERS_CODE_REPOSITORY` (step 6) |
    | `oauth.accessToken.expiresIn` (and `OAUTH_ACCESS_TOKEN_EXPIRES_IN`) | deprecated alias of `oauth.accessToken.defaultExpiresIn`, read only while that key is unset — set both and the new key wins | the standalone logs `config_key_deprecated` (warn, `key = "oauth.accessToken.expiresIn"`) at boot when the old key carries anything but the shipped `3600`; `resolveAccessTokenLifetime` is the reader for every composition |
 

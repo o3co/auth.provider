@@ -75,7 +75,6 @@ const FACTORIES: Readonly<Record<string, readonly string[]>> = {
 		"mfa-recovery-code-factor",
 		"mfa-email-factor",
 	],
-	"@o3co/auth-provider-oauth:oauthAuthorizationModule": ["oauth-authorization"],
 	"@o3co/auth-provider-oauth:oauthModule": ["oauth"],
 	"@o3co/auth-provider-oauth:oauthSessionModule": ["oauth-session"],
 	"@o3co/auth-provider-redis:redisFederationGrantStoreModuleFor": ["redis-federation-grant-store"],

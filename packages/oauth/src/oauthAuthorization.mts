@@ -13,16 +13,37 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/**
+ * The module of the authorization_code, refresh_token, client_credentials and
+ * jwt-bearer grants: each switched on, it contributes that grant, and the
+ * actions the two session-bound grants admit
+ * (`AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS`,
+ * `REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS`).
+ *
+ * One module, built from nothing, switched by its own section: each grant's
+ * switch, `oauth-authorization.grants.<grant>.enabled`, is read from
+ * `oauth-authorization {}` as boot parsed it, and an absent section or key is
+ * off. A grant switched off answers `null` from its factory and registers
+ * nothing; with every grant off the module is off (`section.isEnabled`): it
+ * registers nothing and requires nothing. The section's defaults live in the
+ * package's `config/reference.conf` alone.
+ *
+ * What the grants need of `oauth {}` — the issuer, the lifetimes, the
+ * resource-indicator switch and `requireEmailVerified` — they read from the
+ * `oauthTokenSettings` slot, required while the module is on: the oauth
+ * module provides it, and a composition without that module fills it. The
+ * refresh-token binding rule they read from core's `tokenBindingSettings`
+ * slot. The refresh grant still reads `oauth.refreshToken.unknownFamilyPolicy`
+ * from `config`, which no slot carries, so the module still requires it.
+ */
+
 import {
-	type AdmissionActionDeclaration,
-	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	type CodeRepository,
 	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
-	type GrantHandler,
-	type Module,
 	type ProviderDeps,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	supportsSessionEnd,
@@ -37,16 +58,14 @@ import { createClientCredentialsGrant } from "./grants/clientCredentials.mjs";
 import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "./grants/jwtBearer.mjs";
 import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 
-/** A grant's switch: off unless the operator says so. */
-const ENABLED = coerceBooleanFromEnv.optional();
-
-/** One grant's own keys: whether it registers. */
-const grantSwitch = z.object({ enabled: ENABLED }).strict().optional();
+/** One grant's own keys: whether it registers, on only when true; absent is off. */
+const grantSwitch = z.object({ enabled: coerceBooleanFromEnv.optional() }).strict().optional();
 
 /**
  * The schema of `oauth-authorization {}`, the module's own section, strict at
  * every level: the switch of each grant the module installs, under `grants`.
- * An absent switch is off; the defaults are the package's `reference.conf`'s.
+ * It fills no default: the package's `reference.conf` ships every switch off.
+ * Absent, the section is `undefined`, which reads as every grant off.
  */
 export const oauthAuthorizationConfigSchema = z
 	.object({
@@ -63,8 +82,23 @@ export const oauthAuthorizationConfigSchema = z
 	.strict()
 	.optional();
 
+/** The module's section as its schema leaves it. */
+type OAuthAuthorizationSection = z.output<typeof oauthAuthorizationConfigSchema>;
+
 /** The grants' keys under `grants`, each by the grant it switches. */
 type GrantKey = "authorizationCode" | "refreshToken" | "clientCredentials" | "jwtBearer";
+
+/** Each grant's key under `grants`, in the order the section declares them. */
+const GRANT_KEYS: readonly GrantKey[] = [
+	"authorizationCode",
+	"refreshToken",
+	"clientCredentials",
+	"jwtBearer",
+];
+
+/** Whether the grant under `key` is switched on: only when its `enabled` is true. */
+const switchedOn = (section: OAuthAuthorizationSection, key: GrantKey): boolean =>
+	section?.grants?.[key]?.enabled === true;
 
 /**
  * The module's section, with the paths it moved from and the variables
@@ -72,7 +106,9 @@ type GrantKey = "authorizationCode" | "refreshToken" | "clientCredentials" | "jw
  * under `oauth-authorization.grants`, and its variable is held to the new
  * name. The authorization_code grant's `pkce` block is removed: PKCE with
  * `S256` is mandatory for every authorization-code client, so a key or
- * variable still setting one refuses boot.
+ * variable still setting one refuses boot. Parsed whether or not a grant is
+ * on, so a setting still written at an old path refuses boot rather than
+ * reading as off.
  */
 const SECTION = {
 	schema: oauthAuthorizationConfigSchema,
@@ -92,63 +128,14 @@ const SECTION = {
 		OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED: "oauth.grants.client_credentials.enabled",
 		OAUTH_GRANTS_JWT_BEARER_ENABLED: `oauth.grants.${JWT_BEARER_GRANT_TYPE}.enabled`,
 	},
+	// The module's switch: on while any grant is on.
+	isEnabled: (section: OAuthAuthorizationSection) =>
+		GRANT_KEYS.some((key) => switchedOn(section, key)),
 } as const;
 
-/**
- * Whether the grant under `key` is on in the configuration the composition
- * root read before boot: `oauth-authorization.grants.<key>.enabled` read as
- * the section's schema reads it, so an environment variable's `"true"` is on.
- * Anything the schema refuses is off, the secure default, and boot then
- * refuses the value.
- */
-const isEnabled = (config: unknown, key: GrantKey): boolean => {
-	const grants = (
-		config as
-			| { "oauth-authorization"?: { grants?: Record<string, { enabled?: unknown } | undefined> } }
-			| undefined
-	)?.["oauth-authorization"]?.grants;
-	const read = ENABLED.safeParse(grants?.[key]?.enabled);
-	return read.success && read.data === true;
-};
-
-/** Each grant's key under `grants`, in the order the section declares them. */
-const GRANT_KEYS: readonly GrantKey[] = [
-	"authorizationCode",
-	"refreshToken",
-	"clientCredentials",
-	"jwtBearer",
-];
-
-/**
- * The module's section, held to the decisions the module was built with:
- * whether each grant registers is decided from the configuration handed to
- * `oauthAuthorizationModule`, before boot, and each switch is parsed again from
- * the configuration `createApp` is handed. A switch that reads otherwise there
- * refuses boot, naming its key, in either direction; a composition would
- * otherwise run without a grant its configuration turns on, or with one it
- * turns off.
- */
-const sectionFor = (built: Readonly<Record<GrantKey, boolean>>) => ({
-	...SECTION,
-	schema: oauthAuthorizationConfigSchema.superRefine((section, ctx) => {
-		for (const key of GRANT_KEYS) {
-			const booted = section?.grants?.[key]?.enabled === true;
-			if (booted === built[key]) continue;
-			const [decided, parsed] = built[key] ? ["on", "off"] : ["off", "on"];
-			ctx.addIssue({
-				code: "custom",
-				path: ["grants", key, "enabled"],
-				message:
-					`oauthAuthorizationModule was built from a configuration with grants.${key} ${decided}, ` +
-					`but the configuration createApp parsed has oauth-authorization.grants.${key}.enabled ${parsed}. ` +
-					"Whether the grant registers is decided from the first. Hand oauthAuthorizationModule " +
-					"the configuration read from the same files and environment as the one createApp is handed.",
-			});
-		}
-	}),
-});
-
 const REQUIRES = [
+	// The refresh grant reads `oauth.refreshToken.unknownFamilyPolicy` from it,
+	// which no slot carries; nothing else here reads it.
 	"config",
 	"clientRepository",
 	"keyStore",
@@ -157,6 +144,14 @@ const REQUIRES = [
 	// code's session through `admitSession` with it, twice; the refresh grant
 	// reads the token's.
 	"sessionRequirementResolver",
+	// What the oauth module provides of `oauth {}`: the issuer, the lifetimes,
+	// the resource-indicator switch and `requireEmailVerified`, which every
+	// grant here reads. A composition without that module fills it.
+	"oauthTokenSettings",
+	// Core's token-binding settings, which boot always fills: the
+	// authorization_code and refresh grants read the refresh-token binding
+	// rule from it.
+	"tokenBindingSettings",
 ] as const;
 const OPTIONAL = [
 	// Where the authorization_code grant redeems the codes `/authorize` issues.
@@ -303,108 +298,108 @@ function warnRotationWithoutRevocation(deps: OAuthAuthorizationModuleDeps): void
 }
 
 /**
- * The deps every contribution of {@link oauthAuthorizationModule} receives:
- * exactly its `requires` / `optional`, typed. Each grant factory
- * declares the subset it reads, so the wiring below is checked, not trusted.
+ * The deps every contribution of {@link oauthAuthorizationGrantsModule}
+ * receives, besides its section: exactly its `requires` / `optional`, typed.
+ * Each grant factory declares the subset it reads, so the wiring below is
+ * checked, not trusted.
  */
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
 export type OAuthAuthorizationModuleDeps = ProviderDeps<Requires, Optional>;
 
 /**
- * Declarative manifest for the authorization_code and refresh_token grants
- * (and the jwt-bearer and client_credentials grants). The boot
- * planner registers its `contributes.grants` entries; the repositories come
- * through `requires` from the DI graph.
+ * The authorization_code, refresh_token, client_credentials and jwt-bearer
+ * grants — see the file header for what each switch decides. The boot
+ * planner registers each `contributes.grants` entry that does not answer
+ * `null`; the repositories come through `requires` from the DI graph. List it
+ * as it is.
  */
-export const oauthAuthorizationModule = (params: { config: AppConfig }): Module => {
-	// Each factory takes `Pick<GrantDependencies, …>` of the slots it reads,
-	// and this module's typed deps satisfy every pick — so a grant reading a
-	// slot this module never declared is a compile error at its wiring below.
-	const grants: Record<string, (deps: OAuthAuthorizationModuleDeps) => GrantHandler> = {};
-	const built = Object.fromEntries(
-		GRANT_KEYS.map((key) => [key, isEnabled(params.config, key)]),
-	) as Record<GrantKey, boolean>;
-	// Each grant that admits a session registers its action beside it.
-	const admissionActions: Record<string, AdmissionActionDeclaration> = {};
-	// Secure-default opt-in: a grant is registered only when its switch is on
-	// (`isEnabled`). The package's reference.conf ships each off; a
-	// deployment's own layer, or the switch's variable, turns one on.
-	if (built.authorizationCode) {
-		grants.authorization_code = (deps) => {
-			requireSessionStoreWithSubjectRevocation(deps);
-			const grant = createAuthorizationGrant({
-				...deps,
-				codeRepository: requireCodeRepository(deps),
-			});
-			warnWithoutSessionEnd(deps);
-			warnRotationWithoutRevocation(deps);
-			return grant;
-		};
-		Object.assign(admissionActions, AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS);
-	}
-	if (built.refreshToken) {
-		Object.assign(admissionActions, REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS);
-		grants.refresh_token = (deps) => {
-			// Refused at boot, not at the first refresh: see the function.
-			requireRefreshTokenFamilies(deps);
-			return createRefreshTokenGrant(deps);
-		};
-	}
-	// RFC 7523 jwt-bearer. Opt-in like every other grant, and additionally
-	// inert without an `assertionVerifier` — the module lists it optional so a
-	// deployment that never enables this grant is not made to wire one, and the
-	// factory below refuses to register the grant when it is missing rather
-	// than registering one that would accept anything.
-	if (built.jwtBearer) {
-		grants[JWT_BEARER_GRANT_TYPE] = (deps) => {
-			const { userRepository, assertionVerifier } = deps;
-			if (!userRepository) {
-				throw new Error(
-					`${JWT_BEARER_GRANT_TYPE} is enabled but no userRepository is wired. ` +
-						"The grant resolves the verified handle through " +
-						"`authenticateByToken`, so without it there is nothing to resolve " +
-						"against and the first request would fail at the call rather than " +
-						"at boot.",
-				);
-			}
-			if (!assertionVerifier) {
-				throw new Error(
-					`${JWT_BEARER_GRANT_TYPE} is enabled but no assertionVerifier is wired. ` +
-						"This grant turns a presented assertion into a login, so there is no " +
-						"default: the only possible one would accept things. Wire an " +
-						"AssertionVerifier (createJwtAssertionVerifier for a signed device JWT, " +
-						"or your own for a platform attestation), or disable the grant.",
-				);
-			}
-			// Both are `optional` here and required by the grant; the checks
-			// above are what narrow them, so they are handed over by name.
-			return createJwtBearerGrant({ ...deps, assertionVerifier, userRepository });
-		};
-	}
-	// client_credentials follows the same opt-in. Per-client
-	// `AuthenticatedClient.allowedGrantTypes` (deny-by-absence) is the
-	// authoritative access gate; the server-wide flag is a kill switch, and
-	// keeps M2M off in deployments that never use it.
-	if (built.clientCredentials) {
-		grants.client_credentials = (deps) => createClientCredentialsGrant(deps);
-	}
-
-	return defineModule<Requires, Optional, typeof oauthAuthorizationConfigSchema>({
-		name: "oauth-authorization",
-		section: sectionFor(built),
-		requires: REQUIRES,
-		optional: OPTIONAL,
-		// `subjectRevocation` is optional to wire, not optional to decide.
-		// This module reads the slot on its own, so a composition that mounts
-		// it without `oauthModule` (the grants alone, no routes) would
-		// otherwise boot with the watermark unfilled and undeclared.
-		absencePolicies: {
-			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
-			// The same rule for the audit sink admission emits through,
-			// declared here as `oauthModule` declares it, for the same reason.
-			auditSink: AUDIT_SINK_ABSENCE_POLICY,
+export const oauthAuthorizationGrantsModule = defineModule<
+	Requires,
+	Optional,
+	typeof oauthAuthorizationConfigSchema
+>({
+	name: "oauth-authorization",
+	section: SECTION,
+	requires: REQUIRES,
+	optional: OPTIONAL,
+	// `subjectRevocation` is optional to wire, not optional to decide.
+	// This module reads the slot on its own, so a composition that mounts
+	// it without `oauthModule` (the grants alone, no routes) would
+	// otherwise boot with the watermark unfilled and undeclared.
+	absencePolicies: {
+		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+		// The same rule for the audit sink admission emits through,
+		// declared here as `oauthModule` declares it, for the same reason.
+		auditSink: AUDIT_SINK_ABSENCE_POLICY,
+	},
+	contributes: {
+		// The actions the two session-bound grants admit, declared whenever the
+		// module is on: a declaration registers no grant.
+		admissionActions: {
+			...AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS,
+			...REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS,
 		},
-		contributes: { grants, admissionActions },
-	});
-};
+		// Each factory takes `Pick<GrantDependencies, …>` of the slots it reads,
+		// and this module's typed deps satisfy every pick — so a grant reading a
+		// slot this module never declared is a compile error at its wiring below.
+		// Secure-default opt-in: a grant whose switch is off answers `null`. The
+		// package's reference.conf ships each off; a deployment's own layer, or
+		// the switch's variable, turns one on.
+		grants: {
+			authorization_code: (deps) => {
+				if (!switchedOn(deps.section, "authorizationCode")) return null;
+				requireSessionStoreWithSubjectRevocation(deps);
+				const grant = createAuthorizationGrant({
+					...deps,
+					codeRepository: requireCodeRepository(deps),
+				});
+				warnWithoutSessionEnd(deps);
+				warnRotationWithoutRevocation(deps);
+				return grant;
+			},
+			refresh_token: (deps) => {
+				if (!switchedOn(deps.section, "refreshToken")) return null;
+				// Refused at boot, not at the first refresh: see the function.
+				requireRefreshTokenFamilies(deps);
+				return createRefreshTokenGrant(deps);
+			},
+			// RFC 7523 jwt-bearer. Opt-in like every other grant, and additionally
+			// inert without an `assertionVerifier` — the module lists it optional so
+			// a deployment that never enables this grant is not made to wire one,
+			// and the factory refuses to register the grant when it is missing
+			// rather than registering one that would accept anything.
+			[JWT_BEARER_GRANT_TYPE]: (deps) => {
+				if (!switchedOn(deps.section, "jwtBearer")) return null;
+				const { userRepository, assertionVerifier } = deps;
+				if (!userRepository) {
+					throw new Error(
+						`${JWT_BEARER_GRANT_TYPE} is enabled but no userRepository is wired. ` +
+							"The grant resolves the verified handle through " +
+							"`authenticateByToken`, so without it there is nothing to resolve " +
+							"against and the first request would fail at the call rather than " +
+							"at boot.",
+					);
+				}
+				if (!assertionVerifier) {
+					throw new Error(
+						`${JWT_BEARER_GRANT_TYPE} is enabled but no assertionVerifier is wired. ` +
+							"This grant turns a presented assertion into a login, so there is no " +
+							"default: the only possible one would accept things. Wire an " +
+							"AssertionVerifier (createJwtAssertionVerifier for a signed device JWT, " +
+							"or your own for a platform attestation), or disable the grant.",
+					);
+				}
+				// Both are `optional` here and required by the grant; the checks
+				// above are what narrow them, so they are handed over by name.
+				return createJwtBearerGrant({ ...deps, assertionVerifier, userRepository });
+			},
+			// client_credentials follows the same opt-in. Per-client
+			// `AuthenticatedClient.allowedGrantTypes` (deny-by-absence) is the
+			// authoritative access gate; the server-wide switch is a kill switch,
+			// and keeps M2M off in deployments that never use it.
+			client_credentials: (deps) =>
+				switchedOn(deps.section, "clientCredentials") ? createClientCredentialsGrant(deps) : null,
+		},
+	},
+});
