@@ -167,9 +167,10 @@ Each one implements a port core declares; the slot name is in parentheses.
   (`active` → `closing` → `closed`), its participants and its pending close
   work, in one key per session; see
   [Session lifecycle](#session-lifecycle-one-key-per-session-in-fixed-shards).
-  `createRedisSessionLifecycleStore` builds it over
-  `makeIoredisClients(io).sessionLifecycleStoreClient`; no module provides the
-  slot yet.
+  `redisSessionStoresModule` provides it, keyed under its section's
+  `keyPrefix` plus `lc:`; `createRedisSessionLifecycleStore` builds it over
+  `makeIoredisClients(io).sessionLifecycleStoreClient` directly. Nothing reads
+  the slot yet.
 - `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,
   `SessionFederationIndex`, `SubjectSessionIndex`, `SubjectRevocation` — the
   six user-session and subject-revocation stores, installed together by
@@ -468,7 +469,7 @@ Each adapter ships in up to two forms:
 | `redisReplaySeenSetModule` | `replaySeenSetClient` | `replaySeenSet` | `redis-replay-seen-set` | `redisReplaySeenSetBuilder` |
 | `redisAccessTokenDenylistModule` | `accessTokenDenylistClient` | `accessTokenDenylist` | `redis-access-token-denylist` | `redisAccessTokenDenylistBuilder` |
 | `redisRefreshTokenFamilyStoreModule` | `refreshTokenFamilyClient` | `refreshTokenFamilyStore` | `redis-refresh-token-family-store` | `redisRefreshTokenFamilyStoreBuilder` |
-| `redisSessionStoresModule` | the six session/subject clients | the six session/subject stores | `redis-session-stores` | per-store builders |
+| `redisSessionStoresModule` | the six session/subject clients, `sessionLifecycleStoreClient` | the six session/subject stores, `sessionLifecycleStore` | `redis-session-stores` | per-store builders |
 | `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redis-federation-token-store` | `redisFederationTokenStoreBuilder` |
 | `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redis-federation-grant-store` (`keyPrefix`, `listingAllowanceMs`, `tombstoneRetention`, `encryptionMode`, `encryptionKeys`) | — |
 | `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redis-federation-grant-intent-store` (`keyPrefix`, default `fg:`) | — |
@@ -483,8 +484,9 @@ Each adapter ships in up to two forms:
 Each store module but `redisCodeRepositoryModule` reads its own section, named after the module: strict, its defaults and its variables in the package's [`config/reference.conf`](config/reference.conf), which each module declares (`section.reference`) and a composition root layers when it loads any of them. The path a section moved from (`redisConsentStore`, `redisRateLimiter`, `rateLimit.failMode`, the grant store's `federationGrants` keys, …) refuses boot naming the new one, and so does a renamed variable's old name (`RATE_LIMIT_FAIL_MODE`, `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` and `_CAS_RETRY_LIMIT`, `FEDERATION_GRANTS_ENCRYPTION_MODE`) unless the new one carries the same value. `redisCodeRepositoryModule` still requires `config` and reads `redisCodeRepository`; the two sealing-store modules require `deploymentMode`. Every module whose stores log also reads
 the optional `logger` slot: the two sealing-store modules, for the plaintext
 guard's line; `redisSessionStoresModule` and `redisCodeRepositoryModule`, for a
-stored record they cannot read; the two MFA store modules, for their boot
-durability check's warning. The `*Client` column is the slot
+stored record they cannot read (and `redisSessionStoresModule` for the session
+lifecycle store's eviction check's warning); the two MFA store modules, for
+their boot durability check's warning. The `*Client` column is the slot
 `makeIoredisClients` fills, except the two federation-grant clients (see
 above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at
@@ -1342,8 +1344,8 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   `checkSessionLifecycleEviction` in
   [`src/internal/session-lifecycle-eviction.mts`](src/internal/session-lifecycle-eviction.mts),
   refuses every `volatile-*` and `allkeys-*` policy with a
-  `RedisStoreEvictableError` (`session-lifecycle-store-evictable`); the module
-  that provides the slot runs it.
+  `RedisStoreEvictableError` (`session-lifecycle-store-evictable`);
+  `redisSessionStoresModule` runs it once it builds the store.
 - **What it refuses.** A key of another type, a record holding a field or a
   value this store did not write, and a pending count that disagrees with
   the pending items reject every member that touches them, never answering an
@@ -1397,7 +1399,7 @@ its port. Two directories hold what several of them share:
 
 - **`src/modules/`** — modules that bundle more than one store. Every other
   module is defined beside the one store it provides; `redisSessionStoresModule`
-  installs six, with one key scheme across them, so it has a file of its own.
+  installs seven, with one key scheme across them, so it has a file of its own.
 - **`src/internal/`** — helpers no consumer imports, and which the package's
   exports do not reach: the advisory lock (its options carry the federation
   token's `{ sid, federationName }`, so it is not a general-purpose lock), the
