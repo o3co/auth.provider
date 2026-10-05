@@ -762,11 +762,13 @@ modules fills them.
   gone from `createDeviceVerificationHandler`, the federation-grants routers,
   `RateLimitGuardOptions` and `RateLimitPolicyOptions`; `checkWithFailMode`
   takes a policy from `createRateLimitPolicy` and refuses any other object;
-  `memoryRateLimiterModule`, `redisRateLimiterModule` and `webauthnModule`
-  require `rateLimitBudgetResolver`, which a hand-built
-  deps object for their factories carries. `createDeviceVerificationHandler`'s
-  `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
-  `revokedBefore` (#717).
+  `memoryRateLimiterModule` and `webauthnModule` require
+  `rateLimitBudgetResolver`, which a hand-built deps object for their
+  factories carries. `createRedisRateLimiter` no longer takes `budgets` and
+  `redisRateLimiterModule` requires only `rateLimiterClient`; set a prefix's
+  limit as `redis-rate-limiter.limits.<prefix>` (#807).
+  `createDeviceVerificationHandler`'s `subjectRevocation` is the full
+  `SubjectRevocation`, no longer a `Pick` of `revokedBefore` (#717).
 - **A switched-off grant or second factor is no override target (#728).** A
   `grants` or `mfaFactors` factory may answer `null` — switched off by its
   module's settings while the module is on; the entry stays claimed, and an
