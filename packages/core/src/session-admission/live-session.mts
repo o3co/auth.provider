@@ -16,9 +16,11 @@
 
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
- * read, the subject, the renewal nonce and the revocation boundary, then the
+ * read and the session's lifecycle, the subject, the renewal nonce and the
+ * revocation boundary, then the
  * store's step-up capability over the live record. The session store, the
- * boundary and the audit sink are read here and nowhere else in admission,
+ * lifecycle store, the boundary and the audit sink are read here and nowhere
+ * else in admission,
  * each off `deps` once; an outage, a read of either store off `deps` that
  * throws, or a store that throws when its capability is read, is answered
  * through admission's `unavailable`, which logs it. The sink is read only
@@ -32,6 +34,7 @@ import {
 	claimCoveredByRevocationBoundary,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 } from "../jwt/verify.mjs";
+import { readVersionedSessionLifecycle } from "../user-sessions/lifecycle/readers.mjs";
 import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
 import {
 	supportsSecondFactorUpdate,
@@ -116,6 +119,27 @@ export async function readLiveSession(
 			return { answer: { outcome: "not_live", reason: "gone" } };
 		}
 		session = record;
+	}
+
+	// Step 2b: the session's lifecycle, after a live record. Closing or closed
+	// from its closing commit on is not live; no record, or no store, reads as
+	// before. The store is read off `deps` once, in the same guarded section as
+	// its answer, which core's reader holds to the port's types.
+	if (session !== null && presented.sid !== undefined) {
+		try {
+			const lifecycleStore = checked.readSessionLifecycleStore();
+			const lifecycle =
+				lifecycleStore === undefined
+					? null
+					: readVersionedSessionLifecycle(await lifecycleStore.read(presented.sid));
+			if (lifecycle !== null && lifecycle.value.state !== "active") {
+				return { answer: { outcome: "not_live", reason: "closing" } };
+			}
+		} catch (err) {
+			return {
+				answer: unavailable("session_lifecycle" satisfies AdmissionInfrastructureStore, err),
+			};
+		}
 	}
 
 	// Step 3: the subject.

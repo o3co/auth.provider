@@ -117,6 +117,8 @@ const ANSWER: InterruptionAnswer = { status: 403, body: { error: "contract_inter
 const admissionDeps = (requirements: readonly SessionRequirement[]): AdmissionDeps => ({
 	userSessionStore: undefined,
 	subjectRevocation: undefined,
+	// No session store, so no live record for the lifecycle to be read after.
+	sessionLifecycleStore: undefined,
 	requirements: resolverForTests(requirements),
 	acrTable: readAcrTable({}),
 	logger: undefined,

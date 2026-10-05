@@ -27,6 +27,7 @@
 
 import type { AuditSink } from "../audit/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import type { SessionLifecycleStore } from "../user-sessions/lifecycle/types.mjs";
 import type { SubjectRevocation, UserSessionStore } from "../user-sessions/types.mjs";
 import type { AcrTable } from "./acr.mjs";
 import type { AdmissionAction } from "./actions.mjs";
@@ -77,6 +78,7 @@ export interface CheckedRequest {
 	readonly requirements: SessionRequirementResolver;
 	readonly readUserSessionStore: () => UserSessionStore | undefined;
 	readonly readSubjectRevocation: () => SubjectRevocation | undefined;
+	readonly readSessionLifecycleStore: () => SessionLifecycleStore | undefined;
 	readonly acrTable: AcrTable;
 	readonly logger: Logger | undefined;
 	readonly readAuditSink: () => AuditSink | undefined;
@@ -170,6 +172,7 @@ export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): Ch
 		requirements,
 		readUserSessionStore: readOnce(() => deps.userSessionStore),
 		readSubjectRevocation: readOnce(() => deps.subjectRevocation),
+		readSessionLifecycleStore: readOnce(() => deps.sessionLifecycleStore),
 		acrTable,
 		logger,
 		readAuditSink: readOnce(() => deps.auditSink),
