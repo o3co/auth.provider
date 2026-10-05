@@ -10,7 +10,6 @@ import {
 	DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
 } from "#/challenges/adapters/memory.mjs";
-import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import { ChallengeStorageError } from "#/single-use/errors.mjs";
 import { runChallengeStoreContract } from "./adapters.contract.mjs";
 
@@ -36,76 +35,6 @@ const issueMany = async (
 		await store.issue(scope, `${prefix}-${i}`, Date.now() + ttlMs);
 	}
 };
-
-// These cases join the shared contract suite (`adapters.contract.mts`) once
-// the Redis store records the issuance too.
-describe("createMemoryChallengeStore — the issuance it records", () => {
-	/** The contract suite's unstorable instants (`adapters.contract.mts`). */
-	const UNSTORABLE_INSTANTS = [
-		Number.NaN,
-		Number.POSITIVE_INFINITY,
-		Number.NEGATIVE_INFINITY,
-		8_640_000_000_000_001,
-		1e21,
-		-1e21,
-	];
-
-	it("answers the issuance issue was given, and none for a challenge issued without one", async () => {
-		const store = createMemoryChallengeStore();
-		const issuedAtMs = Date.now() - 250;
-		await store.issue("scope-A", "v", issuedAtMs + 60_000, issuedAtMs);
-		await store.issue("scope-A", "v-plain", issuedAtMs + 60_000);
-
-		expect(await store.find("scope-A", "v")).toEqual({
-			expiresAtMs: issuedAtMs + 60_000,
-			issuedAtMs,
-		});
-		const plain = await store.find("scope-A", "v-plain");
-		expect(plain).not.toBeNull();
-		expect(plain?.issuedAtMs).toBeUndefined();
-	});
-
-	it("accepts an issuance equal to the expiry, and a fractional one", async () => {
-		const store = createMemoryChallengeStore();
-		const expiresAtMs = Date.now() + 60_000;
-		await store.issue("scope-A", "v-equal", expiresAtMs, expiresAtMs);
-		await store.issue("scope-A", "v-frac", expiresAtMs, expiresAtMs - 30_000.5);
-
-		expect((await store.find("scope-A", "v-equal"))?.issuedAtMs).toBe(expiresAtMs);
-		expect((await store.find("scope-A", "v-frac"))?.issuedAtMs).toBe(expiresAtMs - 30_000.5);
-	});
-
-	it("refuses an issuance that is not a finite instant within the Date range, is after the expiry, or is further ahead than the clock-skew allowance, and records nothing", async () => {
-		const store = createMemoryChallengeStore();
-		const expiresAtMs = Date.now() + 60_000;
-		const farExpiryMs = Date.now() + 2 * DEFAULT_CLOCK_SKEW_MS;
-		for (const [bad, expiry] of [
-			...UNSTORABLE_INSTANTS.map((v) => [v, expiresAtMs] as const),
-			[expiresAtMs + 1, expiresAtMs] as const,
-			// Within the expiry, but ahead of the store's clock by more than the allowance.
-			[farExpiryMs, farExpiryMs] as const,
-		]) {
-			await expect(store.issue("scope-A", "v-bad", expiry, bad)).rejects.toThrow(RangeError);
-			expect(await store.find("scope-A", "v-bad")).toBeNull();
-		}
-		// Nothing was recorded, so this is not a duplicate.
-		await store.issue("scope-A", "v-bad", expiresAtMs, expiresAtMs - 60_000);
-		expect(await store.consume("scope-A", "v-bad")).toBe(true);
-	});
-
-	it("refuses a bad issuance for a challenge already live as a RangeError, not a duplicate, and leaves the live one as it was", async () => {
-		const store = createMemoryChallengeStore();
-		const issuedAtMs = Date.now();
-		const expiresAtMs = issuedAtMs + 60_000;
-		await store.issue("scope-A", "v-live", expiresAtMs, issuedAtMs);
-
-		await expect(store.issue("scope-A", "v-live", expiresAtMs, Number.NaN)).rejects.toThrow(
-			RangeError,
-		);
-
-		expect(await store.find("scope-A", "v-live")).toEqual({ expiresAtMs, issuedAtMs });
-	});
-});
 
 /*
  * A challenge nobody finishes is never looked up again: a WebAuthn prompt the

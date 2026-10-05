@@ -145,7 +145,15 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
 
 Each one implements a port core declares; the slot name is in parentheses.
 
-- `ChallengeStore` (`challengeStore`)
+- `ChallengeStore` (`challengeStore`) — one key per challenge, living until
+  its expiry. A challenge issued with `issuedAtMs` holds `i:<issuedAtMs>` and
+  `find` answers that issuance exactly; one issued without it holds `1`, as
+  every challenge written before the store kept the issuance does, and answers
+  none. The issuance is read with the client's optional `get`: a
+  `ChallengeStoreClient` without it serves every challenge, and `find` then
+  answers no issuance. An issuance core's contract refuses (not a finite
+  instant in the Date range, after the expiry, or further ahead of the host's
+  clock than `DEFAULT_CLOCK_SKEW_MS`) is a `RangeError` before Redis is asked.
 - `ReplaySeenSet` (`replaySeenSet`) — single-use records: `private_key_jwt`
   `jti`s, consumed WebAuthn challenges, and every proof
   `@o3co/auth-provider-dpop` accepts (under `dpop-proof:<jkt>`). The
