@@ -31,9 +31,10 @@
  * - the grant-type allowlist switch: only the oauth module reads it;
  * - the revocation modes (`oauth.revocation.*`): the declared-absence guard
  *   reads them at validation, before any provider runs;
- * - `core.tokenBinding`: owned by core's token-binding extension point and
- *   read with `resolveTokenBindingSettings`; a slot carrying it would be a
- *   second source, which the contract refuses.
+ * - `core.tokenBinding`: owned by core's token-binding extension point,
+ *   read with `resolveTokenBindingSettings` and carried by core's own
+ *   `tokenBindingSettings` slot; this slot carrying it would be a second
+ *   source, which the contract refuses.
  *
  * A module in the oauth module's dependency set (providers of its `requires`
  * and `optional` keys, transitively) cannot read the slot: boot orders

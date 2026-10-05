@@ -19,6 +19,7 @@ import express from "express";
 import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import {
+	configDefaultsFor,
 	readLogging,
 	readOwnLayers,
 	readSwitches,
@@ -83,13 +84,15 @@ await (async (): Promise<void> => {
 	// so `CONFIG_ENV=production` is production to the guard too.
 	//
 	// Phase two: `createApp` parses the configuration as resolved once, with
-	// every loaded module's schema (`configPath.mts`). From here on the
+	// every loaded module's schema (`configPath.mts`), and names each section
+	// nothing loaded reads by the configuration's defaults. From here on the
 	// template reads the parsed configuration.
 	const modules = buildModules(switches, { environment: env, logger });
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
 			config: resolveForBoot(own, modules, switches),
+			configDefaults: configDefaultsFor(modules),
 			pathResolver: import.meta.resolve,
 			logger,
 		},

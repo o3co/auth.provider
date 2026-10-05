@@ -16,11 +16,26 @@
 import { expect, test } from "vitest";
 import { SYNTHETIC_COMPONENT_KEYS } from "../synthetic-keys.mjs";
 
-test("SYNTHETIC_COMPONENT_KEYS has 10 members", () => {
+test("SYNTHETIC_COMPONENT_KEYS has 12 members", () => {
 	// 4 federation and grant keys + lifecycleRegistrar + readinessRegistrar +
 	// mfaFactorResolver (the MFA ADR's D3) + sessionRequirementResolver (the
-	// session-admission ADR's D3) + rateLimitBudgetResolver + deploymentMode = 10.
-	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(10);
+	// session-admission ADR's D3) + rateLimitBudgetResolver + deploymentMode +
+	// tokenBindingSettings + federationSettings = 12.
+	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(12);
+});
+
+test("SYNTHETIC_COMPONENT_KEYS includes federationSettings", () => {
+	// Core fills it from the configuration's core.federations: a module or host
+	// that set it would be a second statement of the federations, beside the
+	// one boot dispatches by.
+	expect(SYNTHETIC_COMPONENT_KEYS.has("federationSettings")).toBe(true);
+});
+
+test("SYNTHETIC_COMPONENT_KEYS includes tokenBindingSettings", () => {
+	// Core fills it from the configuration's core.tokenBinding: a module or
+	// host that set it would be a second source of the token-binding settings,
+	// beside the one boot's dispatch policy reads.
+	expect(SYNTHETIC_COMPONENT_KEYS.has("tokenBindingSettings")).toBe(true);
 });
 
 test("SYNTHETIC_COMPONENT_KEYS includes deploymentMode", () => {

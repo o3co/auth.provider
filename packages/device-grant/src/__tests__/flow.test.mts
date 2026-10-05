@@ -40,11 +40,13 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	consoleLogger,
+	coveredByRevocationBoundary,
 	createInMemorySubjectRevocation,
 	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
 	createSymmetricKeyStore,
 	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	generateUserCode,
 	normaliseUserCode,
 } from "@o3co/auth-provider-core";
@@ -2205,6 +2207,82 @@ describe("a subject revocation between the approval and the poll", () => {
 		});
 	});
 
+	it("refuses the poll when the approving session authenticated at or before a boundary its approval postdates", async () => {
+		// Admission saw no boundary; the boundary is stamped, and the clock
+		// moves past it, while the attempt is counted, so the approval's own
+		// instant postdates the boundary and only the session's does not.
+		const subjectRevocation = boundariesAsSet();
+		const clock = makeClock(APPROVAL);
+		const inner = createMemoryAttemptCounter({ now: clock.now });
+		const counter: AttemptCounter = {
+			consume: async (key, spec) => {
+				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 2_000), FAR);
+				clock.advance(5_000);
+				return inner.consume(key, spec);
+			},
+		};
+		const harness = makeHarness({ clock, attemptCounter: counter, subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+		});
+	});
+
+	it("refuses an approval at or before the boundary whatever authentication time it records", async () => {
+		const subjectRevocation = boundariesAsSet();
+		const harness = makeHarness({
+			subjectRevocation,
+			store: answeringBroken("poll", "authTimeMs", { value: APPROVAL + 9_000 }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	it("honours an approval whose session authenticated after the boundary", async () => {
+		const subjectRevocation = boundariesAsSet();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const harness = makeHarness({ subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+		expect(result).toHaveProperty("tokens.access_token");
+	});
+
+	it("refuses an approval that records no authentication time while a boundary is in force", async () => {
+		// The approval's own instant postdates the boundary; the session's
+		// authentication, which the boundary is held against, cannot be shown to.
+		const subjectRevocation = boundariesAsSet();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const harness = makeHarness({
+			subjectRevocation,
+			store: answeringBroken("poll", "authTimeMs", { value: undefined }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+		});
+	});
+
+	it("honours an approval that records no authentication time while no boundary is in force", async () => {
+		const harness = makeHarness({
+			subjectRevocation: boundariesAsSet(),
+			store: answeringBroken("poll", "authTimeMs", { value: undefined }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+	});
+
 	it.each([
 		["with a boundary in force", true],
 		["with no boundary", false],
@@ -2223,7 +2301,9 @@ describe("a subject revocation between the approval and the poll", () => {
 			});
 			const deviceCode = await approvedDevice(harness);
 			if (withBoundary) {
-				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
+				// Before the session's authentication: only the future approval
+				// instant is left for the clock check to refuse.
+				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
 			}
 			const { result } = await harness.poll(deviceCode);
 			expect(result).toEqual({
@@ -2297,6 +2377,48 @@ describe("a subject revocation between the approval and the poll", () => {
 		const harness = makeHarness({ subjectRevocation, store: legacy as never });
 		const deviceCode = await approvedDevice(harness);
 		expect((await harness.poll(deviceCode)).result.status).toBe(200);
+	});
+
+	it("mints a token the boundary covers when the boundary is stamped while the poll reads it", async () => {
+		// The reader answers what it read before the stamp, and replies after
+		// the clock has moved on: the token's `iat` must still fall at or
+		// before the boundary, so every surface that checks `iat` refuses it.
+		const inner = boundariesAsSet();
+		const clock = makeClock(APPROVAL);
+		let stamped: Date | null = null;
+		// Armed for the poll's read only: verification's admission reads it too.
+		let armed = false;
+		const subjectRevocation: SubjectRevocation = {
+			kind: "stamped-while-read",
+			revokeBefore: (...args) => inner.revokeBefore(...args),
+			revokedBefore: async (subject) => {
+				const read = await inner.revokedBefore(subject);
+				if (!armed) return read;
+				armed = false;
+				clock.advance(1_000);
+				stamped = new Date(clock.now());
+				await inner.revokeBefore(subject, stamped, FAR);
+				clock.advance(4_000);
+				return read;
+			},
+		};
+		const harness = makeHarness({ clock, subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		armed = true;
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+		const accessToken = (result as { tokens: { access_token: string } }).tokens.access_token;
+		const claims = JSON.parse(
+			Buffer.from(accessToken.split(".")[1] as string, "base64url").toString("utf8"),
+		) as { iat: number };
+		expect(stamped).not.toBeNull();
+		expect(
+			coveredByRevocationBoundary(
+				new Date(claims.iat * 1000),
+				stamped,
+				DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+			),
+		).toBe(true);
 	});
 
 	it("answers a boundary it cannot read at the poll with 503, logged once at error", async () => {

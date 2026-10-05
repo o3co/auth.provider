@@ -23,6 +23,11 @@ export interface GenerateIdTokenOptions {
 	readonly issuer: string;
 	readonly expiresIn?: number; // default 3600 seconds
 	/**
+	 * Epoch seconds for `iat`, what `exp` is measured from, and the clock
+	 * `authTime` is read against. The clock unless the caller supplies it.
+	 */
+	readonly issuedAt?: number;
+	/**
 	 * RFC 8176 authentication methods the session recorded; omitted when
 	 * empty. `| undefined` because a session or code record may hold
 	 * `undefined`, which a caller compiling with `exactOptionalPropertyTypes`
@@ -38,10 +43,11 @@ export interface GenerateIdTokenOptions {
  * given), exp, iat, jti, auth_time, sid (for back-channel logout), nonce
  * (when the authorize request sent one), well-formed amr / acr, and the user
  * claims the scopes authorize ({@link filterClaimsByScope}). `auth_time` is
- * `authTime` read against the clock that sets `iat` (`authTimeAt`), so never
- * later than `iat`; one it cannot read — an invalid `Date`, an instant before
- * the epoch, one ahead of the clock by more than `DEFAULT_CLOCK_SKEW_MS` — is a
- * `RangeError`, and nothing is signed.
+ * `authTime` read against the instant that sets `iat` (`issuedAt`, else the
+ * clock; `authTimeAt`), so never later than `iat`; one it cannot read — an
+ * invalid `Date`, an instant before the epoch, one ahead of that instant by
+ * more than `DEFAULT_CLOCK_SKEW_MS` — is a `RangeError`, and nothing is signed.
+ * An `issuedAt` that is not whole, non-negative epoch seconds is refused too.
  *
  * Header `typ: "JWT"` is load-bearing: logout pins `id_token_hint` to it, and
  * every at+jwt-pinned surface (userinfo, introspection, the central verifier)
@@ -50,7 +56,15 @@ export interface GenerateIdTokenOptions {
  * RPs that validate `typ`.
  */
 export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token> {
-	const nowMs = Date.now();
+	const { issuedAt } = opts;
+	// Whole epoch seconds, as `generateToken` takes it: anything else would sign
+	// an `iat` / `exp` no verifier reads as intended.
+	if (issuedAt !== undefined && !(Number.isSafeInteger(issuedAt) && issuedAt >= 0)) {
+		throw new Error(
+			"generateIdToken: issuedAt must be a non-negative whole number of epoch seconds",
+		);
+	}
+	const nowMs = issuedAt === undefined ? Date.now() : issuedAt * 1000;
 	// The id_token always carries `auth_time`: an instant it cannot read is refused, never signed.
 	const authTime = authTimeAt(opts.authTime, nowMs);
 	if (authTime === undefined) {
@@ -58,8 +72,15 @@ export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Tok
 			"generateIdToken: authTime must be a valid instant at or after the epoch, no further ahead of the clock than DEFAULT_CLOCK_SKEW_MS",
 		);
 	}
-	const now = Math.floor(nowMs / 1000);
+	const now = issuedAt ?? Math.floor(nowMs / 1000);
 	const expiresIn = opts.expiresIn ?? 3600;
+	// A supplied `iat` can sit near 2^53, where `iat + expiresIn` rounds to a
+	// neighbouring integer and two lifetimes would sign the same `exp`.
+	if (issuedAt !== undefined && now + expiresIn > Number.MAX_SAFE_INTEGER) {
+		throw new RangeError(
+			`generateIdToken: exp (iat ${now} + expiresIn ${expiresIn}) is past Number.MAX_SAFE_INTEGER`,
+		);
+	}
 	const amr = wellFormedAmr(opts.amr);
 	const acr = wellFormedAcr(opts.acr);
 	const claims: JWTPayload = {

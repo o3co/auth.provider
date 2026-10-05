@@ -139,6 +139,12 @@ export {
 	deploymentModeContract,
 } from "./slots/deploymentMode.mjs";
 export {
+	createTestFederationSettings,
+	type FederationSettingsContractInput,
+	federationSettingsContract,
+	type TestFederationEntry,
+} from "./slots/federationSettings.mjs";
+export {
 	createTestHttpSettings,
 	type HttpSettingsContractInput,
 	httpSettingsContract,
@@ -177,4 +183,9 @@ export {
 	type SessionCookiePolicyContractInput,
 	sessionCookiePolicyContract,
 } from "./slots/sessionCookiePolicy.mjs";
+export {
+	createTestTokenBindingSettings,
+	type TokenBindingSettingsContractInput,
+	tokenBindingSettingsContract,
+} from "./slots/tokenBindingSettings.mjs";
 export type { TestInspect } from "./test-inspect.mjs";

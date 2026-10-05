@@ -72,9 +72,10 @@ import { BootError } from "./types.mjs";
  * Build a typed deps object for a module from the working component map,
  * using the module's DepsBlueprint from the plan.
  *
- * A missing `requires` key means an earlier stage (validate-manifests or
- * planBoot's activation closure) broke an invariant, so it throws a plain
- * Error, not a BootError; this mirrors materialize-components.buildDeps as
+ * A `requires` key missing or holding `undefined` means an earlier stage
+ * (validate-manifests, planBoot's activation closure, or
+ * materializeComponents) broke an invariant, so it throws a plain Error, not
+ * a BootError; this mirrors materialize-components.buildDeps as
  * defence in depth. `optional` keys may be absent and are included as
  * `undefined`. `deps.section`, the module's own configuration section parsed
  * at stage 1, is set only when the module declares one.
@@ -88,9 +89,9 @@ function buildDeps(
 ): Record<string, unknown> {
 	const deps: Record<string, unknown> = {};
 	for (const key of requires) {
-		if (!Object.hasOwn(components, key)) {
+		if (!Object.hasOwn(components, key) || components[key as string] === undefined) {
 			throw new Error(
-				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/2 should have caught this`,
+				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/3 should have caught this`,
 			);
 		}
 		deps[key as string] = components[key as string];

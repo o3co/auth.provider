@@ -46,7 +46,13 @@ import { loginCompletionModule } from "@o3co/auth-provider-session";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
-import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "#/configPath.mjs";
+import {
+	configDefaultsFor,
+	readOwnLayers,
+	readSwitches,
+	resolveConfigPaths,
+	resolveForBoot,
+} from "#/configPath.mjs";
 import {
 	ALICE,
 	authorize,
@@ -627,6 +633,7 @@ async function bootShipped(
 		modules,
 		bootstrapComponents: {
 			config: resolveForBoot(own, modules, switches),
+			configDefaults: configDefaultsFor(modules),
 			pathResolver: (s: string) => s,
 			logger,
 		},

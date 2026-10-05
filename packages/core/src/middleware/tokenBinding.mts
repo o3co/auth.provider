@@ -142,7 +142,8 @@ export type DispatchPolicy = "intent-explicit" | "strict-mutual-exclusion";
 /**
  * Settings across every mechanism at core's token-binding extension point, from
  * core's own section, `core.tokenBinding`. They are core's, as the extension
- * point is, and no slot carries them (not the oauth module's
+ * point is: boot fills the `tokenBindingSettings` slot with them for every
+ * composition, and no module's slot carries them (not the oauth module's
  * `oauthTokenSettings`).
  */
 export interface TokenBindingSettings {
@@ -162,9 +163,10 @@ export interface TokenBindingSettings {
 
 /**
  * The token-binding settings a configuration declares, frozen: the one reader
- * of `core.tokenBinding`, for boot (the dispatch policy) and every grant that
- * mints a refresh token (the confidential-client rule). Takes any value, as
- * boot holds the configuration.
+ * of `core.tokenBinding`, for boot (the dispatch policy, and the value it fills
+ * the `tokenBindingSettings` slot with) and every grant that mints a refresh
+ * token (the confidential-client rule). Takes any value, as boot holds the
+ * configuration.
  */
 export function resolveTokenBindingSettings(config: unknown): TokenBindingSettings {
 	const section = (
@@ -184,6 +186,22 @@ export function resolveTokenBindingSettings(config: unknown): TokenBindingSettin
 				: "intent-explicit",
 		bindConfidentialClientRefreshTokens: section?.bindConfidentialClientRefreshTokens === true,
 	});
+}
+
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		/**
+		 * Core's token-binding settings: filled by boot with
+		 * `resolveTokenBindingSettings` over the configuration's
+		 * `core.tokenBinding` for every composition, before any provider runs. A
+		 * synthetic key: no module provides it and no host map sets it
+		 * (`synthetic-key-collision`).
+		 */
+		readonly tokenBindingSettings?: TokenBindingSettings;
+	}
 }
 
 export interface TokenBindingMiddlewareOptions {

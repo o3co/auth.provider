@@ -761,8 +761,10 @@ describe("what creating a grant needs", () => {
 	});
 
 	it("refuses a deployment with no durable sessions for the connect flow to re-read", async () => {
+		// A userSessionStore slot holding undefined is unwired: core's federation
+		// store guard refuses it before the module is built.
 		await expect(boot({ withUserSessionStore: false })).rejects.toThrow(
-			/federationGrantsModule: federation grants are enabled and no userSessionStore/,
+			/required federation stores are missing: userSessionStore/,
 		);
 	});
 

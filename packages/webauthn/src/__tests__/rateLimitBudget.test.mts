@@ -20,21 +20,29 @@
  * budget lives in the WebAuthn section. The module contributes
  * `webauthn.rateLimit.authenticationOptions` as a `rateLimitBudgets` entry
  * for every limiter to read; without it a shared limiter would serve the
- * route its `defaultLimit`.
+ * route its `defaultLimit`. The section is parsed by its schema before any
+ * factory runs, so the budget is always given, as numbers a limiter can apply.
  */
 
 import type { RateLimitSpec } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
+import { webauthnConfigSchema } from "#/config.mjs";
 import { webauthnModule } from "#/module.mjs";
 import { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "#/routes/authenticationOptions.mjs";
+import { createTestWebAuthnConfig } from "#/testing/index.mjs";
 
-/** What the module contributes for its options route, from the `webauthn` section. */
+/** What the module contributes for its options route, from its parsed `webauthn` section. */
 const optionsBudget = async (section: unknown): Promise<RateLimitSpec | null | undefined> =>
 	webauthnModule.contributes?.rateLimitBudgets?.[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]?.({
 		section,
 	} as never);
 
-const configured = (authenticationOptions: unknown) => ({ rateLimit: { authenticationOptions } });
+/** The section with `authenticationOptions` as its budget, as the schema parses it. */
+const parsedWith = (authenticationOptions: unknown) =>
+	webauthnConfigSchema.safeParse({
+		...createTestWebAuthnConfig(),
+		rateLimit: { authenticationOptions },
+	});
 
 describe("the WebAuthn module's options-route budget", () => {
 	it("is keyed by the prefix the route limits under, which holds no colon", () => {
@@ -42,28 +50,18 @@ describe("the WebAuthn module's options-route budget", () => {
 	});
 
 	it("is webauthn.rateLimit.authenticationOptions", async () => {
-		expect(await optionsBudget(configured({ limit: 30, windowSeconds: 60 }))).toEqual({
-			limit: 30,
-			windowSeconds: 60,
-		});
+		const section = parsedWith({ limit: 30, windowSeconds: 60 });
+		expect(await optionsBudget(section.data)).toEqual({ limit: 30, windowSeconds: 60 });
 	});
 
-	it("is switched off when the section gives no budget", async () => {
-		for (const section of [undefined, {}, { rateLimit: {} }]) {
-			expect(await optionsBudget(section), JSON.stringify(section)).toBeNull();
-		}
-	});
-
-	it("reads the key as the package's schema does: a numeric string is its number", async () => {
+	it("reads the key as the schema parsed it: a numeric string is its number", async () => {
 		// `reference.conf` fills both fields from environment variables, which
-		// HOCON substitutes as strings, and the section's schema checks nothing.
-		expect(await optionsBudget(configured({ limit: "30", windowSeconds: "60" }))).toEqual({
-			limit: 30,
-			windowSeconds: 60,
-		});
+		// HOCON substitutes as strings.
+		const section = parsedWith({ limit: "30", windowSeconds: "60" });
+		expect(await optionsBudget(section.data)).toEqual({ limit: 30, windowSeconds: 60 });
 	});
 
-	it("refuses a budget that is given but unusable, naming the key", async () => {
+	it("is never contributed unusable: the section refuses a budget no limiter can apply, naming the key", () => {
 		for (const authenticationOptions of [
 			{ limit: 30, windowSeconds: 0 },
 			{ limit: 0, windowSeconds: 60 },
@@ -72,11 +70,14 @@ describe("the WebAuthn module's options-route budget", () => {
 			{ limit: "", windowSeconds: 60 },
 			{ limit: 30, windowSeconds: 1e13 },
 			null,
+			undefined,
 		]) {
-			await expect(
-				optionsBudget(configured(authenticationOptions)),
+			const result = parsedWith(authenticationOptions);
+			expect(result.success, JSON.stringify(authenticationOptions)).toBe(false);
+			expect(
+				result.error?.issues.map((issue) => issue.path.slice(0, 2).join(".")),
 				JSON.stringify(authenticationOptions),
-			).rejects.toThrow(/^webauthn\.rateLimit\.authenticationOptions must be/);
+			).toContain("rateLimit.authenticationOptions");
 		}
 	});
 });

@@ -58,11 +58,14 @@ export const isRefusal = <T extends object & { readonly result?: never }>(
 	outcome: T | GrantHandlerResult,
 ): outcome is GrantHandlerResult => "result" in outcome;
 
-/** The issued token, as RFC 8693 §2.2.1 answers it. */
-export function tokenAnswer(accessToken: Token): GrantHandlerResult {
+/**
+ * The issued token, as RFC 8693 §2.2.1 answers it, with `expires_in` the
+ * seconds left of its lifetime when it is answered.
+ */
+export function tokenAnswer(accessToken: Token, expiresIn: number): GrantHandlerResult {
 	// RFC 9449 §5: a DPoP-bound token is `token_type: "DPoP"`; mTLS keeps "Bearer"
 	// (RFC 8705 §3). Read off the stamped confirmation, so the two cannot disagree.
-	const tokens = generateTokenResponse({ accessToken });
+	const tokens = generateTokenResponse({ accessToken: { ...accessToken, expiresIn } });
 	const tokensWithIssuedType: typeof tokens & { issued_token_type: string } = {
 		...tokens,
 		issued_token_type: ACCESS_TOKEN_TYPE,

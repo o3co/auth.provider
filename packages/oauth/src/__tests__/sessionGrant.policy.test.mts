@@ -25,24 +25,15 @@ import {
 	type AuthenticatedClient,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type GrantPolicyHook,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
-
-const config = {
-	oauth: {
-		jwt: { issuer: "https://issuer.test" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
-	},
-} as unknown as GrantDependencies["config"];
 
 const CLIENT: AuthenticatedClient = {
 	clientId: "app",
@@ -54,7 +45,7 @@ const CLIENT: AuthenticatedClient = {
 const grantWith = (evaluate: GrantPolicyHook["evaluate"]) =>
 	createSessionGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config,
+		oauthTokenSettings: createTestOAuthTokenSettings(),
 		keyStore: createSymmetricKeyStore("session-policy-test-secret-32-bytes"),
 		grantPolicy: { kind: "stub", evaluate },
 	});
@@ -291,7 +282,7 @@ describe("session grant — the minting instant", () => {
 		} as unknown as UserSessionStore;
 		const { result } = await createSessionGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-			config,
+			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore: createSymmetricKeyStore("session-policy-test-secret-32-bytes"),
 			userSessionStore,
 			grantPolicy: {

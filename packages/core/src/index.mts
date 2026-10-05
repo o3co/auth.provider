@@ -338,6 +338,10 @@ export {
 	readIssuedScope,
 	readSpaceDelimitedParameter,
 } from "./federations/scope.mjs";
+// The `federationSettings` slot: core's view of `core.federations`, which boot
+// fills for every composition, so a module reads the federations from its
+// dependencies rather than from `config`.
+export type { ConfiguredFederation, FederationSettings } from "./federations/settings.mjs";
 // The one reading of an upstream token's lifetime, and the age of one held.
 export type {
 	HeldUpstreamToken,
@@ -530,6 +534,7 @@ export type {
 	VerifyRevocation,
 } from "./jwt/verify.mjs";
 export {
+	claimCoveredByRevocationBoundary,
 	isVerificationUnavailable,
 	JwtVerificationError,
 	REVOCATION_RETENTION_ALLOWANCE_MS,

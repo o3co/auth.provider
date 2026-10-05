@@ -26,10 +26,8 @@
  * (the Redis set's for a module only it loads, the package's `reference.conf`
  * for one neither loads), and from the samples below for the levels and the
  * forms those leave out: every level a section's schema declares must be
- * reached. A level whose keys are open by design is exempt, with its reason.
- * A module not yet strict is on an allowlist pinned level by level, which may
- * only shrink: a level that comes to refuse, or a new level that keeps an
- * unknown key, fails, and so does any offender off the list.
+ * reached. A level whose keys are open by design is exempt, with its reason;
+ * any other level that keeps an unknown key fails.
  */
 
 import { readFileSync } from "node:fs";
@@ -56,16 +54,6 @@ const EXEMPT: Readonly<Record<string, string>> = {
 	"oauth.authorize.acrValues": "each key is an acr value the deployment vouches for",
 	"federation-grants.connections.*.authorizationParams":
 		"each key is an authorization request parameter the upstream defines; the module refuses the ones it sets itself",
-};
-
-/**
- * The modules whose sections still keep an unknown key, each with every level
- * that keeps one. A level leaves the list in the change that makes it strict,
- * and a module with it.
- */
-const NOT_YET_STRICT: Readonly<Record<string, readonly string[]>> = {
-	webauthn: ["webauthn", "webauthn.rateLimit", "webauthn.rateLimit.authenticationOptions"],
-	"session-store": ["session-store.storage"],
 };
 
 /**
@@ -289,24 +277,7 @@ describe("every module with a section refuses an unknown key in it", () => {
 		);
 	});
 
-	it("finds no level keeping an unknown key, and none unreached, outside the allowlist", () => {
-		expect(
-			problemsOf(modules.filter((module) => !Object.hasOwn(NOT_YET_STRICT, module.name))),
-		).toEqual([]);
+	it("finds no level keeping an unknown key, and none unreached", () => {
+		expect(problemsOf(modules)).toEqual([]);
 	});
-
-	it.each(Object.entries(NOT_YET_STRICT))(
-		"finds in %s exactly the levels its entry lists, so the entry shrinks with each level made strict",
-		(name, levels) => {
-			const module = modules.find((candidate) => candidate.name === name);
-			expect(module, `${name} is not a sectioned module of the full set`).toBeDefined();
-			expect(problemsOf([module as Module])).toEqual(
-				levels
-					.map(
-						(level) => `${level}: module "${name}"'s section schema does not refuse an unknown key`,
-					)
-					.sort(),
-			);
-		},
-	);
 });

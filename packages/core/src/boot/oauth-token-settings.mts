@@ -18,7 +18,8 @@
  * What boot's own machinery reads of the oauth module's settings: the issuer
  * the discovery document, the CORS table and a session requirement's page are
  * built on. The token-binding dispatch policy is core's; boot reads it from
- * the configuration with `resolveTokenBindingSettings`.
+ * the configuration with `resolveTokenBindingSettings`, the reader it fills
+ * the `tokenBindingSettings` slot with.
  *
  * The issuer is the `oauthTokenSettings` slot's when the composition holds it
  * — the key is present, whatever a provider answered — otherwise the

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createRouter } from "../Federation.mjs";
@@ -59,7 +59,8 @@ describe("Federation.mts route rewire — federationRedirectPolicyResolver param
 
 		expect(() =>
 			createRouter(stubExpress, {
-				config: {} as never,
+				federationSettings: createTestFederationSettings(),
+				federationTransactionCookieName: "test.session.federation",
 				federationProviders: new Map(),
 				federationRedirectPolicyResolver: resolver as never,
 				providerCallbackUrls: new Map(),

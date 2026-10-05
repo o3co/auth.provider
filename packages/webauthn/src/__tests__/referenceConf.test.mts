@@ -49,8 +49,25 @@ describe("the package's config/reference.conf", () => {
 		]);
 	});
 
-	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
-		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
+	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path, once the operator names the relying party", () => {
+		const withRelyingParty = (path: string, env: Readonly<Record<string, string>>): unknown =>
+			read(path, {
+				WEBAUTHN_RP_ID: "example.com",
+				WEBAUTHN_RP_NAME: "Example App",
+				WEBAUTHN_ORIGIN: "https://example.com",
+				...env,
+			});
+		expect(
+			packageReferenceProblems({ reference: REFERENCE, modules, read: withRelyingParty }),
+		).toEqual([]);
+	});
+
+	it("leaves exactly the relying party to the operator: with no variable set, only its three keys are refused", () => {
+		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([
+			expect.stringMatching(/^webauthn\.origin: refused by module "webauthn"'s section schema/),
+			expect.stringMatching(/^webauthn\.rpId: refused by module "webauthn"'s section schema/),
+			expect.stringMatching(/^webauthn\.rpName: refused by module "webauthn"'s section schema/),
+		]);
 	});
 
 	it("declares the two rate-limit variables renamed to the names their paths derive, and the removed key's variable", () => {

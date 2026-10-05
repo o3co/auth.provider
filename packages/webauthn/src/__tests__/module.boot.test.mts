@@ -41,10 +41,10 @@ import { renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { type WebAuthnConfig, webauthnConfigSchema } from "../config.mjs";
+import type { WebAuthnConfig } from "../config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
 import { webauthnModule } from "../module.mjs";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, testTokenSettings, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared boot components
@@ -66,20 +66,7 @@ const coreConfig = {
 	},
 };
 
-/** Minimal bootstrap: config + pathResolver + keyStore. */
-const minBoot = {
-	config: coreConfig,
-	pathResolver: (p: string) => p,
-} as never;
-
-const keyStoreModule = defineModule({
-	name: "test:webauthn-boot-key-store",
-	provides: {
-		keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
-	},
-});
-
-/** Stub webauthnConfig values — not used for real ceremonies. */
+/** Stub relying party — not used for real ceremonies. */
 const stubWebAuthnConfig: WebAuthnConfig = {
 	rpId: "example.com",
 	rpName: "Example App",
@@ -92,11 +79,20 @@ const stubWebAuthnConfig: WebAuthnConfig = {
 	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
 
-/** Bootstrap module: satisfies the `webauthnConfig` DI slot. */
-const webauthnConfigModule = defineModule({
-	name: "test:webauthn-config-bootstrap",
+/** The `oauthTokenSettings` slot webauthnModule requires, for the issuer above. */
+const tokenSettings = testTokenSettings({ issuer: "https://test.example" });
+
+/** Minimal bootstrap: the configuration with the module's section, and the token settings. */
+const minBoot = {
+	config: withWebAuthnSection(coreConfig, stubWebAuthnConfig),
+	pathResolver: (p: string) => p,
+	oauthTokenSettings: tokenSettings,
+} as never;
+
+const keyStoreModule = defineModule({
+	name: "test:webauthn-boot-key-store",
 	provides: {
-		webauthnConfig: () => stubWebAuthnConfig,
+		keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 	},
 });
 
@@ -138,7 +134,6 @@ const activatorModule = defineModule({
 
 const happyPathModules = [
 	webauthnModule,
-	webauthnConfigModule,
 	keyStoreModule,
 	memoryChallengeStoreModule,
 	memoryReplaySeenSetModule,
@@ -153,7 +148,7 @@ const happyPathModules = [
 // ---------------------------------------------------------------------------
 
 describe("webauthnModule boot integration", () => {
-	it("boots successfully when webauthnConfig is provided and materialises the webauthn grant", async () => {
+	it("boots on its own section and materialises the webauthn grant", async () => {
 		const handle = await createApp({
 			modules: happyPathModules,
 			bootstrapComponents: minBoot,
@@ -198,34 +193,6 @@ describe("webauthnModule boot integration", () => {
 		await handle.dispose();
 	});
 
-	it("throws BootError missing-required-component for webauthnConfig when the slot is not provided", async () => {
-		const { BootError } = await import("@o3co/auth-provider-core");
-
-		// Omit webauthnConfigModule — the slot remains unwired.
-		const modulesWithoutConfig = [
-			webauthnModule,
-			keyStoreModule,
-			memoryChallengeStoreModule,
-			memoryReplaySeenSetModule,
-			defaultChallengeCeremonyModule,
-			memoryWebAuthnCredentialStoreModule,
-			activatorModule,
-		];
-
-		const error = await createApp({
-			modules: modulesWithoutConfig,
-			bootstrapComponents: minBoot,
-		}).then(
-			() => undefined,
-			(e: unknown) => e,
-		);
-		expect(error).toBeInstanceOf(BootError);
-		expect(error).toMatchObject({
-			reason: "missing-required-component",
-			details: { missingKey: "webauthnConfig" },
-		});
-	});
-
 	/**
 	 * The webauthn grant requires grantPolicy at boot. It has no library-side
 	 * scope ceiling (client_credentials falls back to `client.allowedScopes`), so
@@ -235,7 +202,6 @@ describe("webauthnModule boot integration", () => {
 		// All deps present EXCEPT grantPolicy.
 		const modulesWithoutPolicy = [
 			webauthnModule,
-			webauthnConfigModule,
 			keyStoreModule,
 			memoryChallengeStoreModule,
 			memoryReplaySeenSetModule,
@@ -256,7 +222,6 @@ describe("webauthnModule boot integration", () => {
 		const error = await createApp({
 			modules: [
 				webauthnModule,
-				webauthnConfigModule,
 				keyStoreModule,
 				memoryChallengeStoreModule,
 				memoryReplaySeenSetModule,
@@ -312,7 +277,6 @@ describe("webauthnModule boot integration", () => {
 		const handle = await createApp({
 			modules: [
 				webauthnModule,
-				webauthnConfigModule,
 				keyStoreModule,
 				memoryChallengeStoreModule,
 				memoryReplaySeenSetModule,
@@ -369,14 +333,17 @@ describe("webauthnModule boot integration", () => {
 		} as unknown as typeof coreConfig;
 
 		const bootWithPolicy = {
-			config: configWithRI,
+			config: withWebAuthnSection(configWithRI, stubWebAuthnConfig),
 			pathResolver: (p: string) => p,
+			oauthTokenSettings: testTokenSettings({
+				issuer: "https://example.com",
+				resourceIndicatorEnabled: true,
+			}),
 		} as never;
 
 		const handle = await createApp({
 			modules: [
 				webauthnModule,
-				webauthnConfigModule,
 				keyStoreModule,
 				memoryChallengeStoreModule,
 				memoryReplaySeenSetModule,
@@ -446,8 +413,8 @@ describe("webauthnModule boot integration", () => {
 /**
  * The operator's path for `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN`: the
  * composition root parses its resolved HOCON with core's `AppConfigSchema`,
- * and the bootstrap module this package's README describes hands
- * `config.webauthn` to `webauthnConfigSchema`.
+ * and boot parses `webauthn` with `webauthnConfigSchema`, the module's section
+ * schema, which the module provides as the `webauthnConfig` slot.
  *
  * `hoconWebauthn` is the `webauthn` section as the shipped reference.conf
  * resolves with these variables set: literals keep their types, every `${?VAR}`
@@ -473,14 +440,24 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 		// AppConfigSchema passes the origin list on as the one string it is.
 		expect(config.webauthn?.origin).toBe(`https://example.com,${ANDROID}`);
 
+		let resolved: WebAuthnConfig | undefined;
 		const handle = await createApp({
 			modules: [
 				webauthnModule,
 				defineModule({
-					name: "test:webauthn-config-from-app-config",
-					requires: ["config"] as const,
-					provides: {
-						webauthnConfig: ({ config }) => webauthnConfigSchema.parse(config.webauthn),
+					name: "test:webauthn-config-reader",
+					requires: ["webauthnConfig"] as const,
+					contributes: {
+						routes: [
+							({ webauthnConfig }) => {
+								resolved = webauthnConfig;
+								return {
+									id: "test-webauthn-config-reader",
+									mountPath: "/__test_webauthn_config_reader__",
+									handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+								};
+							},
+						],
 					},
 				}),
 				keyStoreModule,
@@ -496,11 +473,9 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 			bootstrapComponents: {
 				config: { ...config, "renamed-variables": coreConfig["renamed-variables"] },
 				pathResolver: (p: string) => p,
+				oauthTokenSettings: tokenSettings,
 			} as never,
 		});
-		const resolved = (handle.components as Record<string, unknown>).webauthnConfig as
-			| WebAuthnConfig
-			| undefined;
 		expect(resolved?.origin).toEqual(["https://example.com", ANDROID]);
 		expect(resolved?.topOrigin).toEqual(["https://partner.example"]);
 		await handle.dispose();
@@ -523,7 +498,11 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 		try {
 			const handle = await createApp({
 				modules: happyPathModules,
-				bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+				bootstrapComponents: {
+					config,
+					pathResolver: (p: string) => p,
+					oauthTokenSettings: tokenSettings,
+				} as never,
 			});
 			await handle.dispose();
 		} catch (error) {
@@ -577,16 +556,9 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 		},
 	);
 
-	it("lists no known user's credentials on authentication/options, whatever the relying party carries", async () => {
-		const retired: Record<string, unknown> = { allowCredentialsForKnownUser: true };
+	it("lists no known user's credentials on authentication/options", async () => {
 		const handle = await createApp({
-			modules: [
-				...happyPathModules.filter((m) => m !== webauthnConfigModule),
-				defineModule({
-					name: "test:webauthn-config-carrying-the-retired-key",
-					provides: { webauthnConfig: () => ({ ...stubWebAuthnConfig, ...retired }) },
-				}),
-			],
+			modules: happyPathModules,
 			bootstrapComponents: minBoot,
 		});
 		try {

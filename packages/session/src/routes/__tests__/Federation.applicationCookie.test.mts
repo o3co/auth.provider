@@ -32,7 +32,7 @@
 
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import { codeChallenge } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import session from "express-session";
 import request from "supertest";
@@ -41,6 +41,7 @@ import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {
+	HARNESS_TRANSACTION_COOKIE_NAME,
 	makeFederationTokenStore,
 	makePermissivePolicy,
 	makeSessionFederationIndex,
@@ -147,7 +148,8 @@ function buildRealApp({ rolling = false }: { rolling?: boolean } = {}): RealApp 
 	app.use(
 		createRouter(express, {
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
-			config: {} as never,
+			federationSettings: createTestFederationSettings(),
+			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map(
 				[...providers.keys()].map((name) => [name, makePermissivePolicy()]),

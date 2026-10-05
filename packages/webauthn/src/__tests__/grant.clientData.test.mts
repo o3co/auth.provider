@@ -29,10 +29,11 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 } from "@o3co/auth-provider-core";
+import { createTestTokenBindingSettings } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
 import { createTestWebAuthnConfig } from "#/testing/index.mjs";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { testTokenSettings } from "./appConfig.fixture.mjs";
 import {
 	type CeremonyOptions,
 	nonCanonicalBase64url,
@@ -62,7 +63,8 @@ async function grant() {
 		createdAt: new Date(),
 	});
 	const handler = createWebAuthnGrant({
-		config: makeAppConfig() as never,
+		tokenBindingSettings: createTestTokenBindingSettings(),
+		oauthTokenSettings: testTokenSettings(),
 		keyStore: createSymmetricKeyStore("client-data-test-secret-32-bytes!!"),
 		webauthnCredentialStore: credentialStore,
 		challengeCeremony: createChallengeCeremony({
