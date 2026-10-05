@@ -75,7 +75,12 @@ export const webauthnModule = defineModule<
 	| "rateLimitBudgetResolver"
 	| "oauthTokenSettings"
 	| "tokenBindingSettings",
-	"grantPolicy" | "rateLimiter" | "auditSink" | "logger" | "refreshTokenFamilyRotation",
+	| "grantPolicy"
+	| "rateLimiter"
+	| "auditSink"
+	| "logger"
+	| "refreshTokenFamilyRotation"
+	| "subjectRevocation",
 	typeof webauthnConfigSchema,
 	"webauthnConfig"
 >({
@@ -128,6 +133,9 @@ export const webauthnModule = defineModule<
 		// uses. Optional for compositions that issue no refresh tokens; when wired, a store
 		// outage fails closed.
 		"refreshTokenFamilyRotation",
+		// The subject's revocation boundary, which the grant reads before minting; unread when
+		// absent. An unreadable boundary is 503.
+		"subjectRevocation",
 	],
 	// The relying party and the rest of the section, for the package's other readers (the
 	// WebAuthn second factor): the section as boot parsed it, deeply frozen.

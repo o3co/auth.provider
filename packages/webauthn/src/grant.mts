@@ -23,6 +23,12 @@
  * ceiling: `grantPolicy` is the only scope bound, and `webauthnModule` refuses to boot without it.
  * A store that cannot answer is 503 temporarily_unavailable, never a verdict on the passkey. The
  * package README's SECURITY sections state the full rules.
+ *
+ * With `subjectRevocation` wired, the subject's revocation boundary is read after every slow step
+ * and before anything is registered or signed, and an authentication it covers
+ * (`claimCoveredByRevocationBoundary`, the rule `verifyJwt` applies) is `invalid_grant`; a
+ * boundary that cannot be read or compared is 503. Both tokens carry one `iat`, fixed before that
+ * read, so a revocation stamped after it covers them.
  */
 
 import { randomUUID } from "node:crypto";
@@ -32,7 +38,9 @@ import {
 	authTimeClaim,
 	boundPolicyAudience,
 	checkOAuthTokenSettings,
+	claimCoveredByRevocationBoundary,
 	consoleLogger,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	evaluateGrantPolicy,
 	extractResourceParam,
 	type GrantContext,
@@ -69,8 +77,9 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 
 /**
  * What the WebAuthn grant reads: the shared grant slots (`keyStore` to mint, `grantPolicy`,
- * `refreshTokenFamilyRotation`, `logger`), the credential store and challenge ceremony, the
- * `oauthTokenSettings` slot (the token lifetimes and the resource-indicator switch), core's
+ * `refreshTokenFamilyRotation`, `subjectRevocation`, `logger`), the credential store and
+ * challenge ceremony, the `oauthTokenSettings` slot (the token lifetimes and the
+ * resource-indicator switch), core's
  * `tokenBindingSettings` slot (whether a confidential client's refresh token is bound), and the
  * RP fields of `webauthnConfig` — `webauthnModule` hands it its own section there. Nothing is
  * read from the whole configuration.
@@ -83,7 +92,7 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 export interface WebAuthnGrantDeps
 	extends Pick<
 			GrantDependencies,
-			"keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "logger"
+			"keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "subjectRevocation" | "logger"
 		>,
 		ProviderDeps<
 			| "webauthnCredentialStore"
@@ -154,7 +163,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	 */
 	const storeUnavailable = (
 		store: Exclude<WebAuthnStore, "challenge">,
-		step: "find" | "consume" | "update_sign_count" | "register",
+		step: "find" | "consume" | "update_sign_count" | "read" | "register",
 		clientId: string | undefined,
 		err: unknown,
 	): GrantHandlerResult => {
@@ -242,6 +251,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// Read before the consume: a challenge still live when consumed, at or after this instant,
 			// was issued after `redeemedAtMs - challengeTtlMs`, and the gesture came after its issuance.
 			const redeemedAtMs = Date.now();
+			const challengeTtlMs = deps.webauthnConfig.challengeTtlMs;
 			let ceremonyOutcome: Awaited<ReturnType<typeof deps.challengeCeremony.consume>>;
 			try {
 				ceremonyOutcome = await deps.challengeCeremony.consume(
@@ -290,8 +300,15 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				};
 			}
 			// An assertion can be held until its challenge expires, so `auth_time` is the earliest
-			// instant the gesture could have been made: never fresher than it was (RFC 9470 §6.1).
-			const authTime = authTimeClaim(new Date(redeemedAtMs - deps.webauthnConfig.challengeTtlMs));
+			// instant the gesture could have been made, the challenge's issuance: never fresher than
+			// it was (RFC 9470 §6.1). A ceremony that reports no usable expiry leaves the earliest
+			// issuance a live challenge could have had.
+			const expiresAtMs = ceremonyOutcome.expiresAtMs;
+			const authenticatedAtMs =
+				typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs)
+					? Math.min(expiresAtMs - challengeTtlMs, redeemedAtMs)
+					: redeemedAtMs - challengeTtlMs;
+			const authTime = authTimeClaim(new Date(authenticatedAtMs));
 
 			// ------------------------------------------------------------------
 			// Step 5: Atomic CAS sign-count update
@@ -381,7 +398,42 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			}
 
 			// ------------------------------------------------------------------
-			// Step 8: Derive audience + issue tokens
+			// Step 8: The issuance instant, then the subject's revocation boundary
+			//
+			// Both tokens are signed with this `iat`. The boundary is the last
+			// read before anything is registered or signed, so a revocation
+			// stamped after it is at or after this instant and covers both.
+			// ------------------------------------------------------------------
+			const issuedAt = Math.floor(Date.now() / 1000);
+			if (deps.subjectRevocation) {
+				let revoked: boolean;
+				try {
+					const boundary = await deps.subjectRevocation.revokedBefore(credential.userId);
+					const covered = (claimSeconds: number): boolean =>
+						claimCoveredByRevocationBoundary(
+							claimSeconds,
+							boundary,
+							DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+						);
+					// Both claims `verifyJwt` compares: `auth_time` never follows `iat`, but the
+					// wall clock may step back between the redemption and this instant.
+					revoked = covered(issuedAt) || (authTime !== undefined && covered(authTime));
+				} catch (err) {
+					return storeUnavailable("revocation_boundary", "read", clientId, err);
+				}
+				if (revoked) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "the authentication predates a revocation of the subject",
+						},
+					};
+				}
+			}
+
+			// ------------------------------------------------------------------
+			// Step 9: Derive audience + issue tokens
 			// ------------------------------------------------------------------
 			const client = ctx.authenticatedClient;
 			// Policy audience > `allowedAudiences[0]` > client id, the rule every user-bound grant
@@ -428,9 +480,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// family has no replay detection (RFC 6819 §5.2.2.3). 503 tells the client to retry;
 			// `invalid_grant` would make it discard the passkey session.
 			const refreshReservation =
-				familyId === null
-					? null
-					: { familyId, jti: randomUUID(), issuedAt: Math.floor(Date.now() / 1000) };
+				familyId === null ? null : { familyId, jti: randomUUID(), issuedAt };
 			if (refreshReservation !== null && deps.refreshTokenFamilyRotation) {
 				try {
 					await deps.refreshTokenFamilyRotation.register(
@@ -464,6 +514,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					...(client ? { authorizedParty: client.clientId } : {}),
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					issuedAt,
 					...(confirmation ? { confirmation } : {}),
 				},
 			);
@@ -498,7 +549,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 						tokenType: "rt+jwt",
 						// The identity the family was registered under above.
 						jti: refreshReservation.jti,
-						issuedAt: refreshReservation.issuedAt,
+						issuedAt,
 						...(bindRefreshToken && confirmation ? { confirmation } : {}),
 					},
 				);
