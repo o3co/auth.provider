@@ -25,6 +25,7 @@ import { z } from "zod";
 
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { OutboundSectionSchema } from "../net/outbound-policy.mjs";
+import { checkAcrValueName } from "./acr-values.mjs";
 import { MAX_DURATION_SECONDS } from "./durations.mjs";
 import { type RemovedKey, unreadSection, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
@@ -460,6 +461,25 @@ const acrAlternativeSchema = z.array(z.string().min(1)).min(1);
 const acrRequirementSchema = z.union([acrAlternativeSchema, z.array(acrAlternativeSchema).min(1)]);
 
 /**
+ * `oauth.authorize.acrValues`: each key an acr value a request can name
+ * (`checkAcrValueName`), refused under the key otherwise, so no deployment
+ * advertises one `/authorize` can never be asked for. The keys are judged
+ * whenever the table is a record, beside any entry refused for its value, so
+ * one boot names every key to fix.
+ */
+const acrValuesSchema = z.record(z.string().min(1), acrRequirementSchema).superRefine(
+	(table, ctx) => {
+		for (const name of Object.keys(table)) {
+			const refusal = checkAcrValueName(name);
+			if (refusal !== null) ctx.addIssue({ code: "custom", message: refusal, path: [name] });
+		}
+	},
+	{
+		when: ({ value }) => typeof value === "object" && value !== null && !Array.isArray(value),
+	},
+);
+
+/**
  * `oauth.authorize`: one live key, `acrValues`, plus the retired
  * `allowUnmarkedClients`. Optional: `reference.conf` declares `acrValues {}`,
  * and the tombstone env substitution resolves to nothing unless a stale
@@ -476,7 +496,7 @@ const authorizeSchema = withRemovedKeys(
 			// here is refused), and discovery advertises the keys as
 			// `acr_values_supported`, less entries nothing installed can satisfy
 			// (dropped at boot with a log line).
-			acrValues: z.record(z.string().min(1), acrRequirementSchema).optional(),
+			acrValues: acrValuesSchema.optional(),
 		})
 		.optional(),
 );

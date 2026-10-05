@@ -200,6 +200,16 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   slashless `iss`, which is what discovery already advertised.
 - **Unknown keys.** A key under `oauth.clientIdMetadataDocuments` that the
   oauth package's `reference.conf` does not list refuses the boot (#1151).
+- **BREAKING: an `oauth.authorize.acrValues` key is one value an
+  `acr_values` request can name (#728).** `/authorize` reads `acr_values` as
+  space-delimited RFC 6749 §3.3 scope-tokens, so a key is one or more
+  printable ASCII characters other than the space, `"` and `\`. A key with
+  any other character — whitespace, a quote, a backslash, a non-ASCII
+  letter — was advertised in `acr_values_supported` and could never be
+  requested; it now refuses the boot (`config-validation-failed` at
+  `oauth.authorize.acrValues.<key>`), naming the key, every such key in one
+  boot. Rename the entry to a value a client can send, such as a URN
+  (`urn:example:acr:mfa`), and tell the relying parties that asked for it.
 - **BREAKING: `oauth {}` refuses a key it does not declare, at every level
   (#728).** Wherever the oauth module is installed (the standalone template
   installs it), a key under `oauth` that its schema does not declare — a
@@ -629,6 +639,17 @@ modules fills them.
   deps object for their factories carries. `createDeviceVerificationHandler`'s
   `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
   `revokedBefore` (#717).
+- **BREAKING: a switched-off grant or second factor is no override target
+  (#728).** A `grants` or `mfaFactors` contribution whose factory answers
+  `null` — switched off by its module's settings — stays claimed, and an
+  `overrides.grants` or `overrides.mfaFactors` entry for it now refuses the
+  boot before any factory runs (`override-target-missing`, naming the kind,
+  the name and the overriding module; the message says the entry is switched
+  off). It used to register the override, switching on what the owner's
+  settings switched off. Switch the grant or factor on at its owner's
+  setting (`oauth-authorization.grants.<grant>.enabled`,
+  `mfa-totp-factor.enabled`, …) and keep the override, or drop the override.
+  An override may still answer `null`, switching off the entry it replaces.
 - **BREAKING: an enabled `dpopModule` requires `oauthTokenSettings`, and
   no longer reads the configuration (#728).** It takes the issuer every
   proof's `htu` is checked against from the slot alone, and no longer falls
