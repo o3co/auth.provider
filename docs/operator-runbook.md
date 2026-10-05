@@ -1215,14 +1215,13 @@ ADR's D5, D21, D24).
   `regenerate` the old id keeps what it held. A factor bound in a session
   is answered with its recovery codes whatever its escalation came to: they
   are shown once. A record that fails after the renewal leaves the cookie
-  session holding a nonce the record does not: a session never escalated
-  before stays as it was and is answered `401` at its next step-up, and one
-  escalated before keeps the earlier nonce on its record, so it is
-  `not_live` at once — either way the user signs in again. The first case
-  goes once the step-up's finish expects the nonce admission reports from the
-  record (`renewalNonce` on the admitted outcome). The second is kept
-  fail-closed: a cookie session the record's nonce does not match cannot be
-  told from an old id saved back after the renewal.
+  session holding a nonce the record does not. A session never escalated
+  before stays as it was and steps up at its next try: the finish expects the
+  nonce admission read from the record (`renewalNonce` on the admitted
+  outcome), none here, not the cookie session's. One escalated before keeps
+  the earlier nonce on its record, so it is `not_live` at once and the user
+  signs in again: a cookie session the record's nonce does not match cannot
+  be told from an old id saved back after the renewal.
   A store that answers the escalated record without the new nonce has the
   session ended (`mfa_escalation_unbound`). A step-up's email code goes to
   the address the session's `User` carried at its sign-in: after the
