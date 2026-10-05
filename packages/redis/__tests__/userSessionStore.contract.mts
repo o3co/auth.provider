@@ -542,23 +542,29 @@ export function runUserSessionStoreContract(
 			// with a caller would let a later write change a verified session.
 			const store = await factory();
 			const mfaAtMs = Date.now() - 1_000;
+			const upstreamMs = Date.now() - 600_000;
 			const written = {
 				primary: "fed",
 				federation: "google",
 				upstreamAmr: ["hwk"],
 				mfaAt: new Date(mfaAtMs),
+				upstreamAuthTime: new Date(upstreamMs),
 			};
 			await store.create(INPUT({ sid: "auth-iso", amr: ["fed"], authentication: written }));
 			written.upstreamAmr.push("mfa");
 			written.mfaAt.setTime(0);
+			written.upstreamAuthTime.setTime(Date.now());
 			const read = await store.get("auth-iso");
 			expect(read?.authentication?.upstreamAmr).toEqual(["hwk"]);
 			expect(read?.authentication?.mfaAt?.getTime()).toBe(mfaAtMs);
+			expect(read?.authentication?.upstreamAuthTime?.getTime()).toBe(upstreamMs);
 			(read?.authentication?.upstreamAmr as string[] | undefined)?.push("phr");
 			read?.authentication?.mfaAt?.setTime(0);
+			read?.authentication?.upstreamAuthTime?.setTime(Date.now());
 			const again = await store.get("auth-iso");
 			expect(again?.authentication?.upstreamAmr).toEqual(["hwk"]);
 			expect(again?.authentication?.mfaAt?.getTime()).toBe(mfaAtMs);
+			expect(again?.authentication?.upstreamAuthTime?.getTime()).toBe(upstreamMs);
 		});
 
 		it("readonly kind field present", async () => {
@@ -618,6 +624,10 @@ export function runSecondFactorUpdateContract(
 					at: at(1_000),
 				});
 				expect(recorded?.authentication?.upstreamAuthTime).toStrictEqual(upstreamAuthTime);
+				// What it answered is a copy: changing it changes nothing stored.
+				if (recorded?.authentication?.upstreamAuthTime instanceof Date) {
+					recorded.authentication.upstreamAuthTime.setTime(Date.now());
+				}
 				expect((await store.get(sid))?.authentication?.upstreamAuthTime).toStrictEqual(
 					upstreamAuthTime,
 				);

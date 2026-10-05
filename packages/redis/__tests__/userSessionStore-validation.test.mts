@@ -533,7 +533,7 @@ describe("RedisUserSessionStore — what the store needs from its client, and wh
 				...validEnvelope,
 				amr: ["pwd"],
 				addedLater: { kept: true },
-				authentication: { primary: "pwd", addedLater: { kept: true } },
+				authentication: { primary: "pwd", addedLater: { kept: true }, laterNullable: null },
 			}),
 		);
 		const verifiedAt = new Date();
@@ -547,6 +547,7 @@ describe("RedisUserSessionStore — what the store needs from its client, and wh
 		expect(written.authentication).toEqual({
 			primary: "pwd",
 			addedLater: { kept: true },
+			laterNullable: null,
 			mfaAtMs: verifiedAt.getTime(),
 		});
 	});

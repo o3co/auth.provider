@@ -212,7 +212,9 @@ Each one implements a port core declares; the slot name is in parentheses.
   `upstreamAuthTime` is stored as `upstreamAuthTimeMs`: epoch milliseconds,
   or `null` when the upstream showed no time, left out when none was
   recorded. Any other value reads the envelope as corrupt. A release before
-  this one reads it as none recorded, and its step-up keeps it. The `SessionFamilyIndex` has the session-end
+  this one reads it as none recorded, and its step-up keeps it.
+
+  The `SessionFamilyIndex` has the session-end
   capability (core's `SupportsSessionEnd`) when it is given an
   `endedKeyPrefix` and a `SessionFamilyIndexClient` with `writeEndedMark` and
   `hasEndedMark`, which `makeIoredisClients` provides, and which the module
