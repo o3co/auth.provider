@@ -63,30 +63,27 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		const config = readTransitionalConfig(
 			resolved({
 				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } },
-				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
+				webauthn: { challengeTtlMs: "120000" },
 			}),
 			["oauth.nonce", "webauthn"],
 		);
 		expect(config.oauth.nonce?.maxLength).toBe(128);
-		expect(config.webauthn?.rateLimit?.authenticationOptions).toEqual({
-			limit: 120,
-			windowSeconds: 60,
-		});
+		expect(config.webauthn?.challengeTtlMs).toBe(120000);
 	});
 
 	it("parses only the paths it reads: every other key stays as written, and is not checked", () => {
 		const config = readTransitionalConfig(
 			resolved({
-				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
+				webauthn: { challengeTtlMs: "120000", attestationPreference: "several" },
 				core: { deployment: { mode: "several" } },
 			}),
-			["webauthn.rateLimit.authenticationOptions.limit"],
+			["webauthn.challengeTtlMs"],
 		) as unknown as {
-			webauthn: { rateLimit: { authenticationOptions: Record<string, unknown> } };
+			webauthn: Record<string, unknown>;
 			core: unknown;
 		};
-		expect(config.webauthn.rateLimit.authenticationOptions.limit).toBe(120);
-		expect(config.webauthn.rateLimit.authenticationOptions.windowSeconds).toBe("60");
+		expect(config.webauthn.challengeTtlMs).toBe(120000);
+		expect(config.webauthn.attestationPreference).toBe("several");
 		expect(config.core).toEqual({ deployment: { mode: "several" } });
 	});
 
@@ -99,12 +96,11 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 	});
 
 	it("does not refuse a section a package's reference completes, unless it reads it", () => {
-		// Before the modules are known, the WebAuthn package's reference is not
-		// layered: its `windowSeconds` is missing, and boot, which layers it,
+		// Before the modules are known, the oauth package's reference is not
+		// layered: its `nonce.maxLength` is missing, and boot, which layers it,
 		// accepts what the operator wrote.
-		const partial = resolved({
-			webauthn: { rateLimit: { authenticationOptions: { limit: 10 } } },
-		});
+		const base = makeValidCoreConfig();
+		const partial = resolved({ oauth: { ...base.oauth, nonce: {} } });
 		expect(TransitionalConfigSchema.safeParse(partial).success).toBe(false);
 		expect(() => readTransitionalConfig(partial, ["oauth.code", "oauth.grants"])).not.toThrow();
 	});
