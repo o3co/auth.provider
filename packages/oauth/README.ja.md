@@ -222,6 +222,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant`。ステップアップで満たせるなら `step_up: "<要件>"` を添える;
 - 答えられないストアは `503 temporarily_unavailable`: セッションの読み取りはアドミッションが `session_admission_unavailable` として 1 度だけ、結び付けの書き込みは `authorization_grant_store_unavailable` としてログに出す。
 
+**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、グラントはファミリーとクライアントを上のセッションごとのストアではなく `sessionLifecycle.join` で結び付ける。ライフサイクルは自分のレコードと並べてそれらのストアにも書くので、それらを通したログアウトは今までどおりファミリーを列挙するか追加を拒否する。加えて、終了をコミットしたセッションと、ユーザーセッションが消えたセッションも拒否する。拒否は同じ `400 invalid_grant` / `session_invalidated` と warn の行で、ファミリーはライフサイクルが失効させ済みである。障害は `503 temporarily_unavailable` で、ライフサイクルが `session_lifecycle_unavailable` としてログに出す。
+
 `userSessionStore` が無ければ、サブジェクトはトークンリクエストに伴うブラウザーセッションのユーザーであり、id_token は発行されない。
 
 **id_token** は、付与スコープに `openid` が含まれ、`userSessionStore` が配線され、`oauth.jwt.issuer` が設定されているときに発行される。そうでなければ省かれ、アクセストークンとリフレッシュトークンは通常どおり返る。id_token は `iss`、`sub`、`aud`、`exp`、`iat`、`jti`、`auth_time`、`sid`、`azp` を持ち、認可リクエストに `nonce` があればそれ（OIDC Core §3.1.3.7）、[ステップアップ](#ステップアップと再認証-481)で説明する `amr` / `acr`、スコープで絞ったユーザークレーム（[userinfo と同じ表](#userinfo)）を持つ。

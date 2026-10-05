@@ -54,6 +54,7 @@ const OPTIONAL = [
 	"sessionRPRegistry",
 	"sessionFamilyIndex",
 	"sessionFederationIndex",
+	"sessionLifecycle",
 	"logger",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
