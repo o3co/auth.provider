@@ -349,8 +349,8 @@ strings an answer holds as a reader decodes them — object keys, map and set
 entries included — in any case, an address with its percent-escapes decoded
 too, never in its JSON text, so no escaping hides one. It enrolls at one instant and verifies an hour later,
 every call made for the account's `User.id` as its subject; state, data and
-a response are held to the rule the coordinator takes them by — a plain or
-null-prototype object of JSON values JSON gives back as they are, no `-0`,
+a response are held to the rule the coordinator takes them by, core's
+`copyPlainJson` — a plain or null-prototype object of JSON values JSON gives back as they are, no `-0`,
 every own key an enumerable string, a list's own keys exactly its indices,
 an own getter read once.
 
