@@ -849,6 +849,13 @@ export type Admission =
 			/** Admission's view of the record, equal to what the requirements are handed; `null` without a record. */
 			readonly view: SessionView | null;
 			readonly acr: string | undefined;
+			/**
+			 * The record's renewal nonce as admission read it, absent when the record
+			 * holds none: what a consumer writing the record next expects of it
+			 * (`recordSecondFactor`'s `expectedRenewalNonce`). For a cookie carrier
+			 * it is the one the cookie session presented.
+			 */
+			readonly renewalNonce?: string;
 	  }
 	| { readonly outcome: "unauthenticated" }
 	| {

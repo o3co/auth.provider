@@ -347,14 +347,14 @@ export async function admitSession(
 	// Steps 1 to 4: the claim, the live read, the subject and the renewal nonce, the revocation boundary.
 	const read = await readLiveSession(checked, unavailable);
 	if ("answer" in read) return read.answer;
-	const { session, storeRecords } = read;
+	const { session, storeRecords, renewalNonce } = read;
 	// The record is read into one view; each requirement is handed its own
 	// copy of it, so what one does to its Dates reaches neither the next nor
 	// the consumer. Whether a second factor can be recorded on the session is
 	// decided here, in the view, once: the requirements, the merge and the
 	// consumer all read it there.
 	const live: LiveRecord | null =
-		session === null ? null : { session, view: viewOf(session, storeRecords) };
+		session === null ? null : { session, view: viewOf(session, storeRecords), renewalNonce };
 
 	// Step 5: the requirements, by the action's effective grade: only the
 	// issued remediation keeps its grade and skips them.

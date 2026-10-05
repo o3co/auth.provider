@@ -65,6 +65,8 @@ export const isVerdict = (value: unknown): value is RequirementVerdict =>
 export interface LiveRecord {
 	readonly session: UserSession;
 	readonly view: SessionView;
+	/** The record's renewal nonce as step 3b read it; `undefined` when it holds none. */
+	readonly renewalNonce: string | undefined;
 }
 
 /**

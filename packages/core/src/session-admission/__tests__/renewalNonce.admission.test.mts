@@ -232,3 +232,58 @@ describe("cookieRenewedAway — whether the record a cookie names is bound to an
 		await expect(cookieRenewedAway(down, cookie())).rejects.toThrow("store down");
 	});
 });
+
+/**
+ * What a consumer that writes the record next expects of it: the record's own
+ * renewal nonce as admission read it, so a conditional write compares with the
+ * record and not with the cookie session.
+ */
+describe("the admitted outcome carries the record's renewal nonce", () => {
+	it("carries the record's nonce, which the cookie session holding it presented", async () => {
+		const nonce = newRenewalNonce();
+		expect(await admit(await holding(nonce), cookie(nonce))).toMatchObject({
+			outcome: "admitted",
+			renewalNonce: nonce,
+		});
+	});
+
+	it("carries none for a record without one, whatever the cookie session holds", async () => {
+		const store = await holding();
+		for (const presented of [undefined, newRenewalNonce()]) {
+			const admission = await admit(store, cookie(presented));
+			expect(admission, String(presented)).toMatchObject({ outcome: "admitted" });
+			expect(Object.hasOwn(admission, "renewalNonce"), String(presented)).toBe(false);
+		}
+	});
+
+	it("reads the record's nonce once: an accessor answering another value later changes nothing", async () => {
+		const nonce = newRenewalNonce();
+		const inner = await holding(nonce);
+		const flipping: UserSessionStore = {
+			...inner,
+			get: async (sid) => {
+				const session = await inner.get(sid);
+				if (session === null) return null;
+				let reads = 0;
+				return Object.defineProperty({ ...session }, "renewalNonce", {
+					get: () => (reads++ === 0 ? nonce : newRenewalNonce()),
+					enumerable: true,
+				});
+			},
+		};
+		expect(await admit(flipping, cookie(nonce))).toMatchObject({
+			outcome: "admitted",
+			renewalNonce: nonce,
+		});
+	});
+
+	it("carries the record's nonce for a token carrier too, whose cookie is never compared", async () => {
+		const nonce = newRenewalNonce();
+		expect(
+			await admitSession(deps(await holding(nonce)), {
+				claim: tokenClaim({ sid: SID, sub: SUB }),
+				action: "test.use",
+			}),
+		).toMatchObject({ outcome: "admitted", renewalNonce: nonce });
+	});
+});
