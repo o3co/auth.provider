@@ -30,7 +30,7 @@
  * policy — and requires nothing. The section's defaults live in the
  * package's `config/reference.conf` alone. A key still written at
  * `oauth.deviceAuthorization`, the section's old path, refuses boot naming
- * the new one.
+ * the new one; `store`, at either path, refuses boot as removed.
  *
  * It reads no whole configuration. What it needs of `oauth {}` — the issuer,
  * the access-token lifetime and `requireEmailVerified` — it reads from the
@@ -56,7 +56,6 @@ import {
 	coerceBooleanFromEnv,
 	consoleLogger,
 	createRateLimitGuard,
-	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
 	guardedRead,
 	loggableError,
@@ -138,12 +137,6 @@ export const deviceGrantConfigSchema = z
 		 * limiter's.
 		 */
 		rateLimit: rateLimitSpecSchema,
-		/**
-		 * Declared absence for the `deviceCodeStore` slot. `"unsupported"` is
-		 * the only value; anything else is a typo that would otherwise read as a
-		 * declaration.
-		 */
-		store: z.literal("unsupported").optional(),
 	})
 	.strict()
 	.optional();
@@ -169,6 +162,8 @@ const REQUIRES = [
 // on the OAuth router: without it a `private_key_jwt` request is
 // `server_error`, never an assertion accepted unchecked.
 const OPTIONAL = [
+	// Read by the grant and both endpoints; required once the grant is
+	// enabled (`requireDeviceCodeStore`), unused while it is off.
 	"deviceCodeStore",
 	// The counter the verification's attempt limit runs on. Without one it is
 	// counted per process, where the deployment mode allows it.
@@ -392,8 +387,8 @@ const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 
 /**
  * Presence check for the optional `deviceCodeStore` slot, read by the grant
- * and both endpoints. Declaring the store `"unsupported"` does not let the
- * grant run without one.
+ * and both endpoints: the grant cannot run without one, so there is no
+ * absence to declare while it is on.
  */
 const requireDeviceCodeStore = (
 	deps: DeviceGrantModuleDeps,
@@ -402,9 +397,7 @@ const requireDeviceCodeStore = (
 		throw new Error(
 			"deviceAuthorizationGrantModule: device-grant.enabled = true requires a " +
 				"deviceCodeStore component. The grant has nowhere to record a pending " +
-				"authorization, so no device could ever be authorized; declaring the store " +
-				'absent (device-grant.store = "unsupported") says why it is ' +
-				"missing and does not make the grant work without one. Install " +
+				"authorization, so no device could ever be authorized. Install " +
 				"memoryDeviceCodeStoreModule (single replica only) or " +
 				"redisDeviceCodeStoreModule, or leave the grant disabled.",
 		);
@@ -439,12 +432,18 @@ const requireUserSessionStore = (
  * defaults. No variable binds a key of it, so the refusal of an old path
  * names none. Parsed whether or not the grant is on, so a setting still
  * written at the old path refuses boot rather than reading as off.
+ *
+ * `store` is removed, at either path: no value of it declares anything, since
+ * the grant needs a store while on and nothing while off. The old path is
+ * mapped key by key rather than as a whole: a whole-section entry would send
+ * `oauth.deviceAuthorization.store` to `device-grant.store`, a path refused in
+ * turn, which boot refuses as a chain.
  */
 const SECTION = {
 	schema: deviceGrantConfigSchema,
 	reference: new URL("../config/reference.conf", import.meta.url),
 	relocatedFrom: {
-		"oauth.deviceAuthorization": { to: "", environmentVariable: null },
+		"oauth.deviceAuthorization.enabled": { to: "enabled", environmentVariable: null },
 		"oauth.deviceAuthorization.verification-uri": {
 			to: "verificationUri",
 			environmentVariable: null,
@@ -461,6 +460,9 @@ const SECTION = {
 			to: "pollingIntervalSeconds",
 			environmentVariable: null,
 		},
+		"oauth.deviceAuthorization.rateLimit": { to: "rateLimit", environmentVariable: null },
+		"oauth.deviceAuthorization.store": null,
+		"device-grant.store": null,
 	},
 	// The module's switch: on only when the section says so.
 	isEnabled: (section: z.output<typeof deviceGrantConfigSchema>) => section?.enabled === true,
@@ -484,7 +486,6 @@ export const deviceAuthorizationGrantModule = defineModule<
 	// sink discards every device approval — a consent event — with no
 	// symptom, so it has to list `auditSink` in `core.declaredAbsent` to say so.
 	absencePolicies: {
-		deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY,
 		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 	},
 	contributes: {
@@ -543,7 +544,7 @@ export const deviceAuthorizationGrantModule = defineModule<
 						}),
 					);
 				}
-				// Router-level body parsing, matching `oauthModule` and the
+				// Router-level body parsing, matching `oauthEndpointsModule` and the
 				// WebAuthn routes: `createApp` installs no global parser. A
 				// declared oversized body is refused before it is read.
 				router.all("/", withinBodyLimit);
@@ -651,12 +652,3 @@ export const deviceAuthorizationGrantModule = defineModule<
 		],
 	},
 });
-
-/**
- * Returns {@link deviceAuthorizationGrantModule}; the argument is ignored.
- *
- * @deprecated List {@link deviceAuthorizationGrantModule} instead.
- */
-export const deviceGrantModule = (_params?: {
-	readonly config?: unknown;
-}): typeof deviceAuthorizationGrantModule => deviceAuthorizationGrantModule;

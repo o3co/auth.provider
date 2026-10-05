@@ -30,6 +30,7 @@ import {
 	createInMemorySubjectSessionIndex,
 	createInMemoryUserSessionStore,
 	createSessionLifecycle,
+	DEFAULT_CLOCK_SKEW_MS,
 	type FederationTokenStore,
 	type RefreshTokenFamilyRevocation,
 	type RegisteredRP,
@@ -330,6 +331,128 @@ describe("join", () => {
 		await h.establish(SID, { open: false });
 		expect(await h.lifecycle.join(SID, { federation: "google" })).toEqual({ outcome: "joined" });
 		expect((await h.read())?.value.participants.map((p) => p.id)).toEqual(["google"]);
+	});
+
+	it("refuses a join whose session a close ended, and whose closed record went, while it adopted the record", async () => {
+		// The race: the join reads no record and a live user session; before
+		// it opens the record, a close of the session completes and its closed
+		// record leaves the store. The open then finds no record to refuse it.
+		let current: SessionLifecycleStore | undefined;
+		let closeDuringOpen: (() => Promise<void>) | undefined;
+		const h = harness({
+			familyIndexWithoutEnd: true,
+			store: (inner) => {
+				current = inner;
+				const now = (): SessionLifecycleStore => current ?? inner;
+				return {
+					kind: inner.kind,
+					open: async (sid, sub, expiresAt) => {
+						const race = closeDuringOpen;
+						closeDuringOpen = undefined;
+						if (race !== undefined) await race();
+						return now().open(sid, sub, expiresAt);
+					},
+					join: (sid, participant) => now().join(sid, participant),
+					beginClose: (sid, request) => now().beginClose(sid, request),
+					completeIf: (sid, expected, item) => now().completeIf(sid, expected, item),
+					read: (sid) => now().read(sid),
+					listClosing: (limit, after) => now().listClosing(limit, after),
+				};
+			},
+		});
+		await h.establish(SID, { open: false });
+		closeDuringOpen = async () => {
+			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+			current = createInMemorySessionLifecycleStore();
+		};
+		expect(await h.lifecycle.join(SID, { familyId: "f-late", federation: "google" })).toEqual({
+			outcome: "refused",
+		});
+		expect(h.revoked.has("f-late")).toBe(true);
+		expect(h.calls).toContain(`delete_federation_tokens:${SID}:google`);
+		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+	});
+
+	describe("a join that adopts, when the sid is closed and its session replaced meanwhile", () => {
+		/** A harness whose store runs `race` once, inside the next `open`, then answers from `current`. */
+		const racing = () => {
+			const state: {
+				current?: SessionLifecycleStore;
+				race?: () => Promise<void>;
+			} = {};
+			const h = harness({
+				familyIndexWithoutEnd: true,
+				store: (inner) => {
+					state.current = inner;
+					const now = (): SessionLifecycleStore => state.current ?? inner;
+					return {
+						kind: inner.kind,
+						open: async (sid, sub, expiresAt) => {
+							const race = state.race;
+							state.race = undefined;
+							if (race !== undefined) await race();
+							return now().open(sid, sub, expiresAt);
+						},
+						join: (sid, participant) => now().join(sid, participant),
+						beginClose: (sid, request) => now().beginClose(sid, request),
+						completeIf: (sid, expected, item) => now().completeIf(sid, expected, item),
+						read: (sid) => now().read(sid),
+						listClosing: (limit, after) => now().listClosing(limit, after),
+					};
+				},
+			});
+			return { h, state };
+		};
+
+		/** A new user session under `SID`, the closed one's record gone from the store. */
+		const replace = async (
+			h: Harness,
+			state: { current?: SessionLifecycleStore },
+			sub: string,
+			expiresAt: Date,
+			{ open }: { readonly open: boolean },
+		): Promise<SessionLifecycleStore> => {
+			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+			const fresh = createInMemorySessionLifecycleStore();
+			state.current = fresh;
+			await h.sessions.create({
+				sid: SID,
+				sub,
+				authTime: new Date(),
+				expiresAt,
+				claims: {},
+				amr: ["pwd"],
+				authentication: undefined,
+			});
+			if (open) expect((await fresh.open(SID, sub, expiresAt)).outcome).toBe("opened");
+			return fresh;
+		};
+
+		it("is refused and withdrawn when the replacement holds its record, which gets no participant", async () => {
+			const { h, state } = racing();
+			await h.establish(SID, { open: false });
+			let fresh: SessionLifecycleStore | undefined;
+			state.race = async () => {
+				fresh = await replace(h, state, "someone-else", new Date(Date.now() + DAY), { open: true });
+			};
+			expect(await h.lifecycle.join(SID, { familyId: "f-stale" })).toEqual({ outcome: "refused" });
+			expect(h.revoked.has("f-stale")).toBe(true);
+			const record = readVersionedSessionLifecycle(
+				await (fresh as SessionLifecycleStore).read(SID),
+			);
+			expect(record?.value.sub).toBe("someone-else");
+			expect(record?.value.participants).toEqual([]);
+		});
+
+		it("is refused and withdrawn when the replacement has the same subject but another end", async () => {
+			const { h, state } = racing();
+			await h.establish(SID, { open: false });
+			state.race = async () => {
+				await replace(h, state, SUB, new Date(Date.now() + 2 * DAY), { open: false });
+			};
+			expect(await h.lifecycle.join(SID, { familyId: "f-stale" })).toEqual({ outcome: "refused" });
+			expect(h.revoked.has("f-stale")).toBe(true);
+		});
 	});
 
 	it("answers unavailable when the lifecycle store cannot answer", async () => {
@@ -669,6 +792,110 @@ describe("close", () => {
 		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
 		expect([...h.revoked].sort()).toEqual(["f1", "f2"]);
 		expect((await h.read())?.value.state).toBe("closed");
+	});
+
+	it("runs the close work of a session that ended on the store's clock before its record could be opened", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
+		await h.sessionRPRegistry.registerRP(SID, relyingParty("old-rp"), expiresAt);
+		now = expiresAt.getTime() + 1;
+		h.calls.length = 0;
+		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
+			outcome: "done",
+			rps: ["old-rp"],
+			federations: [],
+		});
+		expect([...h.calls].sort()).toEqual([
+			"delete_user_session",
+			"notify:old-rp",
+			"remove_federation_tokens:sid-1",
+			"remove_subject_session:sid-1",
+			"revoke_family:f-old",
+		]);
+		expect(h.calls.at(-1)).toBe("remove_subject_session:sid-1");
+		expect(await h.sessions.get(SID)).toBeNull();
+		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+		expect(await h.read()).toBeNull();
+	});
+
+	it("answers done to two closes at once of a session that ended on the store's clock with no record", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
+		now = expiresAt.getTime() + 1;
+		const answers = await Promise.all([
+			h.lifecycle.close(SID, "rp_logout"),
+			h.lifecycle.close(SID, "session_logout"),
+		]);
+		expect(answers.map((a) => a.outcome)).toEqual(["done", "done"]);
+		expect(h.revoked.has("f-old")).toBe(true);
+		expect(await h.sessions.get(SID)).toBeNull();
+		expect(await h.read()).toBeNull();
+	});
+
+	it("refuses a join racing the close of a session that ended on the store's clock with no record, and withdraws its family", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		now = expiresAt.getTime() + 1;
+		const [closed, joined] = await Promise.all([
+			h.lifecycle.close(SID, "rp_logout"),
+			h.lifecycle.join(SID, { familyId: "f-late" }),
+		]);
+		expect(closed.outcome).toBe("done");
+		expect(joined).toEqual({ outcome: "refused" });
+		expect(h.revoked.has("f-late")).toBe(true);
+		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+	});
+
+	it("runs the close work of a record that lapses between its read and the closing commit", async () => {
+		let now = Date.now();
+		let expiresAtMs = 0;
+		const h = harness({
+			lifecycleStore: { now: () => now },
+			store: (inner) => ({
+				...inner,
+				beginClose: async (sid, request) => {
+					now = expiresAtMs + DEFAULT_CLOCK_SKEW_MS + 1;
+					return inner.beginClose(sid, request);
+				},
+			}),
+		});
+		expiresAtMs = (await h.establish()).getTime();
+		await joinAll(h);
+		h.calls.length = 0;
+		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
+			outcome: "done",
+			rps: ["a"],
+			federations: ["google"],
+		});
+		expect([...h.calls].sort()).toEqual([
+			"delete_user_session",
+			"notify:a",
+			"remove_federation_tokens:sid-1",
+			"remove_subject_session:sid-1",
+			"revoke_family:f1",
+		]);
+		expect(await h.sessions.get(SID)).toBeNull();
+		expect(await h.read()).toBeNull();
+	});
+
+	it("answers unavailable when the close work of a lapsed record fails, keeping the user session for a retry", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
+		now = expiresAt.getTime() + 1;
+		h.failing.set("revoke_family:f-old", 1);
+		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({ outcome: "unavailable" });
+		expect(h.calls).not.toContain("delete_user_session");
+		expect(await h.sessions.get(SID)).not.toBeNull();
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		expect(h.revoked.has("f-old")).toBe(true);
+		expect(await h.sessions.get(SID)).toBeNull();
 	});
 
 	it("revokes what joined through the old stores when the close comes after the session's end", async () => {

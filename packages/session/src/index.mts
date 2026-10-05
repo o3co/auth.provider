@@ -135,11 +135,7 @@ export { sessionModule } from "./module.mjs";
 // The `loginCompletion` slot, over the deployment's `csrfGuard`: its own
 // module, loaded beside `sessionModule` where a requirement completes a login.
 export { loginCompletionModule } from "./modules/loginCompletionModule.mjs";
-export {
-	type SessionStoreModuleConfig,
-	sessionStoreModule,
-	sessionStoreModuleFor,
-} from "./modules/sessionStoreModule.mjs";
+export { sessionStoreModule } from "./modules/sessionStoreModule.mjs";
 export type { SessionStoreFactory } from "./store/factory.mjs";
 export {
 	createSessionStoreFactory,

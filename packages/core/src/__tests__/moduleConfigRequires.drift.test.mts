@@ -45,7 +45,7 @@
  * keyed by it.
  *
  * Not seen, left to review: `config` a manifest built by a factory captures
- * through the closure (`oauthModule({ config })`) without listing it.
+ * through the closure (`({ config }) => defineModule(…)`) without listing it.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";

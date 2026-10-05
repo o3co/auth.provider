@@ -73,7 +73,8 @@ async function discoveryContribution(
 	config: AppConfig = configWithRevocation(),
 ): Promise<OidcDiscoveryContribution> {
 	const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
-	if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
+	if (factory === undefined)
+		throw new Error("oauthEndpointsModule contributes no discoveryMetadata");
 	// Awaited as the boot planner does: a contribution factory may answer with
 	// a promise.
 	return await factory({
@@ -90,7 +91,7 @@ async function discoveryContribution(
 	} as never);
 }
 
-describe("oauthModule — discoveryMetadata contribution", () => {
+describe("oauthEndpointsModule — discoveryMetadata contribution", () => {
 	it("declares itself the provider root so core activates discovery", async () => {
 		// oauth owns the authorization-server surface, so it sets `providerRoot`.
 		// This is the explicit signal (not an inferred `authorization_endpoint`)
@@ -169,7 +170,8 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 			},
 		} as unknown as AppConfig;
 		const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
-		if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
+		if (factory === undefined)
+			throw new Error("oauthEndpointsModule contributes no discoveryMetadata");
 		const meta = await factory({
 			config,
 			section: config.oauth,
@@ -500,7 +502,7 @@ describe("acr_values_supported", () => {
 	});
 });
 
-describe("oauthModule — client_id_metadata_document_supported", () => {
+describe("oauthEndpointsModule — client_id_metadata_document_supported", () => {
 	const enabled = (): AppConfig => {
 		const base = configWithRevocation();
 		return {
@@ -537,7 +539,7 @@ describe("oauthModule — client_id_metadata_document_supported", () => {
 	});
 });
 
-describe("oauthModule — private_key_jwt is advertised only where it can be honoured", () => {
+describe("oauthEndpointsModule — private_key_jwt is advertised only where it can be honoured", () => {
 	it("says nothing about private_key_jwt when no replay seen-set is wired", async () => {
 		// A client assertion's `jti` is single-use, and the verifier answers
 		// `500 server_error` when it has nowhere to record one rather than

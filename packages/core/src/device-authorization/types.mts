@@ -25,8 +25,6 @@
  * one approval.
  */
 
-import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
-
 /**
  * What the authorization server knows about one device authorization.
  *
@@ -204,27 +202,6 @@ export interface DeviceCodeStore {
 	/** Drop a decided or expired record early. Absence is not an error. */
 	remove(deviceCode: string): Promise<void>;
 }
-
-/**
- * Absence policy for the `deviceCodeStore` slot: an empty slot is a boot
- * failure naming the config key, not a runtime surprise on the first
- * `/oauth/device_authorization` request.
- *
- * Applied while the grant is on; a module switched off declares no policy.
- * An enabled grant without a store is refused by `deviceGrantModule` whatever
- * the declaration says. The hint is quoted into the boot error, so it must not
- * tell an operator with the grant enabled to write a line that is itself
- * refused.
- */
-export const DEVICE_CODE_STORE_ABSENCE_POLICY: AbsencePolicy = {
-	configKey: ["device-grant", "store"],
-	absentValue: "unsupported",
-	hint:
-		"the device authorization grant has nowhere to record a pending authorization, " +
-		"so no device can ever be authorized. Wire a store (memoryDeviceCodeStoreModule on " +
-		"a single replica, redisDeviceCodeStoreModule otherwise) — the declaration does not " +
-		"make the grant work without one — or set device-grant.enabled = false",
-};
 
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

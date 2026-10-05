@@ -76,11 +76,11 @@ module requires no dependency.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config),
+    sessionStoreModule,
     sessionModule,
     googleFederationTypeModule(),
     // ... composition-root modules supplying userRepository and the session stores
@@ -183,6 +183,20 @@ record is silent. **`hd` is not enforced:** nothing here refuses an account from
 another domain, and the claim lands only in `claims.federated.<name>`. A
 Workspace-domain restriction belongs in the Store, which decides who
 `<name>:<sub>` is.
+
+### Freshness: `prompt=login`, `max_age` and an MFA first binding
+
+`/authorize`'s `prompt=login` and `max_age`, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user. This adapter cannot ask Google for that, and
+Google sends `auth_time` only when it is requested and enabled for the client,
+so a Google login usually reports none. With
+`core.federations.<name>.callbackMeetsFreshness` at its default `false`, such a
+session meets no `prompt=login` or `max_age` (`login_required`) and binds no
+first factor: the user is sent to log in again each time. **To use `prompt=login`, `max_age` or an MFA
+first binding with Google, set `core.federations.<name>.callbackMeetsFreshness
+= true`:** the callback itself then counts as the authentication, which is the
+behaviour before 0.17.0.
 
 ### Refresh tokens and the consent screen
 

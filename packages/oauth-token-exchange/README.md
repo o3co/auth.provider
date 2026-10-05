@@ -7,7 +7,7 @@ Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
 
 ## Responsibility
 
-**Role.** The `urn:ietf:params:oauth:grant-type:token-exchange` grant handler, and the built-in validator for this provider's own access tokens presented as `subject_token` or `actor_token`. The package has no route: `tokenExchangeModule` contributes the handler as a `grants` entry, core's boot planner puts it in the `grantHandlerResolver`, and [`@o3co/auth-provider-oauth`](../oauth/README.md)'s `oauthModule` dispatches `POST /oauth/token` requests of this grant type to it. A composition therefore installs both — a dependency through composition, not an import.
+**Role.** The `urn:ietf:params:oauth:grant-type:token-exchange` grant handler, and the built-in validator for this provider's own access tokens presented as `subject_token` or `actor_token`. The package has no route: `tokenExchangeModule` contributes the handler as a `grants` entry, core's boot planner puts it in the `grantHandlerResolver`, and [`@o3co/auth-provider-oauth`](../oauth/README.md)'s `oauthEndpointsModule` dispatches `POST /oauth/token` requests of this grant type to it. A composition therefore installs both — a dependency through composition, not an import.
 
 **Owns:**
 
@@ -47,18 +47,18 @@ import {
   jwksModule,
   memoryRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-core";
-import { oauthModule } from "@o3co/auth-provider-oauth";
+import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import { tokenExchangeModule } from "@o3co/auth-provider-oauth-token-exchange";
 
 const handle = await createApp({
   modules: [
-    oauthModule({ config }), // serves POST /oauth/token, which dispatches the exchange
+    oauthEndpointsModule, // serves POST /oauth/token, which dispatches the exchange
     tokenExchangeModule,
     // refreshTokenFamilyRevocation, so an exchange can see a revoked family (note 1).
     // The memory store is single-replica; @o3co/auth-provider-redis ships a shared one.
     memoryRefreshTokenFamilyStoreModule,
     defaultRefreshTokenFamilyRevocationModule,
-    // oauthModule requires oauth.jwt.issuer, and with an issuer configured the
+    // oauthEndpointsModule requires oauth.jwt.issuer, and with an issuer configured the
     // discovery document needs the jwks_uri this module contributes.
     jwksModule,
     // …the modules that provide clientRepository, codeRepository and keyStore
@@ -73,7 +73,7 @@ The grant type URI is `urn:ietf:params:oauth:grant-type:token-exchange` (IETF re
 
 The built-in `access_token` validator is contributed by `tokenExchangeModule` itself. Consumers do not create or mutate a validator registry.
 
-`oauthModule` has requirements of its own — a `loginEntry` provider where it builds `/authorize`, and the absence decisions for `auditSink` and the revocation stores — listed in the oauth README's [Composing it](../oauth/README.md#composing-it). What this module requires, what it reads optionally and which absent slots must be declared is its manifest, [`module.mts`](./src/module.mts): it requires `oauthTokenSettings`, `clientRepository` and `keyStore`, and reads nothing of the whole configuration — only its own section and those slots. `oauthTokenSettings` carries the issuer and `legacyTypAccept` a subject token is held to and the lifetimes the grant mints within: `oauthModule` provides it, and a composition without the oauth module fills it itself (core's [`OAuthTokenSettings`](../core/src/token-settings/types.mts)); unfilled, boot refuses with `missing-required-component`. `accessTokenDenylist` and `subjectRevocation` are optional to wire but not to decide: an unfilled one must be declared with `oauth.revocation.accessToken = "unsupported"` / `oauth.revocation.subject = "unsupported"`, or boot refuses. `userSessionStore` is optional as it is on `oauthModule`: wired, the exchange refuses a token whose session has ended (note 21). So is core's `sessionLifecycle`: where installed, that check reads its `liveness` instead, so a session closing or closed is refused too.
+`oauthEndpointsModule` has requirements of its own — a `loginEntry` provider where it builds `/authorize`, and the absence decisions for `auditSink` and the revocation stores — listed in the oauth README's [Composing it](../oauth/README.md#composing-it). What this module requires, what it reads optionally and which absent slots must be declared is its manifest, [`module.mts`](./src/module.mts): it requires `oauthTokenSettings`, `clientRepository` and `keyStore`, and reads nothing of the whole configuration — only its own section and those slots. `oauthTokenSettings` carries the issuer and `legacyTypAccept` a subject token is held to and the lifetimes the grant mints within: `oauthEndpointsModule` provides it, and a composition without the oauth module fills it itself (core's [`OAuthTokenSettings`](../core/src/token-settings/types.mts)); unfilled, boot refuses with `missing-required-component`. `accessTokenDenylist` and `subjectRevocation` are optional to wire but not to decide: an unfilled one must be declared with `oauth.revocation.accessToken = "unsupported"` / `oauth.revocation.subject = "unsupported"`, or boot refuses. `userSessionStore` is optional as it is on `oauthEndpointsModule`: wired, the exchange refuses a token whose session has ended (note 21). So is core's `sessionLifecycle`: where installed, that check reads its `liveness` instead, so a session closing or closed is refused too.
 
 ## Public API
 
@@ -125,7 +125,7 @@ The package ships a built-in validator only for the `access_token` token type (t
 import { createApp, defineModule, jwksModule } from "@o3co/auth-provider-core";
 // The validator contract is core's, not this package's.
 import type { ExchangeTokenValidator, ValidatedToken } from "@o3co/auth-provider-core";
-import { oauthModule } from "@o3co/auth-provider-oauth";
+import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import { tokenExchangeModule } from "@o3co/auth-provider-oauth-token-exchange";
 
 class ExternalJwtValidator implements ExchangeTokenValidator {
@@ -154,7 +154,7 @@ const externalJwtTokenExchangeValidatorModule = defineModule({
 
 const handle = await createApp({
   modules: [
-    oauthModule({ config }),
+    oauthEndpointsModule,
     tokenExchangeModule,
     externalJwtTokenExchangeValidatorModule,
     jwksModule,
@@ -279,7 +279,7 @@ Sender-constrained exchange is supported: the handler enforces the DPoP and mTLS
 
 ## Tests
 
-[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest, the family answers of note 1, the store-outage answers of note 20, the code and description of every token refusal in [Error responses](#error-responses), and which answer a scope or audience past the ceilings gets depending on whether the request or the policy asked for it, with `tokenExchangeModule` booted through `createApp`. [`oauth-token-route.test.mts`](./src/__tests__/oauth-token-route.test.mts) makes the exchange over HTTP, through `oauthModule`'s `POST /oauth/token` in the composition [Register the grant](#register-the-grant) shows: client authentication, the allowlist answers of note 15, the response the route writes, the §5.2 character set of a description that quotes the request, and how `resource` and `audience` are read from a form or JSON body — a malformed one refused, an empty one omitted. [`published-files.test.mts`](./src/__tests__/published-files.test.mts) holds that every source file the build publishes is reached from the entry point. Note 21's logout case is pinned end to end, through the real session, oauth and token-exchange modules, by the repository's `tools/composition` suite; its answers are in `grant.test.mts`. [`grant.beforeMint.test.mts`](./src/__tests__/grant.beforeMint.test.mts) pins note 22 and the issuance instant of note 16.
+[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest, the family answers of note 1, the store-outage answers of note 20, the code and description of every token refusal in [Error responses](#error-responses), and which answer a scope or audience past the ceilings gets depending on whether the request or the policy asked for it, with `tokenExchangeModule` booted through `createApp`. [`oauth-token-route.test.mts`](./src/__tests__/oauth-token-route.test.mts) makes the exchange over HTTP, through `oauthEndpointsModule`'s `POST /oauth/token` in the composition [Register the grant](#register-the-grant) shows: client authentication, the allowlist answers of note 15, the response the route writes, the §5.2 character set of a description that quotes the request, and how `resource` and `audience` are read from a form or JSON body — a malformed one refused, an empty one omitted. [`published-files.test.mts`](./src/__tests__/published-files.test.mts) holds that every source file the build publishes is reached from the entry point. Note 21's logout case is pinned end to end, through the real session, oauth and token-exchange modules, by the repository's `tools/composition` suite; its answers are in `grant.test.mts`. [`grant.beforeMint.test.mts`](./src/__tests__/grant.beforeMint.test.mts) pins note 22 and the issuance instant of note 16.
 
 ## RFC references
 

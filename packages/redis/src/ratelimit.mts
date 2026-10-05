@@ -8,7 +8,6 @@ import {
 	createRateLimitBudgetLookup,
 	defineModule,
 	MAX_DURATION_SECONDS,
-	type RateLimitBudgetResolver,
 	type RateLimiter,
 	type RateLimitFailMode,
 	type RateLimitSpec,
@@ -35,8 +34,6 @@ interface CreateRedisRateLimiterOptions {
 	client: RateLimiterClient;
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
-	/** The owners' contributed budgets, read at each check; `limits` wins over one. */
-	budgets?: RateLimitBudgetResolver;
 	/** The limiter's outage policy (`RateLimiter.failMode`); not given, none (closed). */
 	failMode?: RateLimitFailMode;
 }
@@ -73,7 +70,6 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 		...(opts.limits === undefined ? {} : { limits: opts.limits }),
 		// Only `undefined` is "not given": a `null` default is refused.
 		defaultLimit: opts.defaultLimit === undefined ? DEFAULT_LIMIT : opts.defaultLimit,
-		...(opts.budgets === undefined ? {} : { budgets: opts.budgets }),
 	});
 	const client = opts.client;
 	const failMode = checkedFailMode("createRedisRateLimiter: ", "failMode", opts.failMode);
@@ -166,7 +162,7 @@ export const redisRateLimiterSectionSchema = z
 /**
  * `defineModule` manifest for the redis RateLimiter. Reads its own section,
  * `redis-rate-limiter` (limits, defaultLimit, and `failMode`, the limiter's
- * outage policy), and the contributed budgets (`rateLimitBudgetResolver`).
+ * outage policy).
  * `redisRateLimiter` and `rateLimit.failMode`, the paths its keys moved from,
  * and `RATE_LIMIT_FAIL_MODE`, its variable's old name, refuse boot naming the
  * new ones. The redis client itself comes from the `rateLimiterClient`
@@ -184,14 +180,13 @@ export const redisRateLimiterModule = defineModule({
 		},
 		renamedVariables: { RATE_LIMIT_FAIL_MODE: "rateLimit.failMode" },
 	},
-	requires: ["rateLimiterClient", "rateLimitBudgetResolver"] as const,
+	requires: ["rateLimiterClient"] as const,
 	provides: {
-		rateLimiter: ({ section, rateLimiterClient, rateLimitBudgetResolver }) =>
+		rateLimiter: ({ section, rateLimiterClient }) =>
 			createRedisRateLimiter({
 				failMode: section.failMode,
 				client: rateLimiterClient,
 				limits: section.limits,
-				budgets: rateLimitBudgetResolver,
 				defaultLimit: section.defaultLimit,
 			}),
 	},

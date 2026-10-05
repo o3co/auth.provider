@@ -91,7 +91,7 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
  *   - `/session/*`: cookie-backed, governed by the CSRF policy
  *     (`session.csrf.trustedOrigins`).
  *
- * The `/oauth/*` paths assume the bundled `oauthModule`'s mountPath; a
+ * The `/oauth/*` paths assume the bundled `oauthEndpointsModule`'s mountPath; a
  * downstream that re-mounts the OAuth router must build its own table.
  */
 export function browserFacingCorsRoutes(

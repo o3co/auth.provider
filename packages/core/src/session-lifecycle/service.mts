@@ -128,7 +128,9 @@ export type SessionJoinOutcome =
  * elsewhere, those they listed first, then the snapshot's, each once — the
  * federations in the order they joined; a later call answers the snapshot's.
  * `unavailable`: the closing commit did not land, or whether it did could
- * not be read.
+ * not be read; or, where the commit found no live record (the session's end
+ * passed on the store's clock), an item of the close work, run with no
+ * record to save it in, failed.
  */
 export type SessionCloseOutcome =
 	| {
@@ -262,6 +264,19 @@ const phaseOf = (item: string): number => {
 	return 1;
 };
 
+/**
+ * The work items a close of `participants` saves for `request`: its steps,
+ * then one per participant of the kinds it names. What the store's closing
+ * commit saves, and what a close with no record to save it in runs.
+ */
+const closeItemsOf = (
+	request: SessionCloseRequest,
+	participants: readonly SessionParticipant[],
+): string[] => [
+	...request.steps,
+	...participants.filter((p) => request.perParticipant.includes(p.kind)).map(sessionCloseItemOf),
+];
+
 /** The items to run next: those of the earliest phase still pending, not given up on in this run. */
 const nextItems = (pending: readonly string[], skipped: ReadonlySet<string>): string[] => {
 	const earliest = Math.min(...pending.map(phaseOf));
@@ -337,6 +352,12 @@ const participantsOf = (request: SessionJoinRequest): SessionParticipant[] => {
 	}
 	return participants;
 };
+
+/** Whether `a` and `b` are one session: the same subject, authentication time and end. */
+const sameSession = (a: UserSession, b: UserSession): boolean =>
+	a.sub === b.sub &&
+	a.authTime.getTime() === b.authTime.getTime() &&
+	a.expiresAt.getTime() === b.expiresAt.getTime();
 
 /** The most sids one page of the closing listing asks for. */
 const RESUME_PAGE = 100;
@@ -531,15 +552,28 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	 * per-session stores' end mark first, an absent record adopted from the
 	 * user session, then the commit. What joined through the per-session
 	 * stores is not imported: the bridge steps read those stores when they
-	 * run. Answers the record and what the per-session stores listed after the
-	 * mark; `null` when there is neither a record nor a user session to close.
+	 * run. Answers the record, committed (`closing`) or not, and what the
+	 * per-session stores listed after the mark; `null` when there is neither a
+	 * record nor a user session to close.
+	 *
+	 * A commit that finds no live record — the session's end has passed on
+	 * the store's clock, before its record could be opened or since it was
+	 * read — has no record to save the work in, so the work runs here, in its
+	 * phases, over the record the commit would have saved: the read record's
+	 * participants, or none. Any item that fails throws, and the close
+	 * answers `unavailable`; a later close runs it all again, except once the
+	 * user session is deleted: a close then finds neither a record nor a user
+	 * session and answers `done`, and an entry the last phase left in the
+	 * subject's index lapses at its retention or goes with a subject-wide
+	 * revocation.
 	 */
 	const begin = async (
 		sid: string,
 		cause: SessionCloseCause,
 		record: SessionLifecycleRecord | undefined,
 	): Promise<{
-		readonly closing: Versioned<SessionLifecycleRecord>;
+		readonly closing?: Versioned<SessionLifecycleRecord>;
+		readonly record: SessionLifecycleRecord;
 		readonly bridged: BridgedClose;
 	} | null> => {
 		let end: { readonly sub: string; readonly expiresAt: Date } | undefined = record;
@@ -550,13 +584,53 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		}
 		const bridged = await bridge.close(sid, end.expiresAt);
 		if (record === undefined) readSessionOpenAnswer(await store.open(sid, end.sub, end.expiresAt));
-		const answer = readSessionCloseAnswer(await store.beginClose(sid, requestFor(cause)));
-		if (answer.outcome === "missing") {
-			throw new Error(
-				"no lifecycle record to close: the session's end has passed on the store's clock",
-			);
+		const request = requestFor(cause);
+		const answer = readSessionCloseAnswer(await store.beginClose(sid, request));
+		if (answer.outcome !== "missing") {
+			const closing = { value: answer.record, generation: answer.generation };
+			return { closing, record: answer.record, bridged };
 		}
-		return { closing: { value: answer.record, generation: answer.generation }, bridged };
+		const participants = record?.participants ?? [];
+		const unsaved: SessionLifecycleRecord = {
+			sub: end.sub,
+			state: "closing",
+			expiresAt: end.expiresAt,
+			participants,
+			close: {
+				cause,
+				// Read by nothing: no store holds this record, and the work reads
+				// only its cause.
+				closingAt: new Date(),
+				pending: closeItemsOf(request, participants),
+			},
+		};
+		await runUnsaved(sid, unsaved);
+		return { record: unsaved, bridged };
+	};
+
+	/**
+	 * Runs the work of `record`, which no store holds, in its phases: each
+	 * phase only once every item of the earlier ones has run. Throws when an
+	 * item fails, leaving the later phases unrun. Nothing records what ran, so
+	 * a retry runs it all again only while the user session, deleted in the
+	 * phase before the last, is still there.
+	 */
+	const runUnsaved = async (sid: string, record: SessionLifecycleRecord): Promise<void> => {
+		const limit = callLimit(CLOSE_CONCURRENCY);
+		let pending = record.close?.pending ?? [];
+		while (pending.length > 0) {
+			const batch = nextItems(pending, new Set());
+			const failed: string[] = [];
+			await eachSettled(batch, async (item) => {
+				if (!(await ran(sid, record, item, limit))) failed.push(item);
+			});
+			if (failed.length > 0) {
+				throw new Error(
+					`the close work of a session with no lifecycle record failed at ${failed.join(", ")}`,
+				);
+			}
+			pending = pending.filter((item) => !batch.includes(item));
+		}
 	};
 
 	/** Whether everything `request` names joined `sid`; written beside the per-session stores. */
@@ -575,11 +649,28 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		if ((await bridge.join(sid, request, session.expiresAt, read === null)) === "refused") {
 			return false;
 		}
-		if (read === null) readSessionOpenAnswer(await store.open(sid, session.sub, session.expiresAt));
+		// Adopting, the open must land for this session: a record it refuses
+		// belongs to another session of the sid, or is closing.
+		if (
+			read === null &&
+			readSessionOpenAnswer(await store.open(sid, session.sub, session.expiresAt)).outcome !==
+				"opened"
+		) {
+			return false;
+		}
 		for (const participant of participants) {
 			if (readSessionJoinAnswer(await store.join(sid, participant)).outcome !== "joined") {
 				return false;
 			}
+		}
+		// Adopting, the join opened the record itself: a close that completed
+		// since the read above, and whose closed record then left the store,
+		// let the open land. The close deletes the user session before it
+		// closes the record, so the session read first, still read now, was
+		// never closed; one gone, or another created under the sid since, was.
+		if (read === null) {
+			const again = await userSessionOf(sid);
+			if (again === null || !sameSession(again, session)) return false;
 		}
 		return true;
 	};
@@ -639,22 +730,29 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 					`session lifecycle: cause must be one of ${SESSION_CLOSE_CAUSES.join(", ")}`,
 				);
 			}
-			let closing: Versioned<SessionLifecycleRecord>;
+			// The committed record, whose work `finish` runs and records; absent
+			// when the work already ran with no record to save it in.
+			let closing: Versioned<SessionLifecycleRecord> | undefined;
+			let record: SessionLifecycleRecord;
 			let bridged: BridgedClose = { rps: [], federations: [] };
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
 				if (read !== null && read.value.state !== "active") {
 					closing = read;
+					record = read.value;
 				} else {
 					const begun = await begin(sid, cause, read?.value);
 					if (begun === null) return { outcome: "done", rps: [], federations: [] };
-					({ closing, bridged } = begun);
+					({ closing, record, bridged } = begun);
 				}
 			} catch (error) {
 				unavailable("close", sid, error);
 				return { outcome: "unavailable" };
 			}
-			const outcome = closing.value.state === "closed" ? "done" : await finish(sid, closing);
+			const outcome =
+				closing === undefined || closing.value.state === "closed"
+					? "done"
+					: await finish(sid, closing);
 			// What the per-session stores listed first: every join writes them
 			// before the record, so their order is the order of joining.
 			const union = (own: readonly string[], listed: readonly string[]): string[] => [
@@ -662,8 +760,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			];
 			return {
 				outcome,
-				rps: union(idsOf(closing.value, "rp"), bridged.rps),
-				federations: union(idsOf(closing.value, "federation"), bridged.federations),
+				rps: union(idsOf(record, "rp"), bridged.rps),
+				federations: union(idsOf(record, "federation"), bridged.federations),
 			};
 		},
 

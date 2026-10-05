@@ -1680,7 +1680,7 @@ The orchestration is core's (`createSubjectRevocationService`); the module
 that builds it ships in `@o3co/auth-provider-oauth`, because one session's
 teardown is `cascadeLogout` and core cannot import it without inverting the
 package dependency. It fills an optional `subjectRevocationService` slot and
-is installed explicitly — folding it into `oauthModule` would require the
+is installed explicitly — folding it into `oauthEndpointsModule` would require the
 whole session cascade of every deployment that serves `/oauth/token`. The slot
 is `eager`, because its consumer is the Store reading `handle.components` and
 not another module; without that the planner would build nothing. The two
@@ -2950,7 +2950,7 @@ route test is written first and watched failing.
    `findSubjectByFederatedIdentity?` and `federationGrants.identityLookup`;
    `federationGrants.consent.url`, each connection's `callbackURL` and
    `endpoints.login.url` (which core's schema leaves optional and only
-   `oauthModule` requires), all refused at boot when missing; the create and reauthorize routes; the
+   `oauthEndpointsModule` requires), all refused at boot when missing; the create and reauthorize routes; the
    browser half (connect, consent, callback) as a router of its own mounted
    after the session middleware; five audit types. The amendments are marked
    where they stand, in D6, D7, D8, D13, D16, D17 and D18. What this slice
@@ -2980,7 +2980,7 @@ route test is written first and watched failing.
    this slice: the drift tests require them of whichever slice adds a module
    or a slot.
    Done: the template composes the feature from `FEDERATION_GRANTS_ENABLED`
-   — the routes before `oauthModule`, one grant store and one intent store
+   — the routes before `oauthEndpointsModule`, one grant store and one intent store
    by two new switches (`federationGrantStore.adapter`,
    `federationGrantIntentStore.adapter`, declared in core as the switches
    before them), the two client slots off the shared socket, and the

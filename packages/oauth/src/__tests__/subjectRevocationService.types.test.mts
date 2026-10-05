@@ -50,6 +50,8 @@ const OPTIONAL = [
 	"logger",
 	// Whether grants are on and may be kept; absent, grants are off.
 	"federationGrantPolicy",
+	// Core's session lifecycle: where installed, each session is closed through it.
+	"sessionLifecycle",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

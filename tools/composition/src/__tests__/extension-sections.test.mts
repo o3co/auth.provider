@@ -284,7 +284,7 @@ describe("a path a section moved from, written in the operator's own layer", () 
 		);
 	});
 
-	it("oauth.deviceAuthorization: every key refused, naming its camelCase path under device-grant and no variable", async () => {
+	it("oauth.deviceAuthorization: every key refused, naming its camelCase path under device-grant and no variable, and store as removed", async () => {
 		const relocated = await refusedAs(
 			[
 				"oauth.deviceAuthorization {",
@@ -315,7 +315,7 @@ describe("a path a section moved from, written in the operator's own layer", () 
 				moved("polling-interval-seconds", "pollingIntervalSeconds"),
 				moved("rateLimit.limit", "rateLimit.limit"),
 				moved("rateLimit.windowSeconds", "rateLimit.windowSeconds"),
-				moved("store", "store"),
+				{ module: "device-grant", from: "oauth.deviceAuthorization.store", to: null },
 			]),
 		);
 	});

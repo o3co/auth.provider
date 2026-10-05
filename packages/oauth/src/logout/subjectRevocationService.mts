@@ -19,11 +19,15 @@
  *
  * It lives here, not in core, because tearing one session down is
  * `cascadeLogout`, an ordered four-store sequence this package owns, and core
- * cannot import it without inverting the package dependency.
+ * cannot import it without inverting the package dependency. Where core's
+ * session lifecycle is installed, each session is closed through it for
+ * `subject_revocation` instead: the close revokes the session's families and
+ * tells its relying parties.
  *
- * Installed explicitly, not folded into `oauthModule`: those routes work in a
- * deployment with no session stores at all, and requiring the whole cascade
- * from the module that serves `/oauth/token` would break such deployments.
+ * Installed explicitly, not folded into `oauthEndpointsModule`: those routes
+ * work in a deployment with no session stores at all, and requiring the whole
+ * cascade from the module that serves `/oauth/token` would break such
+ * deployments.
  *
  * It reads no configuration: the lifetimes come from the `oauthTokenSettings`
  * and `sessionCookiePolicy` slots, and whether grants are on and may be kept
@@ -84,6 +88,9 @@ const OPTIONAL = [
 	// provided while it is on. Absent, grants are off — unless a grant store
 	// is wired, which the provider refuses rather than read as off.
 	"federationGrantPolicy",
+	// Core's session lifecycle: where installed, each of the subject's
+	// sessions is closed through it rather than through `cascadeLogout`.
+	"sessionLifecycle",
 ] as const;
 
 /**
@@ -231,33 +238,53 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 					})
 				: deps.subjectRevocation;
 
+			const lifecycle = deps.sessionLifecycle;
 			return createSubjectRevocationService({
 				subjectSessionIndex: deps.subjectSessionIndex,
 				subjectRevocation,
-				// No `expiresAt`: this path reads no session, so the cascade lists
-				// the families and writes no ended mark. Without a
-				// `subjectRevocation` boundary, a code exchanged at the same moment
-				// can leave its family unrevoked; with one, the subject watermark
-				// covers it.
-				cascadeSession: async (sid: string) => ({
-					// The cascade answers with its own union, and its `step`
-					// is what makes a failure retryable. What this needs is the
-					// one bit the helper's loop branches on; the detail is
-					// already in the log the cascade wrote.
-					ok:
-						(
-							await cascadeLogoutUnmarked({
-								sid,
-								refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
-								federationTokenStore: deps.federationTokenStore,
-								userSessionStore: deps.userSessionStore,
-								sessionRPRegistry: deps.sessionRPRegistry,
-								sessionFamilyIndex: deps.sessionFamilyIndex,
-								sessionFederationIndex: deps.sessionFederationIndex,
-								...(deps.logger === undefined ? {} : { logger: deps.logger }),
+				// Where core's session lifecycle is installed, its close for
+				// `subject_revocation`, run after the boundary is stamped: it
+				// revokes the session's families, a code exchanged after its
+				// closing commit included, and tells the relying parties. Only
+				// `done` counts the session revoked; a `pending` close has work
+				// left, and the sid stays in the index for a retry, which resumes
+				// or restarts its close, since the close removes the subject's
+				// index entry last. A close that finds neither a lifecycle record
+				// nor a user session runs no work and answers `done`; the subject
+				// boundary covers that sid's tokens, and its per-session entries
+				// lapse. The revocation waits on each session's back-channel
+				// notices, sessions in sequence, so unreachable relying parties
+				// slow it and leave it `complete: false` until a retry.
+				//
+				// Otherwise `cascadeLogout`, with no `expiresAt`: this path reads
+				// no session, so the cascade lists the families and writes no
+				// ended mark. Without a `subjectRevocation` boundary, a code
+				// exchanged at the same moment can leave its family unrevoked;
+				// with one, the subject watermark covers it.
+				cascadeSession:
+					lifecycle !== undefined
+						? async (sid: string) => ({
+								ok: (await lifecycle.close(sid, "subject_revocation")).outcome === "done",
 							})
-						).outcome === "done",
-				}),
+						: async (sid: string) => ({
+								// The cascade answers with its own union, and its `step`
+								// is what makes a failure retryable. What this needs is the
+								// one bit the helper's loop branches on; the detail is
+								// already in the log the cascade wrote.
+								ok:
+									(
+										await cascadeLogoutUnmarked({
+											sid,
+											refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+											federationTokenStore: deps.federationTokenStore,
+											userSessionStore: deps.userSessionStore,
+											sessionRPRegistry: deps.sessionRPRegistry,
+											sessionFamilyIndex: deps.sessionFamilyIndex,
+											sessionFederationIndex: deps.sessionFederationIndex,
+											...(deps.logger === undefined ? {} : { logger: deps.logger }),
+										})
+									).outcome === "done",
+							}),
 				// The boundary must outlive the longest-lived thing it covers,
 				// which this module can read and the service cannot: the token
 				// lifetimes from `oauthTokenSettings` and the session's from

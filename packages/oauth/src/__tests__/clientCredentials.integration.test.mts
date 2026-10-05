@@ -334,7 +334,7 @@ describe("client_credentials — private_key_jwt client authentication at /oauth
 		// The coupling a composition inherits when it installs a seen-set for
 		// another consumer, such as DPoP's proofs. Same client, same keys, same
 		// assertion shape; only the seen-set differs. (Discovery follows the
-		// same condition: oauthModule advertises private_key_jwt iff a
+		// same condition: oauthEndpointsModule advertises private_key_jwt iff a
 		// replaySeenSet is wired — pinned in discovery-contribution.test.mts.)
 		const send = async (app: express.Express) =>
 			request(app)

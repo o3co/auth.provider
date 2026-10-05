@@ -348,6 +348,9 @@ describe("an upstream IdP's amr counts only for a federation that trusts it", ()
 			federation: FEDERATION,
 			upstreamAmr: UPSTREAM_AMR,
 			mfaAt: undefined,
+			// The partner reports no `auth_time`, and the federation does not let
+			// its callback stand for one (`callbackMeetsFreshness`, false by default).
+			upstreamAuthTime: null,
 		});
 	});
 
@@ -373,6 +376,9 @@ describe("an upstream IdP's amr counts only for a federation that trusts it", ()
 			federation: FEDERATION,
 			upstreamAmr: undefined,
 			mfaAt: undefined,
+			// The partner reports no `auth_time`, and the federation does not let
+			// its callback stand for one (`callbackMeetsFreshness`, false by default).
+			upstreamAuthTime: null,
 		});
 	});
 

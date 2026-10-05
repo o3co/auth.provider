@@ -92,7 +92,7 @@ function makeStubRouteCollector() {
 // ---------------------------------------------------------------------------
 
 describe("validateManifests — a module factory listed without being called", () => {
-	// A factory such as `deviceGrantModule({ config })` is assignable to
+	// A factory such as `lateModule({ config })` is assignable to
 	// `Module` uncalled: a function has a `name`, and that is the one field
 	// `Module` requires. Listed that way it would contribute nothing — no
 	// grant, no route, no check — and boot would succeed without a word.

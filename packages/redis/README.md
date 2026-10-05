@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -486,7 +486,7 @@ Each adapter ships in up to two forms:
 | `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redis-federation-token-store` | `redisFederationTokenStoreBuilder` |
 | `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redis-federation-grant-store` (`keyPrefix`, `listingAllowanceMs`, `tombstoneRetention`, `encryptionMode`, `encryptionKeys`) | — |
 | `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redis-federation-grant-intent-store` (`keyPrefix`, default `fg:`) | — |
-| `redisRateLimiterModule` | `rateLimiterClient`, `rateLimitBudgetResolver` | `rateLimiter` | `redis-rate-limiter` | `redisRateLimiterBuilder` |
+| `redisRateLimiterModule` | `rateLimiterClient` | `rateLimiter` | `redis-rate-limiter` | `redisRateLimiterBuilder` |
 | `redisAttemptCounterModule` | `attemptCounterClient` | `attemptCounter` | `redis-attempt-counter` (`keyPrefix`, default `attempt:`) | — |
 | `redisCodeRepositoryModule` | `codeRepositoryClient` | `codeRepository` | `redisCodeRepository` | `redisCodeRepositoryBuilder` |
 | `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redis-device-code-store` | `redisDeviceCodeStoreBuilder` |
@@ -507,14 +507,13 @@ the first command.
 
 The rate limiter takes a key's budget from core's one lookup,
 `createRateLimitBudgetLookup`: its own `redis-rate-limiter.limits` entry for the
-key's prefix, else the budget the prefix's owning module contributed
-(`rateLimitBudgetResolver`, read and checked at each check), else its
-`defaultLimit`, which it declares (`RateLimiter.defaultLimit`). Its `limits`
-may not name `login` or `device_verification`, a verifier's own attempt limit
-set at `session.rateLimit.login` and `device-grant.rateLimit`: the section
-refuses such an entry, and the contributed budget applies in its place.
-`redisRateLimiterBuilder` reads no contributed budget, and takes its `limits`
-as given.
+key's prefix, else its `defaultLimit`, which it declares
+(`RateLimiter.defaultLimit`). The modules that key a limiter claim their
+prefixes with no budget of their own, so neither the module nor
+`redisRateLimiterBuilder`, which takes its `limits` as given, reads one. Its
+`limits` may not name `login` or `device_verification`, a verifier's own
+attempt limit set at `session.rateLimit.login` and `device-grant.rateLimit`
+and counted on the attempt counter: the section refuses such an entry.
 `redisRateLimiterModule` answers `redis-rate-limiter.failMode`, its own key, as
 the limiter's outage policy (`RateLimiter.failMode`), which the guard applies
 while Redis cannot answer; a value other than `"open"` or `"closed"` refuses

@@ -611,6 +611,9 @@ describe("a WebAuthn registration under mfa.mode = required", () => {
 		});
 		const page = browser();
 		const sid = await sidOfLogin(set, async () => {
+			// The IdP says when it authenticated the user: now, as a real login's
+			// id_token does; a first binding reads that as the recent primary.
+			set.upstreams.oidc.idTokenClaims.auth_time = Math.floor(Date.now() / 1000);
 			const start = await page.get(set.app, "/session/oauth/federation/oidc");
 			expect(start.status).toBe(302);
 			const answer = set.upstreams.oidc.authorize(start.headers.location as string);

@@ -28,14 +28,14 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 - the stores themselves — core's memory modules and `@o3co/auth-provider-redis`;
 - the upstream authorization and refresh calls — the federation adapter's delegated-authorization capability, which only `@o3co/auth-provider-federation-oidc` implements ([`docs/offline-access.md`](docs/offline-access.md));
 - the consent page — the deployment's;
-- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`; and the issuer every URL here is built on — the oauth module's, read through the `oauthTokenSettings` slot, which the module requires while the feature is on: a composition without `oauthModule` fills it itself ([#728](https://github.com/o3co/auth.provider/issues/728));
+- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`; and the issuer every URL here is built on — the oauth module's, read through the `oauthTokenSettings` slot, which the module requires while the feature is on: a composition without `oauthEndpointsModule` fills it itself ([#728](https://github.com/o3co/auth.provider/issues/728));
 - the federations a connection names — `core.federations`, read through the `federationSettings` slot core fills for every composition: whether each is configured and on, and the issuer and client id a grant's identity is pinned to;
 - the browser session, login and the CSRF policy — `@o3co/auth-provider-session` (the `session-middleware` route, the login page through the `loginEntry` slot its session module provides, and the policy the consent answer is held to through its `csrfGuard` slot);
 - whether the session behind the browser's cookie may go on — core's session admission (`admitSession`, [the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)): the durable session, the subject's sessions boundary and the registered session requirements. The browser half asks it at every step and keeps the flow's own checks ([below](#the-browser-half-connect-and-consent)).
 
 **Why a separate package.** What these routes disclose is an *upstream* access token, held on a user's standing consent, for a backend the user is not present at. Behind `/oauth/token` it would inherit grant dispatch, `token.issued`, this provider's token minting and a sender-constraint policy that cannot bind a credential another issuer minted; inside the oauth package it would make an optional feature part of every deployment's routing surface, so enabling ordinary OAuth would acquire this lifecycle by accident. The domain and the store ports are core's so that a store adapter depends on core and never on these routes.
 
-**Why it depends on `@o3co/auth-provider-oauth`.** For one thing, `createClientAuthMiddleware`: the five client routes authenticate a confidential client exactly as `/oauth/token` does, `private_key_jwt` included, and their client-authentication `401`s carry that middleware's wording ([below](#post-oauthfederation-grantsgrantidtoken)). It is a required peer, so the package is installed even by a deployment that mounts no `oauthModule` — which is an ordinary thing to do ([below](#beside-oauthmodule)). Nothing in oauth imports this package.
+**Why it depends on `@o3co/auth-provider-oauth`.** For one thing, `createClientAuthMiddleware`: the five client routes authenticate a confidential client exactly as `/oauth/token` does, `private_key_jwt` included, and their client-authentication `401`s carry that middleware's wording ([below](#post-oauthfederation-grantsgrantidtoken)). It is a required peer, so the package is installed even by a deployment that mounts no `oauthEndpointsModule` — which is an ordinary thing to do ([below](#beside-oauthendpointsmodule)). Nothing in oauth imports this package.
 
 ## Install
 
@@ -68,7 +68,7 @@ const app = await createApp({
     // …and the session modules you already run: the browser half mounts after
     // `session-middleware`, admits the durable session behind the cookie, and
     // holds the consent answer to the session module's `csrfGuard`.
-    // And `oauthModule`, which provides the `oauthTokenSettings` slot the
+    // And `oauthEndpointsModule`, which provides the `oauthTokenSettings` slot the
     // routes take their issuer from; a composition without it puts the slot
     // in `bootstrapComponents`.
   ],
@@ -967,9 +967,9 @@ A flow that ended without a grant — declined, the wrong account, a session to
 refresh, a stale link — emits `federation.grant.authorization_failed` with a
 fixed outcome and only the facts established by then.
 
-## Beside `oauthModule`
+## Beside `oauthEndpointsModule`
 
-These routes live under `/oauth`, where `oauthModule` mounts its own router.
+These routes live under `/oauth`, where `oauthEndpointsModule` mounts its own router.
 That router parses the bodies of its own routes only (the paths in its
 [Endpoints](../oauth/README.md#endpoints) table), so a request to
 `/oauth/federation-grants/...` reaches this package's router with its body
@@ -993,7 +993,7 @@ this package's own:
   `federation_grants_unexpected_error` with `site: "federation_grants"`, the
   request's `correlationId` and the error's projection (`err`).
 
-So the list order of `federationGrantsModules` and `oauthModule` does not
+So the list order of `federationGrantsModules` and `oauthEndpointsModule` does not
 matter. This package declares no ordering edge against the OAuth router — it
 needs none, and one would refuse to boot for every deployment that runs
 federation grants *without* `/oauth/token`, which is a perfectly ordinary

@@ -339,7 +339,7 @@ export const BUILTIN_CONTRIBUTION_KINDS: ReadonlyMap<string, "record" | "list"> 
 
 /**
  * A `modules` entry that is a function is a module factory listed without
- * being called (`deviceGrantModule` for `deviceGrantModule({ config })`).
+ * being called (`someModule` for `someModule(options)`).
  * `Module` requires only `name`, which a function has, so the compiler
  * accepts it, and every later check would read it as a manifest that
  * declares nothing: boot would succeed with the module's grants, routes and
