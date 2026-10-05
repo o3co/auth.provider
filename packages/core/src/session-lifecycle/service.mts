@@ -460,6 +460,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		participants: readonly SessionParticipant[],
 	): Promise<boolean> => {
 		const read = readVersionedSessionLifecycle(await store.read(sid));
+		// A record that exists is not compared with the user session's subject:
+		// the caller admitted the session first, and admission refuses a claim
+		// whose subject is not the record's.
 		if (read !== null && read.value.state !== "active") return false;
 		const session = await userSessionOf(sid);
 		if (session === null) return false;
@@ -548,6 +551,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			checkSessionLifecycleKey(sid, "sid");
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
+				// A logout through the per-session stores alone leaves a record
+				// active until it lapses; such a session is not live once its user
+				// session is deleted, which the read below answers.
 				if (read !== null && read.value.state !== "active") return { outcome: "not_live" };
 				const session = await userSessionOf(sid);
 				return session === null ? { outcome: "not_live" } : { outcome: "live", session };
