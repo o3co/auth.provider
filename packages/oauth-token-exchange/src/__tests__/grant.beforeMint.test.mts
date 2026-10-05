@@ -459,4 +459,36 @@ describe("token exchange — the issued token's iat is the instant fixed before 
 		expect(claims.iat).toBe(now);
 		expect(claims.exp).toBe(now + 60);
 	});
+
+	it("measures the lifetime from that instant, and mints nothing already expired", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const start = new Date("2026-10-05T00:00:00.000Z");
+		vi.setSystemTime(start);
+		const now = Math.floor(Date.now() / 1000);
+		const advance = allowAfter(() => {
+			vi.setSystemTime(Date.now() + 5_000);
+		});
+		const subject_token = await signSelfIssuedAccessToken({});
+		const logger = spyLogger();
+
+		const live = await exchange(buildGrant({ grantPolicy: advance, logger }), {
+			subject_token,
+			expires_in: "10",
+		});
+		const claims = decodeJwt(tokensOf(live).access_token);
+		expect([claims.iat, claims.exp]).toEqual([now, now + 10]);
+		expect(tokensOf(live).expires_in).toBe(10);
+
+		vi.setSystemTime(start);
+		const spent = await exchange(buildGrant({ grantPolicy: advance, logger }), {
+			subject_token,
+			expires_in: "5",
+		});
+		expect(spent).toEqual(outage("issued token lifetime elapsed during the exchange"));
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ clientId: "client-a", expiresIn: 5, elapsed: 5 },
+			"token_exchange_lifetime_elapsed",
+		);
+	});
 });

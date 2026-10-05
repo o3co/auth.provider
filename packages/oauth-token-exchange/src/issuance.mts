@@ -24,6 +24,7 @@
 import {
 	type AccessTokenLifetime,
 	type Confirmation,
+	consoleLogger,
 	formatObject,
 	type GrantContext,
 	type GrantDependencies,
@@ -54,7 +55,7 @@ export interface Issuance {
 }
 
 export async function issueAccessToken(
-	deps: Pick<GrantDependencies, "keyStore">,
+	deps: Pick<GrantDependencies, "keyStore" | "logger">,
 	ctx: GrantContext,
 	{ defaultExpiresIn, maxExpiresIn }: AccessTokenLifetime,
 	{
@@ -90,14 +91,30 @@ export async function issueAccessToken(
 	// `iat`/`exp` carry, so `exp` cannot pass the subject's; the expiry is judged
 	// at the minting clock, so a subject that expired while the exchange ran is
 	// refused.
+	const mintedAt = Math.floor(Date.now() / 1000);
 	const subjectExpiry = subjectValidated.claims.exp;
 	if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
 		// `<= 0` includes a token expiring within this second: capping would mint a dead
 		// token, so refuse instead.
-		if (Math.floor(subjectExpiry - Math.floor(Date.now() / 1000)) <= 0) {
+		if (Math.floor(subjectExpiry - mintedAt) <= 0) {
 			return invalidRequest("subject_token has expired");
 		}
 		expiresIn = Math.min(expiresIn, Math.floor(subjectExpiry - issuedAt));
+	}
+	// The lifetime runs from the issuance instant: one the exchange itself has
+	// used up would be minted already expired, so it is refused, and retryable.
+	if (issuedAt + expiresIn <= mintedAt) {
+		(deps.logger ?? consoleLogger).warn(
+			{ clientId: client.clientId, expiresIn, elapsed: mintedAt - issuedAt },
+			"token_exchange_lifetime_elapsed",
+		);
+		return {
+			result: {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "issued token lifetime elapsed during the exchange",
+			},
+		};
 	}
 	// A subject token without `exp` leaves the lifetime above standing: `exp` is a
 	// property of the presented credential, and a validator returning none asserts a
