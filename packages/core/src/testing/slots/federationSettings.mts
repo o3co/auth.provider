@@ -29,6 +29,7 @@
 import assert from "node:assert/strict";
 import type { ConfiguredFederation, FederationSettings } from "../../federations/settings.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
+import { CALLBACK_MEETS_FRESHNESS_DEFAULT } from "../../user-sessions/authentication.mjs";
 import { unfrozenPath } from "./shared.mjs";
 
 export interface FederationSettingsContractInput {
@@ -176,7 +177,8 @@ export type TestFederationEntry = Pick<ConfiguredFederation, "type"> &
  * The settings for the entries a test names, in its order, frozen and
  * inheriting nothing; `{}` when it names none. An entry is enabled unless it
  * says otherwise, its upstream `amr` does not count unless it says so, its
- * callback alone meets no freshness ask unless it says so, and an
+ * callback meets a freshness ask as core's default says unless it says
+ * otherwise, and an
  * enabled one without a `callbackURL` gets
  * `https://auth.test/session/oauth/federation/<name>/callback`; `issuer` and
  * `clientId` only when given. Only the members of `ConfiguredFederation` are
@@ -195,7 +197,7 @@ export function createTestFederationSettings(
 			type: entry.type,
 			enabled,
 			trustsUpstreamAmr: entry.trustsUpstreamAmr ?? false,
-			callbackMeetsFreshness: entry.callbackMeetsFreshness ?? false,
+			callbackMeetsFreshness: entry.callbackMeetsFreshness ?? CALLBACK_MEETS_FRESHNESS_DEFAULT,
 			...(callbackURL === undefined ? {} : { callbackURL }),
 			...(entry.issuer === undefined ? {} : { issuer: entry.issuer }),
 			...(entry.clientId === undefined ? {} : { clientId: entry.clientId }),

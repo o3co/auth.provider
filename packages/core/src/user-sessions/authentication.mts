@@ -571,7 +571,7 @@ export function federationTrustsUpstreamAmr(config: unknown, name: string): bool
  * whose upstream shows no `auth_time` meets no freshness ask until an
  * operator says its callback does.
  */
-const CALLBACK_MEETS_FRESHNESS_DEFAULT = false;
+export const CALLBACK_MEETS_FRESHNESS_DEFAULT = false;
 
 /**
  * Whether federation `name`'s callback alone meets a freshness ask
