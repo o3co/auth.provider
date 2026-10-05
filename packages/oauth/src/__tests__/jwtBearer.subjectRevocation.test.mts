@@ -22,6 +22,7 @@
 
 import {
 	type AppConfig,
+	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
 	type AssertionVerificationResult,
 	type AssertionVerifier,
 	createSymmetricKeyStore,
@@ -75,11 +76,18 @@ const build = (opts: {
 	grantPolicy?: GrantPolicyHook;
 	logger?: unknown;
 	userRepository?: UserRepository;
+	/** The assertion's expiry; five minutes from now unless given (`null` reports none). */
+	expiresAt?: number | null;
 }) =>
 	createJwtBearerGrant({
 		config,
 		keyStore,
-		assertionVerifier: verifierFor(opts.issuedAt === undefined ? {} : { issuedAt: opts.issuedAt }),
+		assertionVerifier: verifierFor({
+			...(opts.issuedAt === undefined ? {} : { issuedAt: opts.issuedAt }),
+			...(opts.expiresAt === null
+				? {}
+				: { expiresAt: opts.expiresAt ?? Math.floor(Date.now() / 1000) + 300 }),
+		}),
 		userRepository: opts.userRepository ?? userRepository,
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
@@ -212,7 +220,7 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 
 	it("answers 503 for a boundary that is not a valid date, even for an issue time long before it", async () => {
 		const { result } = await build({
-			issuedAt: 1,
+			issuedAt: BOUNDARY_SECOND - 3600,
 			subjectRevocation: revocationAt(() => new Date(Number.NaN)),
 		}).handle(ctx());
 		expect(result.status).toBe(503);
@@ -275,6 +283,67 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 		}
 	});
 
+	describe("an assertion's lifetime, with subjectRevocation wired", () => {
+		const SEVEN_DAYS = 7 * 86_400;
+		const now = () => Math.floor(Date.now() / 1000);
+
+		it("refuses a 7-day assertion from a custom verifier while a boundary is in force and after it lapses, before asking the Store", async () => {
+			for (const boundary of [BOUNDARY, null]) {
+				const info = vi.fn();
+				const authenticateByToken = vi.fn(async () => ({ id: "user-42" }));
+				const issuedAt = now() - 60;
+				const { result } = await build({
+					issuedAt,
+					expiresAt: issuedAt + SEVEN_DAYS,
+					subjectRevocation: revocationAt(() => boundary),
+					userRepository: { authenticate: async () => null, authenticateByToken } as never,
+					logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
+				}).handle(ctx());
+				expect(result).toEqual(refused);
+				expect(authenticateByToken).not.toHaveBeenCalled();
+				expect(info).toHaveBeenCalledWith(
+					expect.objectContaining({ kind: "stub" }),
+					"jwt_bearer_assertion_lifetime_exceeded",
+				);
+			}
+		});
+
+		it("refuses an assertion that reports no expiry", async () => {
+			for (const boundary of [BOUNDARY, null]) {
+				const { result } = await build({
+					issuedAt: now() - 60,
+					expiresAt: null,
+					subjectRevocation: revocationAt(() => boundary),
+				}).handle(ctx());
+				expect(result).toEqual(refused);
+			}
+		});
+
+		it("accepts an assertion that lives exactly the limit, and refuses one a second longer", async () => {
+			const issuedAt = now() - 60;
+			const at = await build({
+				issuedAt,
+				expiresAt: issuedAt + ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
+				subjectRevocation: revocationAt(() => BOUNDARY),
+			}).handle(ctx());
+			expect(at.result.status).toBe(200);
+			const over = await build({
+				issuedAt,
+				expiresAt: issuedAt + ASSERTION_MAX_LIFETIME_LIMIT_SECONDS + 1,
+				subjectRevocation: revocationAt(() => BOUNDARY),
+			}).handle(ctx());
+			expect(over.result).toEqual(refused);
+		});
+
+		it("leaves a long-lived or expiry-less assertion alone without subjectRevocation wired", async () => {
+			const issuedAt = now() - 60;
+			for (const expiresAt of [issuedAt + SEVEN_DAYS, null]) {
+				const { result } = await build({ issuedAt, expiresAt }).handle(ctx());
+				expect(result.status).toBe(200);
+			}
+		});
+	});
+
 	it("reads the boundary after the grant policy has answered", async () => {
 		// A revocation stamped while the policy is evaluated is seen.
 		let boundary: Date | null = null;
@@ -331,7 +400,10 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 		const grant = factory?.({
 			config: moduleConfig,
 			keyStore,
-			assertionVerifier: verifierFor({ issuedAt: BOUNDARY_SECOND - 60 }),
+			assertionVerifier: verifierFor({
+				issuedAt: BOUNDARY_SECOND - 60,
+				expiresAt: Math.floor(Date.now() / 1000) + 300,
+			}),
 			userRepository,
 			subjectRevocation: revocationAt(() => BOUNDARY),
 		});

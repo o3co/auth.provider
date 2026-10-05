@@ -24,6 +24,7 @@ import type {
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import {
+	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
 	auditErrorText,
 	boundPolicyAudience,
 	deriveAudienceFromResources,
@@ -76,9 +77,11 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *   boundary covers (core's `subjectBoundaryCovers`, `verifyJwt`'s rule) →
  *   the same uniform `invalid_grant`; an unreadable boundary → `503
  *   temporarily_unavailable`. The boundary is the last read before signing.
- *   `iat` is required whether or not a boundary is in force: an issuer
- *   entry's lifetime ceiling is measured from it, and only that ceiling
- *   keeps an assertion from outliving the boundary that covers it.
+ *   `iat` is required whether or not a boundary is in force, and so is
+ *   `expiresAt` no more than `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS` after
+ *   it, whichever verifier answered: a boundary is kept that long, so a
+ *   longer-lived assertion would outlive the boundary that covers it. Each
+ *   is the same uniform `invalid_grant`, before the Store is asked.
  */
 /**
  * What the jwt-bearer grant reads. The verifier and repository are required
@@ -151,19 +154,20 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				};
 			}
 			// See the header: with a revocation boundary to honour, an assertion
-			// must say when it was issued. Refused before the Store is asked.
-			if (deps.subjectRevocation !== undefined && !isNumericDate(verified.issuedAt)) {
-				deps.logger?.info(
-					{ kind: assertionVerifier.kind, issuer: verified.issuer },
-					"jwt_bearer_assertion_issued_at_missing",
-				);
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription: "assertion did not verify",
-					},
-				};
+			// must say when it was issued and live no longer than a boundary is
+			// kept. Refused before the Store is asked.
+			if (deps.subjectRevocation !== undefined) {
+				const unbounded = unboundedAssertion(verified.issuedAt, verified.expiresAt);
+				if (unbounded !== undefined) {
+					deps.logger?.info({ kind: assertionVerifier.kind, issuer: verified.issuer }, unbounded);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "assertion did not verify",
+						},
+					};
+				}
 			}
 
 			let user: Awaited<ReturnType<UserRepository["authenticateByToken"]>>;
@@ -469,6 +473,26 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 		},
 	};
 };
+
+/**
+ * Why an assertion cannot be held to a revocation boundary, as its log event,
+ * or `undefined` when it can: no usable issue time, no finite expiry, or a
+ * lifetime past the longest a boundary is kept.
+ */
+function unboundedAssertion(
+	issuedAt: unknown,
+	expiresAt: unknown,
+):
+	| "jwt_bearer_assertion_issued_at_missing"
+	| "jwt_bearer_assertion_expiry_missing"
+	| "jwt_bearer_assertion_lifetime_exceeded"
+	| undefined {
+	if (!isNumericDate(issuedAt)) return "jwt_bearer_assertion_issued_at_missing";
+	if (!isNumericDate(expiresAt)) return "jwt_bearer_assertion_expiry_missing";
+	return expiresAt - issuedAt > ASSERTION_MAX_LIFETIME_LIMIT_SECONDS
+		? "jwt_bearer_assertion_lifetime_exceeded"
+		: undefined;
+}
 
 /**
  * Intersect what the request asks for, what the assertion authorizes, and what

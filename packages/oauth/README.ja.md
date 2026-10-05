@@ -887,9 +887,9 @@ const assertionVerifier = createRegistryAssertionVerifier({
 
 ### サブジェクトの失効は、それより前に発行されたアサーションに及ぶ
 
-`subjectRevocation` が配線されていると、すべてのアサーションは `iat` を持たなければならない。境界が有効かどうかにかかわらず、検証器が使える `issuedAt` を報告しないアサーションは拒否する（`jwt_bearer_assertion_issued_at_missing` としてログに出す）。発行者エントリーの有効期間の上限（`maxLifetimeSeconds`、`exp − iat`）はそこから測られ、アサーションがそれを覆う境界より長く生きないようにするのはその上限だけだからである。そのうえでグラントは、署名前の最後の読み取りとして、core の `subjectBoundaryCovers` を通じて解決したサブジェクトの失効境界を読む。アサーションの `issuedAt` がその境界以前なら、`verifyJwt` がトークンの `iat` に適用するのと同じ規則と許容幅で拒否する（`jwt_bearer_assertion_revoked` としてログに出す）。どちらの拒否も一律の `invalid_grant` / `assertion did not verify` である。境界を読めないときは `503 temporarily_unavailable`（`jwt_bearer_revocation_boundary_unavailable`）である。`subjectRevocation` が無ければ何も変わらない。
+`subjectRevocation` が配線されていると、すべてのアサーションは `iat` を持たなければならない。境界が有効かどうかにかかわらず、検証器が使える `issuedAt` を報告しないアサーションは拒否する（`jwt_bearer_assertion_issued_at_missing` としてログに出す）。どの検証器が答えたかにかかわらず、`expiresAt` を報告しないもの（`jwt_bearer_assertion_expiry_missing`）と、`expiresAt − issuedAt` が 1 日（core の `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`）を超えるもの（`jwt_bearer_assertion_lifetime_exceeded`）も拒否する。サブジェクトの境界はその長さだけ保持されるので、それより長く生きるアサーションは、それを覆う境界より長く残ってしまうからである。これらの確認はストアに尋ねる前に行う。そのうえでグラントは、署名前の最後の読み取りとして、core の `subjectBoundaryCovers` を通じて解決したサブジェクトの失効境界を読む。アサーションの `issuedAt` がその境界以前なら、`verifyJwt` がトークンの `iat` に適用するのと同じ規則と許容幅で拒否する（`jwt_bearer_assertion_revoked` としてログに出す）。どちらの拒否も一律の `invalid_grant` / `assertion did not verify` である。境界を読めないときは `503 temporarily_unavailable`（`jwt_bearer_revocation_boundary_unavailable`）である。`subjectRevocation` が無ければ何も変わらない。
 
-- **独自の `AssertionVerifier` は `issuedAt` を報告する。** `subjectRevocation` が配線されていると、グラントはそれを報告しないアサーションをすべて拒否する。`createRegistryAssertionVerifier` と `createJwtAssertionVerifier` は、アサーションが `iat` を持てば常にそれを報告する。
+- **独自の `AssertionVerifier` は `issuedAt` と `expiresAt` を報告する。** `subjectRevocation` が配線されていると、グラントはどちらかを報告しないアサーションと、1 日より長く生きるアサーションをすべて拒否する。`createRegistryAssertionVerifier` と `createJwtAssertionVerifier` は、アサーションが `iat` を持てば常にそれを報告する。
 - サブジェクトの失効は、上流の発行者の資格情報を失効させない。その発行者が失効の後に署名したアサーションは新しい認証であり、受け入れられる。
 
 ## テスト
