@@ -21,7 +21,9 @@
  * key at every level, naming its path, with every default from the package's
  * `config/reference.conf`. The module fills the `webauthnConfig` slot from it
  * and names the slot `authoritative`; it reads the issuer's token settings
- * from the `oauthTokenSettings` slot, which it requires.
+ * from the `oauthTokenSettings` slot, which it requires. Every key the schema
+ * names reaches the slot, and every key the module declares removed refuses
+ * the boot.
  */
 
 import { fileURLToPath } from "node:url";

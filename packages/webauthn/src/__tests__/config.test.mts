@@ -486,9 +486,9 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 });
 
 /**
- * Every number setting is read as a whole number in decimal digits, held to the
- * range core's schema holds the same key to: a typo such as `"1e3"` or `"0x10"`,
- * or an exported-but-empty variable, fails boot naming the key.
+ * Every number setting is read as a whole number in decimal digits: a typo such
+ * as `"1e3"` or `"0x10"`, or an exported-but-empty variable, fails boot naming
+ * the key.
  */
 describe("webauthnConfigSchema reads each number setting in decimal digits", () => {
 	const KEYS: ReadonlyArray<
