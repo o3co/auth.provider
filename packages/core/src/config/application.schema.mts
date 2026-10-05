@@ -150,13 +150,6 @@ export const wholeNumberInRangeFromEnv = (min: number, max?: number) => {
 	return wholeNumberFromEnv(max === undefined ? bounds : bounds.max(max, { error }));
 };
 
-const rateLimitSpecSchema = z.object({
-	limit: wholeNumberInRangeFromEnv(1),
-	// One year at most, the ceiling of every duration here: a window past the
-	// Date range is one the limiter adapters refuse when they are built.
-	windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
-});
-
 const jwtSchemaBase = z.object({
 	// Required: the issuer belongs to the deployment, never to a request. An
 	// `iss` derived from the Host header is caller-controlled behind a trusted
@@ -516,12 +509,13 @@ const FEDERATION_TYPE_REQUIRED =
 
 /**
  * One federation in `core.federations`. Core owns `enabled`, `type`,
- * `trustUpstreamAmr` and `callbackURL`, and boot strips them before the
- * schema of the entry's type sees the entry; every other key is the type's,
- * kept as written here, beside them: an entry is flat. Every entry names its
- * `type`, enabled or not: the module registering that type under
- * `federationTypes` is the one that handles it. `callbackURL` is not declared
- * here: boot requires it of an entry it dispatches by type.
+ * `trustUpstreamAmr`, `callbackMeetsFreshness` and `callbackURL`, and boot
+ * strips them before the schema of the entry's type sees the entry; every
+ * other key is the type's, kept as written here, beside them: an entry is
+ * flat. Every entry names its `type`, enabled or not: the module registering
+ * that type under `federationTypes` is the one that handles it.
+ * `callbackURL` is not declared here: boot requires it of an entry it
+ * dispatches by type.
  */
 const federationEntrySchema = z
 	.object({
@@ -534,6 +528,10 @@ const federationEntrySchema = z
 		// matched for `acr`. Absent is `false`: the values are kept apart
 		// (`authentication.upstreamAmr`).
 		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
+		// Whether this federation's callback alone meets a freshness ask
+		// (`prompt=login`, `max_age`) when the upstream shows no `auth_time`.
+		// Read by `federationCallbackMeetsFreshness`, which supplies the default.
+		callbackMeetsFreshness: coerceBooleanFromEnv.optional(),
 	})
 	.passthrough();
 
@@ -701,8 +699,8 @@ export const CoreConfigSchema = z.object({
 			// registration or a request supplies; its shape is the policy's own
 			// (`net/outbound-policy.mts`).
 			outbound: OutboundSectionSchema.optional(),
-			// The session lifecycle's sweep of pending closes, off unless
-			// written. Read by `readSessionLifecycleSweepIntervalMs` alone, as
+			// The session lifecycle's sweep of pending closes: every 60 seconds
+			// unless written, 0 turning it off. Read by `readSessionLifecycleSweepIntervalMs` alone, as
 			// core's numbers are read.
 			sessionLifecycle: z
 				.object({ sweepIntervalSeconds: z.unknown().optional() })
@@ -869,14 +867,10 @@ export const fullSectionsSchema = z.object({
 			challengeTtlMs: wholeNumberInRangeFromEnv(1).optional(),
 			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
 			userVerification: z.enum(["required", "preferred", "discouraged"]).optional(),
-			// Presence-only: a removed key, kept so a root that parses with
-			// `AppConfigSchema` before boot still hands it to the removed-key refusal.
+			// Presence-only: removed keys, kept so a root that parses with
+			// `AppConfigSchema` before boot still hands them to the removed-key refusal.
 			allowCredentialsForKnownUser: z.unknown().optional(),
-			rateLimit: z
-				.object({
-					authenticationOptions: rateLimitSpecSchema.optional(),
-				})
-				.optional(),
+			rateLimit: z.unknown().optional(),
 		})
 		.optional(),
 	// Presence-only: the path the audit sink's selection (the composition

@@ -232,6 +232,7 @@ describe("core.federations — dispatched by type", () => {
 				corp: enabledEntry("acme", "corp", {
 					issuer: "https://corp.example",
 					trustUpstreamAmr: true,
+					callbackMeetsFreshness: true,
 				}),
 				partner: enabledEntry("acme", "partner", { issuer: "https://partner.example" }),
 			}),

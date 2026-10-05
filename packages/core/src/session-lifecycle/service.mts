@@ -17,17 +17,19 @@
 /**
  * The session lifecycle service, the one writer of `SessionLifecycleStore`
  * (session admission reads a record's state):
- * joins a session, closes it and runs the close work, says whether it is
- * live, and resumes closes left pending. Its callers see `joined` /
- * `refused`, `done` / `pending`, `live` / `not_live` and `unavailable`;
+ * opens a session's record as it is established, joins a session, closes it
+ * and runs the close work, says whether it is live, and resumes closes left
+ * pending. Its callers see `opened` / `joined` / `refused`, `done` /
+ * `pending`, `live` / `not_live` and `unavailable`;
  * generations, states, work items, the cause policy and the bridge to the
  * per-session stores stay here.
  *
  * A close commits first and then runs its work. Every item is safe to run
  * more than once and is recorded at the generation read, so two closes of one
  * session and the sweep may overlap. Items run in phases, each only once the
- * earlier ones are recorded, and the user session is deleted last; a failed
- * item keeps the record closing.
+ * earlier ones are recorded, and the user session is deleted last; the items
+ * of a phase run together, a close's notices and family revocations at most
+ * `CLOSE_CONCURRENCY` at once, and a failed item keeps the record closing.
  */
 
 import {
@@ -43,8 +45,10 @@ import { loggableError } from "../logging/loggableError.mjs";
 import type { RefreshTokenFamilyRevocation } from "../refresh-token-family/types.mjs";
 import { readRecord } from "../session-admission/live-session.mjs";
 import {
+	checkSessionExpiresAt,
 	checkSessionLifecycleKey,
 	checkSessionParticipant,
+	isSessionLifecycleKey,
 	readSessionCloseAnswer,
 	readSessionJoinAnswer,
 	readSessionLifecycleListing,
@@ -72,6 +76,25 @@ import type {
 } from "../user-sessions/types.mjs";
 import { type BridgedClose, createSessionStoresBridge } from "./bridge.mjs";
 import type { SessionCloseNotifier } from "./notifier.mjs";
+
+/** The session a record is opened for: its subject and its own end. */
+export interface SessionOpenRequest {
+	readonly sub: string;
+	/** The end the user session will carry. */
+	readonly expiresAt: Date;
+}
+
+/**
+ * `opened`: the session's record is active for that subject and end, written
+ * now or already. `refused`: the sid holds another session's record (another
+ * subject or end, or one closing or closed), or the end has passed; nothing
+ * was written, and nothing is established on that sid. `unavailable`: the
+ * store could not answer; nothing is established on it.
+ */
+export type SessionOpenOutcome =
+	| { readonly outcome: "opened" }
+	| { readonly outcome: "refused" }
+	| { readonly outcome: "unavailable" };
 
 /** What a join adds to a session. At least one is named. */
 export interface SessionJoinRequest {
@@ -140,15 +163,18 @@ export interface SessionResumeReport {
 
 /** The session lifecycle, filled in the `sessionLifecycle` slot. */
 export interface SessionLifecycle {
+	/** Opens the lifecycle of the session `sid` as it is established. Idempotent for the same subject and end. */
+	open(sid: string, request: SessionOpenRequest): Promise<SessionOpenOutcome>;
 	/** Adds what `request` names to the live session `sid`, only while it is not closing. */
 	join(sid: string, request: SessionJoinRequest): Promise<SessionJoinOutcome>;
 	/** Closes `sid` for `cause` (the first close's cause is kept), and runs or resumes its close work. */
 	close(sid: string, cause: SessionCloseCause): Promise<SessionCloseOutcome>;
-	/** Whether `sid` is live. */
+	/** Whether `sid` is live: `not_live` for a sid the port cannot hold, which names no session. */
 	liveness(sid: string): Promise<SessionLiveness>;
 	/**
 	 * The federations `sid` joined, before it is closed: what a logout reads to
-	 * end the first one upstream with the tokens a close removes.
+	 * end the first one upstream with the tokens a close removes. None for a
+	 * sid the port cannot hold, which names no session.
 	 */
 	federations(sid: string): Promise<SessionFederations>;
 	/** Runs the close work of every closing session. Rejects when the closing listing cannot be read. */
@@ -230,10 +256,48 @@ const phaseOf = (item: string): number => {
 	return 1;
 };
 
-/** The next item to run: of the earliest phase still pending, and not given up on in this run. */
-const nextItem = (pending: readonly string[], skipped: ReadonlySet<string>): string | undefined => {
+/** The items to run next: those of the earliest phase still pending, not given up on in this run. */
+const nextItems = (pending: readonly string[], skipped: ReadonlySet<string>): string[] => {
 	const earliest = Math.min(...pending.map(phaseOf));
-	return pending.find((item) => phaseOf(item) === earliest && !skipped.has(item));
+	return pending.filter((item) => phaseOf(item) === earliest && !skipped.has(item));
+};
+
+/**
+ * How many notices and family revocations one close run makes at once,
+ * whether they come from the record's participants or from the per-session
+ * stores: a notice waits on its relying party, so a close tells several in
+ * the time of the slowest rather than of all of them together.
+ */
+const CLOSE_CONCURRENCY = 8;
+
+/** Runs a call once fewer than `places` calls it was handed are running, holding a place until it settles. */
+type CallLimit = <T>(call: () => Promise<T>) => Promise<T>;
+
+const callLimit = (places: number): CallLimit => {
+	let free = places;
+	const waiting: (() => void)[] = [];
+	return async (call) => {
+		if (free > 0) free -= 1;
+		else await new Promise<void>((resolve) => waiting.push(resolve));
+		try {
+			return await call();
+		} finally {
+			const next = waiting.shift();
+			if (next === undefined) free += 1;
+			else next();
+		}
+	};
+};
+
+/** Runs `run` for every one of `items` at once; settles once every run has, rejecting with the first failure. */
+const eachSettled = async <T,>(
+	items: readonly T[],
+	run: (item: T) => Promise<void>,
+): Promise<void> => {
+	const failed = (await Promise.allSettled(items.map(run))).find(
+		(result) => result.status === "rejected",
+	);
+	if (failed !== undefined) throw failed.reason;
 };
 
 /** `record` with `item` recorded done, closed once nothing is pending. */
@@ -327,28 +391,39 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		return notifier.notify({ sid, sub: record.sub, clientId, cause });
 	};
 
-	/** The work `item` names, for the closing `record`. */
-	const work = async (sid: string, record: SessionLifecycleRecord, item: string): Promise<void> => {
-		if (item.startsWith(FAMILY_ITEM)) {
-			return refreshTokenFamilyRevocation.revokeFamily(item.slice(FAMILY_ITEM.length));
-		}
-		if (item.startsWith(RP_ITEM)) return tell(sid, record, item.slice(RP_ITEM.length));
+	/**
+	 * The work `item` names, for the closing `record`: its notices and family
+	 * revocations each wait for a place in `limit`, and nothing else does.
+	 */
+	const work = async (
+		sid: string,
+		record: SessionLifecycleRecord,
+		item: string,
+		limit: CallLimit,
+	): Promise<void> => {
+		const revoke = (familyId: string) =>
+			limit(() => refreshTokenFamilyRevocation.revokeFamily(familyId));
+		const notify = (clientId: string) => limit(() => tell(sid, record, clientId));
+		if (item.startsWith(FAMILY_ITEM)) return revoke(item.slice(FAMILY_ITEM.length));
+		if (item.startsWith(RP_ITEM)) return notify(item.slice(RP_ITEM.length));
 		switch (item) {
 			case REVOKE_BRIDGED_FAMILIES: {
 				// What the old stores hold now: entries lapsed at the session's end are not revoked here.
 				// The record's own participants have items of their own.
 				const own = new Set(idsOf(record, "family"));
-				for (const familyId of await bridge.families(sid, record.expiresAt)) {
-					if (!own.has(familyId)) await refreshTokenFamilyRevocation.revokeFamily(familyId);
-				}
-				return;
+				const families = await bridge.families(sid, record.expiresAt);
+				return eachSettled(
+					families.filter((familyId) => !own.has(familyId)),
+					revoke,
+				);
 			}
 			case NOTIFY_BRIDGED_RPS: {
 				const own = new Set(idsOf(record, "rp"));
-				for (const clientId of await bridge.relyingParties(sid)) {
-					if (!own.has(clientId)) await tell(sid, record, clientId);
-				}
-				return;
+				const relyingParties = await bridge.relyingParties(sid);
+				return eachSettled(
+					relyingParties.filter((clientId) => !own.has(clientId)),
+					notify,
+				);
 			}
 			case REMOVE_FEDERATION_TOKENS:
 				return federationTokenStore.removeBySid(sid);
@@ -367,9 +442,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		sid: string,
 		record: SessionLifecycleRecord,
 		item: string,
+		limit: CallLimit,
 	): Promise<boolean> => {
 		try {
-			await work(sid, record, item);
+			await work(sid, record, item, limit);
 			return true;
 		} catch (error) {
 			logger.warn({ sid, item, err: loggableError(error) }, "session_close_item_failed");
@@ -379,7 +455,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
 	/**
 	 * Runs and records the pending items of the closing record `start`, until
-	 * it is closed or nothing is left that this run has not seen fail.
+	 * it is closed or nothing is left that this run has not seen fail: the
+	 * items of the earliest phase pending run together, their notices and
+	 * revocations sharing the run's `CLOSE_CONCURRENCY` places, then each item
+	 * that ran is recorded, one at a time, at the generation read.
 	 */
 	const finish = async (
 		sid: string,
@@ -394,17 +473,19 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		// Each conflict means another run recorded an item, so there are no
 		// more conflicts than items.
 		let conflictsLeft = start.value.close?.pending.length ?? 0;
+		const limit = callLimit(CLOSE_CONCURRENCY);
 		while (record.state === "closing") {
 			const pending = record.close?.pending ?? [];
-			const unrecorded = pending.find((item) => done.has(item));
-			const item = unrecorded ?? nextItem(pending, skipped);
-			if (item === undefined) return "pending";
-			if (unrecorded === undefined) {
-				if (!(await ran(sid, record, item))) {
-					skipped.add(item);
-					continue;
-				}
-				done.add(item);
+			const item = pending.find((candidate) => done.has(candidate));
+			if (item === undefined) {
+				const batch = nextItems(pending, skipped);
+				if (batch.length === 0) return "pending";
+				const closing = record;
+				await eachSettled(batch, async (each) => {
+					if (await ran(sid, closing, each, limit)) done.add(each);
+					else skipped.add(each);
+				});
+				continue;
 			}
 			let answer: ConditionalReplaceAnswer;
 			try {
@@ -518,6 +599,18 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	};
 
 	return {
+		async open(sid, { sub, expiresAt }) {
+			checkSessionLifecycleKey(sid, "sid");
+			checkSessionLifecycleKey(sub, "sub");
+			const end = checkSessionExpiresAt(expiresAt);
+			try {
+				return readSessionOpenAnswer(await store.open(sid, sub, end));
+			} catch (error) {
+				unavailable("open", sid, error);
+				return { outcome: "unavailable" };
+			}
+		},
+
 		async join(sid, request) {
 			checkSessionLifecycleKey(sid, "sid");
 			const participants = participantsOf(request);
@@ -569,7 +662,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		},
 
 		async federations(sid) {
-			checkSessionLifecycleKey(sid, "sid");
+			// A sid the port cannot hold names no session; only a write refuses it.
+			if (!isSessionLifecycleKey(sid)) return { outcome: "listed", federations: [] };
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
 				const own = read === null ? [] : idsOf(read.value, "federation");
@@ -585,7 +679,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		},
 
 		async liveness(sid) {
-			checkSessionLifecycleKey(sid, "sid");
+			// A sid the port cannot hold names no session; only a write refuses it.
+			if (!isSessionLifecycleKey(sid)) return { outcome: "not_live" };
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
 				// A logout through the per-session stores alone leaves a record

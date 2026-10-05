@@ -43,6 +43,7 @@ const OPTIONAL = [
 	"accessTokenDenylist",
 	"subjectRevocation",
 	"userSessionStore",
+	"sessionLifecycle",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

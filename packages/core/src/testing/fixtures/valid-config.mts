@@ -64,7 +64,7 @@ export interface CoreConfigForTestsOptions {
 	readonly federations?: NonNullable<NonNullable<CoreConfig["core"]>["federations"]>;
 	/** The slots this composition runs without on purpose (`core.declaredAbsent`); none by default. */
 	readonly declaredAbsent?: readonly string[];
-	/** `core.sessionLifecycle.sweepIntervalSeconds`, as written; left unstated (no sweep) by default. */
+	/** `core.sessionLifecycle.sweepIntervalSeconds`, as written; left unstated (a sweep every 60 seconds) by default. */
 	readonly sessionLifecycleSweepIntervalSeconds?: unknown;
 }
 

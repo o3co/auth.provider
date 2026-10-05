@@ -589,3 +589,91 @@ describe("the refusals each field names", () => {
 		).toThrow(/adds something that is not an object/);
 	});
 });
+
+describe("a primary's upstreamAuthTime — when the upstream last authenticated a federated login's user", () => {
+	const UPSTREAM = new Date("2026-09-28T11:50:00Z");
+	const federated = (upstreamAuthTime: unknown) =>
+		primary({
+			recorded: {
+				amr: ["fed"],
+				authentication: {
+					primary: "fed",
+					federation: "google",
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+					upstreamAuthTime,
+				},
+			},
+		});
+
+	it("keeps a federated primary's Date as a copy, and its null", () => {
+		const source = federated(UPSTREAM);
+		const checked = checkPrimaryAuthentication(source);
+		expect(checked.recorded.authentication.upstreamAuthTime).toEqual(UPSTREAM);
+		expect(checked.recorded.authentication.upstreamAuthTime).not.toBe(UPSTREAM);
+		expect(
+			checkPrimaryAuthentication(federated(null)).recorded.authentication.upstreamAuthTime,
+		).toBeNull();
+	});
+
+	it("records nothing of it for a federated primary that carries none", () => {
+		const checked = checkPrimaryAuthentication(federated(undefined));
+		expect(Object.hasOwn(checked.recorded.authentication, "upstreamAuthTime")).toBe(false);
+	});
+
+	it.each([
+		["a string", UPSTREAM.toISOString()],
+		["a number", UPSTREAM.getTime()],
+		["an Invalid Date", new Date(Number.NaN)],
+	])("refuses a federated primary's that is %s", (_label, upstreamAuthTime) => {
+		expect(() => checkPrimaryAuthentication(federated(upstreamAuthTime))).toThrow(
+			new RangeError(
+				"PrimaryAuthentication: recorded.authentication.upstreamAuthTime must be a valid date, null or absent",
+			),
+		);
+	});
+
+	it("refuses one on a password primary: only a federation has an upstream", () => {
+		for (const upstreamAuthTime of [UPSTREAM, null]) {
+			expect(() =>
+				checkPrimaryAuthentication(
+					primary({
+						recorded: {
+							amr: ["pwd"],
+							authentication: {
+								primary: "pwd",
+								federation: undefined,
+								upstreamAmr: undefined,
+								mfaAt: undefined,
+								upstreamAuthTime,
+							},
+						},
+					}),
+				),
+			).toThrow(
+				new RangeError("PrimaryAuthentication: a password primary records no upstreamAuthTime"),
+			);
+		}
+	});
+
+	it("never reaches a continuation: a password login's carries none, and one read back with it is refused", () => {
+		const continuation = continuationOf(primary(), [], "hold");
+		expect(Object.hasOwn(continuation.primary.recorded.authentication, "upstreamAuthTime")).toBe(
+			false,
+		);
+		const { recorded } = dto();
+		expect(() =>
+			checkPrimaryContinuation({
+				primary: {
+					...dto(),
+					recorded: {
+						...recorded,
+						authentication: { ...recorded.authentication, upstreamAuthTime: null },
+					},
+				},
+				done: [],
+				interruptedBy: "hold",
+			}),
+		).toThrow(RangeError);
+	});
+});

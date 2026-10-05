@@ -527,15 +527,11 @@ describe("core's AppConfigSchema passes through every key webauthnConfigSchema r
 			.filter(([, to]) => to === null)
 			.map(([from]) => from.replace(/^webauthn\./, ""));
 		expect(removed).toEqual(["allowCredentialsForKnownUser", "rateLimit"]);
-		// Below a removed key, core's shape is its own: the refusal names the key, whatever is under it.
-		const underRemoved = (path: string) => removed.some((key) => path.startsWith(`${key}.`));
-		expect(
-			keyPaths(coreSection)
-				.filter((path) => !underRemoved(path))
-				.sort(),
-		).toEqual([...keyPaths(webauthnConfigSchema), ...removed].sort());
-		// Not vacuous: the walk reached a key below the section's top level.
-		expect(keyPaths(coreSection)).toContain("rateLimit.authenticationOptions");
+		expect(keyPaths(coreSection).sort()).toEqual(
+			[...keyPaths(webauthnConfigSchema), ...removed].sort(),
+		);
+		// Not vacuous: the walk reached the section's keys, a removed one included.
+		expect(keyPaths(coreSection)).toEqual(expect.arrayContaining(["challengeTtlMs", "rateLimit"]));
 	});
 });
 
