@@ -337,8 +337,10 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   and the client keys alike; raise it if such a client lodges faster.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
   refused (#807).** `core-rate-limiter-memory.limits` and
-  `redis-rate-limiter.limits` may not name either prefix: each is a verifier's
-  own attempt limit, which no limiter module's configuration may loosen. A limiter built with
+  `redis-rate-limiter.limits` may not name either prefix while its owner, the
+  session or the device-grant module, is loaded: each declares its prefix a
+  verifier's own attempt limit, which no limiter module's configuration may
+  loosen. Core names neither prefix itself. A limiter built with
   `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` reads no
   contributed budget and keeps the `limits` it is given.
   The boot is refused (`config-validation-failed`, naming the key and the
