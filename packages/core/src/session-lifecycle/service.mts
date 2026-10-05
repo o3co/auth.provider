@@ -27,8 +27,8 @@
  * more than once and is recorded at the generation read, so two closes of one
  * session and the sweep may overlap. Items run in phases, each only once the
  * earlier ones are recorded, and the user session is deleted last; the items
- * of a phase run together, at most `CLOSE_CONCURRENCY` at once, and a failed
- * item keeps the record closing.
+ * of a phase run together, a close's notices and family revocations at most
+ * `CLOSE_CONCURRENCY` at once, and a failed item keeps the record closing.
  */
 
 import {
@@ -238,36 +238,41 @@ const nextItems = (pending: readonly string[], skipped: ReadonlySet<string>): st
 };
 
 /**
- * How many items of one phase a close runs at once, and how many relying
- * parties or families of the per-session stores one item reaches at once: a
- * notice waits on its relying party, so a close tells several in the time of
- * the slowest rather than of all of them together.
+ * How many notices and family revocations one close run makes at once,
+ * whether they come from the record's participants or from the per-session
+ * stores: a notice waits on its relying party, so a close tells several in
+ * the time of the slowest rather than of all of them together.
  */
 const CLOSE_CONCURRENCY = 8;
 
-/**
- * Runs `run` for every one of `items`, at most `CLOSE_CONCURRENCY` at once.
- * Settles once every run has; rejects with the first failure.
- */
-const eachAtMost = async <T,>(
+/** Runs a call once fewer than `places` calls it was handed are running, holding a place until it settles. */
+type CallLimit = <T>(call: () => Promise<T>) => Promise<T>;
+
+const callLimit = (places: number): CallLimit => {
+	let free = places;
+	const waiting: (() => void)[] = [];
+	return async (call) => {
+		if (free > 0) free -= 1;
+		else await new Promise<void>((resolve) => waiting.push(resolve));
+		try {
+			return await call();
+		} finally {
+			const next = waiting.shift();
+			if (next === undefined) free += 1;
+			else next();
+		}
+	};
+};
+
+/** Runs `run` for every one of `items` at once; settles once every run has, rejecting with the first failure. */
+const eachSettled = async <T,>(
 	items: readonly T[],
 	run: (item: T) => Promise<void>,
 ): Promise<void> => {
-	let next = 0;
-	let failed: { readonly error: unknown } | undefined;
-	const worker = async (): Promise<void> => {
-		while (next < items.length) {
-			const item = items[next] as T;
-			next += 1;
-			try {
-				await run(item);
-			} catch (error) {
-				failed ??= { error };
-			}
-		}
-	};
-	await Promise.all(Array.from({ length: Math.min(CLOSE_CONCURRENCY, items.length) }, worker));
-	if (failed !== undefined) throw failed.error;
+	const failed = (await Promise.allSettled(items.map(run))).find(
+		(result) => result.status === "rejected",
+	);
+	if (failed !== undefined) throw failed.reason;
 };
 
 /** `record` with `item` recorded done, closed once nothing is pending. */
@@ -361,29 +366,38 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		return notifier.notify({ sid, sub: record.sub, clientId, cause });
 	};
 
-	/** The work `item` names, for the closing `record`. */
-	const work = async (sid: string, record: SessionLifecycleRecord, item: string): Promise<void> => {
-		if (item.startsWith(FAMILY_ITEM)) {
-			return refreshTokenFamilyRevocation.revokeFamily(item.slice(FAMILY_ITEM.length));
-		}
-		if (item.startsWith(RP_ITEM)) return tell(sid, record, item.slice(RP_ITEM.length));
+	/**
+	 * The work `item` names, for the closing `record`: its notices and family
+	 * revocations each wait for a place in `limit`, and nothing else does.
+	 */
+	const work = async (
+		sid: string,
+		record: SessionLifecycleRecord,
+		item: string,
+		limit: CallLimit,
+	): Promise<void> => {
+		const revoke = (familyId: string) =>
+			limit(() => refreshTokenFamilyRevocation.revokeFamily(familyId));
+		const notify = (clientId: string) => limit(() => tell(sid, record, clientId));
+		if (item.startsWith(FAMILY_ITEM)) return revoke(item.slice(FAMILY_ITEM.length));
+		if (item.startsWith(RP_ITEM)) return notify(item.slice(RP_ITEM.length));
 		switch (item) {
 			case REVOKE_BRIDGED_FAMILIES: {
 				// What the old stores hold now: entries lapsed at the session's end are not revoked here.
 				// The record's own participants have items of their own.
 				const own = new Set(idsOf(record, "family"));
 				const families = await bridge.families(sid, record.expiresAt);
-				return eachAtMost(
+				return eachSettled(
 					families.filter((familyId) => !own.has(familyId)),
-					(familyId) => refreshTokenFamilyRevocation.revokeFamily(familyId),
+					revoke,
 				);
 			}
 			case NOTIFY_BRIDGED_RPS: {
 				const own = new Set(idsOf(record, "rp"));
 				const relyingParties = await bridge.relyingParties(sid);
-				return eachAtMost(
+				return eachSettled(
 					relyingParties.filter((clientId) => !own.has(clientId)),
-					(clientId) => tell(sid, record, clientId),
+					notify,
 				);
 			}
 			case REMOVE_FEDERATION_TOKENS:
@@ -403,9 +417,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		sid: string,
 		record: SessionLifecycleRecord,
 		item: string,
+		limit: CallLimit,
 	): Promise<boolean> => {
 		try {
-			await work(sid, record, item);
+			await work(sid, record, item, limit);
 			return true;
 		} catch (error) {
 			logger.warn({ sid, item, err: loggableError(error) }, "session_close_item_failed");
@@ -416,8 +431,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	/**
 	 * Runs and records the pending items of the closing record `start`, until
 	 * it is closed or nothing is left that this run has not seen fail: the
-	 * items of the earliest phase pending run together, then each that ran is
-	 * recorded, one at a time, at the generation read.
+	 * items of the earliest phase pending run together, their notices and
+	 * revocations sharing the run's `CLOSE_CONCURRENCY` places, then each item
+	 * that ran is recorded, one at a time, at the generation read.
 	 */
 	const finish = async (
 		sid: string,
@@ -432,6 +448,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		// Each conflict means another run recorded an item, so there are no
 		// more conflicts than items.
 		let conflictsLeft = start.value.close?.pending.length ?? 0;
+		const limit = callLimit(CLOSE_CONCURRENCY);
 		while (record.state === "closing") {
 			const pending = record.close?.pending ?? [];
 			const item = pending.find((candidate) => done.has(candidate));
@@ -439,8 +456,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 				const batch = nextItems(pending, skipped);
 				if (batch.length === 0) return "pending";
 				const closing = record;
-				await eachAtMost(batch, async (each) => {
-					if (await ran(sid, closing, each)) done.add(each);
+				await eachSettled(batch, async (each) => {
+					if (await ran(sid, closing, each, limit)) done.add(each);
 					else skipped.add(each);
 				});
 				continue;

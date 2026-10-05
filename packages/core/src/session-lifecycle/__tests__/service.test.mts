@@ -589,13 +589,16 @@ describe("a phase's items run together, at most eight at a time", () => {
 		vi.useRealTimers();
 	});
 
-	/** A harness whose every notice takes `NOTICE_MS`, counting how many are in flight at once. */
-	const slowNotices = () => {
+	/**
+	 * A harness whose every call starting with `prefix` (notices by default)
+	 * takes `NOTICE_MS`, counting how many are in flight at once.
+	 */
+	const slowNotices = (prefix = "notify:") => {
 		vi.useFakeTimers({ toFake: ["setTimeout"] });
 		const flight = { now: 0, most: 0 };
 		const h = harness({
 			slow: async (call) => {
-				if (!call.startsWith("notify:")) return;
+				if (!call.startsWith(prefix)) return;
 				flight.now += 1;
 				flight.most = Math.max(flight.most, flight.now);
 				await new Promise((resolve) => setTimeout(resolve, NOTICE_MS));
@@ -644,6 +647,34 @@ describe("a phase's items run together, at most eight at a time", () => {
 		expect((await closing).outcome).toBe("done");
 		expect(flight.most).toBe(8);
 		expect(h.notices).toHaveLength(20);
+	});
+
+	it("never has more than eight notices in flight across the record's relying parties and the old registry's", async () => {
+		const { h, flight } = slowNotices();
+		const expiresAt = await h.establish();
+		for (let i = 0; i < 10; i++) {
+			await h.lifecycle.join(SID, { rp: relyingParty(`c${i}`) });
+			await h.sessionRPRegistry.registerRP(SID, relyingParty(`old${i}`), expiresAt);
+		}
+		const closing = h.lifecycle.close(SID, "rp_logout");
+		await vi.advanceTimersByTimeAsync(3 * NOTICE_MS);
+		expect((await closing).outcome).toBe("done");
+		expect(flight.most).toBe(8);
+		expect(h.notices).toHaveLength(20);
+	});
+
+	it("never has more than eight revocations in flight across the record's families and the old index's", async () => {
+		const { h, flight } = slowNotices("revoke_family:");
+		const expiresAt = await h.establish();
+		for (let i = 0; i < 10; i++) {
+			await h.lifecycle.join(SID, { familyId: `f${i}` });
+			await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, `old${i}`, expiresAt);
+		}
+		const closing = h.lifecycle.close(SID, "rp_logout");
+		await vi.advanceTimersByTimeAsync(3 * NOTICE_MS);
+		expect((await closing).outcome).toBe("done");
+		expect(flight.most).toBe(8);
+		expect(h.revoked.size).toBe(20);
 	});
 
 	it("records each item it ran, and keeps the one that failed pending with the phases after it", async () => {

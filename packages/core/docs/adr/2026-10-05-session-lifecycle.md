@@ -192,9 +192,10 @@ earlier one has not durably done:
 3. `remove_session_indexes` (the per-session stores the bridge steps read);
 4. `delete_user_session`, last.
 
-The items of a phase run together, at most eight at once, and so do the
-relying parties and families a bridge step reaches (`CLOSE_CONCURRENCY`):
-a notice waits on its relying party, so relying parties that do not answer
+The items of a phase run together, and one close run makes at most eight
+notices and family revocations at once (`CLOSE_CONCURRENCY`), those of the
+record's participants and those a bridge step reaches sharing the eight
+places; an item or a bridge step holds no place itself. A notice waits on its relying party, so relying parties that do not answer
 hold a close for about one notifier timeout per eight, not one each. Each
 item that ran is recorded with `completeIf` at the generation read, one at a
 time once its phase's run has settled; a conflict re-reads the record and goes on with what is still pending, so two
