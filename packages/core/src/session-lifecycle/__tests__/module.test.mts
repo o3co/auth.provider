@@ -173,15 +173,19 @@ describe("sessionLifecycleModule", () => {
 			message: expect.stringContaining(
 				"core-session-lifecycle: relying parties are served (the clientRepository slot is filled) " +
 					"and no sessionCloseNotifier is wired, so a closed session's relying parties would never " +
-					"be told. Install the module that provides sessionCloseNotifier.",
+					"be told. Install a module that contributes a sessionCloseNotifiers entry (oauthModule does).",
 			),
 		});
 	});
 
-	it("refuses a second notifier", async () => {
+	it("refuses a second notifier at stage 1", async () => {
 		await expect(
 			boot({ extra: [notifierModule("notifier-a"), notifierModule("notifier-b")] }),
-		).rejects.toThrow(/sessionCloseNotifiers/);
+		).rejects.toMatchObject({
+			reason: "duplicate-contribute",
+			stage: "validateManifests",
+			details: { kind: "sessionCloseNotifiers", modules: ["notifier-a", "notifier-b"] },
+		});
 	});
 
 	it("refuses a notifier factory that answers no notifier", async () => {
@@ -198,7 +202,10 @@ describe("sessionLifecycleModule", () => {
 				bootstrapComponents: { config, pathResolver: (p: string) => p },
 				contributionKinds: { sessionCloseNotifiers: {} },
 			} as never),
-		).rejects.toThrow(/sessionCloseNotifiers/);
+		).rejects.toMatchObject({
+			reason: "contribution-kind-guarded",
+			details: { kind: "sessionCloseNotifiers" },
+		});
 	});
 
 	it("boots a notifier that reads a slot of a module requiring the lifecycle, with no cycle", async () => {

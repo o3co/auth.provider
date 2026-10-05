@@ -144,10 +144,11 @@ export interface SessionLifecycleOptions {
 	/** Absent: a close removes no subject index entry. */
 	readonly subjectSessionIndex?: SubjectSessionIndex;
 	/**
-	 * The notifier, or how to read it when a close runs. Absent, or read as
-	 * `undefined`: a close tells no relying party.
+	 * How to read the notifier when a close runs: at the closing commit and
+	 * when it tells. Absent, or answering `undefined`: a close tells no relying
+	 * party.
 	 */
-	readonly notifier?: SessionCloseNotifier | (() => SessionCloseNotifier | undefined);
+	readonly notifier?: () => SessionCloseNotifier | undefined;
 	/** The per-session stores written beside the lifecycle record. */
 	readonly sessionRPRegistry: SessionRPRegistry;
 	readonly sessionFamilyIndex: SessionFamilyIndex;
@@ -266,10 +267,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		);
 	}
 	const logger = options.logger ?? consoleLogger;
-	const configured = options.notifier;
-	/** The notifier as it is now: read when a close commits and when it tells. */
-	const notifierNow = (): SessionCloseNotifier | undefined =>
-		typeof configured === "function" ? configured() : configured;
+	const notifierNow = options.notifier ?? ((): SessionCloseNotifier | undefined => undefined);
 	const bridge = createSessionStoresBridge(options);
 
 	const requestFor = (cause: SessionCloseCause): SessionCloseRequest => {

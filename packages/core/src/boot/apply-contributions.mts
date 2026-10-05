@@ -259,7 +259,7 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
 /**
  * The read side of the `sessionCloseNotifiers` collector: the one notifier
  * registered, read through at call time. At most one is: a second refuses
- * boot at the end of stage 4 (`checkSessionCloseNotifiers`).
+ * boot at stage 1 (`one-session-close-notifier`).
  * @internal
  */
 function makeSessionCloseNotifierResolver(
@@ -1079,64 +1079,43 @@ async function checkSessionRequirements(
  * @internal
  */
 /**
- * The session-close notifier's rules, once every name-keyed contribution has
- * registered: at most one notifier (`duplicate-contribute`), and, where the
- * session lifecycle is built and relying parties are served (the
- * `clientRepository` slot is filled), one notifier — refused as the
- * lifecycle's provider failing, as it was refused before the notifier was
- * read lazily.
+ * The rule that a composition serving relying parties (the `clientRepository`
+ * slot filled) contributes a session-close notifier, judged once every
+ * name-keyed contribution has registered, and only where core's session
+ * lifecycle module built the `sessionLifecycle` slot: a value the host filled
+ * it with is the host's. Refused as that module's provider failing, with its
+ * text. At most one notifier is stage 1's rule (`one-session-close-notifier`).
  * @internal
  */
-async function checkSessionCloseNotifiers(
+async function checkSessionCloseNotifier(
 	material: ComponentWorld,
 	components: Record<string, unknown>,
 	collector: NameKeyedCollector<SessionCloseNotifier> | undefined,
 ): Promise<void> {
-	const names = collector === undefined ? [] : [...collector.entries()].map(([name]) => name);
-	if (names.length > 1) {
-		const contributors = material.plan.validated.modules
-			.filter((module) =>
-				module.normalised.contributesEntries.some(
-					(entry) => entry.kind === "sessionCloseNotifiers",
-				),
-			)
-			.map((module) => module.normalised.name);
-		// What was built is disposed; the refusal is the duplicate.
-		await runCleanupsReverse(material.cleanups);
-		throw new BootError({
-			message: `sessionCloseNotifiers holds ${names.length} notifiers (${names.join(", ")}); a composition tells relying parties through one.`,
-			reason: "duplicate-contribute",
-			stage: "applyContributions",
-			details: {
-				reason: "duplicate-contribute",
-				kind: "sessionCloseNotifiers",
-				identity: names.join(", "),
-				identityKind: "name",
-				modules: [contributors[0] ?? "", contributors[1] ?? contributors[0] ?? ""],
-			},
-		});
-	}
-	if (
-		names.length === 0 &&
-		components.sessionLifecycle !== undefined &&
-		components.clientRepository !== undefined
-	) {
-		const thrownValue = new Error(SESSION_LIFECYCLE_NOTIFIER_MISSING);
-		const cleanupErrors = await runCleanupsReverse(material.cleanups);
-		throw new BootError({
-			message: `Module "${SESSION_LIFECYCLE_MODULE}" provider factory for "sessionLifecycle" failed: ${failureSummary(thrownValue)}`,
+	const built =
+		!material.externalKeys.has("sessionLifecycle") &&
+		material.plan.providerActivations.some(
+			(activation) =>
+				activation.module === SESSION_LIFECYCLE_MODULE &&
+				activation.componentKey === "sessionLifecycle",
+		);
+	const contributed = collector !== undefined && !collector.entries().next().done;
+	if (!built || contributed || components.clientRepository === undefined) return;
+	const thrownValue = new Error(SESSION_LIFECYCLE_NOTIFIER_MISSING);
+	const cleanupErrors = await runCleanupsReverse(material.cleanups);
+	throw new BootError({
+		message: `Module "${SESSION_LIFECYCLE_MODULE}" provider factory for "sessionLifecycle" failed: ${failureSummary(thrownValue)}`,
+		reason: "provides-factory-failed",
+		stage: "applyContributions",
+		details: {
 			reason: "provides-factory-failed",
-			stage: "applyContributions",
-			details: {
-				reason: "provides-factory-failed",
-				module: SESSION_LIFECYCLE_MODULE,
-				componentKey: "sessionLifecycle",
-				originalError: thrownValue,
-				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
-			},
-			cause: thrownValue,
-		});
-	}
+			module: SESSION_LIFECYCLE_MODULE,
+			componentKey: "sessionLifecycle",
+			originalError: thrownValue,
+			...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+		},
+		cause: thrownValue,
+	});
 }
 
 function collectorFor(
@@ -1454,9 +1433,10 @@ export async function applyContributions(
 	openFederationProjections(components);
 
 	// ---------------------------------------------------------------------------
-	// Step 2b: the session-requirement checks and the boot line, once every
-	// name-keyed contribution has registered and before a list-shaped factory
-	// reads a requirement's reach.
+	// Step 2b: the session-requirement checks (`checkSessionRequirements`), the
+	// session-close notifier's rule (`checkSessionCloseNotifier`) and the boot
+	// lines, once every name-keyed contribution has registered and before a
+	// list-shaped factory reads a requirement's reach.
 	// ---------------------------------------------------------------------------
 
 	await checkSessionRequirements(
@@ -1465,7 +1445,7 @@ export async function applyContributions(
 		contributionKinds.sessionRequirements,
 		contributionKinds.admissionActions,
 	);
-	await checkSessionCloseNotifiers(material, components, contributionKinds.sessionCloseNotifiers);
+	await checkSessionCloseNotifier(material, components, contributionKinds.sessionCloseNotifiers);
 	logRateLimitBudgets(material, components, contributionKinds.rateLimitBudgets);
 	logAdmissionActions(material, components, contributionKinds.admissionActions);
 

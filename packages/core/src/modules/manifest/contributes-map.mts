@@ -323,10 +323,11 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * choosing: at most one per composition, read by the session lifecycle
 	 * through the synthetic key `sessionCloseNotifierResolver` when a close
 	 * runs, never while modules are built, so the module contributing it may
-	 * read slots of modules that require the lifecycle. A second refuses boot
-	 * at the end of the contributions, a factory answering anything but a
-	 * notifier fails its contribution, and a host may not supply the
-	 * collector (`contribution-kind-guarded`).
+	 * read slots of modules that require the lifecycle. A second, under any
+	 * name, refuses boot at stage 1 (`duplicate-contribute`), and so does an
+	 * override of the kind or a host's own collector
+	 * (`contribution-kind-guarded`); a factory answering anything but a
+	 * notifier fails its contribution.
 	 */
 	readonly sessionCloseNotifiers?: {
 		readonly [name: string]: SessionCloseNotifierFactory<Deps>;

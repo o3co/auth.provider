@@ -59,6 +59,8 @@ type Calls = string[];
 
 interface HarnessOptions {
 	readonly notifier?: boolean;
+	/** How the service reads the recording notifier; `() => notifier` by default. */
+	readonly notifierOf?: (notifier: SessionCloseNotifier) => () => SessionCloseNotifier | undefined;
 	readonly subjectSessionIndex?: boolean;
 	readonly store?: (inner: SessionLifecycleStore) => SessionLifecycleStore;
 	/** A family index without the session-end capability: it keeps no end mark. */
@@ -138,7 +140,9 @@ function harness(options: HarnessOptions = {}) {
 		refreshTokenFamilyRevocation,
 		federationTokenStore,
 		...(options.subjectSessionIndex === false ? {} : { subjectSessionIndex }),
-		...(options.notifier === false ? {} : { notifier }),
+		...(options.notifier === false
+			? {}
+			: { notifier: options.notifierOf?.(notifier) ?? (() => notifier) }),
 		sessionRPRegistry,
 		sessionFamilyIndex: options.familyIndexWithoutEnd
 			? {
@@ -570,6 +574,41 @@ describe("close", () => {
 			expect(await h.sessions.get(SID)).toBeNull();
 			expect(h.revoked.has("f1")).toBe(true);
 		});
+	});
+});
+
+describe("the notifier, read when a close runs", () => {
+	it("is read at the closing commit: none then, no relying-party item is saved", async () => {
+		let present = false;
+		const h = harness({ notifierOf: (notifier) => () => (present ? notifier : undefined) });
+		await h.establish();
+		await joinAll(h);
+		h.failing.set("revoke_family:f1", 1);
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+		present = true;
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		expect((await h.read())?.value.participants.map((p) => p.id)).toContain("a");
+		expect(h.notices).toEqual([]);
+	});
+
+	it("is read again when it tells, so the notifier of that moment is the one called", async () => {
+		const calls: string[] = [];
+		const later: SessionCloseNotifier = {
+			notify: async (notice) => {
+				calls.push(`later:${notice.clientId}`);
+			},
+		};
+		let current: "first" | "later" = "first";
+		const h = harness({
+			notifierOf: (notifier) => () => (current === "first" ? notifier : later),
+		});
+		await h.establish();
+		await joinAll(h);
+		h.failing.set("notify:a", 1);
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+		current = "later";
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		expect(calls).toEqual(["later:a"]);
 	});
 });
 

@@ -1383,8 +1383,12 @@ export interface ContributionKindGuardedDetails {
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
 	readonly module: string;
-	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions";
-	/** The prefix, type or action name; absent when the container itself is refused. */
+	readonly kind:
+		| "rateLimitBudgets"
+		| "federationTypes"
+		| "admissionActions"
+		| "sessionCloseNotifiers";
+	/** The prefix, type, action name or notifier name; absent when the container itself is refused. */
 	readonly name?: string;
 	readonly channel: "contributes" | "overrides";
 	readonly problem: string;
