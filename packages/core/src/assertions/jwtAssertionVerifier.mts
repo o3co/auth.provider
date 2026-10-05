@@ -64,6 +64,11 @@ export interface JwtAssertionVerifierOptions {
 	 * refuses it: no lifetime is left for a token to inherit.
 	 */
 	readonly clockToleranceSeconds?: number;
+	/**
+	 * How long an assertion may live, `exp − iat`, in seconds: the issuer
+	 * entry's `maxLifetimeSeconds`. Default an hour, at most a day.
+	 */
+	readonly maxLifetimeSeconds?: number;
 	/** Defaults to reading `sub`. */
 	readonly readSubjectHandle?: SubjectHandleReader;
 	/** Reads `scope` (space-delimited, per RFC 8693 §2.1) by default. */
@@ -93,8 +98,16 @@ export interface JwtAssertionVerifierOptions {
 export function createJwtAssertionVerifier(
 	options: JwtAssertionVerifierOptions,
 ): AssertionVerifier {
-	const { key, issuer, audience, algorithms, clockToleranceSeconds, readSubjectHandle, readScope } =
-		options;
+	const {
+		key,
+		issuer,
+		audience,
+		algorithms,
+		clockToleranceSeconds,
+		maxLifetimeSeconds,
+		readSubjectHandle,
+		readScope,
+	} = options;
 
 	if (issuer.length === 0 || audience.length === 0) {
 		throw new Error(
@@ -124,6 +137,7 @@ export function createJwtAssertionVerifier(
 				keys: { type: "key", key },
 				algorithms,
 				...(clockToleranceSeconds === undefined ? {} : { clockToleranceSeconds }),
+				...(maxLifetimeSeconds === undefined ? {} : { maxLifetimeSeconds }),
 			},
 		]),
 		readersFor: () => readers,

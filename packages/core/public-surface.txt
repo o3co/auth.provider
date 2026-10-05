@@ -1,5 +1,6 @@
 . ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY value
 . ADMISSION_GRADES value
+. ASSERTION_MAX_LIFETIME_LIMIT_SECONDS value
 . ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS value
 . ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS value
 . AUDIT_SINK_ABSENCE_POLICY value
@@ -138,6 +139,7 @@
 . CsrfGuard type
 . CsrfTokenSigner type
 . CsrfVerdict type
+. DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS value
 . DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS value
 . DEFAULT_CLOCK_SKEW_MS value
 . DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS value
@@ -878,6 +880,7 @@
 . describeAbsenceDeclaration value
 . describeAdmissionOutage value
 . describeInvalidAssertionClockTolerance value
+. describeInvalidAssertionMaxLifetime value
 . describeIssuerRejection value
 . describeRedirectUriRejection value
 . describeSerializedOriginRejection value
@@ -962,6 +965,7 @@
 . isUsableMaxUpstreamAccessTokenLifetime value
 . isUsableRateLimitSpec value
 . isValidAssertionClockTolerance value
+. isValidAssertionMaxLifetime value
 . isVerificationUnavailable value
 . isWellFormedClientId value
 . isWellFormedErrorCode value

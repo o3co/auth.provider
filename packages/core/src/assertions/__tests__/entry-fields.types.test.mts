@@ -70,6 +70,7 @@ describe("AssertionIssuerEntry — what a registry answers with", () => {
 		expectTypeOf<
 			IsRequiredKey<AssertionIssuerEntry, "clockToleranceSeconds">
 		>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<AssertionIssuerEntry, "maxLifetimeSeconds">>().toEqualTypeOf<true>();
 	});
 
 	it("still lets a ceiling be absent in value, as undefined", () => {
@@ -90,6 +91,7 @@ describe("AssertionIssuerEntryInput — what a caller writes", () => {
 			| "expiresAt"
 			| "profile"
 			| "clockToleranceSeconds"
+			| "maxLifetimeSeconds"
 		>();
 	});
 

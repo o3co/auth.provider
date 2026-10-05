@@ -489,6 +489,7 @@ describe("an entry is data a store can hold", () => {
 					expiresAt: row.expiresAt === undefined ? undefined : new Date(row.expiresAt),
 					profile: row.profile,
 					clockToleranceSeconds: row.clockToleranceSeconds,
+					maxLifetimeSeconds: row.maxLifetimeSeconds,
 				};
 				return answer;
 			},

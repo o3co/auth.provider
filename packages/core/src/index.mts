@@ -79,10 +79,14 @@ export type {
 } from "./assertions/jwtAssertionVerifier.mjs";
 export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
 export {
+	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
 	type AssertionLifetime,
 	assertionLifetime,
+	DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS,
 	describeInvalidAssertionClockTolerance,
+	describeInvalidAssertionMaxLifetime,
 	isValidAssertionClockTolerance,
+	isValidAssertionMaxLifetime,
 	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	MAX_ASSERTION_LIFETIME_SECONDS,
 } from "./assertions/lifetime.mjs";

@@ -25,6 +25,10 @@
  */
 
 import { describe, expect, it } from "vitest";
+import {
+	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
+	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
+} from "#/assertions/lifetime.mjs";
 import { MAX_DURATION_MS } from "#/config/durations.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "#/federation-grants/lifetime.mjs";
 import {
@@ -86,11 +90,25 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 	it("reads the deprecated alias where that is all a deployment has", () => {
 		// `expiresIn` alone means both the default and the maximum.
 		const horizon = resolveSubjectRevocationHorizonMs(
-			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 7_200 } } },
+			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 172_800 } } },
 			session(60_000),
 		);
-		expect(horizon).toBeGreaterThan(7_200_000);
-		expect(horizon).toBeLessThan(7_200_000 + 600_000);
+		expect(horizon).toBeGreaterThan(172_800_000);
+		expect(horizon).toBeLessThan(172_800_000 + 600_000);
+	});
+
+	it("outlasts every assertion an issuer entry may accept, whatever the configured lifetimes", () => {
+		// A jwt-bearer assertion issued before the boundary lives at most the
+		// largest entry ceiling (`exp − iat`), and is accepted up to its entry's
+		// clock tolerance past `exp`. The registry is not visible here, so the
+		// limit stands in for the largest ceiling.
+		const horizon = resolveSubjectRevocationHorizonMs(
+			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 60 } } },
+			session(60_000),
+		);
+		expect(horizon).toBeGreaterThan(
+			(ASSERTION_MAX_LIFETIME_LIMIT_SECONDS + MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS) * 1000,
+		);
 	});
 
 	it("adds the tolerance with which those things are actually accepted", () => {
@@ -147,14 +165,21 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		const sessionCookie = (maxAgeMs: unknown) => ({ maxAgeMs }) as never;
 
 		it("reads each lifetime from the slot that carries it, in place of the configuration's", () => {
-			// The configuration says a day of refresh token; the slot says an
-			// hour, and two hours of access token. The slot is what was minted.
-			const horizon = resolveSubjectRevocationHorizonMs(config(), {
-				tokenSettings: tokenSettings(),
-				sessionCookie: sessionCookie(60_000),
-			});
-			expect(horizon).toBeGreaterThan(7_200_000);
-			expect(horizon).toBeLessThan(86_400_000);
+			// The configuration says thirty days of refresh token; the slot says
+			// an hour, and two days of access token. The slot is what was minted.
+			const horizon = resolveSubjectRevocationHorizonMs(
+				config({
+					oauth: { refreshToken: { expiresIn: 30 * 86_400 }, accessToken: { expiresIn: 3600 } },
+				}),
+				{
+					tokenSettings: tokenSettings({
+						accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: 172_800 },
+					}),
+					sessionCookie: sessionCookie(60_000),
+				},
+			);
+			expect(horizon).toBeGreaterThan(172_800_000);
+			expect(horizon).toBeLessThan(30 * 86_400_000);
 		});
 
 		it("refuses a slot's value it cannot print as JSON with its RangeError, never a TypeError", () => {
