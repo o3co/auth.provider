@@ -202,9 +202,9 @@ front of the operator.
    audience, `azp` must be present and equal the client id; `exp` and `iat` within tolerance; `nonce` equal to the
    transaction's; `at_hash` recomputed from the access token when the claim is
    present (OIDC Core §3.3.2.11). A response without an id_token is refused.
-   An `auth_time` that is not whole seconds since the epoch, or lies further
-   ahead than the clock skew tolerated between hosts, is refused (core's
-   `readUpstreamAuthTime`). The adapter does not pass `max_age` to the
+   An `auth_time` that is not a non-negative number, or lies further ahead
+   than the clock skew tolerated between hosts, is refused; a fraction is
+   floored to its second (core's `readUpstreamAuthTime`). The adapter does not pass `max_age` to the
    library's own check: whether a session meets an ask is core's judgement.
 4. **UserInfo** — when enabled, fetched with the access token and bound to the
    id_token's `sub`; a mismatch is refused. UserInfo values fill `email`,
