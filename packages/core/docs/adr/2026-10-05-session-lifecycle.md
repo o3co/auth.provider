@@ -107,11 +107,8 @@ the work, so every work item is safe to run more than once.
 
 - The memory store (`createInMemorySessionLifecycleStore`) runs each member as
   one synchronous step, holds at most `maxEntries` records and
-  `maxParticipants` per record. Full, it evicts the `closed` record kept the
-  shortest — its work is done and its user session deleted, so the service
-  reads no live session for that sid either way — and refuses rather than
-  evict an active or closing record, which would let a closed session be
-  joined again or leave its work undone.
+  `maxParticipants` per record, and when full refuses rather than evicts: an
+  evicted record would let a closed session be joined again.
 - `sessionLifecycleStoreContract` in `@o3co/auth-provider-test-kit` holds a
   store to the rules a suite can observe; a Redis store runs it on two
   connections.
@@ -361,3 +358,20 @@ snapshot's. Once the bridge goes, the record's order alone holds it. A logout re
 federation tokens that carry the upstream `id_token_hint`. A logout whose
 close commits with work still pending is audited as `logout.close_pending`.
 
+## Amendment 2026-10-06 — the memory store, full, evicts a closed record of an ended session
+
+The memory store no longer only refuses when full. It drops lapsed records
+and, if that makes no room, evicts the `closed` record of an ended session
+(its `expiresAt` not after the store's clock) whose retention ends first; it
+refuses when there is none. A login and logout loop on one account would
+otherwise fill it with closed records and refuse every login until they
+lapsed.
+
+Such a record may so go before its retention. The service closes a record
+only after deleting its user session, and the store's `open` and `join`
+refuse an ended session, so the sid can be neither opened nor joined again
+and no live session is read for it either way. A repeated close or
+`federations` then answers no snapshot, as after the record's retention. A
+record not closed, or closed while its session has not ended, is never
+evicted: a join racing a close could otherwise open the sid again and join
+a closed session. The port and its contract are unchanged.
