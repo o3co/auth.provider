@@ -101,6 +101,7 @@ function endingFederation(name: string) {
 /** A lifecycle whose answers the case sets; every member a spy. */
 function fakeLifecycle(over: Partial<SessionLifecycle> = {}) {
 	return {
+		open: vi.fn<SessionLifecycle["open"]>(over.open ?? (async () => ({ outcome: "opened" }))),
 		join: vi.fn<SessionLifecycle["join"]>(over.join ?? (async () => ({ outcome: "joined" }))),
 		close: vi.fn<SessionLifecycle["close"]>(
 			over.close ?? (async () => ({ outcome: "done", rps: [], federations: [] })),
