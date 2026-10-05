@@ -319,7 +319,12 @@ describe("subjectRevocationServiceModule", () => {
 			},
 		);
 
-		it("tells the session's relying parties and revokes its families through the close", async () => {
+		/**
+		 * Core's session lifecycle over in-memory stores, holding one session of
+		 * `u-1` that relying party `rp-1` and family `fam-1` joined. Its notifier
+		 * fails the first `failingNotices` notices.
+		 */
+		const lifecycleOverMemory = async (failingNotices = 0) => {
 			const expiresAt = new Date(Date.now() + HOUR);
 			const userSessionStore = createInMemoryUserSessionStore();
 			await userSessionStore.create({
@@ -341,6 +346,7 @@ describe("subjectRevocationServiceModule", () => {
 				isFamilyRevoked: async (familyId) => revoked.includes(familyId),
 			};
 			const notices: SessionCloseNotice[] = [];
+			let failing = failingNotices;
 			const lifecycle = createSessionLifecycle({
 				store: createInMemorySessionLifecycleStore(),
 				userSessionStore,
@@ -352,6 +358,10 @@ describe("subjectRevocationServiceModule", () => {
 				subjectSessionIndex: index,
 				notifier: () => ({
 					notify: async (notice) => {
+						if (failing > 0) {
+							failing -= 1;
+							throw new Error("relying party unreachable");
+						}
 						notices.push(notice);
 					},
 				}),
@@ -374,6 +384,31 @@ describe("subjectRevocationServiceModule", () => {
 					familyId: "fam-1",
 				}),
 			).toEqual({ outcome: "joined" });
+			return { lifecycle, index, userSessionStore, revoked, notices };
+		};
+
+		it("keeps a session whose close is pending listed, and a retry resumes the close and reports complete", async () => {
+			const { lifecycle, index, userSessionStore, notices } = await lifecycleOverMemory(1);
+			const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });
+
+			const first = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(first.sessionsFailed).toEqual(["sid-1"]);
+			expect(first.complete).toBe(false);
+			expect(await index.listSids("u-1")).toEqual(["sid-1"]);
+			expect(await lifecycle.liveness("sid-1")).toEqual({ outcome: "not_live" });
+
+			const retry = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(retry.sessionsRevoked).toEqual(["sid-1"]);
+			expect(retry.complete).toBe(true);
+			expect(await index.listSids("u-1")).toEqual([]);
+			expect(notices.map((n) => n.clientId)).toEqual(["rp-1"]);
+			expect(await userSessionStore.get("sid-1")).toBeNull();
+		});
+
+		it("tells the session's relying parties and revokes its families through the close", async () => {
+			const { lifecycle, index, userSessionStore, revoked, notices } = await lifecycleOverMemory();
 			const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });
 
 			const result = await service.revokeAllForSubject({ subject: "u-1" });

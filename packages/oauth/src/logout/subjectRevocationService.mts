@@ -24,9 +24,10 @@
  * `subject_revocation` instead: the close revokes the session's families and
  * tells its relying parties.
  *
- * Installed explicitly, not folded into `oauthModule`: those routes work in a
- * deployment with no session stores at all, and requiring the whole cascade
- * from the module that serves `/oauth/token` would break such deployments.
+ * Installed explicitly, not folded into `oauthEndpointsModule`: those routes
+ * work in a deployment with no session stores at all, and requiring the whole
+ * cascade from the module that serves `/oauth/token` would break such
+ * deployments.
  *
  * It reads no configuration: the lifetimes come from the `oauthTokenSettings`
  * and `sessionCookiePolicy` slots, and whether grants are on and may be kept
@@ -246,7 +247,8 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				// revokes the session's families, a code exchanged after its
 				// closing commit included, and tells the relying parties. Only
 				// `done` counts the session revoked; a `pending` close has work
-				// left, and the sid stays in the index for a retry.
+				// left, and the sid stays in the index for a retry, since the
+				// close removes the subject's index entry last.
 				//
 				// Otherwise `cascadeLogout`, with no `expiresAt`: this path reads
 				// no session, so the cascade lists the families and writes no
