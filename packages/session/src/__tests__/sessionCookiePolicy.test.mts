@@ -176,7 +176,7 @@ describe("sessionCookiePolicyFrom", () => {
 				withStore(makeValidAppConfig(), change as Record<string, unknown>),
 			) as AppConfig;
 			const booting = createTestApp({
-				modules: [sessionStoreModuleFor(config)],
+				modules: [sessionStoreModule],
 				bootstrapComponents: { config, pathResolver: (s: string) => s },
 			});
 			if (refusal === undefined) {
@@ -304,7 +304,7 @@ describe("the session store module provides sessionCookiePolicy", () => {
 		const seen: { policy?: SessionCookiePolicy } = {};
 		const config = withSessionCaptures(makeValidAppConfig()) as AppConfig;
 		const handle = await createTestApp({
-			modules: [sessionStoreModuleFor(config), consumer(seen)],
+			modules: [sessionStoreModule, consumer(seen)],
 			bootstrapComponents: { config, pathResolver: (s: string) => s },
 		});
 		handles.push(handle);

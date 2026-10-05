@@ -47,7 +47,7 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { sessionModule } from "#/module.mjs";
-import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSessionCaptures } from "./_helpers/sections.mjs";
 
 const PASSWORD = "correct horse battery staple";
@@ -110,7 +110,7 @@ async function boot(user: User, created: string[] = []) {
 	const handle = await createApp({
 		modules: [
 			// The cookie session's middleware is mounted ahead of the routes that read it.
-			sessionStoreModuleFor(config),
+			sessionStoreModule,
 			sessionModule,
 			memorySessionStoresModule,
 			memoryFederationTokenStoreModule,

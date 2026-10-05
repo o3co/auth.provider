@@ -239,12 +239,13 @@ describe("sessionStoreModule", () => {
 });
 
 // ---------------------------------------------------------------------------
-// `SESSION_STORAGE_TYPE=memory` under `core.deployment.mode = "multi"`.
+// `session-store.storage.type = "memory"` under `core.deployment.mode`.
 // express-session's MemoryStore is per process like every other memory store
-// the replica-safety guard refuses, but the storage type is config, which a
-// static manifest cannot know. `sessionStoreModuleFor(config)` builds the
-// manifest from the config the composition root already holds, so the guard
-// reads the declaration at stage 1 like the others.
+// the replica-safety guard refuses, and the storage type is the module's own
+// section: `sessionStoreModule` declares its replica safety from that section,
+// so the guard reads the declaration at stage 1 like the others.
+// `sessionStoreModuleFor(config)` declares the same from the config it is
+// handed.
 // ---------------------------------------------------------------------------
 
 const memoryConfig = baseConfig;
@@ -255,13 +256,118 @@ const redisConfig: SessionLikeConfig = {
 	},
 };
 
+/** The guard's sections for `config`: the session store's, by module name. */
+const sectionsOf = (config: SessionLikeConfig): ReadonlyMap<string, unknown> =>
+	new Map([["session-store", config["session-store"]]]);
+
+const MODES = {
+	multi: { core: { deployment: { mode: "multi" } } },
+	single: { core: { deployment: { mode: "single" } } },
+	unset: {},
+} as const;
+
+/** What the guard does with `input`: refuses (the error), warns (its arguments), or nothing. */
+function guardOutcome(input: Omit<Parameters<typeof checkReplicaSafety>[0], "logger">): unknown {
+	const warn = vi.fn();
+	const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
+	try {
+		checkReplicaSafety({ ...input, logger });
+	} catch (err) {
+		const e = err as { name?: string; reason?: string; message?: string; details?: unknown };
+		return { refused: { name: e.name, reason: e.reason, message: e.message, details: e.details } };
+	}
+	return warn.mock.calls.length === 0 ? "silent" : { warned: warn.mock.calls };
+}
+
+describe("sessionStoreModule — replica safety declared from its section", () => {
+	it("declares replica-unsafe state when session-store.storage.type is memory", () => {
+		const reason = replicaUnsafeReason(sessionStoreModule, memoryConfig["session-store"]);
+		// The guard quotes this; it has to say what breaks, not "use redis".
+		expect(reason).toMatch(/^the express-session store forks per replica/);
+		expect(reason).toBe(replicaUnsafeReason(sessionStoreModuleFor(memoryConfig as never)));
+	});
+
+	it("declares nothing when the store is redis — the state lives in a shared store", () => {
+		expect(replicaUnsafeReason(sessionStoreModule, redisConfig["session-store"])).toBeUndefined();
+	});
+
+	it("is not answered without its section", () => {
+		expect(() => replicaUnsafeReason(sessionStoreModule)).toThrow(
+			expect.objectContaining({
+				name: "TypeError",
+				message: expect.stringContaining('"session-store"'),
+			}),
+		);
+	});
+
+	it('is refused by the guard under core.deployment.mode = "multi", by name and reason', () => {
+		expect(() =>
+			checkReplicaSafety({
+				modules: [sessionStoreModule],
+				config: MODES.multi,
+				sections: sectionsOf(memoryConfig),
+			}),
+		).toThrow(
+			expect.objectContaining({
+				name: "BootError",
+				reason: "replica-unsafe-adapter",
+				message: expect.stringContaining(
+					"session-store: the express-session store forks per replica",
+				),
+				details: { reason: "replica-unsafe-adapter", modules: ["session-store"] },
+			}),
+		);
+	});
+
+	it('is silent under core.deployment.mode = "single" and warns when the mode is unset', () => {
+		const input = { modules: [sessionStoreModule], sections: sectionsOf(memoryConfig) };
+		expect(guardOutcome({ ...input, config: MODES.single })).toBe("silent");
+		expect(guardOutcome({ ...input, config: MODES.unset })).toEqual({
+			warned: [
+				[expect.objectContaining({ modules: ["session-store"] }), "replica_unsafe_adapters"],
+			],
+		});
+	});
+
+	it("passes the redis section through the guard under multi without complaint", () => {
+		expect(
+			guardOutcome({
+				modules: [sessionStoreModule],
+				config: MODES.multi,
+				sections: sectionsOf(redisConfig),
+			}),
+		).toBe("silent");
+	});
+
+	describe.each([
+		["memory", memoryConfig],
+		["redis", redisConfig],
+	] as const)("with session-store.storage.type = %s", (_type, config) => {
+		it.each(Object.keys(MODES) as (keyof typeof MODES)[])(
+			"the guard answers under %s as it does for sessionStoreModuleFor(config)",
+			(mode) => {
+				expect(
+					guardOutcome({
+						modules: [sessionStoreModule],
+						config: MODES[mode],
+						sections: sectionsOf(config),
+					}),
+				).toEqual(
+					guardOutcome({
+						modules: [sessionStoreModuleFor(config as never)],
+						config: MODES[mode],
+					}),
+				);
+			},
+		);
+	});
+});
+
 describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 	it("declares replica-unsafe state on the manifest when session-store.storage.type is memory", () => {
 		const m = sessionStoreModuleFor(memoryConfig as never) as unknown as Module;
 		expect(m.replicaSafety).toMatchObject({ unsafe: true });
-		// The guard quotes this; it has to say what breaks, not "use redis".
-		expect(replicaUnsafeReason(m)).toBeDefined();
-		expect((replicaUnsafeReason(m) ?? "").length).toBeGreaterThan(40);
+		expect(replicaUnsafeReason(m)).toMatch(/^the express-session store forks per replica/);
 	});
 
 	it("declares nothing when the store is redis — the state lives in a shared store", () => {
@@ -284,58 +390,14 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 			expect(built.contributes?.routes).toHaveLength(1);
 		}
 	});
-
-	it('is refused by the replica-safety guard under core.deployment.mode = "multi", by name', () => {
-		expect(() =>
-			checkReplicaSafety({
-				modules: [sessionStoreModuleFor(memoryConfig as never)],
-				config: { core: { deployment: { mode: "multi" } } },
-			}),
-		).toThrow(
-			expect.objectContaining({
-				name: "BootError",
-				reason: "replica-unsafe-adapter",
-				details: { reason: "replica-unsafe-adapter", modules: ["session-store"] },
-			}),
-		);
-	});
-
-	it('is silent under core.deployment.mode = "single" and warns when the mode is unset', () => {
-		const warn = vi.fn();
-		const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
-		checkReplicaSafety({
-			modules: [sessionStoreModuleFor(memoryConfig as never)],
-			config: { core: { deployment: { mode: "single" } } },
-			logger,
-		});
-		expect(warn).not.toHaveBeenCalled();
-		checkReplicaSafety({
-			modules: [sessionStoreModuleFor(memoryConfig as never)],
-			config: {},
-			logger,
-		});
-		expect(warn).toHaveBeenCalledWith(
-			expect.objectContaining({ modules: ["session-store"] }),
-			"replica_unsafe_adapters",
-		);
-	});
-
-	it("passes the redis manifest through the guard under multi without complaint", () => {
-		expect(() =>
-			checkReplicaSafety({
-				modules: [sessionStoreModuleFor(redisConfig as never)],
-				config: { core: { deployment: { mode: "multi" } } },
-			}),
-		).not.toThrow();
-	});
 });
 
-describe("sessionStoreModule (static manifest) — factory-time refusal under multi", () => {
-	// A composition root that wires the static manifest has not told the
-	// stage-1 guard anything, so the route factory — which is where the
-	// storage type is first known for certain — refuses the same combination
-	// with the same reason rather than mounting a per-process store. The mode
-	// is the `deploymentMode` slot core fills from `core.deployment.mode`; the
+describe("sessionStoreModule — the route factory's refusal under multi, and boot's", () => {
+	// The route factory, which mounts the store its section names, refuses
+	// the same combination with the same reason rather than mount a
+	// per-process store: a module built by `sessionStoreModuleFor` from a
+	// config other than the one booted told the guard nothing. The mode is
+	// the `deploymentMode` slot core fills from `core.deployment.mode`; the
 	// configuration's own `deployment` is not read.
 	const factoryOf = (m: unknown) => {
 		const factory = (m as Module).contributes?.routes?.[0];
@@ -415,40 +477,82 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 		expect(route.id).toBe("session-middleware");
 	});
 
-	it.each([
-		["refused", "core.deployment.mode = multi", { mode: "multi" }],
-		["mounted", "core.deployment.mode = single", { mode: "single" }],
-		["mounted", "an empty deployment section", {}],
-		["mounted", "no deployment section", undefined],
-	] as const)(
-		"through createApp, memory storage is %s under %s",
-		async (outcome, _what, deployment) => {
+	const BOOT_FORMS = [
+		["sessionStoreModule", () => sessionStoreModule],
+		["sessionStoreModuleFor(config)", (config: never) => sessionStoreModuleFor(config)],
+	] as const;
+
+	describe.each(BOOT_FORMS)("through createApp, %s", (_form, form) => {
+		it.each([
+			["refused", "core.deployment.mode = multi", { mode: "multi" }],
+			["silent", "core.deployment.mode = single", { mode: "single" }],
+			["warned", "an empty deployment section", {}],
+			["warned", "no deployment section", undefined],
+		] as const)("with memory storage is %s under %s", async (outcome, _what, deployment) => {
 			const base = makeValidAppConfig();
+			const config = withSessionCaptures({
+				...withStore(base, { storage: { type: "memory" } }),
+				...(deployment === undefined ? {} : { core: { ...base.core, deployment } }),
+			});
+			const warn = vi.fn();
+			const logger = {
+				warn,
+				info: vi.fn(),
+				error: vi.fn(),
+				debug: vi.fn(),
+				trace: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			};
 			const boot = createApp({
-				modules: [sessionStoreModule],
-				bootstrapComponents: {
-					config: withSessionCaptures({
-						...withStore(base, { storage: { type: "memory" } }),
-						...(deployment === undefined ? {} : { core: { ...base.core, deployment } }),
-					}),
-					pathResolver: (p: string) => p,
-				} as never,
+				modules: [form(config as never)],
+				bootstrapComponents: { config, logger, pathResolver: (p: string) => p } as never,
 			});
 			if (outcome === "refused") {
+				// The stage-1 guard, which names every offender together, and
+				// before any factory runs.
 				await expect(boot).rejects.toMatchObject({
-					reason: "contribute-factory-failed",
-					cause: { reason: "replica-unsafe-adapter", details: { modules: ["session-store"] } },
+					name: "BootError",
+					stage: "validateManifests",
+					reason: "replica-unsafe-adapter",
+					message: expect.stringContaining(
+						"session-store: the express-session store forks per replica",
+					),
+					details: { modules: ["session-store"] },
 				});
 				return;
 			}
 			const handle = await boot;
 			try {
 				expect(handle.routes.map((r) => r.contribution.id)).toContain("session-middleware");
+				const warnings = warn.mock.calls.filter(([, event]) => event === "replica_unsafe_adapters");
+				if (outcome === "silent") expect(warnings).toEqual([]);
+				else
+					expect(warnings).toEqual([
+						[expect.objectContaining({ modules: ["session-store"] }), "replica_unsafe_adapters"],
+					]);
 			} finally {
 				await handle.dispose();
 			}
-		},
-	);
+		});
+
+		it("with redis storage boots under core.deployment.mode = multi", async () => {
+			const base = makeValidAppConfig();
+			const config = withSessionCaptures({
+				...withStore(base, { storage: redisConfig["session-store"].storage }),
+				core: { ...base.core, deployment: { mode: "multi" } },
+			});
+			const handle = await createApp({
+				modules: [form(config as never)],
+				bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+			});
+			try {
+				expect(handle.routes.map((r) => r.contribution.id)).toContain("session-middleware");
+			} finally {
+				await handle.dispose();
+			}
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -677,7 +781,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 						],
 					},
 				}),
-				sessionStoreModuleFor(config),
+				sessionStoreModule,
 				defineModule({
 					name: "test:session-cookie-policy-reader",
 					requires: ["sessionCookiePolicy"],

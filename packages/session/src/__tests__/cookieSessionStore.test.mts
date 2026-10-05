@@ -93,7 +93,7 @@ const fake = vi.hoisted(() => {
 vi.mock("redis", () => ({ createClient: () => fake.client }));
 
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
-import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import {
 	makeFederationTokenStore,
 	makePermissivePolicy,
@@ -176,7 +176,7 @@ beforeEach(() => {
 const alice = { id: "user-1", username: "alice" };
 
 /**
- * `sessionStoreModuleFor` over the fake Redis, then a module of routes that
+ * `sessionStoreModule` over the fake Redis, then a module of routes that
  * read and write `req.session` — two probes, and the session package's own
  * login and federation routers.
  */
@@ -280,7 +280,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 		},
 	});
 	const handle = await createApp({
-		modules: [sessionStoreModuleFor(config), routes],
+		modules: [sessionStoreModule, routes],
 		bootstrapComponents: {
 			config,
 			pathResolver: (p: string) => p,

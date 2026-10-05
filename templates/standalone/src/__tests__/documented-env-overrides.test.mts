@@ -1050,8 +1050,12 @@ describe("the shipped config boots with every documented override supplied as a 
 		// list covers core's modules only, and cannot see the template's own
 		// memory modules.
 		const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
-		for (const module of buildModules(readShippedSwitches(UMBRELLA_E2E_ENV))) {
-			expect(replicaUnsafeReason(module), module.name).toBeUndefined();
+		// Each module's section at its name: a declaration made from the
+		// section is answered for it.
+		const switches = readShippedSwitches(UMBRELLA_E2E_ENV);
+		const sections = switches as unknown as Record<string, unknown>;
+		for (const module of buildModules(switches)) {
+			expect(replicaUnsafeReason(module, sections[module.name]), module.name).toBeUndefined();
 		}
 	});
 

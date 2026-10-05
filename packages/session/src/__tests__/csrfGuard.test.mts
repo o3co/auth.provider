@@ -51,7 +51,7 @@ import {
 	type SessionCsrfConfigSlice,
 } from "#/csrf.mjs";
 import { sessionModule } from "#/module.mjs";
-import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 const TRUSTED = "https://app.contract.test";
@@ -262,7 +262,7 @@ const boot = async (seen: { guard?: CsrfGuard }): Promise<express.Express> => {
 	) as AppConfig;
 	const handle = await createTestApp({
 		// The session store's middleware first, as every composition lists it.
-		modules: [sessionStoreModuleFor(config), sessionModule, ...stores, probe(seen)],
+		modules: [sessionStoreModule, sessionModule, ...stores, probe(seen)],
 		bootstrapComponents: { config, pathResolver: (s: string) => s },
 	});
 	handles.push(handle);

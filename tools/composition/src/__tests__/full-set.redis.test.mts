@@ -131,7 +131,7 @@ async function replica(options: FullSetOptions = {}): Promise<FullSet> {
 
 describe('every package on, every shared store on Redis, core.deployment.mode = "multi"', () => {
 	it("boots, with the added stores on Redis and nothing declaring replica-unsafe state", async () => {
-		const { modules, handle } = await replica();
+		const { modules, handle, config } = await replica();
 		const names = modules.map((m) => m.name);
 		expect(names).toEqual(
 			expect.arrayContaining([
@@ -143,7 +143,12 @@ describe('every package on, every shared store on Redis, core.deployment.mode = 
 				"redis-mfa-transaction-store",
 			]),
 		);
-		for (const module of modules) expect(replicaUnsafeReason(module), module.name).toBeUndefined();
+		// Each module's section at its name, as boot parsed it: a declaration
+		// made from the section is answered for it.
+		const sections = config as unknown as Record<string, unknown>;
+		for (const module of modules) {
+			expect(replicaUnsafeReason(module, sections[module.name]), module.name).toBeUndefined();
+		}
 		const probes = handle.readinessProbes.filter((p) => p.name === "redis");
 		expect(probes).toHaveLength(1);
 		await expect(probes[0]?.check()).resolves.toBe("PONG");
