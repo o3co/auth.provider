@@ -30,6 +30,7 @@ import {
 	createInMemorySubjectSessionIndex,
 	createInMemoryUserSessionStore,
 	createSessionLifecycle,
+	DEFAULT_CLOCK_SKEW_MS,
 	type FederationTokenStore,
 	type RefreshTokenFamilyRevocation,
 	type RegisteredRP,
@@ -709,6 +710,79 @@ describe("close", () => {
 		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
 		expect([...h.revoked].sort()).toEqual(["f1", "f2"]);
 		expect((await h.read())?.value.state).toBe("closed");
+	});
+
+	it("runs the close work of a session that ended on the store's clock before its record could be opened", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
+		await h.sessionRPRegistry.registerRP(SID, relyingParty("old-rp"), expiresAt);
+		now = expiresAt.getTime() + 1;
+		h.calls.length = 0;
+		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
+			outcome: "done",
+			rps: ["old-rp"],
+			federations: [],
+		});
+		expect([...h.calls].sort()).toEqual([
+			"delete_user_session",
+			"notify:old-rp",
+			"remove_federation_tokens:sid-1",
+			"remove_subject_session:sid-1",
+			"revoke_family:f-old",
+		]);
+		expect(h.calls.at(-1)).toBe("remove_subject_session:sid-1");
+		expect(await h.sessions.get(SID)).toBeNull();
+		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+		expect(await h.read()).toBeNull();
+	});
+
+	it("runs the close work of a record that lapses between its read and the closing commit", async () => {
+		let now = Date.now();
+		let expiresAtMs = 0;
+		const h = harness({
+			lifecycleStore: { now: () => now },
+			store: (inner) => ({
+				...inner,
+				beginClose: async (sid, request) => {
+					now = expiresAtMs + DEFAULT_CLOCK_SKEW_MS + 1;
+					return inner.beginClose(sid, request);
+				},
+			}),
+		});
+		expiresAtMs = (await h.establish()).getTime();
+		await joinAll(h);
+		h.calls.length = 0;
+		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
+			outcome: "done",
+			rps: ["a"],
+			federations: ["google"],
+		});
+		expect([...h.calls].sort()).toEqual([
+			"delete_user_session",
+			"notify:a",
+			"remove_federation_tokens:sid-1",
+			"remove_subject_session:sid-1",
+			"revoke_family:f1",
+		]);
+		expect(await h.sessions.get(SID)).toBeNull();
+		expect(await h.read()).toBeNull();
+	});
+
+	it("answers unavailable when the close work of a lapsed record fails, keeping the user session for a retry", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
+		now = expiresAt.getTime() + 1;
+		h.failing.set("revoke_family:f-old", 1);
+		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({ outcome: "unavailable" });
+		expect(h.calls).not.toContain("delete_user_session");
+		expect(await h.sessions.get(SID)).not.toBeNull();
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		expect(h.revoked.has("f-old")).toBe(true);
+		expect(await h.sessions.get(SID)).toBeNull();
 	});
 
 	it("revokes what joined through the old stores when the close comes after the session's end", async () => {
