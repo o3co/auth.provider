@@ -364,11 +364,6 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		sites: { revokedBefore: 1 },
 		why: `${TOKEN_SIDE}: the device_code grant's boundary read at the poll`,
 	},
-	{
-		file: "packages/webauthn/src/grant.mts",
-		sites: { revokedBefore: 1 },
-		why: `${TOKEN_SIDE}: the passkey grant's boundary read before it mints`,
-	},
 	// A login's MFA transaction, before any session exists: the MFA ADR's D8
 	// (build-order step 11-B).
 	{
