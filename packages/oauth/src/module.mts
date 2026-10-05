@@ -139,11 +139,11 @@ export const oauthEndpointsModule: Module = defineModule<
 		"refreshTokenFamilyRevocation", // introspect/userinfo/logout cascade family-revocation check
 		"accessTokenDenylist", // RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
 		"subjectRevocation", // per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
-		"userSessionStore", // this and the next three: the four session stores
-		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step
+		"userSessionStore", // the four session stores: this, sessionRPRegistry, sessionFamilyIndex, sessionFederationIndex
 		"sessionRPRegistry",
 		"sessionFamilyIndex",
 		"sessionFederationIndex",
+		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step
 		"federationTokenStore", // federation-token routes
 		"consentStore", // the consent step for clients that are not first-party; such clients are refused without it
 		"pendingConsentStore", // where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other

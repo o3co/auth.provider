@@ -168,9 +168,14 @@ const META_FIELDS = new Set(["sub", "state", "exp", "gen", "until", "np", "nw", 
  */
 const recordOf = (fields: Readonly<Record<string, string>>): Versioned<SessionLifecycleRecord> => {
 	const participants: SessionParticipant[] = [];
+	const ordinals = new Map<string, number>();
 	const pending: string[] = [];
 	for (const [field, value] of Object.entries(fields)) {
-		if (field.startsWith("p:")) {
+		if (field.startsWith("o:")) {
+			const ordinal = Number(value);
+			if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw malformed("a join ordinal");
+			ordinals.set(field.slice(2), ordinal);
+		} else if (field.startsWith("p:")) {
 			const item = field.slice(2);
 			const colon = item.indexOf(":");
 			if (colon <= 0) throw malformed("a participant field");
@@ -185,7 +190,17 @@ const recordOf = (fields: Readonly<Record<string, string>>): Versioned<SessionLi
 			throw malformed("an unknown field");
 		}
 	}
-	participants.sort((a, b) => byBytes(sessionCloseItemOf(a), sessionCloseItemOf(b)));
+	// In join order; a participant written with no ordinal after those with
+	// one, by its item's bytes.
+	participants.sort((a, b) => {
+		const left = ordinals.get(sessionCloseItemOf(a)) ?? Number.POSITIVE_INFINITY;
+		const right = ordinals.get(sessionCloseItemOf(b)) ?? Number.POSITIVE_INFINITY;
+		return left === right
+			? byBytes(sessionCloseItemOf(a), sessionCloseItemOf(b))
+			: left < right
+				? -1
+				: 1;
+	});
 	pending.sort(byBytes);
 	const cause = fields.cause;
 	const value = {

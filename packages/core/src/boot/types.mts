@@ -148,7 +148,26 @@ export interface NormalisedModule {
 	readonly authoritativeKeys: readonly ComponentKey[];
 	readonly contributesEntries: readonly ContributionEntry[];
 	readonly overridesEntries: readonly ContributionEntry[];
+	/**
+	 * Each kind's container in `contributes` and `overrides`, as it was read,
+	 * once: stage 1 holds it to its kind's shape. A container that is
+	 * `undefined` is not listed.
+	 */
+	readonly containers: readonly ContributionContainer[];
 	readonly lifecycleKeys: readonly ComponentKey[];
+}
+
+/**
+ * What a kind's container in a module's `contributes` or `overrides` was read
+ * as: `record` for a plain object, `list` for an array, `other` for anything
+ * else, and `given`, how a refusal names it (`a record`, `an array`, `null`,
+ * `a function`, `a Map`, …).
+ */
+export interface ContributionContainer {
+	readonly kind: ContributionKind;
+	readonly channel: "contributes" | "overrides";
+	readonly shape: "record" | "list" | "other";
+	readonly given: string;
 }
 
 /**
@@ -1390,25 +1409,21 @@ export interface ContributionKindGuardedDetails {
 
 /**
  * A contribution whose container, key or value its kind cannot take, found on
- * the manifest at stage 1, before any factory runs: a
- * `rateLimitBudgets`, `federationTypes` or `admissionActions` container that
- * is not a record (an array, a function, `null`) — `name` then absent — a
- * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
- * carries it — or names an `Object.prototype` member, a `federationTypes`
- * declaration that is not an object with a Zod `entrySchema` and a
- * `factory`, an `admissionActions` entry whose name, declaration or grade
- * registration refuses, or a `sessionCloseNotifiers` container that is a list
- * (as normalisation read it) — `name` then absent. `problem` says which.
+ * the manifest at stage 1, before any factory runs: a container that is not
+ * its kind's shape — a record for a kind whose collector is name-keyed, an
+ * array for a list-shaped one, core's kinds and a consumer's alike, as
+ * normalisation read it — `name` then absent; a `rateLimitBudgets` prefix
+ * that is empty or holds `:` — no limiter key carries it — or names an
+ * `Object.prototype` member, a `federationTypes` declaration that is not an
+ * object with a Zod `entrySchema`, a `factory` and a `redirectPolicy`, or an `admissionActions`
+ * entry whose name, declaration or grade registration refuses. `problem`
+ * says which, and for a container what it was given.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
 	readonly module: string;
-	readonly kind:
-		| "rateLimitBudgets"
-		| "federationTypes"
-		| "admissionActions"
-		| "sessionCloseNotifiers";
-	/** The prefix, type, action name or notifier name; absent when the container itself is refused. */
+	readonly kind: ContributionKind;
+	/** The prefix, type or action name; absent when the container itself is refused. */
 	readonly name?: string;
 	readonly channel: "contributes" | "overrides";
 	readonly problem: string;
