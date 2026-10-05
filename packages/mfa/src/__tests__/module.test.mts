@@ -41,11 +41,7 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import {
-	coreConfigForTests,
-	createTestOAuthTokenSettings,
-	resolverForTests,
-} from "@o3co/auth-provider-core/testing";
+import { coreConfigForTests, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
 import { mfaEmailFactorModule } from "#/email/module.mjs";
@@ -67,7 +63,7 @@ import {
 	TOTP_SECTION,
 } from "./moduleHarness.mjs";
 import { factorRecord, stubFactor } from "./requirementHarness.mjs";
-import { beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
+import { addRecord, beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
 
 afterEach(disposeAll);
 
@@ -150,28 +146,31 @@ describe("mfaModules", () => {
 		});
 	});
 
-	it("reads its own section, mfa, at its name: the schema holds mode to off, optional or required and hands every other key on to the settings", () => {
+	it("reads its own section, mfa, at its name: the schema holds the whole section, mode to off, optional or required, and refuses a key it does not know", () => {
 		const section = mfaModule().section;
 		expect(section?.at).toBeUndefined();
 		expect(section?.reference?.href).toMatch(/\/config\/reference\.conf$/);
 		const schema = section?.schema;
 		if (schema === undefined) throw new Error("mfaModule declares no section");
-		for (const mode of ["off", "optional", "required"]) {
-			expect(schema.parse({ mode, transactionTtlSeconds: 600 }), mode).toEqual({
-				mode,
-				transactionTtlSeconds: 600,
-			});
+		for (const mode of ["off", "optional", "required"] as const) {
+			expect(schema.parse(mfaSection(mode)), mode).toMatchObject({ mode });
 		}
 		for (const mode of ["sometimes", "Required", "", null, true]) {
-			const parsed = schema.safeParse({ mode });
+			const parsed = schema.safeParse({ ...mfaSection("required"), mode });
 			expect(parsed.success, String(mode)).toBe(false);
 			expect(
 				parsed.error?.issues.map((issue) => issue.path),
 				String(mode),
 			).toEqual([["mode"]]);
 		}
+		expect(
+			schema
+				.safeParse({ ...mfaSection("required"), factors: {} })
+				.error?.issues.map((issue) => issue.message),
+		).toEqual(["has a key it does not know: factors"]);
 		// Unset — no mode, or no section — is the factory's to refuse, as off is.
-		expect(schema.parse({})).toEqual({});
+		const { mode: _mode, ...withoutMode } = mfaSection("required");
+		expect(schema.parse(withoutMode)).not.toHaveProperty("mode");
 		expect(schema.parse(undefined)).toBeUndefined();
 	});
 });
@@ -481,18 +480,27 @@ describe("the boot refusals", () => {
 		expect(err.details).toMatchObject({ missingKey: "loginCompletion", rootModule: "mfa" });
 	});
 
-	it("refuses an out-of-range transaction life and an unusable lock, naming the key", async () => {
+	it("refuses an out-of-range transaction life before any factory runs, naming the key", async () => {
 		for (const [mfa, key] of [
 			[{ transactionTtlSeconds: 59 }, "mfa.transactionTtlSeconds"],
 			[{ transactionTtlSeconds: 1801 }, "mfa.transactionTtlSeconds"],
 			[{ maxAttemptsPerTransaction: 0 }, "mfa.maxAttemptsPerTransaction"],
 			[{ maxAttemptsPerTransaction: 11 }, "mfa.maxAttemptsPerTransaction"],
-			[{ lockout: { ...mfaSection("required").lockout, threshold: 101 } }, "mfa.lockout.threshold"],
 		] as const) {
 			const err = await refusal({ config: configFor("required", mfa) });
-			expect(err.reason, key).toBe("contribute-factory-failed");
-			expect((err.cause as Error).message, key).toContain(key);
+			expect(err.reason, key).toBe("config-validation-failed");
+			expect(err.message, key).toContain(`${key}: must be a whole number`);
 		}
+	});
+
+	it("refuses a lock whose fields core's rule does not accept together, naming the key", async () => {
+		const err = await refusal({
+			config: configFor("required", {
+				lockout: { ...mfaSection("required").lockout, threshold: 101 },
+			}),
+		});
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect((err.cause as Error).message).toContain("mfa.lockout.threshold");
 	});
 
 	it("refuses a composition without mfa.page.url, the page a step-up starts on, naming it and MFA_PAGE_URL", async () => {
@@ -536,7 +544,8 @@ describe("the factors' sections are the factors' modules' to read", () => {
 
 	it("boots without the TOTP factor's module over another package's counting factor, though no TOTP issuer could be derived: a composition without TOTP is never refused over it", async () => {
 		const { handle } = await boot({
-			config: withIssuer(configFor("required"), NO_TOTP_HOST),
+			config: configFor("required"),
+			tokenIssuer: NO_TOTP_HOST,
 			withoutTotpModule: true,
 			extraModules: [contributing(stubFactor("webauthn", ["hwk", "swk"]))],
 		});
@@ -547,7 +556,8 @@ describe("the factors' sections are the factors' modules' to read", () => {
 
 	it("boots optional without the TOTP factor's module and without any factor, over the same configuration", async () => {
 		const { handle } = await boot({
-			config: withIssuer(configFor("optional"), NO_TOTP_HOST),
+			config: configFor("optional"),
+			tokenIssuer: NO_TOTP_HOST,
 			withoutTotpModule: true,
 		});
 		expect(handle.components.sessionRequirementResolver?.get("mfa")?.reach.size).toBe(0);
@@ -572,27 +582,16 @@ describe("the factors' sections are the factors' modules' to read", () => {
 		}
 	});
 
-	it("boots the TOTP factor over the oauthTokenSettings issuer the composition holds when the configuration's issuer names no host", async () => {
+	it("boots the TOTP factor over the oauthTokenSettings issuer the composition holds, whatever the configuration's issuer names", async () => {
 		// The configuration's issuer names no host a TOTP issuer could default
-		// to; the slot's does, so the factor's module boots.
-		expect(mfaTotpFactorModule.optional).toContain("oauthTokenSettings");
-		const { handle } = await boot({
-			config: withIssuer(configFor("required"), NO_TOTP_HOST),
-			extraModules: [
-				defineModule({
-					name: "test:oauth-token-settings",
-					provides: {
-						oauthTokenSettings: () =>
-							createTestOAuthTokenSettings({ issuer: "https://login.example.org" }),
-					},
-				}),
-			],
-		});
+		// to; the slot's does, and the factor's module reads the slot alone.
+		expect(mfaTotpFactorModule.requires).toEqual(["oauthTokenSettings"]);
+		const { handle } = await boot({ config: withIssuer(configFor("required"), NO_TOTP_HOST) });
 		expect(handle.components.mfaFactorResolver?.get("totp")).toBeDefined();
 	});
 
 	it("leaves the refusal to the TOTP factor's module when it is installed: the same issuer refuses the boot there, naming MFA_TOTP_FACTOR_ISSUER", async () => {
-		const err = await refusal({ config: withIssuer(configFor("required"), NO_TOTP_HOST) });
+		const err = await refusal({ config: configFor("required"), tokenIssuer: NO_TOTP_HOST });
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({
 			kind: "mfaFactors",
@@ -608,7 +607,7 @@ describe("the MFA routes' flood guard without a shared rate limiter", () => {
 		...configFor("required"),
 		...coreConfigForTests({
 			expected: ["mfa"],
-			declaredAbsent: ["auditSink"],
+			declaredAbsent: ["auditSink", "rateLimiter"],
 			...(deploymentMode === undefined ? {} : { deploymentMode }),
 		}),
 	});
@@ -854,7 +853,7 @@ describe("recent MFA's window", () => {
 
 	it("is the one mfa.manage.maxAgeSeconds sets: a second factor half an hour old is recent under an hour's window, and not under five minutes", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(factorRecord(ALICE.id));
+		await addRecord(factorStore, factorRecord(ALICE.id));
 		const admitted = async (maxAgeSeconds: number) => {
 			// configFor builds the section with mfaConfigForTests, these options laid over it.
 			const { handle } = await boot({

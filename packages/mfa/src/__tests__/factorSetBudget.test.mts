@@ -141,7 +141,7 @@ const COMPLETE: SubjectRevocationReport = {
 };
 
 describe("the subject lease's call budget", () => {
-	it.each([1, 2])(
+	it.each([1, 2, 4])(
 		"covers the longest binding: a first binding by the account-email proof in a session, over %i standing set(s)",
 		async (sets) => {
 			const factorStore = createMemoryMfaFactorStore();
@@ -184,10 +184,10 @@ describe("the subject lease's call budget", () => {
 				"email_proof",
 				"email_proof",
 			]);
-			// The note, the consume, the factor, the records read again, D25's flag, the sets
-			// read, the floor read, the new set, the floor raised, each old set's removal,
-			// the records read again, the set marked shown, the witness.
-			expect(counted.most()).toBe(12 + sets);
+			// The set read, the note, the consume, the factor, D25's flag, the floor read,
+			// the new set, the floor raised, each old set's removal, the set marked shown,
+			// the witness: every write fenced on the one read, none read again.
+			expect(counted.most()).toBe(10 + sets);
 			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
 		},
 	);
@@ -226,15 +226,15 @@ describe("the subject lease's call budget", () => {
 				"email_proof",
 				"email_proof",
 			]);
-			// The note, the consume, the factor, the records read again, D25's flag, the sets
-			// read, the floor read, the new set, the floor raised, each old set's removal,
-			// the records read again, the witness: its answer marks the set shown, past the lease.
-			expect(counted.most()).toBe(11 + sets);
+			// The set read, the note, the consume, the factor, D25's flag, the floor read,
+			// the new set, the floor raised, each old set's removal, the witness: its answer
+			// marks the set shown, past the lease.
+			expect(counted.most()).toBe(9 + sets);
 			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
 		},
 	);
 
-	it.each([1, 2, 7])(
+	it.each([1, 2, 8])(
 		"covers a regeneration of recovery codes over %i standing set(s)",
 		async (sets) => {
 			const factorStore = createMemoryMfaFactorStore();
@@ -260,9 +260,9 @@ describe("the subject lease's call budget", () => {
 			const done = await mfaPost(agent, "/recovery-codes", {});
 
 			expect(done.status, JSON.stringify(done.body)).toBe(200);
-			// The records read, the first-binding mark read, the floor read, the new set, the
-			// floor raised, each old set's removal, the records read again, the set marked shown.
-			expect(counted.most()).toBe(7 + sets);
+			// The set read, the first-binding mark read, the floor read, the new set, the
+			// floor raised, each old set's removal, the set marked shown.
+			expect(counted.most()).toBe(6 + sets);
 			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
 		},
 	);

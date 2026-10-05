@@ -94,16 +94,14 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 			// The policy's audience, when it narrowed one; null falls back below.
 			let policyGrantedAudience: string | null = null;
 
-			// The policy runs only when grantPolicy is wired AND
-			// oauth.resourceIndicator.enabled (off by default).
+			// RFC 8707 is read only under oauth.resourceIndicator.enabled (off by
+			// default); the policy runs whenever grantPolicy is wired, and sees no
+			// resource with the flag off.
 			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
-			// Read outside the policy block: RFC 8707 enforcement is gated on the
-			// flag alone, since an audience is derived below even without a
-			// policy hook.
 			const requestedResource = resourceIndicatorEnabled
 				? extractResourceParam(ctx.body as Record<string, unknown>)
 				: null;
-			if (deps.grantPolicy && resourceIndicatorEnabled) {
+			if (deps.grantPolicy) {
 				// `evaluateGrantPolicy` (core, shared by every minting path) fails
 				// closed (throw → 503, deny → 400) and lets the policy only narrow
 				// the effective scope, never draw on the allowlist; an empty array
@@ -212,8 +210,10 @@ function resolveScope(
 		| { scopes: readonly string[] }
 		| { status: 400; error: "invalid_scope"; errorDescription: string } => {
 		if (client.defaultScopes !== undefined) {
-			// Filtered even so: schema-validated registrations are ⊆ by boot,
-			// custom repositories are under no such obligation.
+			// Filtered even so: a grant handler is reachable through
+			// `grantHandlerResolver`, so its caller may hand it an
+			// `authenticatedClient` that did not come through core's
+			// client-record boundary, which holds defaultScopes ⊆ allowedScopes.
 			return { scopes: client.defaultScopes.filter((s) => allowed.includes(s)) };
 		}
 		if (allowed.length === 0) return { scopes: [] };

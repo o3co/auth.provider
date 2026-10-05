@@ -76,8 +76,8 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// each carries `subject`, and the ceremonies' events `kind` and
 	// `purpose` in their details. Those of its routes carry `ip` and
 	// `userAgent`; the operator reset's `mfa.reset`, a library call with no
-	// request behind it, carries neither. The MFA package is private until
-	// the template wires it, so no released composition emits them. A
+	// request behind it, carries neither. A composition that installs the MFA
+	// package emits them. A
 	// deployment notifies the account holder from seven of them, each
 	// carrying, beside those, in its details:
 	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`,
@@ -86,8 +86,9 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// (`mfa` for a regeneration from the account page),
 	// `by: "user"`, `regenerated` (true when a set stood, or may have)
 	// and, when an older set is still stored beside the new one,
-	// `unreplaced: true` — with `kept: "password_binding"` when it was kept
-	// on purpose and still verifies; without it, a retired set left stored,
+	// `unreplaced: true` — with `kept` when it was kept on purpose and still
+	// verifies, naming the binding by a sign-in alone it was kept for
+	// (`password_binding` or `federated_binding`); without it, a retired set left stored,
 	// whose codes verify nothing; `mfa.locked.first`, the refusal that begins an episode (the
 	// store's `first`), its `hold` and the refused attempt's factor `binding`;
 	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` and
@@ -102,10 +103,10 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// `mfa.email_address_mismatch`, the email factor refused because the
 	// account's address no longer matches the one it was enrolled with,
 	// nothing more — never an address. The event's `timestamp` is when.
-	// `mfa.first_binding_conflict` — two logins of one subject bound a first
-	// factor at once, and this one dropped its own: a password holder may be
-	// racing the account's owner — carries the factor's `kind` and `removed`,
-	// false when its factor could not be removed and may still stand.
+	// `mfa.first_binding_conflict` — two first bindings of one subject ran at
+	// once, and this one was refused under the subject's lease by the factor
+	// the other bound, its own never written: a password holder may be racing
+	// the account's owner — carries the factor's `kind` alone.
 	"mfa.challenge.sent",
 	"mfa.email_address_mismatch",
 	"mfa.enrollment_state_inconsistent",

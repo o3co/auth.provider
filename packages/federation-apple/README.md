@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-apple
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03
 
 Sign in with Apple federation provider for `auth.provider` — Apple's **web**
 flow, in a browser, back to this server.
@@ -17,22 +17,27 @@ Apple through the browser.
 
 **Role.** An adapter: it implements core's federation contract
 ([`core/src/federations`](../core/src/federations/README.md)) for Sign in with
-Apple, and `appleFederationModule` contributes it to the session router as the
-federation `apple`, with its redirect policy.
+Apple. It contributes the federation type `apple`: core hands it each enabled
+`core.federations` entry of that type, and it builds one federation per entry,
+registered for the session router with its redirect policy under the entry's
+name.
 
 **Owns:** Apple's endpoints and issuer (written into the adapter, not
 discovered); the rotating ES256 client secret
 ([`src/client-secret.mts`](src/client-secret.mts)); the checks on the return
-URL; how the id_token is verified; and how Apple's claims become a profile —
+URL; how the id_token is verified; how Apple's claims become a profile —
 `email_verified` and `is_private_email` normalised to booleans, the display
-name read from the first authorization's POST body.
+name read from the first authorization's POST body; and the schema of an
+`apple` entry's own keys ([`src/entry.mts`](src/entry.mts)).
 
-**Does not own:** the contract (core); the routes, the `form_post` callback, the
-federation transaction and its cookie, `state` / PKCE verifier / `nonce`
-generation, the redirect-allowlist rules and claim precedence — all
-[`@o3co/auth-provider-session`](../session/README.md), which drives every
-`form_post` federation the same way; who the user is (the Store); the refresh
-and logout routes that call this adapter
+**Does not own:** the contract (core); the `core.federations` map, the keys
+core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
+`callbackURL`) and the dispatch of an entry by its type (core's boot); the
+routes, the `form_post` callback, the federation transaction and its cookie,
+`state` / PKCE verifier / `nonce` generation, the redirect-allowlist rules and
+claim precedence — all [`@o3co/auth-provider-session`](../session/README.md),
+which drives every `form_post` federation the same way; who the user is (the
+Store); the refresh and logout routes that call this adapter
 ([`@o3co/auth-provider-oauth`](../oauth/README.md)).
 
 **Why a separate package.** Each adapter is its own package so that a deployment
@@ -59,81 +64,87 @@ npm install @o3co/auth-provider-federation-apple @o3co/auth-provider-core @o3co/
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. The package depends on `jose` and
-`openid-client`.
+`@o3co/auth-provider-session`. The package depends on `jose`,
+`openid-client` and `zod`.
 
 ## Usage
 
-Add `appleFederationModule` to the manifest list passed to `createApp`. A small
-config-bootstrap module supplies the typed `appleFederationConfig` slot:
+One module, `appleFederationTypeModule()`
+([`src/type-module.mts`](src/type-module.mts)), handles every enabled
+`core.federations` entry whose `type` is `apple`. It contributes
+`federationTypes.apple`; core parses each such entry with the type's schema at
+boot and calls the module's factories with the entry's name, its
+`callbackURL` and its parsed keys, so the composition root fills no slot. The
+module requires no dependency.
 
 ```ts
-import { readFileSync } from "node:fs";
-import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
-import {
-  extractFederationSection,
-  sessionModule,
-  sessionStoreModuleFor,
-} from "@o3co/auth-provider-session";
-import {
-  appleFederationModule,
-  type AppleProviderConfig,
-} from "@o3co/auth-provider-federation-apple";
-
-const appleConfigBridgeModule = defineModule({
-  name: "apple-federation-config",
-  requires: ["config"] as const,
-  provides: {
-    appleFederationConfig: (deps): AppleProviderConfig => {
-      const slice = extractFederationSection(federationsOf(deps.config), "apple");
-      if (slice?.type !== "apple") throw new Error("core.federations.apple must be enabled, with type apple");
-      return {
-        clientId: slice.clientId as string,          // Services ID
-        callbackURL: slice.callbackURL as string,    // must be https
-        teamId: slice.teamId as string,
-        keyId: slice.keyId as string,
-        privateKey: readFileSync(slice.privateKeyPath as string, "utf8"),
-        // The redirect policy is built from this same object: a redirect
-        // field left out here is one the policy never sees.
-        redirectAllowlist: slice.redirectAllowlist as readonly string[] | undefined,
-        sessionDomain: slice.sessionDomain as string | undefined,
-        authCallbackUrl: slice.authCallbackUrl as string | undefined,
-        clientUrl: slice.clientUrl as string | undefined,
-      };
-    },
-  },
-});
+import { createApp } from "@o3co/auth-provider-core";
+import { appleFederationTypeModule } from "@o3co/auth-provider-federation-apple";
+import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
     sessionStoreModuleFor(config), // the form_post transaction lives in this store
     sessionModule,
-    appleFederationModule,
-    appleConfigBridgeModule,
+    appleFederationTypeModule(),
     // ... composition-root modules supplying userRepository and the session stores
   ],
   bootstrapComponents: { config, pathResolver },
 });
 ```
 
-Single-tenant, as `federation-google` and `federation-github` are:
-`provider.name` is fixed at `"apple"`. The config fields are
-[`AppleProviderConfig`](src/apple.mts). The four redirect fields
-(`redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl`) follow the
-[session package's redirect rules](../session/README.md#redirect-allowlists),
-and they reach the redirect policy only through this slot. **Set `clientUrl`:**
-a login whose start carried no `redirect_to` lands there, and without it the
-callback answers `500 misconfiguration` after the session has been saved; a
-start that carries `redirect_to` needs an allowlist entry for it and
-`authCallbackUrl` as well. A bridge that forwards the credentials alone
-therefore ends every such login on a `500` instead of in the app. The bridge above does not forward the other
-optional fields (`endSessionEndpoint`); forward them if the deployment sets them. It
-reads the section only when its `type` is `apple` (the default for a section
-named `apple`), as the standalone template does for Google (in `buildModules.mts`), so a `type = "oidc"` section
-under that name is not read as this adapter's. It casts; a production bridge
-checks each field's type, as the template's Google bridge
-(`googleFederationConfigModule` in
-[`templates/standalone/src/modules.mts`](../../templates/standalone/src/modules.mts)) does.
+`appleFederationTypeModule({ fetch })` sends every request to Apple of every
+`apple` entry — the token and JWKS requests — through that fetch: a proxy, or a
+test double. Without it the global `fetch` is used.
+
+### Configuration
+
+```hocon
+core.federations {
+  apple {
+    enabled     = true
+    type        = "apple"
+    clientId    = "com.example.app.service"   # the Services ID
+    callbackURL = "https://auth.example.com/session/oauth/federation/apple/callback"
+    teamId      = "ABCDE12345"
+    keyId       = "XYZW98765F"
+    privateKey  = ${APPLE_PRIVATE_KEY}         # the .p8 file's contents
+    clientUrl   = "https://app.example.com/"
+  }
+}
+```
+
+The entry's name is the federation's: the `:name` route segment
+(`/session/oauth/federation/<name>`), the name its upstream tokens are stored
+under, and the prefix of the identity handed to the Store (`<name>:<sub>`).
+Two entries of type `apple` — two Services IDs — are two federations.
+
+An entry is flat, and its schema is strict: the keys core owns (`enabled`,
+`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+The schema is `appleEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
+does not name — a typo, or a nested `apple { ... }` section — refuses boot with `config-validation-failed` at `core.federations.<name>`,
+naming the key; a missing or malformed key is refused at
+`core.federations.<name>.<field>`. A key written `null` counts as absent. An absent key
+means what the table says, read by the provider or the redirect policy; the
+schema fills in no default.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `clientId` | yes | The **Services ID** (see below), not the App ID. |
+| `callbackURL` | yes | The return URL registered against the Services ID: `https`, and not loopback (below). A key core owns: boot requires it of every entry it dispatches, and the session routes read it from the same entry. |
+| `clientSecret` | one of | A client secret produced elsewhere, as a string. |
+| `teamId`, `keyId`, `privateKey` | one of, all three | The key material this package signs the client secret with ([below](#the-rotating-client-secret)). `privateKey` is the `.p8` file's PEM contents, not its path. |
+| `clientUrl` | in practice | Where the browser lands after a login whose start carried no `redirect_to`. Without it such a login ends in `500 misconfiguration` after the session has been saved — so it is needed unless every start carries a `redirect_to` and `authCallbackUrl` is set. |
+| `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package's redirect rules](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
+| `endSessionEndpoint` | no | An upstream logout endpoint ([Refresh and logout](#refresh-and-logout)). Apple publishes none. |
+
+`fetch` and `jwksUri` are not entry keys: they are test seams of
+`AppleProviderConfig`, for `createAppleProvider`, and the type module's seam is its `fetch` option (above), which reaches Apple's
+JWKS as well.
+Neither is a resolver for `clientSecret`, nor a `privateKey` read anew at every
+token exchange: a configuration holds strings, read at boot. Those two are
+code-only, through `createAppleProvider`.
+
 
 ## What you need from Apple, and which one goes where
 
@@ -159,9 +170,10 @@ than letting the authorization endpoint answer the first login with an opaque
 `invalid_request`. The value the flow actually sends is held to it as well: the
 session module derives the `redirect_uri` from `core.federations.<name>.callbackURL`,
 and a request whose derived URL is not the configured `callbackURL` is refused
-before anything reaches Apple — the two are one value in the bridge above, and
-a composition where they drift fails at the first request instead of validating
-one URL and sending another.
+before anything reaches Apple. Under the type module they are one value, the
+entry's; a composition that builds the provider with `createAppleProvider`
+and lets them drift fails at the first request instead of validating one URL
+and sending another.
 
 ## The rotating client secret
 
@@ -190,16 +202,25 @@ restart. A signature still in progress under the old key is neither handed to a
 caller that arrives after the rotation nor kept once it completes. That works
 through whatever you passed as `privateKey`, to `createAppleProvider` as much as
 to `createAppleClientSecret`: the option is read at every token exchange, not
-copied at construction. The bridge above reads the file once, at boot; to pick
-up a replaced key without a restart, make `privateKey` a getter that re-reads
-it — `get privateKey() { return readFileSync(path, "utf8"); }` — which then
-runs on every token exchange.
+copied at construction. **Rotating the key without a restart is available only
+through `createAppleProvider`**, never under `appleFederationTypeModule()`: an
+entry's `privateKey` is the PEM the configuration held at boot, so a key
+replaced under the type module takes effect on the next restart. A federation
+is registered only through a type, so the route is a federation type of your
+own (`defineFederationType`, registered under `federationTypes`) whose factory
+builds the provider with `createAppleProvider`; that provider is named
+`apple`, so the entry of that type must be named `apple`. Through
+`createAppleProvider`, make `privateKey` a getter that re-reads the file —
+`get privateKey() { return readFileSync(path, "utf8"); }` — which then runs on
+every token exchange.
 
-If you already produce the secret elsewhere, pass `clientSecret` instead —
-either a string or a resolver (`() => string | Promise<string>`), the
+If you already produce the secret elsewhere, pass `clientSecret` instead — in
+an entry a string; in code either a string or a resolver (`() => string | Promise<string>`), the
 `FederationClientSecret` form, which this adapter resolves with core's
 `resolveClientSecret` on every token request. Supply **one** of the two: both is ambiguous and neither is
-unconfigured, and either fails at boot.
+unconfigured, and either fails at boot — for an entry, as a
+`config-validation-failed` naming it, as does key material missing one of its
+three keys.
 
 ```ts
 import { readFileSync } from "node:fs";
@@ -221,7 +242,7 @@ parameters. It POSTs an `application/x-www-form-urlencoded` body to the
 callback, because the first-authorization `user` field does not fit a redirect
 URL. The provider declares `responseMode: "form_post"`, and the session router
 does the rest: `response_mode=form_post` on the authorization request,
-`POST /session/oauth/federation/apple/callback` (a GET there is
+`POST /session/oauth/federation/<name>/callback` (a GET there is
 `405 method_not_allowed`), and the flow's `state`, PKCE verifier, nonce and
 post-login redirect held in a federation transaction — a record in the session
 store and a dedicated `HttpOnly; Secure; SameSite=None` cookie path-scoped to
@@ -260,7 +281,7 @@ both fail closed without one.
 - **`is_private_email` marks a Hide My Email relay address**
   (`…@privaterelay.appleid.com`) and is surfaced as `isPrivateEmail` so a
   deployment can decide about it — it is namespaced under
-  `claims.federated.apple`, never promoted. Relay addresses forward mail and the
+  `claims.federated.<name>` (the entry's name), never promoted. Relay addresses forward mail and the
   user can disable them at any time; if reaching a real inbox matters, this is
   the value to act on. `isPrivateRelayEmail(email)` is exported for the same
   decision elsewhere. Apple's own marker wins; the relay domain is consulted
@@ -270,7 +291,7 @@ both fail closed without one.
   login. It is mapped to the same `name` claim the other adapters produce, so
   the session package's promotion rules apply unchanged: `email` and `name` fill
   a gap the local record left, and everything else stays under
-  `claims.federated.apple` (see `PROMOTABLE_FEDERATED_CLAIMS`). Persist it on
+  `claims.federated.<name>` (see `PROMOTABLE_FEDERATED_CLAIMS`). Persist it on
   first login if you want to keep it.
 - **The `user` body is not signed.** The `state` check binds it to the session
   and binds nothing else, so treat the name as self-asserted — which is exactly
@@ -323,23 +344,26 @@ What `exchangeCode` returns:
 
 ## Public API
 
-Defined in [`src/apple.mts`](src/apple.mts) and
-[`src/client-secret.mts`](src/client-secret.mts), exported from
-[`src/index.mts`](src/index.mts):
+Exported from [`src/index.mts`](src/index.mts), each from the file linked:
 
-- `appleFederationModule` — const Module contributing `federations.apple` and
-  `federationRedirectPolicies.apple`; requires `appleFederationConfig`.
-- `createAppleProvider(config)` — the provider.
-- `createAppleClientSecret(options)` — the ES256 signer, a resolver for
-  `clientSecret`.
-- `isPrivateRelayEmail(email)`.
+- `appleFederationTypeModule` ([`src/type-module.mts`](src/type-module.mts)) —
+  the Module contributing `federationTypes.apple`, with its options
+  `AppleFederationTypeModuleOptions`, and `APPLE_FEDERATION_TYPE` (`"apple"`).
+- `createAppleProvider(config)` ([`src/apple.mts`](src/apple.mts)) — the
+  provider for the federation `apple`, built from code: the way to what an
+  entry cannot carry (a `clientSecret` resolver, a `privateKey` read at every
+  signing, a `jwksUri` override).
+- `createAppleClientSecret(options)`
+  ([`src/client-secret.mts`](src/client-secret.mts)) — the ES256 signer, a
+  resolver for `clientSecret`.
+- `isPrivateRelayEmail(email)` ([`src/apple.mts`](src/apple.mts)).
 - Constants: `APPLE_ISSUER`, `APPLE_AUDIENCE`, `APPLE_PRIVATE_RELAY_DOMAIN`,
   `APPLE_NAME_PART_MAX_LENGTH`, `APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS`,
   `APPLE_CLIENT_SECRET_DEFAULT_LIFETIME_SECONDS`,
   `APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS`.
-- Types: `AppleProviderConfig`, `AppleProvider`, `AppleClientSecretOptions`.
-- `appleFederationConfig` — the `ComponentMap` slot the module requires,
-  declared by module augmentation (not an export).
+- Types: `AppleEntry` ([`src/entry.mts`](src/entry.mts)), an entry's own keys
+  as the schema answers them; `AppleProviderConfig`, `AppleProvider`,
+  `AppleClientSecretOptions`.
 
 ## Tests
 
@@ -351,4 +375,4 @@ Defined in [`src/apple.mts`](src/apple.mts) and
 | [`apple.token-snapshot.test.mts`](src/__tests__/apple.token-snapshot.test.mts) | the lifetime, `expiresIn` and `tokenType` a login and a refresh report, with and without `expires_in`, and that a non-string `scope` is refused by the library |
 | [`apple.issuer-parameter.test.mts`](src/__tests__/apple.issuer-parameter.test.mts) | the RFC 9207 `iss` check |
 | [`claim-precedence.test.mts`](src/__tests__/claim-precedence.test.mts) | Apple's claims under the session package's precedence rules |
-| [`apple-module.test.mts`](src/__tests__/apple-module.test.mts), [`apple-module-boot.test.mts`](src/__tests__/apple-module-boot.test.mts) | the module's contributions and boot with the session module |
+| [`apple-type-module.test.mts`](src/__tests__/apple-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes, the strict, flat schema, the `fetch` option, refusals that quote no credential, and every key of an entry reaching the provider or the redirect policy |

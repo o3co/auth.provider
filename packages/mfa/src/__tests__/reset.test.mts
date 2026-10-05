@@ -53,6 +53,7 @@ import {
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
 import {
+	addRecord,
 	completeEnrollment,
 	enrollFromAccount,
 	freezeClock,
@@ -147,9 +148,9 @@ async function setup(
 ) {
 	const factorStore = options.factorStore ?? createMemoryMfaFactorStore();
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
-	await factorStore.create(recordOf("totp-retired", "totp"));
-	await factorStore.create(recordOf("uninstalled", "a-kind-nobody-installed"));
-	await factorStore.create(recordOf("codes", "recovery_code"));
+	await addRecord(factorStore, recordOf("totp-retired", "totp"));
+	await addRecord(factorStore, recordOf("uninstalled", "a-kind-nobody-installed"));
+	await addRecord(factorStore, recordOf("codes", "recovery_code"));
 	const users = new WitnessingUserRepository(directoryEntries());
 	const service = options.service ?? revocationService();
 	const audit = recordingAuditSink();
@@ -210,7 +211,7 @@ describe("resetMfaForSubject", () => {
 
 	it("removes every record — one sealed under a retired key, one of a kind not installed, a recovery-code set — and leaves another subject's", async () => {
 		const { reset, factorStore } = await setup();
-		await factorStore.create({ ...recordOf("bobs", "totp"), subject: BOB.id });
+		await addRecord(factorStore, { ...recordOf("bobs", "totp"), subject: BOB.id });
 
 		await reset.resetMfaForSubject(ALICE.id);
 
@@ -486,6 +487,7 @@ describe("resetMfaForSubject", () => {
 			recoveryId: "an-earlier-one",
 			generation: 1,
 			hard: false,
+			rebindAfterMs: null,
 		});
 
 		const report = await reset.resetMfaForSubject(ALICE.id);
@@ -818,7 +820,7 @@ describe("mfaResetModule", () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const transactionStore = createMemoryMfaTransactionStore();
 		const totp = await seedTotp(factorStore);
-		await factorStore.create({ ...recordOf(newFactorId(), "recovery_code"), data: "x" });
+		await addRecord(factorStore, { ...recordOf(newFactorId(), "recovery_code"), data: "x" });
 		const booted = await boot({
 			factorStore,
 			transactionStore,
@@ -835,13 +837,14 @@ describe("mfaResetModule", () => {
 		const gate = new Promise<void>((resolve) => {
 			open = resolve;
 		});
-		const remove = factorStore.remove.bind(factorStore);
+		const remove = factorStore.removeIf.bind(factorStore);
 		const removed = vi.fn();
-		vi.spyOn(factorStore, "remove").mockImplementation(async (subject, id) => {
+		vi.spyOn(factorStore, "removeIf").mockImplementation(async (subject, id, expected) => {
 			reached();
 			await gate;
-			await remove(subject, id);
+			const answer = await remove(subject, id, expected);
 			removed();
+			return answer;
 		});
 		const apply = vi.spyOn(transactionStore, "applySubjectRecovery");
 		const components = booted.handle.components as unknown as {
@@ -934,7 +937,7 @@ describe("a factor-set write begun before a reset or a recovery", () => {
 			leases: createMfaSubjectLeases({ store: setup.transactionStore, storeTimeoutMs: 1_000 }),
 		});
 		await reset.resetMfaForSubject(ALICE.id);
-		const create = vi.spyOn(setup.factorStore, "create");
+		const create = vi.spyOn(setup.factorStore, "createIf");
 
 		const done = await completeEnrollment(
 			setup.agent,
@@ -969,7 +972,7 @@ describe("a factor-set write begun before a reset or a recovery", () => {
 			guessableBoundSinceMs: undefined,
 		});
 		await setup.transactionStore.releaseSubjectLease(ALICE.id, lease.token);
-		const create = vi.spyOn(setup.factorStore, "create");
+		const create = vi.spyOn(setup.factorStore, "createIf");
 
 		const done = await completeEnrollment(
 			setup.agent,
@@ -985,13 +988,13 @@ describe("a factor-set write begun before a reset or a recovery", () => {
 	it("binds under the subject's lease at the generation its begin read", async () => {
 		const setup = await enrollmentBegun();
 		const acquire = vi.spyOn(setup.transactionStore, "acquireSubjectLease");
-		const create = setup.factorStore.create.bind(setup.factorStore);
+		const create = setup.factorStore.createIf.bind(setup.factorStore);
 		let heldDuringCreate: string | undefined;
-		vi.spyOn(setup.factorStore, "create").mockImplementation(async (record) => {
+		vi.spyOn(setup.factorStore, "createIf").mockImplementation(async (record, expected) => {
 			heldDuringCreate ??= (
 				await setup.transactionStore.acquireSubjectLease(ALICE.id, { ttlMs: 1_000, generation: 0 })
 			).outcome;
-			return create(record);
+			return create(record, expected);
 		});
 
 		const done = await completeEnrollment(
@@ -1012,7 +1015,7 @@ describe("a factor-set write begun before a reset or a recovery", () => {
 			generation: 0,
 		});
 		if (lease.outcome !== "acquired") throw new Error("not held");
-		const create = vi.spyOn(setup.factorStore, "create");
+		const create = vi.spyOn(setup.factorStore, "createIf");
 		const transaction = setup.begun.body.transaction as string;
 		const proof = totpProofOf(setup.begun.body.secret);
 
@@ -1039,7 +1042,7 @@ describe("a factor-set write begun before a reset or a recovery", () => {
 			skew = 3_600_000;
 			return consumed;
 		});
-		const create = vi.spyOn(setup.factorStore, "create");
+		const create = vi.spyOn(setup.factorStore, "createIf");
 		const transaction = setup.begun.body.transaction as string;
 		const proof = totpProofOf(setup.begun.body.secret);
 

@@ -294,25 +294,31 @@ describe("session-store's schema", () => {
 	});
 
 	it.each(["redis", "memory", "memcached"])(
-		"accepts storage.type = %j, which the store factory decides on, and keeps every type's block",
+		"accepts storage.type = %j, which the store factory decides on, with the redis block beside it",
 		(type) => {
-			const result = parse({
-				storage: {
-					type,
-					redis: { url: "redis://localhost:6379" },
-					memcached: { servers: ["mc1.example.com:11211"] },
-				},
-			});
+			const result = parse({ storage: { type, redis: { url: "redis://localhost:6379" } } });
 			expect(result.success).toBe(true);
 			if (result.success) {
-				expect(result.data.storage).toEqual({
-					type,
-					redis: { url: "redis://localhost:6379" },
-					memcached: { servers: ["mc1.example.com:11211"] },
-				});
+				expect(result.data.storage).toEqual({ type, redis: { url: "redis://localhost:6379" } });
 			}
 		},
 	);
+
+	it.each([
+		[
+			"a block for a type the store factory has no builder for",
+			{ memcached: { servers: ["mc1.example.com:11211"] } },
+			"memcached",
+		],
+		["a block for memory, which takes no options", { memory: {} }, "memory"],
+		["a misspelt type", { typ: "memory" }, "typ"],
+	])("refuses, in storage, %s, naming it", (_what, extra, key) => {
+		const result = parse({
+			storage: { type: "redis", redis: { url: "redis://localhost:6379" }, ...extra },
+		});
+		expect(paths(result)).toEqual(["storage"]);
+		expect(messages(result)).toContain(`"${key}"`);
+	});
 
 	it("accepts a storage with no redis block for a type other than redis", () => {
 		expect(parse({ storage: { type: "memory" } }).success).toBe(true);
@@ -451,7 +457,6 @@ const STORES = [
 		async get() {
 			return null;
 		},
-		async update() {},
 		async removeBySid() {},
 		async delete() {},
 	} as unknown as FederationTokenStore),

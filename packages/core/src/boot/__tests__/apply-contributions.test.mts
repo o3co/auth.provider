@@ -18,7 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuditSink } from "../../audit/types.mjs";
 import type { GrantHandler } from "../../grants/types.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { coreConfigForTests, makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { applyContributions } from "../apply-contributions.mjs";
 import { materializeComponents } from "../materialize-components.mjs";
 import { planBoot } from "../plan-boot.mjs";
@@ -27,8 +27,8 @@ import type {
 	CollectedRouteContribution,
 	ComponentWorld,
 	ContributionCollectorMap,
+	GrantCollector,
 	ListCollector,
-	NameKeyedCollector,
 } from "../types.mjs";
 import { BootError } from "../types.mjs";
 import { validateManifests } from "../validate-manifests.mjs";
@@ -148,7 +148,7 @@ function stubHandler(): never {
 
 describe("applyContributions — step 0: synthetic projections", () => {
 	it("grants provided → grantHandlerResolver is defined in component map; lazy read-through works after step 2", async () => {
-		const grantCollector = makeStubNameCollector<GrantHandler>();
+		const grantCollector = makeStubNameCollector<GrantHandler | null>();
 		const contributionKinds: ContributionCollectorMap = {
 			grants: grantCollector,
 		};
@@ -193,14 +193,14 @@ describe("applyContributions — step 2: register order = initOrder", () => {
 	it("2 modules contributing different grants: register call order matches initOrder", async () => {
 		const registerOrder: string[] = [];
 
-		const spyCollector: NameKeyedCollector<GrantHandler> = {
+		const spyCollector: GrantCollector = {
 			kind: "name-keyed" as const,
-			register: (n: string, _v: GrantHandler) => {
+			register: (n: string, _v: GrantHandler | null) => {
 				registerOrder.push(n);
 			},
-			replace: (_n: string, _v: GrantHandler) => {},
+			replace: (_n: string, _v: GrantHandler | null) => {},
 			get: (_n: string) => undefined,
-			entries: () => new Map<string, GrantHandler>().entries(),
+			entries: () => new Map<string, GrantHandler | null>().entries(),
 		};
 
 		const contributionKinds: ContributionCollectorMap = {
@@ -333,7 +333,7 @@ describe("applyContributions — step 3: bare RouteContribution value entries", 
 
 describe("applyContributions — step 2: factory throw wraps as BootError", () => {
 	it("cause === thrown (reference equality), details.module/kind/name/originalError correct", async () => {
-		const grantCollector = makeStubNameCollector<GrantHandler>();
+		const grantCollector = makeStubNameCollector<GrantHandler | null>();
 		const contributionKinds: ContributionCollectorMap = { grants: grantCollector };
 
 		const thrown = new Error("factory exploded");
@@ -373,7 +373,6 @@ describe("applyContributions — step 2: factory throw wraps as BootError", () =
 describe("applyContributions — step 2: a grant is a handler", () => {
 	it.each([
 		["undefined", undefined],
-		["null", null],
 		["a string", "handler"],
 		["an array", []],
 		["an object with no handle", {}],
@@ -381,7 +380,7 @@ describe("applyContributions — step 2: a grant is a handler", () => {
 	])(
 		"refuses a grants factory that answers %s, naming the grant, and registers nothing",
 		async (_label, answer) => {
-			const grantCollector = makeStubNameCollector<GrantHandler>();
+			const grantCollector = makeStubNameCollector<GrantHandler | null>();
 			const contributionKinds: ContributionCollectorMap = { grants: grantCollector };
 			const modA = defineModule({
 				name: "ModA",
@@ -415,16 +414,16 @@ describe("applyContributions — step 2: pre-scan prevents factory side-effect l
 		// `as unknown as GrantHandler` on the existing entry: the pre-scan
 		// path checks NAME presence (collector.entries()), not value shape;
 		// the placeholder string is never invoked.
-		const m = new Map<string, GrantHandler>([
+		const m = new Map<string, GrantHandler | null>([
 			["grant_conflict", "existing" as unknown as GrantHandler],
 		]);
-		const spyCollector: NameKeyedCollector<GrantHandler> = {
+		const spyCollector: GrantCollector = {
 			kind: "name-keyed" as const,
-			register: (n: string, v: GrantHandler) => {
+			register: (n: string, v: GrantHandler | null) => {
 				if (m.has(n)) throw new Error(`already ${n}`);
 				m.set(n, v);
 			},
-			replace: (_n: string, _v: GrantHandler) => {},
+			replace: (_n: string, _v: GrantHandler | null) => {},
 			get: (n: string) => m.get(n),
 			entries: () => m.entries(),
 		};
@@ -462,19 +461,19 @@ describe("applyContributions — step 2: pre-scan prevents factory side-effect l
 
 describe("applyContributions — step 2: overrides routed via collector.replace", () => {
 	it("override factory result is passed to collector.replace, not register", async () => {
-		const registerCalls: Array<[string, GrantHandler]> = [];
-		const replaceCalls: Array<[string, GrantHandler]> = [];
+		const registerCalls: Array<[string, GrantHandler | null]> = [];
+		const replaceCalls: Array<[string, GrantHandler | null]> = [];
 
 		// Collector whose internal map is mutated by both register and replace.
-		const m = new Map<string, GrantHandler>();
-		const spyCollector: NameKeyedCollector<GrantHandler> = {
+		const m = new Map<string, GrantHandler | null>();
+		const spyCollector: GrantCollector = {
 			kind: "name-keyed" as const,
-			register: (n: string, v: GrantHandler) => {
+			register: (n: string, v: GrantHandler | null) => {
 				if (m.has(n)) throw new Error(`already registered: ${n}`);
 				m.set(n, v);
 				registerCalls.push([n, v]);
 			},
-			replace: (n: string, v: GrantHandler) => {
+			replace: (n: string, v: GrantHandler | null) => {
 				if (!m.has(n)) throw new Error(`unknown: ${n}`);
 				m.set(n, v);
 				replaceCalls.push([n, v]);
@@ -651,5 +650,34 @@ describe("applyContributions — consumer-defined kinds, routed by collector.kin
 		} as never);
 		const values = Array.from(stubCollector.values());
 		expect(values).toHaveLength(2);
+	});
+});
+
+describe("core.sessionRequirements.secondFactorAuthority without a sessionRequirements collector", () => {
+	it("refuses the key rather than skipping it: nothing can register the requirement it names", async () => {
+		const bootstrap = {
+			config: {
+				...makeValidCoreConfig(),
+				...coreConfigForTests({ expected: ["mfa"], secondFactorAuthority: "mfa" }),
+			} as never,
+			pathResolver: (s: string) => s,
+		} satisfies Record<string, unknown> as BootstrapMap;
+		const validated = validateManifests({
+			modules: [],
+			bootstrapComponents: bootstrap,
+			contributionKinds: {},
+		});
+		const plan = planBoot(validated, bootstrap, undefined);
+		const world = await materializeComponents(plan, bootstrap, undefined, {});
+		await expect(applyContributions(world, {})).rejects.toSatisfy((err: unknown) => {
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).details).toEqual({
+				reason: "second-factor-authority-not-declared",
+				configKey: "core.sessionRequirements.secondFactorAuthority",
+				name: "mfa",
+				unmet: ["not-registered"],
+			});
+			return true;
+		});
 	});
 });

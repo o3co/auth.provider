@@ -27,7 +27,6 @@
 
 import {
 	createMemoryDeviceCodeStore,
-	createMemoryRateLimiter,
 	DEFAULT_CLOCK_SKEW_MS,
 	type RequirementInput,
 	type RequirementVerdict,
@@ -89,7 +88,7 @@ interface HarnessOptions {
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectRevocation?: SubjectRevocation;
 	readonly requireEmailVerified?: boolean;
-	/** The verification budget; five, as the module contributes it, unless a test needs it spent sooner. */
+	/** The verification's attempt limit; five, as the package ships it, unless a test needs it spent sooner. */
 	readonly limit?: number;
 }
 
@@ -115,10 +114,8 @@ const harness = async (options: HarnessOptions = {}) => {
 		createDeviceVerificationHandler({
 			store,
 			settings,
-			rateLimiter: createMemoryRateLimiter({
-				limits: { device_verification: { limit: options.limit ?? 5, windowSeconds: 300 } },
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-			}),
+			attemptLimit: { limit: options.limit ?? 5, windowSeconds: 300 },
+			deploymentMode: "single",
 			userSessionStore: options.userSessionStore ?? liveSessionStore(),
 			...(options.subjectRevocation === undefined
 				? {}
@@ -261,7 +258,7 @@ describe("device verification on session admission", () => {
 		},
 	);
 
-	it("refuses a step-up before the email gate, and spends none of the subject's budget on it", async () => {
+	it("refuses a step-up before the email gate, and spends none of the subject's attempts on it", async () => {
 		const { verify } = await harness({
 			limit: 1,
 			requireEmailVerified: true,
@@ -278,7 +275,7 @@ describe("device verification on session admission", () => {
 			expect(res.status).toBe(403);
 			expect(res.body.error).toBe("step_up_required");
 		}
-		// The one attempt the budget holds is still there.
+		// The one attempt the limit allows is still there.
 		expect((await verify({ action: "lookup", user_code: USER_CODE })).status).toBe(200);
 	});
 
@@ -428,10 +425,8 @@ describe("device verification on session admission", () => {
 			createDeviceVerificationHandler({
 				store: createMemoryDeviceCodeStore(),
 				settings,
-				rateLimiter: createMemoryRateLimiter({
-					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				}),
+				attemptLimit: { limit: 5, windowSeconds: 300 },
+				deploymentMode: "single",
 				userSessionStore: liveSessionStore(),
 				requirements: forged,
 				requireEmailVerified: false,
@@ -446,10 +441,8 @@ describe("device verification on session admission", () => {
 			createDeviceVerificationHandler({
 				store: createMemoryDeviceCodeStore(),
 				settings,
-				rateLimiter: createMemoryRateLimiter({
-					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				}),
+				attemptLimit: { limit: 5, windowSeconds: 300 },
+				deploymentMode: "single",
 				userSessionStore: liveSessionStore(),
 				requirements: resolverForTests([], {
 					actions: { "device.lookup": { grade: "grants_nothing" } },
@@ -465,10 +458,8 @@ describe("device verification on session admission", () => {
 		const handler = createDeviceVerificationHandler({
 			store: createMemoryDeviceCodeStore(),
 			settings,
-			rateLimiter: createMemoryRateLimiter({
-				limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-			}),
+			attemptLimit: { limit: 5, windowSeconds: 300 },
+			deploymentMode: "single",
 			userSessionStore: liveSessionStore(),
 			requirements: resolverForTests(
 				[fixture(() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }))],
@@ -496,10 +487,8 @@ describe("device verification on session admission", () => {
 			createDeviceVerificationHandler({
 				store: createMemoryDeviceCodeStore(),
 				settings,
-				rateLimiter: createMemoryRateLimiter({
-					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				}),
+				attemptLimit: { limit: 5, windowSeconds: 300 },
+				deploymentMode: "single",
 				userSessionStore: liveSessionStore(),
 				requireEmailVerified: false,
 			} as never),
@@ -578,4 +567,40 @@ describe("an approval records the session's authentication", () => {
 			expect((await verify({ action: "deny", user_code: USER_CODE })).status).toBe(200);
 		},
 	);
+
+	/** `user-1`'s session, authenticated further ahead of the handler's clock than the skew. */
+	const aheadOfClock = () =>
+		changedRecord((record) => ({
+			...record,
+			authTime: new Date(NOW + DEFAULT_CLOCK_SKEW_MS + 1_000),
+		}));
+
+	it("refuses an approval it cannot record before the email gate", async () => {
+		// The cookie's user has no verified email, so the gate would refuse it.
+		const { verify } = await harness({
+			requireEmailVerified: true,
+			userSessionStore: aheadOfClock(),
+		});
+		const res = await verify({ action: "approve", user_code: USER_CODE });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
+
+	it("refuses an approval it cannot record before the attempt is counted, and spends none", async () => {
+		const { verify } = await harness({ limit: 1, userSessionStore: aheadOfClock() });
+		for (let i = 0; i < 3; i++) {
+			const res = await verify({ action: "approve", user_code: USER_CODE });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("login_required");
+		}
+		// The one attempt the limit allows is still there.
+		expect((await verify({ action: "lookup", user_code: USER_CODE })).status).toBe(200);
+	});
+
+	it("refuses an approval it cannot record before the code's shape is read", async () => {
+		const { verify } = await harness({ userSessionStore: aheadOfClock() });
+		const res = await verify({ action: "approve", user_code: "0000-0000" });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
 });

@@ -17,7 +17,6 @@
 import {
 	callbackUrlForExchange,
 	codeChallenge,
-	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
@@ -29,17 +28,7 @@ import {
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-core";
-import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
-
-// ComponentMap slot declaration-merge: exposes googleFederationConfig as a typed
-// DI slot. Consumers supply this via a small bootstrap module that reads from
-// app config.
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		readonly googleFederationConfig?: GoogleProviderConfig;
-	}
-}
 
 const GOOGLE_ISSUER = "https://accounts.google.com";
 const SCOPES = ["openid", "profile", "email"] as const;
@@ -102,12 +91,29 @@ export type GoogleProvider = FederationProvider &
 	SupportsLogout &
 	SupportsClaimMapping;
 
+/** The name `createGoogleProvider` gives the provider. */
+const DEFAULT_NAME = "google";
+
 export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvider {
+	return createNamedGoogleProvider(DEFAULT_NAME, config);
+}
+
+/**
+ * `createGoogleProvider` under another name: the provider's `name` — the
+ * `:name` route segment, the key its tokens are stored under and the prefix
+ * of the identity handed to the Store (`<name>:<sub>`) — and the name its
+ * errors give. Everything else is the same.
+ */
+export function createNamedGoogleProvider(
+	name: string,
+	config: GoogleProviderConfig,
+): GoogleProvider {
+	const subject = `Google federation ${JSON.stringify(name)}`;
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
-		throw new Error(`Google federation "google" requires clientId, clientSecret, and callbackURL`);
+		throw new Error(`${subject} requires clientId, clientSecret, and callbackURL`);
 	}
 	// The library reads this as a truthy flag, and an environment override
-	// arrives as the string "false" — which is truthy. A bridge that forwards it
+	// arrives as the string "false" — which is truthy. A caller that forwards it
 	// uncoerced would leave the requirement on during the very incident the
 	// switch exists for, so anything that is not a boolean is refused here.
 	if (
@@ -115,7 +121,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 		typeof config.requireAuthorizationResponseIss !== "boolean"
 	) {
 		throw new Error(
-			'Google federation "google": requireAuthorizationResponseIss must be a boolean — coerce an environment string before passing it',
+			`${subject}: requireAuthorizationResponseIss must be a boolean — coerce an environment string before passing it`,
 		);
 	}
 
@@ -133,14 +139,12 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				: accessType === null || typeof accessType === "number" || typeof accessType === "boolean"
 					? String(accessType)
 					: typeof accessType;
-		throw new Error(
-			`Google federation "google": accessType must be "offline" or "online", got ${got}`,
-		);
+		throw new Error(`${subject}: accessType must be "offline" or "online", got ${got}`);
 	}
 	// Offline access asks for the consent screen on every sign-in (see
 	// `accessType`): tokens are kept per session, and an earlier session's
 	// refresh token is not reachable from a new one — keeping one per
-	// `google:<sub>` would be a store that outlives sessions.
+	// `<name>:<sub>` would be a store that outlives sessions.
 	const offlineAccess: Readonly<Record<string, string>> =
 		accessType === "offline" ? { access_type: "offline", prompt: "consent" } : {};
 
@@ -172,7 +176,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 	oidc.enableNonRepudiationChecks(oidcConfig);
 
 	return {
-		name: "google",
+		name,
 		scope: SCOPES,
 
 		buildAuthorizationUrl(params: {
@@ -186,7 +190,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			// produce an authorization request whose id_token cannot be bound to the session.
 			if (typeof params.nonce !== "string" || params.nonce.length === 0) {
 				throw new Error(
-					'Google federation "google" requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.',
+					`${subject} requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.`,
 				);
 			}
 			return oidc.buildAuthorizationUrl(oidcConfig, {
@@ -212,7 +216,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			// one, rather than verification silently degrading.
 			if (typeof params.nonce !== "string" || params.nonce.length === 0) {
 				throw new Error(
-					'Google federation "google" requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.',
+					`${subject} requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.`,
 				);
 			}
 
@@ -244,7 +248,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			const idTokenSub = tokens.claims()?.sub;
 			if (typeof idTokenSub !== "string" || idTokenSub.length === 0) {
 				throw new Error(
-					'Google federation "google" id_token is missing the sub claim required for UserInfo binding (OIDC §5.3.2).',
+					`${subject} id_token is missing the sub claim required for UserInfo binding (OIDC §5.3.2).`,
 				);
 			}
 			const userInfo = await oidc.fetchUserInfo(oidcConfig, tokens.access_token, idTokenSub);
@@ -292,7 +296,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 					url = new URL(config.endSessionEndpoint);
 				} catch {
 					throw new Error(
-						`Google federation "google" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
+						`${subject} has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
 					);
 				}
 				if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
@@ -309,9 +313,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				// Named, not quoted: the message reaches a log line as the error's
 				// `detail`, and the value is not this adapter's text. (The fallback
 				// above is always a URL, so only a handed value lands here.)
-				throw new Error(
-					'Google federation "google" received an invalid postLogoutRedirectUri: not a URL',
-				);
+				throw new Error(`${subject} received an invalid postLogoutRedirectUri: not a URL`);
 			}
 			if (req.state) url.searchParams.set("state", req.state);
 			return { url, method: "GET" };
@@ -329,25 +331,3 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 		},
 	};
 }
-
-/**
- * Const Module for the Google federation integration.
- *
- * Contributes `federations.google` (the upstream OIDC provider) and
- * `federationRedirectPolicies.google` (the consumer redirect URL policy).
- * Config is supplied via the `googleFederationConfig` ComponentMap slot.
- * Single-tenant: registered under the name "google".
- */
-export const googleFederationModule = defineModule({
-	name: "federation-google",
-	requires: ["googleFederationConfig"] as const,
-	contributes: {
-		federations: {
-			// Single-tenant: provider.name is fixed at "google".
-			google: (deps) => createGoogleProvider(deps.googleFederationConfig),
-		},
-		federationRedirectPolicies: {
-			google: (deps) => createFederationRedirectPolicy(deps.googleFederationConfig),
-		},
-	},
-});

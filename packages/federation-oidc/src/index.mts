@@ -15,11 +15,11 @@
  */
 
 export type { OidcPrivateKey } from "./client-auth.mjs";
-export {
-	OIDC_FEDERATION_TYPE,
-	oidcFederationModule,
-	oidcFederationNames,
-	readOidcFederationConfigs,
-} from "./module.mjs";
+export type { OidcEntry } from "./entry.mjs";
 export type { OidcEndpointOverrides, OidcProvider, OidcProviderConfig } from "./oidc.mjs";
 export { createOidcProvider, DEFAULT_OIDC_SCOPES } from "./oidc.mjs";
+export {
+	OIDC_FEDERATION_TYPE,
+	type OidcFederationTypeModuleOptions,
+	oidcFederationTypeModule,
+} from "./type-module.mjs";

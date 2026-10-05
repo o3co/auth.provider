@@ -12,7 +12,9 @@ import {
 	type RateLimiter,
 	type RateLimitFailMode,
 	type RateLimitSpec,
+	refuseVerifierLimitEntries,
 	shownConfigValue,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RateLimiterClient } from "./clients.mjs";
@@ -137,20 +139,24 @@ export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ct
 /** A budget as the section writes it; each number read from the string a variable carries. */
 const rateLimitSpecSchema = z
 	.object({
-		limit: z.coerce.number().int().positive(),
+		limit: wholeNumberInRangeFromEnv(1),
 		// One year at most, as core holds every duration an operator writes.
-		windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
 	})
 	.strict();
 
 /**
  * The schema of `redis-rate-limiter {}`, the module's own section: per-prefix
- * `limits`, the `defaultLimit` a key nothing covers falls to, and `failMode`,
- * the limiter's outage policy. Strict at every level.
+ * `limits`, none naming a verifier's prefix, the `defaultLimit` a key nothing
+ * covers falls to, and `failMode`, the limiter's outage policy. Strict at
+ * every level.
  */
 export const redisRateLimiterSectionSchema = z
 	.object({
-		limits: z.record(z.string(), rateLimitSpecSchema).default({}),
+		limits: z
+			.record(z.string(), rateLimitSpecSchema)
+			.superRefine(refuseVerifierLimitEntries)
+			.default({}),
 		defaultLimit: rateLimitSpecSchema.default(() => ({ ...DEFAULT_LIMIT })),
 		failMode: z.enum(["open", "closed"]).default("closed"),
 	})

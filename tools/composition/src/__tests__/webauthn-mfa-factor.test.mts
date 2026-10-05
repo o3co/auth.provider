@@ -34,6 +34,7 @@ import type {
 	AuditSink,
 	MfaFactorData,
 	MfaFactorRecord,
+	MfaFactorResolver,
 	MfaFactorStore,
 	MfaTransactionStore,
 	UserSessionStore,
@@ -99,7 +100,10 @@ afterEach(async () => {
  * factor store given (core's memory store by default) and a recording audit
  * sink.
  */
-async function boot(stores: { readonly factorStore?: MfaFactorStore } = {}): Promise<{
+async function boot(
+	stores: { readonly factorStore?: MfaFactorStore } = {},
+	factor: { readonly enabled: boolean } = { enabled: true },
+): Promise<{
 	readonly app: Express;
 	readonly audit: RecordingAuditSink;
 	readonly factorStore: MfaFactorStore;
@@ -113,7 +117,7 @@ async function boot(stores: { readonly factorStore?: MfaFactorStore } = {}): Pro
 			({
 				...config,
 				...CONFIG,
-				...webauthnMfaFactorConfigForTests({ enabled: true }),
+				...webauthnMfaFactorConfigForTests({ enabled: factor.enabled }),
 			}) as typeof config,
 		extraOverrides: () => ({ mfaFactorStore: factorStore, auditSink: audit }),
 	});
@@ -609,5 +613,34 @@ describe("beside TOTP", () => {
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(create.mock.calls[0]?.[0]).toMatchObject({ amr: ["pwd", "hwk", "mfa"] });
 		expect((await storedFactor(factorStore, totp.record)).record.version).toBe(0);
+	});
+});
+
+describe("the factor switched off", () => {
+	it("leaves the webauthn kind out of the resolver, and a stored WebAuthn factor neither listed nor accepted: the login still owes a second factor", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const passkey = passkeyFor();
+		const record = await seedPasskey(factorStore, passkey);
+		const { app, userSessionStore } = await boot({ factorStore }, { enabled: false });
+		if (current === undefined) throw new Error("not booted");
+		const { mfaFactorResolver } = current.handle.components as unknown as {
+			readonly mfaFactorResolver?: MfaFactorResolver;
+		};
+		expect(mfaFactorResolver).toBeDefined();
+		expect(mfaFactorResolver?.get("webauthn")).toBeUndefined();
+		const create = vi.spyOn(userSessionStore, "create");
+		const { browser, transaction } = await beginLogin(app);
+
+		const read = await browser.get("/session/mfa/transaction", { "MFA-Transaction": transaction });
+		expect(read.status).toBe(200);
+		expect(read.body.factors).toEqual([]);
+		const UNKNOWN = { error: "invalid_request", error_description: "Unknown second factor" };
+		const options = await challenge(browser, transaction, record.id);
+		expect(options.status).toBe(400);
+		expect(options.body).toEqual(UNKNOWN);
+		const res = await verify(browser, transaction, record.id, passkey.assert("AAAA"));
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual(UNKNOWN);
+		expect(create).not.toHaveBeenCalled();
 	});
 });

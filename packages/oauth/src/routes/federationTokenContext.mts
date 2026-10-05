@@ -99,7 +99,14 @@ export const createStoreUnavailableLog =
 	(
 		federation: string,
 		store: "user_session" | "session_federation_index" | "federation_token",
-		step: "get" | "list" | "acquire_lock" | "get_after_lock" | "update",
+		step:
+			| "get"
+			| "list"
+			| "acquire_lock"
+			| "get_after_lock"
+			| "get_after_conflict"
+			| "get_before_serve"
+			| "replace_if",
 		error: unknown,
 	): void => {
 		logger.error(

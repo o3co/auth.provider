@@ -493,14 +493,22 @@ describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never th
 		expect(scopeOf(result)).toBe("read");
 	});
 
-	it("filters the defaultScopes by the allowlist even so", async () => {
-		// Schema-validated registrations are a subset by boot; a custom
-		// repository is under no such obligation.
+	it("filters the defaultScopes of a hand-built client by its allowlist", async () => {
+		// A caller reaching the handler through `grantHandlerResolver` may hand
+		// it a client that never passed core's client-record boundary.
 		const { result } = await build({}).handle(
 			ctx({}, client({ allowedScopes: ["read"], defaultScopes: ["read", "admin"] })),
 		);
 		expect(result.status).toBe(200);
 		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("grants a hand-built client without an allowlist none of its defaultScopes", async () => {
+		// With no allowlist and no assertion scope there is no ceiling to read
+		// the default against; the allowlist filter alone keeps it from granting.
+		const { result } = await build({}).handle(ctx({}, client({ defaultScopes: ["admin"] })));
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBeUndefined();
 	});
 
 	it("keeps the empty grant for a scope-less client (empty allowlist, no defaults)", async () => {
@@ -584,7 +592,7 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed", () => {
 		expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ requestedScope: undefined });
 	});
 
-	it("denies with the policy's own error and description", async () => {
+	it("denies access_denied as invalid_request, the token endpoint's code, with the policy's description", async () => {
 		const { result } = await build({
 			grantPolicy: policyOf(async () => ({
 				outcome: "deny",
@@ -593,7 +601,7 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed", () => {
 			})),
 		}).handle(ctx({ scope: "read" }, authed));
 		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("access_denied");
+		expect("error" in result && result.error).toBe("invalid_request");
 		expect("errorDescription" in result && result.errorDescription).toBe("device is quarantined");
 	});
 

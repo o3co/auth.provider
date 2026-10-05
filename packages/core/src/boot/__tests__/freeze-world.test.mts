@@ -42,6 +42,8 @@ function makeMinimalRegistryWorld(
 					byName: new Map(),
 					providers: new Map(),
 					usedKinds: new Set(),
+					dispatchedFederations: [],
+					undeclaredAbsenceSlots: [],
 					bootstrapComponents: {} as never,
 				},
 				initOrder: [],

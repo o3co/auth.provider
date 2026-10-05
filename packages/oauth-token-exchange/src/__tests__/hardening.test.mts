@@ -31,15 +31,16 @@
  */
 
 import type {
-	AppConfig,
 	ClientRepository,
 	ExchangeTokenValidator,
 	GrantContext,
 	GrantPolicyHook,
+	OAuthTokenSettings,
 	PublicClient,
 	TokenBinding,
 	ValidatedToken,
 } from "@o3co/auth-provider-core";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
@@ -49,6 +50,7 @@ import {
 	keyStore,
 	makeFamilyRevocation,
 	signSelfIssuedAccessToken,
+	tokenSettings,
 	tokensOf,
 } from "./fixtures.mjs";
 
@@ -59,15 +61,6 @@ const STUB_TOKEN_TYPE = "urn:example:params:oauth:token-type:stub";
 
 const JKT = "L0AXB6c64d2QW3rhCLLADhOMLf_7u2eTGH-q9ZGja24";
 const X5T = "bwcK0esc3ACC3DB2Y5_lESsXE8o9ltc05O89jdN-dg2";
-
-const mockConfig = {
-	oauth: {
-		jwt: { issuer: ISSUER },
-		accessToken: { expiresIn: 300 },
-		refreshToken: { expiresIn: 86400 },
-		grants: {},
-	},
-} as unknown as AppConfig;
 
 const publicClient = (overrides: Partial<PublicClient> = {}): PublicClient => ({
 	clientId: "client-a",
@@ -99,7 +92,7 @@ function buildGrant(
 	overrides: {
 		clientRepository?: ClientRepository;
 		grantPolicy?: GrantPolicyHook;
-		config?: AppConfig;
+		oauthTokenSettings?: OAuthTokenSettings;
 		stub?: ValidatedToken;
 	} = {},
 ) {
@@ -110,7 +103,7 @@ function buildGrant(
 	]);
 	if (overrides.stub) validators.set(STUB_TOKEN_TYPE, stubValidator(overrides.stub));
 	return createTokenExchangeGrant({
-		config: overrides.config ?? mockConfig,
+		oauthTokenSettings: overrides.oauthTokenSettings ?? tokenSettings,
 		keyStore,
 		refreshTokenFamilyRevocation: store,
 		tokenExchangeValidatorResolver: validators,
@@ -440,7 +433,11 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 			const tokens = tokensOf(result);
 			const claims = decodeJwt(tokens.access_token);
 			expect(claims.exp as number).toBeLessThanOrEqual(subjectExp);
-			expect((claims.exp as number) - (claims.iat as number)).toBe(tokens.expires_in);
+			// `expires_in` counts from the answer (RFC 6749 §5.1), never past `exp`.
+			expect(tokens.expires_in).toBeGreaterThan(0);
+			expect(tokens.expires_in).toBeLessThanOrEqual(
+				(claims.exp as number) - (claims.iat as number),
+			);
 		});
 	});
 
@@ -463,20 +460,18 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 });
 
 describe("token exchange — a request may ask for its lifetime with expires_in", () => {
-	/** Default 600 s, max 1800 s: room on both sides, and unlike `mockConfig`'s 300 s. */
-	const lifetimeConfig = {
-		oauth: {
-			...mockConfig.oauth,
-			accessToken: { defaultExpiresIn: 600, maxExpiresIn: 1800 },
-		},
-	} as unknown as AppConfig;
+	/** Default 600 s, max 1800 s: room on both sides, and unlike `tokenSettings`' 300 s. */
+	const lifetimeSettings = createTestOAuthTokenSettings({
+		issuer: ISSUER,
+		accessTokenLifetime: { defaultExpiresIn: 600, maxExpiresIn: 1800 },
+	});
 
 	/** Exchanges a one-hour subject token, asking for `expiresIn` when given. */
 	async function exchange(
 		expiresIn: unknown,
-		options: { config?: AppConfig; subjectExpiresIn?: string } = {},
+		options: { oauthTokenSettings?: OAuthTokenSettings; subjectExpiresIn?: string } = {},
 	) {
-		const g = buildGrant({ config: options.config ?? lifetimeConfig });
+		const g = buildGrant({ oauthTokenSettings: options.oauthTokenSettings ?? lifetimeSettings });
 		const token = await signSelfIssuedAccessToken(
 			{ family_id: "fam-1" },
 			{ expiresIn: options.subjectExpiresIn ?? "1h" },
@@ -532,15 +527,14 @@ describe("token exchange — a request may ask for its lifetime with expires_in"
 		expect(mintedLifetime((await exchange("0120")).result)).toBe(120);
 	});
 
-	it("extends nothing past the default when maxExpiresIn is unset", async () => {
-		const defaultOnly = {
-			oauth: { ...mockConfig.oauth, accessToken: { defaultExpiresIn: 600 } },
-		} as unknown as AppConfig;
-		expect(mintedLifetime((await exchange("1800", { config: defaultOnly })).result)).toBe(600);
-		// The deprecated alias alone is the same statement: a default, no max.
-		expect(mintedLifetime((await exchange("1800", { config: mockConfig })).result)).toBe(300);
+	it("extends nothing past the default when the max equals it", async () => {
+		expect(
+			mintedLifetime((await exchange("1800", { oauthTokenSettings: tokenSettings })).result),
+		).toBe(300);
 		// Shorter than the default is still honoured.
-		expect(mintedLifetime((await exchange("60", { config: mockConfig })).result)).toBe(60);
+		expect(
+			mintedLifetime((await exchange("60", { oauthTokenSettings: tokenSettings })).result),
+		).toBe(60);
 	});
 
 	const malformed: ReadonlyArray<[string, unknown]> = [
@@ -577,7 +571,10 @@ describe("token exchange — a request may ask for its lifetime with expires_in"
 		// The shape check is syntactic, like the `client_id` / `client_secret`
 		// ones beside it: a malformed request is refused as malformed, whoever
 		// sent it.
-		const g = buildGrant({ config: lifetimeConfig, clientRepository: mockClientRepository(null) });
+		const g = buildGrant({
+			oauthTokenSettings: lifetimeSettings,
+			clientRepository: mockClientRepository(null),
+		});
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token, { expires_in: "0" })));
 		expect(result).toMatchObject({ status: 400, error: "invalid_request" });

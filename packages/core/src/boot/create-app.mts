@@ -53,6 +53,7 @@ import type {
 	ContributionKindMap,
 	CreateAppOptions,
 	DefaultBootstrapMap,
+	GrantCollector,
 	ListCollector,
 	NameKeyedCollector,
 	RegisteredFederationType,
@@ -78,8 +79,9 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
  * `mergeWithBuiltins` seeds the built-in contribution kinds and consumer kinds
  * overlay them, except `sessionRequirements` and `mfaFactors`
  * (`session-requirement-kind-guarded`) and `rateLimitBudgets`,
- * `federationTypes` and `admissionActions` (`contribution-kind-guarded`),
- * which `createApp` refuses to see replaced before the merge
+ * `federationTypes`, `admissionActions`, `auditHooks`, `federations` and
+ * `federationRedirectPolicies` (`contribution-kind-guarded`), which
+ * `createApp` refuses to see replaced before the merge
  * (`refuseGuardedHostKinds`).
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
@@ -88,12 +90,14 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
 export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	options: CreateAppOptions<B>,
 ): Promise<AppHandle> {
-	const { modules, contributionKinds } = options;
+	const { modules } = options;
 	// Each host map is read once, here: stage 1 checks what later stages use,
 	// so a map that answers differently on a later read (a Proxy, a getter)
-	// cannot have one answer checked and another materialised.
+	// cannot have one answer checked and another materialised — nor can the
+	// collectors the guard below reads differ from the ones merged.
 	const bootstrapComponents = snapshotHostMap(options.bootstrapComponents);
 	const overrideComponents = snapshotHostMap(options.overrideComponents);
+	const contributionKinds = snapshotHostMap(options.contributionKinds);
 
 	// A host collector for a guarded kind is refused before anything is merged
 	// or validated.
@@ -208,7 +212,7 @@ function snapshotHostMap<T>(map: T): T {
 /**
  * Seed the built-in contribution kinds and overlay any consumer-supplied
  * collectors on top:
- * - grants: a `NameKeyedCollector` over one `GrantRegistry`, which holds the
+ * - grants: a `GrantCollector` over one `GrantRegistry`, which holds the
  *   handlers and answers every call (`register` / `replace` throw
  *   `GrantRegistryError`).
  * - the other name-keyed kinds: a Map-backed `NameKeyedCollector`, the only
@@ -250,28 +254,30 @@ export function mergeWithBuiltins(
 // ---------------------------------------------------------------------------
 
 /**
- * Build the `grants` `NameKeyedCollector` over one `GrantRegistry`. The
+ * Build the `grants` `GrantCollector` over one `GrantRegistry`. The
  * registry is the only store: `entries()` — what `grantHandlerResolver`
- * lists — reads the same map `get` does.
+ * lists — reads the same map `get` does. `get` answers `null` for a grant
+ * type registered switched off, so boot's pre-scan sees it claimed;
+ * `entries()` leaves it out.
  *
  * @internal
  */
-function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
+function makeGrantCollector(): GrantCollector {
 	const registry = new GrantRegistry();
 
 	return {
 		kind: "name-keyed" as const,
-		register(name: string, value: GrantHandler): void {
+		register(name: string, value: GrantHandler | null): void {
 			registry.register(name, value);
 		},
-		replace(name: string, value: GrantHandler): void {
+		replace(name: string, value: GrantHandler | null): void {
 			registry.replace(name, value);
 		},
 		freeze(): void {
 			registry.freeze();
 		},
-		get(name: string): GrantHandler | undefined {
-			return registry.get(name);
+		get(name: string): GrantHandler | null | undefined {
+			return registry.has(name) ? (registry.get(name) ?? null) : undefined;
 		},
 		entries(): IterableIterator<readonly [string, GrantHandler]> {
 			return registry.entries();

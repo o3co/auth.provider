@@ -44,6 +44,142 @@ return written
 
 export const MFA_FACTOR_UPDATE = defineScript(LUA_MFA_FACTOR_UPDATE);
 
+// A subject's factor set: the factor fields and `~g`, the set's generation, in one hash. Each
+// script below is one membership write or the versioned read, and starts with `#!lua` and no
+// `no-writes` flag, so a read-only replica refuses it outright: none ever answers from a
+// replica (Redis 7.0+).
+//
+// A membership write is `apply`, a function each script defines, run by one shared step
+// (`LUA_MFA_FACTOR_SET_STEP`): a copy of a write already applied answers that write's answer and
+// writes nothing; a write the server takes at or past the deadline the adapter set at issue
+// writes nothing and answers `late`; otherwise `apply` checks and writes the fields, `~g` = the
+// generation it was handed and the key's expiry (none while the set holds a factor, the
+// tombstone's while it holds `~g` alone), and its answer is kept until the declared clock skew
+// past the deadline, so a server whose clock lags the one that kept it (after a failover or a
+// slot migration) still finds it. A key holding factors but no `~g` was written before the set
+// had a generation: a conditional write against it is a `conflict`.
+//
+// The removal, the reset and the versioned read declare `allow-oom`: under `noeviction` a full
+// server still runs them, since they write only `~g`, the replay key and an expiry, and a factor
+// must stay removable, and the reset must run, when nothing more can be enrolled. The create
+// declares no flag, so a full server refuses it (`OOM`).
+//
+// Membership writes: `KEYS[1]` = the subject's hash, `KEYS[2]` = the write's replay key (same
+// hash tag); `ARGV[1]` = the next generation, `ARGV[2]` = the deadline (epoch ms), `ARGV[3]` =
+// the declared clock skew (ms), then each script's own arguments from `ARGV[4]`.
+
+/**
+ * What every membership script starts with. `mfa_factor_late()`: whether the server's clock, to
+ * the millisecond, is at or past the deadline. `mfa_factor_settle(tombstone)`: the key's expiry
+ * for what the write left — the tombstone's `PEXPIRE` when `~g` is all it holds, none otherwise.
+ */
+const LUA_MFA_FACTOR_SET_PRELUDE = `
+local function mfa_factor_late()
+  local t = redis.call('TIME')
+  return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) >= tonumber(ARGV[2])
+end
+
+local function mfa_factor_settle(tombstone)
+  if redis.call('HLEN', KEYS[1]) == 1 then
+    redis.call('PEXPIRE', KEYS[1], tombstone)
+  else
+    redis.call('PERSIST', KEYS[1])
+  end
+end
+`;
+
+/**
+ * What every membership script ends with: the replay key's answer for a copy, `late` past the
+ * deadline, or `apply()`'s answer, kept under the replay key until the declared clock skew past
+ * the deadline.
+ */
+const LUA_MFA_FACTOR_SET_STEP = `
+local applied = redis.call('GET', KEYS[2])
+if applied then return applied end
+if mfa_factor_late() then return 'late' end
+local outcome = apply()
+redis.call('SET', KEYS[2], outcome, 'PXAT', tonumber(ARGV[2]) + tonumber(ARGV[3]) + 1)
+return outcome
+`;
+
+/** The first line of a script that runs on a full server: the removal, the reset, the versioned read. */
+const ALLOW_OOM = "#!lua flags=allow-oom";
+
+/** The first line of a script a full server refuses: the create. */
+const REFUSED_WHEN_FULL = "#!lua";
+
+/** A membership script: its first line, the prelude, its `apply`, and the shared step. */
+const membershipScript = (shebang: string, apply: string): string =>
+	`${shebang}${LUA_MFA_FACTOR_SET_PRELUDE}\nlocal function apply()\n${apply.replace(/^\n+|\s+$/g, "")}\nend\n${LUA_MFA_FACTOR_SET_STEP}`;
+
+/**
+ * `MfaFactorStoreClient.listVersioned`. `KEYS[1]` = the subject's hash; `ARGV[1]` = the
+ * generation a hash without `~g` is given. Returns every field and value, `~g` among them, or an
+ * empty array for no key. `HSETNX` keeps a generation held, and leaves the key's expiry.
+ */
+const LUA_MFA_FACTOR_LIST_VERSIONED = `${ALLOW_OOM}
+if redis.call('EXISTS', KEYS[1]) == 0 then return {} end
+redis.call('HSETNX', KEYS[1], '~g', ARGV[1])
+return redis.call('HGETALL', KEYS[1])
+`;
+
+/**
+ * `MfaFactorStoreClient.createIf`. `ARGV[4]` = the expected generation (empty: the key must be
+ * absent), `ARGV[5]` = the factor's field, `ARGV[6]` = its value. Answers `created`,
+ * `conflict` or `late`.
+ */
+const LUA_MFA_FACTOR_CREATE_IF = membershipScript(
+	REFUSED_WHEN_FULL,
+	`
+  if ARGV[4] == '' then
+    if redis.call('EXISTS', KEYS[1]) == 1 then return 'conflict' end
+  elseif redis.call('HGET', KEYS[1], '~g') ~= ARGV[4] then
+    return 'conflict'
+  end
+  if redis.call('HEXISTS', KEYS[1], ARGV[5]) == 1 then return 'conflict' end
+  redis.call('HSET', KEYS[1], ARGV[5], ARGV[6], '~g', ARGV[1])
+  redis.call('PERSIST', KEYS[1])
+  return 'created'
+`,
+);
+
+/**
+ * `MfaFactorStoreClient.removeIf`. `ARGV[4]` = the tombstone's lifetime (ms), `ARGV[5]` = the
+ * expected generation, `ARGV[6]` = the factor's field. Answers `removed`, `missing`,
+ * `conflict` or `late`; the generation is checked before the field.
+ */
+const LUA_MFA_FACTOR_REMOVE_IF = membershipScript(
+	ALLOW_OOM,
+	`
+  if redis.call('EXISTS', KEYS[1]) == 0 then return 'missing' end
+  if redis.call('HGET', KEYS[1], '~g') ~= ARGV[5] then return 'conflict' end
+  if redis.call('HDEL', KEYS[1], ARGV[6]) == 0 then return 'missing' end
+  redis.call('HSET', KEYS[1], '~g', ARGV[1])
+  mfa_factor_settle(ARGV[4])
+  return 'removed'
+`,
+);
+
+/**
+ * `MfaFactorStoreClient.removeAll`: the reset, unconditional, serialised with the writes above
+ * as one script. `ARGV[4]` = the tombstone's lifetime (ms). Answers `removed` or `late`. The
+ * tombstone is made when there was no key, and its expiry starts again when there was one.
+ */
+const LUA_MFA_FACTOR_REMOVE_ALL = membershipScript(
+	ALLOW_OOM,
+	`
+  redis.call('DEL', KEYS[1])
+  redis.call('HSET', KEYS[1], '~g', ARGV[1])
+  redis.call('PEXPIRE', KEYS[1], ARGV[4])
+  return 'removed'
+`,
+);
+
+export const MFA_FACTOR_LIST_VERSIONED = defineScript(LUA_MFA_FACTOR_LIST_VERSIONED);
+export const MFA_FACTOR_CREATE_IF = defineScript(LUA_MFA_FACTOR_CREATE_IF);
+export const MFA_FACTOR_REMOVE_IF = defineScript(LUA_MFA_FACTOR_REMOVE_IF);
+export const MFA_FACTOR_REMOVE_ALL = defineScript(LUA_MFA_FACTOR_REMOVE_ALL);
+
 // A transaction is one hash. Its deadline is set once, by `create`, and nothing moves it: an
 // update, an attempt, a taken challenge each write fields and leave the key's expiry alone.
 
@@ -604,10 +740,15 @@ return {1, stamp}
  * token, the sessions boundary or empty, the earliest guessable record's time or `none` when no
  * guessable record remains (empty for a reset), and the clock skew (`DEFAULT_CLOCK_SKEW_MS`).
  * The recovery hash, and for a recover the lock state, are read and validated whole before the
- * first write. Refuses, in the port's order, with `{'refused', reason, hard}`; answers
- * `{'already', recoveryId, generation, hard}` for an authorization applied, and
- * `{'applied', recoveryId, generation, week, run, liftedHard, hard}` once it applies, each flag
- * `1` or `0`, `hard` read after the apply.
+ * first write. Refuses, in the port's order, with `{'refused', reason, hard, rebindAfter}`;
+ * answers `{'already', recoveryId, generation, hard, rebindAfter}` for an authorization applied,
+ * and `{'applied', recoveryId, generation, week, run, liftedHard, hard, rebindAfter}` once it
+ * applies, each flag `1` or `0`. `hard` and `rebindAfter` are the hard hold read after the call:
+ * while it stands, from when a rebind counts — the hold's time plus the skew, floored to whole
+ * milliseconds, as decimal text, the bound a recover lifts by — and empty while none does. A
+ * reset reads the hold only to answer a refusal or an authorization already applied. A hold it
+ * cannot read, or whose bound is not a safe whole number from 0, is an error, raised before the
+ * first write.
  */
 const LUA_MFA_SUBJECT_RECOVERY_APPLY = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
 local operation, field, token = ARGV[1], ARGV[2], ARGV[4]
@@ -623,25 +764,37 @@ end
 local g, floor, slots = recovery_load(KEYS[3])
 local next_generation = (g or 0) + 1
 if next_generation > MAX_COUNT then corrupt() end
-local run, pending, week, held_hard = nil, nil, nil, nil
-if operation == 'recover' then run, pending, week, held_hard = load() end
-
-local function hard_flag()
-  if redis.call('HEXISTS', KEYS[1], 'hard') == 1 then return '1' end
-  return '0'
+-- From when a rebind counts against the hard hold's time: a guessable record created after it.
+-- A bound an answer cannot carry (not a safe whole number from 0) is a state this store did not write.
+local function rebind_after(at)
+  local after = math.floor(at + clock_skew)
+  if after < 0 or after > MAX_COUNT then corrupt() end
+  return after
 end
-local function refused(reason) return {'refused', reason, hard_flag()} end
+local run, pending, week, held_hard = nil, nil, nil, nil
+if operation == 'recover' then
+  run, pending, week, held_hard = load()
+  if held_hard ~= nil then rebind_after(held_hard) end
+end
+-- The hard hold as it stands now: '1' and from when a rebind counts, or '0' and empty.
+local function hold()
+  local at = redis.call('HGET', KEYS[1], 'hard')
+  if not at then return '0', '' end
+  return '1', string.format('%.0f', rebind_after(num(at)))
+end
+local function refused(reason) return {'refused', reason, hold()} end
 
 if not lease_held(KEYS[4], token) then return refused('lease_not_held') end
 local slot = slots[field]
 if slot == nil then return refused('unauthorized') end
 if slot.ends <= server_ms() then
+  local hard, after = hold()
   redis.call('HDEL', KEYS[3], field)
   slots[field] = nil
   recovery_keep(KEYS[3], g ~= nil or floor ~= nil, slots)
-  return refused('unauthorized')
+  return {'refused', 'unauthorized', hard, after}
 end
-if slot.applied ~= nil then return {'already', slot.id, slot.applied, hard_flag()} end
+if slot.applied ~= nil then return {'already', slot.id, slot.applied, hold()} end
 if slot.ends <= now then return refused('expired') end
 
 -- Applied: the slot is marked at the generation this moves to.
@@ -649,7 +802,7 @@ local function applied(ended_week, ended_run, lifted)
   local gen = string.format('%.0f', next_generation)
   redis.call('HSET', KEYS[3], 'g', gen, field, 'a|' .. gen .. '|' .. string.format('%.0f', slot.ends) .. '|' .. slot.id)
   redis.call('PERSIST', KEYS[3])
-  return {'applied', slot.id, gen, ended_week, ended_run, lifted, hard_flag()}
+  return {'applied', slot.id, gen, ended_week, ended_run, lifted, hold()}
 end
 
 if operation == 'reset' then
@@ -670,7 +823,7 @@ for _, a in ipairs(week) do
 end
 local revoked = earliest == nil or (boundary ~= nil and boundary > earliest + clock_skew)
 -- The hard hold lifts on a rebind alone: no guessable record from before it, by more than the skew.
-local rebound = held_hard ~= nil and (since == nil or since > held_hard + clock_skew)
+local rebound = held_hard ~= nil and (since == nil or since > rebind_after(held_hard))
 if not revoked and not rebound then return refused('not_revoked_since') end
 
 local ended_week, ended_run, lifted = '0', '0', '0'

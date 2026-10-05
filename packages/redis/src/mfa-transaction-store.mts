@@ -386,16 +386,31 @@ const generationText = (text: string | undefined): number | undefined =>
 		? Number(text)
 		: undefined;
 
+/**
+ * From when a rebind counts, as the apply script answers it: empty while no
+ * hard hold stands (`null`), else canonical decimal text of a safe whole
+ * number; `undefined` for anything else.
+ */
+const rebindAfterText = (text: string | undefined): number | null | undefined =>
+	text === ""
+		? null
+		: text !== undefined && /^(?:0|[1-9][0-9]*)$/.test(text) && Number.isSafeInteger(Number(text))
+			? Number(text)
+			: undefined;
+
 /** The apply script's reply in the port's terms, for core's reading to hold to the port. */
 function recoveryAnswerOf(reply: readonly string[]): unknown {
-	const [outcome, a, b, c, d, e, f] = reply;
-	if (outcome === "refused") return { outcome, reason: a, hard: flag(b) };
+	const [outcome, a, b, c, d, e, f, g] = reply;
+	if (outcome === "refused") {
+		return { outcome, reason: a, hard: flag(b), rebindAfterMs: rebindAfterText(c) };
+	}
 	if (outcome === "already") {
 		return {
 			outcome: "already_applied",
 			recoveryId: a,
 			generation: generationText(b),
 			hard: flag(c),
+			rebindAfterMs: rebindAfterText(d),
 		};
 	}
 	if (outcome === "applied") {
@@ -405,6 +420,7 @@ function recoveryAnswerOf(reply: readonly string[]): unknown {
 			generation: generationText(b),
 			cleared: { week: flag(c), run: flag(d), hard: flag(e) },
 			hard: flag(f),
+			rebindAfterMs: rebindAfterText(g),
 		};
 	}
 	return undefined;

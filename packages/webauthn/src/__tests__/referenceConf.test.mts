@@ -21,7 +21,9 @@
  * without losing a path —
  * core's `packageReferenceProblems`, the check every package with defaults
  * runs over its own file. The two rate-limit variables are named after the
- * paths they set; their old names are declared renamed and bound nowhere.
+ * paths they set; their old names are declared renamed and bound nowhere. The
+ * removed `allowCredentialsForKnownUser` is declared removed, and its variable
+ * is bound nowhere.
  */
 
 import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
@@ -47,16 +49,44 @@ describe("the package's config/reference.conf", () => {
 		]);
 	});
 
-	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
-		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
+	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path, once the operator names the relying party", () => {
+		const withRelyingParty = (path: string, env: Readonly<Record<string, string>>): unknown =>
+			read(path, {
+				WEBAUTHN_RP_ID: "example.com",
+				WEBAUTHN_RP_NAME: "Example App",
+				WEBAUTHN_ORIGIN: "https://example.com",
+				...env,
+			});
+		expect(
+			packageReferenceProblems({ reference: REFERENCE, modules, read: withRelyingParty }),
+		).toEqual([]);
 	});
 
-	it("declares the two rate-limit variables renamed to the names their paths derive", () => {
+	it("leaves exactly the relying party to the operator: with no variable set, only its three keys are refused", () => {
+		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([
+			expect.stringMatching(/^webauthn\.origin: refused by module "webauthn"'s section schema/),
+			expect.stringMatching(/^webauthn\.rpId: refused by module "webauthn"'s section schema/),
+			expect.stringMatching(/^webauthn\.rpName: refused by module "webauthn"'s section schema/),
+		]);
+	});
+
+	it("declares the two rate-limit variables renamed to the names their paths derive, and the removed key's variable", () => {
 		expect(webauthnModule.section?.renamedVariables).toEqual({
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT: "webauthn.rateLimit.authenticationOptions.limit",
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS:
 				"webauthn.rateLimit.authenticationOptions.windowSeconds",
+			WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER: "webauthn.allowCredentialsForKnownUser",
 		});
+	});
+
+	it("declares allowCredentialsForKnownUser removed, and binds its variable nowhere", () => {
+		expect(webauthnModule.section?.relocatedFrom).toEqual({
+			"webauthn.allowCredentialsForKnownUser": null,
+		});
+		const tree = read(new URL(REFERENCE).pathname, {
+			WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER: "true",
+		}) as { webauthn: Record<string, unknown> };
+		expect(tree.webauthn).not.toHaveProperty("allowCredentialsForKnownUser");
 	});
 
 	it.each([

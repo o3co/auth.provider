@@ -30,6 +30,7 @@ import type { AppConfig } from "../config/application.schema.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
+import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	AuditHook,
@@ -184,6 +185,44 @@ export interface ValidatedManifests {
 	 * config.
 	 */
 	readonly bootstrapComponents: BootstrapMap;
+	/**
+	 * Each enabled `core.federations` entry whose `type` a module switched on
+	 * registers, parsed by that type's schema, in the configuration's key
+	 * order: what stage 4 builds a provider and a redirect policy from.
+	 */
+	readonly dispatchedFederations: readonly DispatchedFederation[];
+	/**
+	 * Each slot an absence policy governs whose absence the configuration does
+	 * not declare. Every one is planned (stage 1 refuses otherwise); stage 3
+	 * refuses any that holds `undefined` once its sources have answered.
+	 */
+	readonly undeclaredAbsenceSlots: readonly UndeclaredAbsenceSlot[];
+}
+
+/** A slot that must hold a value: its absence policy is in force and undeclared. */
+export interface UndeclaredAbsenceSlot {
+	readonly componentKey: ComponentKey;
+	/** Modules naming the key in `requires` / `optional`, in input order. */
+	readonly consumedBy: readonly string[];
+	readonly policy: AbsencePolicy;
+}
+
+/**
+ * An enabled `core.federations` entry dispatched to the type it names, as
+ * stage 1 parsed it.
+ */
+export interface DispatchedFederation {
+	readonly type: string;
+	/**
+	 * The module whose declaration of the type is in force: the one that
+	 * overrides it, or else the one that contributes it.
+	 */
+	readonly module: string;
+	/**
+	 * What both of the type's factories receive, frozen: the entry's name, its
+	 * `callbackURL`, and the rest of it as the type's `entrySchema` answered.
+	 */
+	readonly instance: FederationInstance<unknown>;
 }
 
 /**
@@ -357,6 +396,27 @@ export interface NameKeyedCollector<V> {
 }
 
 /**
+ * Collector for the `grants` kind: a `NameKeyedCollector` whose values are a
+ * grant handler or `null`, a grant its module's settings switched off, which
+ * claims the grant type. Its mutators are function-valued properties, so
+ * their parameter is checked strictly: a collector that takes handlers only
+ * is not one, since boot hands it `null`.
+ */
+export interface GrantCollector {
+	readonly kind: "name-keyed";
+	/** Register a handler, or `null` for a switched-off grant, by grant type. Throws on duplicate. */
+	readonly register: (name: string, value: GrantHandler | null) => void;
+	/** Replace a registered grant type's value. Throws if the grant type is unknown. */
+	readonly replace: (name: string, value: GrantHandler | null) => void;
+	/** Optional activation boundary — throws further mutation attempts when defined. */
+	readonly freeze?: () => void;
+	/** The handler, `null` for a switched-off grant type, `undefined` for an unregistered one. */
+	get(name: string): GrantHandler | null | undefined;
+	/** The registered grant types; a switched-off one may be listed with `null`. */
+	entries(): IterableIterator<readonly [string, GrantHandler | null]>;
+}
+
+/**
  * Collector for list-shaped contribution kinds (auditHooks,
  * grantPolicyHooks). Same-instance values are deduplicated.
  */
@@ -386,13 +446,26 @@ export interface RouteCollector {
  * built-in kinds; consumers add custom kinds via `declare module` augmentation.
  */
 export interface ContributionCollectorMap {
-	readonly grants?: NameKeyedCollector<GrantHandler>;
+	/**
+	 * Collector for `grants` contributions, by grant type. A `null` entry is a
+	 * grant its module's settings switched off: it claims the grant type, and
+	 * `grantHandlerResolver` leaves it out. It is no override target.
+	 */
+	readonly grants?: GrantCollector;
+	/**
+	 * Collector for `federations`, by name: the provider stage 4 builds for
+	 * each `core.federations` entry stage 1 dispatched to its type. Boot
+	 * fills it alone: a module's contribution or override, and a host
+	 * collector, are refused (`contribution-kind-guarded`).
+	 */
 	readonly federations?: NameKeyedCollector<FederationProvider>;
 	/**
-	 * Collector for `federationRedirectPolicies` contributions.
-	 * The concrete policy type (`FederationRedirectPolicy`) is declared in the
-	 * session package via `declare module` augmentation; core stores it as
-	 * `unknown` to avoid a cross-package dependency.
+	 * Collector for `federationRedirectPolicies`, by name: the redirect policy
+	 * stage 4 builds beside each dispatched entry's provider, filled by boot
+	 * alone like `federations`. The concrete policy type
+	 * (`FederationRedirectPolicy`) is declared in the session package via
+	 * `declare module` augmentation; core stores it as `unknown` to avoid a
+	 * cross-package dependency.
 	 */
 	readonly federationRedirectPolicies?: NameKeyedCollector<unknown>;
 	readonly tokenExchangeValidators?: NameKeyedCollector<ExchangeTokenValidator>;
@@ -417,8 +490,8 @@ export interface ContributionCollectorMap {
 	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
 	/**
 	 * Collector for `federationTypes` contributions, by type: each
-	 * package's declaration, its factory bound to the module's deps. Nothing
-	 * dispatches configured entries to it yet.
+	 * package's declaration, its factories bound to the module's deps, which
+	 * stage 4 calls for each entry stage 1 dispatched to the type.
 	 */
 	readonly federationTypes?: NameKeyedCollector<RegisteredFederationType>;
 	/**
@@ -457,13 +530,14 @@ export interface ContributionCollectorMap {
 
 /**
  * A `federationTypes` declaration as registered: the type's entry
- * schema, and `create`, its factory bound to the contributing module's deps —
- * what the dispatch of configured entries by type will call once per entry
- * of the type, with the entry parsed by `entrySchema` and its name.
+ * schema, and its two factories bound to the contributing module's deps —
+ * `create`, the provider's, and `redirectPolicy` — which stage 4 calls once
+ * per entry dispatched to the type, with that entry's instance.
  */
 export interface RegisteredFederationType {
 	readonly entrySchema: z.ZodType;
 	readonly create: (instance: FederationInstance<unknown>) => Contributed<FederationProvider>;
+	readonly redirectPolicy: (instance: FederationInstance<unknown>) => Contributed<unknown>;
 }
 
 /**
@@ -478,12 +552,51 @@ export type ContributionKindMap = Partial<ContributionCollectorMap>;
 // ---------------------------------------------------------------------------
 
 /**
+ * What a composition root hands boot in `bootstrapComponents` beside the
+ * components: inputs stage 1 reads itself. Each key is reserved — boot takes
+ * it out of the map before any check reads the map and seeds no component
+ * from it, and a module that provides, requires or optionally reads a
+ * component of its name, or an `overrideComponents` entry of it, refuses boot
+ * (`reserved-component-key`).
+ */
+export interface ReservedBootstrapInputs {
+	/**
+	 * The configuration's defaults: what the composition resolves from the
+	 * `reference.conf` files of the modules it loads and core's
+	 * (`moduleReferences`), in the same order, with no operator layer and no
+	 * environment — unparsed, as `config` is. Optional; `undefined` is none.
+	 * Resolve it exactly as the configuration is resolved — the same reader
+	 * and the same conversion to plain data (`toObject` with the same
+	 * options) — since a section is compared with its default whole,
+	 * prototypes included, and one built differently differs.
+	 *
+	 * Stage 1 reads it for the top-level sections no loaded module owns that
+	 * set something: one it holds and the configuration leaves equal to it —
+	 * a sibling's section, which a package's `reference.conf` sets whenever
+	 * any of its modules is loaded — is not named; one it holds and the
+	 * operator's files or the environment set otherwise is named once at warn
+	 * as `config_sections_not_loaded`; one it does not hold is
+	 * `config_sections_ignored`. Without it, every such section is
+	 * `config_sections_ignored`. Names only, never a value.
+	 *
+	 * It is read once, before any check, into a copy of its plain data: an
+	 * object of sections whose values are strings, numbers, booleans, `null`,
+	 * lists and objects (prototype `Object.prototype` or none), each an own
+	 * data property. Anything else — not an object of sections, an accessor,
+	 * a value that throws as it is read, a Proxy's trap included — refuses
+	 * boot (`config-defaults-invalid`), naming the path and no value.
+	 */
+	readonly configDefaults?: unknown;
+}
+
+/**
  * Map of component values originating from the host environment, pre-seeded
- * into the DI graph before any module factory runs.
+ * into the DI graph before any module factory runs, with the reserved inputs
+ * stage 1 reads itself ({@link ReservedBootstrapInputs}).
  */
 export type BootstrapMap = {
 	readonly [K in ComponentKey]?: ComponentMap[K];
-};
+} & ReservedBootstrapInputs;
 
 /**
  * The minimal host contract of the built-in createApp call: a closed shape,
@@ -619,12 +732,12 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 39 literals
+// BootErrorReason — 40 literals
 // ---------------------------------------------------------------------------
 
 /**
  * Every reason a BootError can carry: one literal per validation or runtime
- * failure the boot planner detects, 39 in all.
+ * failure the boot planner detects, 40 in all.
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -647,9 +760,9 @@ export type BootErrorReason =
 	| "contribute-factory-failed"
 	| "route-order-cycle"
 	| "route-order-target-missing"
-	| "federation-redirect-policy-unpaired"
 	| "grant-policy-without-issuer"
 	| "federation-stores-incomplete"
+	| "federation-type-unhandled"
 	| "discovery-document-invalid"
 	| "replica-unsafe-adapter"
 	| "component-absence-undeclared"
@@ -657,6 +770,7 @@ export type BootErrorReason =
 	| "session-requirements-undeclared"
 	| "session-requirement-missing"
 	| "duplicate-second-factor-authority"
+	| "second-factor-authority-not-declared"
 	| "reserved-component-key"
 	| "module-section-path-invalid"
 	| "contribution-kind-guarded"
@@ -665,10 +779,11 @@ export type BootErrorReason =
 	| "environment-variable-renamed"
 	| "authoritative-without-provides"
 	| "authoritative-component-overridden"
-	| "token-settings-lifetime-exceeds-configuration";
+	| "token-settings-lifetime-exceeds-configuration"
+	| "config-defaults-invalid";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 39 in all
+// Per-reason *Details interfaces — one per BootErrorReason, 40 in all
 // ---------------------------------------------------------------------------
 
 /**
@@ -717,11 +832,11 @@ export type BootstrapComponentCollisionDetails =
 
 /**
  * A synthetic ComponentMap key (`SYNTHETIC_COMPONENT_KEYS`: the resolvers,
- * the two registrars, `deploymentMode`) appeared in a module's `provides`,
+ * the two registrars, `deploymentMode`, `tokenBindingSettings`,
+ * `federationSettings`, `outboundPolicy`) appeared in a module's `provides`,
  * `bootstrapComponents` or `overrideComponents`; only the boot planner
- * produces these keys. `source:
- * "module-provides"` carries `module`; the other two sources are
- * composition-root data and carry no module name.
+ * produces these keys. `source: "module-provides"` carries `module`; the
+ * other two sources are composition-root data and carry no module name.
  */
 export type SyntheticKeyCollisionDetails =
 	| {
@@ -853,22 +968,33 @@ export interface AuthoritativeComponentOverriddenDetails {
 }
 
 /**
- * An `oauthTokenSettings` a host filled names a token lifetime longer than
- * the one core resolves from the configuration, which sizes the retention
- * of what revokes that token.
+ * An `oauthTokenSettings` names a token lifetime longer than the one core
+ * resolves from the configuration, which sizes the retention of what
+ * revokes that token: a host map's at stage 1, or as the value enters the
+ * component map at stage 3 (a module's, or a host's that answered stage 1
+ * differently).
  */
-export interface TokenSettingsLifetimeExceedsConfigurationDetails {
+export type TokenSettingsLifetimeExceedsConfigurationDetails = {
 	readonly reason: "token-settings-lifetime-exceeds-configuration";
 	readonly componentKey: "oauthTokenSettings";
-	/** The host map the slot came from. */
-	readonly source: "bootstrapComponents" | "overrideComponents";
 	/** The slot's member, as the contract names it. */
 	readonly member: "accessTokenLifetime.maxExpiresIn" | "refreshTokenExpiresIn";
 	/** The slot's lifetime, in seconds. */
 	readonly slotSeconds: number;
 	/** The lifetime core resolves from the configuration, in seconds. */
 	readonly configurationSeconds: number;
-}
+} & (
+	| {
+			/** The host map the slot came from. */
+			readonly source: "bootstrapComponents" | "overrideComponents";
+	  }
+	| {
+			/** A module's `provides`. */
+			readonly source: "provides";
+			/** The module that provided it. */
+			readonly module: string;
+	  }
+);
 
 export interface InvalidRouteAdvertisementPathDetails {
 	readonly reason: "invalid-route-advertisement-path";
@@ -889,6 +1015,9 @@ export interface InvalidRouteAdvertisementPathDetails {
  * - `__proto__` as an own key of a host map (`source`): set on the component
  *   map it would replace the prototype, so every key of its value would read
  *   as a component no module provided.
+ * - `configDefaults`, the reserved bootstrap input (`ReservedBootstrapInputs`),
+ *   provided, required or read optionally by a module (`module`), or an
+ *   `overrideComponents` entry: boot reads it itself, and no component carries it.
  */
 export type ReservedComponentKeyDetails =
 	| {
@@ -896,6 +1025,17 @@ export type ReservedComponentKeyDetails =
 			readonly componentKey: string;
 			readonly source: "module-requires" | "module-optional";
 			readonly module: string;
+	  }
+	| {
+			readonly reason: "reserved-component-key";
+			readonly componentKey: "configDefaults";
+			readonly source: "module-provides";
+			readonly module: string;
+	  }
+	| {
+			readonly reason: "reserved-component-key";
+			readonly componentKey: "configDefaults";
+			readonly source: "overrideComponents";
 	  }
 	| {
 			readonly reason: "reserved-component-key";
@@ -989,6 +1129,18 @@ export interface EnvironmentVariableRenamedDetails {
  * whole configuration, or, once that passed, the modules' own sections, each
  * parsed by its manifest's `section.schema`.
  */
+/**
+ * `bootstrapComponents.configDefaults` is not plain data boot can read once
+ * (`ReservedBootstrapInputs`): `path` is the keys from its top to what is
+ * wrong — `[]` for the value itself — and `problem` says what is wrong. No
+ * value is carried.
+ */
+export interface ConfigDefaultsInvalidDetails {
+	readonly reason: "config-defaults-invalid";
+	readonly path: readonly string[];
+	readonly problem: string;
+}
+
 export interface ConfigValidationFailedDetails {
 	readonly reason: "config-validation-failed";
 	/**
@@ -1080,21 +1232,6 @@ export interface RouteOrderTargetMissingDetails {
 }
 
 /**
- * A federation contributing `federations[name]` lacks a matching
- * `federationRedirectPolicies[name]` (or vice versa).
- *
- * `name`: the unmatched federation/policy key.
- * `side`: which side is missing its pair.
- * `contributedBy`: the module that contributed the unpaired side.
- */
-export interface FederationRedirectPolicyUnpairedDetails {
-	readonly reason: "federation-redirect-policy-unpaired";
-	readonly name: string;
-	readonly side: "federation-without-policy" | "policy-without-federation";
-	readonly contributedBy: string;
-}
-
-/**
  * When any module provides `grantPolicy`, `config.oauth.jwt.issuer` must be a
  * non-empty string: the grant policy hook signs decisions against the
  * issuer, and an empty one turns its fail-closed enforcement into a silent
@@ -1116,8 +1253,22 @@ export interface FederationStoresIncompleteDetails {
 	readonly reason: "federation-stores-incomplete";
 	/** The federation name whose enabled flag triggered the check. */
 	readonly federationName: string;
-	/** The store keys that are absent from the planned component set. */
+	/** The store keys no source plans, or whose slot holds `undefined`. */
 	readonly missing: readonly string[];
+}
+
+/**
+ * An enabled `core.federations` entry no installed module handles: its `type`
+ * is not one a module registers under `federationTypes`, the one way a
+ * federation registers. Every such entry is listed, in the order written. Its routes would otherwise answer `404` while the operator
+ * believes the federation is on.
+ */
+export interface FederationTypeUnhandledDetails {
+	readonly reason: "federation-type-unhandled";
+	/** Each unhandled entry: its name and the `type` it names, which no installed module registers. */
+	readonly unhandled: readonly { readonly federationName: string; readonly type: string }[];
+	/** The types the installed modules register, in module order. */
+	readonly handled: readonly string[];
 }
 
 /**
@@ -1176,18 +1327,36 @@ export interface ComponentAbsenceUndeclaredDetails {
  * planner's alone: `rateLimitBudgets` — a host collector could answer
  * a looser budget than the owning module contributed, on a prefix such as
  * RFC 8628 §5.1's device verification — `federationTypes`, and
- * `admissionActions`, whose grades admission hands the requirements, and
- * `auditHooks`, which the audit fan-out reads. Refused in `createApp`, before
- * the kinds are merged. Also a module's
- * `overrides.admissionActions` entry, at stage 1 (`channel: "overrides"`,
- * naming the module and the action): an action's grade is its registrant's.
+ * `admissionActions`, whose grades admission hands the requirements,
+ * `auditHooks`, which the audit fan-out reads, and `federations` and
+ * `federationRedirectPolicies`, which boot fills from the dispatched
+ * `core.federations` entries. Refused in `createApp`, before the kinds are
+ * merged. Also, at stage 1, naming the module and the channel: a module's
+ * `overrides.admissionActions` entry, naming the action (an action's grade is
+ * its registrant's), a module's `overrides.rateLimitBudgets` entry, naming
+ * the prefix (a prefix is its claimant's), and a module's `contributes` or `overrides` of
+ * `federations` or `federationRedirectPolicies` whatever it holds, the module
+ * switched on or not (a federation registers through its type alone), naming
+ * the container's first entry only when the container is a record with one.
  */
 export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
-	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions" | "auditHooks";
-	/** Present for a module's override; absent for a host collector. */
-	readonly channel?: "overrides";
+	readonly kind:
+		| "rateLimitBudgets"
+		| "federationTypes"
+		| "admissionActions"
+		| "auditHooks"
+		| "federations"
+		| "federationRedirectPolicies";
+	/** Present for a module's contribution or override; absent for a host collector. */
+	readonly channel?: "contributes" | "overrides";
 	readonly module?: string;
+	/**
+	 * The entry refused: the action of an `admissionActions` override, the
+	 * prefix of a `rateLimitBudgets` override, or the first entry of a
+	 * federation kind's container when it is a record with one; absent
+	 * otherwise.
+	 */
 	readonly name?: string;
 }
 
@@ -1263,6 +1432,8 @@ export interface SessionRequirementMissingDetails {
 	readonly declared: readonly string[];
 	/** What registered, in registration order. */
 	readonly registered: readonly string[];
+	/** `core.sessionRequirements.secondFactorAuthority`, when it names one of the missing. */
+	readonly secondFactorAuthority?: string;
 	readonly cleanupErrors?: readonly {
 		readonly module: string;
 		readonly componentKey: ComponentKey;
@@ -1286,8 +1457,32 @@ export interface DuplicateSecondFactorAuthorityDetails {
 }
 
 /**
+ * `core.sessionRequirements.secondFactorAuthority` names a requirement that
+ * fails one or more of: `core.sessionRequirements.expected` lists it
+ * (`not-expected`), a module registers it (`not-registered`), and the
+ * registered requirement declares the second-factor authority
+ * (`not-declared`). Refused, rather than left believing the requirement the
+ * composition holds to the authority enforces a second factor. `unmet` lists
+ * every failed condition, in that order; `module` is the module that
+ * registered it, when one did.
+ */
+export interface SecondFactorAuthorityNotDeclaredDetails {
+	readonly reason: "second-factor-authority-not-declared";
+	readonly configKey: "core.sessionRequirements.secondFactorAuthority";
+	/** The requirement the key names. */
+	readonly name: string;
+	readonly module?: string;
+	readonly unmet: readonly ("not-expected" | "not-registered" | "not-declared")[];
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
+}
+
+/**
  * Discriminated union (on `reason`) of the per-reason details: one member
- * per `BootErrorReason`, 39 in all.
+ * per `BootErrorReason`, 40 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1305,14 +1500,15 @@ export type BootErrorDetails =
 	| LifecycleWithoutProvidesDetails
 	| InvalidRouteAdvertisementPathDetails
 	| ConfigValidationFailedDetails
+	| ConfigDefaultsInvalidDetails
 	| CircularDependencyDetails
 	| ProvidesFactoryFailedDetails
 	| ContributeFactoryFailedDetails
 	| RouteOrderCycleDetails
 	| RouteOrderTargetMissingDetails
-	| FederationRedirectPolicyUnpairedDetails
 	| GrantPolicyWithoutIssuerDetails
 	| FederationStoresIncompleteDetails
+	| FederationTypeUnhandledDetails
 	| DiscoveryDocumentInvalidDetails
 	| ReplicaUnsafeAdapterDetails
 	| ComponentAbsenceUndeclaredDetails
@@ -1320,6 +1516,7 @@ export type BootErrorDetails =
 	| SessionRequirementsUndeclaredDetails
 	| SessionRequirementMissingDetails
 	| DuplicateSecondFactorAuthorityDetails
+	| SecondFactorAuthorityNotDeclaredDetails
 	| ReservedComponentKeyDetails
 	| ModuleSectionPathInvalidDetails
 	| ContributionKindGuardedDetails

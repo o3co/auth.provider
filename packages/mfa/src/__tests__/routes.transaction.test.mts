@@ -27,6 +27,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ALICE, BOB, boot, configFor, disposeAll, login } from "./moduleHarness.mjs";
 import { stubFactor } from "./requirementHarness.mjs";
 import {
+	addRecord,
 	beginLogin,
 	contributing,
 	freezeClock,
@@ -125,7 +126,7 @@ describe("GET /session/mfa/transaction", () => {
 			BOB.id,
 		);
 		const copied = { ...sealedForBob, subject: ALICE.id, id: newFactorId() };
-		await factorStore.create(copied);
+		await addRecord(factorStore, copied);
 		const factor: MfaFactor = {
 			...stubFactor("hinted", ["otp"]),
 			describe: (data) => ({ hint: String(data.address) }),

@@ -8,8 +8,8 @@
  * holds one JSON wrapper:
  *
  * ```
- * mode = "required"         { "v": 2, "c": "<AES-256-GCM ciphertext of the JSON envelope>" }
- * mode = "allow-plaintext"  { "v": 2, "p": { ...envelope } }
+ * mode = "required"         { "v": 2, "g": "<generation>", "c": "<AES-256-GCM ciphertext of the JSON envelope>" }
+ * mode = "allow-plaintext"  { "v": 2, "g": "<generation>", "p": { ...envelope } }
  * ```
  *
  * The whole envelope is one ciphertext, not only its token fields, so no part
@@ -23,15 +23,49 @@
  *
  * A record without the `v: 2` wrapper (the older per-field shape, with
  * `accessToken` at the top level) is treated like corrupt JSON or a failed
- * decrypt: `get` removes the key and its index member and answers `null`, and
- * the user re-federates. There is deliberately no dual-read path, which would
- * keep plaintext-readable code alive.
+ * decrypt: a read removes the key, only while it still holds the bytes read,
+ * and answers `null`, and the user re-federates. Its index member stays: a
+ * concurrent `attach` may have just added it, and a member naming no key is
+ * harmless. There is deliberately no dual-read path, which would keep
+ * plaintext-readable code alive.
+ *
+ * `g` is the record's store generation (docs/adapter-surface.md, "Conditional
+ * writes"), outside the ciphertext, so a replica that does not know it reads
+ * the record as before. Every write sets a fresh one. A record written without
+ * one (by such a replica) is given one by its first versioned read, its TTL
+ * kept; a conditional write against it answers `conflict`. That mint is
+ * bounded as a write is, below: a copy of the read sent again mints nothing,
+ * so it never puts a generation another reader holds onto a record written
+ * since. A record `get`
+ * reads that the versioned read can neither find a generation in nor mint one
+ * into makes `getVersioned` reject, as an outage would: it is never removed.
+ *
+ * `attach` and each conditional member are one script on the record's key,
+ * refused at or after a deadline the adapter stamps at issue and the server's
+ * clock judges, so a write's lifetime W is the write timeout plus the declared
+ * clock skew (`internal/write-deadline.mts`), while the app's and Redis's
+ * clocks agree within that skew. Each such write keeps its answer under a
+ * replay key of its own until the declared clock skew past its deadline, so a
+ * copy the driver sends again before then answers as the first did and writes
+ * nothing, even when a server whose clock lags by the skew judges it: a resent
+ * `attach` never puts an older record back over a later write. A write
+ * answered `late`, like one unanswered within the write timeout, rejects with
+ * an unknown outcome: the copy that answered wrote nothing, but another copy
+ * may have committed, or may still commit within W. A conditional write never
+ * shrinks the index, and adds to it only after `updated`, so the index
+ * outlives the record it names. The store assumes acknowledged writes are not
+ * rolled back (persistence, plus a failover setup that keeps acknowledged
+ * writes); a deployment that accepts acknowledged-write loss on failover also
+ * accepts that a conditional write may see a restored, older generation. It
+ * also assumes `noeviction`: an evicted replay key lets a resent `attach`
+ * write again, so the module's boot check refuses an eviction policy.
  */
 
 import {
 	type AdapterBuilder,
 	checkDeploymentMode,
 	coerceBooleanFromEnv,
+	consoleLogger,
 	type DeploymentMode,
 	decodeSealingKey,
 	defineModule,
@@ -39,9 +73,13 @@ import {
 	type FederationTokens,
 	isStorableExpiry,
 	isStorableLifetime,
+	isStoreGeneration,
 	type Logger,
+	newStoreGeneration,
 	SEALING_KEY_BYTES,
+	type StoreGeneration,
 	type SupportsLock,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { FederationTokenStoreClient } from "./clients.mjs";
@@ -51,9 +89,12 @@ import {
 	validateEncryptionMode,
 } from "./internal/encryption-mode.mjs";
 
+import { checkFederationTokenEviction } from "./internal/federation-token-eviction.mjs";
 import { createRedisLock } from "./internal/lock.mjs";
 import { createRedisSidSet } from "./internal/redisSidSet.mjs";
+import { replayKeyOf } from "./internal/replay-key.mjs";
 import { redisReference } from "./internal/section.mjs";
+import { CLOCK_SKEW_MS, WRITE_TIMEOUT_MS, withWriteDeadline } from "./internal/write-deadline.mjs";
 
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
@@ -164,11 +205,13 @@ const RECORD_VERSION = 2;
  * What is written to Redis (see the file header): `c` under `required`, `p`
  * under `allow-plaintext`. Neither mode reads the other's shape: a `p` record
  * under `required` would be a plaintext-readable path in production, and a `c`
- * record under `allow-plaintext` has no key to be read with.
+ * record under `allow-plaintext` has no key to be read with. `g` is the
+ * record's generation; `v` stays first, which the versioned read's mint relies
+ * on.
  */
 type StoredRecord =
-	| { v: typeof RECORD_VERSION; c: string }
-	| { v: typeof RECORD_VERSION; p: Envelope };
+	| { v: typeof RECORD_VERSION; g: string; c: string }
+	| { v: typeof RECORD_VERSION; g: string; p: Envelope };
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 	typeof v === "object" && v !== null && !Array.isArray(v);
@@ -267,9 +310,10 @@ export function createRedisFederationTokenStore(
 	// Per-session key index: one SET per sid naming its federations, so
 	// `removeBySid` deletes named keys instead of scanning. Its own `idx:`
 	// sub-namespace (like `lock:`) keeps it out of the `${prefix}${sid}:*`
-	// pattern the scan fallback sweeps. A sid equal to a sub-namespace token
-	// ("idx", "lock") would make the layouts ambiguous; sids are opaque
-	// generated identifiers, so that bounds what may be passed in.
+	// pattern the scan fallback sweeps, as the replay keys' `w:` does. A sid
+	// equal to a sub-namespace token ("idx", "lock", "w") would make the
+	// layouts ambiguous; sids are opaque generated identifiers, so that bounds
+	// what may be passed in.
 	const index = createRedisSidSet({
 		client: opts.client,
 		keyPrefix: `${prefix}idx:`,
@@ -321,20 +365,21 @@ export function createRedisFederationTokenStore(
 		tokenType: e.tokenType,
 		scope: e.scope,
 		grantedScope: e.grantedScope,
-		// Absent stays absent, not `undefined`, as core's memory store answers.
-		...(e.obtainedAtMs === undefined ? {} : { obtainedAt: new Date(e.obtainedAtMs) }),
+		obtainedAt: e.obtainedAtMs === undefined ? undefined : new Date(e.obtainedAtMs),
 	});
 
 	/**
-	 * Wrap an envelope for the wire. `key` is the Redis key it is written under,
-	 * and under `mode = "required"` the AAD the ciphertext is bound to.
+	 * Wrap an envelope for the wire, at `generation`. `key` is the Redis key it
+	 * is written under, and under `mode = "required"` the AAD the ciphertext is
+	 * bound to.
 	 */
-	const seal = (key: string, env: Envelope): string => {
+	const seal = (key: string, env: Envelope, generation: StoreGeneration): string => {
 		const record: StoredRecord =
 			opts.encryption.mode === "allow-plaintext"
-				? { v: RECORD_VERSION, p: env }
+				? { v: RECORD_VERSION, g: generation, p: env }
 				: {
 						v: RECORD_VERSION,
+						g: generation,
 						c: encryptTokenField(JSON.stringify(env), opts.encryption.key, key),
 					};
 		return JSON.stringify(record);
@@ -343,13 +388,17 @@ export function createRedisFederationTokenStore(
 	/**
 	 * Inverse of `seal`. Throws on anything but a record this store wrote in its
 	 * own mode (corrupt JSON, the unversioned per-field shape, the other mode's
-	 * shape, a ciphertext sealed for another key, a malformed envelope); `get`
-	 * turns every throw into the same self-heal.
+	 * shape, a ciphertext sealed for another key, a malformed envelope, a `g`
+	 * that is no generation); a read turns every throw into the same self-heal.
+	 * A record without `g` is read: a replica that does not know it wrote it.
 	 */
 	const open = (key: string, raw: string): Envelope => {
-		const record = JSON.parse(raw) as Partial<Record<"v" | "c" | "p", unknown>> | null;
+		const record = JSON.parse(raw) as Partial<Record<"v" | "g" | "c" | "p", unknown>> | null;
 		if (record === null || typeof record !== "object" || record.v !== RECORD_VERSION) {
 			throw new Error("FederationTokenStore redis: not a v2 record");
+		}
+		if ("g" in record && !isStoreGeneration(record.g)) {
+			throw new Error("FederationTokenStore redis: malformed generation");
 		}
 		let inner: unknown;
 		if (opts.encryption.mode === "allow-plaintext") {
@@ -369,16 +418,55 @@ export function createRedisFederationTokenStore(
 		return inner;
 	};
 
-	const writeEnv = async (sid: string, name: string, env: Envelope) => {
-		// Index before the envelope: a failure between them leaves an index
-		// member naming a missing key, which removal tolerates, where the other
-		// order would leave an envelope nothing knows about.
-		await index.add(sid, name, storeTtlMs);
-		// The key TTL is the store lifetime, not the access token's expiry
-		// (kept in the envelope): the refresh_token must outlive the access
-		// token.
-		const key = k(sid, name);
-		await opts.client.set(key, seal(key, env), "PX", storeTtlMs);
+	/**
+	 * Removes a record this store cannot read, only while it still holds `raw`,
+	 * the bytes read: a write since then is kept. The index member stays.
+	 */
+	const selfHeal = async (key: string, raw: string): Promise<null> => {
+		await opts.client.compareAndDelete(key, raw);
+		return null;
+	};
+
+	/**
+	 * A write whose outcome is unknown. A rejection of `attach` or of a
+	 * conditional write means only that, never that nothing was written.
+	 */
+	const unknownOutcome = (operation: string, what: string, why: string): Error =>
+		new Error(`FederationTokenStore (redis): ${operation} ${what}; the outcome is unknown: ${why}`);
+
+	/**
+	 * Answered `late`: the copy that answered reached the server at or after its
+	 * deadline and wrote nothing, but another copy of the same write may have
+	 * committed, or may still commit within W.
+	 */
+	const late = (operation: string): Error =>
+		unknownOutcome(
+			operation,
+			"was answered past its deadline",
+			"another copy may have committed, or may still commit within W",
+		);
+
+	/** Unanswered within the write timeout. */
+	const unanswered = (operation: string) => (): Error =>
+		unknownOutcome(
+			operation,
+			`had no answer within ${WRITE_TIMEOUT_MS} ms`,
+			"it may have committed, or may still commit within W",
+		);
+
+	/**
+	 * The replay key of `attach` or a conditional write, on its record's
+	 * Cluster slot, or a refusal before any command when there is none
+	 * (`replayKeyOf`).
+	 */
+	const replayKeyFor = (operation: string, key: string, writeId: string): string => {
+		const replayKey = replayKeyOf(key, prefix, writeId);
+		if (replayKey === null) {
+			throw new RangeError(
+				`FederationTokenStore (redis): ${operation} refused: no replay key can share the record's Redis Cluster slot (its key holds a brace but no hash tag)`,
+			);
+		}
+		return replayKey;
 	};
 
 	/** Unlink `keys` in bounded batches. */
@@ -397,7 +485,28 @@ export function createRedisFederationTokenStore(
 	return {
 		kind: "redis",
 		async attach(sid, name, tokens) {
-			await writeEnv(sid, name, toEnvelope(tokens));
+			const key = k(sid, name);
+			const generation = newStoreGeneration();
+			const replayKey = replayKeyFor("attach", key, generation);
+			const value = seal(key, toEnvelope(tokens), generation);
+			// Index before the record: a failure between them leaves an index
+			// member naming a missing key, which removal tolerates, where the
+			// other order would leave a record nothing knows about.
+			await index.add(sid, name, storeTtlMs);
+			// The key TTL is the store lifetime, not the access token's expiry
+			// (kept in the envelope): the refresh_token must outlive it.
+			const outcome = await withWriteDeadline(
+				(deadlineMs) =>
+					opts.client.attachRecord(key, {
+						value,
+						ttlMs: storeTtlMs,
+						deadlineMs,
+						replayKey,
+						clockSkewMs: CLOCK_SKEW_MS,
+					}),
+				unanswered("attach"),
+			);
+			if (outcome === "late") throw late("attach");
 		},
 		async get(sid, name) {
 			const key = k(sid, name);
@@ -409,18 +518,84 @@ export function createRedisFederationTokenStore(
 				return fromEnvelope(open(key, v));
 			} catch {
 				// Corrupt JSON, a failed decrypt (rotated key, or a ciphertext
-				// sealed for another key) or an unversioned record: delete the key,
-				// as the UserSessionStore adapter does, rather than fail silently on
-				// every read. `null` then means re-authenticate.
-				await opts.client.del(key);
-				// Drop the index member too, so `removeBySid` does no work for a
-				// key that cannot exist.
-				await index.remove(sid, name);
-				return null;
+				// sealed for another key) or an unversioned record: removed rather
+				// than failing on every read. `null` then means re-authenticate.
+				return selfHeal(key, v);
 			}
 		},
-		async update(sid, name, tokens) {
-			await writeEnv(sid, name, toEnvelope(tokens));
+		async getVersioned(sid, name) {
+			const key = k(sid, name);
+			const candidate = newStoreGeneration();
+			const replayKey = replayKeyFor("getVersioned", key, candidate);
+			const read = await withWriteDeadline(
+				(deadlineMs) =>
+					opts.client.readVersioned(key, {
+						candidate,
+						deadlineMs,
+						replayKey,
+						clockSkewMs: CLOCK_SKEW_MS,
+					}),
+				unanswered("getVersioned"),
+			);
+			if (read === null) return null;
+			let value: FederationTokens;
+			try {
+				value = fromEnvelope(open(key, read.raw));
+			} catch {
+				return selfHeal(key, read.raw);
+			}
+			// `""` for a record `get` still serves: the read found no generation in
+			// it and could not mint one. Removing it would lose tokens `get` reads,
+			// so this answers as an outage would.
+			if (!isStoreGeneration(read.generation)) {
+				throw new Error(
+					"FederationTokenStore (redis): getVersioned found no generation in a readable record and could not mint one",
+				);
+			}
+			return { value, generation: read.generation };
+		},
+		async replaceIf(sid, name, expected, tokens) {
+			const key = k(sid, name);
+			const generation = newStoreGeneration();
+			const replayKey = replayKeyFor("replaceIf", key, generation);
+			const value = seal(key, toEnvelope(tokens), generation);
+			// The index's TTL raised first, so it lapses at most this step's time
+			// before the record when the add after `updated` fails.
+			await index.extend(sid, storeTtlMs);
+			const outcome = await withWriteDeadline(
+				(deadlineMs) =>
+					opts.client.replaceIfGeneration(key, {
+						expected,
+						value,
+						ttlMs: storeTtlMs,
+						deadlineMs,
+						replayKey,
+						clockSkewMs: CLOCK_SKEW_MS,
+					}),
+				unanswered("replaceIf"),
+			);
+			if (outcome === "late") throw late("replaceIf");
+			if (outcome !== "updated") return { outcome };
+			// Started after the record's write, so the index's deadline is no
+			// earlier than the record's; it lists the record again if it lapsed.
+			await index.add(sid, name, storeTtlMs);
+			return { outcome, generation };
+		},
+		async removeIf(sid, name, expected) {
+			const key = k(sid, name);
+			const replayKey = replayKeyFor("removeIf", key, newStoreGeneration());
+			const outcome = await withWriteDeadline(
+				(deadlineMs) =>
+					opts.client.removeIfGeneration(key, {
+						expected,
+						deadlineMs,
+						replayKey,
+						clockSkewMs: CLOCK_SKEW_MS,
+					}),
+				unanswered("removeIf"),
+			);
+			if (outcome === "late") throw late("removeIf");
+			return { outcome };
 		},
 		async removeBySid(sid) {
 			// The session's index names the keys: O(its federations), read in
@@ -485,8 +660,12 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		throw new Error("federationTokenStore.redis: 'client' option is required");
 	}
 	const clientObj = cfg.client as Record<string, unknown>;
-	// `compareAndDelete` releases the advisory lock; `unlink` and the three SET
-	// primitives serve the per-session index. Checked here so a custom client
+	// `compareAndDelete` releases the advisory lock and removes an unreadable
+	// record; `unlink`, the three SET primitives and `pExpireGT` serve the
+	// per-session index; `attachRecord` writes a record; the three scripts
+	// after it are the conditional members; `durability` serves the module's
+	// boot check.
+	// Checked here so a custom client
 	// missing one fails at build time, not with a `TypeError` at first logout,
 	// the path that must remove a logged-out session's upstream tokens.
 	const requiredMethods = [
@@ -499,6 +678,12 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		"sScanIterator",
 		"scanIterator",
 		"compareAndDelete",
+		"attachRecord",
+		"readVersioned",
+		"replaceIfGeneration",
+		"removeIfGeneration",
+		"pExpireGT",
+		"durability",
 	] as const;
 	const missing = requiredMethods.filter((m) => typeof clientObj[m] !== "function");
 	if (missing.length > 0) {
@@ -556,7 +741,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 export const redisFederationTokenStoreSectionSchema = z
 	.object({
 		keyPrefix: z.string().default("ft:"),
-		ttl: z.coerce.number().int().positive().default(86400),
+		ttl: wholeNumberInRangeFromEnv(1).default(86400),
 		encryptionMode: z.enum(["required", "allow-plaintext"]).default("required"),
 		encryptionKey: z.string().optional(),
 		// Migration flag; see `RedisFederationTokenStoreOptions.scanFallback`.
@@ -597,6 +782,12 @@ export interface RedisFederationTokenStoreModuleOptions {
  * environment off `options`, since only the
  * composition root knows how it chose its config file. Its notice goes to the
  * optional `logger` slot (`consoleLogger` when empty).
+ *
+ * Once the store is built, the module reads the server's eviction policy
+ * once: an eviction policy (`volatile-*`, `allkeys-*`), under which a resent
+ * write's replay key may be evicted, refuses the boot with a
+ * `RedisStoreEvictableError`; a policy it could not read or does not know is
+ * an info line there, and the boot goes on.
  */
 export function redisFederationTokenStoreModuleFor(
 	options: RedisFederationTokenStoreModuleOptions = {},
@@ -618,7 +809,7 @@ export function redisFederationTokenStoreModuleFor(
 		provides: {
 			federationTokenStore: (deps) => {
 				const cfg = deps.section;
-				return redisFederationTokenStoreBuilder(
+				const built = redisFederationTokenStoreBuilder(
 					{
 						client: deps.federationTokenStoreClient,
 						encryption: { mode: cfg.encryptionMode, key: cfg.encryptionKey },
@@ -633,6 +824,15 @@ export function redisFederationTokenStoreModuleFor(
 					},
 					deps.logger !== undefined ? { logger: deps.logger } : {},
 				);
+				// Built first, so a setting it refuses throws before the server is asked.
+				return (async () => {
+					const store = await built;
+					await checkFederationTokenEviction(
+						() => deps.federationTokenStoreClient.durability(),
+						deps.logger ?? consoleLogger,
+					);
+					return store;
+				})();
 			},
 		},
 	});

@@ -34,7 +34,6 @@ function makeFedStore(override?: Partial<FederationTokenStore>): FederationToken
 		kind: "memory",
 		attach: vi.fn(),
 		get: vi.fn().mockResolvedValue(null),
-		update: vi.fn(),
 		removeBySid: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn(),
 		...override,

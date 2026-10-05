@@ -26,12 +26,14 @@
  * every later reader and would vanish the day the boundary is lost.
  *
  * A `503` is one line at error, `federation_grant_status_unavailable`, with
- * `reason`, `store` and `step`. A boundary that could not be read for a grant
+ * `reason`, `store` and `step`. A stored date the view cannot put on the wire
+ * is the record's outage, `503` `storage`, as retrieval answers it. A boundary that could not be read for a grant
  * answered from the record is one warn, `federation_grant_status_step_failed`.
  */
 
 import {
 	type AuditSink,
+	type EffectiveFederationGrantStatus,
 	effectiveFederationGrantStatus,
 	type FederationGrantConnection,
 	type FederationGrantRetrievalLimits,
@@ -164,6 +166,19 @@ export function createFederationGrantStatusHandler(
 			const maxExpiresInMs = options.limits.maxExpiresInMs;
 
 			const permitted = (): boolean => allows(req, grant.connection);
+			/** The view, `200`; a stored date it cannot put on the wire is the record's outage, `503`. */
+			const describe = (status: EffectiveFederationGrantStatus, allowed: boolean): void => {
+				const described = federationGrantStatusView(grant, status, maxExpiresInMs, allowed);
+				if (!described.ok) {
+					unavailable("storage", {
+						store: "federation_grant",
+						step: "inspect",
+						error: new TypeError(`the stored grant holds no instant for ${described.field}`),
+					});
+					return;
+				}
+				res.status(200).json(described.view);
+			};
 			const refusePermission = (): void => {
 				res
 					.status(403)
@@ -179,16 +194,7 @@ export function createFederationGrantStatusHandler(
 				// grant it used to spend is over, which is the answer that lets
 				// it stop asking. It does decide WHAT is answered — see
 				// `federationGrantStatusView`.
-				res
-					.status(200)
-					.json(
-						federationGrantStatusView(
-							grant,
-							{ status: "revoked", reason: grant.revocation.by },
-							maxExpiresInMs,
-							permitted(),
-						),
-					);
+				describe({ status: "revoked", reason: grant.revocation.by }, permitted());
 				return;
 			}
 			if (grant.status === "pending") {
@@ -198,9 +204,7 @@ export function createFederationGrantStatusHandler(
 					refusePermission();
 					return;
 				}
-				res
-					.status(200)
-					.json(federationGrantStatusView(grant, { status: "pending" }, maxExpiresInMs, true));
+				describe({ status: "pending" }, true);
 				return;
 			}
 			if (boundaryFailure !== undefined) {
@@ -213,21 +217,30 @@ export function createFederationGrantStatusHandler(
 				return;
 			}
 
-			const status = effectiveFederationGrantStatus(grant, {
-				now: at,
-				connection,
-				maxExpiresInMs,
-				// `undefined` never reaches here from the module's bridge, which
-				// refuses an answer that is neither; a hand-mounted reader that
-				// returns one is treated as a failure above rather than as "nothing
-				// was revoked".
-				grantsBoundary: boundary ?? null,
-				revocationSkewMs: options.limits.revocationSkewMs,
-				// A key that is not in the ring is not a status — it is an outage,
-				// answered below and only where it would otherwise have read as a
-				// credential that cannot be opened.
-				credentials: inspection.credentials === "ok" ? "ok" : "unreadable",
-			});
+			// A stored date it cannot compare throws a RangeError: the record's
+			// outage, `503` `storage`, as retrieval answers it.
+			let status: EffectiveFederationGrantStatus;
+			try {
+				status = effectiveFederationGrantStatus(grant, {
+					now: at,
+					connection,
+					maxExpiresInMs,
+					// `undefined` never reaches here from the module's bridge, which
+					// refuses an answer that is neither; a hand-mounted reader that
+					// returns one is treated as a failure above rather than as "nothing
+					// was revoked".
+					grantsBoundary: boundary ?? null,
+					revocationSkewMs: options.limits.revocationSkewMs,
+					// A key that is not in the ring is not a status — it is an outage,
+					// answered below and only where it would otherwise have read as a
+					// credential that cannot be opened.
+					credentials: inspection.credentials === "ok" ? "ok" : "unreadable",
+				});
+			} catch (error) {
+				if (!(error instanceof RangeError)) throw error;
+				unavailable("storage", { store: "federation_grant", step: "status", error });
+				return;
+			}
 
 			if (status.status === "revoked" && status.reason === "backstop") {
 				// Persisted, not merely reported (see the file comment). The event
@@ -278,7 +291,7 @@ export function createFederationGrantStatusHandler(
 				return;
 			}
 
-			res.status(200).json(federationGrantStatusView(grant, status, maxExpiresInMs, permitted()));
+			describe(status, permitted());
 		} catch (error) {
 			log.unexpected("status", { grantId, correlationId }, error);
 			res.status(500).json({ error: "server_error" });

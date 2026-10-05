@@ -16,9 +16,11 @@
 
 /**
  * The federations the template ships, in core's own section:
- * `core.federations.google` and `core.federations.oidc`, each bound to the
- * variables named after its paths (`CORE_FEDERATIONS_<NAME>_<KEY>`). Phase
- * one chooses the federation modules from the map there. A variable the
+ * `core.federations.google` and `core.federations.oidc`, each naming its
+ * type and bound to the variables named after its paths
+ * (`CORE_FEDERATIONS_<NAME>_<KEY>`). The federation types the template
+ * bundles are listed whatever the map says (`federation-types.test.mts`
+ * boots them). A variable the
  * template bound before, `FEDERATIONS_<NAME>_<KEY>`, set alone or beside its
  * new name at a different value is refused before any module is chosen,
  * naming the new variable and path and never a value; the two at one value
@@ -33,13 +35,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "@o3co/auth-provider-core";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
-import {
-	expectedSessionRequirements,
-	readOwnLayers,
-	readSwitches,
-	resolveConfigPaths,
-	resolveForBoot,
-} from "#/configPath.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "#/configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -60,9 +56,12 @@ function ownFiles(hocon?: string): string[] {
 	return [file, envConfPath, applicationConfPath];
 }
 
+/** MFA, on by default, switched off: these are about the federations. */
+const MFA_OFF: Readonly<Record<string, string>> = { MFA_MODE: "off" };
+
 /** Phase one under `env` and an operator's `hocon`. */
 const switchesFrom = (env: Record<string, string> = {}, hocon?: string) =>
-	readSwitches(readOwnLayers(ownFiles(hocon), { env }));
+	readSwitches(readOwnLayers(ownFiles(hocon), { env: { ...MFA_OFF, ...env } }));
 
 /** What phase one refuses under `env`. */
 function refusal(env: Record<string, string>): Error {
@@ -134,9 +133,9 @@ const RENAMED = [
 ] as const;
 
 describe("the federations the template ships, under core.federations", () => {
-	it("ships google and oidc disabled, oidc of type oidc", () => {
+	it("ships google and oidc disabled, each of the type of its name", () => {
 		const federations = federationsOf();
-		expect(federations.google?.enabled).toBe(false);
+		expect(federations.google).toMatchObject({ enabled: false, type: "google" });
 		expect(federations.oidc).toMatchObject({ enabled: false, type: "oidc" });
 	});
 
@@ -147,20 +146,16 @@ describe("the federations the template ships, under core.federations", () => {
 		},
 	);
 
-	it("chooses the Google federation's modules when CORE_FEDERATIONS_GOOGLE_ENABLED is true, and none while it is not", () => {
-		expect(moduleNames({ CORE_FEDERATIONS_GOOGLE_ENABLED: "true" })).toContain("federation-google");
-		expect(moduleNames({})).not.toContain("federation-google");
-	});
-
-	it("chooses an OIDC federation's module for an entry of type oidc written under core.federations", () => {
-		const names = buildModules(
-			switchesFrom(
-				{},
-				'core.federations.okta { enabled = true, type = "oidc", issuer = "https://okta.test", clientId = "c", clientSecret = "s", callbackURL = "https://auth.test/session/oauth/federation/okta/callback" }\n',
-			),
-			{ environment: "production" },
-		).map((module) => module.name);
-		expect(names).toContain("federation-oidc-okta");
+	it("lists the same federation modules whether CORE_FEDERATIONS_GOOGLE_ENABLED is true or not", () => {
+		const federationModules = (env: Record<string, string>) =>
+			moduleNames(env).filter((name) => name === "federation-oidc" || name.endsWith("-type"));
+		expect(federationModules({ CORE_FEDERATIONS_GOOGLE_ENABLED: "true" })).toEqual([
+			"federation-google-type",
+			"federation-oidc",
+		]);
+		expect(federationModules({})).toEqual(
+			federationModules({ CORE_FEDERATIONS_GOOGLE_ENABLED: "true" }),
+		);
 	});
 });
 
@@ -197,6 +192,7 @@ describe("the map written at the top level", () => {
 	it("refuses boot, naming its paths under core.federations", async () => {
 		const own = readOwnLayers(ownFiles("federations.okta.enabled = false\n"), {
 			env: {
+				...MFA_OFF,
 				KEY_STORE_LOCAL_SECRET: "core-federations-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
 				SESSION_STORE_SECRET: "core-federations-session.at-least-32-bytes.ok",
@@ -208,7 +204,7 @@ describe("the map written at the top level", () => {
 			createApp({
 				modules,
 				bootstrapComponents: {
-					config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
+					config: resolveForBoot(own, modules, switches),
 					pathResolver: (s: string) => s,
 				} as never,
 			}),

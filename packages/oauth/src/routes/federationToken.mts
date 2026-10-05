@@ -36,10 +36,10 @@ import {
 	type FederationTokenContext,
 	type FederationTokenRouterOptions,
 } from "./federationTokenContext.mjs";
+import { readRecord, serveStored } from "./federationTokenRecord.mjs";
 import { refreshStoredTokens } from "./federationTokenRefresh.mjs";
 import { REFRESH_FLOOR_MS } from "./federationTokenRefreshAnswer.mjs";
 import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
-import { answerStoredToken, readStoredTokens } from "./federationTokenStored.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
 
@@ -254,16 +254,17 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		if (caller === null) return;
 		if (!(await checkCallerStanding(ctx, caller))) return;
 
-		const tokens = await readStoredTokens(ctx, caller);
-		if (tokens === null) return;
+		// Step 9: the stored record. None is `404`; an outage `503`.
+		const read = await readRecord(ctx, caller, "get");
+		if (read === null) return;
 
 		// Step 10: a token not yet due is returned as stored; one with no
 		// finite expiry omits `expires_in`.
-		if (!refreshIsDue(ctx, tokens)) {
-			return answerStoredToken(ctx, caller, tokens);
+		if (!refreshIsDue(ctx, read.value)) {
+			return serveStored(ctx, caller, read);
 		}
 
-		return refreshStoredTokens(ctx, caller, tokens);
+		return refreshStoredTokens(ctx, caller, read);
 	});
 
 	return router;

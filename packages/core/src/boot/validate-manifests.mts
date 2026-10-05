@@ -36,7 +36,6 @@ import {
 	findRelocatedKeys,
 	findRenamedVariables,
 	type HandedConfiguration,
-	pathsSetBy,
 	RENAMED_VARIABLES_SECTION,
 	type RelocatedPath,
 	type RenamedVariable,
@@ -46,19 +45,21 @@ import {
 	withoutRenamedVariables,
 } from "../config/removed-keys.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
-import { federationsOf } from "../federations/configured.mjs";
+import { enabledFederationsOf } from "../federations/configured.mjs";
 import {
+	type AbsencePolicy,
 	describeAbsenceDeclaration,
 	isAbsenceDeclared,
 } from "../modules/manifest/absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
-import type {
-	FederationInstance,
-	FederationTypeContribution,
-} from "../modules/manifest/contributes-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
+import { RATE_LIMITER_ABSENCE_POLICY } from "../ratelimit/types.mjs";
+import {
+	verifierLimitSetting,
+	withVerifierLimitDeclarations,
+} from "../ratelimit/verifierLimits.mjs";
 import {
 	admissionActionProblem,
 	registeredAdmissionAction,
@@ -68,15 +69,25 @@ import {
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
 import { contributesAuditHooks } from "./audit-fan-out.mjs";
+import { type ConfigDefaults, logConfigNotices, readConfigDefaults } from "./config-notices.mjs";
 import { failureSummary } from "./failure-summary.mjs";
+import {
+	checkFederationEntriesHandled,
+	type FederationTypeSnapshot,
+	federationTypeRegistration,
+	federationTypeSnapshot,
+	parseFederationEntries,
+} from "./federation-entries.mjs";
+import { frozenSection, parseSection } from "./parsed-values.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
+	BootStage,
 	BootstrapMap,
 	ContributionEntry,
 	ContributionKind,
 	ContributionKindMap,
 	NormalisedModule,
-	RegisteredFederationType,
+	UndeclaredAbsenceSlot,
 	ValidatedManifests,
 	ValidatedModule,
 } from "./types.mjs";
@@ -106,18 +117,6 @@ export interface ValidateManifestsInput {
 // ---------------------------------------------------------------------------
 
 /**
- * What each `federationTypes` declaration was read as, once, at stage 1 — its
- * `entrySchema` and `factory` — keyed by the registration factory
- * `nameKeyedFactory` answered for it. The shape check reads these, and the
- * registration closes over the same values, so what is checked is what
- * registers, and a declaration changed afterwards changes neither.
- */
-const federationTypeSnapshots = new WeakMap<
-	object,
-	{ readonly entrySchema: unknown; readonly factory: unknown }
->();
-
-/**
  * What each `admissionActions` declaration was read as, once, at stage 1 —
  * its grade — keyed by the registration factory `nameKeyedFactory` answered
  * for it, so what is checked is what registers.
@@ -125,17 +124,77 @@ const federationTypeSnapshots = new WeakMap<
 const admissionActionSnapshots = new WeakMap<object, { readonly grade: unknown }>();
 
 /**
+ * What each `rateLimitBudgets` factory carrying a `verifier` declaration was
+ * read as, once, at stage 1 — its setting, or what its read threw — keyed by
+ * the registration factory `nameKeyedFactory` answered for it.
+ */
+const verifierClaimSnapshots = new WeakMap<
+	object,
+	{ readonly setting: unknown } | { readonly threw: string }
+>();
+
+/** Why a verifier claim's declaration, as read, is refused, or `undefined` when it is usable. */
+function verifierClaimProblem(
+	snapshot: { readonly setting: unknown } | { readonly threw: string },
+): string | undefined {
+	if ("threw" in snapshot) return `reading its verifier declaration threw: ${snapshot.threw}`;
+	return typeof snapshot.setting === "string" && snapshot.setting.length > 0
+		? undefined
+		: "a verifier's claim declares { setting }, the setting its limit is made at, a non-empty string";
+}
+
+/**
+ * The setting each prefix `modules` claim as a verifier's is made at, from
+ * the declarations normalisation read: the first usable one per prefix (a
+ * second claim is refused as a duplicate).
+ */
+function declaredVerifierLimits(modules: readonly NormalisedModule[]): ReadonlyMap<string, string> {
+	const declared = new Map<string, string>();
+	for (const m of modules) {
+		for (const entry of m.contributesEntries) {
+			if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+			const snapshot = verifierClaimSnapshots.get(entry.factory as object);
+			if (snapshot === undefined || verifierClaimProblem(snapshot) !== undefined) continue;
+			if (!declared.has(entry.key)) {
+				declared.set(entry.key, (snapshot as { readonly setting: string }).setting);
+			}
+		}
+	}
+	return declared;
+}
+
+/**
  * The factory a name-keyed entry registers through. A `federationTypes` entry
- * is a declaration, `{ entrySchema, factory }`, not a factory: its schema and
- * factory are read once, here, and what registers is a
- * `RegisteredFederationType` whose `create` binds that factory to the deps
- * stage 4 hands every factory. An `admissionActions` entry is a declaration,
+ * is a declaration, `{ entrySchema, factory, redirectPolicy }`, not a
+ * factory: its members are read once, here, and what registers is a
+ * `RegisteredFederationType` whose factories are bound to the deps stage 4
+ * hands every factory (`federationTypeRegistration`). An `admissionActions` entry is a declaration,
  * `{ grade }`: its grade is read once, here, and what registers is the
- * action `name` with that grade. `checkContributionShapes` holds each
- * snapshot's shape; a declaration that is not an object is left for it to
- * refuse. Every other value is its own factory.
+ * action `name` with that grade. A `rateLimitBudgets` factory's `verifier`
+ * declaration is read once, here, and what registers is a factory calling it.
+ * `checkContributionShapes` holds each snapshot's shape; a declaration that
+ * is not an object is left for it to refuse. Every other value is its own
+ * factory.
  */
 function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
+	if (kind === "rateLimitBudgets" && typeof value === "function") {
+		let snapshot: { readonly setting: unknown } | { readonly threw: string };
+		try {
+			const verifier: unknown = (value as { readonly verifier?: unknown }).verifier;
+			if (verifier === undefined) return value;
+			snapshot = {
+				setting:
+					typeof verifier === "object" && verifier !== null
+						? (verifier as { readonly setting?: unknown }).setting
+						: undefined,
+			};
+		} catch (thrown) {
+			snapshot = { threw: failureSummary(thrown) };
+		}
+		const register = (deps: unknown): unknown => (value as (deps: unknown) => unknown)(deps);
+		verifierClaimSnapshots.set(register, snapshot);
+		return register;
+	}
 	if (typeof value !== "object" || value === null) return value;
 	if (kind === "admissionActions") {
 		if (Array.isArray(value)) return value;
@@ -145,23 +204,7 @@ function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
 		return register;
 	}
 	if (kind !== "federationTypes") return value;
-	const { entrySchema, factory } = value as {
-		readonly entrySchema?: unknown;
-		readonly factory?: unknown;
-	};
-	const register = (deps: Record<string, unknown>): RegisteredFederationType =>
-		Object.freeze({
-			entrySchema: entrySchema as z.ZodType,
-			// Called as the method it was declared as, on the declaration.
-			create: (instance: FederationInstance<unknown>) =>
-				(factory as FederationTypeContribution<Record<string, unknown>>["factory"]).call(
-					value,
-					deps,
-					instance,
-				),
-		});
-	federationTypeSnapshots.set(register, { entrySchema, factory });
-	return register;
+	return federationTypeRegistration(value);
 }
 
 /**
@@ -197,7 +240,7 @@ function normaliseModule(m: Module): NormalisedModule {
 				});
 			}
 		} else if (kindMap !== null && typeof kindMap === "object") {
-			// Name-keyed kinds: grants, federations, tokenExchangeValidators, mfaFactors, …
+			// Name-keyed kinds: grants, tokenExchangeValidators, mfaFactors, …
 			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
 				contributesEntries.push({
 					kind: kind as ContributionKind,
@@ -396,12 +439,22 @@ function checkAuthoritativeClosure(modules: readonly NormalisedModule[]): void {
 }
 
 /**
+ * The name of the reserved bootstrap input (`ReservedBootstrapInputs`): boot
+ * takes it out of `bootstrapComponents` and reads it itself, so no component
+ * is named so — none is provided, required, read optionally or overridden
+ * under it (`reserved-component-key`).
+ */
+const RESERVED_BOOTSTRAP_INPUT = "configDefaults";
+
+/**
  * A host map carrying `__proto__` as its own key (a computed key, or parsed
  * from JSON) refuses boot (`reserved-component-key`): set on the component
  * map it would replace the prototype rather than name a component, so every
  * key of its value would read as a component no provider ran for, unseen by
- * the checks that read the map's own keys. Runs before any row reads the host
- * maps.
+ * the checks that read the map's own keys. So does an `overrideComponents`
+ * entry named after the reserved bootstrap input, which names no component.
+ * Runs before any row reads a component from the host maps (the pre-config
+ * rows and the parse read only `config`).
  * @internal
  */
 function checkReservedHostKeys(
@@ -422,6 +475,18 @@ function checkReservedHostKeys(
 			reason: "reserved-component-key",
 			stage: "validateManifests",
 			details: { reason: "reserved-component-key", componentKey: "__proto__", source },
+		});
+	}
+	if (override !== undefined && Object.hasOwn(override, RESERVED_BOOTSTRAP_INPUT)) {
+		throw new BootError({
+			message: `overrideComponents carries "${RESERVED_BOOTSTRAP_INPUT}", which names no component: it is the configuration's defaults, which boot reads from bootstrapComponents itself. Hand it there, or remove the entry.`,
+			reason: "reserved-component-key",
+			stage: "validateManifests",
+			details: {
+				reason: "reserved-component-key",
+				componentKey: RESERVED_BOOTSTRAP_INPUT,
+				source: "overrideComponents",
+			},
 		});
 	}
 }
@@ -467,14 +532,29 @@ function checkAuthoritativeOverrides(
 // ---------------------------------------------------------------------------
 
 /**
- * What a `synthetic-key-collision` message adds for `key`: for
- * `deploymentMode`, which boot fills from the configuration, where to state
- * the mode instead.
+ * What a `synthetic-key-collision` message adds for `key`: for a key boot
+ * fills from the configuration (`deploymentMode`, `tokenBindingSettings`,
+ * `federationSettings`, `outboundPolicy`), where to state its value instead.
  */
-const syntheticKeyRemedy = (key: string): string =>
-	key === "deploymentMode"
-		? " Set core.deployment.mode in the configuration instead: boot fills deploymentMode from it."
-		: "";
+const SYNTHETIC_KEY_REMEDIES: ReadonlyMap<string, string> = new Map([
+	[
+		"deploymentMode",
+		" Set core.deployment.mode in the configuration instead: boot fills deploymentMode from it.",
+	],
+	[
+		"tokenBindingSettings",
+		" Set core.tokenBinding in the configuration instead: boot fills tokenBindingSettings from it.",
+	],
+	[
+		"federationSettings",
+		" Set core.federations in the configuration instead: boot fills federationSettings from it.",
+	],
+	[
+		"outboundPolicy",
+		" Set core.outbound in the configuration instead: boot fills outboundPolicy from it.",
+	],
+]);
+const syntheticKeyRemedy = (key: string): string => SYNTHETIC_KEY_REMEDIES.get(key) ?? "";
 
 /**
  * Step 3: Check bootstrap/overrideComponents/synthetic-key constraints.
@@ -702,30 +782,57 @@ function buildMissingRequiredPath(
 const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
 
 /**
+ * The kinds a federation's provider and redirect policy register under. Core
+ * registers them, from each enabled `core.federations` entry, with the
+ * factories of the type the entry names: no module contributes or overrides
+ * an entry of either (`checkFederationKindGuard`), and no host supplies their
+ * collector (`refuseGuardedHostKinds`).
+ */
+const FEDERATION_KINDS = ["federations", "federationRedirectPolicies"] as const;
+
+/** How the entries of the federation kinds register, as a refusal says it. */
+const FEDERATION_KINDS_REGISTERED =
+	"boot registers a federation's provider and redirect policy from its core.federations entry, " +
+	"with the factories of the type the entry names under federationTypes";
+
+/**
  * The kinds whose collector is the planner's alone: a host collector
  * for `rateLimitBudgets` could answer a looser budget than the owning module
  * contributed — on RFC 8628 §5.1's device-verification prefix, say —
- * `federationTypes` is what the dispatch of configured federations will read,
+ * `federationTypes` is what the dispatch of configured federations reads,
  * `admissionActions` is where admission reads the grade it hands the
  * requirements, and `auditHooks` is what the audit fan-out in the `auditSink`
  * slot reads at each event, the slot stage 1 counts as filled once a hook is
- * contributed. Unlike `GUARDED_KINDS`, a module may override an entry of the
- * first two; `auditHooks` is list-shaped, and a list kind has no override.
+ * contributed; `federations` and `federationRedirectPolicies` are filled by
+ * boot alone, from the dispatched entries (`FEDERATION_KINDS`). Unlike
+ * `GUARDED_KINDS`, a module may override a `federationTypes` entry; no module
+ * overrides a `rateLimitBudgets` prefix or an admission action
+ * (`checkContributionShapes`), and `auditHooks` is list-shaped, and a list
+ * kind has no override.
  */
 const PLANNER_OWNED_KINDS = [
 	"rateLimitBudgets",
 	"federationTypes",
 	"admissionActions",
 	"auditHooks",
+	...FEDERATION_KINDS,
 ] as const;
 
 /** What a refusal of a host collector for a planner-owned `kind` says of its entries. */
-const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string =>
-	kind === "auditHooks"
-		? "and the audit fan-out in the auditSink slot reads them"
-		: kind === "admissionActions"
-			? "and no module overrides one"
-			: "and a module may override one";
+const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string => {
+	switch (kind) {
+		case "federations":
+		case "federationRedirectPolicies":
+			return FEDERATION_KINDS_REGISTERED;
+		case "auditHooks":
+			return "the modules that own its entries contribute them, and the audit fan-out in the auditSink slot reads them";
+		case "admissionActions":
+		case "rateLimitBudgets":
+			return "the modules that own its entries contribute them, and no module overrides one";
+		default:
+			return "the modules that own its entries contribute them, and a module may override one";
+	}
+};
 
 /**
  * A requirement is switched off by not installing it, never removed from
@@ -759,6 +866,77 @@ function checkSessionRequirementKindGuard(modules: readonly NormalisedModule[]):
 }
 
 /**
+ * A module contributes or overrides neither `federations` nor
+ * `federationRedirectPolicies`: an entry of either would serve no
+ * federation, since only the module registering an enabled entry's type
+ * handles it. A pre-config row, over every module — switched on or not —
+ * before any factory runs: the kind as an own key of the manifest's
+ * `contributes` or `overrides` is refused whatever it holds (a record, a
+ * list, an empty one, `null`, a scalar, a function), and so is an entry of
+ * it in the normalised manifest, which a getter answering differently
+ * twice could hold without the key on this read. Refused as the kind
+ * guarded (`contribution-kind-guarded`), naming the module and the channel,
+ * and `name` — the first entry of the container — only when the container is
+ * a record with an entry; the message points the author at
+ * `federationTypes`.
+ * @internal
+ */
+function checkFederationKindGuard(
+	rawModules: readonly Module[],
+	modules: readonly NormalisedModule[],
+): void {
+	const refuse = (
+		module: string,
+		channel: "contributes" | "overrides",
+		kind: (typeof FEDERATION_KINDS)[number],
+		name: string | undefined,
+	): never => {
+		throw new BootError({
+			message:
+				`Module "${module}" ${channel} ${kind}${name === undefined ? "" : ` ${JSON.stringify(name)}`}, ` +
+				`which no module may: ${FEDERATION_KINDS_REGISTERED}. To handle a federation, register a type under federationTypes instead.`,
+			reason: "contribution-kind-guarded",
+			stage: "validateManifests",
+			details: {
+				reason: "contribution-kind-guarded",
+				kind,
+				channel,
+				module,
+				...(name === undefined ? {} : { name }),
+			},
+		});
+	};
+	rawModules.forEach((m, index) => {
+		for (const channel of ["contributes", "overrides"] as const) {
+			const map: unknown = m[channel];
+			if ((typeof map === "object" || typeof map === "function") && map !== null) {
+				for (const kind of FEDERATION_KINDS) {
+					if (!Object.hasOwn(map, kind)) continue;
+					const container: unknown = (map as Record<string, unknown>)[kind];
+					const isRecord =
+						typeof container === "object" && container !== null && !Array.isArray(container);
+					refuse(m.name, channel, kind, isRecord ? Object.keys(container)[0] : undefined);
+				}
+			}
+			const normalised = modules[index];
+			const entries =
+				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
+			const entry = entries?.find(({ kind }) =>
+				(FEDERATION_KINDS as readonly string[]).includes(kind),
+			);
+			if (entry !== undefined) {
+				refuse(
+					m.name,
+					channel,
+					entry.kind as (typeof FEDERATION_KINDS)[number],
+					typeof entry.key === "string" ? entry.key : undefined,
+				);
+			}
+		}
+	});
+}
+
+/**
  * The host's `contributionKinds` held to the same rule, in `createApp`
  * before the kinds are merged and before stage 1: a collector for
  * `sessionRequirements` or `mfaFactors` the host
@@ -782,7 +960,7 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	for (const kind of PLANNER_OWNED_KINDS) {
 		if (Object.hasOwn(host, kind)) {
 			throw new BootError({
-				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${plannerOwnedEntries(kind)}.`,
+				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: ${plannerOwnedEntries(kind)}.`,
 				reason: "contribution-kind-guarded",
 				stage: "validateManifests",
 				details: { reason: "contribution-kind-guarded", kind },
@@ -807,10 +985,13 @@ const containerShape = (container: unknown): string =>
  *   before its first `:`, whatever the budget's factory answers;
  * - a prefix names no `Object.prototype` member (`constructor`, `__proto__`),
  *   which a limiter looking budgets up on a plain object finds in its place;
- * - a declaration, as normalisation read it (`federationTypeSnapshots`), is
- *   an object with a Zod `entrySchema` and a `factory` function, so one
- *   written in JavaScript is refused as itself, not as a `TypeError` at
- *   registration;
+ * - a prefix is claimed by the module whose routes key it, so an override of
+ *   one is refused as the kind guarded (`contribution-kind-guarded`), naming
+ *   the setting a verifier's prefix is limited at;
+ * - a declaration, as normalisation read it (`federationTypeSnapshot`), is
+ *   an object with a Zod `entrySchema` and `factory` and `redirectPolicy`
+ *   functions, so one written in JavaScript is refused as itself, not as a
+ *   `TypeError` at registration;
  * - an action's name and declaration, as normalisation read it
  *   (`admissionActionSnapshots`), are what registration admits
  *   (`admissionActionProblem`); an action is registered by the module that
@@ -845,6 +1026,7 @@ function checkContributionShapes(
 			},
 		});
 	};
+	const declaredVerifiers = declaredVerifierLimits(modules);
 	rawModules.forEach((m, index) => {
 		for (const channel of ["contributes", "overrides"] as const) {
 			const map = m[channel] as Readonly<Record<string, unknown>> | undefined;
@@ -888,6 +1070,39 @@ function checkContributionShapes(
 			const normalised = modules[index];
 			const entries =
 				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
+			// Read off the entries normalisation captured, which stage 4 applies.
+			for (const entry of entries ?? []) {
+				if (
+					channel !== "overrides" ||
+					entry.kind !== "rateLimitBudgets" ||
+					typeof entry.key !== "string"
+				) {
+					continue;
+				}
+				const setting = verifierLimitSetting(entry.key, declaredVerifiers);
+				throw new BootError({
+					message:
+						`Module "${m.name}" overrides rateLimitBudgets "${entry.key}", which no module may: a prefix is claimed by the module whose routes key it` +
+						(setting === undefined
+							? ", and a limiter's own limits decide what applies under it."
+							: `, and "${entry.key}" is a verifier's own limit, set at ${setting}.`),
+					reason: "contribution-kind-guarded",
+					stage: "validateManifests",
+					details: {
+						reason: "contribution-kind-guarded",
+						kind: "rateLimitBudgets",
+						channel: "overrides",
+						module: m.name,
+						name: entry.key,
+					},
+				});
+			}
+			for (const entry of entries ?? []) {
+				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+				const snapshot = verifierClaimSnapshots.get(entry.factory as object);
+				const problem = snapshot === undefined ? undefined : verifierClaimProblem(snapshot);
+				if (problem !== undefined) refuse(m, "rateLimitBudgets", entry.key, channel, problem);
+			}
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
 				if (channel === "overrides") {
@@ -910,25 +1125,25 @@ function checkContributionShapes(
 			}
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "federationTypes" || typeof entry.key !== "string") continue;
-				const snapshot = federationTypeSnapshots.get(entry.factory as object);
+				const snapshot = federationTypeSnapshot(entry.factory);
 				if (snapshot === undefined) {
 					refuse(
 						m,
 						"federationTypes",
 						entry.key,
 						channel,
-						"a declaration is an object with an entrySchema and a factory",
+						"a declaration is an object with an entrySchema, a factory and a redirectPolicy",
 					);
 				}
-				const { entrySchema, factory } = snapshot as {
-					readonly entrySchema: unknown;
-					readonly factory: unknown;
-				};
+				const { entrySchema, factory, redirectPolicy } = snapshot as FederationTypeSnapshot;
 				if (typeof (entrySchema as { safeParse?: unknown } | null)?.safeParse !== "function") {
 					refuse(m, "federationTypes", entry.key, channel, "its entrySchema is not a Zod schema");
 				}
 				if (typeof factory !== "function") {
 					refuse(m, "federationTypes", entry.key, channel, "its factory is not a function");
+				}
+				if (typeof redirectPolicy !== "function") {
+					refuse(m, "federationTypes", entry.key, channel, "its redirectPolicy is not a function");
 				}
 			}
 		}
@@ -1215,74 +1430,6 @@ function checkRouteCollisions(
 }
 
 // ---------------------------------------------------------------------------
-// Step 7.5 — Federation / federationRedirectPolicies pairing invariant
-// ---------------------------------------------------------------------------
-
-/**
- * Step 7.5: Every `federations[name]` contribution MUST have a matching
- * `federationRedirectPolicies[name]` contribution and vice versa.
- *
- * Throws BootError({ reason: "federation-redirect-policy-unpaired" }).
- * @internal
- */
-function checkFederationRedirectPolicyPairing(modules: readonly NormalisedModule[]): void {
-	const federationNames = new Map<string, string>(); // name → first contributing module
-	const policyNames = new Map<string, string>(); // name → first contributing module
-
-	// A name counts as registered if contributes or overrides declares it.
-	// Walking contributes alone would report "federation-without-policy" when
-	// one module contributes federations[x] and another overrides
-	// federationRedirectPolicies[x], before step 8 could give the more precise
-	// override-target-missing.
-	for (const m of modules) {
-		const allEntries = [...m.contributesEntries, ...m.overridesEntries];
-		for (const entry of allEntries) {
-			if (entry.kind === "federations" && typeof entry.key === "string") {
-				if (!federationNames.has(entry.key)) {
-					federationNames.set(entry.key, m.name);
-				}
-			} else if (entry.kind === "federationRedirectPolicies" && typeof entry.key === "string") {
-				if (!policyNames.has(entry.key)) {
-					policyNames.set(entry.key, m.name);
-				}
-			}
-		}
-	}
-
-	for (const [name, contributedBy] of federationNames) {
-		if (!policyNames.has(name)) {
-			throw new BootError({
-				message: `Federation "${name}" (contributed by "${contributedBy}") has no matching federationRedirectPolicies["${name}"] contribution.`,
-				reason: "federation-redirect-policy-unpaired",
-				stage: "validateManifests",
-				details: {
-					reason: "federation-redirect-policy-unpaired",
-					name,
-					side: "federation-without-policy",
-					contributedBy,
-				},
-			});
-		}
-	}
-
-	for (const [name, contributedBy] of policyNames) {
-		if (!federationNames.has(name)) {
-			throw new BootError({
-				message: `federationRedirectPolicies["${name}"] (contributed by "${contributedBy}") has no matching federations["${name}"] contribution.`,
-				reason: "federation-redirect-policy-unpaired",
-				stage: "validateManifests",
-				details: {
-					reason: "federation-redirect-policy-unpaired",
-					name,
-					side: "policy-without-federation",
-					contributedBy,
-				},
-			});
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Step 13.5 — grantPolicy / jwt.issuer consistency invariant
 //
 // When `grantPolicy` is wired through any of the three component sources
@@ -1350,29 +1497,48 @@ const FEDERATION_REQUIRED_STORES = [
 
 /**
  * If any `core.federations.<name>.enabled === true`, all six session,
- * federation and refresh-token-family slots must be in the planned component
- * set. A missing one makes federation routes either fail at runtime with an
- * opaque 503 (the session and federation-token stores) or never mount,
- * surfacing as unexpected 404s (refreshTokenFamilyRevocation, per the
- * `logoutSupported` / `federationTokenSupported` gates in
- * `packages/oauth/src/routes.mts`). Refusing at boot makes both visible.
+ * federation and refresh-token-family slots must be wired. A missing one
+ * makes federation routes either fail at runtime with an opaque 503 (the
+ * session and federation-token stores) or never mount, surfacing as
+ * unexpected 404s (refreshTokenFamilyRevocation, per the `logoutSupported` /
+ * `federationTokenSupported` gates in `packages/oauth/src/routes.mts`).
+ * Refusing at boot makes both visible. Stage 1 counts a planned slot as
+ * wired; stage 3 refuses one that holds `undefined`.
  */
 export function checkFederationStoresWiring(
 	config: AppConfig,
 	plannedKeys: ReadonlySet<string>,
 ): void {
-	for (const [name, fed] of Object.entries(federationsOf(config))) {
-		if ((fed as { enabled?: unknown } | null)?.enabled !== true) continue;
-		const missing = FEDERATION_REQUIRED_STORES.filter((k) => !plannedKeys.has(k));
+	const refusal = federationStoresRefusal(
+		config,
+		(key) => plannedKeys.has(key),
+		"validateManifests",
+	);
+	if (refusal !== undefined) throw refusal;
+}
+
+/**
+ * The `federation-stores-incomplete` refusal of the first enabled federation
+ * whose stores `isWired` does not answer for, or `undefined`.
+ * @internal
+ */
+export function federationStoresRefusal(
+	config: AppConfig,
+	isWired: (key: ComponentKey) => boolean,
+	stage: BootStage,
+): BootError | undefined {
+	for (const [name] of enabledFederationsOf(config)) {
+		const missing = FEDERATION_REQUIRED_STORES.filter((k) => !isWired(k));
 		if (missing.length > 0) {
-			throw new BootError({
-				stage: "validateManifests",
+			return new BootError({
+				stage,
 				reason: "federation-stores-incomplete",
 				message: `core.federations.${name} is enabled but required federation stores are missing: ${missing.join(", ")}`,
 				details: { reason: "federation-stores-incomplete", federationName: name, missing },
 			});
 		}
 	}
+	return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,38 +1562,53 @@ function readConfigPath(config: unknown, path: readonly string[]): unknown {
 }
 
 /**
- * Enforces `ModuleSpec.absencePolicies`: every optional key carrying a policy
- * must be filled from one of the three component sources, or the config must
- * carry the policy's declared-absent value. Otherwise boot refuses with
- * `component-absence-undeclared`: a capability slot (token revocation, an
- * audit sink) must never be a silent no-op.
- *
- * Two modules attaching different policies to one key are refused even when
- * the absence is declared, so the advice does not depend on module order;
- * the bundled modules share one policy constant per key
+ * The policies core attaches to slots it declares, wherever a module reads the
+ * slot: its readers need not attach it. A module that does attaches the same
+ * policy, or is refused as disagreeing.
+ */
+const CORE_SLOT_ABSENCE_POLICIES: Readonly<Record<string, AbsencePolicy>> = {
+	rateLimiter: RATE_LIMITER_ABSENCE_POLICY,
+};
+
+/** Who a core-attached policy is declared by, as the disagreement refusal names it. */
+const CORE_POLICY_OWNER = "core";
+
+/**
+ * The slots `ModuleSpec.absencePolicies`, and the policies core attaches to
+ * its own slots (`CORE_SLOT_ABSENCE_POLICIES`), govern, in the order the
+ * policies are met, with the modules that read each. Refuses, with
+ * `component-absence-undeclared`, a policy on a key its module does not read,
+ * and two modules attaching different policies to one key even when the
+ * absence is declared, so the advice does not depend on module order; the
+ * bundled modules share one policy constant per key
  * (`AUDIT_SINK_ABSENCE_POLICY`) so this cannot happen by accident.
  *
  * `consumedBy` is every module naming the key in `requires` / `optional`, the
  * evidence that the slot is part of this app's surface. New absence rules
  * attach an `AbsencePolicy` rather than adding a bespoke check.
  */
-function checkDeclaredAbsence(
+function absenceGovernedSlots(
 	modules: readonly NormalisedModule[],
 	rawModules: readonly Module[],
-	config: unknown,
-	plannedKeys: ReadonlySet<string>,
-): void {
+): UndeclaredAbsenceSlot[] {
 	interface Collected {
-		readonly policy: {
-			readonly configKey: readonly string[];
-			readonly absentValue: string;
-			readonly hint: string;
-		};
+		readonly policy: AbsencePolicy;
 		readonly declaredBy: string[];
 	}
 	const byKey = new Map<string, Collected>();
 	// Step 1 (checkUniqueModuleNames) has run, so the name lookup is total.
 	const normalisedByName = new Map(modules.map((nm) => [nm.name, nm]));
+	const readersOf = (key: string): string[] =>
+		modules
+			.filter(
+				(m) =>
+					(m.requires as readonly string[]).includes(key) ||
+					(m.optional as readonly string[]).includes(key),
+			)
+			.map((m) => m.name);
+	for (const [key, policy] of Object.entries(CORE_SLOT_ABSENCE_POLICIES)) {
+		if (readersOf(key).length > 0) byKey.set(key, { policy, declaredBy: [CORE_POLICY_OWNER] });
+	}
 
 	for (const m of rawModules) {
 		// biome-ignore lint/style/noNonNullAssertion: every raw module was normalised under its (unique) name
@@ -1496,36 +1677,70 @@ function checkDeclaredAbsence(
 		}
 	}
 
-	for (const [key, { policy }] of byKey) {
-		if (plannedKeys.has(key)) continue;
-		if (isAbsenceDeclared(config, policy)) continue;
+	return [...byKey].map(([key, { policy }]) => ({
+		componentKey: key as ComponentKey,
+		consumedBy: readersOf(key),
+		policy,
+	}));
+}
 
-		const consumedBy = modules
-			.filter(
-				(m) =>
-					(m.requires as readonly string[]).includes(key) ||
-					(m.optional as readonly string[]).includes(key),
-			)
-			.map((m) => m.name);
-		const configKeyDotted = policy.configKey.join(".");
+/**
+ * The governed slots whose absence `config` does not declare: each must hold
+ * a value, from one of the three component sources.
+ */
+function undeclaredAbsenceSlotsOf(
+	modules: readonly NormalisedModule[],
+	rawModules: readonly Module[],
+	config: unknown,
+): UndeclaredAbsenceSlot[] {
+	return absenceGovernedSlots(modules, rawModules).filter(
+		(slot) => !isAbsenceDeclared(config, slot.policy),
+	);
+}
 
-		throw new BootError({
-			message:
-				`Component "${key}" is read by ` +
-				`${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
-				"but nothing provides it, and its absence is not declared. " +
-				`Wire a provider, or ${describeAbsenceDeclaration(policy)} to declare ` +
-				`the capability absent on purpose. ${policy.hint}`,
+/**
+ * The refusal of `slot` holding no value: a capability slot (token
+ * revocation, an audit sink, a rate limiter) must never be a silent no-op.
+ * @internal
+ */
+export function undeclaredAbsenceRefusal(slot: UndeclaredAbsenceSlot, stage: BootStage): BootError {
+	const { componentKey: key, consumedBy, policy } = slot;
+	return new BootError({
+		message:
+			`Component "${key}" is read by ` +
+			`${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
+			"but nothing provides it, and its absence is not declared. " +
+			`Wire a provider, or ${describeAbsenceDeclaration(policy)} to declare ` +
+			`the capability absent on purpose. ${policy.hint}`,
+		reason: "component-absence-undeclared",
+		stage,
+		details: {
 			reason: "component-absence-undeclared",
-			stage: "validateManifests",
-			details: {
-				reason: "component-absence-undeclared",
-				componentKey: key as ComponentKey,
-				consumedBy,
-				configKey: configKeyDotted,
-				absentValue: policy.absentValue,
-			},
-		});
+			componentKey: key,
+			consumedBy,
+			configKey: policy.configKey.join("."),
+			absentValue: policy.absentValue,
+		},
+	});
+}
+
+/**
+ * Enforces the absence policies at stage 1: every governed slot must be
+ * planned from one of the three component sources, or the config must carry
+ * the policy's declared-absent value. A planned slot that holds `undefined`
+ * once its sources have answered is refused at stage 3, from
+ * `ValidatedManifests.undeclaredAbsenceSlots`.
+ */
+function checkDeclaredAbsence(
+	modules: readonly NormalisedModule[],
+	rawModules: readonly Module[],
+	config: unknown,
+	plannedKeys: ReadonlySet<string>,
+): void {
+	for (const slot of undeclaredAbsenceSlotsOf(modules, rawModules, config)) {
+		if (!plannedKeys.has(slot.componentKey)) {
+			throw undeclaredAbsenceRefusal(slot, "validateManifests");
+		}
 	}
 }
 
@@ -1743,6 +1958,60 @@ function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
 		.join("; ");
 }
 
+/** The names of `Object.prototype`'s members: reserved, with `prototype`, as configuration keys. */
+const OBJECT_PROTOTYPE_MEMBERS: ReadonlySet<string> = new Set(
+	Object.getOwnPropertyNames(Object.prototype),
+);
+
+/** Why `key` is reserved as a configuration key, or `undefined` when it is not. */
+function reservedKeyReason(key: string): string | undefined {
+	if (OBJECT_PROTOTYPE_MEMBERS.has(key)) return "is named after an Object.prototype member";
+	if (key === "prototype") return 'is "prototype"';
+	return undefined;
+}
+
+/**
+ * One issue per reserved key of the configuration as written — one named
+ * after an `Object.prototype` member, or `prototype` — at the key's full
+ * path. A schema drops a `__proto__` key unvalidated, and code reading any
+ * such key may meet an inherited member instead. The walk covers the own data properties of
+ * plain objects and lists, which is everything a parsed HOCON file holds;
+ * a getter is read by the parse that follows, not by this walk, and
+ * anything else is a value. An object reached by several paths is named
+ * under each; only its ancestors stop a cycle.
+ */
+function reservedKeyIssues(
+	value: unknown,
+	path: readonly PropertyKey[] = [],
+	ancestors = new Set<object>(),
+): z.core.$ZodIssue[] {
+	if (!Array.isArray(value) && !isPlainConfigObject(value)) return [];
+	if (ancestors.has(value)) return [];
+	ancestors.add(value);
+	const issues = Object.keys(value).flatMap((key) => {
+		const at = [...path, Array.isArray(value) ? Number(key) : key];
+		const below = Object.getOwnPropertyDescriptor(value, key);
+		const reason = reservedKeyReason(key);
+		return [
+			...(reason !== undefined
+				? [
+						{
+							code: "custom",
+							path: at,
+							message: `the key "${key}" ${reason}, which configuration cannot carry`,
+							input: undefined,
+						} as z.core.$ZodIssue,
+					]
+				: []),
+			...(below !== undefined && "value" in below
+				? reservedKeyIssues(below.value, at, ancestors)
+				: []),
+		];
+	});
+	ancestors.delete(value);
+	return issues;
+}
+
 /**
  * Step 13: parses the configuration the composition root handed over
  * (`bootstrapComponents.config`) once, with every schema that reads it:
@@ -1759,9 +2028,11 @@ function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
  *
  * Returns the composed configuration, which becomes the `config` slot once
  * `parseModuleSections` writes each section back. Refused values make one
- * `config-validation-failed` naming each operator path: the base's alone
- * when the base refuses (the module schemas have no output to read), else
- * every module schema's.
+ * `config-validation-failed` naming each operator path: every reserved key
+ * (`reservedKeyIssues`: an `Object.prototype` member's name, or
+ * `prototype`), then the
+ * base's issues alone when the base refuses (the module schemas have no
+ * output to read), else every module schema's.
  * @internal
  */
 function validateAndComposeConfig(modules: readonly Module[], bootstrap: BootstrapMap): unknown {
@@ -1771,6 +2042,7 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 
 	for (const m of modules) if (m.configSchema) participants.push({ module: m.name });
 
+	issues.push(...reservedKeyIssues(raw));
 	// Each parse through `parseSection`: a schema that throws instead of
 	// answering — an async refinement, a transform or a getter that throws —
 	// is one more issue naming whose schema it was, not an error escaping
@@ -1867,30 +2139,20 @@ function conflictingOutputs(
 }
 
 /**
- * The top-level sections of the configuration as written that nothing owns,
- * sorted: not a section core's transitional base declares — its
- * own, or one it mirrors — not a top-level key of a loaded module's
- * `configSchema`, and not the first key of a loaded module's section path.
- * A section that sets nothing (`pathsSetBy`, the walk the relocation refusal
- * reads a configuration with) is none of them: an empty one, or one holding
- * only empty ones, as a `reference.conf` leaves a section whose variables are
- * unset. Boot keeps
- * them in the `config` slot and names them once in the log; a misspelt
- * section name is what an operator finds there.
+ * The top-level sections something loaded owns: every section core's
+ * transitional base declares — its own, or one it mirrors — every top-level
+ * key of a loaded module's `configSchema`, and the first key of every loaded
+ * module's section path. What the configuration sets outside them is what
+ * stage 1's notices name (`logConfigNotices`).
  * @internal
  */
-function ignoredSections(modules: readonly Module[], raw: unknown): readonly string[] {
-	// Boot's parse accepted `raw` as an object before this runs — a plain one
-	// or an instance: its own keys are the sections.
+function ownedSections(modules: readonly Module[]): ReadonlySet<string> {
 	const owned = new Set<string>(Object.keys(TransitionalConfigSchema.shape));
 	for (const m of modules) {
 		for (const key of Object.keys(m.configSchema?.shape ?? {})) owned.add(key);
 		if (m.section !== undefined) owned.add(sectionSegmentsOf(m)[0] as string);
 	}
-	const sections = raw as Readonly<Record<string, unknown>>;
-	return Object.keys(sections)
-		.filter((key) => !owned.has(key) && pathsSetBy(sections[key]).length > 0)
-		.sort();
+	return owned;
 }
 
 // ---------------------------------------------------------------------------
@@ -1909,72 +2171,6 @@ function sectionPathOf(m: Module): string {
 /** The keys of a dot-separated section path; a module's own name is one key. */
 function sectionSegmentsOf(m: Module): readonly string[] {
 	return m.section?.at === undefined ? [m.name] : m.section.at.split(".");
-}
-
-/**
- * A parsed section as every factory of its module receives it: plain data —
- * arrays, and objects whose prototype is `Object.prototype` or `null` —
- * copied and frozen all the way down, so no factory can change what another
- * reads, and a subtree the schema passed through (`z.unknown()`) is not the
- * `config` slot's own object. Anything else — a `URL`, a `Buffer`, a class
- * instance a transform built — is handed over as the schema made it: freezing
- * a typed array throws, and copying an instance would lose what it is.
- */
-function frozenSection(value: unknown, copies = new Map<object, unknown>()): unknown {
-	if (value === null || typeof value !== "object") return value;
-	const known = copies.get(value);
-	if (known !== undefined) return known;
-	if (Array.isArray(value)) {
-		const copy: unknown[] = [];
-		copies.set(value, copy);
-		for (const item of value) copy.push(frozenSection(item, copies));
-		return Object.freeze(copy);
-	}
-	const prototype: unknown = Object.getPrototypeOf(value);
-	if (prototype !== Object.prototype && prototype !== null) return value;
-	// The same prototype as the original: `Object.prototype`, or none.
-	const copy: object = prototype === null ? Object.setPrototypeOf({}, null) : {};
-	copies.set(value, copy);
-	for (const key of Reflect.ownKeys(value)) {
-		if (!Object.prototype.propertyIsEnumerable.call(value, key)) continue;
-		// Defined, not assigned: a key named `__proto__` stays a key.
-		Object.defineProperty(copy, key, {
-			value: frozenSection((value as Record<PropertyKey, unknown>)[key], copies),
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
-	}
-	return Object.freeze(copy);
-}
-
-/**
- * Parse `value` with one schema of the composed parse — core's base, a
- * module's `configSchema` or a module's section — synchronously. A schema
- * that throws instead of answering — an async refinement (Zod cannot finish
- * it synchronously), or a transform or a getter that throws — is one more
- * issue at the root of what it parsed, naming `subject`, so it refuses boot
- * the way a refused value does rather than escaping stage 1 as a bare error.
- */
-function parseSection(
-	schema: z.ZodType,
-	value: unknown,
-	subject = "the section's schema",
-): { readonly data: unknown } | { readonly issues: readonly z.ZodIssue[] } {
-	try {
-		const result = schema.safeParse(value);
-		return result.success ? { data: result.data } : { issues: result.error.issues };
-	} catch (thrown) {
-		return {
-			issues: [
-				{
-					code: "custom",
-					path: [],
-					message: `${subject} threw instead of answering, so it could not be parsed synchronously: ${failureSummary(thrown)}`,
-				} as z.ZodIssue,
-			],
-		};
-	}
 }
 
 /** What `writeConfigPath` writes to remove the key at the path. */
@@ -2123,6 +2319,60 @@ function parseModuleSections(
 	return { config, sections };
 }
 
+/**
+ * The names of the modules their own section switches off: `section.isEnabled`
+ * answers `false` for the section the module is handed. A switch that throws
+ * or answers anything but a boolean is one more issue at its section's path,
+ * all of them refused together as `config-validation-failed`.
+ * @internal
+ */
+function switchedOffModules(
+	modules: readonly Module[],
+	sections: ReadonlyMap<string, { readonly value: unknown }>,
+): ReadonlySet<string> {
+	const off = new Set<string>();
+	const issues: z.ZodIssue[] = [];
+	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
+	for (const m of modules) {
+		const isEnabled: unknown = m.section?.isEnabled;
+		if (isEnabled === undefined) continue;
+		let problem: string;
+		if (typeof isEnabled !== "function") {
+			problem = "it is not a function";
+		} else {
+			try {
+				const answer: unknown = isEnabled.call(m.section, sections.get(m.name)?.value);
+				if (answer === false) off.add(m.name);
+				if (typeof answer === "boolean") continue;
+				problem = `it answered ${kindOf(answer)}`;
+			} catch (thrown) {
+				problem = `it threw: ${failureSummary(thrown)}`;
+			}
+		}
+		issues.push({
+			code: "custom",
+			path: [...sectionSegmentsOf(m)],
+			message: `module "${m.name}"'s isEnabled did not answer whether its section switches it on: ${problem}`,
+		} as z.ZodIssue);
+		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
+	}
+	if (issues.length > 0) {
+		throw new BootError({
+			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`).join("; ")}.`,
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+			details: { reason: "config-validation-failed", issues, modules: refused },
+		});
+	}
+	return off;
+}
+
+/**
+ * What a switched-off module is to every stage after the parse: its name and
+ * its section, nothing it would register.
+ */
+const switchedOff = (m: Module): Module => ({ name: m.name, section: m.section }) as Module;
+
 // ---------------------------------------------------------------------------
 // Step 14 — Route-order edge sanity
 // ---------------------------------------------------------------------------
@@ -2222,13 +2472,36 @@ const SECTION_DEPS_KEY = "section";
  * component named `section`: its deps would carry both under one name, the
  * section shadowing the slot. Only that module is refused; elsewhere
  * `section` is an ordinary slot (provided, read by a module without a
- * section, bootstrapped or overridden). Throws `reserved-component-key`.
+ * section, bootstrapped or overridden). No module may provide, require or
+ * optionally read a component named after the reserved bootstrap input,
+ * which no component carries. Throws `reserved-component-key`.
  * @internal
  */
 function checkReservedComponentKeys(
 	rawModules: readonly Module[],
 	modules: readonly NormalisedModule[],
 ): void {
+	for (const m of modules) {
+		const sources = [
+			["module-provides", m.providesKeys, "provides"],
+			["module-requires", m.requires, "requires"],
+			["module-optional", m.optional, "optionally reads"],
+		] as const;
+		for (const [source, keys, verb] of sources) {
+			if (!(keys as readonly string[]).includes(RESERVED_BOOTSTRAP_INPUT)) continue;
+			throw new BootError({
+				message: `Module "${m.name}" ${verb} a component named "${RESERVED_BOOTSTRAP_INPUT}", which no component carries: it is the configuration's defaults, which boot reads from bootstrapComponents itself. Name the component otherwise.`,
+				reason: "reserved-component-key",
+				stage: "validateManifests",
+				details: {
+					reason: "reserved-component-key",
+					componentKey: RESERVED_BOOTSTRAP_INPUT,
+					source,
+					module: m.name,
+				},
+			});
+		}
+	}
 	modules.forEach((m, index) => {
 		if (rawModules[index]?.section === undefined) return;
 		const sources = [
@@ -2718,6 +2991,21 @@ export function renamedVariablesOf(
 }
 
 /**
+ * The variable names `relocating` — core, as module "core", and the loaded
+ * modules — declare renamed: each rename's old name and its new one. Boot
+ * judges these by their captures; a capture of any other name is what no
+ * loaded module applies. Read after the declarations are held.
+ * @internal
+ */
+function judgedVariables(relocating: readonly Module[]): ReadonlySet<string> {
+	return new Set(
+		declaredRenames(relocating).flatMap((rename) =>
+			rename.to === null ? [rename.from] : [rename.from, rename.to],
+		),
+	);
+}
+
+/**
  * A configuration still setting a key at or under a path a loaded module's
  * section moved from refuses boot (`config-path-relocated`) before it is
  * parsed: the old path may be in no section any loaded module reads, and what
@@ -2821,13 +3109,41 @@ function checkModuleSectionOwners(rawModules: readonly Module[]): void {
 }
 
 /**
- * Where stage 1's warnings go — the replica-safety warning and
- * `config_sections_ignored`, one rule for both: the logger the
- * composition root wired as a bootstrap component. A composition that wired
- * none hears nothing from stage 1.
+ * Where stage 1's warnings go — the replica-safety warning and the notices of
+ * configuration nothing loaded reads (`logConfigNotices`), one rule for both:
+ * the logger the composition root wired as a bootstrap component. A
+ * composition that wired none hears nothing from stage 1.
  */
 function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
 	return bootstrap.logger;
+}
+
+/**
+ * The bootstrap map without `configDefaults`, and that input read once into a
+ * copy of its plain data (`readConfigDefaults`): boot reads it at stage 1 for
+ * the notices and seeds no component from it. The map itself, and no
+ * defaults, when it holds no such key. A value that is not plain data — not
+ * an object of sections, a getter, a throw as it is read — refuses boot
+ * (`config-defaults-invalid`), before any check, naming the path and no value.
+ */
+function takeConfigDefaults(bootstrap: BootstrapMap): {
+	readonly bootstrapComponents: BootstrapMap;
+	readonly configDefaults: ConfigDefaults | undefined;
+} {
+	if (!Object.hasOwn(bootstrap, RESERVED_BOOTSTRAP_INPUT)) {
+		return { bootstrapComponents: bootstrap, configDefaults: undefined };
+	}
+	const { configDefaults: handed, ...bootstrapComponents } = bootstrap;
+	const read = readConfigDefaults(handed);
+	if ("problem" in read) {
+		throw new BootError({
+			message: `bootstrapComponents.${[RESERVED_BOOTSTRAP_INPUT, ...read.path].join(".")} ${read.problem}. Hand boot the configuration's defaults as the composition resolves its configuration: the loaded modules' reference.conf files and core's, with no file of its own and no environment, as plain data.`,
+			reason: "config-defaults-invalid",
+			stage: "validateManifests",
+			details: { reason: "config-defaults-invalid", path: [...read.path], problem: read.problem },
+		});
+	}
+	return { bootstrapComponents, configDefaults: read.defaults };
 }
 
 // ---------------------------------------------------------------------------
@@ -2852,6 +3168,8 @@ interface StageOneContext {
 	 */
 	readonly relocating: readonly Module[];
 	readonly parsedConfig: unknown;
+	/** The modules their section switches off; empty before the parse. */
+	readonly switchedOff: ReadonlySet<string>;
 	/**
 	 * Provides ∪ bootstrapComponents ∪ overrideComponents, the three component
 	 * sources, and `auditSink` when a module contributes `auditHooks` (core
@@ -2868,8 +3186,10 @@ interface StageOneContext {
  * every reader's `checkOAuthTokenSettings` applies). A host map is known
  * before any provider runs, so it is refused here
  * (`token-settings-lifetime-exceeds-configuration`), naming the map, the
- * member and both values; a module-provided value is refused where a reader
- * first reads it. A member that is not a number is left to the readers' check.
+ * member and both values; a module-provided value is refused the same way
+ * as stage 3 materialises it (`token-settings-slot.mts`), which also holds a
+ * host's value to the contract and stores the frozen snapshot every reader
+ * reads. A member that is not a number is left to that check.
  * @internal
  */
 function checkHostTokenSettingsLifetimes(
@@ -2922,9 +3242,11 @@ const freezeChecks = (checks: readonly StageOneCheck[]): readonly StageOneCheck[
 	Object.freeze(checks.map((check) => Object.freeze(check)));
 
 /**
- * The checks that run before the config parse (steps 1–12), in order. The
- * registry order is the execution order, so the first violation is the first
- * failing row; each row's `spec` names its step.
+ * The checks that run before the config parse, in order: what the parse
+ * itself relies on — manifests, unique names, section paths — and the
+ * refusal of old paths and renamed variables. The registry order is the
+ * execution order, so the first violation is the first failing row; each
+ * row's `spec` names its step.
  */
 export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
 	{
@@ -2937,6 +3259,37 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		spec: "A2-β §5.1 step 1",
 		run: (ctx) => checkUniqueModuleNames(ctx.rawModules),
 	},
+	{
+		id: "federation-kind-guard",
+		spec: "issue #728 (a federation registers through the type its entry names, whatever a module declares, switched on or not)",
+		run: (ctx) => checkFederationKindGuard(ctx.rawModules, ctx.modules),
+	},
+	{
+		id: "module-section-paths",
+		spec: "issue #728 (a section's transitional path, the paths it moved from, the variables renamed with them, and its one owner)",
+		run: (ctx) => checkModuleSectionPaths(ctx.rawModules, ctx.relocating),
+	},
+	{
+		id: "relocated-config-paths",
+		spec: "issue #728 (B10: a relocated path refuses boot)",
+		run: (ctx) => checkRelocatedConfigPaths(ctx.relocating, ctx.bootstrapComponents),
+	},
+	{
+		id: "renamed-environment-variables",
+		spec: "issue #728 (a variable renamed with a move refuses boot unless its new name carries the same value)",
+		run: (ctx) => checkRenamedEnvironmentVariables(ctx.relocating, ctx.bootstrapComponents),
+	},
+]);
+
+/**
+ * The checks that run after the config parse (step 13, a distinct stage in
+ * `validateManifests` because it produces the parsed config and the sections
+ * that say which modules are switched on), in order, over the modules switched
+ * on alone: the manifest rows of steps 2–12, the wiring guards, then the
+ * step-14 route-order check. A new wiring guard is a row appended before
+ * `route-order-edges`.
+ */
+export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
 	{
 		id: "provides-closure",
 		spec: "A2-β §5.1 step 2",
@@ -3003,11 +3356,6 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		run: (ctx) => checkRouteCollisions(ctx.modules, ctx.rawModules),
 	},
 	{
-		id: "federation-redirect-policy-pairing",
-		spec: "A5 §8.2 (step 7.5)",
-		run: (ctx) => checkFederationRedirectPolicyPairing(ctx.modules),
-	},
-	{
 		id: "override-targets",
 		spec: "A2-β §5.1 step 8",
 		run: (ctx) => checkOverrideTargets(ctx.modules, ctx.contributionKinds ?? {}),
@@ -3033,30 +3381,6 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		run: (ctx) => checkLifecycleClosure(ctx.modules),
 	},
 	{
-		id: "module-section-paths",
-		spec: "issue #728 (a section's transitional path, the paths it moved from, the variables renamed with them, and its one owner)",
-		run: (ctx) => checkModuleSectionPaths(ctx.rawModules, ctx.relocating),
-	},
-	{
-		id: "relocated-config-paths",
-		spec: "issue #728 (B10: a relocated path refuses boot)",
-		run: (ctx) => checkRelocatedConfigPaths(ctx.relocating, ctx.bootstrapComponents),
-	},
-	{
-		id: "renamed-environment-variables",
-		spec: "issue #728 (a variable renamed with a move refuses boot unless its new name carries the same value)",
-		run: (ctx) => checkRenamedEnvironmentVariables(ctx.relocating, ctx.bootstrapComponents),
-	},
-]);
-
-/**
- * The checks that run after the config parse (step 13, a distinct stage in
- * `validateManifests` because it produces the parsed config these rows
- * read), in order: the wiring guards, then the step-14 route-order check. A
- * new wiring guard is a row appended before `route-order-edges`.
- */
-export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
-	{
 		id: "grant-policy-issuer",
 		spec: "CP-20 (restored v0.4.x guard; step 13.5)",
 		run: (ctx) =>
@@ -3071,6 +3395,11 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		id: "federation-stores-wiring",
 		spec: "issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05 (step 13.7)",
 		run: (ctx) => checkFederationStoresWiring(ctx.parsedConfig as AppConfig, ctx.plannedKeys),
+	},
+	{
+		id: "federation-entries-handled",
+		spec: "issue #728 (an enabled core.federations entry is handled by the module registering its type)",
+		run: (ctx) => checkFederationEntriesHandled(ctx.modules, ctx.parsedConfig),
 	},
 	{
 		id: "declared-absence",
@@ -3088,10 +3417,11 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		//
 		// `rawModules`, not the normalised view: the guard reads each manifest's
 		// own `replicaSafety` declaration, which normalisation does not carry.
+		// A switched-off module holds no state, whatever its name.
 		run: (ctx) => {
 			const bootLogger = warningLogger(ctx.bootstrapComponents);
 			checkReplicaSafety({
-				modules: ctx.rawModules,
+				modules: ctx.rawModules.filter((m) => !ctx.switchedOff.has(m.name)),
 				config: ctx.parsedConfig,
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});
@@ -3122,19 +3452,33 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * Stage 1 of the boot planner: runs {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then
  * step 13 (`validateAndComposeConfig`, the one composed parse, and
  * `parseModuleSections`, which writes each module's section back into the
- * parsed config), then {@link STAGE_ONE_POST_CONFIG_CHECKS}. Returns
- * `ValidatedManifests`, or throws a `BootError` for the first violation in
- * input order.
+ * parsed config), then reads each module's switch (`section.isEnabled`), then
+ * runs {@link STAGE_ONE_POST_CONFIG_CHECKS} over the modules switched on: a
+ * module switched off is, from there on, its name and its section alone, so
+ * it registers nothing. Last, it parses each enabled `core.federations` entry
+ * of a registered type with that type's schema (`parseFederationEntries`). Returns `ValidatedManifests`, or throws a `BootError`
+ * for the first violation in input order.
  *
  * Deterministic: the same inputs give the same output or error. Its only side
- * effects are boot notices to the wired logger: the top-level sections
- * nothing owns (`config_sections_ignored`) and the replica-safety warning.
+ * effects are boot notices to the wired logger: the configuration nothing
+ * loaded reads (`logConfigNotices`) and the replica-safety warning.
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
-	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = input;
+	const { modules, contributionKinds, overrideComponents } = input;
+	// `configDefaults` is read here and is no component: no check and no later
+	// stage sees it.
+	const { bootstrapComponents, configDefaults } = takeConfigDefaults(input.bootstrapComponents);
 
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);
+
+	const plannedKeysOf = (normalised: readonly NormalisedModule[]): ReadonlySet<string> =>
+		new Set<string>([
+			...normalised.flatMap((m) => m.providesKeys as string[]),
+			...Object.keys(bootstrapComponents),
+			...Object.keys(overrideComponents ?? {}),
+			...(contributesAuditHooks(normalised) ? ["auditSink"] : []),
+		]);
 
 	const baseContext: StageOneContext = {
 		rawModules: modules,
@@ -3144,12 +3488,8 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		contributionKinds,
 		relocating: withCoreRelocations(modules, input.core ?? CORE_RELOCATIONS),
 		parsedConfig: undefined,
-		plannedKeys: new Set<string>([
-			...normalisedModules.flatMap((m) => m.providesKeys as string[]),
-			...Object.keys(bootstrapComponents),
-			...Object.keys(overrideComponents ?? {}),
-			...(contributesAuditHooks(normalisedModules) ? ["auditSink"] : []),
-		]),
+		switchedOff: new Set<string>(),
+		plannedKeys: plannedKeysOf(normalisedModules),
 	};
 
 	for (const check of STAGE_ONE_PRE_CONFIG_CHECKS) {
@@ -3171,28 +3511,57 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// Each module's own section, parsed out of that configuration by
 	// the module's schema and written back at its path — before any
 	// post-config row, which may assume the configuration is valid.
-	const { config: parsedConfig, sections } = parseModuleSections(modules, composedConfig);
+	// A limiter section refuses the prefixes every loaded module claims as a
+	// verifier's, switched on or not: no switch is read before the parse.
+	const { config: parsedConfig, sections } = withVerifierLimitDeclarations(
+		declaredVerifierLimits(normalisedModules),
+		() => parseModuleSections(modules, composedConfig),
+	);
 	const substitutedBootstrap: BootstrapMap = {
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],
 	};
-	// The top-level sections nothing loaded owns stay in the config slot and
-	// are named once, to the logger the composition wired.
-	const ignored = ignoredSections(modules, config);
-	if (ignored.length > 0) {
-		warningLogger(bootstrapComponents)?.warn({ sections: [...ignored] }, "config_sections_ignored");
-	}
+	// The top-level sections nothing loaded owns stay in the config slot, and
+	// they and the captured variables nothing loaded declares are named once,
+	// to the logger the composition wired.
+	logConfigNotices(warningLogger(bootstrapComponents), {
+		config: rawConfig,
+		owned: ownedSections(modules),
+		defaults: configDefaults,
+		judged: judgedVariables(baseContext.relocating),
+	});
 
-	const postConfigContext: StageOneContext = { ...baseContext, parsedConfig };
+	// A module its section switches off stays its name and its section: what
+	// it would register is out of every row below and every later stage.
+	const off = switchedOffModules(modules, sections);
+	const switchedOn = modules.map((m) => (off.has(m.name) ? switchedOff(m) : m));
+	const switchedOnNormalised = normalisedModules.map((normalised, i) =>
+		off.has(normalised.name) ? normaliseModule(switchedOn[i] as Module) : normalised,
+	);
+
+	const postConfigContext: StageOneContext = {
+		...baseContext,
+		rawModules: switchedOn,
+		modules: switchedOnNormalised,
+		parsedConfig,
+		switchedOff: off,
+		plannedKeys: plannedKeysOf(switchedOnNormalised),
+	};
 	for (const check of STAGE_ONE_POST_CONFIG_CHECKS) {
 		check.run(postConfigContext);
 	}
 
+	// Step 15, like step 13, is not a registry row: it produces the enabled
+	// `core.federations` entries dispatched to a registered type, each parsed
+	// by its type's schema, which stage 4 builds providers from. It reads the
+	// declarations the rows above held, over the modules switched on.
+	const dispatchedFederations = parseFederationEntries(switchedOnNormalised, parsedConfig);
+
 	// Build output indices
-	const validatedModules: ValidatedModule[] = normalisedModules.map((normalised, i) => {
+	const validatedModules: ValidatedModule[] = switchedOnNormalised.map((normalised, i) => {
 		const section = sections.get(normalised.name);
 		return {
-			manifest: modules[i],
+			manifest: switchedOn[i] as Module,
 			normalised,
 			...(section === undefined ? {} : { section }),
 		};
@@ -3223,5 +3592,11 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		providers,
 		usedKinds: usedKindsSet,
 		bootstrapComponents: substitutedBootstrap,
+		dispatchedFederations,
+		undeclaredAbsenceSlots: undeclaredAbsenceSlotsOf(
+			switchedOnNormalised,
+			switchedOn,
+			parsedConfig,
+		),
 	};
 }

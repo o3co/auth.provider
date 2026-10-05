@@ -15,10 +15,10 @@
  */
 
 /**
- * The one reading of the `ClientRepository` an oauth entry point is handed
- * (`createOAuthRouter`, `createClientAuthMiddleware`): behind core's
- * client-record boundary, as the outermost layer, so every registered client
- * an endpoint reads is held to the registration schema.
+ * The one reading of the `ClientRepository` an oauth entry point or grant is
+ * handed (`createOAuthRouter`, `createClientAuthMiddleware`, the
+ * authorization-code grant): behind core's client-record boundary, so every
+ * registered client an endpoint reads is held to the registration schema.
  */
 
 import {
@@ -31,9 +31,9 @@ import { isClientIdMetadataDocumentFallback } from "./clientIdMetadataDocument.m
 /**
  * `repository` behind core's boundary (`validatedClientRepository`, which
  * answers a boundary as it is). A document fallback is answered as it is:
- * it reads its registered clients through the boundary already, and is
- * never wrapped, since a boundary over it would read its refusals as
- * absences and copy its document clients away from their provenance.
+ * it reads its registered clients through the boundary already, and a
+ * boundary over it would copy its document clients away from their
+ * provenance.
  */
 export function behindClientBoundary(
 	repository: ClientRepository,

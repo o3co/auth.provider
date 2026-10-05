@@ -99,6 +99,26 @@ export interface FederationGrantUsage {
 	readonly ineligible: FederationGrantIneligibilityMarker | undefined;
 	/** Left by a refresh that failed. Cleared by whatever replaces or ends the credentials. */
 	readonly refreshFailure: FederationGrantRefreshFailure | undefined;
+	/**
+	 * The rotation budget spent in the current window; `undefined` until the
+	 * first take. Kept by a refresh, reset by an activation.
+	 */
+	readonly rotations: FederationGrantRotations | undefined;
+}
+
+/**
+ * The rotation budget's window: upstream refresh-token rotations taken from
+ * `since`, counted by the store. Non-secret, and outside the authenticated
+ * envelope.
+ */
+export interface FederationGrantRotations {
+	/** When the window opened: the first take in it. */
+	readonly since: Date;
+	/**
+	 * Rotations taken in the window: `1` for the first. A give-back can leave it
+	 * at `0`, and that is still a window: it closes at `since + windowMs`.
+	 */
+	readonly count: number;
 }
 
 /**
@@ -248,6 +268,13 @@ export type FederationGrantIneligibilityReason =
 	/** Not a bearer token: a route with no proof key cannot present a sender-constrained one. */
 	| "token_type_unsupported"
 	/**
+	 * The upstream answered a refresh with a token that carries the grant's
+	 * scopes but not one the held token carries and the call asked for. The
+	 * held token is kept while it is good; the marker keeps the upstream from
+	 * being asked again about it until its interval has passed.
+	 */
+	| "scope_not_granted"
+	/**
 	 * The adapter reported a refresh without a usable access token, or with a
 	 * field of the wrong type. The refresh token it came with is kept all the
 	 * same, and the marker keeps a broken adapter from rotating on every request.
@@ -380,6 +407,7 @@ export interface FederationGrantRetrievalFailure {
 		| "backstop_revoke"
 		| "lock"
 		| "release"
+		| "rotation"
 		| "upstream"
 		| "mark"
 		| "write"

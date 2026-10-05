@@ -61,6 +61,10 @@ export type FederationGrantDelegatedAuthorizer = Pick<
 export interface FederationGrantBrowserRouterOptions {
 	readonly intentStore: FederationGrantIntentStore;
 	readonly grantStore: FederationGrantStore;
+	/**
+	 * The `clientRepository` slot, which holds core's client-record boundary:
+	 * each record it answers is validated and frozen, and a refused one rejects.
+	 */
 	readonly clientRepository: ClientRepository;
 	/** The durable sessions behind the cookie, which admission re-reads at every step. */
 	readonly userSessionStore: UserSessionStore;
@@ -94,8 +98,11 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly csrfGuard: Pick<CsrfGuard, "check">;
 	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
 	readonly issuer: string;
-	/** The browser budget; its own `failMode` is the outage policy. */
-	readonly rateLimiter: RateLimiter;
+	/**
+	 * The browser budget; its own `failMode` is the outage policy. Absent, the
+	 * pages are not throttled.
+	 */
+	readonly rateLimiter?: RateLimiter;
 	readonly background: FederationGrantBackground;
 	/**
 	 * The subject's GRANTS boundary: what the callback's backstop and re-read

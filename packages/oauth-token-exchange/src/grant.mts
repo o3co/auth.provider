@@ -22,6 +22,7 @@
  */
 
 import type {
+	ExchangeTokenValidator,
 	GrantContext,
 	GrantDependencies,
 	GrantHandler,
@@ -35,16 +36,14 @@ import type {
 	ValidatedToken,
 } from "@o3co/auth-provider-core";
 import {
-	auditErrorText,
 	checkOAuthTokenSettings,
 	consoleLogger,
-	isWellFormedErrorCode,
 	logGrantPolicyUnavailable,
 	loggableError,
+	policyDenied,
 	policyOutOfBounds,
 	policyUnavailable,
 	readGrantPolicyDecision,
-	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { invalidRequest, isRefusal, tokenAnswer } from "./answers.mjs";
 import { authenticateClient } from "./clientAuthentication.mjs";
@@ -54,8 +53,9 @@ import { issueAccessToken } from "./issuance.mjs";
 import { issuedTarget, type RequestTargets, requestTargets } from "./targetCeilings.mjs";
 import { readTokenRequest, type TokenRequest } from "./tokenRequest.mjs";
 import {
-	reportedFamily,
+	type ReportedBindings,
 	resolveValidators,
+	revalidate,
 	validateActor,
 	validateSubject,
 } from "./tokenValidation.mjs";
@@ -63,52 +63,39 @@ import {
 /**
  * What the exchange reads: the shared grant slots it uses, the client repository,
  * and core's validator resolver. The module's `ProviderDeps<R, O>` satisfies
- * every slot.
+ * every slot. Nothing is read of the whole configuration.
  */
 export interface TokenExchangeDependencies
 	extends Pick<
 			GrantDependencies,
-			| "config"
-			| "keyStore"
-			| "logger"
-			| "grantPolicy"
-			| "refreshTokenFamilyRevocation"
-			| "userSessionStore"
+			"keyStore" | "logger" | "grantPolicy" | "refreshTokenFamilyRevocation" | "userSessionStore"
 		>,
 		ProviderDeps<"clientRepository"> {
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
-	/** What the oauth module provides of `oauth {}`; the configuration is read when absent. */
-	readonly oauthTokenSettings?: OAuthTokenSettings;
+	/**
+	 * What the oauth module provides of `oauth {}`: the access-token lifetimes
+	 * the grant mints within. Held to its contract here; that its lifetimes are
+	 * within the ones core resolves from the configuration is the caller's to
+	 * hold. Within `createApp`, boot holds every slot to them before any
+	 * reader runs. A caller building the grant by hand, outside `createApp`,
+	 * passes the value `checkOAuthTokenSettings(value, config)` answers.
+	 */
+	readonly oauthTokenSettings: OAuthTokenSettings;
 	/**
 	 * The module's own section, `oauth-token-exchange {}`: the deepest actor
-	 * chain accepted before the current actor is added, 3 when unset. Without
-	 * it, a configuration still setting `oauth.tokenExchange` is refused.
+	 * chain accepted before the current actor is added, 3 when unset.
 	 */
 	readonly section?: { readonly maxActorChainDepth?: number };
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
-	// Fail closed: a bound written at the old path, read as unset, would widen
-	// the actor chain to the default.
-	if (
-		deps.section === undefined &&
-		(deps.config as { oauth?: { tokenExchange?: unknown } }).oauth?.tokenExchange !== undefined
-	) {
-		throw new RangeError(
-			"createTokenExchangeGrant: oauth.tokenExchange has moved to oauth-token-exchange; " +
-				"hand maxActorChainDepth as section.maxActorChainDepth " +
-				"(oauth-token-exchange.maxActorChainDepth), and remove oauth.tokenExchange.",
-		);
-	}
-	// The lifetimes are read once, when the grant is built, so a hand-built
-	// configuration the resolver refuses fails the composition instead of every
-	// request after client authentication. The oauth module's settings when present
-	// (checked whole), else the configuration through core's reader.
-	const { defaultExpiresIn, maxExpiresIn } =
-		deps.oauthTokenSettings === undefined
-			? resolveAccessTokenLifetime(deps.config)
-			: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).accessTokenLifetime;
+	// The lifetimes are read once, when the grant is built, so a hand-built value
+	// that breaks the contract fails the composition instead of every request after
+	// client authentication. Checked whole, never member by member.
+	const { defaultExpiresIn, maxExpiresIn } = checkOAuthTokenSettings(
+		deps.oauthTokenSettings,
+	).accessTokenLifetime;
 
 	return {
 		// Deny by absence: token exchange mints a fresh credential from one the client
@@ -129,31 +116,31 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 
 			const validators = resolveValidators(tokenExchangeValidatorResolver, request);
 			if (isRefusal(validators)) return validators;
+			// The issued token's `iat`, fixed before the presented tokens are validated,
+			// so a subject revocation recorded after any watermark read here covers it.
+			const issuedAt = Math.floor(Date.now() / 1000);
 			const subject = await validateSubject(deps, ctx, request, validators.subjectValidator);
 			if (isRefusal(subject)) return subject;
-			const { subjectValidated, issuedConfirmation } = subject;
+			const { subjectValidated, subjectBindings, issuedConfirmation } = subject;
 
-			// The refresh-token family rule — this grant's, not the validator's;
-			// see `familyRefusal`. After the sender-constraint matrices, so a cheap
-			// refusal still short-circuits ahead of the store read.
-			const subjectFamilyRefusal = await familyRefusal(deps, "subject", subjectValidated);
-			if (subjectFamilyRefusal) return subjectFamilyRefusal;
-			// The session rule, beside it: see `sessionRefusal`.
-			const subjectSessionRefusal = await sessionRefusal(deps, "subject", subjectValidated);
-			if (subjectSessionRefusal) return subjectSessionRefusal;
+			// After the sender-constraint matrices, so a cheap refusal still
+			// short-circuits ahead of the store reads.
+			const subjectStanding = await standingRefusal(
+				deps,
+				"subject",
+				subjectValidated,
+				subjectBindings,
+			);
+			if (subjectStanding) return subjectStanding;
 
 			const actor = await validateActor(deps, ctx, request, validators.actorValidator);
 			if (isRefusal(actor)) return actor;
-			const { actorValidated } = actor;
-			if (actorValidated) {
-				// The subject's family rule, applied to the actor: a revoked actor credential
-				// must not be recorded in `act` as a live delegation.
-				const actorFamilyRefusal = await familyRefusal(deps, "actor", actorValidated);
-				if (actorFamilyRefusal) return actorFamilyRefusal;
-				// And the session rule: an actor whose session a logout ended is
-				// not a live delegation either.
-				const actorSessionRefusal = await sessionRefusal(deps, "actor", actorValidated);
-				if (actorSessionRefusal) return actorSessionRefusal;
+			const { actorValidated, actorBindings } = actor;
+			if (actorValidated && actorBindings) {
+				// A revoked or logged-out actor credential must not be recorded in
+				// `act` as a live delegation.
+				const actorStanding = await standingRefusal(deps, "actor", actorValidated, actorBindings);
+				if (actorStanding) return actorStanding;
 			}
 			const delegationRefused = delegationRefusal(deps, client, subjectValidated, actorValidated);
 			if (delegationRefused) return delegationRefused;
@@ -177,13 +164,26 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (isRefusal(issued)) return issued;
 			const { audienceForToken } = issued;
 
+			// The last check before minting: the token is minted only from presented
+			// tokens that still pass after the policy.
+			const presentedAgain = await presentedTokensRefusal(
+				deps,
+				request,
+				validators,
+				{ subjectValidated, subjectBindings },
+				{ actorValidated, actorBindings },
+			);
+			if (presentedAgain) return presentedAgain;
+
 			const issuedToken = await issueAccessToken(
 				deps,
 				ctx,
 				{ defaultExpiresIn, maxExpiresIn },
 				{
+					issuedAt,
 					client,
 					subjectValidated,
+					subjectBindings,
 					actorValidated,
 					grantedScope,
 					audienceForToken,
@@ -193,7 +193,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			);
 			if (isRefusal(issuedToken)) return issuedToken;
 
-			return tokenAnswer(issuedToken.accessToken);
+			return tokenAnswer(issuedToken.accessToken, issuedToken.expiresIn);
 		},
 	};
 }
@@ -276,33 +276,14 @@ async function applyGrantPolicy(
 		});
 		if (reading.verdict === "invalid") return { result: reading.result };
 		if (reading.verdict === "deny") {
-			// RFC 6749 §5.2 makes `error` 1*NQSCHAR: a malformed policy code is logged
-			// (sanitised) and replaced by `invalid_request`, RFC 8693 §2.2.2's code for a
-			// request refused by policy. `/oauth/token` checks too; this covers a
-			// composition dispatching the handler from its own route.
-			let error = reading.decision.error;
-			if (!isWellFormedErrorCode(error)) {
-				deps.logger?.warn(
-					{ error: auditErrorText(String(error)) },
-					"token_exchange_policy_deny_error_malformed",
-				);
-				error = "invalid_request";
-			}
-			// A JavaScript policy can return anything as its description; one
-			// that is empty or not a string is not sent (RFC 6749 A.8 makes the
-			// field 1*NQSCHAR), and nothing replaces it, as `/oauth/token` answers
-			// the other grants' deny.
-			const description = reading.decision.errorDescription;
-			// `400` whatever the code (RFC 6749 §5.2), as core's
-			// `evaluateGrantPolicy` answers the other grants' deny.
+			// Core's answer to a deny, as on every grant: a code that is not a
+			// token-endpoint code is `invalid_request`, also RFC 8693 §2.2.2's code for
+			// a request refused by policy.
 			return {
-				result: {
-					status: 400,
-					error,
-					...(typeof description === "string" && description !== ""
-						? { errorDescription: description }
-						: {}),
-				},
+				result: policyDenied(reading, deps.logger, {
+					grantType: GRANT_TYPE,
+					hook: deps.grantPolicy,
+				}),
 			};
 		}
 		const { decision } = reading;
@@ -359,6 +340,63 @@ async function applyGrantPolicy(
 }
 
 /**
+ * The presented tokens held again, at the end of the exchange, to what can change
+ * while it runs: each token's validator (its denylist and watermark, when it
+ * reads them), then its family and session rules over the bindings the first
+ * validation read, which are the ones minted. In the first check's order, with
+ * its refusals and outages; `null` when both tokens still pass.
+ */
+async function presentedTokensRefusal(
+	deps: TokenExchangeDependencies,
+	{ subjectToken, actorToken }: Pick<TokenRequest, "subjectToken" | "actorToken">,
+	{
+		subjectValidator,
+		actorValidator,
+	}: {
+		readonly subjectValidator: ExchangeTokenValidator;
+		readonly actorValidator: ExchangeTokenValidator | null | undefined;
+	},
+	subject: {
+		readonly subjectValidated: ValidatedToken;
+		readonly subjectBindings: ReportedBindings;
+	},
+	actor: {
+		readonly actorValidated: ValidatedToken | null;
+		readonly actorBindings: ReportedBindings | null;
+	},
+): Promise<GrantHandlerResult | null> {
+	const subjectRefused =
+		(await revalidate(deps, "subject", subjectToken, subjectValidator)) ??
+		(await standingRefusal(deps, "subject", subject.subjectValidated, subject.subjectBindings));
+	if (subjectRefused) return subjectRefused;
+	const { actorValidated, actorBindings } = actor;
+	if (actorToken === null || !actorValidator || !actorValidated || !actorBindings) return null;
+	return (
+		(await revalidate(deps, "actor", actorToken, actorValidator)) ??
+		(await standingRefusal(deps, "actor", actorValidated, actorBindings))
+	);
+}
+
+/**
+ * A validated token's standing with this grant: the family rule, then the
+ * session rule. The refusal, or `null` when the token passes both.
+ */
+async function standingRefusal(
+	deps: Pick<
+		TokenExchangeDependencies,
+		"refreshTokenFamilyRevocation" | "userSessionStore" | "logger"
+	>,
+	role: "subject" | "actor",
+	validated: ValidatedToken,
+	bindings: ReportedBindings,
+): Promise<GrantHandlerResult | null> {
+	return (
+		(await familyRefusal(deps, role, bindings)) ??
+		(await sessionRefusal(deps, role, validated, bindings))
+	);
+}
+
+/**
  * The refresh-token family rule for a `subject_token` or `actor_token`: the
  * refusal, or `null` when the token passes. This grant owns it (the built-in
  * validator does not read `refreshTokenFamilyRevocation`), so a revoked family
@@ -379,9 +417,8 @@ async function applyGrantPolicy(
 async function familyRefusal(
 	deps: Pick<TokenExchangeDependencies, "refreshTokenFamilyRevocation" | "logger">,
 	role: "subject" | "actor",
-	validated: ValidatedToken,
+	{ familyId }: ReportedBindings,
 ): Promise<GrantHandlerResult | null> {
-	const familyId = reportedFamily(validated);
 	if (familyId === undefined) return null;
 	const revocation = deps.refreshTokenFamilyRevocation;
 	if (!revocation) {
@@ -433,8 +470,8 @@ async function sessionRefusal(
 	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "logger">,
 	role: "subject" | "actor",
 	validated: ValidatedToken,
+	{ sid }: ReportedBindings,
 ): Promise<GrantHandlerResult | null> {
-	const sid = validated.sid ? validated.sid : undefined;
 	const store = deps.userSessionStore;
 	if (sid === undefined || store === undefined) return null;
 	let live: boolean;

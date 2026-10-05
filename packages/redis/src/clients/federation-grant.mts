@@ -64,6 +64,15 @@ export interface FederationGrantHashFields {
 	readonly revokedBy?: string;
 	readonly revokedAt?: string;
 	/**
+	 * The rotation budget's window: when it opened, in epoch milliseconds, and
+	 * the rotations taken in it. Written together by `takeRotation`, the count
+	 * alone by `refundRotation`, kept by every other write but `activate`,
+	 * which removes both. A record without both, or with either not a whole
+	 * number (the count not below 0), has no window.
+	 */
+	readonly rotationsSince?: string;
+	readonly rotationsCount?: string;
+	/**
 	 * The credential's extension. Written or removed in the step that writes
 	 * the credential, and removed with it. Opens only beside the exact
 	 * credential it was written with.
@@ -150,6 +159,22 @@ export interface NoteFederationGrantRefreshFailureInput {
 	readonly retryAfterSeconds: number | undefined;
 	/** For `rejected`: the upstream's error code. `undefined` otherwise. */
 	readonly upstreamCode: string | undefined;
+}
+
+export interface TakeFederationGrantRotationInput {
+	readonly nowMs: number;
+	readonly expectedVersion: number;
+	/** The most rotations one window admits: a whole number of at least 1. */
+	readonly limit: number;
+	/** How long a window lasts, in whole milliseconds above 0. */
+	readonly windowMs: number;
+}
+
+export interface RefundFederationGrantRotationInput {
+	readonly nowMs: number;
+	readonly expectedVersion: number;
+	/** When the window the take counted into opened, in epoch milliseconds. */
+	readonly sinceMs: number;
 }
 
 /** What one read returns: the record and its credential as they were at one instant. */
@@ -258,6 +283,28 @@ export interface FederationGrantStoreClient {
 	noteRefreshFailure(
 		grantKey: string,
 		input: NoteFederationGrantRefreshFailureInput,
+	): Promise<FederationGrantHashFields | null>;
+	/**
+	 * Takes one rotation from the budget of an `active` grant at
+	 * `expectedVersion`, before its stored expiry: a new window
+	 * (`rotationsSince` = `nowMs`, `rotationsCount` = 1) when there is none or
+	 * `nowMs` is at or past its end, else one more below `limit`, else refused.
+	 * Bumps the version once in the same step and touches no other field. A
+	 * bound below its minimum is refused.
+	 */
+	takeRotation(
+		grantKey: string,
+		input: TakeFederationGrantRotationInput,
+	): Promise<FederationGrantHashFields | null>;
+	/**
+	 * Gives back one rotation of an `active` grant at `expectedVersion`, before
+	 * its stored expiry, whose window opened at `sinceMs` and holds at least
+	 * one: `rotationsCount` - 1 and the version bumped, nothing else touched.
+	 * The bump makes it once per attempt.
+	 */
+	refundRotation(
+		grantKey: string,
+		input: RefundFederationGrantRotationInput,
 	): Promise<FederationGrantHashFields | null>;
 	/** Moves `lastUsedAt` forward, and never back. Writes nothing when there is no record. */
 	touch(grantKey: string, atMs: number): Promise<void>;

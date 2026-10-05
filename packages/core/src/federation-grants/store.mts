@@ -162,9 +162,9 @@ export interface FederationGrantStore {
 	 *   stored: a renewal never re-points a grant to another upstream account.
 	 *
 	 * Effects: `active`; authorization fields and credentials replaced whole;
-	 * the ineligibility marker cleared; the intent retired (no double
-	 * activation); `version` bumped; `lastUsedAt` kept. A refused activation
-	 * changes nothing.
+	 * the ineligibility marker and `rotations` cleared; the intent retired (no
+	 * double activation); `version` bumped; `lastUsedAt` kept. A refused
+	 * activation changes nothing.
 	 */
 	activate(input: {
 		readonly grantId: string;
@@ -181,7 +181,8 @@ export interface FederationGrantStore {
 	 * access token is never written); the marker is set, or cleared with `null`,
 	 * in the same write; `version` is bumped; the current intent is left alone,
 	 * so a background refresh cannot cost the user a reauthorization in
-	 * progress. Refused: an invalid date, a non-integer version, a non-finite
+	 * progress; `rotations` is kept, since the rotation it counts is the one
+	 * this write records. Refused: an invalid date, a non-integer version, a non-finite
 	 * issued lifetime or `judgedAgainst`, and a credential the store's own clock
 	 * already reclaimed (else the write would land beside a record the caller
 	 * next reads as `absent`).
@@ -246,6 +247,68 @@ export interface FederationGrantStore {
 		 * rounded into a match.
 		 */
 		readonly rowMs: number;
+		readonly now: Date;
+	}): Promise<FederationGrantWrite>;
+
+	/**
+	 * Takes one upstream refresh-token rotation from the grant's rotation
+	 * budget, before the upstream is asked. A rotation here is a refresh the
+	 * upstream may have acted on, whether or not it issued a new refresh
+	 * token. The grant must be `active`, at the caller's `version`, with `now`
+	 * before `expiresAt`. Then, in one atomic step against `rotations`:
+	 *
+	 * - none, a `since` that holds no instant, or `now` at or after
+	 *   `since + windowMs`: a new window, `{ since: now, count: 1 }`;
+	 * - else, `count` below `limit`: `count + 1`;
+	 * - else the budget is spent, and the write is refused.
+	 *
+	 * In the same step `version` is bumped, once, and the grant answered
+	 * carries the new one; nothing else is touched. Every later write of the
+	 * attempt, its give-back included, is guarded by that version, so one from
+	 * an earlier attempt can never land after a later take. A refused take
+	 * writes nothing and bumps nothing. Kept by `replaceCredentials`, reset by
+	 * `activate`.
+	 *
+	 * The window is fixed, not sliding: it opens at its first take, so any
+	 * `windowMs` that straddles two windows can hold up to twice `limit` takes.
+	 *
+	 * Bounds are checked before the record, and rejected with a `RangeError`, as
+	 * a `now` that is not a date is: a `limit` that is not a whole number of at
+	 * least `1` (`0` would still admit a window's first take), and a `windowMs`
+	 * that is not a positive finite number (one of `0` or less would reopen on
+	 * every take, NaN never). Every adapter applies the same rule, a Redis
+	 * script included.
+	 *
+	 * Clocks: a `now` behind `since` counts into the current window and opens
+	 * none, so an earlier clock fails closed. A replica whose clock is ahead
+	 * opens a window later than the others would, so for them it lasts longer.
+	 * A `now` far in the future holds the budget spent until real time passes
+	 * `since + windowMs`.
+	 */
+	takeRotation(input: {
+		readonly grantId: string;
+		readonly expectedVersion: number;
+		readonly limit: number;
+		readonly windowMs: number;
+		readonly now: Date;
+	}): Promise<FederationGrantWrite>;
+
+	/**
+	 * Gives back a rotation `takeRotation` took, for an attempt the upstream
+	 * definitely did not perform. A rotation here is a refresh the upstream
+	 * may have acted on, whether or not it issued a new refresh token. The
+	 * grant must be `active`, at the caller's `version` (the one the take left,
+	 * on the grant it answered), with `now` before `expiresAt`,
+	 * and `rotations.since` must be `since`, the window the take counted into,
+	 * with a `count` of at least one. Then, in one atomic step, `count - 1` and
+	 * `version` bumped; nothing else touched. The bump makes it once per
+	 * attempt: a second give-back at the same version is refused. A `now` or a
+	 * `since` that is not a date is a `RangeError`.
+	 */
+	refundRotation(input: {
+		readonly grantId: string;
+		readonly expectedVersion: number;
+		readonly since: Date;
 		readonly now: Date;
 	}): Promise<FederationGrantWrite>;
 

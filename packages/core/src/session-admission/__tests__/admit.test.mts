@@ -825,6 +825,31 @@ describe("step 3 — the subject", () => {
 			await admitSession(deps(), request({ claim: cookie({ user: { id: "user-2" } }) })),
 		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
 	});
+
+	it("reads deps.auditSink only to audit a mismatch: a getter that throws fails as a sink that throws — the answer stands, never a rejection", async () => {
+		let reads = 0;
+		const { logger, lines } = recordingLogger();
+		const throwing = {
+			...deps({ logger }),
+			get auditSink(): AuditSink {
+				reads++;
+				throw new Error("sink unreadable");
+			},
+		};
+		expect(await admitSession(throwing, request())).toMatchObject({ outcome: "admitted" });
+		expect(reads).toBe(0);
+		expect(
+			await admitSession(throwing, request({ claim: cookie({ user: { id: "user-2" } }) })),
+		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
+		expect(reads).toBe(1);
+		expect(lines).toEqual([
+			{
+				level: "warn",
+				message: "session_admission_subject_mismatch",
+				fields: { action: "test.use" },
+			},
+		]);
+	});
 });
 
 describe("step 4 — the revocation boundary", () => {
@@ -881,6 +906,32 @@ describe("step 4 — the revocation boundary", () => {
 				),
 				String(boundary),
 			).toMatchObject({ outcome: "admitted" });
+		}
+	});
+
+	it("compares in whole seconds, as verifyJwt compares the auth_time a token from the session carries", async () => {
+		// The boundary a tenth of a second into second T, with the default
+		// one-second allowance: every authTime in second T+1 is covered, as
+		// its auth_time is; the first one in T+2 is not.
+		const second = minutesAgo(5).getTime();
+		const boundary = new Date(second + 100);
+		for (const [offsetMs, outcome] of [
+			[1_101, "revoked"],
+			[1_500, "revoked"],
+			[1_999, "revoked"],
+			[2_000, "admitted"],
+			[2_500, "admitted"],
+		] as const) {
+			expect(
+				await admitSession(
+					deps({
+						userSessionStore: holding(session({ authTime: new Date(second + offsetMs) })),
+						subjectRevocation: revocationOf(async () => boundary),
+					}),
+					request(),
+				),
+				`authTime T+${offsetMs}ms`,
+			).toMatchObject({ outcome });
 		}
 	});
 
@@ -1486,6 +1537,50 @@ describe("step 5 — what a requirement answers is validated at the boundary", (
 		}
 	});
 
+	it("answers unavailable (the requirement's name), logged once at error, for an answer whose outcome or whenStillUnmet getter throws — never a rejection", async () => {
+		const throwing = (field: "outcome" | "whenStillUnmet") =>
+			field === "outcome"
+				? {
+						get outcome(): string {
+							throw new Error("outcome unreadable");
+						},
+					}
+				: {
+						outcome: "step_up",
+						get whenStillUnmet(): string {
+							throw new Error("whenStillUnmet unreadable");
+						},
+					};
+		for (const field of ["outcome", "whenStillUnmet"] as const) {
+			const { logger, lines } = recordingLogger();
+			let askedOther = 0;
+			const odd = met("odd", { admit: async () => throwing(field) as never });
+			const other = met("other", {
+				admit: async () => {
+					askedOther++;
+					return { outcome: "met" };
+				},
+			});
+			expect(
+				await admitSession(
+					deps({
+						requirements: resolverForTests([odd, other], { actions: TEST_ACTIONS }),
+						logger,
+					}),
+					request(),
+				),
+				field,
+			).toEqual({ outcome: "unavailable", store: "odd" });
+			expect(askedOther, field).toBe(0);
+			expect(lines, field).toHaveLength(1);
+			expect(lines[0], field).toMatchObject({
+				level: "error",
+				message: "session_admission_unavailable",
+				fields: { store: "odd", action: "test.use" },
+			});
+		}
+	});
+
 	it("hands the requirement the subject: the record's sub when one was read, else the claim's — undefined only on the code record's first read", async () => {
 		const seen: (string | undefined)[] = [];
 		const watching = met("watch", {
@@ -1591,7 +1686,7 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 		expect(seen).toBe("use");
 	});
 
-	it("the stores: deps.userSessionStore and deps.subjectRevocation are read once each, the record, the boundary and the step-up capability all off that one read", async () => {
+	it("the stores: deps.userSessionStore and deps.subjectRevocation are read once each, the record, the boundary and the step-up capability of both readings all off that one read", async () => {
 		let storeReads = 0;
 		let revocationReads = 0;
 		let boundaryAsked = 0;
@@ -1619,7 +1714,8 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 			},
 		};
 		expect(await admitSession(counting, request())).toMatchObject({ outcome: "admitted" });
-		expect(boundaryAsked).toBe(1);
+		// A requirement was asked: the boundary is read again after it answered.
+		expect(boundaryAsked).toBe(2);
 		expect(seen?.session?.secondFactorRecordable).toBe(true);
 		expect(storeReads).toBe(1);
 		expect(revocationReads).toBe(1);

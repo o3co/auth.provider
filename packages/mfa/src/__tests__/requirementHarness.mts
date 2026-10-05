@@ -28,6 +28,7 @@ import {
 	type MfaFactorRecord,
 	type MfaFactorResolver,
 	type MfaFactorStore,
+	type StoreGeneration,
 } from "@o3co/auth-provider-core";
 import { createMfaSealing } from "#/sealing.mjs";
 
@@ -107,11 +108,29 @@ export const factorRecord = (subject: string, kind = "totp", id = "f-1"): MfaFac
 	data: "sealed",
 });
 
-/** A factor store holding `records`, read by subject; its writes are a memory store's. */
-export const factorStoreHolding = (...records: MfaFactorRecord[]): MfaFactorStore => ({
-	...createMemoryMfaFactorStore(),
-	list: async (subject) => records.filter((record) => record.subject === subject),
-});
+/** The one generation a {@link factorStoreHolding} store answers for a subject's records. */
+const HELD = "held" as StoreGeneration;
+
+/**
+ * A factor store holding `records`, read by subject: `list` and
+ * `listVersioned` answer the same records, the latter at one generation
+ * while the subject holds any. Nothing written moves what it holds, so a
+ * conditional write against it is refused (`conflict`); its other writes are
+ * a memory store's, beside it.
+ */
+export const factorStoreHolding = (...records: MfaFactorRecord[]): MfaFactorStore => {
+	const held = (subject: string) => records.filter((record) => record.subject === subject);
+	return {
+		...createMemoryMfaFactorStore(),
+		list: async (subject) => held(subject),
+		listVersioned: async (subject) => {
+			const items = held(subject);
+			return { items, generation: items.length === 0 ? null : HELD };
+		},
+		createIf: async () => ({ outcome: "conflict" }),
+		removeIf: async () => ({ outcome: "conflict" }),
+	};
+};
 
 /** A factor store whose `list` cannot answer: an outage. */
 export const unreachableFactorStore = (): MfaFactorStore => ({
@@ -119,13 +138,16 @@ export const unreachableFactorStore = (): MfaFactorStore => ({
 	list: async () => {
 		throw new Error("factor store unreachable");
 	},
-	create: async () => {
+	listVersioned: async () => {
+		throw new Error("factor store unreachable");
+	},
+	createIf: async () => {
+		throw new Error("factor store unreachable");
+	},
+	removeIf: async () => {
 		throw new Error("factor store unreachable");
 	},
 	update: async () => {
-		throw new Error("factor store unreachable");
-	},
-	remove: async () => {
 		throw new Error("factor store unreachable");
 	},
 	removeAllForSubject: async () => {

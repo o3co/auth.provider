@@ -128,14 +128,17 @@ export interface MfaFirstBindingDistrusted {
  * admitted it: its `sid`, its subject, the `User` its cookie holds (core's
  * `cookieSessionUser`), its primary sign-in as admission's view holds
  * it — `undefined` without one, which any first-binding mark distrusts —
- * and the enrollment witness its login's `User` carried as admission's view
- * holds it, `undefined` when it recorded none.
+ * whether that sign-in was a federation's, and the enrollment witness its
+ * login's `User` carried as admission's view holds it, `undefined` when it
+ * recorded none.
  */
 export interface MfaCeremonySession {
 	readonly sid: string;
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
 	readonly authTimeMs: number | undefined;
+	/** Whether the session was signed in through a federation, as core's `sessionAuthentication` reads its record; `false` when that cannot be told. */
+	readonly federated: boolean;
 	readonly witness: "enrolled" | "not_enrolled" | "malformed" | undefined;
 	/**
 	 * Whether a second factor can be recorded on the session, as admission's
@@ -324,7 +327,22 @@ export type MfaEnrollmentRefusal =
 	 */
 	| { readonly outcome: "first_binding_closed"; readonly purpose: MfaTransaction["purpose"] }
 	/** The subject holds `mfa.maxFactorsPerSubject` records. */
-	| { readonly outcome: "factor_limit" };
+	| { readonly outcome: "factor_limit" }
+	/**
+	 * The factor is enrolled already: a record of the subject, of its kind,
+	 * answers the identity the binding would add (`MfaFactor.identity`).
+	 */
+	| { readonly outcome: "factor_duplicate" };
+
+/**
+ * The factor could not start its enrollment, or could not say whether the
+ * user may enroll it (`MfaEnrollableError`): an outage, never a refusal.
+ */
+export interface MfaEnrollmentFailed {
+	readonly outcome: "enrollment_failed";
+	readonly kind: string;
+	readonly cause: unknown;
+}
 
 /** An `enroll` transaction as the page names it next: its id, and the seconds it has left. */
 export interface MfaOpenedTransaction {
@@ -335,8 +353,7 @@ export interface MfaOpenedTransaction {
 export type MfaEnrollmentBeginOutcome =
 	| MfaEnrollmentRefusal
 	| MfaMailRefusal
-	/** The factor could not start its enrollment: an outage, never a refusal. */
-	| { readonly outcome: "enrollment_failed"; readonly kind: string; readonly cause: unknown }
+	| MfaEnrollmentFailed
 	| ({
 			readonly outcome: "begun";
 			readonly response: object;
@@ -351,6 +368,7 @@ export type MfaEnrollmentBeginOutcome =
 
 export type MfaEnrollmentCompleteOutcome = (
 	| MfaEnrollmentRefusal
+	| MfaEnrollmentFailed
 	| MfaFactorUnreadable
 	| { readonly outcome: "no_pending_enrollment" }
 	/**
@@ -363,38 +381,16 @@ export type MfaEnrollmentCompleteOutcome = (
 	| { readonly outcome: "spent" }
 	| ({
 			readonly outcome: "refused";
-			readonly reason: MfaRefusalReason | "duplicate";
+			readonly reason: MfaRefusalReason;
 			readonly attemptsRemaining: number;
 	  } & MfaCeremonySubject)
 	/**
-	 * Once this binding's factor was written, another record stood beside it
-	 * (`first_binding_conflict`), or the records could not be read again to
-	 * tell (`first_binding_unchecked`, with that outage). Its own was removed
-	 * — or, `standing` saying why, still stands after every try — and the
-	 * login starts again.
+	 * A first binding its read before the subject's lease let through, refused
+	 * by a record that may count found by its read under the lease: another
+	 * binding of the subject landed between the two. Nothing was written and
+	 * the transaction stands; answered as `first_binding_closed`, and audited.
 	 */
-	| ({
-			readonly outcome: "first_binding_conflict";
-			readonly standing: { readonly cause: unknown } | undefined;
-	  } & MfaCeremonySubject)
-	/**
-	 * Another factor, once written, found its subject's records past
-	 * `mfa.maxFactorsPerSubject` — or could not read them again to tell
-	 * (`listing`) — and could not be removed after every try: it stands, and
-	 * is usable.
-	 */
-	| ({
-			readonly outcome: "factor_standing";
-			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
-			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
-			readonly listing: MfaStoreOutage | undefined;
-			readonly standing: { readonly cause: unknown };
-	  } & MfaCeremonySubject)
-	| ({
-			readonly outcome: "first_binding_unchecked";
-			readonly listing: MfaStoreOutage;
-			readonly standing: { readonly cause: unknown } | undefined;
-	  } & MfaCeremonySubject)
+	| ({ readonly outcome: "first_binding_conflict" } & MfaCeremonySubject)
 	| ({
 			readonly outcome: "enrolled";
 			/** What the login persisted, as the store answered it at consumption. */
@@ -442,7 +438,7 @@ export type MfaStepUpOutcome =
  */
 export interface MfaCeremonyKit {
 	readonly factors: MfaFactorResolver;
-	readonly factorStore: MfaFactorStore;
+	readonly factorStore: Pick<MfaFactorStore, "update">;
 	readonly sealing: MfaSealing;
 	readonly mailSender: MailSender | undefined;
 	readonly witness: MfaEnrollmentWitness;
@@ -578,4 +574,9 @@ export interface MfaCeremonyKit {
 	readonly answerable: (value: unknown) => value is object;
 	/** `factor.amrFor(data)` when it names at least one value and only values the factor declares; else `undefined`. */
 	readonly declaredAmr: (factor: MfaFactor, data: MfaFactorData) => readonly string[] | undefined;
+	/**
+	 * `factor.identity(data)` when it answers a non-empty string; else
+	 * `undefined`, a duplicate of none — a throw too, which is said (`identityFailed`).
+	 */
+	readonly identityOf: (factor: MfaFactor, data: MfaFactorData) => string | undefined;
 }

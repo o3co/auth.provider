@@ -46,7 +46,7 @@ import {
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
 import { factorRecord, unreachableFactorStore } from "./requirementHarness.mjs";
-import { recordingAuditSink } from "./routesHarness.mjs";
+import { addRecord, recordingAuditSink } from "./routesHarness.mjs";
 
 afterEach(disposeAll);
 
@@ -96,7 +96,7 @@ const REQUIREMENT_UNAVAILABLE = {
 /** A factor store holding one TOTP factor for alice. */
 async function aliceEnrolled() {
 	const store = createMemoryMfaFactorStore();
-	await store.create(factorRecord(ALICE.id, "totp"));
+	await addRecord(store, factorRecord(ALICE.id, "totp"));
 	return store;
 }
 

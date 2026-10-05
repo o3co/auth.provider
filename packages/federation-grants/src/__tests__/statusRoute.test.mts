@@ -333,20 +333,20 @@ describe("the status route — who may ask", () => {
 		}
 	});
 
-	it("refuses a client whose allowlist is not a list as an unknown client", async () => {
+	it("refuses a client whose allowlist is not a list, as a rejected lookup: 503", async () => {
 		// `ClientRepository` is a port, and a deployment's own repository may
 		// answer anything. On a comma-joined string, `.includes` would let
 		// `"calendar,mail"` allow `"cal"`. The client authentication in front
 		// of this route reads clients through core's client-record boundary,
-		// which refuses such a record: the client is unknown, and nothing is
+		// which refuses such a record: the lookup rejects, and nothing is
 		// allowed.
 		const h = harness();
 		await h.seed();
 		h.world.allowedConnections = "calendar,mail" as unknown as readonly string[];
 
 		const response = await ask(h);
-		expect(response.status).toBe(401);
-		expect(response.body.error).toBe("invalid_client");
+		expect(response.status).toBe(503);
+		expect(response.body.error).toBe("temporarily_unavailable");
 	});
 
 	it("reads an absent allowlist as allowing nothing", async () => {
@@ -558,6 +558,142 @@ describe("the status route — the boundary and the backstop", () => {
 
 		expect(response.status).toBe(503);
 		expect(response.body.error_description).toBe("storage");
+	});
+});
+
+describe("the status route — a stored date that holds no instant", () => {
+	/** The harness's store, its `inspect` answering the grant with `field` set to `value`. */
+	const storingDate = async (h: ReturnType<typeof harness>, field: string, value: unknown) => {
+		const inspect = h.store.inspect.bind(h.store);
+		vi.spyOn(h.store, "inspect").mockImplementation(async (...args) => {
+			const inspection = await inspect(...args);
+			return inspection === null
+				? null
+				: ({ ...inspection, grant: { ...inspection.grant, [field]: value } } as typeof inspection);
+		});
+	};
+
+	it.each([
+		["createdAt", "2026-01-01T00:00:00.000Z"],
+		["createdAt", new Date(Number.NaN)],
+		["authorizedAt", null],
+		["expiresAt", "never"],
+		["lastUsedAt", "yesterday"],
+	])(
+		"answers a grant whose stored %s is %o 503 storage, as retrieval does",
+		async (field, value) => {
+			const h = harness();
+			await h.seed();
+			await storingDate(h, field, value);
+
+			const response = await ask(h);
+
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "storage",
+			});
+		},
+	);
+
+	it.each([
+		["a string", "2026-01-01T00:00:00.000Z"],
+		["an Invalid Date", new Date(Number.NaN)],
+	])(
+		"answers a live grant whose stored consent instant is %s 503 storage, before the status is judged",
+		async (_label, at) => {
+			const h = harness();
+			await h.seed();
+			const inspect = h.store.inspect.bind(h.store);
+			vi.spyOn(h.store, "inspect").mockImplementation(async (...args) => {
+				const inspection = await inspect(...args);
+				if (inspection === null || inspection.grant.status !== "active") return inspection;
+				return {
+					...inspection,
+					grant: { ...inspection.grant, consent: { ...inspection.grant.consent, at: at as Date } },
+				};
+			});
+
+			const response = await ask(h);
+
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "storage",
+			});
+		},
+	);
+
+	it.each([
+		[
+			"revoked",
+			async (h: ReturnType<typeof harness>) => {
+				await h.seed();
+				await h.store.revoke(GRANT_ID, "operator", h.world.now);
+			},
+		],
+		[
+			"expired",
+			async (h: ReturnType<typeof harness>) => {
+				await h.seed({ expiresAt: new Date(h.world.now.getTime() + 1000) });
+				h.world.now = new Date(h.world.now.getTime() + 2000);
+			},
+		],
+	])(
+		"describes a %s grant to a de-allowlisted client with 200, its unreadable dates left out rather than refused",
+		async (_label, arrange) => {
+			const h = harness();
+			await arrange(h);
+			h.world.allowedConnections = [];
+			const inspect = h.store.inspect.bind(h.store);
+			vi.spyOn(h.store, "inspect").mockImplementation(async (...args) => {
+				const inspection = await inspect(...args);
+				return inspection === null
+					? null
+					: ({
+							...inspection,
+							grant: {
+								...inspection.grant,
+								authorizedAt: "never",
+								expiresAt: new Date(Number.NaN),
+								lastUsedAt: "yesterday",
+							},
+						} as unknown as typeof inspection);
+			});
+
+			const response = await ask(h);
+
+			expect(response.status).toBe(200);
+			expect(response.body.status).toBe(_label);
+			for (const field of ["authorized_at", "expires_at", "last_used_at"]) {
+				expect(response.body, field).not.toHaveProperty(field);
+			}
+		},
+	);
+
+	it("answers a revoked grant whose stored creation date holds no instant 503 storage too", async () => {
+		const h = harness();
+		await h.seed();
+		await h.store.revoke(GRANT_ID, "subject", h.world.now);
+		await storingDate(h, "createdAt", 0);
+
+		const response = await ask(h);
+
+		expect(response.status).toBe(503);
+		expect(response.body.error_description).toBe("storage");
+	});
+
+	it("reads a stored date through the Date intrinsic, not a method the value overrides", async () => {
+		const h = harness();
+		await h.seed();
+		const createdAt = new Date(h.world.now.getTime());
+		Object.defineProperty(createdAt, "toISOString", { value: () => "not-a-date" });
+		await storingDate(h, "createdAt", createdAt);
+
+		const response = await ask(h);
+
+		expect(response.status).toBe(200);
+		expect(response.body.created_at).toBe(h.world.now.toISOString());
 	});
 });
 

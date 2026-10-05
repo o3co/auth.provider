@@ -20,8 +20,9 @@
  * 2026-09-17-federation-grants-offline-delegation, D9.
  *
  *   1. cache directives and correlation, ahead of anything that can answer;
- *   2. the throttle, keyed on the IP, BEFORE client authentication, so that
- *      repeated unauthenticated hits are bounded before a repository lookup;
+ *   2. when a limiter is wired, the throttle, keyed on the IP, BEFORE client
+ *      authentication, so that repeated unauthenticated hits are bounded
+ *      before a repository lookup;
  *   3. content type and body parsing, then `parserRefusals`;
  *   4. client authentication, before domain validation, so an unauthenticated
  *      caller learns nothing about a grant, not even from a refusal's timing;
@@ -96,9 +97,8 @@ export const noStore: RequestHandler = (_req, res, next) => {
 
 /**
  * The last handler under the mount path: every method and sub-path this
- * package does not serve. The body carries no description, so on a disabled
- * deployment it names no feature to an unauthenticated caller. See README, "A
- * disabled deployment names no feature and runs nothing".
+ * package does not serve. The body carries no description: it names no
+ * feature to an unauthenticated caller.
  */
 export const notFound: RequestHandler = (_req, res) => {
 	res.status(404).json({ error: "not_found" });
@@ -112,7 +112,11 @@ const transport = (): Router => {
 	return router;
 };
 
-/** What a deployment that has not enabled the feature mounts. */
+/**
+ * A 404 under the mount path that names no feature, for a composition root
+ * that mounts the path itself while the feature is off; the module mounts
+ * nothing then.
+ */
 export function createDisabledFederationGrantRouter(): Router {
 	const router = express.Router();
 	router.use(transport());
@@ -234,8 +238,11 @@ export interface FederationGrantRouterOptions extends FederationGrantTokenHandle
 	 * `connect_uri` is built on.
 	 */
 	readonly issuer: string;
-	/** The routes' budget; its own `failMode` is the outage policy. */
-	readonly rateLimiter: RateLimiter;
+	/**
+	 * The routes' budget; its own `failMode` is the outage policy. Absent, the
+	 * routes are not throttled.
+	 */
+	readonly rateLimiter?: RateLimiter;
 	/** Where a `private_key_jwt` assertion's single-use `jti` is recorded. */
 	readonly replaySeenSet?: ReplaySeenSet;
 }
@@ -287,15 +294,17 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	// `deniedDescription` keeps this route's throttle speaking the same
 	// vocabulary as core's — `rate_limited` with the reason `provider` — rather
 	// than whichever budget name the limiter adapter reports.
-	router.use(
-		createRateLimitGuard({
-			limiter: options.rateLimiter,
-			tag: FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
-			deniedDescription: "provider",
-			...(options.logger === undefined ? {} : { logger: options.logger }),
-			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
-		}),
-	);
+	if (options.rateLimiter !== undefined) {
+		router.use(
+			createRateLimitGuard({
+				limiter: options.rateLimiter,
+				tag: FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
+				deniedDescription: "provider",
+				...(options.logger === undefined ? {} : { logger: options.logger }),
+				...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+			}),
+		);
+	}
 	router.use(supportedContentType);
 	router.use(withinBodyLimit);
 	router.use(express.json({ limit: BODY_LIMIT }));

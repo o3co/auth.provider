@@ -21,6 +21,7 @@ import {
 	measureSecretEntropyBytes,
 	type ReplicaSafetyDeclaration,
 	type SessionCookiePolicy,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import session from "express-session";
 import { z } from "zod";
@@ -39,12 +40,13 @@ const SECRET = { configKey: "session-store.secret", envVar: "SESSION_STORE_SECRE
 /**
  * The schema of `session-store {}`, the module's own section: the session
  * cookie (its name, lifetime and attributes, and the secret that signs it)
- * and the store express-session keeps sessions in. Strict at the top; a
- * storage type's own block passes through to the store factory. A section
- * that yields no session cookie is refused naming the key
- * (`sessionCookieRefusal`), and a secret below the 256-bit floor naming the
- * secret. The secret has no default: absent, the module refuses to build
- * (`requireSecret`).
+ * and the store express-session keeps sessions in. Strict at every level:
+ * the storage types are the store factory's built-in ones, which the route
+ * registers itself, so `storage` declares the one block a type takes options
+ * from (`redis`) and refuses any other. A section that yields no session
+ * cookie is refused naming the key (`sessionCookieRefusal`), and a secret
+ * below the 256-bit floor naming the secret. The secret has no default:
+ * absent, the module refuses to build (`requireSecret`).
  */
 export const sessionStoreConfigSchema = z
 	.object({
@@ -60,9 +62,9 @@ export const sessionStoreConfigSchema = z
 			})
 			.optional(),
 		name: z.string(),
-		// Positive and bounded: 0 (an exported-but-empty variable) makes
-		// express-session emit an already-expired cookie.
-		maxAge: z.coerce.number().int().positive().max(MAX_DURATION_MS),
+		// Positive and bounded: 0 makes express-session emit an
+		// already-expired cookie.
+		maxAge: wholeNumberInRangeFromEnv(1, MAX_DURATION_MS),
 		secure: coerceBooleanFromEnv,
 		sameSite: z.enum(["lax", "none", "strict"]),
 		domain: z.string().nullable(),
@@ -73,7 +75,7 @@ export const sessionStoreConfigSchema = z
 				// `storage[storage.type]` into the store factory.
 				redis: z.object({ url: z.string(), password: z.string().optional() }).strict().optional(),
 			})
-			.passthrough(),
+			.strict(),
 	})
 	.strict()
 	.superRefine((section, ctx) => {

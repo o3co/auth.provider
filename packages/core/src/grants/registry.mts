@@ -55,6 +55,9 @@ export class GrantRegistryError extends Error {
  * - `register(name, handler)` throws on duplicate (no silent overwrite).
  * - `replace(name, handler)` is the explicit override path.
  * - `freeze()` is the activation boundary; after it, mutation throws.
+ * - A `null` handler is a grant switched off by its module's settings: it
+ *   claims the grant type (`has`, a second `register` is a duplicate) and is
+ *   absent from `get` and `entries`, as a grant type nothing registered is.
  *
  * Only the boot planner mutates it, from each module's `contributes.grants`
  * and `overrides.grants`. Not in `@o3co/auth-provider-core`'s main entry
@@ -63,10 +66,10 @@ export class GrantRegistryError extends Error {
  * @internal
  */
 export class GrantRegistry {
-	private handlers = new Map<string, GrantHandler>();
+	private handlers = new Map<string, GrantHandler | null>();
 	private frozen = false;
 
-	register(grantType: string, handler: GrantHandler): void {
+	register(grantType: string, handler: GrantHandler | null): void {
 		if (this.frozen) {
 			throw new GrantRegistryError({
 				reason: "frozen",
@@ -84,7 +87,7 @@ export class GrantRegistry {
 		this.handlers.set(grantType, handler);
 	}
 
-	replace(grantType: string, handler: GrantHandler): void {
+	replace(grantType: string, handler: GrantHandler | null): void {
 		if (this.frozen) {
 			throw new GrantRegistryError({
 				reason: "frozen",
@@ -111,17 +114,25 @@ export class GrantRegistry {
 		this.frozen = true;
 	}
 
+	/** Whether the grant type is registered: with a handler, or switched off (`null`). */
+	has(grantType: string): boolean {
+		return this.handlers.has(grantType);
+	}
+
+	/** The grant type's handler; `undefined` when it is unregistered or switched off. */
 	get(grantType: string): GrantHandler | undefined {
-		return this.handlers.get(grantType);
+		return this.handlers.get(grantType) ?? undefined;
 	}
 
 	/**
 	 * Every registered handler, in registration order; a replaced one keeps
-	 * the place of the handler it replaced. Readable before and after
-	 * `freeze()`. Boot's `grants` collector hands this to the
-	 * `grantHandlerResolver` it projects.
+	 * the place of the handler it replaced, and a switched-off grant type is
+	 * left out. Readable before and after `freeze()`. Boot's `grants`
+	 * collector hands this to the `grantHandlerResolver` it projects.
 	 */
-	entries(): IterableIterator<readonly [string, GrantHandler]> {
-		return this.handlers.entries();
+	*entries(): IterableIterator<readonly [string, GrantHandler]> {
+		for (const [grantType, handler] of this.handlers) {
+			if (handler !== null) yield [grantType, handler] as const;
+		}
 	}
 }

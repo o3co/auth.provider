@@ -17,7 +17,9 @@
 /**
  * The presented tokens: each token type backed by a validator, the subject and the
  * actor validated, and each held to the sender constraint this request proves. A
- * validator that cannot reach an answer is a `503`, never a verdict on the token.
+ * validator that cannot reach an answer is a `503`, never a verdict on the token;
+ * one whose answer names a family or a session other than as a string is a failed
+ * validation.
  */
 
 import {
@@ -33,7 +35,7 @@ import {
 	type TokenExchangeValidatorResolver,
 	type ValidatedToken,
 } from "@o3co/auth-provider-core";
-import { invalidRequest } from "./answers.mjs";
+import { invalidRequest, isRefusal } from "./answers.mjs";
 import type { TokenRequest } from "./tokenRequest.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 
@@ -92,30 +94,16 @@ export async function validateSubject(
 ): Promise<
 	| {
 			readonly subjectValidated: ValidatedToken;
+			readonly subjectBindings: ReportedBindings;
 			readonly issuedConfirmation: Confirmation | undefined;
 	  }
 	| GrantHandlerResult
 > {
-	let subjectValidated: ValidatedToken | null;
-	try {
-		subjectValidated = await subjectValidator.validate(subjectToken, { role: "subject" });
-	} catch (err) {
-		// A validator throws only when it cannot reach an answer (a keystore or
-		// revocation store down; core's `ExchangeTokenValidator` contract): a logged 503,
-		// never a verdict on the token.
-		(deps.logger ?? consoleLogger).error(
-			{ role: "subject", err: loggableError(err) },
-			"token_exchange_validation_unavailable",
-		);
-		return {
-			result: {
-				status: 503,
-				error: "temporarily_unavailable",
-				errorDescription: "subject_token validation store unavailable",
-			},
-		};
-	}
-	if (!subjectValidated) return invalidRequest("subject_token validation failed");
+	const subjectAnswer = await askValidator(deps, "subject", subjectToken, subjectValidator);
+	if (isRefusal(subjectAnswer)) return subjectAnswer;
+	const subjectValidated = subjectAnswer.validated;
+	const subjectBindings = readBindings(subjectValidated);
+	if (subjectBindings === undefined) return invalidRequest("subject_token validation failed");
 
 	// Sender constraint (RFC 9449 §5, RFC 8705 §4) through core's
 	// `matchConfirmation`, as the refresh grant does. Without it a stolen DPoP- or
@@ -160,7 +148,7 @@ export async function validateSubject(
 	// yields a bound token, which cannot help an attacker already holding a bearer
 	// token.
 	const issuedConfirmation = ownedConfirmation(ctx.tokenBinding);
-	return { subjectValidated, issuedConfirmation };
+	return { subjectValidated, subjectBindings, issuedConfirmation };
 }
 
 /** The actor token, when one was sent, validated and held to the sender constraint; else `null`. */
@@ -169,25 +157,23 @@ export async function validateActor(
 	ctx: GrantContext,
 	{ actorToken }: Pick<TokenRequest, "actorToken">,
 	actorValidator: ExchangeTokenValidator | null | undefined,
-): Promise<{ readonly actorValidated: ValidatedToken | null } | GrantHandlerResult> {
+): Promise<
+	| {
+			readonly actorValidated: ValidatedToken | null;
+			/** The actor's bindings; `null` with no actor. */
+			readonly actorBindings: ReportedBindings | null;
+	  }
+	| GrantHandlerResult
+> {
 	let actorValidated: ValidatedToken | null = null;
+	let actorBindings: ReportedBindings | null = null;
 	if (actorToken !== null && actorValidator) {
-		try {
-			actorValidated = await actorValidator.validate(actorToken, { role: "actor" });
-		} catch (err) {
-			(deps.logger ?? consoleLogger).error(
-				{ role: "actor", err: loggableError(err) },
-				"token_exchange_validation_unavailable",
-			);
-			return {
-				result: {
-					status: 503,
-					error: "temporarily_unavailable",
-					errorDescription: "actor_token validation store unavailable",
-				},
-			};
-		}
-		if (!actorValidated) return invalidRequest("actor_token validation failed");
+		const answer = await askValidator(deps, "actor", actorToken, actorValidator);
+		if (isRefusal(answer)) return answer;
+		actorValidated = answer.validated;
+		const read = readBindings(actorValidated);
+		if (read === undefined) return invalidRequest("actor_token validation failed");
+		actorBindings = read;
 	}
 
 	// The actor is held to the same sender-constraint rule: `buildActClaim` records
@@ -219,14 +205,76 @@ export async function validateActor(
 			);
 		}
 	}
-	return { actorValidated };
+	return { actorValidated, actorBindings };
 }
 
 /**
- * The family a validator reports, or `undefined`. An empty `familyId` is absent
- * for the family rule and issuance alike, so no token inherits a `family_id: ""`
- * that no revocation could reach.
+ * The presented token's validator asked again, answered as the first asking
+ * was: `null` when it still accepts the token, else the same refusal or `503`.
+ * Its answer gates only; the bindings and claims read at the first asking stay
+ * the ones checked and minted.
  */
-export function reportedFamily(validated: ValidatedToken): string | undefined {
-	return validated.familyId ? validated.familyId : undefined;
+export async function revalidate(
+	deps: Pick<GrantDependencies, "logger">,
+	role: "subject" | "actor",
+	token: string,
+	validator: ExchangeTokenValidator,
+): Promise<GrantHandlerResult | null> {
+	const answer = await askValidator(deps, role, token, validator);
+	return isRefusal(answer) ? answer : null;
+}
+
+/**
+ * The validator's answer for a presented token, or the refusal: `null` is a
+ * failed validation, and a throw (a keystore or revocation store down; core's
+ * `ExchangeTokenValidator` contract) a logged `503`, never a verdict on the token.
+ */
+async function askValidator(
+	deps: Pick<GrantDependencies, "logger">,
+	role: "subject" | "actor",
+	token: string,
+	validator: ExchangeTokenValidator,
+): Promise<{ readonly validated: ValidatedToken } | GrantHandlerResult> {
+	let validated: ValidatedToken | null;
+	try {
+		validated = await validator.validate(token, { role });
+	} catch (err) {
+		(deps.logger ?? consoleLogger).error(
+			{ role, err: loggableError(err) },
+			"token_exchange_validation_unavailable",
+		);
+		return {
+			result: {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: `${role}_token validation store unavailable`,
+			},
+		};
+	}
+	return validated ? { validated } : invalidRequest(`${role}_token validation failed`);
+}
+
+/**
+ * The family and the session a validator reports, each read once off its
+ * answer: a non-empty string, or `undefined` for unset (an empty string
+ * included, so no token inherits a `family_id: ""` that no revocation could
+ * reach). The family rule, the session rule and issuance read these, never
+ * the answer again.
+ */
+export interface ReportedBindings {
+	readonly familyId: string | undefined;
+	readonly sid: string | undefined;
+}
+
+/**
+ * The answer's bindings, or `undefined` when either is present but not a
+ * string. That is no answer: the stores key families and sessions by string,
+ * and introspection and the session rule read any other claim as none, so the
+ * check and the minted token would both miss it.
+ */
+function readBindings(validated: ValidatedToken): ReportedBindings | undefined {
+	const { familyId, sid } = validated;
+	if (familyId !== undefined && typeof familyId !== "string") return undefined;
+	if (sid !== undefined && typeof sid !== "string") return undefined;
+	return { familyId: familyId || undefined, sid: sid || undefined };
 }

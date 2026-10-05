@@ -20,19 +20,20 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
-	BootError,
 	createApp,
 	type Module,
 	moduleReferences,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
+import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
+import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
-	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -158,6 +159,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// Which adapter fills each slot: the composition root's own section,
 	// read before the modules are chosen.
 	ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_ATTEMPT_COUNTER: "redis",
 	ADAPTERS_USER_SESSION_STORES: "redis",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
 	// The replay seen-set behind private_key_jwt client authentication.
@@ -210,10 +212,40 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX: "fg:",
 
 	// --- multi-factor authentication ----------------------------------
-	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
-	// module reads and the template declares `mfa` from (ADR
-	// 2026-09-28-session-admission).
+	// The template's switch, `mfaMode`: off here, so the parse below
+	// layers nothing of MFA. The rest is what the switch installs — the MFA
+	// package's settings, foundation's Store-backed factor store's — and is
+	// covered by the substitutions it brings (`liveSubstitutions`).
 	MFA_MODE: "off",
+	MFA_ENCRYPTION_KEY: "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+	MFA_PAGE_URL: "/mfa",
+	MFA_STORE_TIMEOUT_MS: "5000",
+	MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF: "when-mail",
+	MFA_TOTP_FACTOR_ENABLED: "true",
+	MFA_TOTP_FACTOR_ALGORITHM: "SHA1",
+	MFA_TOTP_FACTOR_DIGITS: "6",
+	MFA_TOTP_FACTOR_PERIOD: "30",
+	MFA_TOTP_FACTOR_WINDOW: "1",
+	MFA_TOTP_FACTOR_ISSUER: "auth.test",
+	MFA_RECOVERY_CODE_FACTOR_ENABLED: "true",
+	MFA_RECOVERY_CODE_FACTOR_COUNT: "10",
+	MFA_EMAIL_FACTOR_ENABLED: "false",
+	MFA_EMAIL_FACTOR_ADDS_MFA: "false",
+	MFA_EMAIL_FACTOR_CODE_TTL_SECONDS: "600",
+	FOUNDATION_MFA_FACTOR_STORE_LIST_URL: "https://users.example.com/mfa/factors/list",
+	FOUNDATION_MFA_FACTOR_STORE_CREATE_URL: "https://users.example.com/mfa/factors/create",
+	FOUNDATION_MFA_FACTOR_STORE_UPDATE_URL: "https://users.example.com/mfa/factors/update",
+	FOUNDATION_MFA_FACTOR_STORE_DELETE_URL: "https://users.example.com/mfa/factors/delete",
+
+	// --- mail ---------------------------------------------------------
+	// The SMTP sender's section, which the template installs outside
+	// development and builds only where something sends.
+	STANDARD_SMTP_MAIL_SENDER_HOST: "smtp.example.com",
+	STANDARD_SMTP_MAIL_SENDER_PORT: "587",
+	STANDARD_SMTP_MAIL_SENDER_SECURE: "starttls",
+	STANDARD_SMTP_MAIL_SENDER_USER: "mailer",
+	STANDARD_SMTP_MAIL_SENDER_PASSWORD: "mailer-password",
+	STANDARD_SMTP_MAIL_SENDER_FROM: "auth@example.com",
 	// …and the Redis stores' key namespaces, which the Redis package's two MFA
 	// modules read.
 	REDIS_MFA_FACTOR_STORE_KEY_PREFIX: "tenant-a:mfaf:",
@@ -401,7 +433,46 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"removed: the Redis code repository uses the shared redis-clients connection; only captured — set at all, it fails boot",
 	CLIENT_CODE_PASSWORD:
 		"removed: the Redis code repository uses the shared redis-clients connection; only captured — set at all, it fails boot",
+	ENDPOINTS_MFA_URL:
+		"renamed MFA_PAGE_URL, and only captured — set alone, or to another value, it fails boot where MFA is installed",
+	MFA_TOTP_ENABLED:
+		"renamed MFA_TOTP_FACTOR_ENABLED, and only captured — set alone, or to another value, it fails boot where MFA is installed",
+	MFA_TOTP_ISSUER:
+		"renamed MFA_TOTP_FACTOR_ISSUER, and only captured — set alone, or to another value, it fails boot where MFA is installed",
 };
+
+/**
+ * The federation variables `config/application.conf` documents on lines it
+ * ships commented out — a key an operator binds by uncommenting it — as the
+ * string an operator would supply. They are not live substitutions, so they
+ * are not in `DOCUMENTED_ENV`; the federation cases below bind them as their
+ * comments write them (`commentedFederationBindings`).
+ */
+const COMMENTED_FEDERATION_ENV: Readonly<Record<string, string>> = {
+	CORE_FEDERATIONS_GOOGLE_SESSION_DOMAIN: ".example.com",
+	CORE_FEDERATIONS_GOOGLE_AUTH_CALLBACK_URL: "https://app.example.com/auth/callback",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_URL: "https://app.example.com/",
+	CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS: "false",
+};
+
+/**
+ * Each `# <key> = ${?CORE_FEDERATIONS_<NAME>_…}` line of the shipped
+ * `config/application.conf`, uncommented as an operator's layer above it:
+ * `core.federations.<name>.<key> = ${?…}`.
+ */
+function commentedFederationBindings(): string {
+	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
+	return readFileSync(applicationConfPath, "utf8")
+		.split("\n")
+		.flatMap((line) => {
+			const match =
+				/^\s*#\s*([A-Za-z]+) = \$\{\?(CORE_FEDERATIONS_([A-Z0-9]+)_[A-Z0-9_]+)\}\s*$/.exec(line);
+			if (match === null) return [];
+			const [, key, variable, name] = match as unknown as [string, string, string, string];
+			return [`core.federations.${name.toLowerCase()}.${key} = \${?${variable}}`];
+		})
+		.join("\n");
+}
 
 /**
  * The provider environment `o3co/auth`'s `tests/docker-compose.yml` sets,
@@ -449,6 +520,7 @@ const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
 	OAUTH_GRANTS_SESSION_ENABLED: "true",
 	OAUTH_SESSION_ENABLED: "true",
+	MFA_MODE: "off",
 };
 
 /** The template's own files for `configEnv`, under `operatorLayer` — HOCON an operator adds above them — when given. */
@@ -480,32 +552,90 @@ const FEDERATION_STORES = Object.fromEntries(
 	].map((key) => [key, {}]),
 );
 
+/** What core handed a federation type for one entry: its callback, and its own keys as the type's schema parsed them. */
+interface Dispatched {
+	readonly callbackURL: string;
+	readonly entry: Readonly<Record<string, unknown>>;
+}
+
+/** A federation type's declaration, as far as this suite reads it. */
+interface TypeDeclaration {
+	readonly factory: (deps: unknown, instance: { name: string } & Dispatched) => unknown;
+}
+
 /**
- * The shipped layers under `env`, as `app.mts` hands them to boot, and the
- * configuration boot parsed: phase one for what the composition expects of
- * session admission, phase two resolved over the reference of every package
- * the template's modules come from (the template's own and core's) and
- * parsed once by `createApp` — no bridge on the way.
- * No module is loaded unless `modules` names one: the parse is what this
+ * `module`, a federation type module, with each type's factory recording what
+ * core handed it into `dispatched`, by the entry's name, before building the
+ * provider as the module does. The schema, the parse and the provider are the
+ * module's own.
+ */
+function recordingDispatch(module: Module, dispatched: Map<string, Dispatched>): Module {
+	const contributes = module.contributes as {
+		readonly federationTypes: Readonly<Record<string, TypeDeclaration>>;
+	};
+	const federationTypes = Object.fromEntries(
+		Object.entries(contributes.federationTypes).map(([type, declaration]) => [
+			type,
+			{
+				...declaration,
+				factory: (deps: unknown, instance: { name: string } & Dispatched) => {
+					dispatched.set(instance.name, {
+						callbackURL: instance.callbackURL,
+						entry: instance.entry,
+					});
+					return declaration.factory(deps, instance);
+				},
+			},
+		]),
+	);
+	return { ...module, contributes: { ...contributes, federationTypes } } as Module;
+}
+
+/**
+ * The upstream the documented OIDC federation's issuer names. Its type
+ * discovers the issuer at boot, so the module is handed this fake's `fetch`
+ * rather than the network. Made once per file.
+ */
+let oidcUpstream: Promise<FakeIdp> | undefined;
+const documentedOidcUpstream = (): Promise<FakeIdp> => {
+	oidcUpstream ??= createFakeIdp({
+		issuer: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_ISSUER as string,
+		discovery: true,
+		clientId: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_CLIENT_ID as string,
+	});
+	return oidcUpstream;
+};
+
+/**
+ * The shipped layers under `env`, as `app.mts` hands them to boot, booted
+ * with the federation types the template bundles: phase one for what the
+ * composition expects of session admission, phase two resolved over the
+ * reference of every package the template's modules come from (the
+ * template's own and core's) and parsed once by `createApp` — no bridge on
+ * the way. Core dispatches each enabled federation to its type, which parses
+ * the entry with its own schema; `dispatched` is what each type was handed.
+ * No other module is loaded unless `modules` names one: the parse is what this
  * suite asks about, and each key it reads is one core's schema declares, or
  * the section of a module it loads.
  */
-async function bootParsed(
+async function bootDispatched(
 	env: Record<string, string>,
 	configEnv = "production",
 	operatorLayer?: string,
 	modules: readonly Module[] = [],
-): Promise<AppConfig> {
+): Promise<{ readonly parsed: AppConfig; readonly dispatched: ReadonlyMap<string, Dispatched> }> {
 	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
 	const switches = readSwitches(own);
+	const dispatched = new Map<string, Dispatched>();
+	const upstream = await documentedOidcUpstream();
 	const handle = await createApp({
-		modules: [...modules],
+		modules: [
+			recordingDispatch(googleFederationTypeModule(), dispatched),
+			recordingDispatch(oidcFederationTypeModule({ fetch: upstream.fetch }), dispatched),
+			...modules,
+		],
 		bootstrapComponents: {
-			config: resolveForBoot(
-				own,
-				buildModules(switches, { environment: configEnv }),
-				expectedSessionRequirements(switches),
-			),
+			config: resolveForBoot(own, buildModules(switches, { environment: configEnv }), switches),
 			pathResolver: (s: string) => s,
 			...FEDERATION_STORES,
 		} as never,
@@ -513,7 +643,17 @@ async function bootParsed(
 	const parsed = handle.components.config;
 	await handle.dispose();
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
-	return parsed;
+	return { parsed, dispatched };
+}
+
+/** The configuration boot parsed, as {@link bootDispatched} boots it. */
+async function bootParsed(
+	env: Record<string, string>,
+	configEnv = "production",
+	operatorLayer?: string,
+	modules: readonly Module[] = [],
+): Promise<AppConfig> {
+	return (await bootDispatched(env, configEnv, operatorLayer, modules)).parsed;
 }
 
 /** `session-store {}` as the session store's module parses it. */
@@ -586,11 +726,18 @@ function documentedInReadme(path: string = readmePath): Set<string> {
 /**
  * The substitutions of the template's own layers, and of the `reference.conf`
  * of every package the template loads a module from under the documented
- * environment (core's among them).
+ * environment in production (core's among them) — and under it with MFA
+ * installed, its factors in the Store, which brings the MFA package's and
+ * foundation's.
  */
 function liveSubstitutions(): Set<string> {
 	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
-	const references = moduleReferences(buildModules(readShippedSwitches(DOCUMENTED_ENV)));
+	const references = [
+		DOCUMENTED_ENV,
+		{ ...DOCUMENTED_ENV, MFA_MODE: "required", ADAPTERS_MFA_FACTOR_STORE: "store" },
+	].flatMap((env) =>
+		moduleReferences(buildModules(readShippedSwitches(env), { environment: "production" })),
+	);
 	return new Set([
 		...references.flatMap((reference) => [...substitutionsIn(fileURLToPath(reference))]),
 		...substitutionsIn(fileURLToPath(templateReference())),
@@ -658,9 +805,9 @@ describe("the shipped config boots with every documented override supplied as a 
 			maxConcurrentFetches: 4,
 			cacheMaxAgeMs: 60000,
 		});
-		// ADR 2026-09-25-multi-factor-authentication. The mode is read before
-		// boot, by the template, and handed to no module here.
-		expect(readMfaMode(readShippedSwitches(DOCUMENTED_ENV))).toBe("off");
+		// The MFA switch is read before boot, by the template; off, it hands
+		// boot no `mfa` section.
+		expect(readShippedSwitches(DOCUMENTED_ENV).mfaMode).toBe("off");
 		expect(config).not.toHaveProperty("mfa");
 		expect(config).not.toHaveProperty("endpoints.mfa");
 		expect(readShippedSwitches(DOCUMENTED_ENV).adapters).toMatchObject({
@@ -671,6 +818,133 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(sections["redis-mfa-transaction-store"]?.keyPrefix).toBe("tenant-a:mfat:");
 		// A comma-separated string becomes a list of origins, trimmed.
 		expect(http.cors.allowedOrigins).toEqual(["https://app.example.com", "http://localhost:5173"]);
+	});
+
+	describe("the federations' variables, read by each federation's type", () => {
+		it("hands each enabled federation's type the entry its documented variables set", async () => {
+			const { dispatched } = await bootDispatched(DOCUMENTED_ENV);
+			expect(Object.fromEntries(dispatched)).toEqual({
+				google: {
+					callbackURL: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CALLBACK_URL,
+					entry: {
+						clientId: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_ID,
+						clientSecret: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET,
+						redirectAllowlist: [],
+						accessType: "online",
+					},
+				},
+				oidc: {
+					callbackURL: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_CALLBACK_URL,
+					entry: {
+						issuer: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_ISSUER,
+						clientId: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_CLIENT_ID,
+						clientSecret: DOCUMENTED_ENV.CORE_FEDERATIONS_OIDC_CLIENT_SECRET,
+						scopes: ["openid", "profile", "email"],
+						redirectAllowlist: [],
+					},
+				},
+			});
+		});
+
+		it("reads the Google keys the configuration documents commented out, bound as their comments write them", async () => {
+			const { dispatched } = await bootDispatched(
+				{ ...DOCUMENTED_ENV, ...COMMENTED_FEDERATION_ENV },
+				"production",
+				commentedFederationBindings(),
+			);
+			expect(dispatched.get("google")?.entry).toEqual({
+				clientId: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_ID,
+				clientSecret: DOCUMENTED_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET,
+				redirectAllowlist: [],
+				accessType: "online",
+				sessionDomain: COMMENTED_FEDERATION_ENV.CORE_FEDERATIONS_GOOGLE_SESSION_DOMAIN,
+				authCallbackUrl: COMMENTED_FEDERATION_ENV.CORE_FEDERATIONS_GOOGLE_AUTH_CALLBACK_URL,
+				clientUrl: COMMENTED_FEDERATION_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_URL,
+				requireAuthorizationResponseIss: false,
+			});
+			// `toEqual` passes a key present as `undefined`: no variable binds
+			// `endSessionEndpoint`, so the entry must not carry the key at all.
+			expect(dispatched.get("google")?.entry).not.toHaveProperty("endSessionEndpoint");
+		});
+
+		it("hands the Google type no key the documented variables leave unset, not even as undefined", async () => {
+			const { dispatched } = await bootDispatched(DOCUMENTED_ENV);
+			const entry = dispatched.get("google")?.entry;
+			expect(entry).toBeDefined();
+			for (const key of [
+				"sessionDomain",
+				"authCallbackUrl",
+				"clientUrl",
+				"requireAuthorizationResponseIss",
+				"endSessionEndpoint",
+			]) {
+				expect(entry, key).not.toHaveProperty(key);
+			}
+		});
+
+		it("binds every variable the configuration documents commented out", () => {
+			expect(
+				commentedFederationBindings()
+					.match(/\$\{\?[A-Z0-9_]+\}/g)
+					?.sort(),
+			).toEqual(
+				Object.keys(COMMENTED_FEDERATION_ENV)
+					.map((name) => `\${?${name}}`)
+					.sort(),
+			);
+		});
+
+		/** The entry the Google type was handed under `variables`, the commented keys bound. */
+		const googleEntryUnder = async (variables: Record<string, string>) =>
+			(
+				await bootDispatched(
+					{ ...DOCUMENTED_ENV, ...variables },
+					"production",
+					commentedFederationBindings(),
+				)
+			).dispatched.get("google")?.entry;
+
+		for (const [supplied, expected] of [
+			["true", true],
+			["TRUE", true],
+			["1", true],
+			["false", false],
+			["False", false],
+			[" false ", false],
+			["0", false],
+		] as const) {
+			it(`CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS=${JSON.stringify(supplied)} reads as ${expected}`, async () => {
+				const entry = await googleEntryUnder({
+					CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS: supplied,
+				});
+				expect(entry?.requireAuthorizationResponseIss).toBe(expected);
+			});
+		}
+
+		it("refuses CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS exported empty or misspelt, naming the key, rather than turning the check off", async () => {
+			for (const supplied of ["", "no", "off", "ture"]) {
+				await expect(
+					googleEntryUnder({
+						CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS: supplied,
+					}),
+					supplied,
+				).rejects.toThrow(/core\.federations\.google\.requireAuthorizationResponseIss/);
+			}
+		});
+
+		it("reads CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE as offline or online, exactly", async () => {
+			for (const supplied of ["offline", "online"]) {
+				expect(
+					(await googleEntryUnder({ CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE: supplied }))?.accessType,
+				).toBe(supplied);
+			}
+			for (const supplied of ["", "Online", "offine", "true"]) {
+				await expect(
+					googleEntryUnder({ CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE: supplied }),
+					supplied,
+				).rejects.toThrow(/core\.federations\.google\.accessType/);
+			}
+		});
 	});
 
 	describe("HTTP_CORS_ALLOWED_ORIGINS", () => {
@@ -782,7 +1056,7 @@ describe("the shipped config boots with every documented override supplied as a 
 	});
 
 	it("reads MFA_MODE=off before boot, where the shipped configuration expects no session requirement", async () => {
-		expect(readMfaMode(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }))).toBe("off");
+		expect(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }).mfaMode).toBe("off");
 		const parsed = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: "off" });
 		expect(parsed.core?.sessionRequirements).toEqual({ expected: [] });
 	});
@@ -907,25 +1181,19 @@ describe("the shipped config boots with every documented override supplied as a 
 			});
 		}
 
-		it("refuses MFA_MODE that is none of the three before boot, naming mfa.mode", async () => {
+		it("refuses MFA_MODE that is none of the three before boot, naming mfaMode", async () => {
 			const env = { ...DOCUMENTED_ENV, MFA_MODE: "on" };
-			expect(() => expectedSessionRequirements(readShippedSwitches(env))).toThrow(
-				new RangeError('mfa.mode must be "off", "optional" or "required"'),
-			);
-			await expect(bootParsed(env)).rejects.toThrow(/mfa\.mode/);
+			expect(() => readShippedSwitches(env)).toThrow(RangeError);
+			await expect(bootParsed(env)).rejects.toThrow(/mfaMode/);
 		});
 
 		for (const mode of ["optional", "required"] as const) {
-			it(`refuses MFA_MODE=${mode} at boot, the template installing no MFA module: session-requirement-missing, naming mfa`, async () => {
-				const err = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: mode }).then(
-					() => undefined,
-					(caught: unknown) => caught,
-				);
-				expect(err).toBeInstanceOf(BootError);
-				expect((err as BootError).reason).toBe("session-requirement-missing");
-				expect((err as BootError).details).toMatchObject({
-					configKey: "core.sessionRequirements.expected",
-					missing: ["mfa"],
+			it(`reads MFA_MODE=${mode} as the switch that installs MFA, expecting mfa`, () => {
+				const switches = readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: mode });
+				expect(switches.mfaMode).toBe(mode);
+				expect(expectedSessionRequirements(switches)).toEqual({
+					expected: ["mfa"],
+					secondFactorAuthority: "mfa",
 				});
 			});
 		}

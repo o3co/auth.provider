@@ -49,6 +49,7 @@ import {
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
 import {
+	addRecord,
 	beginLogin,
 	freezeClock,
 	mfaPost,
@@ -181,7 +182,7 @@ describe("GET /session/mfa/factors", () => {
 			version: 0,
 			data: "opaque",
 		};
-		await built.factorStore.create(older);
+		await addRecord(built.factorStore, older);
 		await seedTotp(built.factorStore, BOB.id);
 
 		const res = await list(agent);
@@ -480,6 +481,7 @@ describe("POST /session/mfa/factors/rename", () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
 		const listed = vi.spyOn(built.factorStore, "list");
+		const versioned = vi.spyOn(built.factorStore, "listVersioned");
 
 		for (const path of ["/factors/rename", "/factors/remove"]) {
 			const res = await agent
@@ -488,6 +490,7 @@ describe("POST /session/mfa/factors/rename", () => {
 			expect(res.status, path).toBe(403);
 		}
 		expect(listed).not.toHaveBeenCalled();
+		expect(versioned).not.toHaveBeenCalled();
 	});
 });
 
@@ -516,7 +519,7 @@ describe("POST /session/mfa/factors/remove", () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
 		const set = await seedFactor(built.factorStore, "recovery_code", recoverySet(2).data);
-		const removed = vi.spyOn(built.factorStore, "remove");
+		const removed = vi.spyOn(built.factorStore, "removeIf");
 		const marked = vi.spyOn(built.users, "markMfaEnrolled");
 
 		const res = await remove(agent, totp.record.id);
@@ -632,11 +635,13 @@ describe("POST /session/mfa/factors/remove", () => {
 	it("carries on as removed when the store removed the record and then failed: 200, audited, the witness cleared", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
-		const removeFor = built.factorStore.remove.bind(built.factorStore);
-		vi.spyOn(built.factorStore, "remove").mockImplementationOnce(async (subject, id) => {
-			await removeFor(subject, id);
-			throw new Error("timed out after the write");
-		});
+		const removeFor = built.factorStore.removeIf.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "removeIf").mockImplementationOnce(
+			async (subject, id, expected) => {
+				await removeFor(subject, id, expected);
+				throw new Error("timed out after the write");
+			},
+		);
 		const marked = vi.spyOn(built.users, "markMfaEnrolled");
 
 		const res = await remove(agent, totp.record.id);
@@ -651,7 +656,7 @@ describe("POST /session/mfa/factors/remove", () => {
 		const { agent, totp } = await signedIn(built);
 		await seedFactor(built.factorStore, "recovery_code", recoverySet(2).data);
 		const read = built.factorStore.list.bind(built.factorStore);
-		const removed = vi.spyOn(built.factorStore, "remove");
+		const removed = vi.spyOn(built.factorStore, "removeIf");
 		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
 			if (removed.mock.calls.length > 0) throw new Error("factor store unreachable");
 			return read(subject);
@@ -714,7 +719,7 @@ describe("POST /session/mfa/factors/remove", () => {
 	it("answers 503 when the factor store cannot remove, logged once, writing no witness", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
-		vi.spyOn(built.factorStore, "remove").mockRejectedValue(new Error("down"));
+		vi.spyOn(built.factorStore, "removeIf").mockRejectedValue(new Error("down"));
 		const marked = vi.spyOn(built.users, "markMfaEnrolled");
 
 		const res = await remove(agent, totp.record.id);
@@ -808,11 +813,13 @@ describe("the subject's factor-set writes, one at a time", () => {
 		const { agent, totp } = await signedIn(built);
 		const other = await seedTotp(built.factorStore);
 		const held = gate();
-		const removeFor = built.factorStore.remove.bind(built.factorStore);
-		vi.spyOn(built.factorStore, "remove").mockImplementationOnce(async (subject, id) => {
-			await held.wait();
-			return removeFor(subject, id);
-		});
+		const removeFor = built.factorStore.removeIf.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "removeIf").mockImplementationOnce(
+			async (subject, id, expected) => {
+				await held.wait();
+				return removeFor(subject, id, expected);
+			},
+		);
 		const store = built.transactionStore;
 		const acquire = store.acquireSubjectLease.bind(store);
 		vi.spyOn(store, "acquireSubjectLease").mockImplementation(async (subject, request) => {
@@ -963,14 +970,13 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
 		const clock = monotonicClock();
-		const read = built.factorStore.list.bind(built.factorStore);
-		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
-		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
-			// Slow once the lease is held: the read under it leaves less than one Store timeout.
-			if (acquire.mock.calls.length > 0) clock.advance(FILLS_THE_LEASE);
+		const read = built.factorStore.listVersioned.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "listVersioned").mockImplementation(async (subject) => {
+			// Slow under the lease: the read leaves less than one Store timeout.
+			clock.advance(FILLS_THE_LEASE);
 			return read(subject);
 		});
-		const removed = vi.spyOn(built.factorStore, "remove");
+		const removed = vi.spyOn(built.factorStore, "removeIf");
 
 		const res = await remove(agent, totp.record.id);
 
@@ -984,16 +990,15 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 			const built = await composed();
 			const { agent, totp } = await signedIn(built);
 			const clock = monotonicClock();
-			const read = built.factorStore.list.bind(built.factorStore);
-			const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
-			vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
-				if (acquire.mock.calls.length > 0) clock.advance(FILLS_THE_LEASE);
+			const read = built.factorStore.listVersioned.bind(built.factorStore);
+			vi.spyOn(built.factorStore, "listVersioned").mockImplementation(async (subject) => {
+				clock.advance(FILLS_THE_LEASE);
 				return read(subject);
 			});
 			const releasing = vi.spyOn(built.transactionStore, "releaseSubjectLease");
 			if (release === "false") releasing.mockResolvedValue(false);
 			else releasing.mockRejectedValue(new Error("down"));
-			const removed = vi.spyOn(built.factorStore, "remove");
+			const removed = vi.spyOn(built.factorStore, "removeIf");
 
 			const res = await remove(agent, totp.record.id);
 
@@ -1033,10 +1038,11 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
 		const clock = monotonicClock();
-		const removeFor = built.factorStore.remove.bind(built.factorStore);
-		vi.spyOn(built.factorStore, "remove").mockImplementation(async (subject, id) => {
-			await removeFor(subject, id);
+		const removeFor = built.factorStore.removeIf.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "removeIf").mockImplementation(async (subject, id, expected) => {
+			const removed = await removeFor(subject, id, expected);
 			clock.advance(FILLS_THE_LEASE);
+			return removed;
 		});
 		const marked = vi.spyOn(built.users, "markMfaEnrolled");
 
@@ -1057,7 +1063,7 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
 		const clock = monotonicClock();
-		vi.spyOn(built.factorStore, "remove").mockImplementation(async () => {
+		vi.spyOn(built.factorStore, "removeIf").mockImplementation(async () => {
 			clock.advance(FILLS_THE_LEASE);
 			throw new Error("timed out");
 		});

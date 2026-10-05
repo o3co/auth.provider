@@ -19,13 +19,17 @@
 // write, the SSCAN-paged read, the batched UNLINK, and the migration fallback
 // that reaches records written before the index existed.
 
-import type { FederationTokens } from "@o3co/auth-provider-core";
+import { type FederationTokens, isStoreGeneration } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationTokenStore, type EncryptionConfig } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
+import { replayKeyOf } from "#/internal/replay-key.mjs";
+import { CLOCK_SKEW_MS } from "#/internal/write-deadline.mjs";
+import { FT_PRELUDE } from "#/ioredis/scripts/federation-tokens.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
-import { testRedis } from "./support/redis.mjs";
+import { serverClock, testRedis, until } from "./support/redis.mjs";
 
 let raw: Redis;
 
@@ -46,6 +50,7 @@ const tokens: FederationTokens = {
 	tokenType: undefined,
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 let suiteCounter = 0;
@@ -160,6 +165,7 @@ describe("mode=required over a real Redis", () => {
 		scope: "openid email",
 		// Included, so the round-trip pins this field too.
 		grantedScope: "openid email profile",
+		obtainedAt: undefined,
 	};
 	const makeEncrypted = () => makeStore(false, { mode: "required", key: encryptionKey });
 
@@ -172,7 +178,7 @@ describe("mode=required over a real Redis", () => {
 			expect(value).not.toContain(marker);
 		}
 		const record = JSON.parse(value) as Record<string, unknown>;
-		expect(Object.keys(record).sort()).toEqual(["c", "v"]);
+		expect(Object.keys(record).sort()).toEqual(["c", "g", "v"]);
 		expect(record.v).toBe(2);
 	});
 
@@ -184,7 +190,7 @@ describe("mode=required over a real Redis", () => {
 		expect(await store.get("sid-1", "github")).toEqual({ ...fullTokens, expiresAt: null });
 	});
 
-	it("drops a legacy per-field record on read — key and index member gone, null returned", async () => {
+	it("drops a legacy per-field record on read — key gone, index member kept, null returned", async () => {
 		const { keyPrefix, store } = makeEncrypted();
 		// A legacy per-field record, under the same key this store holds.
 		await raw.set(
@@ -203,7 +209,7 @@ describe("mode=required over a real Redis", () => {
 
 		expect(await store.get("sid-1", "google")).toBeNull();
 		expect(await raw.exists(`${keyPrefix}sid-1:google`)).toBe(0);
-		expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(0);
+		expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(1);
 		expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "github")).toBe(1);
 	});
 
@@ -216,16 +222,16 @@ describe("mode=required over a real Redis", () => {
 
 		expect(await store.get("sid-2", "google")).toBeNull();
 		expect(await raw.exists(`${keyPrefix}sid-2:google`)).toBe(0);
-		expect(await raw.exists(`${keyPrefix}idx:sid-2`)).toBe(0);
+		expect(await raw.sismember(`${keyPrefix}idx:sid-2`, "google")).toBe(1);
 		// The original is still readable under the key it was sealed for.
 		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
 	});
 });
 
-// `obtainedAt` is one optional field inside the sealed envelope: written only
-// when the record has one, read back as a fresh Date, absent as no key, and a
-// value this store would never write takes the same self-heal as any
-// unreadable record. The wrapper stays `v: 2`.
+// `obtainedAt` is one field inside the sealed envelope: written only when the
+// record has one, read back as a fresh Date, absent as `undefined` with the key
+// named, and a value this store would never write takes the same self-heal as
+// any unreadable record. The wrapper stays `v: 2`.
 describe("obtainedAt over a real Redis", () => {
 	const encryptionKey = Buffer.alloc(32, 7);
 	const obtainedAt = new Date(1_899_999_000_000);
@@ -243,27 +249,41 @@ describe("obtainedAt over a real Redis", () => {
 					? JSON.stringify({ v: 2, c: encryptTokenField(innerJson, encryptionKey, key) })
 					: `{"v":2,"p":${innerJson}}`;
 
-			it("round-trips obtainedAt through attach, update and get", async () => {
+			/** Replaces the live record of `(sid, google)` at its current generation. */
+			const replace = async (
+				store: ReturnType<typeof makeStore>["store"],
+				sid: string,
+				next: FederationTokens,
+			): Promise<void> => {
+				const read = await store.getVersioned(sid, "google");
+				if (read === null) throw new Error(`${sid}/google is not live`);
+				expect(await store.replaceIf(sid, "google", read.generation, next)).toMatchObject({
+					outcome: "updated",
+				});
+			};
+
+			it("round-trips obtainedAt through attach, replaceIf and get", async () => {
 				const { store } = makeStore(false, encryption);
 				await store.attach("sid-1", "google", { ...tokens, obtainedAt });
 				expect(await store.get("sid-1", "google")).toStrictEqual({ ...tokens, obtainedAt });
 
 				const later = new Date(obtainedAt.getTime() + 60_000);
-				await store.update("sid-1", "google", { ...tokens, obtainedAt: later });
+				await replace(store, "sid-1", { ...tokens, obtainedAt: later });
 				expect((await store.get("sid-1", "google"))?.obtainedAt).toStrictEqual(later);
 			});
 
-			it("a record without obtainedAt reads back with the key absent, not undefined", async () => {
+			it("a record without obtainedAt reads back with the key named, as undefined, never null", async () => {
 				const { store } = makeStore(false, encryption);
 				await store.attach("sid-1", "google", tokens);
 				const read = await store.get("sid-1", "google");
 				expect(read).toStrictEqual(tokens);
-				expect(Object.hasOwn(read ?? {}, "obtainedAt")).toBe(false);
+				expect(Object.hasOwn(read ?? {}, "obtainedAt")).toBe(true);
+				expect((await store.getVersioned("sid-1", "google"))?.value).toStrictEqual(tokens);
 
-				// An update without it removes a value an earlier write held.
+				// A replace without it removes a value an earlier write held.
 				await store.attach("sid-2", "google", { ...tokens, obtainedAt });
-				await store.update("sid-2", "google", tokens);
-				expect(Object.hasOwn((await store.get("sid-2", "google")) ?? {}, "obtainedAt")).toBe(false);
+				await replace(store, "sid-2", tokens);
+				expect(await store.get("sid-2", "google")).toStrictEqual(tokens);
 			});
 
 			it("hands out a copy: mutating either Date leaves the stored value", async () => {
@@ -284,7 +304,7 @@ describe("obtainedAt over a real Redis", () => {
 				>;
 				expect(record.v).toBe(2);
 				expect(Object.keys(record).sort()).toEqual(
-					encryption.mode === "required" ? ["c", "v"] : ["p", "v"],
+					encryption.mode === "required" ? ["c", "g", "v"] : ["g", "p", "v"],
 				);
 			});
 
@@ -303,7 +323,7 @@ describe("obtainedAt over a real Redis", () => {
 				["past the Date range", "8640000000000001"],
 				["before the Date range", "-8640000000000001"],
 			])(
-				"a corrupt obtainedAtMs (%s) self-heals: key and index member gone, null returned",
+				"a corrupt obtainedAtMs (%s) self-heals: key gone, index member kept, null returned",
 				async (_label, value) => {
 					const { keyPrefix, store } = makeStore(false, encryption);
 					await store.attach("sid-1", "github", tokens);
@@ -318,10 +338,617 @@ describe("obtainedAt over a real Redis", () => {
 
 					expect(await store.get("sid-1", "google")).toBeNull();
 					expect(await raw.exists(key)).toBe(0);
-					expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(0);
+					expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(1);
 					expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "github")).toBe(1);
 				},
 			);
 		});
 	}
+});
+
+// The conditional members over the wire: the generation in the wrapper, minted
+// into a record written without one, the deadline each conditional script
+// keeps, the index they never shrink, and the index the record never outlives.
+describe("conditional writes over a real Redis", () => {
+	const encryptionKey = Buffer.alloc(32, 7);
+	const makeEncrypted = () => makeStore(false, { mode: "required", key: encryptionKey });
+
+	/** The record at `key` rewritten as a replica without generations writes it: no `g`, `PX` `ttlMs`. */
+	const rewriteWithoutGeneration = async (key: string, ttlMs: number): Promise<string> => {
+		const { g: _g, ...rest } = JSON.parse((await raw.get(key)) as string) as Record<
+			string,
+			unknown
+		>;
+		const bytes = JSON.stringify(rest);
+		await raw.set(key, bytes, "PX", ttlMs);
+		return bytes;
+	};
+
+	const live = async (
+		store: ReturnType<typeof makeEncrypted>["store"],
+		sid: string,
+		name: string,
+	) => {
+		const read = await store.getVersioned(sid, name);
+		if (read === null) throw new Error(`${sid}/${name} is not live`);
+		return read;
+	};
+
+	it("keeps the generation in the wrapper, outside the ciphertext, and moves it on every write", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const record = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
+		expect(Object.keys(record).sort()).toEqual(["c", "g", "v"]);
+		expect(record.v).toBe(2);
+		const read = await live(store, "sid-1", "google");
+		expect(read.generation).toBe(record.g);
+		expect(isStoreGeneration(read.generation)).toBe(true);
+		expect(await store.replaceIf("sid-1", "google", read.generation, tokens)).toMatchObject({
+			outcome: "updated",
+		});
+		const after = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
+		expect(after.g).not.toBe(record.g);
+		expect(await store.get("sid-1", "google")).toEqual(tokens);
+	});
+
+	it("mints a generation into a record written without one, at its first versioned read, keeping its TTL", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		await rewriteWithoutGeneration(key, 600_000);
+		// A replica without generations still reads it.
+		expect(await store.get("sid-1", "google")).toEqual(tokens);
+		expect(JSON.parse((await raw.get(key)) as string)).not.toHaveProperty("g");
+
+		const read = await live(store, "sid-1", "google");
+		expect(isStoreGeneration(read.generation)).toBe(true);
+		expect(read.value).toEqual(tokens);
+		const stored = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
+		expect(stored.g).toBe(read.generation);
+		const pttl = await raw.pttl(key);
+		expect(pttl).toBeGreaterThan(0);
+		expect(pttl).toBeLessThanOrEqual(600_000);
+		// The minted generation is the record's now: read again, and written at.
+		expect((await live(store, "sid-1", "google")).generation).toBe(read.generation);
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, tokens);
+		expect(replaced.outcome).toBe("updated");
+	});
+
+	it("answers conflict to a conditional write against a record rewritten without a generation, and mints nothing", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		// A replica without generations rewrites the record after that read.
+		const bytes = await rewriteWithoutGeneration(key, 600_000);
+
+		expect(await store.replaceIf("sid-1", "google", read.generation, tokens)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await store.removeIf("sid-1", "google", read.generation)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await raw.get(key)).toBe(bytes);
+
+		const again = await live(store, "sid-1", "google");
+		expect(again.generation).not.toBe(read.generation);
+	});
+
+	it("a versioned read the driver sends again after a replacement written without a generation mints nothing, so a stale holder of its first mint meets conflict", async () => {
+		suiteCounter += 1;
+		const keyPrefix = `t291ft:${suiteCounter}:`;
+		const key = `${keyPrefix}sid-1:google`;
+		const { federationTokenStoreClient } = makeIoredisClients(raw);
+		// The first versioned read's command, recorded so it can be sent again as
+		// the driver does after a reconnect; its reply is lost.
+		let lostRead: unknown[] | undefined;
+		const client = new Proxy(federationTokenStoreClient, {
+			get(target, method, receiver) {
+				const member = Reflect.get(target, method, receiver) as unknown;
+				if (method !== "readVersioned" || typeof member !== "function") return member;
+				return async (...args: unknown[]) => {
+					const reply = await (member as (...a: unknown[]) => Promise<unknown>).apply(target, args);
+					if (lostRead !== undefined) return reply;
+					lostRead = args;
+					throw new Error("connection lost");
+				};
+			},
+		});
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client,
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix,
+			scanFallback: false,
+		});
+		await store.attach("sid-1", "google", tokens);
+		await rewriteWithoutGeneration(key, 600_000);
+
+		// 1. Read A mints a generation; its reply is lost.
+		await expect(store.getVersioned("sid-1", "google")).rejects.toThrow(/connection lost/);
+		if (lostRead === undefined) throw new Error("no versioned read sent");
+		// 2. Reader B obtains the generation A minted.
+		const stale = await live(store, "sid-1", "google");
+		expect(JSON.parse((await raw.get(key)) as string).g).toBe(stale.generation);
+		// 3. A replica without generations replaces the tokens.
+		const next = { ...tokens, accessToken: "at-linked" };
+		await store.attach("sid-1", "google", next);
+		const replacement = await rewriteWithoutGeneration(key, 600_000);
+		// 4. The driver sends A again.
+		const resent = (await (
+			federationTokenStoreClient.readVersioned as (...a: unknown[]) => Promise<unknown>
+		)(...lostRead)) as { raw: string; generation: string } | null;
+		expect(resent?.generation).not.toBe(stale.generation);
+		expect(await raw.get(key)).toBe(replacement);
+
+		expect(await store.replaceIf("sid-1", "google", stale.generation, tokens)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await store.removeIf("sid-1", "google", stale.generation)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await store.get("sid-1", "google")).toEqual(next);
+		// A read of its own mints a fresh generation into the replacement.
+		const fresh = await live(store, "sid-1", "google");
+		expect(fresh.value).toEqual(next);
+		expect(fresh.generation).not.toBe(stale.generation);
+	});
+
+	it("a versioned read past its deadline mints nothing; one on time keeps its mint under its replay key the declared clock skew past its deadline", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const bytes = await rewriteWithoutGeneration(key, 600_000);
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const now = await serverClock(() => raw)();
+		const read = (candidate: string, deadlineMs: number) =>
+			client.readVersioned(key, {
+				candidate,
+				deadlineMs,
+				replayKey: `${key}:w:${candidate}`,
+				clockSkewMs: CLOCK_SKEW_MS,
+			});
+
+		expect(await read("mint-late", now - 1)).toEqual({ raw: bytes, generation: "" });
+		expect(await raw.get(key)).toBe(bytes);
+		expect(await raw.exists(`${key}:w:mint-late`)).toBe(0);
+
+		const deadlineMs = now + 30_000;
+		const minted = await read("mint-1", deadlineMs);
+		expect(minted?.generation).toBe("mint-1");
+		expect(await raw.get(key)).toBe(minted?.raw);
+		expect(await raw.pexpiretime(`${key}:w:mint-1`)).toBe(deadlineMs + CLOCK_SKEW_MS + 1);
+		// A copy sent again while the record still carries the mint answers it, writing nothing.
+		expect(await read("mint-1", deadlineMs)).toEqual(minted);
+		// A record carrying a generation is read whatever the deadline, and nothing is written.
+		expect(await read("mint-2", now - 1)).toEqual(minted);
+		expect(await raw.exists(`${key}:w:mint-2`)).toBe(0);
+	});
+
+	it("mints a generation into a v2 record without one whatever the order of its fields, splicing it in before the bytes it read", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const { c } = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
+		const reordered = JSON.stringify({ c, v: 2 });
+		await raw.set(key, reordered, "PX", 600_000);
+
+		const read = await live(store, "sid-1", "google");
+		expect(read.value).toEqual(tokens);
+		expect(isStoreGeneration(read.generation)).toBe(true);
+		expect(await raw.get(key)).toBe(
+			`{"g":${JSON.stringify(read.generation)},${reordered.slice(1)}`,
+		);
+	});
+
+	it("rejects a versioned read of a record get still reads but it cannot mint a generation into, and keeps the record", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const { g: _g, ...rest } = JSON.parse((await raw.get(key)) as string) as Record<
+			string,
+			unknown
+		>;
+		// Leading whitespace: valid JSON, but its first byte is not the `{` the mint splices after.
+		const bytes = ` ${JSON.stringify(rest)}`;
+		await raw.set(key, bytes, "PX", 600_000);
+
+		await expect(store.getVersioned("sid-1", "google")).rejects.toThrow(
+			/getVersioned found no generation in a readable record/,
+		);
+		expect(await raw.get(key)).toBe(bytes);
+		expect(await store.get("sid-1", "google")).toEqual(tokens);
+	});
+
+	it("answers null to a versioned read of an unreadable record, removes it, and keeps its index member", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await raw.set(key, "{not-json", "PX", 600_000);
+		await raw.sadd(`${keyPrefix}idx:sid-1`, "google");
+
+		expect(await store.getVersioned("sid-1", "google")).toBeNull();
+		expect(await raw.exists(key)).toBe(0);
+		expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(1);
+	});
+
+	it("never shrinks the index, and never adds to it but on updated", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const index = `${keyPrefix}idx:sid-1`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		// A removal leaves the member: a concurrent attach may have just added it.
+		expect(await store.removeIf("sid-1", "google", read.generation)).toEqual({
+			outcome: "removed",
+		});
+		expect(await raw.sismember(index, "google")).toBe(1);
+
+		// missing never re-adds an entry.
+		await raw.srem(index, "google");
+		expect(await store.replaceIf("sid-1", "google", read.generation, tokens)).toEqual({
+			outcome: "missing",
+		});
+		expect(await raw.sismember(index, "google")).toBe(0);
+
+		// Nor does conflict.
+		await store.attach("sid-1", "github", tokens);
+		const stale = await live(store, "sid-1", "github");
+		await store.attach("sid-1", "github", tokens);
+		await raw.srem(index, "github");
+		expect(await store.replaceIf("sid-1", "github", stale.generation, tokens)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await raw.sismember(index, "github")).toBe(0);
+	});
+
+	it("after updated, the index outlives the record, and an index that had expired is made again", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const index = `${keyPrefix}idx:sid-1`;
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		await raw.pexpire(index, 60_000);
+		const read = await live(store, "sid-1", "google");
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, tokens);
+		expect(replaced.outcome).toBe("updated");
+		expect(await raw.pttl(index)).toBeGreaterThanOrEqual(await raw.pttl(key));
+
+		await raw.del(index);
+		if (replaced.outcome !== "updated") throw new Error("not updated");
+		expect((await store.replaceIf("sid-1", "google", replaced.generation, tokens)).outcome).toBe(
+			"updated",
+		);
+		expect(await raw.sismember(index, "google")).toBe(1);
+		expect(await raw.pttl(index)).toBeGreaterThanOrEqual(await raw.pttl(key));
+	});
+
+	it("a logout after a replace finds the record by the index, however long the replace took to reach the record", async () => {
+		suiteCounter += 1;
+		const keyPrefix = `t291ft:${suiteCounter}:`;
+		const { federationTokenStoreClient } = makeIoredisClients(raw);
+		// The index's TTL is raised, then the replace is held back past that TTL's end.
+		const heldMs = 1_500;
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: {
+				...federationTokenStoreClient,
+				pExpireGT: async (k, ttlMs) => {
+					await federationTokenStoreClient.pExpireGT(k, ttlMs);
+					await new Promise((resolve) => setTimeout(resolve, heldMs));
+				},
+			},
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix,
+			scanFallback: false,
+			ttl: 2,
+		});
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const raisedAt = Date.now();
+		expect((await store.replaceIf("sid-1", "google", read.generation, tokens)).outcome).toBe(
+			"updated",
+		);
+		// Past the deadline the raise set (2 s from it), short of the record's.
+		await until(
+			async () => Date.now() > raisedAt + 2_200,
+			"the raised TTL to pass",
+			raisedAt + 10_000,
+		);
+		expect(await raw.exists(`${keyPrefix}sid-1:google`)).toBe(1);
+		await store.removeBySid("sid-1");
+		expect(await raw.exists(`${keyPrefix}sid-1:google`)).toBe(0);
+	});
+
+	it("a replace the driver sends again answers what its first copy answered and writes nothing, after a later write too", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const first = {
+			expected: read.generation,
+			value: '{"v":2,"g":"replayed-1","c":"one"}',
+			ttlMs: 60_000,
+			deadlineMs: Date.now() + 60_000,
+			replayKey: `${key}:w:replayed-1`,
+			clockSkewMs: CLOCK_SKEW_MS,
+		};
+		expect(await client.replaceIfGeneration(key, first)).toBe("updated");
+		// The copy a reconnect sends again: the write landed, so it is not a conflict.
+		expect(await client.replaceIfGeneration(key, first)).toBe("updated");
+		expect(await raw.get(key)).toBe(first.value);
+		// A later write at the generation the first copy wrote, then the copy again.
+		const later = {
+			...first,
+			expected: "replayed-1",
+			value: '{"v":2,"g":"replayed-2","c":"two"}',
+			replayKey: `${key}:w:replayed-2`,
+		};
+		expect(await client.replaceIfGeneration(key, later)).toBe("updated");
+		expect(await client.replaceIfGeneration(key, first)).toBe("updated");
+		expect(await raw.get(key)).toBe(later.value);
+	});
+
+	it("an attach the driver sends again after a later replace does not put the older record back", async () => {
+		suiteCounter += 1;
+		const keyPrefix = `t291ft:${suiteCounter}:`;
+		const key = `${keyPrefix}sid-1:google`;
+		const { federationTokenStoreClient } = makeIoredisClients(raw);
+		// Every command `attach` sends, recorded so it can be sent again as the
+		// driver does after a reconnect.
+		const sent: { method: string; args: unknown[] }[] = [];
+		const client = new Proxy(federationTokenStoreClient, {
+			get(target, method, receiver) {
+				const member = Reflect.get(target, method, receiver) as unknown;
+				if (typeof member !== "function" || typeof method !== "string") return member;
+				return (...args: unknown[]) => {
+					sent.push({ method, args });
+					return (member as (...a: unknown[]) => unknown).apply(target, args);
+				};
+			},
+		});
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client,
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix,
+			scanFallback: false,
+		});
+		await store.attach("sid-1", "google", tokens);
+		const attachCommands = sent.splice(0);
+		const read = await live(store, "sid-1", "google");
+		const next = { ...tokens, accessToken: "at-2" };
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, next);
+		if (replaced.outcome !== "updated") throw new Error("not updated");
+		const after = await raw.get(key);
+		for (const { method, args } of attachCommands) {
+			const member = Reflect.get(federationTokenStoreClient, method) as (
+				...a: unknown[]
+			) => unknown;
+			await member.apply(federationTokenStoreClient, args);
+		}
+		expect(await raw.get(key)).toBe(after);
+		expect(await store.getVersioned("sid-1", "google")).toEqual({
+			value: next,
+			generation: replaced.generation,
+		});
+	});
+
+	it("an attach that reaches the server past its deadline writes nothing; one on time keeps its answer the declared clock skew past its deadline", async () => {
+		const { keyPrefix } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const now = await serverClock(() => raw)();
+		const attach = (replayKey: string, deadlineMs: number, value: string) =>
+			client.attachRecord(key, {
+				value,
+				ttlMs: 60_000,
+				deadlineMs,
+				replayKey,
+				clockSkewMs: CLOCK_SKEW_MS,
+			});
+		expect(await attach(`${key}:w:attach-late`, now - 1, '{"v":2,"g":"late","c":"x"}')).toBe(
+			"late",
+		);
+		expect(await raw.exists(key, `${key}:w:attach-late`)).toBe(0);
+		const deadlineMs = now + 30_000;
+		expect(await attach(`${key}:w:attach-1`, deadlineMs, '{"v":2,"g":"one","c":"x"}')).toBe(
+			"attached",
+		);
+		expect(await raw.get(key)).toBe('{"v":2,"g":"one","c":"x"}');
+		expect(await raw.pttl(key)).toBeGreaterThan(50_000);
+		expect(await raw.pexpiretime(`${key}:w:attach-1`)).toBe(deadlineMs + CLOCK_SKEW_MS + 1);
+	});
+
+	it("a removal the driver sends again answers removed, and leaves a record made since", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const removal = {
+			expected: read.generation,
+			deadlineMs: Date.now() + 60_000,
+			replayKey: `${key}:w:removal-1`,
+			clockSkewMs: CLOCK_SKEW_MS,
+		};
+		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
+		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
+		await store.attach("sid-1", "google", tokens);
+		const relinked = await raw.get(key);
+		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
+		expect(await raw.get(key)).toBe(relinked);
+	});
+
+	it("a logout between a replace and its resent copy leaves the replay answer: the copy answers updated and writes nothing", async () => {
+		// The migration scan is on, and the session id carries a hash tag: the
+		// shape whose replay key could fall under the session's `${prefix}${sid}:*`.
+		const { keyPrefix, store } = makeStore(true);
+		const sid = "{sid-1}";
+		const key = `${keyPrefix}${sid}:google`;
+		await store.attach(sid, "google", tokens);
+		const read = await live(store, sid, "google");
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const replayKey = replayKeyOf(key, keyPrefix, "logout-1");
+		if (replayKey === null) throw new Error("no replay key");
+		const copy = {
+			expected: read.generation,
+			value: '{"v":2,"g":"logout-1","p":{}}',
+			ttlMs: 60_000,
+			deadlineMs: Date.now() + 60_000,
+			replayKey,
+			clockSkewMs: CLOCK_SKEW_MS,
+		};
+		expect(await client.replaceIfGeneration(key, copy)).toBe("updated");
+		await store.removeBySid(sid);
+		expect(await raw.exists(key)).toBe(0);
+		expect(await raw.exists(replayKey)).toBe(1);
+		expect(await client.replaceIfGeneration(key, copy)).toBe("updated");
+		expect(await raw.exists(key)).toBe(0);
+	});
+
+	it("keeps a write's answer until the declared clock skew past its deadline, and no longer", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const deadlineMs = (await serverClock(() => raw)()) + 30_000;
+		const replayKey = `${key}:w:kept`;
+		expect(
+			await client.removeIfGeneration(key, {
+				expected: read.generation,
+				deadlineMs,
+				replayKey,
+				clockSkewMs: CLOCK_SKEW_MS,
+			}),
+		).toBe("removed");
+		expect(await raw.pexpiretime(replayKey)).toBe(deadlineMs + CLOCK_SKEW_MS + 1);
+	});
+
+	it("judges a write late at its deadline on the server's clock, not only after it", async () => {
+		// The deadline is the server's TIME, read in the same script that asks
+		// ft_late. TIME does not move within one script (Redis 7.2 samples it
+		// once per script), so ft_late judges exactly the instant of the
+		// deadline: late at it, not only after it.
+		const reply = await raw.eval(
+			`${FT_PRELUDE}
+local t = redis.call('TIME')
+local deadline = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if ft_late(deadline) then return 1 end
+return 0`,
+			0,
+		);
+		expect(reply).toBe(1);
+	});
+
+	it("a conditional write that reaches the server past its deadline writes nothing", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const before = await raw.get(key);
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const past = (await serverClock(() => raw)()) - 1;
+		expect(
+			await client.replaceIfGeneration(key, {
+				expected: read.generation,
+				value: "replaced",
+				ttlMs: 60_000,
+				deadlineMs: past,
+				replayKey: `${key}:w:late-1`,
+				clockSkewMs: CLOCK_SKEW_MS,
+			}),
+		).toBe("late");
+		expect(
+			await client.removeIfGeneration(key, {
+				expected: read.generation,
+				deadlineMs: past,
+				replayKey: `${key}:w:late-2`,
+				clockSkewMs: CLOCK_SKEW_MS,
+			}),
+		).toBe("late");
+		expect(await raw.exists(`${key}:w:late-1`, `${key}:w:late-2`)).toBe(0);
+		expect(await raw.get(key)).toBe(before);
+		// Within its deadline, the same write commits.
+		expect(
+			await client.removeIfGeneration(key, {
+				expected: read.generation,
+				deadlineMs: Date.now() + 60_000,
+				replayKey: `${key}:w:late-3`,
+				clockSkewMs: CLOCK_SKEW_MS,
+			}),
+		).toBe("removed");
+		expect(await raw.exists(key)).toBe(0);
+	});
+});
+
+/** A case that fills a whole server: on a container of its own, so no other file's server fills. */
+describe("conditional writes on a full noeviction server of its own", () => {
+	const encryptionKey = Buffer.alloc(32, 7);
+	let full: StartedTestContainer | undefined;
+	let io: Redis | undefined;
+
+	beforeAll(async () => {
+		full = await new GenericContainer("redis:7.2-alpine")
+			.withExposedPorts(6379)
+			.withStartupTimeout(60_000)
+			.start();
+		io = new Redis({ host: full.getHost(), port: full.getMappedPort(6379) });
+		io.on("error", () => {});
+	}, 120_000);
+
+	afterAll(async () => {
+		io?.disconnect();
+		await full?.stop();
+	});
+
+	it("serves a versioned read of a record written without a generation, minting one, and removes it, where an attach is refused", async () => {
+		if (io === undefined) throw new Error("the container did not start");
+		const admin = io;
+		const client = makeIoredisClients(admin).federationTokenStoreClient;
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client,
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix: "full:",
+			scanFallback: false,
+		});
+		const key = "full:sid-1:google";
+		await store.attach("sid-1", "google", tokens);
+		// As a replica that does not know `g` writes it.
+		const { g: _g, ...rest } = JSON.parse((await admin.get(key)) as string) as Record<
+			string,
+			unknown
+		>;
+		await admin.set(key, JSON.stringify(rest), "PX", 60_000);
+		await admin.config("SET", "maxmemory-policy", "noeviction");
+		await admin.config("SET", "maxmemory", "1");
+		try {
+			// The attach's own script, past the index's MULTI that a full server
+			// refuses first: it is refused too, and keeps no answer.
+			const replayKey = "full:w:{full:sid-2:google}:oom";
+			await expect(
+				client.attachRecord("full:sid-2:google", {
+					value: '{"v":2,"g":"oom","c":"x"}',
+					ttlMs: 60_000,
+					deadlineMs: (await serverClock(() => admin)()) + 30_000,
+					replayKey,
+					clockSkewMs: CLOCK_SKEW_MS,
+				}),
+			).rejects.toThrow(/OOM/);
+			expect(await admin.exists("full:sid-2:google", replayKey)).toBe(0);
+			// Through the store, the index's MULTI is refused first.
+			await expect(store.attach("sid-2", "google", tokens)).rejects.toThrow(/EXECABORT/);
+			const read = await store.getVersioned("sid-1", "google");
+			if (read === null) throw new Error("not live");
+			expect(read.value).toEqual(tokens);
+			expect(await store.getVersioned("sid-1", "google")).toEqual(read);
+			expect(await store.removeIf("sid-1", "google", read.generation)).toEqual({
+				outcome: "removed",
+			});
+			expect(await admin.exists(key)).toBe(0);
+		} finally {
+			await admin.config("SET", "maxmemory", "0");
+		}
+	});
 });

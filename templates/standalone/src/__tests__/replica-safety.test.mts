@@ -57,9 +57,9 @@ import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
-	adaptersOf,
 	capturedRenames,
 	libraryLayers,
+	rootSectionsOf,
 	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
@@ -134,10 +134,11 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 /**
  * The umbrella E2E's shape (`o3co/auth` `tests/docker-compose.yml`), with
- * every shared store on Redis, express-session's own included. Each case
- * below flips one variable off this.
+ * every shared store on Redis, express-session's own included, and MFA off
+ * as the umbrella sets it. Each case below flips one variable off this.
  */
 const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: "replica-safety-test-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
@@ -151,6 +152,8 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	ADAPTERS_USER_SESSION_STORES: "redis",
 	ADAPTERS_RATE_LIMITER: "redis",
+	// The login's attempt counter, shared: per process, `multi` refuses the login.
+	ADAPTERS_ATTEMPT_COUNTER: "redis",
 	ADAPTERS_CODE_REPOSITORY: "redis",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
 	ADAPTERS_REPLAY_SEEN_SET: "redis",
@@ -169,7 +172,7 @@ function resolveConfig(env: Record<string, string>): Switches {
 		.withFallback(libraryLayers(env));
 	return {
 		...sectionsCoreDoesNotDeclare(layers),
-		adapters: adaptersOf(layers, env),
+		...rootSectionsOf(layers, env),
 		...validate(layers, AppConfigSchema),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.

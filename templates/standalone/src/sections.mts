@@ -18,7 +18,8 @@
  * The schemas of the template's own sections: its modules' — `logging`,
  * `http` (with its CORS list), `key-store`, `redis-clients`, `repositories`,
  * the in-process code repository's and `audit-sink` — and the composition
- * root's own `adapters`. Each is strict, a key it does not declare refused;
+ * root's own `adapters` and `mfaMode`. Each is strict, a key it does not
+ * declare refused;
  * each reads the strings an environment variable carries; none holds a
  * default, which lives in `config/reference.conf`. The rules a value is held
  * to are core's shared vocabulary (trusted-proxy entries, serialized origins,
@@ -35,7 +36,9 @@ import {
 	MAX_TRUST_PROXY_HOPS,
 	normalizeAllowedOrigins,
 	wholeNumberFromEnv,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
+import { mfaConfigSchema } from "@o3co/auth-provider-mfa";
 import { z } from "zod";
 
 /** `logging`: the level the process logs at. `silent` is a threshold, not a level. */
@@ -170,7 +173,7 @@ export const httpSectionSchema = z
 	.object({
 		port: portSchema,
 		trustProxy: trustProxySchema,
-		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
+		readinessTimeoutMs: wholeNumberInRangeFromEnv(1, 2_147_483_647),
 		cors: z.object({ allowedOrigins: allowedOriginsSchema }).strict(),
 	})
 	.strict();
@@ -252,13 +255,14 @@ export const redisClientsSectionSchema = z
 export const adaptersSchema = z
 	.object({
 		rateLimiter: z.enum(["memory", "redis"]),
+		attemptCounter: z.enum(["memory", "redis"]),
 		userSessionStores: z.enum(["memory", "redis"]),
 		accessTokenDenylist: z.enum(["memory", "redis"]),
 		replaySeenSet: z.enum(["memory", "redis"]),
 		consentStore: z.enum(["none", "memory", "redis"]),
 		federationTokenStore: z.enum(["memory", "redis"]),
-		federationGrantStore: z.enum(["memory", "redis"]),
-		federationGrantIntentStore: z.enum(["memory", "redis"]),
+		federationGrantStore: z.enum(["none", "memory", "redis"]),
+		federationGrantIntentStore: z.enum(["none", "memory", "redis"]),
 		mfaFactorStore: z.enum(["memory", "redis", "store"]),
 		mfaTransactionStore: z.enum(["memory", "redis"]),
 		codeRepository: z.enum(["memory", "redis"]),
@@ -270,6 +274,24 @@ export const adaptersSchema = z
 
 /** The composition root's adapter selections, as `adaptersSchema` reads them. */
 export type Adapters = z.output<typeof adaptersSchema>;
+
+/** A section of keys: an object whose prototype is `Object.prototype` or none. */
+export function isPlainSection(value: unknown): value is Readonly<Record<string, unknown>> {
+	if (typeof value !== "object" || value === null) return false;
+	const prototype: unknown = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+/**
+ * `mfaMode`: whether the composition root installs MFA, its own choice — the
+ * MFA package's mode, read with that package's schema for `mfa.mode`. `off`
+ * installs nothing of MFA; `optional` and `required` install it and are
+ * written to `mfa.mode`.
+ */
+export const mfaSwitchSchema = mfaConfigSchema.shape.mode;
+
+/** The composition root's MFA switch, as `mfaSwitchSchema` reads it. */
+export type MfaSwitch = z.output<typeof mfaSwitchSchema>;
 
 /** A YAML file's path: a repository reads its entries from it when it is built. */
 const yamlSchema = z.object({ path: z.string() }).strict();
@@ -332,7 +354,7 @@ export function repositoriesSectionSchemaFor(selection: {
 
 /** The in-process code repository's section: the default lifetime, in positive whole seconds. */
 export const inMemoryCodeRepositorySectionSchema = z
-	.object({ defaultExpiresIn: z.coerce.number().int().positive() })
+	.object({ defaultExpiresIn: wholeNumberInRangeFromEnv(1) })
 	.strict();
 
 /**

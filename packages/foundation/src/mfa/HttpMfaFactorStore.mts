@@ -26,22 +26,44 @@
  * built from an allowlist (`storeFailure.mts`, `storeErrors.mts`) and carries
  * nothing the Store sent; the sealed `data` it is handed is sent as it is,
  * and nothing is sent that the wire codec would not read back.
+ *
+ * A record is created or removed only conditionally: every create and every
+ * single-record removal it sends carries `expectedGeneration`, and only the
+ * whole set's reset (`removeAllForSubject`) is sent without one.
+ *
+ * The factor set's members (`listVersioned`, `createIf`, `removeIf`) read
+ * every answer through core's codec alone, once: a status the operation does
+ * not give is `unexpected_status`, read before any body, and whatever the
+ * codec refuses — a `404` or `409` without its outcome body among them — is
+ * `malformed_answer`. A conditional write states its deadline on the wire
+ * (`deadlineMs`, the request timeout from just before it is sent), at or
+ * before the moment the transport gives up, whose timer starts after it: a
+ * write past it is never applied after the adapter stopped waiting. A Store
+ * that reads it as passed answers `408`, which is `unexpected_status`. A conditional write that is sent and then fails,
+ * its deadline included, is unknown: it may have committed.
  */
 
 import {
+	type ConditionalCreateAnswer,
+	type ConditionalSetRemoveAnswer,
 	fromMfaStoreFactor,
 	type MfaFactorRecord,
 	type MfaFactorRecordUpdate,
 	type MfaFactorStore,
-	type MfaStoreCreateRequest,
 	type MfaStoreDeleteRequest,
 	type MfaStoreFactor,
 	type MfaStoreFactorChanges,
 	type MfaStoreListRequest,
+	readMfaStoreCreateIfAnswer,
 	readMfaStoreFactor,
 	readMfaStoreListAnswer,
-	toMfaStoreFactor,
+	readMfaStoreRemoveIfAnswer,
+	readMfaStoreVersionedListAnswer,
+	type StoreGeneration,
+	toMfaStoreCreateIfRequest,
+	toMfaStoreRemoveIfRequest,
 	toMfaStoreUpdateRequest,
+	type VersionedSet,
 } from "@o3co/auth-provider-core";
 import { assertSecureEndpoint } from "../endpointUrl.mjs";
 import {
@@ -65,8 +87,11 @@ import {
 /** What this adapter's messages lead with. */
 const OWNER = "HttpMfaFactorStore";
 
-/** The port's refusal of a `(subject, id)` already held, as the bundled stores word it. */
-const DUPLICATE = "an MFA factor record with this id already exists for the subject";
+/** The statuses a conditional create is answered with, each with its outcome body. */
+const CREATE_IF_STATUSES: ReadonlySet<number> = new Set([200, 409]);
+
+/** The statuses a conditional removal is answered with, each with its outcome body. */
+const REMOVE_IF_STATUSES: ReadonlySet<number> = new Set([200, 404, 409]);
 
 export interface HttpMfaFactorStoreOptions {
 	/** The Store's four MFA factor endpoints, each https or loopback http. */
@@ -143,12 +168,38 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		return reading.factors.map(fromMfaStoreFactor);
 	}
 
-	async create(record: MfaFactorRecord): Promise<void> {
-		const body: MfaStoreCreateRequest = { factor: toMfaStoreFactor(record) };
-		const { response } = await this.#post("create", body, () => false);
-		if (response.ok) return;
-		if (response.status === 409) throw new Error(DUPLICATE);
-		throw mfaStoreStatusError("create", this.#urls.create, response);
+	async listVersioned(subject: string): Promise<VersionedSet<MfaFactorRecord>> {
+		const body: MfaStoreListRequest = { subject };
+		const { response, text } = await this.#post("list", body, (status) => status === 200);
+		if (text === undefined) throw mfaStoreStatusError("list", this.#urls.list, response);
+		return this.#read("list", () => readMfaStoreVersionedListAnswer(parsed(text), subject));
+	}
+
+	async createIf(
+		record: MfaFactorRecord,
+		expected: StoreGeneration | null,
+	): Promise<ConditionalCreateAnswer> {
+		const { response, text } = await this.#postConditional(
+			"create",
+			(deadlineMs) => toMfaStoreCreateIfRequest(record, expected, deadlineMs),
+			(status) => CREATE_IF_STATUSES.has(status),
+		);
+		if (text === undefined) throw mfaStoreStatusError("create", this.#urls.create, response);
+		return this.#read("create", () => readMfaStoreCreateIfAnswer(response.status, parsed(text)));
+	}
+
+	async removeIf(
+		subject: string,
+		id: string,
+		expected: StoreGeneration,
+	): Promise<ConditionalSetRemoveAnswer> {
+		const { response, text } = await this.#postConditional(
+			"delete",
+			(deadlineMs) => toMfaStoreRemoveIfRequest(subject, id, expected, deadlineMs),
+			(status) => REMOVE_IF_STATUSES.has(status),
+		);
+		if (text === undefined) throw mfaStoreStatusError("delete", this.#urls.delete, response);
+		return this.#read("delete", () => readMfaStoreRemoveIfAnswer(response.status, parsed(text)));
 	}
 
 	async update(
@@ -181,19 +232,44 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		return fromMfaStoreFactor(factor);
 	}
 
-	async remove(subject: string, id: string): Promise<void> {
-		await this.#delete({ subject, id });
-	}
-
+	/** The subject's whole set reset: done on a `2xx` or a `404`. */
 	async removeAllForSubject(subject: string): Promise<void> {
-		await this.#delete({ subject, all: true });
-	}
-
-	/** A delete: done on a `2xx` or a `404`. */
-	async #delete(body: MfaStoreDeleteRequest): Promise<void> {
+		const body: MfaStoreDeleteRequest = { subject, all: true };
 		const { response } = await this.#post("delete", body, () => false);
 		if (response.ok || response.status === 404) return;
 		throw mfaStoreStatusError("delete", this.#urls.delete, response);
+	}
+
+	/**
+	 * A conditional write to `operation`'s endpoint, its body built by
+	 * `build` with its `deadlineMs`: the request timeout from now, taken just
+	 * before the request is sent. Nothing yields between this and the
+	 * transport's timer, which starts after it, so the deadline is at or
+	 * before the moment the adapter gives up.
+	 */
+	#postConditional(
+		operation: "create" | "delete",
+		build: (deadlineMs: number) => unknown,
+		readsBody: (status: number) => boolean,
+	): Promise<StoreAnswer> {
+		const deadlineMs = Date.now() + this.#settings.timeout;
+		return this.#post(operation, build(deadlineMs), readsBody);
+	}
+
+	/**
+	 * What `read`, a reader of core's codec, makes of an answer of
+	 * `operation`; the `TypeError` it throws for an answer outside the
+	 * contract is `malformed_answer`, carrying none of the reader's words.
+	 */
+	#read<A>(operation: "list" | "create" | "delete", read: () => A): A {
+		try {
+			return read();
+		} catch (error) {
+			if (error instanceof TypeError) {
+				throw mfaStoreMalformedAnswer(operation, this.#urls[operation]);
+			}
+			throw error;
+		}
 	}
 
 	/** `body` to `operation`'s endpoint, its answer read when `readsBody` says so. */

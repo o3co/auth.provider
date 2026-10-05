@@ -54,7 +54,7 @@ describe("the in-process MfaFactorStore", () => {
 	it("hands out copies: changing what it returned changes nothing it holds", async () => {
 		const store = createMemoryMfaFactorStore();
 		const written = { ...RECORD, createdAt: new Date(RECORD.createdAt) };
-		await store.create(written);
+		expect((await store.createIf(written, null)).outcome).toBe("created");
 		written.createdAt.setTime(0);
 		const [listed] = await store.list("user-1");
 		listed?.createdAt.setTime(0);
@@ -70,13 +70,13 @@ describe("the in-process store's factor set generation", () => {
 
 	it("answers no generation for a set never written, and a fresh one at each membership write", async () => {
 		const store = createMemoryMfaFactorStore();
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
-		const first = await store.createIf?.(RECORD, null);
-		if (first?.outcome !== "created") throw new Error("the first binding was refused");
-		const next = await store.createIf?.(second, first.generation);
-		if (next?.outcome !== "created") throw new Error("the second binding was refused");
+		expect(await store.listVersioned("user-1")).toStrictEqual({ generation: null, items: [] });
+		const first = await store.createIf(RECORD, null);
+		if (first.outcome !== "created") throw new Error("the first binding was refused");
+		const next = await store.createIf(second, first.generation);
+		if (next.outcome !== "created") throw new Error("the second binding was refused");
 		expect(next.generation).not.toBe(first.generation);
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+		expect(await store.listVersioned("user-1")).toStrictEqual({
 			generation: next.generation,
 			items: [RECORD, second],
 		});
@@ -84,19 +84,19 @@ describe("the in-process store's factor set generation", () => {
 
 	it("writes nothing at a generation that moved, and keeps the set when its last record goes", async () => {
 		const store = createMemoryMfaFactorStore();
-		const first = await store.createIf?.(RECORD, null);
-		if (first?.outcome !== "created") throw new Error("the first binding was refused");
-		expect(await store.createIf?.(RECORD, null)).toStrictEqual({ outcome: "conflict" });
-		const removed = await store.removeIf?.("user-1", RECORD.id, first.generation);
-		if (removed?.outcome !== "removed") throw new Error("the removal was refused");
-		expect(await store.removeIf?.("user-1", RECORD.id, first.generation)).toStrictEqual({
+		const first = await store.createIf(RECORD, null);
+		if (first.outcome !== "created") throw new Error("the first binding was refused");
+		expect(await store.createIf(RECORD, null)).toStrictEqual({ outcome: "conflict" });
+		const removed = await store.removeIf("user-1", RECORD.id, first.generation);
+		if (removed.outcome !== "removed") throw new Error("the removal was refused");
+		expect(await store.removeIf("user-1", RECORD.id, first.generation)).toStrictEqual({
 			outcome: "conflict",
 		});
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+		expect(await store.listVersioned("user-1")).toStrictEqual({
 			generation: removed.generation,
 			items: [],
 		});
-		expect(await store.createIf?.(second, first.generation)).toStrictEqual({
+		expect(await store.createIf(second, first.generation)).toStrictEqual({
 			outcome: "conflict",
 		});
 		expect(await store.list("user-1")).toStrictEqual([]);
@@ -104,21 +104,21 @@ describe("the in-process store's factor set generation", () => {
 
 	it("keeps the generation through an update, and moves it at a reset, even of a set never written", async () => {
 		const store = createMemoryMfaFactorStore();
-		await store.create(RECORD);
-		const before = await store.listVersioned?.("user-1");
+		expect((await store.createIf(RECORD, null)).outcome).toBe("created");
+		const before = await store.listVersioned("user-1");
 		await store.update("user-1", RECORD.id, 1, {
 			data: "v2.next",
 			label: undefined,
 			lastUsedAt: undefined,
 		});
-		expect((await store.listVersioned?.("user-1"))?.generation).toBe(before?.generation);
+		expect((await store.listVersioned("user-1")).generation).toBe(before.generation);
 		await store.removeAllForSubject("user-1");
-		const after = await store.listVersioned?.("user-1");
-		expect(after?.items).toStrictEqual([]);
-		expect(after?.generation).not.toBe(before?.generation);
-		expect(after?.generation).not.toBeNull();
+		const after = await store.listVersioned("user-1");
+		expect(after.items).toStrictEqual([]);
+		expect(after.generation).not.toBe(before.generation);
+		expect(after.generation).not.toBeNull();
 		await store.removeAllForSubject("nobody");
-		expect((await store.listVersioned?.("nobody"))?.generation).not.toBeNull();
+		expect((await store.listVersioned("nobody")).generation).not.toBeNull();
 	});
 });
 
@@ -127,26 +127,26 @@ describe("the in-process store's expected generation", () => {
 		const store = createMemoryMfaFactorStore();
 		for (const expected of [undefined, "", 'a"b', 7]) {
 			await expect(
-				store.createIf?.(RECORD, expected as unknown as StoreGeneration | null),
+				store.createIf(RECORD, expected as unknown as StoreGeneration | null),
 			).rejects.toThrow(
 				new RangeError("MfaFactorStore.createIf: expected is not a store generation"),
 			);
 		}
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
+		expect(await store.listVersioned("user-1")).toStrictEqual({ generation: null, items: [] });
 	});
 
 	it("refuses a removal whose expected is not a store generation, and writes nothing", async () => {
 		const store = createMemoryMfaFactorStore();
-		const created = await store.createIf?.(RECORD, null);
-		if (created?.outcome !== "created") throw new Error("the first binding was refused");
+		const created = await store.createIf(RECORD, null);
+		if (created.outcome !== "created") throw new Error("the first binding was refused");
 		for (const expected of [undefined, null, "", 'a"b']) {
 			await expect(
-				store.removeIf?.("user-1", RECORD.id, expected as unknown as StoreGeneration),
+				store.removeIf("user-1", RECORD.id, expected as unknown as StoreGeneration),
 			).rejects.toThrow(
 				new RangeError("MfaFactorStore.removeIf: expected is not a store generation"),
 			);
 		}
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+		expect(await store.listVersioned("user-1")).toStrictEqual({
 			generation: created.generation,
 			items: [RECORD],
 		});
@@ -172,50 +172,50 @@ describe("the in-process store's tombstone", () => {
 
 	it("keeps a reset's tombstone until the bound has passed on its clock, then reads it as never written", async () => {
 		const { store, advance } = clocked();
-		await store.create(RECORD);
-		const read = await store.listVersioned?.("user-1");
-		const stale = read?.generation;
-		if (stale === null || stale === undefined) throw new Error("the create left no generation");
+		expect((await store.createIf(RECORD, null)).outcome).toBe("created");
+		const read = await store.listVersioned("user-1");
+		const stale = read.generation;
+		if (stale === null) throw new Error("the create left no generation");
 		await store.removeAllForSubject("user-1");
-		const tombstone = await store.listVersioned?.("user-1");
+		const tombstone = await store.listVersioned("user-1");
 		advance(BUNDLED_STORE_WRITE_LIFETIME_MS - 1);
-		expect(await store.listVersioned?.("user-1")).toStrictEqual(tombstone);
-		expect(await store.createIf?.(RECORD, null)).toStrictEqual({ outcome: "conflict" });
-		expect(await store.createIf?.(RECORD, stale)).toStrictEqual({ outcome: "conflict" });
-		expect(await store.removeIf?.("user-1", RECORD.id, stale)).toStrictEqual({
+		expect(await store.listVersioned("user-1")).toStrictEqual(tombstone);
+		expect(await store.createIf(RECORD, null)).toStrictEqual({ outcome: "conflict" });
+		expect(await store.createIf(RECORD, stale)).toStrictEqual({ outcome: "conflict" });
+		expect(await store.removeIf("user-1", RECORD.id, stale)).toStrictEqual({
 			outcome: "conflict",
 		});
-		expect(await store.listVersioned?.("user-1")).toStrictEqual(tombstone);
+		expect(await store.listVersioned("user-1")).toStrictEqual(tombstone);
 		advance(1);
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
+		expect(await store.listVersioned("user-1")).toStrictEqual({ generation: null, items: [] });
 	});
 
 	it("expires a set its last removal emptied the same way, and a reset of a subject never written", async () => {
 		const { store, advance } = clocked();
-		const first = await store.createIf?.(RECORD, null);
-		if (first?.outcome !== "created") throw new Error("the first binding was refused");
-		await store.removeIf?.("user-1", RECORD.id, first.generation);
+		const first = await store.createIf(RECORD, null);
+		if (first.outcome !== "created") throw new Error("the first binding was refused");
+		await store.removeIf("user-1", RECORD.id, first.generation);
 		await store.removeAllForSubject("nobody");
 		advance(BUNDLED_STORE_WRITE_LIFETIME_MS);
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
-		expect(await store.listVersioned?.("nobody")).toStrictEqual({ generation: null, items: [] });
+		expect(await store.listVersioned("user-1")).toStrictEqual({ generation: null, items: [] });
+		expect(await store.listVersioned("nobody")).toStrictEqual({ generation: null, items: [] });
 	});
 
 	it("holds no expiry on a set written to after it was emptied, and counts the bound again from a later reset", async () => {
 		const { store, advance } = clocked();
 		await store.removeAllForSubject("user-1");
-		const tombstone = await store.listVersioned?.("user-1");
-		const bound = await store.createIf?.(RECORD, tombstone?.generation ?? null);
-		if (bound?.outcome !== "created") throw new Error("the binding on the tombstone was refused");
+		const tombstone = await store.listVersioned("user-1");
+		const bound = await store.createIf(RECORD, tombstone.generation);
+		if (bound.outcome !== "created") throw new Error("the binding on the tombstone was refused");
 		advance(2 * BUNDLED_STORE_WRITE_LIFETIME_MS);
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+		expect(await store.listVersioned("user-1")).toStrictEqual({
 			generation: bound.generation,
 			items: [RECORD],
 		});
 		advance(BUNDLED_STORE_WRITE_LIFETIME_MS / 2);
 		await store.removeAllForSubject("user-1");
 		advance(BUNDLED_STORE_WRITE_LIFETIME_MS - 1);
-		expect((await store.listVersioned?.("user-1"))?.generation).not.toBeNull();
+		expect((await store.listVersioned("user-1")).generation).not.toBeNull();
 	});
 });
 

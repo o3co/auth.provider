@@ -16,9 +16,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { retrieveFederationGrantToken } from "#/federation-grants/retrieve.mjs";
+import type { AuthorizedFederationGrant } from "#/federation-grants/types.mjs";
 import type { DelegatedTokens } from "#/federations/types.mjs";
 import {
 	at,
+	CONSENTED,
 	connection,
 	type Harness,
 	HOUR,
@@ -421,9 +423,10 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		it("keeps the stored refresh token when the new one is not a usable string", async () => {
 			await h.seed();
 			setNow(DUE);
+			// A new access token each time: a re-answer of one that has ended is refused.
 			for (const refreshToken of ["", 42, null]) {
 				h.refresh.mockResolvedValueOnce({
-					...refreshed("1", now()),
+					...refreshed(String(refreshToken), now()),
 					refreshToken,
 				} as unknown as DelegatedTokens);
 				expect((await retrieve()).ok).toBe(true);
@@ -434,12 +437,19 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 		it("reads an empty scope as none named — the grant's — and not as a token that carries nothing (RFC 6749 §6)", async () => {
 			await h.seed();
-			setNow(DUE);
-			h.refresh.mockResolvedValue(refreshed("1", DUE, { scope: "  " }));
-			expect(await retrieve({ scope: ["calendar.read"] })).toMatchObject({
-				ok: true,
-				scopes: [...SCOPES],
-			});
+			setNow(GONE);
+			for (const [tag, scope] of [
+				["1", ""],
+				["2", "  "],
+			]) {
+				h.refresh.mockResolvedValue(refreshed(tag, now(), { scope }));
+				expect(await retrieve({ scope: ["calendar.read"] }), JSON.stringify(scope)).toMatchObject({
+					ok: true,
+					accessToken: `at-${tag}`,
+					scopes: [...SCOPES],
+				});
+				setNow(new Date(now().getTime() + 2 * HOUR));
+			}
 		});
 
 		it("never writes a token whose adapter expiry is already past: neither field can lengthen the other", async () => {
@@ -697,16 +707,51 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			});
 		});
 
-		it("is not given one for a scope the upstream never puts in a token, either", async () => {
+		it.each([
+			// The upstream narrowed the grant: the fresh token is stored and answered.
+			["a scope the upstream no longer grants", "calendar.read"],
+			["a scope the upstream never puts in a token", "calendar.write"],
+		])("is not given one for %s, either", async (_, scope) => {
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockImplementation(async () =>
 				refreshed(`n${h.refresh.mock.calls.length}`, now(), { scope: "openid" }),
 			);
 			for (let i = 0; i < 4; i++) {
-				expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
+				expect(await retrieve({ scope: [scope] })).toStrictEqual({
 					ok: false,
 					code: "invalid_scope",
+				});
+				setNow(new Date(now().getTime() + 5_000));
+			}
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+		});
+
+		it("is not made to rotate on every request by a scope its held token carries and the upstream no longer puts in one: the marker bounds it", async () => {
+			// A held token broadened beyond the grant, by an IdP that accumulates
+			// consent; refreshes now answer the grant's scopes alone.
+			await h.seed({
+				credentials: {
+					refreshToken: SECRET,
+					accessToken: {
+						value: "at-0",
+						tokenType: "Bearer",
+						obtainedAt: T0,
+						issuedLifetime: 3600,
+						effectiveExpiresAt: at(HOUR),
+						scopes: [...CONSENTED],
+					},
+				},
+			});
+			setNow(DUE);
+			h.refresh.mockImplementation(async () =>
+				refreshed(`n${h.refresh.mock.calls.length}`, now(), { scope: SCOPES.join(" ") }),
+			);
+			// Every request while the held token lives.
+			for (let i = 0; i < 3; i++) {
+				expect(await retrieve({ scope: ["calendar.write"] })).toMatchObject({
+					ok: true,
+					accessToken: "at-0",
 				});
 				setNow(new Date(now().getTime() + 5_000));
 			}
@@ -725,6 +770,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		it.each<[string, Partial<typeof request>]>([
 			["a min_ttl above what is left", { minTtlSeconds: 3600 }],
 			["a scope the token lacks", { scope: ["calendar.read"] }],
+			["a scope no token carries", { scope: ["calendar.write"] }],
 		])(
 			"is not made to rotate on every request by %s when the adapter's expiry is earlier than its lifetime",
 			async (_, ask) => {
@@ -1054,15 +1100,16 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		])(
 			"is a loss when the write never landed and somebody else's did — %s",
 			async (_, refreshToken, accessToken) => {
-				const grant = await h.seed();
+				await h.seed();
 				setNow(DUE);
 				// No rotation: what this call tries to store keeps the stored refresh token.
 				h.refresh.mockResolvedValue(refreshed("1", DUE, { refreshToken: undefined }));
 				const real = h.store.replaceCredentials.bind(h.store);
-				vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async () => {
+				vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async (input) => {
+					// At the version the record has, which is the one this call's write names.
 					await real({
 						grantId: "g-1",
-						expectedVersion: grant.version,
+						expectedVersion: input.expectedVersion,
 						credentials: {
 							refreshToken,
 							accessToken: {
@@ -1095,14 +1142,14 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			// An IdP that does not rotate, and an adapter that answers nonsense: two
 			// replicas would store the same refresh token and no access token. What
 			// this call tried to store includes its marker, and that one is dated.
-			const grant = await h.seed();
+			await h.seed();
 			setNow(GONE);
 			h.refresh.mockResolvedValue({ refreshToken: SECRET } as DelegatedTokens);
 			const real = h.store.replaceCredentials.bind(h.store);
-			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async () => {
+			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async (input) => {
 				await real({
 					grantId: "g-1",
-					expectedVersion: grant.version,
+					expectedVersion: input.expectedVersion,
 					credentials: { refreshToken: SECRET, accessToken: undefined },
 					ineligible: {
 						reason: "malformed_token_response",
@@ -1204,6 +1251,249 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				},
 			]);
 		});
+	});
+
+	describe("a stored date a store answers as something other than a Date", () => {
+		/** A driver's default for a column it does not type: the instant as an ISO string. */
+		const ISO = "2026-09-18T00:00:00.000Z";
+
+		/** Every `open` answers the authorized grant with `edit` applied, as a store that reads its dates back so would. */
+		const answeredWith = (edit: (grant: AuthorizedFederationGrant) => object) => {
+			const real = h.store.open.bind(h.store);
+			vi.spyOn(h.store, "open").mockImplementation(async (grantId, at) => {
+				const opened = await real(grantId, at);
+				if (opened === null || !("consent" in opened.grant)) return opened;
+				const grant = opened.grant as AuthorizedFederationGrant;
+				return { ...opened, grant: edit(grant) as AuthorizedFederationGrant };
+			});
+		};
+
+		/** What `deps.report` was told: each stored date that holds no instant is told once per call. */
+		const reportedDates = () => {
+			const told: { during: string; error: unknown }[] = [];
+			h.deps.report = (failure) => {
+				told.push(failure);
+			};
+			return () =>
+				told.filter(
+					(failure) =>
+						failure.during === "open" &&
+						failure.error instanceof TypeError &&
+						failure.error.message.includes("holds no instant"),
+				);
+		};
+
+		it.each([
+			[
+				"ineligible.at",
+				(grant: AuthorizedFederationGrant) => ({
+					...grant,
+					ineligible: {
+						reason: "scope_exceeded",
+						at: ISO,
+						judgedAgainst: connection.maxAccessTokenLifetime,
+					},
+				}),
+			],
+			[
+				"refreshFailure.at",
+				(grant: AuthorizedFederationGrant) => ({
+					...grant,
+					refreshFailure: {
+						at: ISO,
+						kind: "unavailable",
+						count: 3,
+						retryAfterSeconds: undefined,
+						upstreamCode: undefined,
+					},
+				}),
+			],
+		])(
+			"tells the logger once, by the field's name and never its value, when %s holds no instant",
+			async (field, edit) => {
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockResolvedValue(refreshed("1", DUE));
+				const told = reportedDates();
+				answeredWith(edit);
+				await retrieve();
+				// Asked again under the lock: still told once.
+				expect(h.refresh).toHaveBeenCalledTimes(1);
+				const dates = told();
+				expect(dates).toHaveLength(1);
+				const message = String((dates[0]?.error as Error | undefined)?.message);
+				expect(message).toContain(field);
+				expect(message).not.toContain(ISO);
+			},
+		);
+
+		it("tells the logger nothing when the stored dates are Dates", async () => {
+			await h.seed();
+			setNow(DUE);
+			h.refresh.mockResolvedValue(refreshed("1", DUE));
+			const told = reportedDates();
+			await retrieve();
+			expect(told()).toEqual([]);
+		});
+
+		it("answers a consent date it cannot compare as the storage outage: neither revoked nor live", async () => {
+			await h.seed();
+			answeredWith((grant) => ({ ...grant, consent: { ...grant.consent, at: ISO } }));
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "storage",
+			});
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
+		it("lets the retry through for an ineligibility marker it cannot date", async () => {
+			await h.seed();
+			setNow(DUE);
+			h.refresh.mockResolvedValue(refreshed("1", DUE));
+			answeredWith((grant) => ({
+				...grant,
+				ineligible: {
+					reason: "scope_exceeded",
+					at: ISO,
+					judgedAgainst: connection.maxAccessTokenLifetime,
+				},
+			}));
+			await retrieve();
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+		});
+
+		it("lets the retry through for a failed-refresh stamp it cannot date, and counts the next failure as the first of its row", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockRejectedValue(Object.assign(new Error("x"), { status: 503 }));
+			answeredWith((grant) => ({
+				...grant,
+				refreshFailure: {
+					at: ISO,
+					kind: "rejected",
+					count: 5,
+					retryAfterSeconds: undefined,
+					upstreamCode: "invalid_client",
+				},
+			}));
+			// The first of a row is retried promptly: no wait is told.
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "upstream",
+			});
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+			expect((await h.store.find("g-1", now()))?.refreshFailure).toMatchObject({
+				kind: "unavailable",
+				count: 1,
+			});
+		});
+
+		it("does not take a marker it cannot date for the one its own lost write stored: the write is lost, and nothing throws", async () => {
+			const grant = await h.seed();
+			setNow(GONE);
+			h.refresh.mockResolvedValue({ refreshToken: SECRET } as DelegatedTokens);
+			const real = h.store.replaceCredentials.bind(h.store);
+			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async (input) => {
+				await real(input);
+				throw new Error("connection reset after commit");
+			});
+			answeredWith((stored) =>
+				stored.ineligible === undefined
+					? stored
+					: { ...stored, ineligible: { ...stored.ineligible, at: ISO } },
+			);
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(500);
+			await answer;
+			await Promise.all(h.background);
+			const told = h.events.map((event) => `${event.type} ${event.outcome}`);
+			expect(told).toContain("federation.grant.refresh_failed write_lost");
+			expect(grant.version).toBeLessThan((await h.store.find("g-1", now()))?.version ?? 0);
+		});
+	});
+
+	describe("a grant whose id or version cannot guard a write", () => {
+		/** Every `open` answers the authorized grant with `edit` applied. */
+		const answeredWith = (edit: (grant: AuthorizedFederationGrant) => object) => {
+			const real = h.store.open.bind(h.store);
+			vi.spyOn(h.store, "open").mockImplementation(async (grantId, at) => {
+				const opened = await real(grantId, at);
+				if (opened === null || !("consent" in opened.grant)) return opened;
+				const grant = opened.grant as AuthorizedFederationGrant;
+				return { ...opened, grant: edit(grant) as AuthorizedFederationGrant };
+			});
+		};
+		/** The grant with `field` answered by a getter that throws, as an ORM entity's unloaded column does. */
+		const throwing = (field: "id" | "version") => (grant: AuthorizedFederationGrant) =>
+			Object.defineProperty({ ...grant }, field, {
+				enumerable: true,
+				get() {
+					throw new Error(`${field} was not loaded`);
+				},
+			});
+
+		const cases: Array<[string, (grant: AuthorizedFederationGrant) => object]> = [
+			["a version whose read throws", throwing("version")],
+			["a version read as a string", (grant) => ({ ...grant, version: String(grant.version) })],
+			["a version that is not an integer", (grant) => ({ ...grant, version: grant.version + 0.5 })],
+			["a version past the safe integers", (grant) => ({ ...grant, version: 2 ** 53 })],
+			["an id whose read throws", throwing("id")],
+			["an id that is not the one asked for", (grant) => ({ ...grant, id: "g-2" })],
+			["an id that is not a string", (grant) => ({ ...grant, id: 1 })],
+		];
+		for (const [what, edit] of cases) {
+			it(`answers ${what} as the storage outage, before the upstream is asked`, async () => {
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockResolvedValue(refreshed("rotated", GONE));
+				const reported: string[] = [];
+				h.deps.report = (failure) => reported.push(failure.during);
+				answeredWith(edit);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(h.refresh).not.toHaveBeenCalled();
+				expect(reported).toContain("open");
+				vi.mocked(h.store.open).mockRestore();
+				expect((await stored())?.refreshToken).toBe(SECRET);
+				await Promise.all(h.background);
+				expect(await lockIsFree(h)).toBe(true);
+			});
+		}
+
+		it("still answers a stored token that needs no refresh: nothing is written", async () => {
+			await h.seed();
+			answeredWith(throwing("version"));
+			expect(await retrieve()).toMatchObject({ ok: true, refreshed: false });
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
+		const idCases: Array<[string, (grant: AuthorizedFederationGrant) => object]> = [
+			["an id that is not the one asked for", (grant) => ({ ...grant, id: "g-2" })],
+			["an id whose read throws", throwing("id")],
+		];
+		for (const [what, edit] of idCases) {
+			it(`serves no stored token for ${what}, and records no use of either grant`, async () => {
+				await h.seed();
+				const touch = vi.spyOn(h.store, "touch");
+				const reported: string[] = [];
+				h.deps.report = (failure) => reported.push(failure.during);
+				answeredWith(edit);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				await Promise.all(h.background);
+				expect(touch).not.toHaveBeenCalled();
+				expect(h.refresh).not.toHaveBeenCalled();
+				expect(reported).toContain("open");
+			});
+		}
 	});
 
 	it("never repeats a secret the upstream echoes as its error code: only codes this provider knows are repeated", async () => {

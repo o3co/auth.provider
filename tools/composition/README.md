@@ -1,6 +1,6 @@
 # composition — every workspace package, booted together
 
-Last updated: 2026-10-01
+Last updated: 2026-10-05
 
 The contracts that exist only when all of this repository's modules are
 composed: the standalone template's composition with every package it does not
@@ -75,13 +75,33 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   passkey, answering the handle its registration options named, signs it in
   ([`webauthn-grant-user-handle.test.mts`](src/__tests__/webauthn-grant-user-handle.test.mts)).
 - **The budget in force for each prefix a package owns, on both bundled
-  limiters.** `login`, `device_verification`,
-  `webauthn-authentication-options` and `mfa` — each the budget its owning
-  module contributes — and `token`, which the oauth module claims with no budget of its own (`null`), so it falls to the limiter's `defaultLimit`, asked of the limiter
+  limiters.** `webauthn-authentication-options` and `mfa` — each the budget
+  its owning module contributes — and `token`, `login` and
+  `device_verification`, which their owners claim with no budget of their own
+  (`null`; the last two are counted on the attempt counter), so they fall to the limiter's `defaultLimit`, asked of the limiter
   the full set hands a consumer, on the in-process limiter and on the Redis
   one: with the shipped configuration, with each owner's own key set, with the
-  limiter's own `limits` declaring every prefix (which wins), and with the
+  limiter's own `limits` declaring every prefix but `login` and
+  `device_verification`, which it may not name (an entry wins), and with the
   owners switched off.
+- **A module switched off by its own `enabled` key registers nothing.** Each
+  such module — DPoP, mTLS, the device grant, the session grant, federation
+  grants and the MFA package's factors — at its package's own off section
+  is switched off by it or declares nothing but its section, and booted
+  alone needs none of what it would require and contributes no route, grant
+  or factor
+  ([`disabled-modules.test.mts`](src/__tests__/disabled-modules.test.mts)).
+- **Every module refuses an unknown key in its own section.** Core's
+  `sectionStrictnessProblems` over every module with a section that the full
+  set loads on memory stores or on Redis, that a package exports, or that an
+  exported module factory builds (each factory is listed, and a new one
+  fails until it is), each section sampled from the configuration it boots
+  with or its package's `reference.conf`, and from samples that reach every
+  level and every form its schema declares: a level open by design is exempt
+  with its reason, and a module not yet strict is on an allowlist pinned level
+  by level that may only shrink — a level no longer needed fails, and so does
+  a new offender
+  ([`section-strictness.test.mts`](src/__tests__/section-strictness.test.mts)).
 - **What it checks on real Redis, under `core.deployment.mode = "multi"`.** That
   nothing in the full set declares replica-unsafe state, that each added
   memory store is refused at boot by name, and that two replicas on one

@@ -13,7 +13,11 @@
 
 import type { FederationTokenStore, FederationTokens } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import type { FederationTokenStoreClient } from "#/clients.mjs";
+import type {
+	FederationTokenAttachInput,
+	FederationTokenReadInput,
+	FederationTokenStoreClient,
+} from "#/clients.mjs";
 import {
 	createRedisFederationTokenStore,
 	redisFederationTokenStoreBuilder,
@@ -91,6 +95,22 @@ function createFakeRedis() {
 			}
 			return false;
 		}),
+		attachRecord: vi.fn(async (k: string, input: FederationTokenAttachInput) => {
+			data.set(k, input.value);
+			ttls.set(k, input.ttlMs);
+			return "attached" as const;
+		}),
+		// The conditional members' primitives; these tests write unconditionally.
+		readVersioned: vi.fn(async (_k: string, _input: FederationTokenReadInput) => null),
+		replaceIfGeneration: vi.fn(async () => "missing" as const),
+		removeIfGeneration: vi.fn(async () => "missing" as const),
+		pExpireGT: vi.fn(async (_key: string, _ttlMs: number) => {}),
+		durability: async () => ({
+			maxmemoryPolicy: "noeviction",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		}),
 	} satisfies FederationTokenStoreClient & {
 		data: Map<string, string>;
 		sets: Map<string, Set<string>>;
@@ -106,6 +126,7 @@ const tokens: FederationTokens = {
 	tokenType: undefined,
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 const plaintext = { mode: "allow-plaintext" } as const;
@@ -124,17 +145,6 @@ describe("per-session federation key index", () => {
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);
 		expect(indexMembers(redis, "sid-1")).toEqual(["github", "google"]);
-	});
-
-	it("update records the federation name too (a store that only ever saw update stays indexed)", async () => {
-		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
-			deploymentMode: "unset",
-			client: redis,
-			encryption: plaintext,
-		});
-		await store.update("sid-1", "google", tokens);
-		expect(indexMembers(redis, "sid-1")).toEqual(["google"]);
 	});
 
 	it("the index key carries the store TTL, not the access-token expiry", async () => {
@@ -174,7 +184,7 @@ describe("per-session federation key index", () => {
 		expect(indexMembers(redis, "sid-1")).toEqual(["github"]);
 	});
 
-	it("get() drops the name from the index when it self-heals a corrupt envelope", async () => {
+	it("get() keeps the name in the index when it self-heals a corrupt envelope: a concurrent attach may have just added it", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
 			deploymentMode: "unset",
@@ -184,7 +194,8 @@ describe("per-session federation key index", () => {
 		await store.attach("sid-1", "google", tokens);
 		redis.data.set("ft:sid-1:google", "{not-json");
 		expect(await store.get("sid-1", "google")).toBeNull();
-		expect(indexMembers(redis, "sid-1")).toEqual([]);
+		expect(indexMembers(redis, "sid-1")).toEqual(["google"]);
+		expect(redis.sRem).not.toHaveBeenCalled();
 	});
 });
 

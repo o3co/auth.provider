@@ -39,7 +39,11 @@ import type {
 	SessionRequirement,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { defineModule } from "@o3co/auth-provider-core";
+import {
+	defineModule,
+	readConditionalCreateAnswer,
+	readConditionalSetRemoveAnswer,
+} from "@o3co/auth-provider-core";
 import type { RecordingMailSender } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import type request from "supertest";
@@ -113,6 +117,33 @@ export const seedTotp = (
 		...options,
 	});
 
+/**
+ * `record` added to its subject's set as a writer of the set adds one: by
+ * `createIf`, at the generation the set is read at. Throws when the store
+ * refuses it.
+ */
+export async function addRecord(store: MfaFactorStore, record: MfaFactorRecord): Promise<void> {
+	const { generation } = await store.listVersioned(record.subject);
+	const answer = readConditionalCreateAnswer(await store.createIf(record, generation));
+	if (answer.outcome !== "created") throw new Error(`${record.id} was not stored`);
+}
+
+/**
+ * `id` removed from `subject`'s set as a writer of the set removes one: by
+ * `removeIf`, at the generation the set is read at. Throws when the store
+ * refuses it.
+ */
+export async function dropRecord(
+	store: MfaFactorStore,
+	subject: string,
+	id: string,
+): Promise<void> {
+	const { generation } = await store.listVersioned(subject);
+	if (generation === null) throw new Error(`${id} was not stored`);
+	const answer = readConditionalSetRemoveAnswer(await store.removeIf(subject, id, generation));
+	if (answer.outcome !== "removed") throw new Error(`${id} was not removed`);
+}
+
 /** Seeds a record of `kind` for `subject` whose data is `data`, sealed to it. */
 export async function seedFactor(
 	store: MfaFactorStore,
@@ -132,7 +163,7 @@ export async function seedFactor(
 		version: 0,
 		data: suiteSealing().sealFactorData({ subject, id, kind }, data),
 	};
-	await store.create(record);
+	await addRecord(store, record);
 	return record;
 }
 
@@ -554,4 +585,49 @@ export function cookieSessionTap() {
 		},
 	});
 	return { module, tapped, held, release: () => release() };
+}
+
+/** Every caller waits until `n` have arrived, then all go on. */
+export function barrier(n: number): () => Promise<void> {
+	let arrived = 0;
+	let release: () => void = () => {};
+	const open = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return async () => {
+		arrived += 1;
+		if (arrived >= n) release();
+		await open;
+	};
+}
+
+/**
+ * Holds the first two acquires of the subject's lease on `store` until both
+ * are asked — every completion has passed its checks before the lease — and
+ * the later one until the earlier's lease is released.
+ */
+export function leasingOneAfterAnother(store: MfaTransactionStore): void {
+	const arrive = barrier(2);
+	let released: () => void = () => {};
+	const firstReleased = new Promise<void>((resolve) => {
+		released = resolve;
+	});
+	let asked = 0;
+	const acquire = store.acquireSubjectLease.bind(store);
+	vi.spyOn(store, "acquireSubjectLease").mockImplementation(async (subject, options) => {
+		asked += 1;
+		if (asked === 2) {
+			await arrive();
+			await firstReleased;
+		} else if (asked === 1) {
+			await arrive();
+		}
+		return acquire(subject, options);
+	});
+	const release = store.releaseSubjectLease.bind(store);
+	vi.spyOn(store, "releaseSubjectLease").mockImplementation(async (subject, token) => {
+		const answer = await release(subject, token);
+		released();
+		return answer;
+	});
 }

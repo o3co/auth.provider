@@ -37,12 +37,12 @@ export type {
 	OutboundTransport,
 } from "../net/outbound-transport.mjs";
 
-export interface OutboundFetchForTestingOptions extends OutboundFetchOptions {
+export type OutboundFetchForTestingOptions = OutboundFetchOptions & {
 	/** Answers a host name with its addresses; absent → the system resolver. */
 	readonly lookup?: (hostname: string) => Promise<readonly string[]>;
 	/** Performs the exchange with the checked addresses; absent → Node's own. */
 	readonly transport?: OutboundTransport;
-}
+};
 
 /** `createOutboundFetch`, with the resolver and the transport replaced where given. */
 export function createOutboundFetchForTesting(

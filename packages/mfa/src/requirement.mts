@@ -131,7 +131,7 @@ export interface MfaRequirementOptions {
 	readonly mode: MfaRequirementMode;
 	/** The installed factors, read when asked: they register in the same pass as the requirement. */
 	readonly factors: MfaFactorResolver;
-	readonly factorStore: MfaFactorStore;
+	readonly factorStore: Pick<MfaFactorStore, "list">;
 	readonly transactions: LoginTransactions;
 	/** `mfa.page.url`, as the page a step-up starts on. */
 	readonly stepUpPage: StepUpPage;

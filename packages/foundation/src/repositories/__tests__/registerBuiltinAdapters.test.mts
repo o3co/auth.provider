@@ -24,6 +24,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { registerBuiltinAdapters } from "#/index.mjs";
+import { readStoreTransportConfig } from "#/storeTransport.mjs";
 
 const BASE_URL = "http://localhost:19090";
 const mockUser = { id: "u1", username: "alice" };
@@ -321,6 +322,21 @@ describe("registerBuiltinAdapters", () => {
 			await expect(build({ maxResponseBytes: { bytes: 2048 } })).rejects.toThrow(
 				/maxResponseBytes/,
 			);
+		});
+
+		// A string is read only as decimal digits: "0x10" is not 16, nor "1e3" 1000.
+		describe.each(["timeout", "maxResponseBytes"])("%s", (key) => {
+			it.each([["0x10"], ["1e3"], ["5.0"], ["+5"], [true], [""], ["  "], ["Infinity"]])(
+				"refuses %j",
+				async (value) => {
+					await expect(build({ [key]: value })).rejects.toThrow(new RegExp(`"${key}"`));
+				},
+			);
+
+			it.each([[60], ["60"], [" 60 "]])("reads %j as 60", async (value) => {
+				expect(readStoreTransportConfig({ [key]: value })[key as "timeout"]).toBe(60);
+				await expect(build({ [key]: value })).resolves.toBeDefined();
+			});
 		});
 	});
 });

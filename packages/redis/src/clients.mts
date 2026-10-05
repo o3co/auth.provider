@@ -21,6 +21,11 @@
  */
 
 import type {
+	AttemptCounterClient,
+	AttemptCounterConsumeInput,
+	AttemptCounterConsumeReply,
+} from "./clients/attempt-counter.mjs";
+import type {
 	ConsentRecordFields,
 	ConsentStoreClient,
 	GrantConsentInput,
@@ -37,6 +42,7 @@ import type {
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 } from "./clients/device-code.mjs";
+import type { RedisDurability } from "./clients/durability.mjs";
 import type {
 	ActivateFederationGrantInput,
 	CreatePendingFederationGrantInput,
@@ -45,17 +51,25 @@ import type {
 	FederationGrantStoreClient,
 	NameFederationGrantIntentInput,
 	NoteFederationGrantRefreshFailureInput,
+	RefundFederationGrantRotationInput,
 	ReplaceFederationGrantCredentialsInput,
 	RequireFederationGrantReauthorizationInput,
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
+	TakeFederationGrantRotationInput,
 } from "./clients/federation-grant.mjs";
 import type {
 	FederationGrantConsentAnswered,
 	FederationGrantIntentAdmission,
 	FederationGrantIntentStoreClient,
 } from "./clients/federation-grant-intent.mjs";
-import type { FederationTokenStoreClient } from "./clients/federation-tokens.mjs";
+import type {
+	FederationTokenAttachInput,
+	FederationTokenReadInput,
+	FederationTokenRemoveIfInput,
+	FederationTokenReplaceIfInput,
+	FederationTokenStoreClient,
+} from "./clients/federation-tokens.mjs";
 import type {
 	AcquireMfaSubjectLeaseInput,
 	AcquireMfaSubjectLeaseReply,
@@ -64,6 +78,10 @@ import type {
 	AuthorizeMfaSubjectRecoveryInput,
 	AuthorizeMfaSubjectRecoveryReply,
 	MfaFactorRecordUpdateInput,
+	MfaFactorSetCreateIfInput,
+	MfaFactorSetEmptyingWriteInput,
+	MfaFactorSetRemoveIfInput,
+	MfaFactorSetWriteInput,
 	MfaFactorStoreClient,
 	MfaFirstBindingRead,
 	MfaRemovedTransaction,
@@ -75,7 +93,6 @@ import type {
 	NoteMfaFirstBindingReply,
 	RaiseMfaRecoverySetFloorInput,
 	RaiseMfaRecoverySetFloorReply,
-	RedisDurability,
 	ReserveMfaSubjectAttemptInput,
 	ReserveMfaSubjectAttemptReply,
 } from "./clients/mfa.mjs";
@@ -110,6 +127,9 @@ export type {
 	ActivateFederationGrantInput,
 	ApplyMfaSubjectRecoveryInput,
 	ApplyMfaSubjectRecoveryReply,
+	AttemptCounterClient,
+	AttemptCounterConsumeInput,
+	AttemptCounterConsumeReply,
 	AuthorizeMfaSubjectRecoveryInput,
 	AuthorizeMfaSubjectRecoveryReply,
 	ChallengeStoreClient,
@@ -131,9 +151,17 @@ export type {
 	FederationGrantIntentStoreClient,
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
+	FederationTokenAttachInput,
+	FederationTokenReadInput,
+	FederationTokenRemoveIfInput,
+	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
 	GrantConsentInput,
 	MfaFactorRecordUpdateInput,
+	MfaFactorSetCreateIfInput,
+	MfaFactorSetEmptyingWriteInput,
+	MfaFactorSetRemoveIfInput,
+	MfaFactorSetWriteInput,
 	MfaFactorStoreClient,
 	MfaFirstBindingRead,
 	MfaRemovedTransaction,
@@ -155,6 +183,7 @@ export type {
 	RedisDurability,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
+	RefundFederationGrantRotationInput,
 	ReplaceFederationGrantCredentialsInput,
 	ReplaySeenSetClient,
 	RequireFederationGrantReauthorizationInput,
@@ -170,6 +199,7 @@ export type {
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	SubjectSessionIndexMultiClient,
+	TakeFederationGrantRotationInput,
 	UserSessionStoreClient,
 };
 
@@ -192,6 +222,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly subjectRevocationClient?: SubjectRevocationClient;
 		readonly federationTokenStoreClient?: FederationTokenStoreClient;
 		readonly rateLimiterClient?: RateLimiterClient;
+		readonly attemptCounterClient?: AttemptCounterClient;
 		readonly codeRepositoryClient?: CodeRepositoryClient;
 		readonly deviceCodeStoreClient?: DeviceCodeStoreClient;
 		readonly consentStoreClient?: ConsentStoreClient;

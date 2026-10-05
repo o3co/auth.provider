@@ -142,9 +142,9 @@ export interface SessionAuthentication {
 	/**
 	 * The federation, for `"fed"`: the name it is installed under — the key
 	 * its callback resolved it by, whose `trustUpstreamAmr` applied. Equal to
-	 * the adapter's `provider.name` in every bundled composition; the
-	 * federation index, logout and the federation-token store use
-	 * `provider.name`.
+	 * the adapter's `provider.name` for every provider a module registers,
+	 * which boot refuses when named otherwise than its key; the federation
+	 * index, logout and the federation-token store use `provider.name`.
 	 */
 	readonly federation: string | undefined;
 	/** What an untrusted upstream IdP asserted: kept for the record, never stamped, never read for `acr`. */
@@ -477,11 +477,12 @@ export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
  * change must invalidate outstanding tokens whose jtis are not enumerable, so
  * the watermark names the moment before which none count.
  *
- * Compared inclusively against `iat` (`iat <= watermark` is revoked): `iat`
- * is second-truncated and replica clocks differ, so a token minted just
- * before the reset often shares the watermark's second. Killing one minted
- * just after costs a retry; letting one from just before survive is the
- * vulnerability this closes.
+ * Compared inclusively against `iat`, and against `auth_time` when a token
+ * carries one (either at or before the watermark is revoked;
+ * `claimCoveredByRevocationBoundary`): `iat` is second-truncated and replica
+ * clocks differ, so a token minted just before the reset often shares the
+ * watermark's second. Killing one minted just after costs a retry; letting
+ * one from just before survive is the vulnerability this closes.
  *
  * `revokeBefore`'s `expiresAt` MUST reach at least as far as the
  * longest-lived credential the watermark must refuse, since it is the

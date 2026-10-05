@@ -25,11 +25,13 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type {
-	MfaFactorData,
-	MfaFactorRecord,
-	MfaFactorStore,
-	MfaLockoutPolicy,
+import {
+	type MfaFactorData,
+	type MfaFactorRecord,
+	type MfaFactorStore,
+	type MfaLockoutPolicy,
+	readConditionalCreateAnswer,
+	readMfaFactorSet,
 } from "@o3co/auth-provider-core";
 import { readMfaSettings } from "../config.mjs";
 import { createMfaSealing } from "../sealing.mjs";
@@ -176,6 +178,22 @@ export function openMfaFactorDataForTests(
 	return opened.value;
 }
 
+/**
+ * `record` added to its subject's set in `store` as a writer of the set adds
+ * one: by `createIf`, at the generation the set is read at. Throws when the
+ * store refuses it — another write landed meanwhile, or the id is held.
+ */
+async function addToSet(store: MfaFactorStore, record: MfaFactorRecord): Promise<void> {
+	const { generation } = readMfaFactorSet(
+		await store.listVersioned(record.subject),
+		record.subject,
+	);
+	const answer = readConditionalCreateAnswer(await store.createIf(record, generation));
+	if (answer.outcome !== "created") {
+		throw new Error("the factor was not stored: the subject's set changed, or its id is held");
+	}
+}
+
 /** What {@link seedMfaFactor} stores. */
 export interface SeedMfaFactorOptions {
 	/** A configuration holding the MFA module's section: its key ring seals the data. */
@@ -209,7 +227,7 @@ export async function seedMfaFactor(options: SeedMfaFactorOptions): Promise<MfaF
 		version: 0,
 		data: sealMfaFactorDataForTests(options.config, bound, options.data),
 	};
-	await options.factorStore.create(record);
+	await addToSet(options.factorStore, record);
 	return record;
 }
 
@@ -262,7 +280,7 @@ export async function seedTotpFactor(
 			},
 		),
 	};
-	await options.factorStore.create(record);
+	await addToSet(options.factorStore, record);
 	return { record, secret };
 }
 

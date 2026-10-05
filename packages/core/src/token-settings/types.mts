@@ -20,8 +20,10 @@
  *
  * A key several modules read has one owner (here the oauth module, owner of
  * `oauth {}`), which parses its section once and provides these values.
- * Readers list the slot as optional, since they also run without the oauth
- * module, and read the configuration only when no module provides it. A
+ * Most readers list the slot as optional, since they also run without the
+ * oauth module, and read the configuration only when nothing fills it. A
+ * reader that requires the slot reads none of the configuration: a
+ * composition without the oauth module fills the slot itself. A
  * provided slot is read whole, checked with `checkOAuthTokenSettings`, never
  * mixed with the configuration.
  *
@@ -29,9 +31,10 @@
  * - the grant-type allowlist switch: only the oauth module reads it;
  * - the revocation modes (`oauth.revocation.*`): the declared-absence guard
  *   reads them at validation, before any provider runs;
- * - `core.tokenBinding`: owned by core's token-binding extension point and
- *   read with `resolveTokenBindingSettings`; a slot carrying it would be a
- *   second source, which the contract refuses.
+ * - `core.tokenBinding`: owned by core's token-binding extension point,
+ *   read with `resolveTokenBindingSettings` and carried by core's own
+ *   `tokenBindingSettings` slot; this slot carrying it would be a second
+ *   source, which the contract refuses.
  *
  * A module in the oauth module's dependency set (providers of its `requires`
  * and `optional` keys, transitively) cannot read the slot: boot orders

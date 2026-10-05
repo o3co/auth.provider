@@ -60,13 +60,6 @@ export const coerceBooleanFromEnv = environmentCoercer(
 	),
 );
 
-const rateLimitSpecSchema = z.object({
-	limit: z.coerce.number().int().positive(),
-	// One year at most, the ceiling of every duration here: a window past the
-	// Date range is one the limiter adapters refuse when they are built.
-	windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
-});
-
 const LEGACY_JWT_FIELDS = [
 	"algorithm",
 	"kid",
@@ -141,6 +134,27 @@ export const wholeNumberFromEnv = (bounds: z.ZodNumber) =>
  * `tombstoneRetention: null` fails boot instead of disabling tombstones.
  */
 export const durationFromEnv = wholeNumberFromEnv;
+
+/**
+ * {@link wholeNumberFromEnv} held to `min`, and to `max` when given, every
+ * refusal carrying one message that names the range and the form. The reader
+ * for a number setting that needs no message of its own.
+ */
+export const wholeNumberInRangeFromEnv = (min: number, max?: number) => {
+	const error =
+		max === undefined
+			? `must be a whole number of at least ${min}, in decimal digits`
+			: `must be a whole number from ${min} to ${max}, in decimal digits`;
+	const bounds = z.number({ error }).int({ error }).min(min, { error });
+	return wholeNumberFromEnv(max === undefined ? bounds : bounds.max(max, { error }));
+};
+
+const rateLimitSpecSchema = z.object({
+	limit: wholeNumberInRangeFromEnv(1),
+	// One year at most, the ceiling of every duration here: a window past the
+	// Date range is one the limiter adapters refuse when they are built.
+	windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
+});
 
 const jwtSchemaBase = z.object({
 	// Required: the issuer belongs to the deployment, never to a request. An
@@ -367,11 +381,8 @@ export function resolveRefreshTokenLifetime(config: RefreshTokenLifetimeSource):
 	return value;
 }
 
-/**
- * A lifetime in whole seconds, positive and bounded, so the exported-but-empty
- * variable that `z.coerce.number()` reads as `0` fails boot.
- */
-const lifetimeSecondsSchema = z.coerce.number().int().positive().max(MAX_DURATION_SECONDS);
+/** A lifetime in whole seconds, positive and bounded. */
+const lifetimeSecondsSchema = wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS);
 
 /**
  * `oauth.accessToken`. Every key is optional so either spelling of the default
@@ -478,20 +489,29 @@ const authorizeSchema = withRemovedKeys(
  */
 export const MAX_TRUST_PROXY_HOPS = 255;
 
+/** Why an entry without a type, or with an empty or blank one, is refused. */
+const FEDERATION_TYPE_REQUIRED =
+	"every federation names its type: the federationTypes key of the installed module that handles it";
+
 /**
- * One federation in `core.federations`: whether it is on, the package that
- * handles it (`type`), and whether its upstream IdP's `amr` counts. Every
- * other key is the handling package's, kept as written.
+ * One federation in `core.federations`. Core owns `enabled`, `type`,
+ * `trustUpstreamAmr` and `callbackURL`, and boot strips them before the
+ * schema of the entry's type sees the entry; every other key is the type's,
+ * kept as written here, beside them: an entry is flat. Every entry names its
+ * `type`, enabled or not: the module registering that type under
+ * `federationTypes` is the one that handles it. `callbackURL` is not declared
+ * here: boot requires it of an entry it dispatches by type.
  */
 const federationEntrySchema = z
 	.object({
 		enabled: coerceBooleanFromEnv,
-		type: z.string().optional(),
+		type: z
+			.string({ error: FEDERATION_TYPE_REQUIRED })
+			.regex(/\S/, { error: FEDERATION_TYPE_REQUIRED }),
 		// Whether this federation's upstream IdP's `amr` counts (MFA ADR): it is
 		// recorded in the session's `amr` beside `fed`, stamped on tokens and
 		// matched for `acr`. Absent is `false`: the values are kept apart
-		// (`authentication.upstreamAmr`). Beside `enabled` in both shapes, never
-		// inside a type's own section.
+		// (`authentication.upstreamAmr`).
 		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
 	})
 	.passthrough();
@@ -549,7 +569,7 @@ export const CoreConfigSchema = z.object({
 		// per-request memory or bloat the id_token. Default in HOCON.
 		nonce: z
 			.object({
-				maxLength: z.coerce.number().int().positive(),
+				maxLength: wholeNumberInRangeFromEnv(1),
 			})
 			.optional(),
 		// Opt-in RFC 8707 Resource Indicator enforcement; off in reference.conf
@@ -617,7 +637,9 @@ export const CoreConfigSchema = z.object({
 			// compared at the end of boot's stage 4 with what registered, both ways
 			// once written. Required whenever a consumer of admission is installed,
 			// `[]` allowed, and no default anywhere: every composition states its
-			// posture.
+			// posture. `secondFactorAuthority`, optional with no default, names the
+			// expected requirement boot holds to declaring the second-factor
+			// authority.
 			sessionRequirements: z
 				.object({
 					expected: z.array(
@@ -625,13 +647,22 @@ export const CoreConfigSchema = z.object({
 							error: "core.sessionRequirements.expected names each requirement",
 						}),
 					),
+					secondFactorAuthority: z
+						.string({
+							error: "core.sessionRequirements.secondFactorAuthority names a requirement",
+						})
+						.min(1, {
+							error: "core.sessionRequirements.secondFactorAuthority names a requirement",
+						})
+						.optional(),
 				})
 				.strict()
 				.optional(),
 			// The settings across every mechanism at core's token-binding
 			// extension point (DPoP, mTLS, ...), core's as the point is: read
 			// through `resolveTokenBindingSettings` alone, and carried by no
-			// slot. See
+			// module's slot — boot fills core's `tokenBindingSettings` with
+			// them. See
 			// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
 			// The slots this composition runs without on purpose, each a slot a
 			// module's absence policy names by its key here (`auditSink`): the
@@ -807,10 +838,12 @@ export const fullSectionsSchema = z.object({
 			// The origins this RP may be framed by; the same two spellings as
 			// `origin`, for the same reason.
 			topOrigin: z.union([z.string(), z.array(z.string())]).optional(),
-			challengeTtlMs: z.coerce.number().int().positive().optional(),
+			challengeTtlMs: wholeNumberInRangeFromEnv(1).optional(),
 			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
 			userVerification: z.enum(["required", "preferred", "discouraged"]).optional(),
-			allowCredentialsForKnownUser: coerceBooleanFromEnv.optional(),
+			// Presence-only: a removed key, kept so a root that parses with
+			// `AppConfigSchema` before boot still hands it to the removed-key refusal.
+			allowCredentialsForKnownUser: z.unknown().optional(),
 			rateLimit: z
 				.object({
 					authenticationOptions: rateLimitSpecSchema.optional(),

@@ -26,7 +26,6 @@
  */
 
 import type {
-	AppConfig,
 	ClientRepository,
 	GrantContext,
 	PublicClient,
@@ -36,7 +35,13 @@ import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import {
+	ISSUER,
+	keyStore,
+	makeFamilyRevocation,
+	signSelfIssuedAccessToken,
+	tokenSettings,
+} from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -44,15 +49,6 @@ const JKT = "L0AXB6c64d2QW3rhCLLADhOMLf_7u2eTGH-q9ZGja24";
 const OTHER_JKT = "ZmFrZS1qa3QtdGhhdC1pcy1ub3QtdGhlLXNhbWUtdmFsdWU";
 const X5T = "bwcK0esc3ACC3DB2Y5_lESsXE8o9ltc05O89jdN-dg2";
 const OTHER_X5T = "ZmFrZS10aHVtYnByaW50LXRoYXQtaXMtbm90LXRoZS1zYW1l";
-
-const mockConfig = {
-	oauth: {
-		jwt: { issuer: ISSUER },
-		accessToken: { expiresIn: 300 },
-		refreshToken: { expiresIn: 86400 },
-		grants: {},
-	},
-} as unknown as AppConfig;
 
 const publicClient = (): PublicClient => ({
 	clientId: "client-a",
@@ -83,7 +79,7 @@ const buildGrant = () => {
 	]);
 	return createTokenExchangeGrant({
 		keyStore,
-		config: mockConfig,
+		oauthTokenSettings: tokenSettings,
 		clientRepository,
 		refreshTokenFamilyRevocation: store,
 		tokenExchangeValidatorResolver: validators,

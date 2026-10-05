@@ -36,6 +36,9 @@ import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
  * Every field is a required key, `undefined` where there is none: stores
  * rebuild the record field by field, and a required key turns a forgotten
  * field (a lost `subject` or `grantedScope`) into a compile error.
+ *
+ * A consumer reads a record a store answers through `readDeviceAuthorization`,
+ * never the store's object itself.
  */
 export interface DeviceAuthorization {
 	/** The code the human types. Normalised — see `normaliseUserCode`. */
@@ -207,20 +210,20 @@ export interface DeviceCodeStore {
  * failure naming the config key, not a runtime surprise on the first
  * `/oauth/device_authorization` request.
  *
- * Declaring absence is for a deployment that leaves the grant off; an
- * enabled grant without a store is refused by `deviceGrantModule`. The hint
- * is quoted into the boot error, so it must not tell an operator with the
- * grant enabled to write a line that is itself refused.
+ * Applied while the grant is on; a module switched off declares no policy.
+ * An enabled grant without a store is refused by `deviceGrantModule` whatever
+ * the declaration says. The hint is quoted into the boot error, so it must not
+ * tell an operator with the grant enabled to write a line that is itself
+ * refused.
  */
 export const DEVICE_CODE_STORE_ABSENCE_POLICY: AbsencePolicy = {
 	configKey: ["device-grant", "store"],
 	absentValue: "unsupported",
 	hint:
 		"the device authorization grant has nowhere to record a pending authorization, " +
-		"so no device can ever be authorized. With device-grant.enabled = true " +
-		"wire a store (memoryDeviceCodeStoreModule on a single replica, " +
-		"redisDeviceCodeStoreModule otherwise) — the declaration is refused there; it is " +
-		"for a deployment that leaves the grant off",
+		"so no device can ever be authorized. Wire a store (memoryDeviceCodeStoreModule on " +
+		"a single replica, redisDeviceCodeStoreModule otherwise) — the declaration does not " +
+		"make the grant work without one — or set device-grant.enabled = false",
 };
 
 declare module "@o3co/auth-provider-core" {

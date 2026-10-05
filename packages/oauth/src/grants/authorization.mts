@@ -50,7 +50,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
-import { usableFrontchannelLogoutUri } from "../logout/frontchannelLogoutUri.mjs";
+import { behindClientBoundary } from "../clients/clientBoundary.mjs";
 import { joinSession } from "../logout/sessionEnd.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
@@ -111,7 +111,11 @@ const requirementOrOutageRefusal = (
 };
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
-	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
+	const { config, codeRepository, keyStore, logger } = deps;
+	// The client's logout metadata is snapshotted into the session RP
+	// registry, so the record is read through core's client-record boundary:
+	// a record it refuses rejects the lookup, answered as the store's outage.
+	const clientRepository = behindClientBoundary(deps.clientRepository, logger ?? consoleLogger);
 	// No acr table: the acr was chosen at /authorize and travels on the code.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
@@ -252,7 +256,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	// One PKCE policy, through the same resolver `/authorize` uses, so
 	// `/authorize` cannot mint a code that `/token` refuses. Resolved once at
 	// composition.
-	const pkce = resolveOAuthOptions(config).pkce;
+	const pkce = resolveOAuthOptions(config.oauth).pkce;
 
 	// The lifetimes, also resolved once when the grant is built, so a
 	// hand-built configuration the resolvers refuse fails composition rather
@@ -310,6 +314,30 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						errorDescription: "redirect_uri mismatch",
 					},
 				};
+			}
+
+			// The client's logout metadata, read before the code is spent: a
+			// record the boundary refuses, or a repository that cannot answer, is
+			// a logged `503` that leaves the code redeemable and nothing signed or
+			// registered. Read only where it is used, with a session store wired.
+			let clientRecord: Awaited<ReturnType<typeof clientRepository.findById>> = null;
+			if (deps.userSessionStore) {
+				try {
+					clientRecord = await clientRepository.findById(authenticatedClientId);
+				} catch (err) {
+					logClientRepositoryUnavailable(
+						logger,
+						{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
+						err,
+					);
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session linking unavailable",
+						},
+					};
+				}
 			}
 
 			// Atomic consume (replay prevention). A store that cannot answer is a
@@ -522,9 +550,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// §6.1). One this clock cannot read — further ahead than the skew
 			// allows — refuses the exchange before anything is signed.
 			// One issuance instant for the exchange: `authTime` is read against it
-			// and every token signed here carries it as `iat` (the id_token's own
-			// `auth_time` is read against the clock it signs with, never later than
-			// its `iat`), so a wall clock moved back before the signing cannot put
+			// and every token signed here, the id_token included, carries it as
+			// `iat`, so a wall clock moved back before the signing cannot put
 			// `auth_time` after `iat`.
 			const mintingNow = Date.now();
 			const issuedAt = Math.floor(mintingNow / 1000);
@@ -711,12 +738,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// to logout. With a store wired, the first read already refused a code
 			// without a sid.
 			if (deps.userSessionStore && sid) {
+				const at = { sid, clientId: authenticatedClientId };
 				try {
-					const clientRecord = await clientRepository.findById(authenticatedClientId);
-
 					// The second read, right before the family is added: a session
-					// ended since the first read (spanning both signings, the family
-					// registration and `findById`) is refused here. A logout between
+					// ended since the first read (spanning both signings and the
+					// family registration) is refused here. A logout between
 					// this read and the add is caught by the add itself (below).
 					//
 					// The claim carries the first read's `sub`: the tokens were signed
@@ -733,10 +759,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					});
 					if (revalidation.outcome !== "admitted" || revalidation.session === null) {
 						return {
-							result: revalidationRefusal(revalidation, {
-								sid,
-								clientId: authenticatedClientId,
-							}),
+							result: revalidationRefusal(revalidation, at),
 						};
 					}
 					// The revalidated session drives the TTLs below and the id_token's other claims.
@@ -760,23 +783,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 								// from the logout cascade.
 								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
 								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-								// http(s) only, checked here as at logout: a refused URI
-								// leaves this RP without a front-channel entry, and the
-								// exchange goes on.
-								frontchannelLogoutUri: usableFrontchannelLogoutUri(
-									{
-										// The RP is registered under the authenticated id,
-										// so the warn names that one.
-										clientId: authenticatedClientId,
-										// Read by the helper, inside its guard.
-										get frontchannelLogoutUri(): unknown {
-											return clientRecord?.frontchannelLogoutUri;
-										},
-									},
-									"authorization_code",
-									// The refusal is logged even on a grant built without one.
-									logger ?? consoleLogger,
-								),
+								// http(s) only: the record is the boundary's validated
+								// copy (above), which refuses any other value (a
+								// document client registers none).
+								frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
 								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
 								registeredAt: new Date(),
 							},
@@ -785,7 +795,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						},
 					);
 					if (joined.outcome === "ended") {
-						const at = { sid, clientId: authenticatedClientId };
 						const refusal = sessionInvalidated(at);
 						await revokeRefusedFamily(familyId, at);
 						return { result: refusal };
@@ -801,20 +810,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						};
 					}
 				} catch (err) {
-					// Fail closed: the client lookup threw (the joins answer their
-					// outages above, and admission answers its own).
-					logClientRepositoryUnavailable(
-						logger,
-						{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
-						err,
-					);
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "session linking unavailable",
-						},
-					};
+					// The family is registered and its tokens are never served: revoked
+					// before the throw leaves, so none is left live outside the index.
+					await revokeRefusedFamily(familyId, at);
+					throw err;
 				}
 			}
 
@@ -833,8 +832,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					sub: userSession.sub,
 					aud: authenticatedClientId,
 					azp: authenticatedClientId,
-					// The instant read above, so the three tokens agree.
+					// The instants read above, so the three tokens agree; `authTime`
+					// is never later than `issuedAt`, so the id_token reads it as is.
 					authTime: new Date(authTime * 1000),
+					issuedAt,
 					...(nonce ? { nonce } : {}),
 					sid,
 					...(amr ? { amr } : {}),

@@ -39,11 +39,14 @@ export const liveCookieSession = (): Record<string, unknown> => ({
 	sid: LIVE_SID,
 });
 
+/** When every fixed session authenticated, in epoch milliseconds. */
+export const LIVE_AUTH_TIME_MS = 1_800_000_000_000;
+
 const sessionRecord = (sid: string, sub: string): UserSession => ({
 	sid,
 	sub,
-	authTime: new Date(1_800_000_000_000),
-	createdAt: new Date(1_800_000_000_000),
+	authTime: new Date(LIVE_AUTH_TIME_MS),
+	createdAt: new Date(LIVE_AUTH_TIME_MS),
 	expiresAt: new Date(1_900_000_000_000),
 	claims: {},
 	// A password login's record.

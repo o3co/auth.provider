@@ -16,7 +16,8 @@
 
 /**
  * What the `/oauth` router resolves once, when it is built, and hands its
- * endpoints: the `oauth.*` options, the acr table `/authorize` answers from,
+ * endpoints: the `oauth.*` options, read from the section `oauth` alone; the
+ * acr table `/authorize` answers from,
  * the canonical issuer (one that is not canonical refuses the build) and the
  * one client repository every endpoint looks a client up in, which reads
  * registered clients through core's client-record boundary.
@@ -58,6 +59,7 @@ export interface RouterSettings {
 }
 
 export const resolveRouterSettings = ({
+	section,
 	config,
 	authorizationEndpoint,
 	requirements,
@@ -67,6 +69,12 @@ export const resolveRouterSettings = ({
 	clientIdMetadataDocumentSeams,
 	logger,
 }: {
+	/** `oauth {}`: every `oauth.*` option the router reads. */
+	readonly section: unknown;
+	/**
+	 * The configuration, for what the acr table reads beyond `oauth {}`: which
+	 * installed federation trusts its upstream IdP's `amr`.
+	 */
 	readonly config: AppConfig;
 	/** Whether `/authorize` is mounted. */
 	readonly authorizationEndpoint: boolean;
@@ -81,7 +89,7 @@ export const resolveRouterSettings = ({
 	// here, at router composition; see `resolveOAuthOptions` for the defensive
 	// reads and per-field defaults. The /authorize handler receives the whole
 	// object (routes/authorize.mts).
-	const options = resolveOAuthOptions(config);
+	const options = resolveOAuthOptions(section);
 	// `/authorize` answers `acr_values` only from the entries this composition
 	// can satisfy — the same table discovery advertises — and an entry dropped
 	// is said once, here, at composition. With no `/authorize` there is no
@@ -114,8 +122,8 @@ export const resolveRouterSettings = ({
 	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
 	const canonicalIssuer = options.issuer as string;
 	// Every endpoint reads registered clients through core's client-record
-	// boundary, outermost: the document fallback over it, or the boundary
-	// itself (`behindClientBoundary`).
+	// boundary: the document fallback over it, or the boundary itself
+	// (`behindClientBoundary`).
 	//
 	// Client ID Metadata Documents. Pre-registered clients answer first; a
 	// client_id that is an https URL is then resolved from the document it

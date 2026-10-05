@@ -52,9 +52,9 @@ import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { repositoriesModuleFor, templateReference } from "../modules.mjs";
 import { repositoriesSectionSchema } from "../sections.mjs";
 import {
-	adaptersOf,
 	capturedRenames,
 	libraryLayers,
+	rootSectionsOf,
 	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
@@ -111,7 +111,7 @@ const resolve = (env: Record<string, string>): Switches => {
 		.withFallback(libraryLayers(env));
 	return {
 		...sectionsCoreDoesNotDeclare(layers),
-		adapters: adaptersOf(layers, env),
+		...rootSectionsOf(layers, env),
 		...validate(layers, AppConfigSchema),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
@@ -174,8 +174,9 @@ describe("REPOSITORIES_USER_HTTP_BEARER_TOKEN reaches the Store through the ship
 });
 
 describe("a token the Store refuses, seen from outside the booted app", () => {
-	/** Every store on memory, so the boot opens no socket but the Store's. */
+	/** Every store on memory, so the boot opens no socket but the Store's; MFA off. */
 	const MEMORY_ENV: Readonly<Record<string, string>> = {
+		MFA_MODE: "off",
 		SESSION_STORE_SECURE: "false",
 		SESSION_STORE_NAME: "auth.session",
 		SESSION_STORE_STORAGE_TYPE: "memory",

@@ -18,8 +18,9 @@
  * oauth's entry points that take a `ClientRepository`, `createOAuthRouter`
  * and `createClientAuthMiddleware`, read registered clients through core's
  * client-record boundary, outermost, with Client ID Metadata Documents off
- * as with them on. A boundary handed in is not wrapped again, and a document
- * fallback handed in is not wrapped at all.
+ * as with them on. A boundary handed in is not wrapped again, and the
+ * router's document fallback, handed to the client authentication, is not
+ * wrapped at all.
  */
 
 import crypto, { randomUUID } from "node:crypto";
@@ -29,8 +30,6 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createMemoryAccessTokenDenylist,
-	createMemoryConsentStore,
-	createMemoryPendingConsentStore,
 	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 	type GrantHandler,
@@ -47,6 +46,7 @@ import express from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { behindClientBoundary } from "#/clients/clientBoundary.mjs";
 import {
 	isClientIdMetadataDocumentClient,
 	withClientIdMetadataDocuments,
@@ -121,10 +121,7 @@ const capturingGrant = () => {
 	return { registry, seen };
 };
 
-const buildRouter = async (
-	clientRepository: ClientRepository,
-	{ consent = false }: { consent?: boolean } = {},
-) => {
+const buildRouter = async (clientRepository: ClientRepository) => {
 	const logger = createMockLogger();
 	const { registry, seen } = capturingGrant();
 	const { router } = await createOAuthRouter(express, {
@@ -136,12 +133,6 @@ const buildRouter = async (
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		accessTokenDenylist: createMemoryAccessTokenDenylist(),
-		...(consent
-			? {
-					consentStore: createMemoryConsentStore(),
-					pendingConsentStore: createMemoryPendingConsentStore(),
-				}
-			: {}),
 		logger,
 	});
 	const session: Record<string, unknown> = { isAuthenticated: true, user: { id: "user-1" } };
@@ -181,16 +172,25 @@ const token = (app: express.Express) =>
 const refusals = (logger: ReturnType<typeof createMockLogger>) =>
 	logger.warn.mock.calls.filter(([, message]) => message === "client_record_refused");
 
+/** The outage lines naming the boundary's refusal as their cause. */
+const refusedLookups = (logger: ReturnType<typeof createMockLogger>) =>
+	logger.error.mock.calls.filter(
+		([line, message]) =>
+			message === "client_repository_unavailable" &&
+			(line as { err?: { reason?: string } }).err?.reason === "client_record_refused",
+	);
+
 describe("createOAuthRouter with documents off reads registered clients through core's boundary", () => {
-	it("answers a refused record 400 invalid_client at /authorize, with no redirect, and warns it", async () => {
+	it("answers a refused record 503 at /authorize, with no redirect, and warns it once", async () => {
 		const { app, logger } = await buildRouter(answering(REFUSED));
 		const res = await authorize(app);
-		expect(res.status).toBe(400);
-		expect(res.body).toMatchObject({ error: "invalid_client" });
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(res.headers.location).toBeUndefined();
 		expect(refusals(logger).map(([line]) => [line.step, line.clientId])).toEqual([
 			["find", CLIENT_ID],
 		]);
+		expect(refusedLookups(logger)).toHaveLength(1);
 	});
 
 	it("serves the same client at /authorize once its record is valid", async () => {
@@ -203,26 +203,27 @@ describe("createOAuthRouter with documents off reads registered clients through 
 		expect(refusals(logger)).toEqual([]);
 	});
 
-	it("answers a refused record 401 invalid_client at /token, before any grant runs", async () => {
+	it("answers a refused record 503 at /token, before any grant runs, with no challenge", async () => {
 		const { app, seen } = await buildRouter(answering(REFUSED));
 		const res = await token(app);
-		expect(res.status).toBe(401);
-		expect(res.body).toMatchObject({ error: "invalid_client" });
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(res.headers["www-authenticate"]).toBeUndefined();
 		expect(seen).toEqual([]);
 	});
 
-	it("answers a refused record invalid_client at /revoke", async () => {
+	it("answers a refused record 503 at /revoke", async () => {
 		const { app } = await buildRouter(answering(REFUSED));
 		const res = await basic("/oauth/revoke", app, { token: "some-token" });
-		expect(res.status).toBe(401);
-		expect(res.body).toMatchObject({ error: "invalid_client" });
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 	});
 
-	it("answers a refused record invalid_client at /introspect", async () => {
+	it("answers a refused record 503 at /introspect", async () => {
 		const { app } = await buildRouter(answering(REFUSED));
 		const res = await basic("/oauth/introspect", app, { token: "some-token" });
-		expect(res.status).toBe(401);
-		expect(res.body).toMatchObject({ error: "invalid_client" });
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 	});
 
 	it("answers a repository that throws 503 at /authorize and /token", async () => {
@@ -235,51 +236,56 @@ describe("createOAuthRouter with documents off reads registered clients through 
 		expect(exchanged.body).toMatchObject({ error: "temporarily_unavailable" });
 	});
 
-	it("dispatches /token with the client a boundary handed in answered, not a second copy of it", async () => {
-		const boundary = validatedClientRepository(answering(VALID), { logger: createMockLogger() });
-		const authenticate = vi.spyOn(boundary, "authenticate");
+	it("dispatches /token with the client a boundary handed in answered, read through it as it is", async () => {
+		const inner = answering(VALID);
+		const authenticate = vi.spyOn(inner, "authenticate");
+		const boundary = validatedClientRepository(inner, { logger: createMockLogger() });
+		// The boundary is frozen, so it cannot be spied on: it is kept as it is.
+		expect(behindClientBoundary(boundary, createMockLogger())).toBe(boundary);
 		const { app, seen } = await buildRouter(boundary);
 		const res = await token(app);
 		expect(res.status).toBe(400);
 		expect(authenticate).toHaveBeenCalledTimes(1);
-		const answered = (await authenticate.mock.results[0]?.value) as PublicClient;
 		expect(seen).toHaveLength(1);
-		// The grant's client is built from the boundary's answer: the frozen
-		// array is the same one, which a second boundary would have copied.
-		expect(seen[0]?.allowedScopes).toBe(answered.allowedScopes);
+		expect(seen[0]).toMatchObject({ clientId: CLIENT_ID, allowedScopes: VALID.allowedScopes });
+		expect(Object.isFrozen(seen[0]?.allowedScopes)).toBe(true);
 	});
 });
 
-describe("createOAuthRouter handed a document fallback", () => {
-	const DOC_ID = "https://tools.example/oauth/client.json";
-	const fallback = () =>
-		withClientIdMetadataDocuments(answering(null), {
-			allowedScopes: ["openid", "read"],
-			allowedAudiences: [],
-			config: {},
-			fetch: (async () =>
-				new Response(
-					JSON.stringify({
-						client_id: DOC_ID,
-						client_name: "Tools",
-						redirect_uris: [REDIRECT_URI],
-						token_endpoint_auth_method: "none",
-					}),
-					{ status: 200, headers: { "content-type": "application/json" } },
-				)) as typeof fetch,
-		});
+describe("a record whose defaultScopes leave its allowedScopes never reaches a scope decision", () => {
+	// `/authorize` and the grants `/token` dispatches to grant an omitted scope
+	// from the client's defaultScopes as they are: the boundary is what holds
+	// them within the allowlist.
+	const OVER_DEFAULT = { ...VALID, defaultScopes: ["read", "admin"] };
 
-	it("reads it unwrapped, so consent still names the host of a document client", async () => {
-		const { app } = await buildRouter(fallback(), { consent: true });
-		const res = await authorize(app, DOC_ID);
-		expect(res.status).toBe(302);
-		const location = new URL(res.headers.location as string, ISSUER);
-		expect(location.pathname).toBe("/consent");
-		const challenge = location.searchParams.get("challenge");
-		const page = await request(app).get("/oauth/consent").query({ challenge });
-		expect(page.status).toBe(200);
-		expect(page.body).toMatchObject({ client_id: DOC_ID, client_id_host: "tools.example" });
+	it("answers it 503 at /authorize for a request that omits scope, with no redirect", async () => {
+		const { app, logger } = await buildRouter(answering(OVER_DEFAULT));
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: CLIENT_ID,
+			redirect_uri: REDIRECT_URI,
+			state: "xyz",
+			code_challenge: S256_CHALLENGE,
+			code_challenge_method: "S256",
+		});
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(res.headers.location).toBeUndefined();
+		expect(refusals(logger).map(([line]) => line.reasons)).toEqual([
+			[expect.stringContaining("defaultScopes")],
+		]);
 	});
+
+	it.each(["client_credentials", "urn:ietf:params:oauth:grant-type:jwt-bearer"])(
+		"answers it 503 at /token for %s, before any grant runs",
+		async (grantType) => {
+			const { app, seen } = await buildRouter(answering(OVER_DEFAULT));
+			const res = await basic("/oauth/token", app, { grant_type: grantType });
+			expect(res.status).toBe(503);
+			expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+			expect(seen).toEqual([]);
+		},
+	);
 });
 
 describe("createClientAuthMiddleware reads clients through core's boundary", () => {
@@ -305,12 +311,13 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 		return server;
 	};
 
-	it("refuses a client whose record the boundary refuses 401 invalid_client, and warns it", async () => {
+	it("answers a client whose record the boundary refuses 503, and warns it once", async () => {
 		const logger = createMockLogger();
 		const res = await basic("/token", app(answering(REFUSED), logger), {});
-		expect(res.status).toBe(401);
-		expect(res.body).toMatchObject({ error: "invalid_client" });
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(refusals(logger).map(([line]) => line.clientId)).toEqual([CLIENT_ID]);
+		expect(refusedLookups(logger).map(([line]) => line.step)).toEqual(["find"]);
 	});
 
 	it("passes a valid record on as the boundary's frozen copy", async () => {
@@ -325,9 +332,10 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 	});
 
-	it("sets the client a boundary handed in answered, not a second copy of it", async () => {
-		const boundary = validatedClientRepository(answering(VALID), { logger: createMockLogger() });
-		const authenticate = vi.spyOn(boundary, "authenticate");
+	it("sets the client a boundary handed in answered, read through it as it is", async () => {
+		const inner = answering(VALID);
+		const authenticate = vi.spyOn(inner, "authenticate");
+		const boundary = validatedClientRepository(inner, { logger: createMockLogger() });
 		const server = express();
 		server.use(express.urlencoded({ extended: false }));
 		let set: PublicClient | undefined;
@@ -338,7 +346,8 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 		const res = await basic("/token", server, {});
 		expect(res.status).toBe(200);
 		expect(authenticate).toHaveBeenCalledTimes(1);
-		expect(set).toBe(await authenticate.mock.results[0]?.value);
+		expect(set).toMatchObject({ clientId: CLIENT_ID, clientName: VALID.clientName });
+		expect(Object.isFrozen(set)).toBe(true);
 	});
 
 	it("reads a document fallback unwrapped, so a document client keeps its provenance", async () => {
@@ -402,10 +411,10 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 					client_assertion: await assertion(),
 				});
 
-		it("refuses an assertion whose client's record the boundary refuses", async () => {
+		it("answers an assertion whose client's record the boundary refuses 503", async () => {
 			const res = await send(jwtRecord({ clientName: "" }));
-			expect(res.status).toBe(401);
-			expect(res.body).toMatchObject({ error: "invalid_client" });
+			expect(res.status).toBe(503);
+			expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		});
 
 		it("authenticates the same assertion once the record is valid", async () => {

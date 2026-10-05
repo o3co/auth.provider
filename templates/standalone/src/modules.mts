@@ -27,7 +27,6 @@ import {
 	createKeyStoreFactory,
 	createRepositoryFactories,
 	defineModule,
-	federationsOf,
 	type LifecycleRegistrar,
 	type Logger,
 	loggableError,
@@ -37,15 +36,12 @@ import {
 	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
-import type { GoogleProviderConfig } from "@o3co/auth-provider-federation-google";
-import { readOidcFederationConfigs } from "@o3co/auth-provider-federation-oidc";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import {
 	makeIoredisClients,
 	makeIoredisFederationGrantIntentStoreClient,
 	makeIoredisFederationGrantStoreClient,
 } from "@o3co/auth-provider-redis/ioredis";
-import { extractFederationSection } from "@o3co/auth-provider-session";
 // Named import, not default: ioredis is CJS (`module.exports = Redis`, the
 // class re-exported as both `default` and `Redis`), so under `module:
 // "nodenext"` with esModuleInterop the default import resolves to the
@@ -528,6 +524,11 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.rateLimiterClient;
 		},
+		// `redisAttemptCounterModule` consumes this slot where a deployment installs it.
+		attemptCounterClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
+				.attemptCounterClient;
+		},
 		// `redisCodeRepositoryModule` consumes this slot when
 		// `adapters.codeRepository = "redis"`.
 		codeRepositoryClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
@@ -612,11 +613,10 @@ export const standaloneRedisClientsModule: Module = defineModule({
 				.federationTokenStoreClient;
 		},
 		// The two MFA stores' clients, required by `redisMfaFactorStoreModule`
-		// and `redisMfaTransactionStoreModule`. This template installs
-		// neither; the slots are provided anyway, for the device-code slot's
-		// reason. Each module checks the server's eviction
-		// policy and persistence when it boots (ADR
-		// 2026-09-25-multi-factor-authentication).
+		// and `redisMfaTransactionStoreModule`, which `buildModules` selects
+		// with MFA on and `adapters.mfaFactorStore` / `.mfaTransactionStore`
+		// = "redis". Each module checks the server's eviction policy and
+		// persistence when it boots.
 		mfaFactorStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.mfaFactorStoreClient;
@@ -732,151 +732,3 @@ function getOrCreateClients(
 	if (lifecycleRegistrar) clientsCache.set(lifecycleRegistrar, clients);
 	return clients;
 }
-
-/**
- * Reads an optional string field off a federation slice. An unset field stays
- * absent rather than becoming `undefined`, so `"sessionDomain" in config`
- * still distinguishes the two. A present non-string throws: HOCON hands
- * through whatever the file holds, and silently ignoring `sessionDomain = 42`
- * would run the redirect policy with one fewer constraint than the operator
- * wrote down.
- */
-function optionalString(
-	slice: Record<string, unknown>,
-	field: string,
-): Record<string, string> | Record<string, never> {
-	const value = slice[field];
-	if (value === undefined || value === null) return {};
-	if (typeof value !== "string") {
-		throw new Error(`core.federations.google.${field} must be a string when present`);
-	}
-	return { [field]: value };
-}
-
-/**
- * An optional boolean from the `core.federations.google` entry: a HOCON boolean, or
- * from an environment override (`${?VAR}`) a string in the spellings core's
- * `coerceBooleanFromEnv` accepts ("true" / "false" / "1" / "0", trimmed, any
- * case). Unlike that coercion, an empty value is refused, not read as false:
- * HOCON substitutes an exported-but-empty variable as "", and a security
- * switch must not quietly turn the check off. Anything else is refused too,
- * so a typo fails boot rather than reading as either value.
- */
-function optionalBoolean(
-	slice: Record<string, unknown>,
-	field: string,
-): Record<string, boolean> | Record<string, never> {
-	const value = slice[field];
-	if (value === undefined || value === null) return {};
-	if (typeof value === "boolean") return { [field]: value };
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true" || normalized === "1") return { [field]: true };
-		if (normalized === "false" || normalized === "0") return { [field]: false };
-	}
-	throw new Error(
-		`core.federations.google.${field} must be one of true, false, "true", "false", "1" or "0" when present`,
-	);
-}
-
-/**
- * `accessType` from the `core.federations.google` entry: `"offline"` or `"online"`,
- * exactly, or absent. `federation-google` refuses any other value too; this
- * refuses it first, naming the key, as the fields above do.
- */
-function optionalAccessType(
-	slice: Record<string, unknown>,
-): { accessType: "offline" | "online" } | Record<string, never> {
-	const value = slice.accessType;
-	if (value === undefined || value === null) return {};
-	if (value === "offline" || value === "online") return { accessType: value };
-	throw new Error('core.federations.google.accessType must be "offline" or "online" when present');
-}
-
-/**
- * Google federation config bridge: supplies the typed `googleFederationConfig`
- * slot from the `core.federations.google` entry. The bridge is the
- * composition root's responsibility because the slot's content is
- * consumer-specific (see the `@o3co/auth-provider-federation-google` README).
- *
- * It carries every field the provider reads, not only the credentials:
- * `googleFederationModule` hands this same object to
- * `createFederationRedirectPolicy`, so a dropped `redirectAllowlist` /
- * `sessionDomain` / `authCallbackUrl` / `clientUrl` would silently run the
- * policy without the constraints the operator configured.
- */
-export const googleFederationConfigModule: Module = defineModule({
-	name: "google-federation-config",
-	requires: ["config"] as const,
-	provides: {
-		googleFederationConfig: ({ config }): GoogleProviderConfig => {
-			const slice = extractFederationSection(federationsOf(config), "google");
-			if (!slice) {
-				throw new Error(
-					"core.federations.google must be enabled with credentials when googleFederationModule is in the manifest",
-				);
-			}
-			const clientId = slice.clientId;
-			const clientSecret = slice.clientSecret;
-			const callbackURL = slice.callbackURL;
-			if (
-				typeof clientId !== "string" ||
-				typeof clientSecret !== "string" ||
-				typeof callbackURL !== "string"
-			) {
-				throw new Error(
-					"core.federations.google requires clientId, clientSecret, callbackURL when enabled",
-				);
-			}
-
-			// The allowlist is checked for shape here and for content by
-			// `createFederationRedirectPolicy`, which owns the URL rules. This
-			// only has to establish that HOCON produced a list of strings —
-			// `redirectAllowlist = "https://…"` (a bare string, the natural typo)
-			// would otherwise reach the policy as a config it cannot read.
-			const rawAllowlist = slice.redirectAllowlist;
-			let redirectAllowlist: Record<string, readonly string[]> | Record<string, never> = {};
-			if (rawAllowlist !== undefined && rawAllowlist !== null) {
-				if (!Array.isArray(rawAllowlist) || rawAllowlist.some((e) => typeof e !== "string")) {
-					throw new Error(
-						"core.federations.google.redirectAllowlist must be a list of URL strings, " +
-							'e.g. ["https://app.example.com/welcome"]',
-					);
-				}
-				redirectAllowlist = { redirectAllowlist: rawAllowlist as readonly string[] };
-			}
-
-			return {
-				clientId,
-				clientSecret,
-				callbackURL,
-				...redirectAllowlist,
-				...optionalString(slice, "sessionDomain"),
-				...optionalString(slice, "authCallbackUrl"),
-				...optionalString(slice, "clientUrl"),
-				// Absent means the provider's default, which is to require it.
-				...optionalBoolean(slice, "requireAuthorizationResponseIss"),
-				// Absent means the provider's default, "offline": consent on every
-				// sign-in, and a refresh token for every session.
-				...optionalAccessType(slice),
-			};
-		},
-	},
-});
-
-/**
- * OIDC federation config bridge: supplies the `oidcFederationConfigs`
- * slot every `oidcFederationModule(<name>)` in the manifest reads its entry
- * from. One bridge for all instances: `readOidcFederationConfigs` walks
- * `core.federations` and reads every enabled entry of type `oidc`,
- * refusing a malformed field by `core.federations.<name>.<field>` at boot.
- * `buildModules` lists this module only when at least one such section
- * exists.
- */
-export const oidcFederationConfigModule: Module = defineModule({
-	name: "oidc-federation-config",
-	requires: ["config"] as const,
-	provides: {
-		oidcFederationConfigs: ({ config }) => readOidcFederationConfigs(federationsOf(config)),
-	},
-});

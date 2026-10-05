@@ -39,7 +39,11 @@ import {
 	type Logger,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestFederationSettings,
+	makeValidAppConfig,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -224,7 +228,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 					mountPath: "/session",
 					handler: createFederationRouter(express, {
 						requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
-						config: config as never,
+						federationSettings: createTestFederationSettings(),
 						federationTransactionCookieName: deriveFederationTransactionCookieName(
 							deps.sessionCookiePolicy.name,
 						),

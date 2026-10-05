@@ -16,8 +16,8 @@
 
 /**
  * The `/session` routes for a browser's own login and logout — `GET /csrf`,
- * `POST /login`, `POST /logout` — behind the CSRF guard and the login rate
- * limit. A password login verifies credentials, then asks session admission
+ * `POST /login`, `POST /logout` — behind the CSRF guard and, for the login,
+ * its own attempt limit (core's attempt guard). A password login verifies credentials, then asks session admission
  * (`admitPrimary`) before anything is written: if every requirement
  * establishes, `establishSession` writes the session and a fresh CSRF token
  * is returned; if one interrupts, its ceremony is opened on a regenerated,
@@ -29,23 +29,22 @@
 
 import {
 	type AdmissionDeps,
+	type AttemptCounter,
 	type AuditSink,
 	admitPrimary,
-	BootError,
 	type CsrfTokenSigner,
 	checkDeploymentMode,
 	checkResolver,
 	consoleLogger,
 	cookieClaim,
 	cookieRenewedAway,
-	createMemoryRateLimiter,
-	createRateLimitGuard,
+	createAttemptGuard,
 	type DeploymentMode,
 	type FederationTokenStore,
 	type Logger,
 	loggableError,
 	passwordPrimary,
-	type RateLimiter,
+	readUserSnapshot,
 	type SessionCookiePolicy,
 	type SessionFederationIndex,
 	type SessionRequirementResolver,
@@ -72,7 +71,7 @@ import {
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
-import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "../loginBudget.mjs";
+import { LOGIN_ATTEMPT_TAG, readLoginAttemptSpec } from "../loginAttempts.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
 
 const DEFAULT_SESSION_TTL_MS = 86400_000;
@@ -98,7 +97,7 @@ export const createRouter = (
 		subjectSessionIndex,
 		federationTokenStore,
 		sessionFederationIndex,
-		rateLimiter,
+		attemptCounter,
 		auditSink,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		logger = consoleLogger,
@@ -108,7 +107,7 @@ export const createRouter = (
 		userRepository: UserRepository;
 		/**
 		 * The session module's own section, as its schema parsed it: the
-		 * redirect allowlist, the CSRF settings and the login's budget.
+		 * redirect allowlist, the CSRF settings and the login's attempt limit.
 		 */
 		section: {
 			readonly redirectAllowlist?: readonly string[] | undefined;
@@ -122,10 +121,10 @@ export const createRouter = (
 		 */
 		sessionCookie: Pick<SessionCookiePolicy, "name" | "secure" | "sameSite" | "domain">;
 		/**
-		 * The replica count, as core's `deploymentMode` slot holds it: what the
-		 * login throttle's per-process fallback is refused, warned about or
-		 * silent by. Anything but the three values, absence included, is a
-		 * TypeError at construction.
+		 * The replica count, as core's `deploymentMode` slot holds it: what
+		 * counting login attempts per process, with no `attemptCounter`, is
+		 * refused, warned about or silent by. Anything but the three values,
+		 * absence included, is a TypeError at construction.
 		 */
 		deploymentMode: DeploymentMode;
 		userSessionStore?: UserSessionStore;
@@ -146,15 +145,14 @@ export const createRouter = (
 		 */
 		sessionFederationIndex?: SessionFederationIndex;
 		/**
-		 * Shared rate limiter for the login brute-force guard, so the limit holds
-		 * across replicas. Omitted, the router builds a per-process in-memory
-		 * limiter with the same spec and warns (or refuses when `deploymentMode`
-		 * is `"multi"`).
+		 * The `attemptCounter` slot's counter, so the login's limit holds across
+		 * replicas. Omitted, the attempt guard counts per process where
+		 * `deploymentMode` allows it.
 		 */
-		rateLimiter?: RateLimiter;
+		attemptCounter?: AttemptCounter;
 		/**
-		 * Receives the login guard's `rate_limit.unavailable` event during a
-		 * limiter outage. Absent: no audit events.
+		 * Receives the attempt guard's `rate_limit.unavailable` event during a
+		 * counter outage. Absent: no audit events.
 		 */
 		auditSink?: AuditSink;
 		/** Session TTL in milliseconds. Default: 24h. */
@@ -212,58 +210,15 @@ export const createRouter = (
 		logger,
 	});
 
-	// The login guard runs on the same `RateLimiter` as the OAuth endpoints,
-	// keyed under the prefix the session module contributes this budget for.
-	const loginLimitSpec = readLoginRateLimitBudget(section);
-	if (loginLimitSpec === null) {
-		throw new Error(
-			"createRouter: POST /session/login requires session.rateLimit.login { windowMs, limit }",
-		);
-	}
-	if (rateLimiter === undefined) {
-		// The per-process fallback is replica-unsafe state, so the deployment
-		// mode decides: "multi" refuses at boot (the limit would really be
-		// limit × replicas, reset on every deploy), "single" is silent, "unset"
-		// warns. The planner wraps this throw as `contribute-factory-failed`.
-		if (replicas === "multi") {
-			throw new BootError({
-				stage: "applyContributions",
-				reason: "replica-unsafe-adapter",
-				message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login: the route would fall back to a per-process limiter, so the configured ${loginLimitSpec.limit} / ${loginLimitSpec.windowSeconds}s is really ${loginLimitSpec.limit} × replicas and resets on every deploy. Wire a rateLimiter (adapters.rateLimiter = "redis" in the standalone template), or set core.deployment.mode = "single".`,
-				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
-			});
-		}
-		if (replicas !== "single") {
-			logger.warn(
-				{
-					limit: loginLimitSpec.limit,
-					windowSeconds: loginLimitSpec.windowSeconds,
-				},
-				"login_rate_limiter_not_shared",
-			);
-		}
-	}
-	// Falling back rather than leaving the route unguarded: this is the endpoint
-	// that exists to resist password guessing, and a per-process bucket is weak
-	// protection, not absent protection. The warning above says which one is in
-	// force so the weakness is stated rather than implied.
-	const loginLimiter: RateLimiter =
-		rateLimiter ??
-		createMemoryRateLimiter({
-			limits: { [LOGIN_RATE_LIMIT_PREFIX]: loginLimitSpec },
-			defaultLimit: loginLimitSpec,
-		});
-
-	// The check and outage policy are core's `createRateLimitGuard`, shared
-	// with the OAuth endpoints (the limiter's own `failMode`, the same
-	// `rate_limit.unavailable` audit event). `RateLimit-*` headers fall back to
-	// the documented login spec when the adapter reports none.
-	const loginRateLimit = createRateLimitGuard({
-		limiter: loginLimiter,
-		tag: LOGIN_RATE_LIMIT_PREFIX,
+	// The login's own attempt limit, whatever limiter the deployment wires: the
+	// guard owns the per-process fallback, failing closed and the headers.
+	const loginAttempts = createAttemptGuard({
+		...(attemptCounter === undefined ? {} : { counter: attemptCounter }),
+		deploymentMode: replicas,
+		tag: LOGIN_ATTEMPT_TAG,
+		spec: readLoginAttemptSpec(section),
 		logger,
-		auditSink,
-		headerFallback: loginLimitSpec,
+		...(auditSink === undefined ? {} : { auditSink }),
 	});
 
 	// `redirect_to` is held to the same exact-match, fail-closed allowlist as
@@ -376,7 +331,7 @@ export const createRouter = (
 		.post(
 			"/login",
 			verifyCsrf,
-			loginRateLimit,
+			loginAttempts.perIp(),
 			(req: Request, res: Response, next: NextFunction): void => {
 				const { redirect_to } = req.body;
 				if (redirect_to != null) {
@@ -412,6 +367,17 @@ export const createRouter = (
 					});
 				}
 
+				// The login's one read of the user: everything after reads the
+				// snapshot. A user core refuses is the route's error, a 500.
+				const reading = readUserSnapshot(user);
+				if (!reading.ok) {
+					const field = reading.refused === "not_plain_data" ? ` (${reading.field})` : "";
+					throw new RangeError(
+						`POST /session/login: the user is refused: ${reading.refused}${field}`,
+					);
+				}
+				const { snapshot } = reading;
+
 				const redirectTo = req.body.redirect_to as string | undefined;
 
 				// The user is verified and nothing is written yet: ask every
@@ -420,9 +386,9 @@ export const createRouter = (
 				const admission = await admitPrimary(
 					admissionDeps,
 					passwordPrimary({
-						subject: user.id,
-						user,
-						claims: extractUserClaims(user),
+						subject: snapshot.id,
+						user: snapshot,
+						claims: extractUserClaims(snapshot),
 						authTime: new Date(),
 						redirectTo: redirectTo || undefined,
 						request: loginRequestFacts(req),

@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+import { newStoreGeneration, type StoreGeneration } from "../../adapters/conditionalWrite.mjs";
 import { createInProcessLock } from "../lock/memory.mjs";
 import type { FederationTokenStore, FederationTokens, SupportsLock } from "../types.mjs";
 
@@ -18,8 +19,8 @@ const cloneTokens = (t: FederationTokens): FederationTokens => ({
 	tokenType: t.tokenType,
 	scope: t.scope,
 	grantedScope: t.grantedScope,
-	// Copied like `expiresAt`; a record without it stays without the key.
-	...(t.obtainedAt === undefined ? {} : { obtainedAt: new Date(t.obtainedAt.getTime()) }),
+	// Copied like `expiresAt`; an unknown age stays `undefined`, the key named.
+	obtainedAt: t.obtainedAt === undefined ? undefined : new Date(t.obtainedAt.getTime()),
 });
 
 /**
@@ -29,22 +30,45 @@ const cloneTokens = (t: FederationTokens): FederationTokens => ({
  * and deleting the record then would strand the longer-lived refresh token.
  * Refresh-or-expire is the consumer's call. Stale entries go when logout
  * calls `removeBySid(sid)`; long-lived processes should use redis.
+ *
+ * Every write stores a copy at a new store generation. Each conditional
+ * member checks and writes with no `await` between, so the check and the
+ * write are one step in this process.
  */
 export function createInMemoryFederationTokenStore(): FederationTokenStore & SupportsLock {
-	const store = new Map<string, FederationTokens>();
+	const store = new Map<string, { tokens: FederationTokens; generation: StoreGeneration }>();
 	const lock = createInProcessLock();
+	const write = (sid: string, name: string, tokens: FederationTokens): StoreGeneration => {
+		const generation = newStoreGeneration();
+		store.set(key(sid, name), { tokens: cloneTokens(tokens), generation });
+		return generation;
+	};
 
 	return {
 		kind: "memory",
 		async attach(sid, name, tokens) {
-			store.set(key(sid, name), cloneTokens(tokens));
+			write(sid, name, tokens);
 		},
 		async get(sid, name) {
-			const t = store.get(key(sid, name));
-			return t ? cloneTokens(t) : null;
+			const entry = store.get(key(sid, name));
+			return entry ? cloneTokens(entry.tokens) : null;
 		},
-		async update(sid, name, tokens) {
-			store.set(key(sid, name), cloneTokens(tokens));
+		async getVersioned(sid, name) {
+			const entry = store.get(key(sid, name));
+			return entry ? { value: cloneTokens(entry.tokens), generation: entry.generation } : null;
+		},
+		async replaceIf(sid, name, expected, tokens) {
+			const entry = store.get(key(sid, name));
+			if (entry === undefined) return { outcome: "missing" };
+			if (entry.generation !== expected) return { outcome: "conflict" };
+			return { outcome: "updated", generation: write(sid, name, tokens) };
+		},
+		async removeIf(sid, name, expected) {
+			const entry = store.get(key(sid, name));
+			if (entry === undefined) return { outcome: "missing" };
+			if (entry.generation !== expected) return { outcome: "conflict" };
+			store.delete(key(sid, name));
+			return { outcome: "removed" };
 		},
 		async removeBySid(sid) {
 			for (const k of [...store.keys()]) {

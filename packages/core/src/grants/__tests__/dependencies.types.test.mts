@@ -15,8 +15,10 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { TokenBindingSettings } from "../../middleware/tokenBinding.mjs";
 import type { ComponentMap } from "../../modules/manifest/component-map.mjs";
 import type { ProviderDeps } from "../../modules/manifest/provider.mjs";
+import type { OAuthTokenSettings } from "../../token-settings/types.mjs";
 import type { GrantDependencies } from "../types.mjs";
 
 // `GrantDependencies` is the one statement of what a grant may
@@ -39,6 +41,8 @@ type GrantSlots = ProviderDeps<
 	| "sessionFederationIndex"
 	| "subjectRevocation"
 	| "logger"
+	| "oauthTokenSettings"
+	| "tokenBindingSettings"
 >;
 
 describe("GrantDependencies is defined on ComponentMap slots", () => {
@@ -53,6 +57,38 @@ describe("GrantDependencies is defined on ComponentMap slots", () => {
 		expectTypeOf<GrantDependencies["config"]>().toEqualTypeOf<
 			NonNullable<ComponentMap["config"]>
 		>();
+		expect(true).toBe(true);
+	});
+
+	it("types `oauthTokenSettings` as the slot's value, optional, so a grant reads it without `config`", () => {
+		expectTypeOf<GrantDependencies["oauthTokenSettings"]>().toEqualTypeOf<
+			ComponentMap["oauthTokenSettings"]
+		>();
+		expectTypeOf<
+			NonNullable<GrantDependencies["oauthTokenSettings"]>
+		>().toEqualTypeOf<OAuthTokenSettings>();
+		// Optional: a module that never declared it still hands its deps to a grant.
+		expectTypeOf<ProviderDeps<"config" | "keyStore">>().toMatchTypeOf<GrantDependencies>();
+		expectTypeOf<ProviderDeps<"config" | "keyStore", "oauthTokenSettings">>().toMatchTypeOf<
+			Pick<GrantDependencies, "oauthTokenSettings">
+		>();
+		expect(true).toBe(true);
+	});
+
+	it("types `tokenBindingSettings` as the slot's value, optional, so a grant reads core's token-binding settings without `config`", () => {
+		expectTypeOf<GrantDependencies["tokenBindingSettings"]>().toEqualTypeOf<
+			ComponentMap["tokenBindingSettings"]
+		>();
+		expectTypeOf<
+			NonNullable<GrantDependencies["tokenBindingSettings"]>
+		>().toEqualTypeOf<TokenBindingSettings>();
+		// A module that requires the slot hands a grant the settings, never undefined.
+		expectTypeOf<
+			ProviderDeps<"config" | "keyStore" | "tokenBindingSettings">
+		>().toMatchTypeOf<GrantDependencies>();
+		expectTypeOf<
+			ProviderDeps<"tokenBindingSettings">["tokenBindingSettings"]
+		>().toEqualTypeOf<TokenBindingSettings>();
 		expect(true).toBe(true);
 	});
 

@@ -213,14 +213,13 @@ function makeStubListCollector<V = unknown>() {
  * kinds. `mfaFactors` and `sessionRequirements` are left to the built-in
  * collectors: a host collector for either is refused by `createApp` before
  * the kinds are merged (`session-requirement-kind-guarded`; see ADR
- * 2026-09-28-session-admission). So is `auditHooks`, the planner's own
- * (`contribution-kind-guarded`).
+ * 2026-09-28-session-admission). So are `auditHooks`, `federations` and
+ * `federationRedirectPolicies`, the planner's own (`contribution-kind-guarded`).
  */
 function makeStubCollectors(): ContributionCollectorMap {
 	return {
 		grants: makeStubNameCollector(),
 		tokenExchangeValidators: makeStubNameCollector(),
-		federations: makeStubNameCollector(),
 		routes: makeStubRouteCollector(),
 		grantPolicyHooks: makeStubListCollector(),
 	};

@@ -29,15 +29,17 @@ import {
 	assertFederationGrantRetrievalLimits,
 	type FederationGrantRetrievalLimits,
 } from "./retrieve.mjs";
+import { FEDERATION_GRANT_ROTATION_BUDGET_DEFAULTS } from "./rotation-budget.mjs";
 
 /**
- * The defaults the federation-grants package's `config/reference.conf` ships
- * for its section, in the units it writes them.
+ * The defaults of the section's settings, in the units an operator writes
+ * them. The federation-grants package's `config/reference.conf` ships those
+ * it declares.
  *
  * Exported because a hand-built configuration never passes through that file,
  * and a second copy of these numbers inside a module would be the one that is
  * forgotten. `settings.test.mts` reads the section back out of that file and
- * compares it to this, so the two cannot drift.
+ * compares what it ships to this, so the two cannot drift.
  */
 export const FEDERATION_GRANT_SETTING_DEFAULTS = {
 	/** Seconds. Thirty days: what a new grant gets, reserved for acquisition. */
@@ -65,6 +67,10 @@ export const FEDERATION_GRANT_SETTING_DEFAULTS = {
 	lockWaitMs: 5_000,
 	/** Milliseconds. How long a refresh keeps trying to write down what it got. */
 	persistRetryBudgetMs: 3_000,
+	/** Rotations. How many upstream refresh-token rotations a grant may take in a window. */
+	rotationBudget: FEDERATION_GRANT_ROTATION_BUDGET_DEFAULTS.limit,
+	/** Seconds. The rotation budget's window. */
+	rotationWindow: FEDERATION_GRANT_ROTATION_BUDGET_DEFAULTS.windowMs / 1000,
 } as const;
 
 /**
@@ -87,18 +93,26 @@ export type FederationGrantSettings = Partial<
 type Settings = FederationGrantSettings;
 
 /**
- * The largest any of these may be: one year, in the key's unit. Needed
- * because `assertFederationGrantRetrievalLimits` bounds only timers, and an
- * allowance like `1e21` passes `Number.isInteger` (a refresh buffer that
- * large makes every token look stale for ever).
+ * The largest any of these may be: one year, in the key's unit, and a safe
+ * integer for a count. Needed because `assertFederationGrantRetrievalLimits`
+ * bounds only timers, and an allowance like `1e21` passes `Number.isInteger`
+ * (a refresh buffer that large makes every token look stale for ever).
  */
-const MAXIMUM = { seconds: 31_536_000, milliseconds: 31_536_000_000 } as const;
+const MAXIMUM = {
+	seconds: 31_536_000,
+	milliseconds: 31_536_000_000,
+	rotations: Number.MAX_SAFE_INTEGER,
+} as const;
+
+/** The unit a key is written in: a count, or a duration its name says the unit of. */
+const unitOf = (key: keyof typeof FEDERATION_GRANT_SETTING_DEFAULTS): keyof typeof MAXIMUM =>
+	key === "rotationBudget" ? "rotations" : key.endsWith("Ms") ? "milliseconds" : "seconds";
 
 /** A plain decimal, which is the only shape an operator writes a duration in. */
 const DECIMAL = /^\d+$/;
 
 /**
- * A whole number an operator wrote, or the shipped default when they wrote
+ * A whole number an operator wrote, or its default when they wrote
  * nothing. Anything else is refused by name, never replaced by the default.
  *
  * The type is checked before the value because `Number(written)` accepts
@@ -109,7 +123,7 @@ const DECIMAL = /^\d+$/;
 function setting(settings: Settings, key: keyof typeof FEDERATION_GRANT_SETTING_DEFAULTS): number {
 	const written = settings[key];
 	if (written === undefined) return FEDERATION_GRANT_SETTING_DEFAULTS[key];
-	const unit = key.endsWith("Ms") ? "milliseconds" : "seconds";
+	const unit = unitOf(key);
 	const refuse = (): never => {
 		throw new RangeError(
 			`federation-grants.${key} must be a whole number of ${unit} no greater than ` +
@@ -198,6 +212,8 @@ export function resolveFederationGrantRetrievalLimits(
 		refreshLockTtlMs: setting(settings, "refreshLockTtlMs"),
 		lockWaitMs: setting(settings, "lockWaitMs"),
 		persistRetryBudgetMs: setting(settings, "persistRetryBudgetMs"),
+		rotationBudget: setting(settings, "rotationBudget"),
+		rotationWindowMs: setting(settings, "rotationWindow") * 1000,
 	};
 	assertFederationGrantRetrievalLimits(limits);
 	return limits;

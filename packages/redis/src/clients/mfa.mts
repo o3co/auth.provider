@@ -17,7 +17,7 @@
 /**
  * The MFA stores' clients: the enrolled factors, one hash per subject; the transactions, a
  * subject's lock state, the email-proof requirement, a session's proof and a subject's
- * first-binding mark; and the durability report both are checked by at boot.
+ * first-binding mark.
  */
 
 import type {
@@ -26,25 +26,9 @@ import type {
 	MfaSubjectHold,
 	MfaSubjectRecoveryOperation,
 } from "@o3co/auth-provider-core";
+import type { RedisDurability } from "./durability.mjs";
 
 // --- MfaFactorStoreClient --------------------------------------------------
-
-/**
- * What a Redis server says about keeping what it is written — read at boot
- * by the two MFA store modules (ADR 2026-09-25-multi-factor-authentication,
- * on durability). Each part is `undefined` when it could not be read: the server
- * refused the question (`refusal`), or answered without the value.
- */
-export interface RedisDurability {
-	/** `INFO memory`'s `maxmemory_policy`, or `CONFIG GET maxmemory-policy` where INFO does not say. */
-	readonly maxmemoryPolicy: string | undefined;
-	/** `INFO persistence`'s `aof_enabled`. */
-	readonly appendOnly: boolean | undefined;
-	/** `CONFIG GET save` is not empty: RDB snapshots are taken. Asked only when AOF is off. */
-	readonly snapshots: boolean | undefined;
-	/** The first reply that refused a question — an unknown or renamed command, `NOPERM`, a disabled command — as the driver raised it. Logged by its projection only. */
-	readonly refusal: unknown;
-}
 
 /**
  * What an update writes over a factor record's version and its mutable part,
@@ -60,9 +44,63 @@ export interface MfaFactorRecordUpdateInput {
 }
 
 /**
+ * What every membership write of a factor set carries: the generation it
+ * leaves the set at, and the deadline past which it writes nothing.
+ */
+export interface MfaFactorSetWriteInput {
+	/** The set's new generation, minted by the adapter: written as the `~g` field. */
+	readonly next: string;
+	/**
+	 * Epoch milliseconds, on the app's clock at issue plus the adapter's write
+	 * timeout. A write that reaches the server when its clock (`TIME`), to the
+	 * millisecond, is at or past this answers `late` and writes nothing, however it got there late: queued
+	 * while the connection was down, sent again after a reconnect, or held by
+	 * a stalled server. `late` says only that this copy wrote nothing: another
+	 * copy may have committed, or may still commit within W (the write
+	 * timeout plus {@link MfaFactorSetWriteInput.clockSkewMs}) on a server whose
+	 * clock lags by that skew, so the adapter rejects it with the outcome
+	 * unknown.
+	 */
+	readonly deadlineMs: number;
+	/**
+	 * A key of its own for this write, on the set's hash tag, that keeps the
+	 * write's answer until `clockSkewMs` past its deadline. A copy of the
+	 * write sent again (the driver resends a command whose reply a dropped
+	 * connection lost) finds it, answers what the first copy answered, and
+	 * writes nothing.
+	 */
+	readonly replayKey: string;
+	/**
+	 * The clock skew the adapter allows between servers' clocks: the replay
+	 * key outlives the deadline by it, so a copy that a server whose clock
+	 * lags the one that kept the key (after a failover or a slot migration)
+	 * still finds it before it would judge the copy on time.
+	 */
+	readonly clockSkewMs: number;
+}
+
+/** A membership write that may leave the set empty: how long its tombstone is kept. */
+export interface MfaFactorSetEmptyingWriteInput extends MfaFactorSetWriteInput {
+	/** Milliseconds a set this write leaves empty is kept as its tombstone (`PEXPIRE`). */
+	readonly tombstoneMs: number;
+}
+
+/** A conditional create: the generation the set must still be at, `null` for an absent set. */
+export interface MfaFactorSetCreateIfInput extends MfaFactorSetWriteInput {
+	readonly expected: string | null;
+}
+
+/** A conditional removal: the generation the set must still be at. */
+export interface MfaFactorSetRemoveIfInput extends MfaFactorSetEmptyingWriteInput {
+	readonly expected: string;
+}
+
+/**
  * Backing client for the `MfaFactorStore` adapter (ADR
  * 2026-09-25-multi-factor-authentication): one hash per subject, a field
- * per factor.
+ * per factor, and the set's generation under the reserved field `~g`, which
+ * no factor's field can be (a factor's field is base64url, which has no
+ * `~`).
  *
  * A factor's value is three lines — `<version>\n<fixed>\n<mutable>` — where
  * `<version>` is decimal text and `<fixed>` and `<mutable>` are one line of
@@ -73,23 +111,60 @@ export interface MfaFactorRecordUpdateInput {
  * re-encoded the record would change it (`cjson` writes an empty array as
  * `{}`), so none does. Every operation touches the one key it is handed, so
  * this client needs no hash tag to run on Cluster.
+ *
+ * Every membership write — `createIf`, `removeIf` and `removeAll` — is one
+ * indivisible step that first answers a copy of a write
+ * already applied with that write's answer (its `replayKey`), then refuses a
+ * write at or past its deadline (`late`), then checks, then writes the fields and
+ * `~g` = `next`, and keeps its answer under `replayKey` until `clockSkewMs`
+ * past its deadline. `removeIf`, the reset and `listVersioned` run on a
+ * full server (`allow-oom`): they write only `~g`, the replay key and an
+ * expiry, and a factor must stay removable when nothing can be enrolled.
+ * A write that leaves the hash holding `~g` alone (an emptied set, its
+ * tombstone) sets the key to expire `tombstoneMs` later; one that leaves it
+ * holding a factor takes the expiry off. A key without `~g` that holds
+ * factors was written before the set had a generation: a conditional write
+ * against it answers `conflict`, and `listVersioned` gives it one.
  */
 export interface MfaFactorStoreClient {
 	/** Every field of the hash at `key` and its value (`HGETALL`); `{}` when there is none. */
 	list(key: string): Promise<Readonly<Record<string, string>>>;
-	/** Write `value` under `field` only while the field is absent (`HSETNX`). Resolves whether it wrote. */
-	create(key: string, field: string, value: string): Promise<boolean>;
+	/**
+	 * Every field of the hash at `key` and its value, `~g` among them, from one
+	 * snapshot; `{}` when there is none. A hash without `~g` is given `mint` as
+	 * its generation in the same step, its expiry kept. Read on the primary: a
+	 * read-only replica refuses it.
+	 */
+	listVersioned(key: string, mint: string): Promise<Readonly<Record<string, string>>>;
+	/**
+	 * Write `value` under `field` only while the set is at `input.expected`
+	 * (`null`: while there is no key) and does not hold `field`.
+	 */
+	createIf(
+		key: string,
+		field: string,
+		value: string,
+		input: MfaFactorSetCreateIfInput,
+	): Promise<"created" | "conflict" | "late">;
+	/**
+	 * Remove `field` only while the set is at `input.expected`: `missing` for
+	 * no key, or no such field at `expected`; `conflict` for another
+	 * generation, or none. The generation is checked before the field.
+	 */
+	removeIf(
+		key: string,
+		field: string,
+		input: MfaFactorSetRemoveIfInput,
+	): Promise<"removed" | "missing" | "conflict" | "late">;
 	/**
 	 * Atomically: while the value under `field` is at `input.expectedVersion`,
 	 * replace its version and mutable part, keep its fixed part, and resolve
 	 * the value as written; `null` when the field is absent, at another
-	 * version, or not three lines.
+	 * version, or not three lines. Keeps `~g` and the key's expiry.
 	 */
 	update(key: string, field: string, input: MfaFactorRecordUpdateInput): Promise<string | null>;
-	/** Remove `field` (`HDEL`). Idempotent. */
-	remove(key: string, field: string): Promise<void>;
-	/** Remove the whole hash (`DEL`). Idempotent. */
-	removeAll(key: string): Promise<void>;
+	/** Remove every field, and leave the set's tombstone at `input.next`, the key made when absent. */
+	removeAll(key: string, input: MfaFactorSetEmptyingWriteInput): Promise<"removed" | "late">;
 	/**
 	 * What the server says about keeping what it is written. A reply
 	 * that refuses a question leaves that part unread; any other reply error,
@@ -198,10 +273,13 @@ export interface ApplyMfaSubjectRecoveryInput {
 }
 
 /**
- * What the apply script answers, each part as its text: `refused, reason, hard`;
- * `already, recoveryId, generation, hard`; or
- * `applied, recoveryId, generation, week, run, liftedHard, hard`, each flag `1` or `0`. The
- * adapter reads it into the port's answer.
+ * What the apply script answers, each part as its text: `refused, reason, hard, rebindAfter`;
+ * `already, recoveryId, generation, hard, rebindAfter`; or
+ * `applied, recoveryId, generation, week, run, liftedHard, hard, rebindAfter`, each flag `1` or
+ * `0`. `hard` is whether the hard hold stands after the call and `rebindAfter`, while it does,
+ * from when a rebind counts — the port's `rebindAfterMs`, as canonical decimal text — empty
+ * while it does not. The adapter reads it into the port's answer; a reply without
+ * `rebindAfter` is an outage.
  */
 export type ApplyMfaSubjectRecoveryReply = readonly string[];
 

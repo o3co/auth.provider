@@ -15,6 +15,16 @@
  */
 
 /**
+ * What a failed upstream IdP call says, read off what the library raised.
+ * Two readings:
+ *
+ * - {@link readFederationUpstreamDelivery}: whether the request is proven not
+ *   to have been acted on (`unprocessed`), may have been (`unknown`), or the
+ *   error says nothing (`silent`). The refresh-error reader judges a failed
+ *   refresh by it, to give back a rotation only for an attempt the upstream
+ *   provably did not act on.
+ * - {@link isFederationUpstreamOutage}, described below.
+ *
  * Whether a failed upstream IdP call is an OUTAGE (not reached, timed out, or
  * answered 5xx) rather than the upstream's verdict. The refresh-error
  * classifier (`refresh-error.mts`) checks it before the OAuth codes that
@@ -37,7 +47,8 @@
  *   or on its own; any other code, even under a `TypeError`, is not;
  * - a 5xx `status` on the error, or on the `Response` it was raised over.
  *
- * Never throws: every read is guarded.
+ * The delivery reading follows causes by the same rule, and reads a non-Error
+ * cause (a parsed body) only for doubt. Never throws: every read is guarded.
  */
 
 import { guardedRead, isError } from "../logging/loggableError.mjs";
@@ -205,4 +216,126 @@ export function readFederationUpstreamOutage(error: unknown): FederationUpstream
  */
 export function isFederationUpstreamOutage(error: unknown): boolean {
 	return readFederationUpstreamOutage(error) === "outage";
+}
+
+/**
+ * The codes of a request that never left: no connection was made, or none
+ * that a request could be written to — refused, unresolvable, unreachable,
+ * a connect that timed out, a URL that could not be parsed, and a TLS
+ * handshake or certificate that failed ({@link X509_VERIFICATION}).
+ */
+const NOT_SENT: ReadonlySet<string> = new Set([
+	"ECONNREFUSED",
+	"ENOTFOUND",
+	"EAI_AGAIN",
+	"EHOSTUNREACH",
+	"EHOSTDOWN",
+	"ENETUNREACH",
+	"ENETDOWN",
+	"UND_ERR_CONNECT_TIMEOUT",
+	"ERR_INVALID_URL",
+	"ERR_TLS_CERT_ALTNAME_INVALID",
+	"ERR_TLS_HANDSHAKE_TIMEOUT",
+	"ERR_TLS_INVALID_PROTOCOL_VERSION",
+	"ERR_TLS_PROTOCOL_VERSION_CONFLICT",
+	"ERR_TLS_DH_PARAM_SIZE",
+	"ERR_SSL_WRONG_VERSION_NUMBER",
+	"ERR_SSL_UNSUPPORTED_PROTOCOL",
+	"ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION",
+	"ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE",
+]);
+
+/**
+ * What an HTTP status proves about the request it answered. A 4xx is the
+ * upstream refusing it, but a 408 or a 499 (the request or the client gave
+ * up), and a 501 or a 503 is a server that did not take it on; a 500, a 502,
+ * a 504 and any other 5xx may come back over a request that was forwarded
+ * and acted on. A status that is not an integer from 400 to 599 proves
+ * nothing and is doubted. (A mesh such as Envoy or Istio can answer 503 after
+ * forwarding: that undercounts one rotation per such answer, which the
+ * failure backoff bounds.)
+ */
+const statusDelivery = (status: unknown): "unprocessed" | "unknown" => {
+	if (typeof status !== "number" || !Number.isInteger(status) || status < 400 || status > 599) {
+		return "unknown";
+	}
+	if (status === 408 || status === 499) return "unknown";
+	if (status < 500 || status === 501 || status === 503) return "unprocessed";
+	return "unknown";
+};
+
+/** How the upstream's own error code (`.error`) is judged: the caller's, which knows the codes. */
+export type FederationUpstreamErrorCodeJudge = (code: unknown) => "unprocessed" | "unknown";
+
+/**
+ * What a failed upstream call proves about the request: that it was not
+ * acted on (`unprocessed`), that it may have been (`unknown`), or nothing
+ * (`silent`). The whole chain is read, up to the depth limit: the thrown
+ * value, then its causes as {@link readFederationUpstreamOutage} walks them.
+ * Any level that doubts makes it `unknown`; it is `unprocessed` only when a
+ * level proved it and none doubted.
+ *
+ * At each level: a request given up on (`AbortError`, `TimeoutError`)
+ * doubts; a `status` that is present is judged as an HTTP status; the
+ * upstream's own code (`.error`), when present, is judged by `judgeErrorCode`;
+ * a transport code of a request that never left proves, any other transport
+ * code doubts. A cause that is neither an Error nor a `Response` (a parsed
+ * body) ends the chain, read only for doubt: a transport code or an abandoned
+ * name. A field that cannot be read, and a chain longer than the limit,
+ * doubt. Never throws.
+ */
+export function readFederationUpstreamDelivery(
+	error: unknown,
+	judgeErrorCode: FederationUpstreamErrorCodeJudge,
+): "unprocessed" | "unknown" | "silent" {
+	let unreadable = false;
+	const field = (value: unknown, key: string): unknown => {
+		const read = guardedRead(value as object, key);
+		if (read === null) unreadable = true;
+		return read?.value;
+	};
+	if (typeof error !== "object" || error === null) return "silent";
+	let proved = false;
+	let current: unknown = error;
+	for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+		if (isResponse(current)) {
+			const status = field(current, "status");
+			if (unreadable || statusDelivery(status) === "unknown") return "unknown";
+			return "unprocessed";
+		}
+		if (typeof current !== "object" || current === null) {
+			return proved ? "unprocessed" : "silent";
+		}
+		const name = field(current, "name");
+		const code = field(current, "code");
+		if (unreadable) return "unknown";
+		if (typeof name === "string" && ABANDONED.has(name)) return "unknown";
+		if (depth > 0 && !isError(current)) {
+			// A parsed body: what it says can only doubt.
+			return isTransportCode(code) ? "unknown" : proved ? "unprocessed" : "silent";
+		}
+		const status = field(current, "status");
+		const upstreamCode = field(current, "error");
+		if (unreadable) return "unknown";
+		if (status !== undefined) {
+			if (statusDelivery(status) === "unknown") return "unknown";
+			proved = true;
+		}
+		if (upstreamCode !== undefined) {
+			if (judgeErrorCode(upstreamCode) === "unknown") return "unknown";
+			proved = true;
+		}
+		if (typeof code === "string") {
+			if (NOT_SENT.has(code) || X509_VERIFICATION.has(code)) proved = true;
+			else if (isTransportCode(code)) return "unknown";
+		}
+		current = field(current, "cause");
+		if (unreadable) return "unknown";
+	}
+	// Longer than it reads: what lies beyond may doubt it.
+	return typeof current === "object" && current !== null
+		? "unknown"
+		: proved
+			? "unprocessed"
+			: "silent";
 }

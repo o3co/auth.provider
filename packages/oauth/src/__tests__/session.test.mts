@@ -14,33 +14,18 @@
  * limitations under the License.
  */
 
-import {
-	createSymmetricKeyStore,
-	type GrantContext,
-	type GrantDependencies,
-} from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createSymmetricKeyStore, type GrantContext } from "@o3co/auth-provider-core";
+import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 
-const mockConfig = {
-	oauth: {
-		jwt: { secret: "test-secret" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
-		grants: {
-			session: { enabled: true },
-			authorization_code: { enabled: true },
-			refresh_token: { enabled: true },
-		},
-	},
-} as unknown as GrantDependencies["config"];
+type SessionGrantDeps = Parameters<typeof createSessionGrant>[0];
 
-const makeDeps = (overrides?: Partial<GrantDependencies>) => ({
+const makeDeps = (overrides?: Partial<SessionGrantDeps>): SessionGrantDeps => ({
 	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-	config: mockConfig,
+	oauthTokenSettings: createTestOAuthTokenSettings(),
 	keyStore: createSymmetricKeyStore("test-secret"),
 	...overrides,
 });
@@ -57,24 +42,52 @@ const AUTH_CLIENT = {
 	allowedScopes: ["read", "write"],
 };
 
-describe("createSessionGrant — the lifetime it mints with, read when it is built", () => {
-	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
-		// Resolved per request, a hand-built lifetime the resolver refuses
-		// would fail every token request with a 500, after client
-		// authentication had spent whatever it spends.
-		for (const accessToken of [
-			{ expiresIn: 1.5 },
-			{ expiresIn: 0 },
+describe("createSessionGrant — the token settings it mints with, read when it is built", () => {
+	it("is refused when it is built without the oauthTokenSettings slot, naming it", () => {
+		// Read per request, a missing slot would fail every token request with
+		// a 500, after client authentication had spent whatever it spends.
+		const { oauthTokenSettings: _settings, ...withoutSlot } = makeDeps();
+		expect(() => createSessionGrant(withoutSlot as SessionGrantDeps)).toThrow(/oauthTokenSettings/);
+	});
+
+	it("is refused when it is built with an access-token lifetime the slot's contract refuses", () => {
+		for (const accessTokenLifetime of [
+			{ defaultExpiresIn: 1.5, maxExpiresIn: 3600 },
+			{ defaultExpiresIn: 0, maxExpiresIn: 3600 },
 			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
 			{},
 		]) {
-			const config = {
-				oauth: { ...mockConfig.oauth, accessToken },
-			} as unknown as GrantDependencies["config"];
-			expect(() => createSessionGrant(makeDeps({ config })), JSON.stringify(accessToken)).toThrow(
-				RangeError,
-			);
+			const oauthTokenSettings = {
+				...createTestOAuthTokenSettings(),
+				accessTokenLifetime,
+			} as unknown as SessionGrantDeps["oauthTokenSettings"];
+			expect(
+				() => createSessionGrant(makeDeps({ oauthTokenSettings })),
+				JSON.stringify(accessTokenLifetime),
+			).toThrow(/oauthTokenSettings\.accessTokenLifetime/);
 		}
+	});
+
+	it("reads nothing of a whole configuration it is handed", async () => {
+		// Settings at a configuration's paths that the slot contradicts: only
+		// the slot's are read.
+		const config = {
+			oauth: {
+				accessToken: { defaultExpiresIn: 60, maxExpiresIn: 60 },
+				requireEmailVerified: true,
+			},
+		};
+		const handler = createSessionGrant({ ...makeDeps(), config } as SessionGrantDeps);
+		const { result } = await handler.handle({
+			body: {},
+			session: { isAuthenticated: true, user: { id: "user1" } },
+			issuer: "localhost",
+			metadata: {},
+			authenticatedClient: AUTH_CLIENT,
+		});
+
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
+		expect(result.tokens.expires_in).toBe(3600);
 	});
 });
 
@@ -161,12 +174,9 @@ describe("createSessionGrant", () => {
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
 			const handler = createSessionGrant(
 				makeDeps({
-					config: {
-						oauth: {
-							...mockConfig.oauth,
-							accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
-						},
-					} as unknown as GrantDependencies["config"],
+					oauthTokenSettings: createTestOAuthTokenSettings({
+						accessTokenLifetime: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+					}),
 				}),
 			);
 			const { result } = await handler.handle({
@@ -500,19 +510,13 @@ describe("createSessionGrant", () => {
 // ---------------------------------------------------------------------------
 
 describe("createSessionGrant — email-verified gate", () => {
-	const gatedConfig = {
-		...(mockConfig as unknown as Record<string, unknown>),
-		oauth: {
-			...(mockConfig as unknown as { oauth: Record<string, unknown> }).oauth,
-			requireEmailVerified: true,
-		},
-	} as unknown as GrantDependencies["config"];
+	const gated = createTestOAuthTokenSettings({ requireEmailVerified: true });
 
 	const runWith = async (
-		config: GrantDependencies["config"],
+		oauthTokenSettings: SessionGrantDeps["oauthTokenSettings"],
 		user: Record<string, unknown> | undefined,
 	) => {
-		const handler = createSessionGrant(makeDeps({ config }));
+		const handler = createSessionGrant(makeDeps({ oauthTokenSettings }));
 		const { result } = await handler.handle({
 			body: {},
 			session: { isAuthenticated: true, ...(user ? { user } : {}) },
@@ -526,23 +530,23 @@ describe("createSessionGrant — email-verified gate", () => {
 	it("refuses when the gate is on and the Store published no verification", async () => {
 		// This grant mints straight from the browser session, so gating only
 		// /authorize would leave a deployment believing it had a gate.
-		const result = await runWith(gatedConfig, { id: "u1" });
+		const result = await runWith(gated, { id: "u1" });
 		expect(result.status).toBe(400);
 		expect("error" in result && result.error).toBe("invalid_grant");
 	});
 
 	it("refuses on an explicit false", async () => {
-		const result = await runWith(gatedConfig, { id: "u1", emailVerified: false });
+		const result = await runWith(gated, { id: "u1", emailVerified: false });
 		expect("error" in result && result.error).toBe("invalid_grant");
 	});
 
 	it("admits when the Store published true", async () => {
-		const result = await runWith(gatedConfig, { id: "u1", emailVerified: true });
+		const result = await runWith(gated, { id: "u1", emailVerified: true });
 		expect(result.status).toBe(200);
 	});
 
 	it("is inert when the gate is off", async () => {
-		const result = await runWith(mockConfig, { id: "u1" });
+		const result = await runWith(createTestOAuthTokenSettings(), { id: "u1" });
 		expect(result.status).toBe(200);
 	});
 });

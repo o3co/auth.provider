@@ -45,6 +45,7 @@ describe("core barrel — federation grant domain rules", () => {
 			"federationGrantIdentityRevision",
 			"federationGrantAuthorizationRevision",
 			"judgeUpstreamAccessToken",
+			"readFederationGrantUpstreamAnswer",
 			"isUsableMaxUpstreamAccessTokenLifetime",
 			"federationGrantIneligibilityStands",
 			"federationGrantIneligibilityRetry",
@@ -158,6 +159,20 @@ describe("core barrel — the grant policy's answers", () => {
 		expect(typeof core.policyUnavailable).toBe("function");
 		expect(typeof core.policyOutOfBounds).toBe("function");
 	});
+
+	it("re-exports the token endpoint's answer to a deny", () => {
+		expect(typeof core.policyDenied).toBe("function");
+	});
+});
+
+describe("core barrel — the federations a configuration declares", () => {
+	it("re-exports the one reading of core.federations: the map by name, and the entries switched on", () => {
+		const config = {
+			core: { federations: { corp: { enabled: true, type: "acme" }, off: { enabled: false } } },
+		};
+		expect(Object.keys(core.federationsOf(config))).toEqual(["corp", "off"]);
+		expect(core.enabledFederationsOf(config)).toEqual([["corp", { enabled: true, type: "acme" }]]);
+	});
 });
 
 describe("core barrel — the federation adapter toolkit", () => {
@@ -254,6 +269,12 @@ describe("core barrel — the trusted-proxy address vocabulary", () => {
 
 	it("re-exports the check a reader holds a composition's oauthTokenSettings to before reading it", () => {
 		expect(typeof core.checkOAuthTokenSettings).toBe("function");
+	});
+
+	it("re-exports the reader of core's own section, for a composition root before boot", () => {
+		expect(core.readCoreSection({ core: { deployment: { mode: "single" } } })).toEqual({
+			deployment: { mode: "single" },
+		});
 	});
 
 	it("re-exports the one reading of the token-binding settings, which are core's", () => {

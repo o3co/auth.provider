@@ -23,7 +23,8 @@
  * D25's flag. A proof asked for that nobody can give is never skipped.
  */
 
-import { describe, expect, it } from "vitest";
+import type { MfaFactorRecord } from "@o3co/auth-provider-core";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	enrollableKinds,
 	type FirstBindingGate,
@@ -31,8 +32,10 @@ import {
 	type MailAddressFact,
 	MfaEnrollableError,
 	type RequireEmailProof,
+	recordsAfterFirstBinding,
 	reopenedEnrollment,
 } from "#/firstBinding.mjs";
+import { replacesStandingSets } from "#/recovery/issue.mjs";
 import { FACTORS, factorRecord, resolverOver, stubFactor } from "./requirementHarness.mjs";
 
 type Row = readonly [RequireEmailProof, boolean, MailAddressFact, FirstBindingGate];
@@ -147,4 +150,45 @@ describe("enrollableKinds", () => {
 		expect(thrown).toBeInstanceOf(MfaEnrollableError);
 		expect(thrown).toMatchObject({ kind: "email", cause: broken });
 	});
+});
+
+type Binding = NonNullable<MfaFactorRecord["binding"]>;
+
+/**
+ * Whether a binding by each of the record's bindings replaces the recovery
+ * sets that stood: only one that proved a second factor or the account's
+ * address does. Typed over every binding, so one added to the record fails
+ * to compile here until it is decided.
+ */
+const REPLACES: Readonly<Record<Binding, boolean>> = {
+	password: false,
+	federated: false,
+	email_proof: true,
+	mfa: true,
+};
+
+describe("replacesStandingSets", () => {
+	it("is decided for every binding the record admits", () => {
+		expectTypeOf(replacesStandingSets).parameter(0).toEqualTypeOf<Binding>();
+	});
+
+	it.each(Object.entries(REPLACES) as [Binding, boolean][])(
+		"a binding by %s replaces the sets that stood: %s",
+		(binding, replaces) => {
+			expect(replacesStandingSets(binding)).toBe(replaces);
+		},
+	);
+});
+
+describe("recordsAfterFirstBinding", () => {
+	const factors = resolverOver([FACTORS.totp(), FACTORS.recovery()]);
+	const standing = [factorRecord("u", "recovery_code", "a")];
+
+	it.each(Object.entries(REPLACES) as [Binding, boolean][])(
+		"a first binding by %s beside a standing set counts it unless it replaces it (%s)",
+		(binding, replaces) => {
+			// The standing set unless replaced, the new set, the factor.
+			expect(recordsAfterFirstBinding(factors, standing, binding)).toBe(replaces ? 2 : 3);
+		},
+	);
 });

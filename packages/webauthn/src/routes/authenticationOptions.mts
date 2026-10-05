@@ -20,18 +20,16 @@
  * tag is exported.
  *
  * Unauthenticated by design (the assertion is the authentication event), so `module.mts` mounts
- * a rate limit in front of it and the endpoint reveals nothing about accounts. The challenge is
- * stored under the fixed namespace "webauthn:authentication": the user comes from the credential
- * after the assertion, never from the client. The optional `userId` is bounded to the WebAuthn
- * §5.4.3 user-handle shape before any store sees it. Unless `allowCredentialsForKnownUser` is
- * set, the credential store is not consulted, so the response and the work behind it are the same
- * whether or not the account exists. A store outage is 503 temporarily_unavailable, logged
- * without the caller's `userId`.
+ * a rate limit in front of it and the endpoint reveals nothing about accounts. The options are
+ * always the discoverable-credential shape, with no `allowCredentials`: the body is not read and
+ * no credential store is consulted, so the response and the work behind it are the same for
+ * every caller. The challenge is stored under the fixed namespace "webauthn:authentication": the
+ * user comes from the assertion's user handle, never from the client. A store outage is 503
+ * temporarily_unavailable.
  */
 
-import type { ChallengeStore, Logger, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
+import type { ChallengeStore, Logger } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
-import { z } from "zod";
 import type { WebAuthnConfig } from "../config.mjs";
 import { generateAuthenticationOptionsForUser } from "../internal/options.mjs";
 import { refuseCeremonyStoreUnavailable } from "../internal/storeUnavailable.mjs";
@@ -50,49 +48,12 @@ import { refuseCeremonyStoreUnavailable } from "../internal/storeUnavailable.mjs
 export const WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG = "webauthn-authentication-options";
 
 // ---------------------------------------------------------------------------
-// Body schema
-// ---------------------------------------------------------------------------
-
-/**
- * WebAuthn §5.4.3 caps the user handle at 64 bytes; `registrationOptions.mts` applies the same
- * bound to the session-derived handle.
- */
-const MAX_USER_ID_BYTES = 64;
-
-/** C0 and C1 control characters — never part of a legitimate opaque handle. */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: bounding the accepted handle to printable characters is the point of this check.
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
-
-/**
- * The one description for every rejection of this body, so the failure reveals nothing about the
- * value sent or about what the server knows of the account.
- */
-const INVALID_USER_ID_DESCRIPTION =
-	"userId must be an opaque handle of 1-64 UTF-8 bytes with no control characters (WebAuthn section 5.4.3)";
-
-const userIdSchema = z
-	// `.max` on code units first: UTF-8 is never shorter than the code-unit count, so an
-	// oversized value (up to the 100kb body limit) is refused without being encoded.
-	.string()
-	.max(MAX_USER_ID_BYTES)
-	.refine((value) => !CONTROL_CHARACTERS.test(value))
-	.refine((value) => {
-		const byteLength = new TextEncoder().encode(value).length;
-		return byteLength >= 1 && byteLength <= MAX_USER_ID_BYTES;
-	});
-
-const bodySchema = z.object({
-	userId: userIdSchema.optional(),
-});
-
-// ---------------------------------------------------------------------------
 // Handler deps
 // ---------------------------------------------------------------------------
 
 export interface AuthenticationOptionsDeps {
 	readonly config: WebAuthnConfig;
 	readonly challengeStore: ChallengeStore;
-	readonly credentialStore: WebAuthnCredentialStore;
 	/** Where a store outage is logged. */
 	readonly logger: Pick<Logger, "error">;
 	// Rate limiting is middleware `module.mts` mounts in front of this handler, not a dep.
@@ -107,54 +68,20 @@ export interface AuthenticationOptionsDeps {
  *
  * Unauthenticated — no req.webauthnSubject check.
  *
- * @param deps - Injected dependencies (config, challengeStore, credentialStore, logger).
+ * @param deps - Injected dependencies (config, challengeStore, logger).
  * @returns RequestHandler suitable for mounting on an Express router.
  */
 export function createAuthenticationOptionsHandler(
 	deps: AuthenticationOptionsDeps,
 ): RequestHandler {
-	return async (req: Request, res: Response) => {
-		// Bound the identifier before anything else touches it. This runs
-		// regardless of `allowCredentialsForKnownUser` so that flipping the flag
-		// changes exactly one thing — whether allowCredentials is derived — and
-		// not what the endpoint accepts.
-		const parsed = bodySchema.safeParse(req.body ?? {});
-		if (!parsed.success) {
-			res.status(400).json({
-				error: "invalid_request",
-				error_description: INVALID_USER_ID_DESCRIPTION,
-			});
-			return;
-		}
-
-		const { userId } = parsed.data;
-
-		// `allowCredentials` only under the opt-in. Without it no request reaches the store, so
-		// there is no per-account timing or shape to compare. With it, the deployment has
-		// accepted the enumeration oracle to support non-discoverable authenticators (see
-		// `allowCredentialsForKnownUser` in config.mts).
-		let allowCredentials: Awaited<ReturnType<typeof deps.credentialStore.listByUserId>> = [];
-		if (deps.config.allowCredentialsForKnownUser && userId !== undefined) {
-			try {
-				allowCredentials = await deps.credentialStore.listByUserId(userId);
-			} catch (err) {
-				refuseCeremonyStoreUnavailable(
-					res,
-					deps.logger,
-					{ site: "authentication_options", store: "webauthn_credential", step: "list" },
-					err,
-				);
-				return;
-			}
-		}
-
+	return async (_req: Request, res: Response) => {
 		// Generate a fresh 32-byte random challenge for this ceremony.
 		const challenge = crypto.getRandomValues(new Uint8Array(32));
 
 		// An empty allowCredentials yields the discoverable-credential flow.
 		const options = await generateAuthenticationOptionsForUser({
 			config: deps.config,
-			allowCredentials,
+			allowCredentials: [],
 			challenge,
 		});
 

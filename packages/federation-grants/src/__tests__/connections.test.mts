@@ -29,11 +29,12 @@ import { resolveFederationGrantConnections } from "#/connections.mjs";
 const FEDERATIONS = {
 	upstream: {
 		enabled: true,
+		type: "oidc",
 		issuer: "https://issuer.example",
 		clientId: "provider-client",
 	},
-	disabled: { enabled: false, issuer: "https://off.example", clientId: "x" },
-	noIssuer: { enabled: true, clientId: "y" },
+	disabled: { enabled: false, type: "oidc", issuer: "https://off.example", clientId: "x" },
+	noIssuer: { enabled: true, type: "oidc", clientId: "y" },
 };
 
 const CONNECTION = {
@@ -254,7 +255,10 @@ describe("resolveFederationGrantConnections", () => {
 
 	it("refuses a federation with no configured client id", () => {
 		expect(() =>
-			resolve({ g: CONNECTION }, { upstream: { enabled: true, issuer: "https://i.example" } }),
+			resolve(
+				{ g: CONNECTION },
+				{ upstream: { enabled: true, type: "oidc", issuer: "https://i.example" } },
+			),
 		).toThrow(/clientId/);
 	});
 

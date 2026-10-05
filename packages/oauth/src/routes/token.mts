@@ -26,6 +26,7 @@ import {
 	auditErrorText,
 	emitAuditEvent,
 	errorEnvelope,
+	type GrantError,
 	type GrantHandlerResolver,
 	type GrantHandlerResult,
 	isGrantTypeAllowed,
@@ -55,6 +56,22 @@ import type { ResolvedOAuthOptions } from "../resolveOAuthOptions.mjs";
  */
 const auditReason = (error: string, errorDescription: unknown): string =>
 	auditErrorText(errorDescription) || auditErrorText(error);
+
+/**
+ * Why a refusal's `token.issued.failure` was written: a grant policy's deny
+ * is `policy_denied` with the policy's own code as `policy_error`, so it
+ * reads apart from a malformed request answered with the same code; any
+ * other refusal is {@link auditReason}.
+ */
+const auditCause = (
+	error: string,
+	result: GrantError,
+): { readonly reason: string; readonly policy_error?: string } => {
+	const denied = auditErrorText(result.policyDenial?.error);
+	return denied !== undefined
+		? { reason: "policy_denied", policy_error: denied }
+		: { reason: auditReason(error, result.errorDescription) };
+};
 
 export const createTokenHandler =
 	({
@@ -366,7 +383,7 @@ export const createTokenHandler =
 			details: {
 				grant_type,
 				error,
-				reason: auditReason(error, result.errorDescription),
+				...auditCause(error, result),
 			},
 		});
 		return res.status(result.status).json(errorBody);

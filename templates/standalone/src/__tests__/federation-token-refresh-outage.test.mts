@@ -75,6 +75,7 @@ describe("POST /oauth/federation/google/token: an upstream outage never ends the
 				tokenType: "Bearer",
 				scope: "openid profile email",
 				grantedScope: "openid profile email",
+				obtainedAt: undefined,
 			},
 		});
 		const res = await request(session.app)
@@ -127,6 +128,8 @@ describe("POST /oauth/federation/google/token: an upstream outage never ends the
 		expect(res.status).toBe(410);
 		expect(res.body.error).toBe("re_authentication_required");
 		expect(await federationTokenStore.get(sid, "google")).toBeNull();
-		expect(await sessionFederationIndex.listFederations(sid)).not.toContain("google");
+		// The route never writes the session's index: the link, now holding no
+		// credential, stays listed until federation logout or the session's end.
+		expect(await sessionFederationIndex.listFederations(sid)).toContain("google");
 	});
 });

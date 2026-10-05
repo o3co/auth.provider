@@ -139,7 +139,7 @@ const outbound = (
 	const exchanges: OutboundExchange[] = [];
 	const lookup = opts.lookup ?? publicLookup;
 	const fetch = createOutboundFetchForTesting({
-		config: opts.config,
+		config: opts.config ?? {},
 		source: "request",
 		maxResponseBytes: opts.maxResponseBytes ?? DEFAULT_CIMD_MAX_BYTES,
 		lookup: async (hostname) => {

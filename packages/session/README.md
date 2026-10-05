@@ -1,10 +1,10 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-02
+Last updated: 2026-10-05
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
-package contributes beside its provider, and the express-session store those
+package's type builds beside its provider, and the express-session store those
 routes — and every other route that reads `req.session` — run over.
 
 ## Responsibility
@@ -27,10 +27,9 @@ responsibilities:
    [interrupt it](#when-a-requirement-interrupts-the-login).
 2. **The federation-adapter toolkit** — what an adapter package imports from
    the router it plugs into: `createFederationRedirectPolicy` and the allowlist
-   rules it is built from, and `extractFederationSection`. The helpers an
-   adapter builds its upstream requests with — `codeChallenge`,
-   `callbackUrlForExchange`, `FederationClientSecret` / `resolveClientSecret` —
-   are core's.
+   rules it is built from. The helpers an adapter builds its upstream requests
+   with — `codeChallenge`, `callbackUrlForExchange`, `FederationClientSecret` /
+   `resolveClientSecret` — are core's.
 3. **The browser session store** — `sessionStoreModule` / `sessionStoreModuleFor`
    and `createSessionStoreFactory` / `registerBuiltinSessionStores`: the
    express-session middleware, its cookie and its store (memory, or Redis through
@@ -40,8 +39,9 @@ responsibilities:
 
 - the `/session` routes and their answers; the CSRF policy for them
   (`session.csrf.*`), which other packages run through the `csrfGuard` slot;
-  the login rate-limit guard's wiring and its budget (`session.rateLimit.login`, which
-  the session module contributes as the `login` budget); the redirect
+  the login's own attempt limit (`session.rateLimit.login`), counted through
+  core's attempt guard on the `attemptCounter` slot, never a rate limiter's
+  budgets; the redirect
   allowlists (`session.redirectAllowlist`, `core.federations.<name>.redirectAllowlist`);
 - what the modules provide other packages through slots whose contracts
   are core's: `csrfGuard`, `loginEntry` and `loginCompletion`, and
@@ -50,7 +50,9 @@ responsibilities:
 - how a federation is driven: `state`, PKCE and `nonce`, the `form_post`
   transaction and its cookie, claim precedence, the `amr` a login records, and
   what a callback writes to the stores;
-- the `federationRedirectPolicies` contribution kind and the
+- the `federationRedirectPolicies` key it declares on core's `ContributesMap`,
+  which types the redirect policy a federation type's `redirectPolicy` answers
+  (boot refuses a module's contribution or override of it), and the
   `federationRedirectPolicyResolver` slot it declares on core
   ([`src/federations/contributes.mts`](src/federations/contributes.mts)), and
   [`FederationResult`](src/federations/types.mts);
@@ -92,10 +94,13 @@ package's store module. What the split costs is stated in
 
 **Why the three live together.** Each of the other two exists for the routes.
 
-- The toolkit: the redirect policy is a contribution kind this package declares
-  and its router consumes, and `extractFederationSection` reads the config shape
-  the router reads callback URLs from. Both are the router's, which is why
-  every adapter package takes this package as a peer dependency. The pure
+- The toolkit: the redirect policy is a contract this package declares — its
+  type is what a federation type's `redirectPolicy` answers — and its router
+  consumes. It is the router's, which is why every adapter
+  package takes this package as a peer dependency. A federation's entry is not
+  read here: core reads `core.federations` and hands the module what it reads
+  of each entry through the `federationSettings` slot, the router's callback
+  URLs included. The pure
   request helpers are not here: the router uses none of them, so they live in
   core beside the contract that tells adapters to use them.
 - The store: it is what `req.session` is, and the routes here are what write it;
@@ -136,7 +141,8 @@ Peer dependencies: `@o3co/auth-provider-core`, `express@^5.0.0` and
 one dependency of its own is `zod`, which its sections' schemas are written in.
 
 Core is a peer because this package augments it (the
-`federationRedirectPolicies` contribution kind and its slot), and an
+`federationRedirectPolicies` key that types a federation's redirect policy, and
+its slot), and an
 augmentation reaches only the copy of core it resolves: as a peer, that is
 your composition's one copy. A deployment on `session-store.storage.type = "memory"`
 installs neither Redis library; nothing imports them until the Redis store is
@@ -148,15 +154,15 @@ fails naming it and the install command.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
-import { googleFederationModule } from "@o3co/auth-provider-federation-google";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 
 const handle = await createApp({
   modules: [
     sessionStoreModuleFor(config), // first, so every module after it can read req.session; provides csrfTokenSigner too
     sessionModule,                 // a const Module, not a factory
-    googleFederationModule,        // contributes federations.google + federationRedirectPolicies.google
+    googleFederationTypeModule(),  // handles every core.federations entry of type "google"
     // ... modules providing userRepository, userSessionStore, federationTokenStore,
-    //     sessionFederationIndex and googleFederationConfig
+    //     sessionFederationIndex
   ],
   bootstrapComponents: { config, pathResolver },
 });
@@ -197,7 +203,9 @@ store's module provides `csrfTokenSigner` with `createSessionCsrfTokenSigner`
 
 ## Configuration
 
-Each module reads its own section. The defaults and the environment variables
+Each module reads its own section, and nothing else of the configuration:
+what `sessionModule` needs of `core.federations` comes from core's
+`federationSettings` slot. The defaults and the environment variables
 are in the package's [`config/reference.conf`](config/reference.conf), which a
 composition root layers because the modules declare it.
 
@@ -214,9 +222,11 @@ composition root layers because the modules declare it.
 | `session.redirectAllowlist` | | `[]` | [Redirect allowlists](#redirect-allowlists) |
 | `session.csrf.trustedOrigins`, `.ttlSeconds` | `SESSION_CSRF_TTL_SECONDS` (`ttlSeconds`) | `[]`, `7200` | [CSRF](#csrf-on-the-state-changing-routes) |
 | `session.loginPage.url` | `SESSION_LOGIN_PAGE_URL` | `/login` | Required. The page the `loginEntry` slot names: a path or an absolute URL, with no `redirect_to` of its own |
-| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | Required. `POST /session/login`'s budget, which the module contributes as `login` |
+| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | Required. `POST /session/login`'s own attempt limit: `windowMs` a whole number of milliseconds up to a day (86400000), read as whole seconds rounded up; `limit` a positive whole number |
 
-Each section is strict: a key it does not declare refuses boot, naming it. The
+Each section is strict at every level: a key it does not declare refuses boot,
+naming it. `session-store.storage` holds `type` and the `redis` block alone, so
+a block for any other storage type is refused too. The
 paths these keys moved from — each key of the cookie and its store under
 `session`, `endpoints.login.url` and `rateLimit.login` — refuse boot
 (`config-path-relocated`), naming the new path and its variable. The variables
@@ -352,17 +362,22 @@ signs as the module does, so tokens issued under that secret keep verifying.
 | GET | `/session/oauth/federation/:name/callback` | Callback of a `query` federation; `405` (`Allow: POST`) for a `form_post` one |
 | POST | `/session/oauth/federation/:name/callback` | Callback of a `form_post` federation; `405` (`Allow: GET`) for a `query` one |
 
-`:name` is the federation's name; a name no module contributed is `404`.
+`:name` is the federation's name; a name no enabled `core.federations` entry
+registers is `404`.
 
 The manifest ([`src/module.mts`](src/module.mts)):
 
-- `requires`: `config`, `userRepository`, `userSessionStore`,
+- `requires`: `userRepository`, `userSessionStore`,
   `federationTokenStore`, `sessionFederationIndex`, `csrfTokenSigner` (what the
   CSRF token is signed and checked with; the session store's module provides
-  it), and the synthetic
-  `federationProviders` and `federationRedirectPolicyResolver`, which the boot
-  planner builds from per-federation modules' `federations.<name>` and
-  `federationRedirectPolicies.<name>` contributions, and
+  it), core's `federationSettings` — its view of `core.federations`, which
+  core fills in every composition: each enabled entry's callback URL, and
+  whether an installed federation's upstream `amr` counts; the module reads
+  nothing of the configuration but its own section — and the synthetic
+  `federationProviders` and `federationRedirectPolicyResolver`, which core
+  builds from the federations it dispatches by type — for each enabled
+  `core.federations` entry, the provider and the redirect policy the module
+  registering its `type` builds — and
   `sessionRequirementResolver` — the password login asks the registered
   requirements through core's
   [session admission](../core/src/session-admission/README.md) before anything
@@ -372,14 +387,21 @@ The manifest ([`src/module.mts`](src/module.mts)):
   (`routes/Session.mts`, `routes/Federation.mts`) takes the resolver as the
   required `requirements` option and throws without it; a test builds one with
   core's `resolverForTests`. And `deploymentMode`, which core fills from
-  `core.deployment.mode`: the login throttle's per-process fallback is refused under
+  `core.deployment.mode`: counting login attempts per process is refused under
   `multi`, so the mode is required rather than read as absent. The session
   router built by hand also takes the signer as the required `csrfTokenSigner`
   option, and throws without it, and the mode as the required `deploymentMode`
   option, where a value that is none of the three, absence included, is a
-  TypeError at construction. `sessionRPRegistry` and `sessionFamilyIndex`, the
-  other two session stores, are `oauth`'s.
-- `optional`: `logger`, `rateLimiter`, `auditSink`, `subjectSessionIndex`,
+  TypeError at construction. The federation router built by hand takes
+  core's view of the federations as the required `federationSettings` option,
+  the transaction cookie's name as the required
+  `federationTransactionCookieName` (the module names it after the
+  `sessionCookiePolicy` slot's cookie), and where a link may start from as
+  `linkTrustedOrigins` (the module passes `session.csrf.trustedOrigins`; absent,
+  only this site's own pages), and throws without the first two.
+  `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
+  are `oauth`'s.
+- `optional`: `logger`, `attemptCounter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads).
   `auditSink` unwired must be declared with `core.declaredAbsent = ["auditSink"]`, and
   `subjectSessionIndex` and `subjectRevocation` unwired with
@@ -404,7 +426,7 @@ The manifest ([`src/module.mts`](src/module.mts)):
 - Once the Store verified the user, and before anything is written, the route
   asks core's [session admission](../core/src/session-admission/README.md)
   (`admitPrimary`) about the primary core builds from the login
-  (`passwordPrimary`: the subject, the `User`, the claims the record will hold,
+  (`passwordPrimary`: the subject, the `User`'s snapshot, the claims the record will hold,
   `authTime`, the allowlisted `redirect_to`, the client's address and user
   agent — `amr` and `authentication` are core's, never the route's). With no
   requirement registered every login is answered `establish`. A requirement's
@@ -412,9 +434,11 @@ The manifest ([`src/module.mts`](src/module.mts)):
   (core's `describeAdmissionOutage`) with nothing written, logged once by
   admission as `session_admission_unavailable` (`store` the requirement's
   name, `phase: "establishment"`). A requirement's interruption is
-  [below](#when-a-requirement-interrupts-the-login). A `User` whose
-  declared field holds what is not plain data (a `Date` witness, a function)
-  is refused before anything is written, as the route's error (`500`).
+  [below](#when-a-requirement-interrupts-the-login). The route reads the
+  `User` once, with core's `readUserSnapshot`, and takes the subject and the
+  claims from that snapshot. A `User` the snapshot refuses (a declared field
+  holding what is not plain data, such as a `Date` witness or a function) is
+  refused before anything is written, as the route's error (`500`).
 - On success — every requirement answered `establish` — it creates a
   `UserSession` (`amr: ["pwd"]`, `authentication` primary `pwd`, lifetime
   `session-store.maxAge`), records it in `subjectSessionIndex` when that is wired,
@@ -424,16 +448,23 @@ The manifest ([`src/module.mts`](src/module.mts)):
 - `redirect_to`, when sent, must be on `session.redirectAllowlist` (see
   [Redirect allowlists](#redirect-allowlists)) and is stored as
   `req.session.redirectTo`; nothing in this package redirects to it.
-- The brute-force guard runs on the shared `rateLimiter` (prefix `login`, keyed
-  by client IP) with `session.rateLimit.login`'s window and limit — the session module
-  contributes them as the `login` budget, which a limiter's own `limits.login`
-  overrides — answering `429` when it denies and following the limiter's own
-  `failMode` when the limiter fails. With no
-  `rateLimiter` wired the route falls back to a per-process limiter: boot is
-  refused under `core.deployment.mode = "multi"`, a `login_rate_limiter_not_shared`
-  warning is logged when the mode is unset, and nothing is said under
-  `"single"`. The mode is core's `deploymentMode` slot, which the module
-  requires; the router reads nothing of `deployment` itself.
+- The login's attempt limit runs before the credentials are read: one attempt
+  per request, keyed `login:ip:<client IP>`, counted against
+  `session.rateLimit.login` by core's attempt guard (`createAttemptGuard`) on
+  the `attemptCounter` slot's counter. No rate limiter takes part: a limiter's
+  `limits`, `defaultLimit` and `failMode` neither loosen nor replace it, and
+  the module claims the `login` prefix with no budget. A refused attempt is
+  `429 rate_limited` with `Retry-After` and `Cache-Control: no-store`, and no
+  `RateLimit-*` headers, which would tell a guesser how many guesses are left.
+  A counter that throws, does not answer within two seconds, or answers
+  something core cannot read is `503 service_unavailable` whatever any
+  limiter declares, logged as `attempt_counter_unavailable` and audited as
+  `rate_limit.unavailable` (`tag: "login"`). With no `attemptCounter` wired
+  the guard counts per process: boot is refused under
+  `core.deployment.mode = "multi"`, an `attempt_counter_not_shared` warning is
+  logged when the mode is unset, and nothing is said under `"single"`. The
+  mode is core's `deploymentMode` slot, which the module requires; the router
+  reads nothing of `deployment` itself. A refused attempt is not audited.
 
 #### When a requirement interrupts the login
 
@@ -502,14 +533,17 @@ from the `User` (the MFA enrollment witness and what its address is — none,
 one the provider reads, or one it cannot — never the address), and the `redirectTo`; nothing a caller passes
 beside it. Anything that is not an `Establishment` core built —
 an object shaped like one, a copy of one — is a `RangeError` before anything
-is written. On both paths core reads the `User` into the primary as a plain snapshot —
-exactly the fields `User` declares, each by name, once, however the object
-holds it, so a class instance with getters or an ORM entity logs in — and
+is written. On both paths the login route reads the `User` once, with core's
+`readUserSnapshot`, into a plain snapshot — exactly the fields `User`
+declares, each by name, once, however the object holds it, so a class
+instance with getters or an ORM entity logs in — and hands that snapshot,
+never the `User`, to the builders (`passwordPrimary`, `establishWithoutAsking`);
+the subject, the claims and the route's log lines are read from it too.
 `req.session.user` holds that snapshot: the declared fields alone, nothing
-else the Store answered, and no Store's `toJSON` applied. Core refuses a
-`User` whose `id` is not a non-empty string or not the subject, or whose
-declared field holds what is not plain data; the login then answers `500`
-with nothing written. It runs, in order: the
+else the Store answered, and no Store's `toJSON` applied. A `User` whose `id`
+is not a non-empty string, or whose declared field holds what is not plain
+data, is refused by the snapshot; the login then answers `500` with nothing
+written. It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session-store.maxAge` after
 `authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the
@@ -718,13 +752,14 @@ string array; none of the bundled adapters does). By default it is kept in
 `authentication.upstreamAmr`, for the record: no token carries it and no
 `acr_values` entry is met by it — an IdP's word about its own login is not this
 provider's. `trustUpstreamAmr = true`, beside `enabled` in the federation's
-section, records it beside `fed`, where it counts, as every federation's did
+entry, records it beside `fed`, where it counts, as every federation's did
 before the switch existed. The routes read each installed federation's switch
-once, when they are built, through core's `federationTrustsUpstreamAmr` — the
-reading `@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session
-records and what `/authorize` advertises agree; a switch that is neither
-`true` nor `false` refuses the composition (`RangeError`), and the schema
-coerces the spellings an environment variable delivers. Each federation's
+once, when they are built, from core's `federationSettings` slot, whose
+`trustsUpstreamAmr` is core's `federationTrustsUpstreamAmr` — the reading
+`@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session records and
+what `/authorize` advertises agree; a switch that is neither `true` nor
+`false` refuses the boot, and the schema coerces the spellings an environment
+variable delivers. Each federation's
 switch is kept by the name it is installed under, and a login takes the switch
 of the name its callback came in on, which is also the federation
 `authentication.federation` names. The decision is written into the session
@@ -760,7 +795,7 @@ A federated identity is `<provider>:<sub>` — the federation's name and the IdP
 An account gains a second identity through an explicit, authenticated action:
 
 1. The browser already holds a session (`isAuthenticated`, a live `UserSession`).
-2. It starts the federation with `?link=1`: `GET /session/oauth/federation/<name>?link=1`, **from a link or a form on the deployment's own pages**. The start is a GET and the session cookie is `SameSite=Lax`, so without a check any page could send a signed-in user there, and paired with a login CSRF at the IdP the attacker's identity would be linked to the victim's account. The start therefore needs positive evidence: `Sec-Fetch-Site: same-origin`, or `none` (a typed URL or bookmark). `cross-site` is refused. `same-site` is not enough on its own — it covers every host on the registrable domain, including a user-controlled `blog.example.com` — so it, and a request with no `Sec-Fetch-Site` (an older browser), must name this origin or one on `session.csrf.trustedOrigins` in its `Referer`; a missing `Referer` is refused, because the navigating page picks its own referrer policy. An account page on a sibling host is therefore listed in `session.csrf.trustedOrigins`, and must not send `Referrer-Policy: no-referrer`. A refusal is `403 link_requires_trusted_origin`. Next, when the Store's repository does not implement `linkFederatedIdentity`, the start is `400 link_unsupported` — a fault of the composition, answered before the session is read, so it is the same whatever the session store is doing. The start then reads the session through core's [session admission](../core/src/session-admission/README.md) as `session.link`, graded `credential_change` — a linked identity is a new way into the account, so a registered requirement decides its recent-authentication rule here, where a step-up has a page to return to: a cookie that is not authenticated, carries no `sid` or no `user.id`, or whose `UserSession` is gone, past its `expiresAt`, another subject's, or covered by the subject-revocation boundary (when `subjectRevocation` is wired), and a requirement's `reauthenticate` or `unmet`, are `401 login_required`; a requirement's step-up is `403 step_up_required` with `error_description`, `requirement` and the requirement's registered `page` (`{ url, params }`) — see [When the start answers a step-up](#when-the-start-answers-a-step-up); an outage of the session store, the boundary or a requirement is `503 temporarily_unavailable`, described by what failed (core's `describeAdmissionOutage`: "session store unavailable", "revocation store unavailable" or "session requirement unavailable"), logged once by admission (`session_admission_unavailable`, `action: "session.link"`). All of these come before the browser is sent anywhere.
+2. It starts the federation with `?link=1`: `GET /session/oauth/federation/<name>?link=1`, **from a link or a form on the deployment's own pages**. The start is a GET and the session cookie is `SameSite=Lax`, so without a check any page could send a signed-in user there, and paired with a login CSRF at the IdP the attacker's identity would be linked to the victim's account. The start therefore needs positive evidence: `Sec-Fetch-Site: same-origin`, or `none` (a typed URL or bookmark). `cross-site` is refused. `same-site` is not enough on its own — it covers every host on the registrable domain, including a user-controlled `blog.example.com` — so it, and a request with no `Sec-Fetch-Site` (an older browser), must name this origin or one on `session.csrf.trustedOrigins` in its `Referer`; a missing `Referer` is refused, because the navigating page picks its own referrer policy. An account page on a sibling host is therefore listed in `session.csrf.trustedOrigins`, and must not send `Referrer-Policy: no-referrer`. A refusal is `403 link_requires_trusted_origin`. Next, when the Store's repository does not implement `linkFederatedIdentity`, the start is `400 link_unsupported` — a fault of the composition, answered before the session is read, so it is the same whatever the session store is doing. The start then reads the session through core's [session admission](../core/src/session-admission/README.md) as `session.link`, graded `credential_change` — a linked identity is a new way into the account, so a registered requirement decides its recent-authentication rule here, where a step-up has a page to return to: a cookie that is not authenticated, carries no `sid` or no `user.id`, or whose `UserSession` is gone, past its `expiresAt`, another subject's, or covered by the subject-revocation boundary (when `subjectRevocation` is wired), and a requirement's `reauthenticate` or `unmet`, are `401 login_required`; a requirement's step-up is `403 step_up_required` with `error_description`, `requirement` and `page`, the requirement's registered step-up page as one absolute URL string — see [When the start answers a step-up](#when-the-start-answers-a-step-up); an outage of the session store, the boundary or a requirement is `503 temporarily_unavailable`, described by what failed (core's `describeAdmissionOutage`: "session store unavailable", "revocation store unavailable" or "session requirement unavailable"), logged once by admission (`session_admission_unavailable`, `action: "session.link"`). All of these come before the browser is sent anywhere.
 3. On the callback, after `state`, PKCE and `nonce` are checked exactly as for a login, the identity is resolved:
    - **nobody** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`. `ok` links it; the Store's `refused` is `403 link_refused`, its `conflict` is `409 identity_conflict`, each with the Store's `description` when it gives one, sent within RFC 6749's characters (`?` for any other).
    - **another account** → `409 identity_conflict`; the Store is not asked. Linking never merges accounts.
@@ -842,7 +877,9 @@ URL is exactly what the adapter returned.
    `iss` from them through core's `callbackUrlForExchange`.
 2. **`exchangeCode` throwing is `502 exchange_failed`.** Every refusal inside an
    adapter — a wrong `iss`, a bad id_token, a UserInfo mismatch — surfaces this
-   way and never reaches the Store. A profile without `sub` is
+   way and never reaches the Store, and so does an answer whose `expiresIn` or
+   `expiresAt` throws when read, or whose `expiresAt` is neither absent,
+   `null` nor a `Date` holding an instant. A profile without `sub` is
    `400 invalid_profile`. The warning, `federation_callback_exchange_failed`
    (the provider bound on the line), carries core's `loggableError(err)`,
    never the error itself: an OAuth
@@ -882,17 +919,24 @@ URL is exactly what the adapter returned.
    (`subject_session_index_write_failed`) and the login proceeds.
 6. **Tokens** are attached to `federationTokenStore` under the new `sid` only
    when the profile carries an `accessToken`:
-   - `accessToken`, `refreshToken`, `idToken` and `expiresAt` as the adapter
-     returned them — `expiresAt: null` is stored as `null` ("do not refresh"),
-     and the router never invents an expiry;
+   - `accessToken`, `refreshToken` and `idToken` as the adapter returned them;
+   - the lifetime, read once from `profile.expiresIn` and `profile.expiresAt`
+     through core's `readUpstreamTokenLifetime`, at a floor of 0 and with no
+     cap. When `expires_in` is stated and the reading is finite, `obtainedAt`
+     is the instant just before `exchangeCode` was called and `expiresAt` is
+     the reading's end, the earlier of the adapter's instant and
+     `obtainedAt + expiresIn`. Otherwise (an end stated only as an instant,
+     which is on the upstream's clock; none; a malformed, contradictory or
+     spent one) `expiresAt` is the adapter's, `null` stored as `null` ("do not
+     refresh"), and the record has no `obtainedAt`, so `oauth` keeps its
+     refresh buffer for it. The router never invents an expiry. The link
+     callback writes the same lifetime;
    - `scope` and `grantedScope`: `profile.scope` when the adapter returned one
      (an empty or unusable string names nothing), otherwise the provider's
      requested `scope` — RFC 6749 §3.3 reads an absent answer as "as requested"
      ([`src/federations/consented-scope.mts`](src/federations/consented-scope.mts));
    - `tokenType`: `profile.tokenType` verbatim, `""` when it is not a string,
      `undefined` when the adapter returned none (`oauth` reads that as `Bearer`).
-
-   `profile.expiresIn` is not read here.
 7. **The redirect** is the federation's redirect policy's
    `resolveCallbackRedirect`. The default policy answers its `authCallbackUrl`
    with `redirect_to` appended when the start carried one, otherwise its
@@ -1124,70 +1168,74 @@ reading it as a gate would be reading a string.
 
 ### Configuring federations
 
-`core.federations.<name>` names a federation; `extractFederationSection`
-([`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts))
-normalises a section for the module that reads it. Three shapes are accepted:
+Each `core.federations.<name>` entry is one federation, reached at
+`/session/oauth/federation/<name>`. An entry is flat: the keys core owns and the
+keys of its `type` sit side by side.
 
 ```hocon
 core.federations {
-  # Shorthand: the key names the type (here "google").
   google {
     enabled = true
+    type = "google"
     clientId = ${CORE_FEDERATIONS_GOOGLE_CLIENT_ID}
     clientSecret = ${CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
     clientUrl = "https://app.example.com/"
   }
 
-  # Flat with an explicit type.
   okta {
     enabled = true
     type = "oidc"
     issuer = "https://dev-123.okta.com"
+    callbackURL = "https://auth.example.com/session/oauth/federation/okta/callback"
     # …
   }
 
-  # Nested: the credentials under a sub-section named by the type.
   keycloak {
-    enabled = true
+    enabled = false
     type = "oidc"
-    oidc {
-      issuer = "https://sso.example.com/realms/staff"
-      # …
-    }
+    issuer = "https://sso.example.com/realms/staff"
+    # …
   }
 }
 ```
 
-A nested section that also sets `clientId`, `clientSecret` or `callbackURL` at
-its top level fails boot; any other top-level field is kept beside the
-sub-section, and one the sub-section also sets is overridden by it. A section
-without `enabled = true` is ignored. The Google, GitHub and Apple
-modules are single-tenant — each registers its provider under a fixed name
-(`google`, `github`, `apple`) — so a deployment has at most one of each;
-`type = "oidc"` sections
-([`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md)) are one
-federation per section.
+Core owns `enabled`, `type`, `trustUpstreamAmr` and `callbackURL`; every other
+key belongs to the entry's type. Every entry names its `type`, enabled or not:
+one without, or with an empty one, refuses boot (`config-validation-failed` at
+`core.federations.<name>.type`). An enabled entry is handled by the module that
+registers its type under `federationTypes`, which builds one provider and one
+redirect policy for it, both named after the entry, so a type can have any
+number of entries. The Google, GitHub, Apple and OIDC packages each export such
+a module — `googleFederationTypeModule()`, `githubFederationTypeModule()`,
+`appleFederationTypeModule()` and `oidcFederationTypeModule()`, for the types
+`"google"`, `"github"`, `"apple"` and `"oidc"`
+([`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) for
+any OpenID Connect IdP); each package's README lists its type's keys. A
+disabled entry is not read past core's schema.
 
 Boot rules:
 
-- Every enabled section must have a `callbackURL`, or `sessionModule` fails boot.
-  The federation router hands exactly that value to the adapter as `redirect_uri`.
-- `trustUpstreamAmr` sits at a section's top level, beside `enabled`, in every
-  shape; it is `false` when absent, and anything but a boolean (after the
-  schema's coercion) fails boot. Written inside a nested section's
-  sub-section (`core.federations.okta.oidc.trustUpstreamAmr`) it fails boot too,
-  saying it belongs beside `enabled` — it would otherwise be ignored. No
-  environment variable is wired for it. What it decides is
+- Core requires a non-empty `callbackURL` on every entry it dispatches to a
+  type, or boot is refused (`config-validation-failed` at
+  `core.federations.<name>.callbackURL`). The federation router hands exactly
+  that value to the adapter as `redirect_uri`.
+- `trustUpstreamAmr` is read only at an entry's top level, beside `enabled`; it
+  is `false` when absent, and core's schema refuses anything but a boolean
+  (after coercing the spellings an environment variable delivers). A
+  `trustUpstreamAmr` nested under another key
+  (`core.federations.okta.oidc.trustUpstreamAmr`) is not read. No environment
+  variable is wired for it. What it decides is
   [above](#what-a-session-records-about-the-authentication).
-- Every `federations.<name>` contribution must be paired with a
-  `federationRedirectPolicies.<name>` one and vice versa, or boot fails with
-  `federation-redirect-policy-unpaired`.
-- `sessionModule` does not cross-check config against contributions. A
-  federation enabled in config that no module contributes boots, and its routes
-  answer `404`; a federation contributed without an enabled section has no
-  callback URL, and its start answers `500 misconfiguration`. A composition that
-  wants either to fail boot adds the check itself.
+- A federation's provider and redirect policy come together from the module
+  registering its `type` under `federationTypes`: one of each per enabled entry,
+  named after it. Modules cannot contribute or override `federations` or
+  `federationRedirectPolicies`; either is refused at boot
+  (`contribution-kind-guarded`).
+- `sessionModule` does not cross-check config against the registered
+  federations; core's boot does: an enabled entry whose `type` no installed
+  module registers refuses boot (`federation-type-unhandled`). A disabled entry
+  registers no federation, so its start answers `404`.
 
 ### Redirect allowlists
 
@@ -1248,9 +1296,11 @@ start carries a `redirect_to`, and a start that carries one needs
 `authCallbackUrl`.
 
 `FederationRedirectPolicy` ([`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts))
-is the replacement point: a module may contribute its own policy for a
-federation, and must fail closed. `createFederationRedirectPolicy` is the
-default; `checkRedirectShape`, `createRedirectAllowlistValidator`,
+is the replacement point: a federation type's `redirectPolicy` builds the
+policy for each of its entries, and a policy other than the default must fail
+closed. A deployment that customises a federation's redirect policy overrides
+its type (`overrides.federationTypes.<type>`). `createFederationRedirectPolicy`
+is the default; `checkRedirectShape`, `createRedirectAllowlistValidator`,
 `describeRedirectRejection` and `isLoopbackHostname` are exported so a custom
 policy reuses the same rules and rejection vocabulary. The policy's methods
 answer with a [`FederationResult`](src/federations/types.mts): `ok` with a value,
@@ -1271,32 +1321,39 @@ provider at the start leg); a `4xx` is not logged
 ### Writing an adapter
 
 For an IdP that publishes an OpenID Connect discovery document, write no code:
-a `type = "oidc"` section of
+a `type = "oidc"` entry of
 [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) is the
-adapter. Otherwise an adapter is a module that contributes both
-`federations.<name>` (the `FederationProvider`) and
-`federationRedirectPolicies.<name>`, with its config on a typed `ComponentMap`
-slot that a small bridge module fills from `extractFederationSection`:
+adapter. Otherwise an adapter is a module that registers a type under
+`federationTypes`: the schema of an entry's own keys, flat, and the two
+factories core calls for each enabled entry of the type, with the entry's name,
+its `callbackURL` and the keys the schema answered. Core removes the keys it
+owns (`enabled`, `type`, `trustUpstreamAmr`, `callbackURL`) before the schema
+reads the entry:
 
 ```ts
-import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
+import { defineFederationType, defineModule } from "@o3co/auth-provider-core";
 import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
+import { z } from "zod";
 
-declare module "@o3co/auth-provider-core" {
-  interface ComponentMap {
-    readonly exampleFederationConfig?: ExampleConfig;
-  }
-}
+const exampleEntrySchema = z.strictObject({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  clientUrl: z.string().optional(),
+  redirectAllowlist: z.array(z.string()).optional(),
+  authCallbackUrl: z.string().optional(),
+  sessionDomain: z.string().optional(),
+});
 
-export const exampleFederationModule = defineModule({
-  name: "federation:example",
-  requires: ["exampleFederationConfig"] as const,
+export const exampleFederationTypeModule = defineModule({
+  name: "federation-example-type",
   contributes: {
-    federations: {
-      example: (deps): FederationProvider => createExampleProvider(deps.exampleFederationConfig),
-    },
-    federationRedirectPolicies: {
-      example: (deps) => createFederationRedirectPolicy(deps.exampleFederationConfig),
+    federationTypes: {
+      example: defineFederationType()({
+        entrySchema: exampleEntrySchema,
+        factory: (_deps, { name, callbackURL, entry }) =>
+          createExampleProvider(name, { ...entry, callbackURL }),
+        redirectPolicy: (_deps, { entry }) => createFederationRedirectPolicy(entry),
+      }),
     },
   },
 });
@@ -1344,11 +1401,11 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, the cookie policy refuses whatever would break the contract, over every combination of the cookie's attributes, and a name or domain it refuses is refused at validation with its message; an override of the policy beside the store's module refuses boot, and a composition without the module fills the slot |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
 | [`src/__tests__/renewSession.test.mts`](src/__tests__/renewSession.test.mts) | the session renewal over express-session's `MemoryStore`: the signed-in state and a fresh nonce alone on the new id, the old id destroyed, a failed `regenerate` or `save` answered as the cookie session's outage with nothing written; and the race — a request in flight on the old id puts it back after the renewal, and core's admission refuses it once the escalation carries the nonce |
-| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
+| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginAttempts.test.mts`](src/routes/__tests__/loginAttempts.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login's attempt limit |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | the link start and callback on session admission: each outcome's answer, the subject recorded beside the `sid`, what a requirement is asked, the pre-upgrade transaction |
-| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | the callback's login established without asking: a requirement that would interrupt a password login does not interrupt it, the record is what core composes, and a user core cannot copy is refused with nothing written |
+| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | the callback's login established without asking: a requirement that would interrupt a password login does not interrupt it, the record is what core composes, the `User` is read once, and a user the snapshot refuses is refused with nothing written |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts), [`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts), [`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts), [`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response modes, the transaction cookie, the untouched session cookie, the transaction's failure paths and what single use guarantees |
 | [`src/federations/__tests__/`](src/federations/__tests__/) | the toolkit and the router's federation parts; the request helpers are pinned in core ([`core/src/federations/__tests__/`](../core/src/federations/__tests__/)) |
 

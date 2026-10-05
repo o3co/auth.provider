@@ -105,7 +105,7 @@ export type OidcProvider = FederationProvider &
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** A federation name is the `:name` route segment and the identity prefix; keep it to one plain segment. */
-export function checkFederationName(name: unknown): asserts name is string {
+function checkFederationName(name: unknown): asserts name is string {
 	if (typeof name !== "string" || !NAME_PATTERN.test(name)) {
 		throw new Error(
 			`OIDC federation name must be one URL path segment of letters, digits, ".", "_" or "-", got ${JSON.stringify(name)}`,

@@ -14,10 +14,18 @@
  * limitations under the License.
  */
 
+/**
+ * The Apple federation provider: the authorization URL, the `form_post` code
+ * exchange with a client secret given as is or signed from the key material,
+ * the ID token verified against Apple's keys, the profile and RP-initiated
+ * logout. `buildAppleProvider` builds it under a federation's name, as the
+ * type module does for each entry; `createAppleProvider` builds it under the
+ * name `apple`, for code that wires a provider by hand.
+ */
+
 import {
 	callbackUrlForExchange,
 	codeChallenge,
-	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationClientSecret,
@@ -32,18 +40,8 @@ import {
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-core";
-import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 import { createAppleClientSecret } from "./client-secret.mjs";
-
-// ComponentMap slot declaration-merge: exposes appleFederationConfig as a typed
-// DI slot. Consumers supply this via a small bootstrap module that reads from
-// app config.
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		readonly appleFederationConfig?: AppleProviderConfig;
-	}
-}
 
 export const APPLE_ISSUER = "https://appleid.apple.com";
 const APPLE_JWKS_URI = "https://appleid.apple.com/auth/keys";
@@ -196,13 +194,13 @@ export type AppleProvider = FederationProvider &
  * that supplies neither has none. Either is a boot-time misconfiguration and
  * belongs at boot, not at the first login attempt.
  */
-function resolveSecretSource(config: AppleProviderConfig): FederationClientSecret {
+function resolveSecretSource(name: string, config: AppleProviderConfig): FederationClientSecret {
 	const hasKeyMaterial = config.teamId != null || config.keyId != null || config.privateKey != null;
 	const hasClientSecret = config.clientSecret != null;
 
 	if (hasClientSecret && hasKeyMaterial) {
 		throw new Error(
-			`Apple federation "apple" takes either a clientSecret or teamId/keyId/privateKey, not both`,
+			`Apple federation "${name}" takes either a clientSecret or teamId/keyId/privateKey, not both`,
 		);
 	}
 	if (hasClientSecret) {
@@ -210,7 +208,7 @@ function resolveSecretSource(config: AppleProviderConfig): FederationClientSecre
 	}
 	if (!hasKeyMaterial) {
 		throw new Error(
-			`Apple federation "apple" requires a clientSecret, or teamId + keyId + privateKey to sign one`,
+			`Apple federation "${name}" requires a clientSecret, or teamId + keyId + privateKey to sign one`,
 		);
 	}
 	// `createAppleClientSecret` names whichever piece is missing. `privateKey`
@@ -227,12 +225,27 @@ function resolveSecretSource(config: AppleProviderConfig): FederationClientSecre
 	});
 }
 
+/**
+ * The Sign in with Apple provider for the federation `apple`, built from code:
+ * the provider `appleFederationTypeModule()` builds under each entry's name,
+ * with what an entry cannot carry — a client-secret resolver, a `privateKey`
+ * read at every signing, a `jwksUri` override.
+ */
 export function createAppleProvider(config: AppleProviderConfig): AppleProvider {
+	return buildAppleProvider("apple", config);
+}
+
+/**
+ * The provider for the federation `name`: the `:name` route segment, the name
+ * its tokens are stored under, and the prefix of the identity handed to the
+ * Store (`<name>:<sub>`). Every refusal names it.
+ */
+export function buildAppleProvider(name: string, config: AppleProviderConfig): AppleProvider {
 	if (!config.clientId) {
-		throw new Error(`Apple federation "apple" requires clientId (the Services ID)`);
+		throw new Error(`Apple federation "${name}" requires clientId (the Services ID)`);
 	}
 	if (!config.callbackURL) {
-		throw new Error(`Apple federation "apple" requires callbackURL`);
+		throw new Error(`Apple federation "${name}" requires callbackURL`);
 	}
 
 	// Apple's return URL is checked here, at boot, because every way it can be
@@ -244,12 +257,12 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 		callbackUrl = new URL(config.callbackURL);
 	} catch {
 		throw new Error(
-			`Apple federation "apple" received a callbackURL that is not a URL: ${config.callbackURL}`,
+			`Apple federation "${name}" received a callbackURL that is not a URL: ${config.callbackURL}`,
 		);
 	}
 	if (callbackUrl.protocol !== "https:") {
 		throw new Error(
-			`Apple federation "apple" requires an https callbackURL — Apple refuses a plain-http return URL (got ${config.callbackURL})`,
+			`Apple federation "${name}" requires an https callbackURL — Apple refuses a plain-http return URL (got ${config.callbackURL})`,
 		);
 	}
 	// `https` is necessary and not sufficient: Apple refuses a loopback return
@@ -259,7 +272,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	// 127.0.0.0/8 block and bracketed `[::1]` as `URL.hostname` reports it.
 	if (isLoopbackHostname(callbackUrl.hostname)) {
 		throw new Error(
-			`Apple federation "apple" refuses a loopback callbackURL (${config.callbackURL}) — Apple rejects localhost, 127.0.0.0/8 and [::1] return URLs even over https, so local development needs a tunnel or a dev hostname holding a certificate`,
+			`Apple federation "${name}" refuses a loopback callbackURL (${config.callbackURL}) — Apple rejects localhost, 127.0.0.0/8 and [::1] return URLs even over https, so local development needs a tunnel or a dev hostname holding a certificate`,
 		);
 	}
 
@@ -271,13 +284,13 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	const requireConfiguredCallback = (redirectUri: string): string => {
 		if (redirectUri !== config.callbackURL) {
 			throw new Error(
-				`Apple federation "apple" was handed a redirect URI (${redirectUri}) that is not the configured callbackURL (${config.callbackURL}) — the route derives it from core.federations.<name>.callbackURL, and the two must agree`,
+				`Apple federation "${name}" was handed a redirect URI (${redirectUri}) that is not the configured callbackURL (${config.callbackURL}) — the route derives it from core.federations.<name>.callbackURL, and the two must agree`,
 			);
 		}
 		return redirectUri;
 	};
 
-	const clientSecret = resolveSecretSource(config);
+	const clientSecret = resolveSecretSource(name, config);
 
 	// ServerMetadata constructed locally — no discovery call. Apple's endpoints
 	// are stable, and Apple publishes no `userinfo_endpoint` and no
@@ -333,14 +346,14 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	const requireNonce = (nonce: string | undefined): string => {
 		if (typeof nonce !== "string" || nonce.length === 0) {
 			throw new Error(
-				`Apple federation "apple" requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.`,
+				`Apple federation "${name}" requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.`,
 			);
 		}
 		return nonce;
 	};
 
 	return {
-		name: "apple",
+		name,
 		scope: SCOPES,
 		// Apple POSTs the callback whenever `scope` includes `name` or `email`,
 		// which SCOPES always does. The route layer reads this to send
@@ -402,7 +415,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			const claims = tokens.claims();
 			const sub = claims?.sub;
 			if (typeof sub !== "string" || sub.length === 0) {
-				throw new Error(`Apple federation "apple" id_token is missing the sub claim`);
+				throw new Error(`Apple federation "${name}" id_token is missing the sub claim`);
 			}
 
 			const email = typeof claims?.email === "string" ? claims.email : undefined;
@@ -454,7 +467,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 					url = new URL(config.endSessionEndpoint);
 				} catch {
 					throw new Error(
-						`Apple federation "apple" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
+						`Apple federation "${name}" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
 					);
 				}
 				if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
@@ -465,7 +478,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			}
 			if (!req.postLogoutRedirectUri) {
 				throw new Error(
-					`Apple federation "apple" cannot start an upstream logout: Apple publishes no end_session_endpoint, so either configure endSessionEndpoint or pass postLogoutRedirectUri`,
+					`Apple federation "${name}" cannot start an upstream logout: Apple publishes no end_session_endpoint, so either configure endSessionEndpoint or pass postLogoutRedirectUri`,
 				);
 			}
 			let url: URL;
@@ -475,7 +488,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				// Named, not quoted: the message reaches a log line as the error's
 				// `detail`, and the value is not this adapter's text.
 				throw new Error(
-					'Apple federation "apple" received an invalid postLogoutRedirectUri: not a URL',
+					`Apple federation "${name}" received an invalid postLogoutRedirectUri: not a URL`,
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);
@@ -488,7 +501,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			if (typeof profile.emailVerified === "boolean") claims.emailVerified = profile.emailVerified;
 			if (typeof profile.name === "string") claims.name = profile.name;
 			// Apple extension: whether the address is a Hide My Email relay.
-			// Recorded under `claims.federated.apple` (never promoted) so a
+			// Recorded under `claims.federated.<name>` (never promoted) so a
 			// deployment that must reach a real inbox can decide what to do.
 			if (typeof profile.isPrivateEmail === "boolean")
 				claims.isPrivateEmail = profile.isPrivateEmail;
@@ -496,25 +509,3 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 		},
 	};
 }
-
-/**
- * Const Module for the Sign in with Apple federation integration.
- *
- * Contributes `federations.apple` (the upstream OIDC provider) and
- * `federationRedirectPolicies.apple` (the consumer redirect URL policy),
- * which must be contributed together. Config arrives through the
- * `appleFederationConfig` ComponentMap slot. Single-tenant, as the Google and
- * GitHub modules are: registered under the name "apple".
- */
-export const appleFederationModule = defineModule({
-	name: "federation-apple",
-	requires: ["appleFederationConfig"] as const,
-	contributes: {
-		federations: {
-			apple: (deps) => createAppleProvider(deps.appleFederationConfig),
-		},
-		federationRedirectPolicies: {
-			apple: (deps) => createFederationRedirectPolicy(deps.appleFederationConfig),
-		},
-	},
-});

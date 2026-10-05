@@ -43,6 +43,7 @@ import {
 	registerBuiltinKeyStores,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { federationTypeForTests } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -52,9 +53,9 @@ import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths, type Switches } from "#/configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
-	adaptersOf,
 	capturedRenames,
 	libraryLayers,
+	rootSectionsOf,
 	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
@@ -73,6 +74,8 @@ const MFA_ACR = "urn:example:mfa";
 const FED_ACR = "urn:example:fed";
 
 const ENV: Readonly<Record<string, string>> = {
+	// This provider verifies no second factor of its own here: only upstream's.
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: "upstream-amr.acceptance.at-least-32-bytes",
 	OAUTH_JWT_ISSUER: ISSUER,
@@ -123,7 +126,7 @@ function resolveConfig(trustUpstreamAmr: boolean | undefined): Switches {
 	});
 	return {
 		...sectionsCoreDoesNotDeclare(layers),
-		adapters: adaptersOf(layers, ENV),
+		...rootSectionsOf(layers, ENV),
 		...parsed,
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
@@ -149,18 +152,11 @@ const partner: FederationProvider = {
 	}),
 };
 
-const partnerFederationModule = defineModule({
-	name: "test:partner-federation",
-	contributes: {
-		federations: { [FEDERATION]: () => partner },
-		federationRedirectPolicies: {
-			[FEDERATION]: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	} as never,
-});
+/**
+ * The partner federation's type: the `partner` entry is the IdP above, with a
+ * redirect policy that accepts every redirect and resolves the callback to `/`.
+ */
+const partnerFederationModule = federationTypeForTests(FEDERATION, { provider: () => partner });
 
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",

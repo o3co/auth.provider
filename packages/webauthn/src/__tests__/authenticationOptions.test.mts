@@ -16,16 +16,12 @@
 
 /**
  * Tests for the POST /oauth/webauthn/authentication/options endpoint, over
- * HTTP with supertest + express. ChallengeStore and WebAuthnCredentialStore
- * are core's memory adapters, not hand-rolled stubs, and
- * generateAuthenticationOptionsForUser is the real one: a pure function.
+ * HTTP with supertest + express. The ChallengeStore is core's memory adapter,
+ * not a hand-rolled stub, and generateAuthenticationOptionsForUser is the real
+ * one: a pure function.
  */
 
-import {
-	createMemoryChallengeStore,
-	createMemoryWebAuthnCredentialStore,
-	type WebAuthnCredential,
-} from "@o3co/auth-provider-core";
+import { createMemoryChallengeStore } from "@o3co/auth-provider-core";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -43,54 +39,27 @@ const BASE_CONFIG: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	// Enumeration-resistant default: the endpoint never derives
-	// allowCredentials from a body-supplied user id.
-	allowCredentialsForKnownUser: false,
 	rateLimit: {
 		authenticationOptions: { limit: 30, windowSeconds: 60 },
 	},
 };
 
-/** Config with the enumeration escape hatch turned on (non-discoverable deployments). */
-const OPT_IN_CONFIG: WebAuthnConfig = {
-	...BASE_CONFIG,
-	allowCredentialsForKnownUser: true,
-};
-
-function makeCredential(overrides?: Partial<WebAuthnCredential>): WebAuthnCredential {
-	return {
-		credentialId: "dGVzdC1jcmVkZW50aWFsLWlk",
-		publicKey: new Uint8Array(64),
-		signCount: 0,
-		transports: ["internal"],
-		backedUp: false,
-		userId: "alice",
-		createdAt: new Date("2026-01-01T00:00:00Z"),
-		...overrides,
-	};
-}
-
 // ---------------------------------------------------------------------------
 // Test setup helper
 // ---------------------------------------------------------------------------
 
-function buildApp(
-	challengeStore = createMemoryChallengeStore(),
-	credentialStore = createMemoryWebAuthnCredentialStore(),
-	config: WebAuthnConfig = BASE_CONFIG,
-) {
+function buildApp(challengeStore = createMemoryChallengeStore()) {
 	const app = express();
 	app.use(express.json());
 
 	const handler = createAuthenticationOptionsHandler({
-		config,
+		config: BASE_CONFIG,
 		challengeStore,
-		credentialStore,
 		logger: { error: vi.fn() },
 	});
 
 	app.post("/oauth/webauthn/authentication/options", handler);
-	return { app, challengeStore, credentialStore };
+	return { app, challengeStore };
 }
 
 /** The challenge is fresh per request; everything else must be identical. */
@@ -99,41 +68,30 @@ function withoutChallenge(body: Record<string, unknown>): Record<string, unknown
 	return rest;
 }
 
-/** A credential store pre-seeded with two credentials for "alice". */
-async function seededCredentialStore() {
-	const credentialStore = createMemoryWebAuthnCredentialStore();
-	await credentialStore.registerCredential(
-		makeCredential({ credentialId: "Y3JlZC0x", userId: "alice" }),
-	);
-	await credentialStore.registerCredential(
-		makeCredential({ credentialId: "Y3JlZC0y", userId: "alice" }),
-	);
-	return credentialStore;
-}
+const post = (app: express.Express, body: unknown) =>
+	supertest(app)
+		.post("/oauth/webauthn/authentication/options")
+		.send(body as object);
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("POST /oauth/webauthn/authentication/options", () => {
-	it("no userId in body → discoverable flow: empty/absent allowCredentials, challenge stored under webauthn:authentication", async () => {
+	it("answers the discoverable flow: no allowCredentials, challenge stored under webauthn:authentication", async () => {
 		const challengeStore = createMemoryChallengeStore();
 		const issueSpy = vi.spyOn(challengeStore, "issue");
 		const { app } = buildApp(challengeStore);
 
-		const res = await supertest(app).post("/oauth/webauthn/authentication/options").send({});
+		const res = await post(app, {});
 
 		expect(res.status).toBe(200);
-		// Discoverable flow: allowCredentials should be absent or empty
 		const body = res.body as Record<string, unknown>;
-		if ("allowCredentials" in body) {
-			expect(body.allowCredentials).toEqual([]);
-		}
-		// challenge is a base64url string
+		expect(body).not.toHaveProperty("allowCredentials");
 		expect(typeof body.challenge).toBe("string");
 		expect((body.challenge as string).length).toBeGreaterThan(0);
 
-		// Challenge must be stored under the non-user-scoped namespace
+		// Stored under the non-user-scoped namespace.
 		expect(issueSpy).toHaveBeenCalledOnce();
 		const [scope, , expiresAtMs] = issueSpy.mock.calls[0] ?? [];
 		expect(scope).toBe("webauthn:authentication");
@@ -141,16 +99,15 @@ describe("POST /oauth/webauthn/authentication/options", () => {
 		expect(expiresAtMs).toBeLessThanOrEqual(Date.now() + BASE_CONFIG.challengeTtlMs + 200);
 	});
 
-	it("challenge stored under scope 'webauthn:authentication' (not user-scoped) regardless of userId", async () => {
+	it("stores the challenge under 'webauthn:authentication' whatever the body names", async () => {
 		const challengeStore = createMemoryChallengeStore();
 		const issueSpy = vi.spyOn(challengeStore, "issue");
 		const { app } = buildApp(challengeStore);
 
-		await supertest(app).post("/oauth/webauthn/authentication/options").send({ userId: "alice" });
+		await post(app, { userId: "alice" });
 
 		expect(issueSpy).toHaveBeenCalledOnce();
 		const [scope] = issueSpy.mock.calls[0] ?? [];
-		// Must be the fixed, non-user-scoped namespace — userId resolved post-assertion
 		expect(scope).toBe("webauthn:authentication");
 		expect(scope).not.toContain("alice");
 	});
@@ -161,193 +118,21 @@ describe("POST /oauth/webauthn/authentication/options", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /oauth/webauthn/authentication/options — enumeration resistance", () => {
-	it("never derives allowCredentials from a body-supplied userId by default", async () => {
-		const credentialStore = await seededCredentialStore();
-		const { app } = buildApp(createMemoryChallengeStore(), credentialStore);
+	it("answers an identical body (modulo challenge) whatever the body names, the body unread", async () => {
+		const { app } = buildApp();
 
-		const res = await supertest(app)
-			.post("/oauth/webauthn/authentication/options")
-			.send({ userId: "alice" });
-
-		expect(res.status).toBe(200);
-		expect(res.body).not.toHaveProperty("allowCredentials");
-	});
-
-	it("returns a byte-identical body (modulo challenge) for a known user, an unknown user, and no userId", async () => {
-		const credentialStore = await seededCredentialStore();
-		const { app } = buildApp(createMemoryChallengeStore(), credentialStore);
-
-		const post = (body: Record<string, unknown>) =>
-			supertest(app).post("/oauth/webauthn/authentication/options").send(body);
-
-		const known = await post({ userId: "alice" });
-		const unknown = await post({ userId: "nobody-at-all" });
-		const anonymous = await post({});
-
-		for (const res of [known, unknown, anonymous]) {
-			expect(res.status).toBe(200);
-		}
-		const knownBody = withoutChallenge(known.body);
-		expect(withoutChallenge(unknown.body)).toEqual(knownBody);
-		expect(withoutChallenge(anonymous.body)).toEqual(knownBody);
-		// Shape uniformity is not enough on its own — the key set must match too.
-		expect(Object.keys(unknown.body).sort()).toEqual(Object.keys(known.body).sort());
-		expect(Object.keys(anonymous.body).sort()).toEqual(Object.keys(known.body).sort());
-	});
-
-	it("does not touch the credential store at all when the opt-in is off (no existence-dependent timing)", async () => {
-		const credentialStore = await seededCredentialStore();
-		const listSpy = vi.spyOn(credentialStore, "listByUserId");
-		const { app } = buildApp(createMemoryChallengeStore(), credentialStore);
-
-		await supertest(app).post("/oauth/webauthn/authentication/options").send({ userId: "alice" });
-		await supertest(app).post("/oauth/webauthn/authentication/options").send({ userId: "nobody" });
-		await supertest(app).post("/oauth/webauthn/authentication/options").send({});
-
-		expect(listSpy).not.toHaveBeenCalled();
-	});
-
-	it("allowCredentialsForKnownUser: true → restores the allow-list flow for non-discoverable authenticators", async () => {
-		const credentialStore = await seededCredentialStore();
-		const { app } = buildApp(createMemoryChallengeStore(), credentialStore, OPT_IN_CONFIG);
-
-		const res = await supertest(app)
-			.post("/oauth/webauthn/authentication/options")
-			.send({ userId: "alice" });
-
-		expect(res.status).toBe(200);
-		const body = res.body as { allowCredentials?: Array<{ id: string }> };
-		expect(body.allowCredentials).toBeDefined();
-		expect(body.allowCredentials).toHaveLength(2);
-		expect((body.allowCredentials ?? []).map((c) => c.id).sort()).toEqual(["Y3JlZC0x", "Y3JlZC0y"]);
-	});
-
-	it("allowCredentialsForKnownUser: true + unknown user → still 200 with no error-shape leak", async () => {
-		const { app } = buildApp(
-			createMemoryChallengeStore(),
-			createMemoryWebAuthnCredentialStore(),
-			OPT_IN_CONFIG,
+		const answers = await Promise.all(
+			[{ userId: "alice" }, { userId: "nobody-at-all" }, {}, { userId: 123 }, { userId: "" }].map(
+				(body) => post(app, body),
+			),
 		);
 
-		const res = await supertest(app)
-			.post("/oauth/webauthn/authentication/options")
-			.send({ userId: "unknown-user" });
-
-		expect(res.status).toBe(200);
-		const body = res.body as Record<string, unknown>;
-		if ("allowCredentials" in body) {
-			expect(body.allowCredentials).toEqual([]);
+		const first = answers[0];
+		if (first === undefined) throw new Error("no answer");
+		for (const res of answers) {
+			expect(res.status).toBe(200);
+			expect(withoutChallenge(res.body)).toEqual(withoutChallenge(first.body));
+			expect(Object.keys(res.body).sort()).toEqual(Object.keys(first.body).sort());
 		}
-		expect(body).not.toMatchObject({ error: expect.anything() });
-	});
-
-	it("allowCredentialsForKnownUser: true but no userId → discoverable flow (no store lookup)", async () => {
-		const credentialStore = await seededCredentialStore();
-		const listSpy = vi.spyOn(credentialStore, "listByUserId");
-		const { app } = buildApp(createMemoryChallengeStore(), credentialStore, OPT_IN_CONFIG);
-
-		const res = await supertest(app).post("/oauth/webauthn/authentication/options").send({});
-
-		expect(res.status).toBe(200);
-		expect(res.body).not.toHaveProperty("allowCredentials");
-		expect(listSpy).not.toHaveBeenCalled();
-	});
-});
-
-// ---------------------------------------------------------------------------
-// Unbounded user IDs
-// ---------------------------------------------------------------------------
-
-describe("POST /oauth/webauthn/authentication/options — userId bounds", () => {
-	const post = (app: express.Express, body: unknown) =>
-		supertest(app)
-			.post("/oauth/webauthn/authentication/options")
-			.send(body as object);
-
-	it("invalid userId type (number) → 400 invalid_request", async () => {
-		const { app } = buildApp();
-
-		const res = await post(app, { userId: 123 });
-
-		expect(res.status).toBe(400);
-		expect(res.body).toMatchObject({ error: "invalid_request" });
-	});
-
-	it("rejects an over-long userId with 400 before any credential lookup", async () => {
-		const credentialStore = await seededCredentialStore();
-		const listSpy = vi.spyOn(credentialStore, "listByUserId");
-		const { app } = buildApp(createMemoryChallengeStore(), credentialStore, OPT_IN_CONFIG);
-
-		const res = await post(app, { userId: "a".repeat(65) });
-
-		expect(res.status).toBe(400);
-		expect(res.body).toMatchObject({ error: "invalid_request" });
-		expect(listSpy).not.toHaveBeenCalled();
-	});
-
-	it("rejects a 100kb userId with 400, minting no challenge", async () => {
-		const challengeStore = createMemoryChallengeStore();
-		const issueSpy = vi.spyOn(challengeStore, "issue");
-		const { app } = buildApp(challengeStore);
-
-		const res = await post(app, { userId: "x".repeat(100_000) });
-
-		expect(res.status).toBe(400);
-		// No challenge is minted for a rejected request.
-		expect(issueSpy).not.toHaveBeenCalled();
-	});
-
-	it("accepts a userId of exactly 64 bytes", async () => {
-		const { app } = buildApp();
-
-		const res = await post(app, { userId: "b".repeat(64) });
-
-		expect(res.status).toBe(200);
-	});
-
-	it("bounds by UTF-8 bytes, not by code units (WebAuthn §5.4.3)", async () => {
-		const { app } = buildApp();
-
-		// 32 × 2-byte characters = 64 bytes → accepted.
-		const ok = await post(app, { userId: "é".repeat(32) });
-		expect(ok.status).toBe(200);
-
-		// 33 × 2-byte characters = 66 bytes → rejected, even though the string
-		// is only 33 code units long.
-		const tooLong = await post(app, { userId: "é".repeat(33) });
-		expect(tooLong.status).toBe(400);
-	});
-
-	it("rejects an empty userId", async () => {
-		const { app } = buildApp();
-
-		const res = await post(app, { userId: "" });
-
-		expect(res.status).toBe(400);
-		// RFC 6749 Appendix A.8: printable ASCII only, so "section", not the sign.
-		expect(res.body).toEqual({
-			error: "invalid_request",
-			error_description:
-				"userId must be an opaque handle of 1-64 UTF-8 bytes with no control characters (WebAuthn section 5.4.3)",
-		});
-	});
-
-	it("rejects a userId carrying control characters", async () => {
-		const { app } = buildApp();
-
-		const res = await post(app, { userId: "alice\u0000admin" });
-
-		expect(res.status).toBe(400);
-		expect(res.body).toMatchObject({ error: "invalid_request" });
-	});
-
-	it("the rejection description does not depend on whether the account exists", async () => {
-		const credentialStore = await seededCredentialStore();
-		const { app } = buildApp(createMemoryChallengeStore(), credentialStore, OPT_IN_CONFIG);
-
-		const knownButTooLong = await post(app, { userId: `alice${"!".repeat(64)}` });
-		const unknownAndTooLong = await post(app, { userId: `zzzzz${"!".repeat(64)}` });
-
-		expect(knownButTooLong.body).toEqual(unknownAndTooLong.body);
 	});
 });

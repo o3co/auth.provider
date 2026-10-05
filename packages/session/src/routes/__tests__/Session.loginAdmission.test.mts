@@ -429,9 +429,9 @@ describe("POST /session/login — every requirement answers establish", () => {
 
 describe("POST /session/login — a user whose field the login needs is not plain data", () => {
 	it("is refused before any requirement is asked and before anything is written: the route's error, answered 500", async () => {
-		// `passwordPrimary` reads the user into a plain snapshot: a field the
-		// login needs that is not plain data — a witness that is a Date — is a
-		// RangeError there, since the snapshot would read it as not enrolled.
+		// The route reads the user once with core's `readUserSnapshot`: a
+		// field the login needs that is not plain data — a witness that is a
+		// Date — is refused there, since left out it would read as not enrolled.
 		const { requirement, asked } = fixture(() => "establish");
 		const { app, userSessionStore, trace } = setup({
 			requirements: [requirement],
@@ -445,6 +445,63 @@ describe("POST /session/login — a user whose field the login needs is not plai
 		expect(userSessionStore.create).not.toHaveBeenCalled();
 		expect(trace).toEqual([]);
 		expect(cookieSessionId(res)).toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The User is read once
+// ---------------------------------------------------------------------------
+
+/** `fields` as a class instance's prototype getters, each counting its reads by name. */
+function countingUser(fields: Record<string, unknown>): {
+	user: Record<string, unknown>;
+	reads: Map<string, number>;
+} {
+	const reads = new Map<string, number>();
+	class Entity {}
+	for (const [name, value] of Object.entries(fields)) {
+		Object.defineProperty(Entity.prototype, name, {
+			get() {
+				reads.set(name, (reads.get(name) ?? 0) + 1);
+				return value;
+			},
+			configurable: true,
+		});
+	}
+	return { user: new Entity() as Record<string, unknown>, reads };
+}
+
+describe("POST /session/login — the User the Store answers is read once", () => {
+	it("runs each of a getter-backed User's getters exactly once, and the session's subject and claims are the snapshot's", async () => {
+		const { requirement, asked } = fixture(() => "establish");
+		const { user, reads } = countingUser({ ...ALICE, emailVerified: true, mfaEnrolled: false });
+		const { app, userSessionStore } = setup({ requirements: [requirement], user });
+
+		const res = await login(app);
+
+		expect(res.status).toBe(200);
+		for (const field of [
+			"id",
+			"username",
+			"email",
+			"emailVerified",
+			"name",
+			"groups",
+			"mfaEnrolled",
+		]) {
+			expect(reads.get(field), field).toBe(1);
+		}
+		expect(reads.has("locale")).toBe(false);
+		expect(asked[0]).toMatchObject({
+			subject: "u-1",
+			claims: {
+				email: "alice@example.com",
+				emailVerified: true,
+				name: "Alice",
+				groups: ["staff"],
+			},
+		});
+		expect(userSessionStore.create).toHaveBeenCalledTimes(1);
 	});
 });
 

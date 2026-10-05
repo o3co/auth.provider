@@ -49,7 +49,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { WebAuthnConfig } from "../config.mjs";
 import { webauthnModule } from "../module.mjs";
 import { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "../routes/authenticationOptions.mjs";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, testTokenSettings } from "./appConfig.fixture.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -73,7 +73,6 @@ const makeWebAuthnConfig = (limit: number): WebAuthnConfig => ({
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	allowCredentialsForKnownUser: false,
 	rateLimit: { authenticationOptions: { limit, windowSeconds: 60 } },
 });
 
@@ -131,19 +130,25 @@ const asSharedStub = (m: Module): Module => {
 	return { ...manifest, name: `test:shared:${m.name}` } as Module;
 };
 
+/**
+ * Boots the module over `section`, its `webauthn` section; a `webauthn` in
+ * `extraConfig` is laid over the section's top-level keys.
+ */
 async function bootApp(
-	webauthnConfig: WebAuthnConfig,
+	section: WebAuthnConfig,
 	extraModules: readonly Module[],
 	failMode?: "open" | "closed",
 	deploymentMode?: "single" | "multi",
 	extraConfig: Record<string, unknown> = {},
 ) {
+	const { webauthn: sectionOverrides, ...rest } = extraConfig as { webauthn?: object };
 	const config = {
 		...makeCoreConfig(failMode),
 		...(deploymentMode === undefined
 			? {}
 			: { core: { ...makeCoreConfig().core, deployment: { mode: deploymentMode } } }),
-		...extraConfig,
+		...rest,
+		webauthn: { ...section, ...sectionOverrides },
 	};
 	// With a deployment mode declared, the memory stores this fixture wires
 	// stand in for shared ones: the case under test is the route's own
@@ -158,17 +163,17 @@ async function bootApp(
 	const handle = await createApp({
 		modules: [
 			webauthnModule,
-			defineModule({
-				name: "test:webauthn-rl-config",
-				provides: { webauthnConfig: () => webauthnConfig },
-			}),
 			keyStoreModule,
 			...storeModules,
 			defaultChallengeCeremonyModule,
 			noopGrantPolicyModule,
 			...extraModules,
 		],
-		bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+		bootstrapComponents: {
+			config,
+			pathResolver: (p: string) => p,
+			oauthTokenSettings: testTokenSettings({ issuer: "https://test.example" }),
+		} as never,
 	});
 	const app = express();
 	app.use(handle.router);
@@ -348,15 +353,12 @@ describe("webauthn authentication/options rate limit — the configured budget o
 	});
 });
 
-describe("webauthn authentication/options rate limit — the slot and the contributed budget", () => {
+describe("webauthn authentication/options rate limit — the section and the contributed budget", () => {
 	/**
-	 * A shared limiter applies the budget the module contributes from the app
-	 * config's `webauthn.rateLimit.authenticationOptions`; the route's
-	 * per-process fallback and its headers read the `webauthnConfig` slot. A
-	 * composition that hard-codes the slot (`webauthnConfigSchema.parse({…})`)
-	 * without the config key runs the route on the limiter's default, and one
-	 * whose key differs from the slot has the limiter apply the key. Boot warns
-	 * once, naming both values and the key to set.
+	 * A shared limiter applies the budget the module contributes from its
+	 * section's `webauthn.rateLimit.authenticationOptions`; the route's
+	 * per-process fallback and its headers read the same key. No module may
+	 * override the contributed budget, so the two agree and boot is silent.
 	 */
 	const EVENT = "webauthn_authentication_options_budget_mismatch";
 	const sharedLimiter = () =>
@@ -372,47 +374,18 @@ describe("webauthn authentication/options rate limit — the slot and the contri
 	const mismatchCalls = (logger: ReturnType<typeof spyLogger>) =>
 		logger.warn.mock.calls.filter((call) => call[1] === EVENT);
 
-	it("warns when a shared limiter is wired and the config does not give the key", async () => {
-		const logger = spyLogger();
-		const { handle } = await bootApp(makeWebAuthnConfig(2), [withLogger(logger), sharedLimiter()]);
-
-		expect(mismatchCalls(logger)).toEqual([
-			[
-				{
-					key: "webauthn.rateLimit.authenticationOptions",
-					contributed: null,
-					webauthnConfig: { limit: 2, windowSeconds: 60 },
-				},
-				EVENT,
-			],
-		]);
-		await handle.dispose();
-	});
-
-	it("warns when the config's key differs from the slot, naming both", async () => {
-		const logger = spyLogger();
-		const { handle } = await bootApp(
-			makeWebAuthnConfig(2),
-			[withLogger(logger), sharedLimiter()],
-			undefined,
-			undefined,
-			{ webauthn: { rateLimit: { authenticationOptions: { limit: 5, windowSeconds: 60 } } } },
+	it("refuses the boot when the section gives no budget, naming the key", async () => {
+		const err = await bootApp(makeWebAuthnConfig(2), [sharedLimiter()], undefined, undefined, {
+			webauthn: { rateLimit: {} },
+		}).then(
+			() => undefined,
+			(caught: unknown) => caught as BootError,
 		);
-
-		expect(mismatchCalls(logger)).toEqual([
-			[
-				{
-					key: "webauthn.rateLimit.authenticationOptions",
-					contributed: { limit: 5, windowSeconds: 60 },
-					webauthnConfig: { limit: 2, windowSeconds: 60 },
-				},
-				EVENT,
-			],
-		]);
-		await handle.dispose();
+		expect(err?.reason).toBe("config-validation-failed");
+		expect(err?.message).toContain("webauthn.rateLimit.authenticationOptions");
 	});
 
-	it("is silent when the key and the slot agree, the key as the strings HOCON substitutes included", async () => {
+	it("is silent when a shared limiter is wired, the key as the strings HOCON substitutes included", async () => {
 		for (const authenticationOptions of [
 			{ limit: 2, windowSeconds: 60 },
 			{ limit: "2", windowSeconds: "60" },
@@ -430,8 +403,7 @@ describe("webauthn authentication/options rate limit — the slot and the contri
 		}
 	});
 
-	it("warns when a module has overridden the contributed budget away from the key and the slot, naming it", async () => {
-		const logger = spyLogger();
+	it("refuses the boot when a module overrides the contributed budget", async () => {
 		const tightener = defineModule({
 			name: "test:webauthn-rl-tightener",
 			overrides: {
@@ -440,28 +412,15 @@ describe("webauthn authentication/options rate limit — the slot and the contri
 				},
 			},
 		});
-		const { handle } = await bootApp(
-			makeWebAuthnConfig(2),
-			[withLogger(logger), sharedLimiter(), tightener],
-			undefined,
-			undefined,
-			{ webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } } },
+		const err = await bootApp(makeWebAuthnConfig(2), [sharedLimiter(), tightener]).then(
+			() => undefined,
+			(caught: unknown) => caught as BootError,
 		);
-
-		expect(mismatchCalls(logger)).toEqual([
-			[
-				{
-					key: "webauthn.rateLimit.authenticationOptions",
-					contributed: { limit: 1, windowSeconds: 60 },
-					webauthnConfig: { limit: 2, windowSeconds: 60 },
-				},
-				EVENT,
-			],
-		]);
-		await handle.dispose();
+		expect(err?.reason).toBe("contribution-kind-guarded");
+		expect(err?.message).toContain(WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG);
 	});
 
-	it("is silent when no shared limiter is wired: the fallback is built from the slot", async () => {
+	it("is silent when no shared limiter is wired: the fallback is built from the key", async () => {
 		const logger = spyLogger();
 		const { handle } = await bootApp(makeWebAuthnConfig(2), [withLogger(logger)]);
 		expect(mismatchCalls(logger)).toEqual([]);
@@ -678,7 +637,7 @@ describe("webauthn authentication/options rate limit — the deploymentMode slot
 	) => {
 		const deps = {
 			...(rateLimiter === undefined ? {} : { rateLimiter }),
-			webauthnConfig: makeWebAuthnConfig(7),
+			section: makeWebAuthnConfig(7),
 			webauthnCredentialStore: {},
 			challengeStore: {},
 			challengeCeremony: {},

@@ -24,6 +24,7 @@
 import {
 	type AccessTokenLifetime,
 	type Confirmation,
+	consoleLogger,
 	formatObject,
 	type GrantContext,
 	type GrantDependencies,
@@ -36,12 +37,16 @@ import {
 } from "@o3co/auth-provider-core";
 import { buildActClaim } from "./act.mjs";
 import { invalidRequest } from "./answers.mjs";
-import { reportedFamily } from "./tokenValidation.mjs";
+import type { ReportedBindings } from "./tokenValidation.mjs";
 
 /** What the issued token is minted from. */
 export interface Issuance {
+	/** The issuance instant, epoch seconds: the minted `iat`, and what `exp` is measured from. */
+	readonly issuedAt: number;
 	readonly client: PublicClient;
 	readonly subjectValidated: ValidatedToken;
+	/** The subject's family and session, as read once at validation. */
+	readonly subjectBindings: ReportedBindings;
 	readonly actorValidated: ValidatedToken | null;
 	readonly grantedScope: readonly string[] | undefined;
 	readonly audienceForToken: string;
@@ -50,19 +55,28 @@ export interface Issuance {
 }
 
 export async function issueAccessToken(
-	deps: Pick<GrantDependencies, "keyStore">,
+	deps: Pick<GrantDependencies, "keyStore" | "logger">,
 	ctx: GrantContext,
 	{ defaultExpiresIn, maxExpiresIn }: AccessTokenLifetime,
 	{
+		issuedAt,
 		client,
 		subjectValidated,
+		subjectBindings,
 		actorValidated,
 		grantedScope,
 		audienceForToken,
 		requestedExpiresIn,
 		issuedConfirmation,
 	}: Issuance,
-): Promise<{ readonly accessToken: Token } | GrantHandlerResult> {
+): Promise<
+	| {
+			readonly accessToken: Token;
+			/** Seconds left of the lifetime when it was signed: the answer's `expires_in`. */
+			readonly expiresIn: number;
+	  }
+	| GrantHandlerResult
+> {
 	const act = buildActClaim({
 		subject: subjectValidated,
 		actor: actorValidated ?? undefined,
@@ -80,30 +94,32 @@ export async function issueAccessToken(
 	// chain of exchanges outlives its origin indefinitely. The built-in validator
 	// already rejects an expired subject, so this is the fail-closed backstop for
 	// contributed validators, placed here so the refusal order of a doubly invalid
-	// request is unchanged. The issuance instant is read once for both the cap and
-	// the minted `iat`/`exp`, so they cannot straddle a second and exceed the
-	// subject's `exp`.
-	const issuedAt = Math.floor(Date.now() / 1000);
+	// request is unchanged. The cap is measured from the issuance instant the minted
+	// `iat`/`exp` carry, so `exp` cannot pass the subject's; the expiry is judged
+	// at the minting clock, so a subject that expired while the exchange ran is
+	// refused.
 	const subjectExpiry = subjectValidated.claims.exp;
 	if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
-		const remaining = Math.floor(subjectExpiry - issuedAt);
 		// `<= 0` includes a token expiring within this second: capping would mint a dead
 		// token, so refuse instead.
-		if (remaining <= 0) return invalidRequest("subject_token has expired");
-		expiresIn = Math.min(expiresIn, remaining);
+		if (Math.floor(subjectExpiry - Math.floor(Date.now() / 1000)) <= 0) {
+			return invalidRequest("subject_token has expired");
+		}
+		expiresIn = Math.min(expiresIn, Math.floor(subjectExpiry - issuedAt));
 	}
+
 	// A subject token without `exp` leaves the lifetime above standing: `exp` is a
 	// property of the presented credential, and a validator returning none asserts a
 	// credential with no expiry. The built-in validator never takes this path.
 
 	const accessToken = await generateToken(
 		formatObject({
-			family_id: reportedFamily(subjectValidated),
+			family_id: subjectBindings.familyId,
 			// The subject's session as a liveness link only (core's
 			// `grants/sessionClaims.mts`): the logout that ends the subject token ends this
 			// one at introspection and userinfo, and nothing a `sid` authorises is reachable
 			// with it. The actor's session is not carried.
-			[LIVENESS_SID_CLAIM]: subjectValidated.sid ? subjectValidated.sid : undefined,
+			[LIVENESS_SID_CLAIM]: subjectBindings.sid,
 			act,
 		}),
 		{
@@ -119,5 +135,23 @@ export async function issueAccessToken(
 			...(issuedConfirmation ? { confirmation: issuedConfirmation } : {}),
 		},
 	);
-	return { accessToken };
+	// The lifetime runs from the issuance instant, so what is left of it once the
+	// token is signed is the answer's `expires_in` (RFC 6749 §5.1). One the
+	// exchange used up is refused, and retryable, rather than answered expired.
+	const answeredAt = Math.floor(Date.now() / 1000);
+	const remaining = issuedAt + expiresIn - answeredAt;
+	if (remaining <= 0) {
+		(deps.logger ?? consoleLogger).warn(
+			{ clientId: client.clientId, expiresIn, elapsed: answeredAt - issuedAt },
+			"token_exchange_lifetime_elapsed",
+		);
+		return {
+			result: {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "issued token lifetime elapsed during the exchange",
+			},
+		};
+	}
+	return { accessToken, expiresIn: remaining };
 }

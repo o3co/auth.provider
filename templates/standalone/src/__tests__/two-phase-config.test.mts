@@ -21,12 +21,12 @@
  *    core's transitional reader — parses only `SWITCHES`, what the template
  *    reads before it knows its modules: the switches `buildModules` chooses
  *    them by, and the configuration's `core.sessionRequirements`, which
- *    `expectedSessionRequirements` reads beside `mfa.mode` — the one path it
- *    reads raw (`OWN_READS`, `readMfaMode`), until the MFA ADR's build-order
- *    step 20 (the log level is the `logging` module's section, which
- *    `readLogging` reads with that module's schema: `own-modules.test.mts`) —
- *    and the composition root's own `adapters`, over the template's own
- *    reference, with the template's schema (`adapters.test.mts`);
+ *    `expectedSessionRequirements` reads (the log level is the `logging`
+ *    module's section, which `readLogging` reads with that module's schema:
+ *    `own-modules.test.mts`) — and the composition root's own `adapters` and
+ *    `mfaMode`, over the template's own reference, with the template's
+ *    schema (`adapters.test.mts`, `mfa-switch.test.mts`), and the Store
+ *    transport settings beside them, unparsed;
  * 2. `resolveForBoot` — its own files over the `reference.conf` of every
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
@@ -53,8 +53,6 @@ import { ADAPTERS_SECTION } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
-	OWN_READS,
-	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -63,6 +61,7 @@ import {
 	SWITCHES,
 	type Switches,
 } from "../configPath.mjs";
+import { MFA_SWITCH } from "../mfaSwitch.mjs";
 import { templateReference } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -89,6 +88,8 @@ const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 		HTTP_TRUST_PROXY: "loopback",
 		SESSION_STORE_SECURE: "false",
 		MFA_MODE: "optional",
+		ADAPTERS_MFA_FACTOR_STORE: "redis",
+		ADAPTERS_MFA_TRANSACTION_STORE: "redis",
 	},
 };
 
@@ -159,12 +160,11 @@ describe("phase one reads each switch as the template's AppConfigSchema pre-pars
 		}
 	}
 
-	it("reads mfa.mode raw, as the environment sets it, beside the switches core's reader parses", () => {
-		expect(OWN_READS).toEqual(["mfa.mode"]);
-		expect(SWITCHES).not.toContain("mfa.mode");
+	it("reads the MFA switch as its own mfaMode, as the environment sets it, and no key of the MFA module's", () => {
+		expect(SWITCHES.filter((path) => path.split(".")[0] === "mfa")).toEqual([]);
 		for (const [name, env] of Object.entries(ENVIRONMENTS)) {
-			expect(readMfaMode(readSwitches(readOwnLayers(ownFiles("production"), { env }))), name).toBe(
-				env.MFA_MODE ?? "off",
+			expect(readSwitches(readOwnLayers(ownFiles("production"), { env })).mfaMode, name).toBe(
+				env.MFA_MODE ?? "required",
 			);
 		}
 	});
@@ -195,7 +195,7 @@ describe("phase one reads its switches and nothing else", () => {
 		expectedSessionRequirements(config);
 		buildModules(config, { environment: "production" });
 		const covered = (path: string) =>
-			[...SWITCHES, ...OWN_READS, ADAPTERS_SECTION].some(
+			[...SWITCHES, ADAPTERS_SECTION, MFA_SWITCH, "storeTransport"].some(
 				(switchPath) =>
 					path === switchPath ||
 					path.startsWith(`${switchPath}.`) ||
@@ -203,6 +203,26 @@ describe("phase one reads its switches and nothing else", () => {
 			);
 		expect(reads.size).toBeGreaterThan(10);
 		expect([...reads].filter((path) => !covered(path))).toEqual([]);
+	});
+
+	it("reads no federation entry: core dispatches each by its type at boot", () => {
+		expect(SWITCHES.filter((path) => path.startsWith("core.federations"))).toEqual([]);
+		const federationEnvs: readonly Readonly<Record<string, string>>[] = [
+			{},
+			{ CORE_FEDERATIONS_GOOGLE_ENABLED: "true" },
+		];
+		for (const federations of federationEnvs) {
+			const { config, reads } = recording(
+				readSwitches(readOwnLayers(ownFiles("production"), { env: { ...env, ...federations } })),
+			);
+			expectedSessionRequirements(config);
+			buildModules(config, { environment: "production" });
+			expect(
+				[...reads].filter(
+					(path) => path === "core.federations" || path.startsWith("core.federations."),
+				),
+			).toEqual([]);
+		}
 	});
 
 	it("still refuses a switch it reads that the schema refuses, naming it", () => {
@@ -228,7 +248,7 @@ describe("phase two: what createApp is handed", () => {
 		const reference = join(dir, "reference.conf");
 		writeFileSync(
 			reference,
-			'widget { size = 3 }\noauth.revocation.accessToken = "widget-revocation"\noauth.oidcMode = "widget-mode"\n',
+			'widget { size = 3 }\noauth.revocation.accessToken = "widget-revocation"\ncore.tokenBinding.dispatchPolicy = "widget-policy"\n',
 		);
 		return {
 			name: "widget",
@@ -238,26 +258,23 @@ describe("phase two: what createApp is handed", () => {
 
 	it("layers each loaded module's reference beneath the template's own files, over core's", () => {
 		const modules = [...buildModules(switches, { environment: "development" }), widgetModule()];
-		const resolved = resolveForBoot(
-			own,
-			modules,
-			expectedSessionRequirements(switches),
-		) as unknown as Record<string, Record<string, unknown>>;
+		const resolved = resolveForBoot(own, modules, switches) as unknown as Record<
+			string,
+			Record<string, unknown>
+		>;
 		// The package's own section, from its reference.
 		expect(resolved.widget).toEqual({ size: 3 });
 		// The template's application.conf wins over a package's reference…
 		expect(resolved.oauth?.revocation).toEqual({ accessToken: "denylist" });
 		// …and a package's reference over core's.
-		expect(resolved.oauth?.oidcMode).toBe("widget-mode");
+		expect(
+			(resolved.core?.tokenBinding as { dispatchPolicy?: unknown } | undefined)?.dispatchPolicy,
+		).toBe("widget-policy");
 	});
 
 	it("layers no reference a loaded module does not declare", () => {
 		const modules = buildModules(switches, { environment: "development" });
-		const resolved = resolveForBoot(
-			own,
-			modules,
-			expectedSessionRequirements(switches),
-		) as unknown as Record<string, unknown>;
+		const resolved = resolveForBoot(own, modules, switches) as unknown as Record<string, unknown>;
 		expect(resolved).not.toHaveProperty("widget");
 	});
 
@@ -269,11 +286,14 @@ describe("phase two: what createApp is handed", () => {
 		const resolved = resolveForBoot(
 			optionalOwn,
 			buildModules(switches, { environment: "development" }),
-			expectedSessionRequirements(optional),
+			optional,
 		) as unknown as Record<string, Record<string, unknown>>;
 		// An environment variable's string, as HOCON substituted it: createApp parses it.
 		expect(resolved.http?.port).toBe("8080");
-		expect(resolved.core?.sessionRequirements).toEqual({ expected: ["mfa"] });
+		expect(resolved.core?.sessionRequirements).toEqual({
+			expected: ["mfa"],
+			secondFactorAuthority: "mfa",
+		});
 	});
 });
 
@@ -288,7 +308,10 @@ describe("phase two refuses the Redis grant store's key prefix moved while the i
 		variables: Readonly<Record<string, string>>,
 		modules: readonly Module[] = BOTH_ON_REDIS,
 		files: readonly string[] = ownFiles("development"),
-	) => resolveForBoot(readOwnLayers(files, { env: { ...env, ...variables } }), modules, undefined);
+	) => {
+		const own = readOwnLayers(files, { env: { ...env, ...variables } });
+		return resolveForBoot(own, modules, readSwitches(own));
+	};
 
 	/** What phase two refused with. */
 	const refusal = (...args: Parameters<typeof resolve>): RangeError => {
@@ -368,7 +391,7 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 		const own = readOwnLayers([operator, ...ownFiles("production")], { env });
 		writeFileSync(operator, 'session-store.storage.type = "memory"\n');
 		const switches = readSwitches(own);
-		const resolved = resolveForBoot(own, [], expectedSessionRequirements(switches));
+		const resolved = resolveForBoot(own, [], switches);
 		expect(valueAt(switches, "session-store.storage.type")).toBe("redis");
 		expect(valueAt(resolved, "session-store.storage.type")).toBe("redis");
 	});
@@ -378,7 +401,7 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 		const own = readOwnLayers(ownFiles("production"), { env: changing });
 		changing.SESSION_STORE_STORAGE_TYPE = "memory";
 		const switches = readSwitches(own);
-		const resolved = resolveForBoot(own, [], expectedSessionRequirements(switches));
+		const resolved = resolveForBoot(own, [], switches);
 		expect(valueAt(switches, "session-store.storage.type")).toBe("redis");
 		expect(valueAt(resolved, "session-store.storage.type")).toBe("redis");
 	});
@@ -403,7 +426,7 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 				const handle = await createApp({
 					modules: [],
 					bootstrapComponents: {
-						config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
+						config: resolveForBoot(own, modules, switches),
 						pathResolver: (s: string) => s,
 						...FEDERATION_STORES,
 					} as never,

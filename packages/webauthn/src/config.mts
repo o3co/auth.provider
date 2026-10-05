@@ -15,25 +15,26 @@
  */
 
 /**
- * WebAuthn deployer configuration schema.
+ * WebAuthn deployer configuration schema: `webauthn {}`, `webauthnModule`'s own section.
  *
- * A bootstrap module parses the `webauthn` section with `webauthnConfigSchema` and supplies it
- * through the `webauthnConfig` ComponentMap slot; core does not merge it into AppConfigSchema.
- * The schema has no `.default()`: every default lives in `packages/webauthn/config/reference.conf`
+ * Boot parses the section with `webauthnConfigSchema` before any factory runs, and the module
+ * fills the `webauthnConfig` ComponentMap slot from it. Every object level refuses a key it does
+ * not declare, naming its path. The schema has no `.default()`: every default lives in
+ * `packages/webauthn/config/reference.conf`
  * (packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md).
  *
  * A HOCON `${?VAR}` substitution is always a string, so every leaf an environment variable can
- * reach is read in that form: numbers through `z.coerce.number()`, booleans through core's
- * `coerceBooleanFromEnv`, origin lists through core's `normalizeAllowedOrigins`.
+ * reach is read in that form: numbers through core's `wholeNumberInRangeFromEnv`, origin lists
+ * through core's `normalizeAllowedOrigins`.
  */
 import {
 	// biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below; biome does not track cross-module-declaration references.
 	type ComponentMap as _ComponentMap,
 	checkSerializedOrigin,
-	coerceBooleanFromEnv,
 	describeSerializedOriginRejection,
 	MAX_DURATION_SECONDS,
 	normalizeAllowedOrigins,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
@@ -141,7 +142,7 @@ const originEntry = z.string().superRefine((entry, ctx) => {
 	if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
 
-export const webauthnConfigSchema = z.object({
+export const webauthnConfigSchema = z.strictObject({
 	/** Relying Party ID — the effective domain, e.g. "example.com". */
 	rpId: z.string().min(1),
 	/** Human-readable Relying Party name shown to the user during ceremony. */
@@ -177,7 +178,7 @@ export const webauthnConfigSchema = z.object({
 	 * Challenge time-to-live in milliseconds. Default 120000 (120 s), sized for slow mobile
 	 * networks.
 	 */
-	challengeTtlMs: z.coerce.number().int().positive(),
+	challengeTtlMs: wholeNumberInRangeFromEnv(1),
 	/**
 	 * AttestationConveyancePreference (W3C WebAuthn §5.4.7). Default "none": no attestation chain
 	 * is verified. Set "direct" only with a curated trust-anchor set.
@@ -185,46 +186,26 @@ export const webauthnConfigSchema = z.object({
 	attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]),
 	/** UserVerificationRequirement (W3C WebAuthn §5.8.6). Default "preferred". */
 	userVerification: z.enum(["required", "preferred", "discouraged"]),
-	/**
-	 * Derive `allowCredentials` on `POST /oauth/webauthn/authentication/options` from the request's
-	 * `userId`. Default `false`.
-	 *
-	 * With `false` the endpoint always returns the discoverable-credential shape without reading
-	 * the credential store, so its response cannot tell whether an account exists. Set `true` only
-	 * for authenticators that cannot do discoverable credentials (non-resident keys, typically
-	 * older security keys): it knowingly reopens that enumeration oracle, so pair it with a strict
-	 * `rateLimit.authenticationOptions` and, where possible, an authenticated identifier-first step.
-	 * With it on, a credential that returns no user handle (a non-resident security key, such as a
-	 * WebAuthn second factor's) can be registered by another account through the grant and then
-	 * sign its owner in as that account: keep it off where WebAuthn second factors are enrolled.
-	 * `webauthnMfaFactorModule` refuses the boot while it is on. The same holds for such a
-	 * credential (one that returns no user handle) from any other system on the RP ID, which the
-	 * boot cannot see: "Known limitations" in the package README, path 1. Path 2 there, a
-	 * discoverable credential whose user handle equals another account's `userId`, does not depend
-	 * on this flag.
-	 *
-	 * `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`: "true" / "1" on, "false" / "0" / empty off (case
-	 * and surrounding spaces ignored); any other value fails the parse.
-	 */
-	allowCredentialsForKnownUser: coerceBooleanFromEnv,
 	/** Rate limits for the module's own endpoints, one entry per endpoint. */
-	rateLimit: z.object({
+	rateLimit: z.strictObject({
 		/**
 		 * `POST /oauth/webauthn/authentication/options`, which is unauthenticated and writes a
 		 * challenge per request: `limit` requests per `windowSeconds` per source IP. Defaults 30 per
 		 * 60 s. Feeds core as a `RateLimitSpec`; like core's `rateLimitSpecSchema`, the window is at
 		 * most one year, since no limiter can apply a window past the Date range.
 		 */
-		authenticationOptions: z.object({
-			limit: z.coerce.number().int().positive(),
-			windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+		authenticationOptions: z.strictObject({
+			limit: wholeNumberInRangeFromEnv(1),
+			windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
 		}),
 	}),
 });
 
 export type WebAuthnConfig = z.infer<typeof webauthnConfigSchema>;
 
-// Declares the typed `webauthnConfig` ComponentMap slot. Augments the package name, not a relative
+// Declares the typed `webauthnConfig` ComponentMap slot: the relying party and the rest of the
+// section, which `webauthnModule` provides from its section and names `authoritative`. A
+// composition without that module fills it itself. Augments the package name, not a relative
 // path, as every cross-package ComponentMap augmentation does.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

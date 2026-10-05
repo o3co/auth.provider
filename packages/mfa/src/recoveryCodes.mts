@@ -53,9 +53,10 @@
  * - `409 mfa_factor_limit`: the set would take the subject past
  *   `mfa.maxFactorsPerSubject` (`recordsAfterRecoveryCodes`: replacing a set
  *   at the limit stays allowed); nothing written.
- * - `409 mfa_recovery_codes_conflict`: another writer's set at the same
- *   generation or a later one was read after the write; this one was
- *   removed, its codes never answered (warn).
+ * - `409 mfa_recovery_codes_conflict`: the subject's factor set changed
+ *   after the lease read it — another write landed, which only a writer past
+ *   its own lease can make — so the new set was not written, the floor not
+ *   raised, and no codes answered (warn).
  * - `409 mfa_factors_busy` with `Retry-After`; `409 mfa_factors_changed` for a
  *   recovery or a reset since the request was admitted, nothing written.
  * - `400` while the recovery-code factor is off, before any lease; `503` for
@@ -70,7 +71,6 @@ import {
 	errorEnvelope,
 	type Logger,
 	loggableError,
-	type MfaFactorRecord,
 	type MfaFactorResolver,
 } from "@o3co/auth-provider-core";
 import express, { type Request, type Response, type Router } from "express";
@@ -140,7 +140,6 @@ export interface MfaRecoveryCodesOptions {
 
 /** What the write under the lease came to. */
 type Regenerated =
-	| { readonly outcome: "unlisted"; readonly cause: unknown }
 	| { readonly outcome: "no_counting_factor" }
 	| { readonly outcome: "unmarked"; readonly cause: unknown }
 	| { readonly outcome: "distrusted"; readonly retryAfterMs: number }
@@ -175,16 +174,7 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 			session.factorSetStart,
 			subject,
 			async (writes): Promise<Regenerated> => {
-				let records: MfaFactorRecord[];
-				try {
-					const listed: unknown = await writes.factorStore.list(subject);
-					if (!Array.isArray(listed)) {
-						throw new TypeError("MfaFactorStore.list answered something that is not a list");
-					}
-					records = listed as MfaFactorRecord[];
-				} catch (cause) {
-					return { outcome: "unlisted", cause };
-				}
+				const records = writes.factors.records;
 				// Admission took a subject with none on a recent primary: no codes stand alone.
 				if (!records.some((record) => mayCount(factors, record))) {
 					return { outcome: "no_counting_factor" };
@@ -228,7 +218,6 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 						subject,
 						binding: "mfa",
 						nowMs,
-						listed: records,
 					}),
 				};
 			},
@@ -252,10 +241,6 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 				break;
 		}
 		const done = bound.done;
-		if (done.outcome === "unlisted") {
-			unavailable(res, "mfa_factor", "list", done.cause);
-			return;
-		}
 		if (done.outcome === "no_counting_factor") {
 			res.status(409).json(NO_COUNTING_FACTOR);
 			return;

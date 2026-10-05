@@ -31,11 +31,10 @@
  * request must receive. `full-set.redis.test.mts` boots the same set on real
  * Redis under `core.deployment.mode = "multi"`.
  *
- * The MFA package is installed as a deployment installs it (`mfaModules` over
- * the MFA stores, `mfa.mode = "optional"`, a key of the deployment's own), so
- * the `mfa` requirement registers beside the fixture's two (ADR
- * 2026-09-28-session-admission). The step-up flows they could start are the
- * consumers' and the MFA package's suites, not this one.
+ * MFA is switched on as a deployment switches it on, through the template's
+ * `MFA_MODE` (`optional`, a key of the deployment's own), so the `mfa`
+ * requirement registers beside the fixture's two. The step-up flows they
+ * could start are the consumers' and the MFA package's suites, not this one.
  *
  * `it.fails` marks a contract the full set breaks today; its entry names the
  * defect, and the fix that mends it turns the case red. An outage case pins
@@ -61,13 +60,15 @@ import {
 	createRecordingMailSender,
 	unreadableModuleLeaves,
 } from "@o3co/auth-provider-core/testing";
-import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import {
+	DEVICE_CODE_GRANT_TYPE,
+	deviceAuthorizationGrantModule,
+} from "@o3co/auth-provider-device-grant";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import {
 	ACCESS_TOKEN_TYPE,
 	TOKEN_EXCHANGE_GRANT_TYPE,
 } from "@o3co/auth-provider-oauth-token-exchange";
-import { loginCompletionModule } from "@o3co/auth-provider-session";
 import {
 	ALICE,
 	AS_LISTED,
@@ -101,7 +102,7 @@ import {
 	WEB,
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import { readOwnLayers, readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
+import { readOwnLayers, resolveLayers } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import { standardSmtpMailSenderModule } from "@o3co/auth-provider-standard";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
@@ -111,6 +112,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { BUNDLED_ACTIONS } from "../../../../packages/mfa/src/__tests__/bundled-actions.fixture.mts";
 import {
 	APPLE_LANDING,
+	addFactorRecord,
 	BINDER,
 	browser,
 	CLIENT_CERTIFICATE,
@@ -169,17 +171,8 @@ const manifest = JSON.parse(
 const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-device-grant": ["device-grant", "core-device-code-store-memory"],
 	"@o3co/auth-provider-dpop": ["dpop"],
-	"@o3co/auth-provider-federation-apple": ["federation-apple"],
-	"@o3co/auth-provider-federation-github": ["federation-github"],
-	// mfaModules, over core's memory MFA stores.
-	"@o3co/auth-provider-mfa": [
-		"mfa-totp-factor",
-		"mfa-recovery-code-factor",
-		"mfa-email-factor",
-		"mfa",
-		"core-mfa-factor-store-memory",
-		"core-mfa-transaction-store-memory",
-	],
+	"@o3co/auth-provider-federation-apple": ["federation-apple-type"],
+	"@o3co/auth-provider-federation-github": ["federation-github-type"],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
 	// No module: contract suites and fakes, for tests.
@@ -194,19 +187,9 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	],
 };
 
-/**
- * The modules a composition loads from a package the template composes but
- * does not load: the session package's login completion, which the MFA
- * module requires to finish a login.
- */
-const FROM_TEMPLATE_PACKAGES = [loginCompletionModule.name];
-
 /** The modules a deployment writes itself, beside the packages' (see the fixture). */
 const DEPLOYMENT_MODULES = [
-	"deployment:webauthn-config",
 	"deployment:grant-policy",
-	"deployment:apple-federation-config",
-	"deployment:github-federation-config",
 	"deployment:requirement-page",
 	"deployment:requirement-bare",
 ];
@@ -242,11 +225,7 @@ describe("what the full set covers", () => {
 	it("adds every package the template does not compose, and nothing the template already does", async () => {
 		const { modules } = await boot();
 		const names = modules.map((m) => m.name);
-		const added = [
-			...Object.values(ADDED).flat(),
-			...FROM_TEMPLATE_PACKAGES,
-			...DEPLOYMENT_MODULES,
-		];
+		const added = [...Object.values(ADDED).flat(), ...DEPLOYMENT_MODULES];
 		for (const name of added) expect(names, name).toContain(name);
 		expect(new Set(names).size, "a module listed twice").toBe(names.length);
 		// The template's list, then the added modules: nothing between.
@@ -390,7 +369,6 @@ describe("the full set boots together", () => {
 			[
 				"device-grant",
 				"dpop",
-				"mfa",
 				"mtls",
 				"oauth-token-exchange",
 				"webauthn",
@@ -469,27 +447,27 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		expect(valueAt(on, "webauthn.rpId")).toBe("auth.test");
 	});
 
-	it("reads the device grant's switch in phase one as the operator wrote it, so the grant registers", () => {
+	it("reads the device grant's switch from its own section as the operator wrote it, so the grant registers", () => {
 		// A deployment that adds the device grant to the template's modules
-		// hands it phase one's configuration: `deviceGrantModule({ config })`
-		// decides from `device-grant.enabled` there, read as its section's
-		// schema reads it, whether the grant exists.
+		// lists the one module: whether the grant exists is its section's
+		// `device-grant.enabled`, read over the package's reference by the
+		// section's schema, as boot reads it.
 		const operator = join(mkdtempSync(join(tmpdir(), "full-set-472-")), "device.conf");
 		writeFileSync(
 			operator,
 			`device-grant {\n  enabled = \${?DEVICE_GRANT_ENABLED}\n  verificationUri = "${ISSUER}/device"\n}\n`,
 		);
-		const switches = readSwitches(
-			readOwnLayers([operator, ...ownFiles()], {
-				env: { ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" },
-			}),
-		);
-		expect(contributionNames(deviceGrantModule({ config: switches }), "grants")).toEqual([
-			DEVICE_CODE_GRANT_TYPE,
-		]);
+		const section = deviceAuthorizationGrantModule.section;
+		const switchedOn = (env: Readonly<Record<string, string>>): unknown => {
+			const resolved = resolveLayers(
+				readOwnLayers([operator, ...ownFiles()], { env }),
+				section?.reference === undefined ? [] : [section.reference],
+			);
+			return section?.isEnabled?.(section.schema.parse(resolved["device-grant"]));
+		};
+		expect(switchedOn({ ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" })).toBe(true);
 		// And off where nothing says on: the grant is opt-in.
-		const unset = readSwitches(readOwnLayers([operator, ...ownFiles()], { env: SINGLE_ENV }));
-		expect(contributionNames(deviceGrantModule({ config: unset }), "grants")).toEqual([]);
+		expect(switchedOn(SINGLE_ENV)).toBe(false);
 	});
 
 	it("reads every leaf a module declares from the string an environment variable carries, every store on Redis", async () => {
@@ -758,17 +736,10 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		});
 	});
 
-	it("refuse the boot under mfa.mode = required without the MFA package: the template declares mfa from the mode, and nothing registers it", async () => {
-		const err = await refused({
-			features: { mfa: false },
-			adjust: (config) => ({ ...config, mfa: { ...mfaOf(config), mode: "required" } }),
-		});
-		expect(err.reason).toBe("session-requirement-missing");
-		expect(err.details).toMatchObject({
-			configKey: "core.sessionRequirements.expected",
-			missing: ["mfa"],
-			registered: [...FIXTURE_REQUIREMENTS],
-		});
+	it("refuse, before boot, an mfa.mode = required the configuration writes while MFA_MODE leaves MFA off: the template installs MFA from its switch alone", async () => {
+		await expect(
+			composeFullSet({ features: { mfa: false }, operatorHocon: 'mfa.mode = "required"\n' }),
+		).rejects.toThrow(/mfaMode/);
 	});
 });
 
@@ -885,7 +856,7 @@ describe("a password login the mfa requirement interrupts, through the template'
 				mfaTransactionStore: MfaTransactionStore;
 				userSessionStore: UserSessionStore;
 			};
-		await mfaFactorStore.create({
+		await addFactorRecord(mfaFactorStore, {
 			id: "f-alice",
 			subject: ALICE.sub,
 			kind: "totp",
@@ -1242,8 +1213,8 @@ describe("discovery with every package on", () => {
 		],
 		["apple", { route: ["get", "/session/oauth/federation/apple"] }],
 		["github", { route: ["get", "/session/oauth/federation/github"] }],
-		// MFA contributes nothing to discovery: its reach meets no acr entry the template ships.
-		["mfa", {}],
+		// The template's urn:o3co:acr:mfa entry, which only MFA's reach meets.
+		["mfa", { fields: ["acr_values_supported"] }],
 	];
 
 	it.each(TOGGLES)(
@@ -1709,7 +1680,7 @@ describe("recent MFA at the link start and WebAuthn registration, under mfa.mode
 
 	/** A TOTP factor for alice: a counting factor. */
 	const holdTotp = (set: FullSet) =>
-		storesOf(set).mfaFactorStore.create({
+		addFactorRecord(storesOf(set).mfaFactorStore, {
 			id: "f-alice",
 			subject: ALICE.sub,
 			kind: "totp",

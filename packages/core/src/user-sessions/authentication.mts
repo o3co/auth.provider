@@ -546,17 +546,17 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
 
 /**
  * Whether federation `name`'s upstream IdP's `amr` counts: only when
- * `core.federations.<name>.trustUpstreamAmr` is `true` beside `enabled: true`,
- * in either section shape. Then the IdP's values sit in the session's `amr`
- * beside `fed`, where tokens carry them and `acr` is matched against them;
- * otherwise they are kept apart, for the record only.
+ * `core.federations.<name>.trustUpstreamAmr` is `true` beside `enabled: true`.
+ * Then the IdP's values sit in the session's `amr` beside `fed`, where tokens
+ * carry them and `acr` is matched against them; otherwise they are kept
+ * apart, for the record only. An entry is flat: a key named after its type is
+ * one of the type's keys, and a switch under it is not read.
  *
- * A non-boolean value, or the switch inside the nested shape's sub-section,
- * is a `RangeError` naming the key and quoting nothing of the value: read
- * either way, a typo would decide what this provider vouches for. The
- * refusals come first, so a disabled section's bad switch still refuses the
- * composition. Core's schema coerces environment-variable spellings first;
- * a hand-built configuration meets the refusal.
+ * A non-boolean value is a `RangeError` naming the key and quoting nothing of
+ * the value: read either way, a typo would decide what this provider vouches
+ * for. A disabled section's bad switch still refuses the composition. Core's
+ * schema coerces environment-variable spellings first; a hand-built
+ * configuration meets the refusal.
  *
  * The federation callback (which writes the split) and the `acr` drop both
  * read this one function, so they cannot disagree.
@@ -566,19 +566,6 @@ export function federationTrustsUpstreamAmr(config: unknown, name: string): bool
 	if (!Object.hasOwn(federations, name)) return false;
 	const section = federations[name];
 	if (typeof section !== "object" || section === null) return false;
-	// The nested shape's sub-section (keyed by `type`, or by the name for a
-	// shorthand: session's `extractFederationSection`) holds the adapter's own
-	// settings. A switch there would be silently ignored, so it is refused.
-	const type =
-		typeof (section as { type?: unknown }).type === "string"
-			? (section as { type: string }).type
-			: name;
-	const sub = Object.hasOwn(section, type) ? (section as Record<string, unknown>)[type] : undefined;
-	if (typeof sub === "object" && sub !== null && Object.hasOwn(sub, "trustUpstreamAmr")) {
-		throw new RangeError(
-			`core.federations.${name}.${type}.trustUpstreamAmr belongs beside enabled, as core.federations.${name}.trustUpstreamAmr`,
-		);
-	}
 	const trust = Object.hasOwn(section, "trustUpstreamAmr")
 		? (section as { trustUpstreamAmr?: unknown }).trustUpstreamAmr
 		: undefined;

@@ -20,6 +20,16 @@ export {
 	redisAccessTokenDenylistBuilder,
 	redisAccessTokenDenylistModule,
 } from "./access-token-denylist.mjs";
+// ---------------------------------------------------------------------------
+// AttemptCounter: the counter behind a verifier's own attempt limits, under a
+// key namespace of its own.
+// ---------------------------------------------------------------------------
+export {
+	createRedisAttemptCounter,
+	DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX,
+	type RedisAttemptCounterOptions,
+	redisAttemptCounterModule,
+} from "./attempt-counter.mjs";
 export {
 	createRedisChallengeStore,
 	type RedisChallengeStoreOptions,
@@ -40,6 +50,9 @@ export type {
 	ActivateFederationGrantInput,
 	ApplyMfaSubjectRecoveryInput,
 	ApplyMfaSubjectRecoveryReply,
+	AttemptCounterClient,
+	AttemptCounterConsumeInput,
+	AttemptCounterConsumeReply,
 	AuthorizeMfaSubjectRecoveryInput,
 	AuthorizeMfaSubjectRecoveryReply,
 	ChallengeStoreClient,
@@ -61,9 +74,17 @@ export type {
 	FederationGrantIntentStoreClient,
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
+	FederationTokenAttachInput,
+	FederationTokenReadInput,
+	FederationTokenRemoveIfInput,
+	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
 	GrantConsentInput,
 	MfaFactorRecordUpdateInput,
+	MfaFactorSetCreateIfInput,
+	MfaFactorSetEmptyingWriteInput,
+	MfaFactorSetRemoveIfInput,
+	MfaFactorSetWriteInput,
 	MfaFactorStoreClient,
 	MfaFirstBindingRead,
 	MfaRemovedTransaction,
@@ -85,6 +106,7 @@ export type {
 	RedisDurability,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
+	RefundFederationGrantRotationInput,
 	ReplaceFederationGrantCredentialsInput,
 	ReplaySeenSetClient,
 	RequireFederationGrantReauthorizationInput,
@@ -100,6 +122,7 @@ export type {
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	SubjectSessionIndexMultiClient,
+	TakeFederationGrantRotationInput,
 	UserSessionStoreClient,
 } from "./clients.mjs";
 // makeIoredisClients lives at the `/ioredis` subpath
@@ -190,6 +213,7 @@ export {
 export {
 	createRedisMfaFactorStore,
 	DEFAULT_REDIS_MFA_FACTOR_STORE_KEY_PREFIX,
+	REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS,
 	type RedisMfaFactorStoreOptions,
 	redisMfaFactorStoreModule,
 } from "./mfa-factor-store.mjs";

@@ -53,6 +53,7 @@ import {
 import {
 	coreConfigForTests,
 	createTestOAuthTokenSettings,
+	federationTypeForTests,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
 import { HttpUserRepository } from "@o3co/auth-provider-foundation";
@@ -120,8 +121,14 @@ const client = {
 	federationGrantRedirectUris: [REDIRECT],
 };
 
+/**
+ * What a lookup by id answers for the client, when a test changes the record
+ * after the client authenticated; the registration by default.
+ */
+let lookedUp: Record<string, unknown> = client;
+
 const clientRepository: ClientRepository = {
-	findById: async (id) => (id === CLIENT_ID ? (client as never) : null),
+	findById: async (id) => (id === CLIENT_ID ? (lookedUp as never) : null),
 	authenticate: async (id, secret) =>
 		id === CLIENT_ID && secret === SECRET ? (client as never) : null,
 };
@@ -176,17 +183,9 @@ const upstream = {
 	refreshDelegatedToken: async () => ({}),
 };
 
-const federationModule = defineModule({
-	name: "test-federation-upstream",
-	contributes: {
-		federations: { upstream: () => upstream },
-		federationRedirectPolicies: {
-			upstream: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	} as never,
+/** The module that handles the `upstream` entry's type, with the provider above. */
+const federationModule = federationTypeForTests("upstream-idp", {
+	provider: () => upstream,
 });
 
 interface Browser {
@@ -273,6 +272,8 @@ const boot = async (
 					federations: {
 						upstream: {
 							enabled: true,
+							type: "upstream-idp",
+							callbackURL: "https://provider.example/federation/upstream/callback",
 							issuer: "https://issuer.example",
 							clientId: "provider-client",
 						},
@@ -617,6 +618,88 @@ describe("a grant created end to end, and spent", () => {
 			const page = new URL(sent.headers.location as string);
 			expect(`${page.origin}${page.pathname}`).toBe(new URL("/step-up", ISSUER).href);
 		} finally {
+			await handle.dispose();
+		}
+	});
+
+	/** A logger keeping each line's level and message, and the fields of each. */
+	const recordingLogger = () => {
+		const lines: [string, unknown, unknown][] = [];
+		const record =
+			(level: string) =>
+			(fields: unknown, message?: unknown): void => {
+				lines.push([level, fields, message]);
+			};
+		const logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: () => logger,
+		} as Logger;
+		return { logger, messages: () => lines.map(([level, , message]) => `${level} ${message}`) };
+	};
+
+	/** The record after a change the registration schema refuses: a `clientUri` that is not http(s). */
+	const refusedRecord = { ...client, clientUri: "javascript:alert(1)" };
+
+	// The `clientRepository` slot holds core's client-record boundary, so the
+	// browser half's own lookups read through it: a record changed after the
+	// intent was lodged into one the boundary refuses is the registry's
+	// outage, never a yes and never shown to the user.
+	it("answers 503 at connect when the client's record has changed into one core's boundary refuses", async () => {
+		const { logger, messages } = recordingLogger();
+		const { handle, app } = await boot(undefined, undefined, undefined, undefined, logger);
+		try {
+			const connect = await lodgeFor(app);
+			signIn("b-refused-connect", new Date());
+			lookedUp = refusedRecord;
+			const refused = await request(app)
+				.get(`${connect.pathname}${connect.search}`)
+				.set("x-browser", "b-refused-connect");
+			expect(refused.status).toBe(503);
+			expect(messages()).toEqual(
+				expect.arrayContaining([
+					"warn client_record_refused",
+					"error client_repository_unavailable",
+				]),
+			);
+		} finally {
+			lookedUp = client;
+			await handle.dispose();
+		}
+	});
+
+	it("answers 503 at the consent page when the client's record has changed into one core's boundary refuses, showing nothing of it", async () => {
+		const { logger, messages } = recordingLogger();
+		const { handle, app } = await boot(undefined, undefined, undefined, undefined, logger);
+		try {
+			const connect = await lodgeFor(app);
+			signIn("b-refused-consent", new Date());
+			const started = await request(app)
+				.get(`${connect.pathname}${connect.search}`)
+				.set("x-browser", "b-refused-consent");
+			expect(started.status).toBe(303);
+			const challenge =
+				new URL(started.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+			lookedUp = refusedRecord;
+			const shown = await request(app)
+				.get("/session/federation-grants/consent")
+				.query({ challenge })
+				.set("x-browser", "b-refused-consent");
+			expect(shown.status).toBe(503);
+			expect(shown.body).toMatchObject({ error: "temporarily_unavailable" });
+			expect(JSON.stringify(shown.body)).not.toContain("javascript:");
+			expect(messages()).toEqual(
+				expect.arrayContaining([
+					"warn client_record_refused",
+					"error client_repository_unavailable",
+				]),
+			);
+		} finally {
+			lookedUp = client;
 			await handle.dispose();
 		}
 	});

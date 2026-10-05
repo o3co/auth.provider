@@ -15,11 +15,13 @@
  */
 
 /**
- * `core.sessionRequirements.expected` (the session-admission ADR's D7): the
- * requirement names a composition expects, a list of strings with no
+ * `core.sessionRequirements` (the session-admission ADR's D7): `expected`,
+ * the requirement names a composition expects, a list of strings with no
  * default in the schema or in `reference.conf` — a composition that
  * installs a consumer of admission writes it, and boot compares it with
- * what registered.
+ * what registered; and `secondFactorAuthority`, the expected requirement
+ * held to declaring the second-factor authority, an optional non-empty
+ * string with no default either.
  */
 
 import { fileURLToPath } from "node:url";
@@ -84,5 +86,37 @@ describe("core.sessionRequirements.expected", () => {
 	it("is declared by the test fixtures as expecting nothing: every createApp test that installs a consumer states its posture", () => {
 		expect(makeValidCoreConfig().core.sessionRequirements).toEqual({ expected: [] });
 		expect(makeValidAppConfig().core.sessionRequirements).toEqual({ expected: [] });
+	});
+});
+
+describe("core.sessionRequirements.secondFactorAuthority", () => {
+	it("is optional, with no default: reference.conf carries none", () => {
+		const fromReference = validate(parseFile(REFERENCE_CONF, { env: ENV }), AppConfigSchema);
+		expect(fromReference.core?.sessionRequirements?.secondFactorAuthority).toBeUndefined();
+		expect(
+			CoreConfigSchema.parse(makeValidCoreConfig()).core?.sessionRequirements,
+		).not.toHaveProperty("secondFactorAuthority");
+	});
+
+	it("reads a requirement name, beside the list", () => {
+		const parsed = CoreConfigSchema.parse({
+			...makeValidCoreConfig(),
+			core: { sessionRequirements: { expected: ["mfa"], secondFactorAuthority: "mfa" } },
+		});
+		expect(parsed.core?.sessionRequirements?.secondFactorAuthority).toBe("mfa");
+	});
+
+	it("refuses what is not a non-empty string, naming the key", () => {
+		for (const secondFactorAuthority of ["", 7, ["mfa"], null]) {
+			expect(
+				issuesAt(
+					CoreConfigSchema.safeParse({
+						...makeValidCoreConfig(),
+						core: { sessionRequirements: { expected: [], secondFactorAuthority } },
+					}),
+				),
+				JSON.stringify(secondFactorAuthority),
+			).toContain("core.sessionRequirements.secondFactorAuthority");
+		}
 	});
 });

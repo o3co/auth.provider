@@ -1110,6 +1110,136 @@ through `/revoke` or `revokeAllForSubject`. A Shared Signals receiver that
 would carry them is recorded under *Outside the first release* as an option
 with no delivery commitment.
 
+**Amended 2026-10-03 (#1032, #1071): the bound on rotations is the per-grant
+rotation budget; half-spent is only when to refresh.** "When a stored token is
+refreshed" above still says when a refresh is worth asking for, but it does
+not bound rotations: a re-answer of the same token, an effective life far
+below the issued one, or a token stored already past half its life each let a
+client rotate on most requests. The bound is now a budget per grant: at most
+`rotationBudget` rotations (24) in a window of `rotationWindow` (an hour),
+counted in the record's non-secret `rotations` by the store's optional
+`takeRotation`, without a version bump (superseded by the version-fence
+amendment below: the take bumps it). A rotation here is a refresh the
+upstream may have acted on, whether or not it issued a new refresh token: the
+shrinking-lifetime path drives a refresh per request at an IdP that does not
+rotate as much as at one that does. The window is fixed, not sliding: it
+opens at its first take and closes `rotationWindow` later, so any hour that
+straddles two windows can hold up to twice the budget. The rotation is taken under the refresh
+lock, after the look under it and immediately before the upstream is asked, at
+the version the refresh's writes are guarded by (the version the look read;
+the writes after it are guarded by the version the take left, per the
+amendment below), and its time is spent of the soft deadline. A take that
+throws or does not answer in time asks the upstream nothing and answers `temporarily_unavailable` / `storage`; a refused take ends
+in the last look, where a grant that changed is `concurrent_update` and
+otherwise the budget is spent. Every look reads `rotations` as a hint by the
+same rule, so a spent budget takes no lock. With the budget spent, a good
+stored token is answered with the life it has, below `min_ttl` too; one that
+lacks an asked-for scope answers `invalid_scope`; and where nothing stored
+serves the request the answer is `rate_limited` / `provider` (429) with
+`Retry-After` until the window closes. No code is added. Where more than one
+keeps the upstream from being asked, the marker is reported first, then the
+failure stamp, then the budget. A store without `takeRotation` keeps no budget
+and the retrieval behaves as before; boot warns once. What "two rotations per
+lifetime" above promised is replaced by this bound, and it holds whatever the
+upstream answers.
+
+The budget counts rotations that may have happened, and D12's backoff counts
+failures; neither counts the other. A rotation the upstream provably did not
+perform is given back (the store's `refundRotation`, optional as
+`takeRotation` is, and required with it later): an answer that proves the
+request was not acted on — a 4xx but 408 and 499, a 501 or a 503, or a code
+this provider knows that is not an outage's — or a request that never left
+(refused, unresolvable, unreachable, a connect that timed out, a TLS handshake
+or certificate that failed). Anything else keeps its rotation: a request given
+up on, a connection lost after it was sent, a 500, a 502, a 504 or any other
+5xx (a gateway that timed out had forwarded the request), an outage the IdP
+names in its body (stamped as "may have been processed"), and a code it does
+not know. The give-back is guarded by the version the take was made at
+(superseded by the version-fence amendment below: the version the take left)
+and bumps it, which makes it once per attempt; one that is refused or throws is
+reported and leaves the rotation spent, and changes no answer, and a refused
+stamp gives nothing back. The whole chain of the error is read, up to its
+depth limit: a level that proves it is needed, and any level that doubts it —
+a field that cannot be read, a code that does not prove it, a status that is
+not an error status, a chain longer than the limit — keeps the rotation.
+A 503 is the known exception: a service mesh (Envoy, Istio) can answer it
+after forwarding the request, so it can undercount one rotation per such
+answer. The failure backoff still bounds the attempts, and doubting every 503
+would let an ordinary outage spend the budget. It is a version-bumping
+write made under the lock after a failure, the same class as a credential
+write in flight: one that may still land keeps the lock, and it is spent of
+the one persist budget the lock is sized for. So an upstream that hangs, or
+that answers 500, 502 or 504, still spends the budget: one attempt per refresh
+lock or per backoff, thirty seconds under the defaults, so about twelve
+minutes of it spend all 24. Bounding that is the failure backoff's to do, not
+the budget's. An `invalid_grant` gives nothing back: it ends the credential,
+and an activation starts the budget afresh. The budget binds only with a store
+that implements `takeRotation`, and gives back only with one that implements
+`refundRotation` too: both bundled stores, memory and Redis, implement both.
+
+**Amended 2026-10-03 (#1032): the take is a version fence.** `takeRotation`
+bumps the version once, and the grant it answers carries the new version.
+Every later write of the attempt (the refresh's write, the failure stamp, the
+mark and the give-back) is guarded by the version of that answered grant. A
+write of an earlier attempt that lands late, after its lock ran out and the
+next holder took its rotation, is refused: a late give-back leaves the
+rotation spent (an overcount, the safe way round) and can no longer bump the
+version under the next holder and refuse its write. A take that does not
+answer in time lets the lock go: the take itself is guarded by the version the
+look read, so landing late it can never land under the next holder's refresh.
+Against a store whose take bumps, it is refused after the next holder's take,
+or it makes that take refuse (`concurrent_update`, and the upstream is not
+asked); against one whose take does not bump, it costs one extra counted
+rotation. Keeping the lock instead would answer every caller `lock_timeout`
+until it ran out. The fence holds for a store whose take bumps: both bundled
+stores, memory and Redis, bump. Against a store whose
+take does not bump, the answered grant carries the version the take was made
+at, so every write after the take is guarded as before the fence, and the late
+give-back race stays open there until that store bumps.
+
+Deployment order: core ships before (or with) a store whose take bumps. This
+core reads the guard off the grant the take answered, so it is right against
+either kind of store. An older core keeps the guard it read before the take,
+and against a bumping store every write after the take would be refused: each
+refresh's rotated token would be lost.
+
+**Amended 2026-10-03 (#1032): the budget's members are required as of 0.17.**
+`takeRotation` and `refundRotation` are required members of
+`FederationGrantStore`, and `rotations` is a required key of the usage fields
+(`undefined` until the first take), so a store without them no longer
+type-checks and no store keeps no budget: the boot warning for one is gone.
+What the amendments above say of a store without `takeRotation` or
+`refundRotation`, or of one whose take does not bump, no longer applies. The
+take must bump the version once and answer the new one: retrieval takes only a
+grant answered for this grant at exactly the version the look read plus one,
+and anything else is the take's outage, with no upstream call. Every package
+is upgraded together. The deployment-order hazard above, a bumping store with
+an older core refusing every write after the take, concerns a 0.17
+development core from before the fence, not v0.16.0: v0.16.0 takes no
+rotation at all, so in a fleet mixing it with 0.17 its refreshes are not
+counted against the budget (its writes keep the `rotations` others counted),
+and the bound holds only once every replica runs 0.17. A store that lacks
+either member is refused at boot by `federationGrantsModule`.
+
+A refresh no longer has to take whatever it is answered with: a fresh token
+that carries less of the asked-for scope than a held token that is still good
+and carries it does not replace that token, as long as the fresh token still
+carries every scope of the grant's own. What it lacks is then a broadening
+beyond the grant (an IdP that accumulates consent) that the upstream no longer
+repeats. The rotated refresh token is stored, the held access token is kept,
+the call is answered from it, and the ineligibility marker of D5 is left with
+the reason `scope_not_granted`, so the upstream is asked again about it once
+per `ineligibleRetryAfter` and not on every request. While the marker stands
+the grant reads `upstream_token_ineligible` / `scope_not_granted`, and a
+renewal is admitted, as for `scope_exceeded`: asking again is the remedy. A
+fresh token that lacks a scope of the grant's own is the user narrowing the
+grant upstream, and it is stored and answered like any other; so is the
+narrower token once the held one has died. The marker withholds a refresh only
+while a stored token serves the request: once none does, the upstream is asked
+as usual, within the budget. That includes a request for a consented scope the
+held token lacks: it refreshes, and the fresh token is stored, so the broadened
+held token is gone.
+
 ### D11 — One typed result, one HTTP mapping
 
 ```ts
@@ -1134,7 +1264,7 @@ reason cannot be attached to a code that has none.
 | `access_denied` | `connection_not_permitted` | 403 | configuration: the client may not use the connection, the operator removed it, or its federation cannot refresh for a grant. Do not retry. Reported after a revocation, the backstop and an expiry, and before a changed identity (D10) |
 | `invalid_request` | `connection_mismatch`, `min_ttl_out_of_range` | 400 | the request is malformed; the reason is for an `error_description` |
 | `invalid_scope`, `invalid_target` | — | 400 | the request exceeds the grant — or, for `invalid_scope`, the stored token does not carry what was asked for and it is too early to ask the upstream again (D10): a refresh may bring the scope once the token is half spent |
-| `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum`, `token_type_unsupported` | 502 | operator; the grant is untouched; honour `retryAfterSeconds`. `token_type_unsupported`: the upstream issues sender-constrained tokens for this client, which a bearer route cannot present |
+| `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum`, `token_type_unsupported`, `scope_not_granted` (D10's amendment of 2026-10-03) | 502 | operator; the grant is untouched; honour `retryAfterSeconds`. `token_type_unsupported`: the upstream issues sender-constrained tokens for this client, which a bearer route cannot present |
 | `upstream_token_ineligible` | `malformed_token_response` | 502 | operator: the federation adapter reported an answer without a usable access token, or with a field of the wrong type. The grant is untouched; honour `retryAfterSeconds` |
 | `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set — the one ineligibility that admits it (#616) — or a new grant on a connection of its own (D19) |
 | `upstream_rejected` | the upstream's error code, or `unknown` (see the amendments below) | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. Answered from the stamp of a failed refresh (D12) it carries `retryAfterSeconds`, and is answered only where nothing stored serves the request (D10). The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
@@ -2434,7 +2564,8 @@ field can lengthen the other. What it changes:
   dated back, it would be half spent at once, and a client asking for more
   than it has could force a rotation on every request. Its half-spent point
   is half of the life from the call to its end. Half-spent is an
-  approximation of D10's rotation bound, not a guarantee of it (#1032).
+  approximation of D10's rotation bound, not a guarantee of it (#1032); the
+  bound is the rotation budget of D10's amendment of 2026-10-03.
 - Neither is the issued lifetime shortened to fit the end: stored shortened,
   a token issued for longer than a maximum lowered later would still be
   disclosed (D5).

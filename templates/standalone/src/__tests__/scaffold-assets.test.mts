@@ -29,9 +29,11 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { readAdapters } from "../adapters.mjs";
-import { resolveConfigPaths } from "../configPath.mjs";
+import { buildModules } from "../buildModules.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { type Adapters, repositoriesSectionSchema } from "../sections.mjs";
+import { createRecordingLogger } from "./all-modules-composition.fixture.mjs";
 
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -226,6 +228,7 @@ describe("what .gitignore keeps out of git stays out of the image, and productio
 		"config/application.conf",
 		"config/development.conf",
 		"config/production.conf",
+		"config/mailpit.conf",
 		"config/clients.yaml.example",
 	] as const;
 
@@ -348,6 +351,39 @@ describe("the compose files put a store and its lifetime-sibling on the same bac
 	});
 });
 
+/** `.env.example`'s uncommented lines that carry a value: what a `.env` copied from it sets. */
+function dotenvExample(): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const line of read("/.env.example").split("\n")) {
+		const match = /^([A-Z][A-Z0-9_]*)=(.+)$/.exec(line);
+		if (match) env[match[1] as string] = match[2] as string;
+	}
+	return env;
+}
+
+describe("the production compose leaves MFA on, for the deployment to decide", () => {
+	it("reads the switch as required, so a deployment that sets nothing about MFA is refused naming MFA_MODE=off", () => {
+		// `environment:` wins over `env_file`, so the compose file's block is
+		// laid over the `.env` copied from `.env.example`.
+		const env = { ...dotenvExample(), ...bootableEnv("/docker-compose.production.yml") };
+		// `app.mts`: CONFIG_ENV, then NODE_ENV, then development.
+		const configEnv = env.CONFIG_ENV || env.NODE_ENV || "development";
+		expect(configEnv).toBe("production");
+		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
+		const switches = readSwitches(readOwnLayers([envConfPath, applicationConfPath], { env }));
+		expect(switches.mfaMode).toBe("required");
+
+		let err: unknown;
+		try {
+			buildModules(switches, { environment: configEnv, logger: createRecordingLogger() });
+		} catch (caught) {
+			err = caught;
+		}
+		expect(err).toBeInstanceOf(RangeError);
+		expect((err as RangeError).message).toContain("MFA_MODE=off");
+	});
+});
+
 describe("the production compose refuses to guess HTTP_TRUST_PROXY", () => {
 	it("names the variable and supplies no default", () => {
 		// Without it the Secure cookie is never set, the CSRF origin check 403s
@@ -428,6 +464,7 @@ describe("the shipped suite carries what it needs to run outside this repository
 		"README.ja.md",
 		"docker-compose.yml",
 		"docker-compose.production.yml",
+		"docker-compose.mailpit.yml",
 	] as const;
 
 	it("reads only files the template actually ships", () => {

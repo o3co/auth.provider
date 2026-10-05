@@ -52,6 +52,7 @@ import {
 	totpCode,
 	totpProofOf,
 	verify,
+	wrongCode,
 	wrongCodesToTheHardLimit,
 } from "./routesHarness.mjs";
 
@@ -144,22 +145,30 @@ async function stepUpWithCode(setup: Composed, agent: Agent, n: number): Promise
 const release = (agent: Agent) => mfaPost(agent, "/lock/release", {});
 
 /**
- * Brings alice to the hard hold and checks it holds her right TOTP code, then
- * moves the clock past the clock-skew allowance: a factor bound within it of
- * the hold is not read as bound after it.
+ * Brings alice to the hard hold and checks it holds her right TOTP code, then,
+ * unless `withinTheMargin`, moves the clock past the clock-skew allowance: a
+ * factor bound within it of the hold is not read as bound after it. Answers
+ * from when a rebind counts, as the release says it: the hold's time plus
+ * that allowance.
  */
-async function hardHeld(setup: Composed, totp: SeededTotp): Promise<void> {
+async function hardHeld(
+	setup: Composed,
+	totp: SeededTotp,
+	options: { readonly withinTheMargin?: boolean } = {},
+): Promise<string> {
 	const third = await wrongCodesToTheHardLimit(setup.app, totp);
+	const latchedAt = Date.now();
 	const held = await verify(third.agent, third.transaction, totp.record.id, totpCode(totp.secret));
 	expect(held.status, JSON.stringify(held.body)).toBe(429);
 	expect(held.body.hold).toBe("hard");
-	freezeClock(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000);
+	if (options.withinTheMargin !== true) freezeClock(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000);
+	return new Date(latchedAt + DEFAULT_CLOCK_SKEW_MS).toISOString();
 }
 
 describe("the release, end to end", () => {
 	it("refuses until the password changed, then gives the week back and says the hard hold stands, then releases once the TOTP factor is replaced, and the new one verifies", async () => {
 		const setup = await composed();
-		await hardHeld(setup, setup.totp);
+		const rebindAfter = await hardHeld(setup, setup.totp);
 
 		const first = await signInWithCode(setup, 0);
 		const refused = await release(first);
@@ -168,6 +177,7 @@ describe("the release, end to end", () => {
 			error: "mfa_lock_release_refused",
 			error_description: "Change the account's password, sign in again, then release",
 			reason: "not_revoked_since",
+			rebind_after: rebindAfter,
 		});
 
 		await changePassword(setup);
@@ -179,6 +189,7 @@ describe("the release, end to end", () => {
 			hold: "hard",
 			description:
 				"Guessable second factors stay held until each is replaced: replace them, verify a recovery code or a passkey again, then release",
+			rebind_after: rebindAfter,
 		});
 		expect(setup.audit.of("mfa.lock.recovered")).toEqual([
 			expect.objectContaining({
@@ -230,6 +241,39 @@ describe("the release, end to end", () => {
 			factors.body.factors as { kind: string; recovery_codes_remaining?: number }[]
 		).find(({ kind }) => kind === "recovery_code");
 		expect(set?.recovery_codes_remaining).toBe(4);
+	});
+
+	it("answers held again, with the same rebind_after, for a TOTP factor rebound before it, and released for one rebound after it", async () => {
+		const setup = await composed();
+		const rebindAfter = await hardHeld(setup, setup.totp, { withinTheMargin: true });
+		await changePassword(setup);
+		const agent = await signInWithCode(setup, 0);
+		const early = await setup.factorStore.list(ALICE.id);
+		await bindTotp(agent);
+		await remove(agent, setup.totp.record.id);
+		const tooSoon = (await setup.factorStore.list(ALICE.id)).find(
+			(record) => record.kind === "totp" && !early.some(({ id }) => id === record.id),
+		);
+		if (tooSoon === undefined) throw new Error("no TOTP factor bound");
+		expect(tooSoon.createdAt.getTime()).toBeLessThanOrEqual(Date.parse(rebindAfter));
+
+		const held = await release(agent);
+		expect(held.status, JSON.stringify(held.body)).toBe(200);
+		expect(held.body).toMatchObject({ lock: "held", hold: "hard", rebind_after: rebindAfter });
+
+		freezeClock(Date.parse(rebindAfter) + 1_000);
+		await stepUpWithCode(setup, agent, 1);
+		const again = await release(agent);
+		expect(again.status, JSON.stringify(again.body)).toBe(200);
+		expect(again.body).toMatchObject({ lock: "held", hold: "hard", rebind_after: rebindAfter });
+
+		await stepUpWithCode(setup, agent, 2);
+		await bindTotp(agent);
+		await remove(agent, tooSoon.id);
+		await stepUpWithCode(setup, agent, 3);
+		const released = await release(agent);
+		expect(released.status, JSON.stringify(released.body)).toBe(200);
+		expect(released.body).toEqual({ lock: "released" });
 	});
 
 	it("lets a subject the hard hold stands for complete a TOTP enrollment: the binding reserves none of the subject's attempts", async () => {
@@ -317,7 +361,14 @@ describe("the release's answers", () => {
 
 	it("is 409 no_revocation_boundary where no sessions boundary is wired, said once at boot", async () => {
 		const setup = await composed({ withoutBoundary: true });
-		await hardHeld(setup, setup.totp);
+		const { agent: attacker, transaction } = await beginLogin(setup.app);
+		const failed = await verify(
+			attacker,
+			transaction,
+			setup.totp.record.id,
+			wrongCode(setup.totp.secret),
+		);
+		expect(failed.status, JSON.stringify(failed.body)).toBe(401);
 		const agent = await signInWithCode(setup, 0);
 
 		const refused = await release(agent);
@@ -332,6 +383,42 @@ describe("the release's answers", () => {
 		expect(
 			events(setup.logger, "warn").filter((event) => event === "mfa_lock_release_unavailable"),
 		).toHaveLength(1);
+	});
+
+	it("is 409 no_revocation_boundary with rebind_after while the hard hold stands where no sessions boundary is wired: a rebind is the way out", async () => {
+		const setup = await composed({ withoutBoundary: true });
+		const rebindAfter = await hardHeld(setup, setup.totp);
+		const agent = await signInWithCode(setup, 0);
+
+		const refused = await release(agent);
+
+		expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+		expect(refused.body).toEqual({
+			error: "mfa_lock_release_refused",
+			error_description:
+				"Guessable second factors stay held until each is replaced after rebind_after: replace them, then release, or ask for a reset",
+			reason: "no_revocation_boundary",
+			rebind_after: rebindAfter,
+		});
+	});
+
+	it("is 403 mfa_exempt_proof_required without rebind_after while the hard hold stands", async () => {
+		const setup = await composed();
+		await hardHeld(setup, setup.totp);
+		vi.spyOn(setup.transactionStore, "authorizeSubjectRecovery").mockRejectedValue(
+			new Error("store down"),
+		);
+		const agent = await signInWithCode(setup, 0);
+		const apply = vi.spyOn(setup.transactionStore, "applySubjectRecovery");
+
+		const refused = await release(agent);
+
+		expect(await apply.mock.results[0]?.value).toMatchObject({
+			outcome: "refused",
+			hard: true,
+		});
+		expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+		expect(refused.body).toEqual(EXEMPT_PROOF_REQUIRED);
 	});
 
 	it("lifts the hard hold on a rebind alone where no sessions boundary is wired", async () => {
@@ -382,6 +469,45 @@ describe("the release's answers", () => {
 		expect(events(setup.logger, "error")).toEqual(["mfa_store_unavailable"]);
 	});
 
+	it("says from when a rebind counts in the answer alone, never in a log line", async () => {
+		const setup = await composed();
+		const rebindAfter = await hardHeld(setup, setup.totp);
+		const refused = await release(await signInWithCode(setup, 0));
+		await changePassword(setup);
+		const held = await release(await signInWithCode(setup, 1));
+
+		expect(refused.body.rebind_after).toBe(rebindAfter);
+		expect(held.body.rebind_after).toBe(rebindAfter);
+		const logged = JSON.stringify(
+			(["info", "warn", "error"] as const).flatMap((level) => setup.logger[level].mock.calls),
+		);
+		expect(logged).not.toContain(rebindAfter);
+		expect(logged).not.toContain(String(Date.parse(rebindAfter)));
+		const audited = JSON.stringify(setup.audit.events);
+		expect(setup.audit.of("mfa.lock.recovered")).toHaveLength(1);
+		expect(audited).not.toContain(rebindAfter);
+		expect(audited).not.toContain(String(Date.parse(rebindAfter)));
+	});
+
+	it("answers 503, logged once at error without the instant, when the store's rebind bound is past what a date holds", async () => {
+		const BEYOND = 8_640_000_000_000_001;
+		const setup = await composed();
+		await hardHeld(setup, setup.totp);
+		await changePassword(setup);
+		const agent = await signInWithCode(setup, 0);
+		const apply = setup.transactionStore.applySubjectRecovery.bind(setup.transactionStore);
+		vi.spyOn(setup.transactionStore, "applySubjectRecovery").mockImplementation(
+			async (...args) => ({ ...(await apply(...args)), rebindAfterMs: BEYOND }) as never,
+		);
+
+		const res = await release(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(res.body).not.toHaveProperty("rebind_after");
+		expect(events(setup.logger, "error")).toEqual(["mfa_store_unavailable"]);
+		expect(JSON.stringify(setup.logger.error.mock.calls)).not.toContain(String(BEYOND));
+	});
+
 	it("answers 409 mfa_factors_busy with Retry-After while another write holds the subject's lease", async () => {
 		const setup = await composed();
 		const agent = await signInWithCode(setup, 0);
@@ -392,6 +518,29 @@ describe("the release's answers", () => {
 		expect(res.status, JSON.stringify(res.body)).toBe(409);
 		expect(res.body.error).toBe("mfa_factors_busy");
 		expect(Number(res.headers["retry-after"])).toBeGreaterThanOrEqual(1);
+	});
+});
+
+describe("the hard hold before an exempt proof", () => {
+	it("answers a login's 429 mfa_locked with no time: neither rebind_after nor the instant in any form", async () => {
+		const setup = await composed();
+		const third = await wrongCodesToTheHardLimit(setup.app, setup.totp);
+		const rebindAfterMs = Date.now() + DEFAULT_CLOCK_SKEW_MS;
+
+		const held = await verify(
+			third.agent,
+			third.transaction,
+			setup.totp.record.id,
+			totpCode(setup.totp.secret),
+		);
+
+		expect(held.status, JSON.stringify(held.body)).toBe(429);
+		expect(held.body).toMatchObject({ error: "mfa_locked", hold: "hard" });
+		expect(held.body).not.toHaveProperty("rebind_after");
+		expect(held.headers["retry-after"]).toBeUndefined();
+		const body = JSON.stringify(held.body);
+		expect(body).not.toContain(new Date(rebindAfterMs).toISOString());
+		expect(body).not.toContain(String(rebindAfterMs));
 	});
 });
 

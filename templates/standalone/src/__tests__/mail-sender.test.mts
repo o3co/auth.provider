@@ -19,11 +19,12 @@
  * both from `@o3co/auth-provider-standard`: the development sender where the
  * configuration was selected as development — the name `app.mts` defaults
  * to — the SMTP sender's module under any other name, and none when
- * `buildModules` is told no name. Nothing in the template reads the slot:
- * this is the wiring alone.
+ * `buildModules` is told no name. A deployment's own sender modules, passed
+ * as `mailSenderModules`, replace that choice under every name. Nothing in
+ * the template reads the slot: this is the wiring alone.
  */
 
-import type { MailSender } from "@o3co/auth-provider-core";
+import { defineModule, type MailSender, type Module } from "@o3co/auth-provider-core";
 import {
 	standardDevelopmentMailSenderModule,
 	standardSmtpMailSenderModule,
@@ -40,11 +41,31 @@ import {
 const DEVELOPMENT = standardDevelopmentMailSenderModule({ environment: "development" }).name;
 const SMTP = standardSmtpMailSenderModule.name;
 
+/** A deployment's own sender, built at boot so the slot holds it with nothing reading it. */
+const OWN_SENDER: MailSender = {
+	kind: "deployment-own",
+	send: async () => ({ outcome: "delivered" }),
+};
+const ownSenderModule: Module = defineModule({
+	name: "deployment-own-mail-sender",
+	lifecycle: { mailSender: { eager: true } },
+	provides: { mailSender: () => OWN_SENDER },
+});
+const OWN = ownSenderModule.name;
+
 /** The mail sender modules `buildModules` lists for `environment`. */
-const senders = (environment: string | undefined): string[] =>
-	buildModules(resolveConfig(SINGLE_ENV), environment === undefined ? {} : { environment })
+const senders = (
+	environment: string | undefined,
+	mailSenderModules?: readonly Module[],
+): string[] =>
+	buildModules(resolveConfig(SINGLE_ENV), {
+		...(environment === undefined ? {} : { environment }),
+		...(mailSenderModules === undefined ? {} : { mailSenderModules }),
+	})
 		.map((module) => module.name)
-		.filter((name) => name === DEVELOPMENT || name === SMTP);
+		.filter((name) => name === DEVELOPMENT || name === SMTP || name === OWN);
+
+const ENVIRONMENTS = ["development", "production", "staging", "test", "Development"] as const;
 
 describe("the template's mail sender", () => {
 	let current: Composition | undefined;
@@ -75,5 +96,39 @@ describe("the template's mail sender", () => {
 		current = await compose();
 		expect(current.modules.map((module) => module.name)).toContain(SMTP);
 		expect(current.handle.components.mailSender).toBeUndefined();
+	});
+
+	describe("given the deployment's own sender modules", () => {
+		it("installs them in place of the bundled sender, under every environment name and none", () => {
+			for (const environment of [...ENVIRONMENTS, undefined]) {
+				expect(senders(environment, [ownSenderModule]), String(environment)).toEqual([OWN]);
+			}
+		});
+
+		it("installs no sender at all when the list is empty", () => {
+			for (const environment of [...ENVIRONMENTS, undefined]) {
+				expect(senders(environment, []), String(environment)).toEqual([]);
+			}
+		});
+
+		it.each(["development", "production"])(
+			"fills the slot with the deployment's sender when the composition boots in %s",
+			async (environment) => {
+				current = await compose({ environment, mailSenderModules: [ownSenderModule] });
+				const names = current.modules.map((module) => module.name);
+				expect(names).toContain(OWN);
+				expect(names).not.toContain(DEVELOPMENT);
+				expect(names).not.toContain(SMTP);
+				expect(current.handle.components.mailSender).toBe(OWN_SENDER);
+			},
+		);
+
+		it("boots in production with no sender when the list is empty", async () => {
+			current = await compose({ environment: "production", mailSenderModules: [] });
+			const names = current.modules.map((module) => module.name);
+			expect(names).not.toContain(DEVELOPMENT);
+			expect(names).not.toContain(SMTP);
+			expect(current.handle.components.mailSender).toBeUndefined();
+		});
 	});
 });

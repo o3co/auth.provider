@@ -39,7 +39,7 @@ import supertest from "supertest";
 import { describe, expect, it } from "vitest";
 import type { WebAuthnConfig } from "../config.mjs";
 import { webauthnModule } from "../module.mjs";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, testTokenSettings, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
 const ROUTES = [
 	"/oauth/webauthn/registration/options",
@@ -54,7 +54,6 @@ const webauthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	allowCredentialsForKnownUser: false,
 	rateLimit: { authenticationOptions: { limit: 100, windowSeconds: 60 } },
 };
 
@@ -106,10 +105,6 @@ const bootApp = async () => {
 		modules: [
 			webauthnModule,
 			defineModule({
-				name: "test:webauthn-body-config",
-				provides: { webauthnConfig: () => webauthnConfig },
-			}),
-			defineModule({
 				name: "test:webauthn-body-key-store",
 				provides: { keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!") },
 			}),
@@ -128,7 +123,11 @@ const bootApp = async () => {
 			}),
 			beneathModule,
 		],
-		bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+		bootstrapComponents: {
+			config: withWebAuthnSection(config, webauthnConfig),
+			pathResolver: (p: string) => p,
+			oauthTokenSettings: testTokenSettings({ issuer: "https://test.example" }),
+		} as never,
 	});
 	const app = express();
 	app.use(handle.router);

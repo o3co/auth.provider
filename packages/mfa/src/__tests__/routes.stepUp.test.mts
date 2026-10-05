@@ -60,6 +60,7 @@ import {
 } from "./moduleHarness.mjs";
 import {
 	completeEnrollment,
+	dropRecord,
 	enrollFromAccount,
 	freezeClock,
 	giveEmailProof,
@@ -350,7 +351,7 @@ describe("the step-up under required, for a password session without a second fa
 		const seeded = await seedTotp(factorStore);
 		const { agent } = await signInWithTotp(app, userSessionStore, seeded);
 		// The session as one written before required was switched on, its subject enrolled in nothing.
-		await factorStore.remove(ALICE.id, seeded.record.id);
+		await dropRecord(factorStore, ALICE.id, seeded.record.id);
 		reading(userSessionStore, (session) => ({
 			...session,
 			amr: ["pwd"],

@@ -15,20 +15,18 @@
  */
 
 import {
-	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
-	CoreConfigSchema,
 	type CsrfGuard,
 	type CsrfTokenSigner,
 	consoleLogger,
 	defineModule,
-	federationsOf,
+	type FederationSettings,
 	LOGIN_RETURN_PARAMETER,
 	type Logger,
 	loginPageCarriesReturn,
-	MAX_DURATION_MS,
 	type SessionCookiePolicy,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -39,20 +37,16 @@ import {
 	MAX_CSRF_TTL_SECONDS,
 	sessionCsrfSlice,
 } from "./csrf.mjs";
-import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
 import { createLoginEntry } from "./login-entry.mjs";
-import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "./loginBudget.mjs";
+import { LOGIN_ATTEMPT_TAG, MAX_LOGIN_WINDOW_MS } from "./loginAttempts.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
-
-/** What the module reads of the configuration beside its own section: core's, for `core.federations`. */
-const sessionConfigSchema = CoreConfigSchema.pick({ core: true });
 
 /**
  * The schema of `session {}`, the module's own section, strict at every
  * level: where `POST /session/login` may send a browser back to, the CSRF
- * policy, the login page and the login's rate-limit budget. The session
+ * policy, the login page and the login's attempt limit. The session
  * cookie and its store are the session store's (`session-store {}`), read
  * here through the `sessionCookiePolicy` slot. Each leaf reads the string an
  * environment variable carries.
@@ -75,7 +69,7 @@ export const sessionSectionSchema = z
 		csrf: z
 			.object({
 				trustedOrigins: z.array(z.string()),
-				ttlSeconds: z.coerce.number().int().positive().max(MAX_CSRF_TTL_SECONDS),
+				ttlSeconds: wholeNumberInRangeFromEnv(1, MAX_CSRF_TTL_SECONDS),
 			})
 			.strict()
 			.optional(),
@@ -97,18 +91,18 @@ export const sessionSectionSchema = z
 			})
 			.strict(),
 		/**
-		 * `POST /session/login`'s brute-force budget, `windowMs` in
-		 * milliseconds, which the module contributes as the `login` budget
-		 * every limiter reads: required (the package's reference ships 20 per
-		 * 15 minutes). Zero (an exported-but-empty variable) would turn the
-		 * guard into a no-op that still looks configured.
+		 * `POST /session/login`'s own attempt limit, `windowMs` in milliseconds
+		 * up to a day, counted on the `attemptCounter` slot's counter, never a
+		 * rate limiter's: required (the package's reference ships 20 per 15
+		 * minutes). Zero would turn the guard into a no-op that still looks
+		 * configured.
 		 */
 		rateLimit: z
 			.object({
 				login: z
 					.object({
-						windowMs: z.coerce.number().int().positive().max(MAX_DURATION_MS),
-						limit: z.coerce.number().int().positive(),
+						windowMs: wholeNumberInRangeFromEnv(1, MAX_LOGIN_WINDOW_MS),
+						limit: wholeNumberInRangeFromEnv(1),
 					})
 					.strict(),
 			})
@@ -122,7 +116,7 @@ type SessionSection = z.output<typeof sessionSectionSchema>;
 /**
  * The module's section, with the paths it moved from: the login page from
  * `endpoints.login.url` (its variable renamed `SESSION_LOGIN_PAGE_URL`) and
- * the login's budget from `rateLimit.login`, which no variable binds.
+ * the login's attempt limit from `rateLimit.login`, which no variable binds.
  */
 const SECTION = {
 	schema: sessionSectionSchema,
@@ -135,27 +129,17 @@ const SECTION = {
 } as const;
 
 /**
- * Boot-time projection of `core.federations` to a `name → callbackURL`
- * map. Throws when an enabled federation has no `callbackURL`: a deployment
- * misconfiguration fails at boot, not per request.
+ * Each enabled federation's name and `callbackURL`, from core's
+ * `federationSettings`. Boot refuses an enabled entry without a non-empty
+ * `callbackURL` before any route is built, so every enabled entry carries
+ * one; a disabled entry's is not read.
  */
-function deriveProviderCallbackUrls(
-	federations: Readonly<Record<string, unknown>>,
-): ReadonlyMap<string, string> {
-	const out = new Map<string, string>();
-	for (const name of Object.keys(federations)) {
-		const slice = extractFederationSection(federations, name);
-		if (!slice) continue; // disabled or absent — skip
-		const callbackURL = slice.callbackURL;
-		if (typeof callbackURL !== "string" || callbackURL.length === 0) {
-			throw new Error(
-				`core.federations.${name}: callbackURL is required when federation is enabled`,
-			);
-		}
-		out.set(name, callbackURL);
-	}
-	return out;
-}
+const providerCallbackUrlsOf = (settings: FederationSettings): ReadonlyMap<string, string> =>
+	new Map(
+		Object.entries(settings).flatMap(([name, entry]) =>
+			entry.enabled && entry.callbackURL !== undefined ? [[name, entry.callbackURL] as const] : [],
+		),
+	);
 
 /**
  * The `csrfGuard` slot's value: the signed double-submit token of
@@ -186,10 +170,12 @@ const csrfGuardOf = (
  *                           POST /session/logout
  *   - "federation-routes" — GET /session/oauth/federation/:name (+ callback)
  *
- * Its section is `session {}` (`sessionSectionSchema`); `config` is read for
- * `core.federations` alone.
+ * Its section is `session {}` (`sessionSectionSchema`); it reads nothing else
+ * of the configuration.
  *
- * `requires`: `config` and `userRepository`; the three stores these routes
+ * `requires`: `userRepository`; core's `federationSettings`, the federations
+ * `core.federations` declares (each enabled one's callback URL, and whether
+ * an installed one's upstream `amr` counts); the three stores these routes
  * use (`userSessionStore`, `federationTokenStore`, `sessionFederationIndex`);
  * `csrfTokenSigner`, what the CSRF token is signed and checked with (the
  * session store's module provides it from `session-store.secret`, which this
@@ -199,17 +185,16 @@ const csrfGuardOf = (
  * planner-derived `federationProviders`,
  * `federationRedirectPolicyResolver` and `sessionRequirementResolver`
  * (password login and the federation link routes go through admission), and
- * `deploymentMode` (the login throttle's per-process fallback is refused
- * under `multi`, so a mode read as absent must not lift that).
+ * `deploymentMode` (counting login attempts per process is refused under
+ * `multi`, so a mode read as absent must not lift that).
  *
  * `provides` what other packages need of the browser session through
  * core-owned slot contracts, so none imports this package: `csrfGuard` and
- * `loginEntry`. `providerCallbackUrls` is derived from config inside the
- * federation-routes lambda rather than being a synthetic key, since it has no
- * contribution surface.
+ * `loginEntry`. `providerCallbackUrls` is derived from `federationSettings`
+ * inside the federation-routes lambda.
  */
 export const sessionModule = defineModule<
-	| "config"
+	| "federationSettings"
 	| "userRepository"
 	| "userSessionStore"
 	| "federationTokenStore"
@@ -220,14 +205,13 @@ export const sessionModule = defineModule<
 	| "federationRedirectPolicyResolver"
 	| "sessionRequirementResolver"
 	| "deploymentMode",
-	"logger" | "rateLimiter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation",
+	"logger" | "attemptCounter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation",
 	typeof sessionSectionSchema
 >({
 	name: "session",
 	section: SECTION,
-	configSchema: sessionConfigSchema,
 	requires: [
-		"config",
+		"federationSettings",
 		"userRepository",
 		"userSessionStore",
 		"federationTokenStore",
@@ -240,12 +224,12 @@ export const sessionModule = defineModule<
 		"deploymentMode",
 	],
 	// All optional so a composition without them still boots: without
-	// `rateLimiter` the router uses a per-process in-memory limiter (and
-	// warns); without `auditSink` no events are emitted; without
+	// `attemptCounter` the login's attempts are counted per process where the
+	// deployment mode allows it; without `auditSink` no events are emitted; without
 	// `subjectSessionIndex`, `revokeAllForSubject` reports the capability as
 	// unavailable; `subjectRevocation` is the boundary the link routes'
 	// admission reads when wired.
-	optional: ["logger", "rateLimiter", "auditSink", "subjectSessionIndex", "subjectRevocation"],
+	optional: ["logger", "attemptCounter", "auditSink", "subjectSessionIndex", "subjectRevocation"],
 	// Optional to wire, not optional to decide: an unfilled `auditSink` must be
 	// declared (`auditSink` in `core.declaredAbsent`), and absent subject-level
 	// revocation must be declared (`oauth.revocation.subject = "unsupported"`),
@@ -283,11 +267,9 @@ export const sessionModule = defineModule<
 	contributes: {
 		// What the link flow's start and callback admit.
 		admissionActions: SESSION_ADMISSION_ACTIONS,
-		// `/session/login`'s budget, `session.rateLimit.login`, for every
-		// limiter to read; an operator's `limits.login` on the limiter wins.
-		rateLimitBudgets: {
-			[LOGIN_RATE_LIMIT_PREFIX]: (deps) => readLoginRateLimitBudget(deps.section),
-		},
+		// The `login` prefix is claimed with no budget: no limiter decides the
+		// login's limit, which the attempt guard counts.
+		rateLimitBudgets: { [LOGIN_ATTEMPT_TAG]: () => null },
 		routes: [
 			(deps) => {
 				return {
@@ -307,7 +289,7 @@ export const sessionModule = defineModule<
 						sessionFederationIndex: deps.sessionFederationIndex,
 						// The CSRF token's signer, the one `csrfGuard` signs with.
 						csrfTokenSigner: deps.csrfTokenSigner,
-						...(deps.rateLimiter ? { rateLimiter: deps.rateLimiter } : {}),
+						...(deps.attemptCounter ? { attemptCounter: deps.attemptCounter } : {}),
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
@@ -319,15 +301,17 @@ export const sessionModule = defineModule<
 				};
 			},
 			(deps) => {
-				const config = deps.config as AppConfig;
 				return {
 					id: "federation-routes",
 					mountPath: "/session",
 					handler: federationRoutes.createRouter(express, {
-						config,
+						federationSettings: deps.federationSettings,
+						// Where an account-link start may be navigated from: the
+						// trust list the CSRF guard reads.
+						linkTrustedOrigins: deps.section.csrf?.trustedOrigins ?? [],
 						federationProviders: deps.federationProviders,
 						federationRedirectPolicyResolver: deps.federationRedirectPolicyResolver,
-						providerCallbackUrls: deriveProviderCallbackUrls(federationsOf(config)),
+						providerCallbackUrls: providerCallbackUrlsOf(deps.federationSettings),
 						userRepository: deps.userRepository,
 						userSessionStore: deps.userSessionStore,
 						sessionFederationIndex: deps.sessionFederationIndex,

@@ -26,9 +26,12 @@
 
 import { Router } from "express";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { GrantHandler } from "../../grants/types.mjs";
 import { createApp } from "../../index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
+import type { ClientRepository } from "../../repositories/ClientRepository.mjs";
+import { validatedClientRepository } from "../../repositories/clientRepositoryBoundary.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -166,7 +169,12 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 
 		// Component slots are materialised.
 		expect(handle.components.keyStore).toBe(stubKeyStore);
-		expect(handle.components.clientRepository).toBe(stubClientRepository);
+		// The clientRepository slot holds core's client-record boundary over
+		// the provider's value: wrapping it again answers the same object.
+		expect(handle.components.clientRepository).not.toBe(stubClientRepository);
+		expect(validatedClientRepository(handle.components.clientRepository as ClientRepository)).toBe(
+			handle.components.clientRepository,
+		);
 		expect(handle.components.codeRepository).toBe(stubCodeRepository);
 		expect(handle.components.userRepository).toBe(stubUserRepository);
 		expect(handle.components.auditSink).toBe(stubAuditSink);
@@ -275,24 +283,28 @@ describe("integration — Scenario 2: missing-required-component failure diagnos
 			provides: {},
 		});
 
-		// googleFederationModule contributes a federation entry.
+		// googleFederationModule registers a federation type.
 		const googleFederationModule = defineModule({
 			name: "google-federation",
 			contributes: {
-				federations: {
-					// A federation, not a placeholder: the contribution type is the
+				federationTypes: {
+					// A federation type, not a placeholder: the contribution type is the
 					// contract, so `{}` does not compile. The scenario is about the
 					// missing-slot diagnostic below.
-					google: (_deps) => ({
-						name: "google",
-						scope: ["openid"],
-						buildAuthorizationUrl: () => new URL("https://accounts.google.com/auth"),
-						exchangeCode: async () => ({
-							issuer: "https://accounts.google.com",
-							sub: "123",
-							expiresAt: null,
+					google: {
+						entrySchema: z.object({}),
+						factory: (_deps, instance) => ({
+							name: instance.name,
+							scope: ["openid"],
+							buildAuthorizationUrl: () => new URL("https://accounts.google.com/auth"),
+							exchangeCode: async () => ({
+								issuer: "https://accounts.google.com",
+								sub: "123",
+								expiresAt: null,
+							}),
 						}),
-					}),
+						redirectPolicy: () => ({}),
+					},
 				},
 			},
 		});

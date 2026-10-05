@@ -19,6 +19,9 @@
  * how a refusal quotes it.
  */
 
+import { z } from "zod";
+import { wholeNumberFromEnv } from "./application.schema.mjs";
+
 /**
  * A value as a refusal shows it, with its type: a string quoted (so `"20"`
  * does not read as a usable number), a number as it prints (`NaN` included),
@@ -46,18 +49,20 @@ export const shownConfigValue = (value: unknown): string => {
 	}
 };
 
+/** A number, or a string of decimal digits read as its number. */
+const numberOrDecimalDigits = wholeNumberFromEnv(z.number());
+
 /**
- * What `z.coerce.number()` makes of a configured value, for a key whose
- * owning schema coerces: a number as it is, and a string that is not blank
- * and whose `Number()` is finite as that number. HOCON substitutes an
- * environment variable as a string, so a key filled from one arrives as one
- * wherever the schema did not run. Anything else — a blank or non-numeric
- * string, a boolean, an array, an object — is `undefined`: none of it can
- * come from a substitution, and none of it is a number.
+ * A configured number as core's schemas read one ({@link wholeNumberFromEnv}),
+ * for a key read where its owning schema did not run: a number as it is, and
+ * a string of decimal digits (whitespace around allowed) as its number. HOCON
+ * substitutes an environment variable as a string, so a key filled from one
+ * arrives as one. Anything else — a blank string, a hex, exponent, sign or
+ * fraction, a boolean, an array, an object — is `undefined`, never a number
+ * the operator did not write. The caller judges the range.
  */
 export const configuredNumber = (value: unknown): number | undefined => {
 	if (typeof value === "number") return value;
-	if (typeof value !== "string" || value.trim() === "") return undefined;
-	const parsed = Number(value);
-	return Number.isFinite(parsed) ? parsed : undefined;
+	const read = numberOrDecimalDigits.safeParse(value);
+	return read.success ? read.data : undefined;
 };

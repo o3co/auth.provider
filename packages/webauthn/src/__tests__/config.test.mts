@@ -16,10 +16,11 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AppConfigSchema } from "@o3co/auth-provider-core";
+import { AppConfigSchema, MAX_DURATION_SECONDS } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { webauthnConfigSchema } from "../config.mjs";
+import { webauthnModule } from "../module.mjs";
 
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
 // packages/webauthn/config/reference.conf (not in Zod .default() calls).
@@ -40,7 +41,6 @@ const VALID = {
 	attestationPreference: "none",
 	userVerification: "preferred",
 	challengeTtlMs: 120_000,
-	allowCredentialsForKnownUser: false,
 	rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
 };
 
@@ -71,29 +71,20 @@ describe("webauthnConfigSchema", () => {
 		).toBe(false);
 	});
 
-	// The enumeration escape hatch and the endpoint's own throttle.
+	// The endpoint's own throttle.
 	describe("authentication/options security knobs", () => {
-		it("allowCredentialsForKnownUser is required — there is no implicit fallback", () => {
-			expect(webauthnConfigSchema.safeParse(without("allowCredentialsForKnownUser")).success).toBe(
-				false,
-			);
-		});
-
-		it("allowCredentialsForKnownUser refuses what is not a boolean spelling", () => {
-			// Core's `coerceBooleanFromEnv` vocabulary: "true" / "false" / "1" / "0"
-			// (and "" as false). Anything else fails at boot rather than being
-			// read as whichever value `Boolean(value)` would guess.
-			for (const bad of ["yes", "on", "ture", 2]) {
-				expect(
-					webauthnConfigSchema.safeParse({ ...VALID, allowCredentialsForKnownUser: bad }).success,
-					String(bad),
-				).toBe(false);
-			}
-		});
-
-		it("carries the opt-in through to the parsed config", () => {
-			const parsed = webauthnConfigSchema.parse({ ...VALID, allowCredentialsForKnownUser: true });
-			expect(parsed.allowCredentialsForKnownUser).toBe(true);
+		it("carries no allowCredentialsForKnownUser: the key is refused as one the schema does not declare", () => {
+			const result = webauthnConfigSchema.safeParse({
+				...VALID,
+				allowCredentialsForKnownUser: true,
+			});
+			expect(result.success).toBe(false);
+			expect(result.error?.issues).toEqual([
+				expect.objectContaining({
+					code: "unrecognized_keys",
+					keys: ["allowCredentialsForKnownUser"],
+				}),
+			]);
 		});
 
 		it("rateLimit.authenticationOptions is required", () => {
@@ -140,39 +131,29 @@ describe("webauthnConfigSchema", () => {
 
 	// HOCON substitutes `${?VAR}` as a string, always, so an operator who sets
 	// one of these variables hands the schema a string. Core's schema coerces
-	// every leaf an env var can reach, and so must these two: a bare
-	// `z.number()` / `z.boolean()` refuses the string their own reference.conf
-	// delivers.
+	// every leaf an env var can reach, and so must this one: a bare
+	// `z.number()` refuses the string its own reference.conf delivers.
 	describe("env-reachable leaves take the string an env substitution delivers", () => {
 		const referenceConf = readFileSync(
 			fileURLToPath(new URL("../../config/reference.conf", import.meta.url)),
 			"utf8",
 		);
 
-		it("reference.conf lets the environment reach both leaves", () => {
+		it("reference.conf lets the environment reach the TTL", () => {
 			expect(referenceConf).toMatch(/^\s*challengeTtlMs = \$\{\?WEBAUTHN_CHALLENGE_TTL_MS\}$/m);
+		});
+
+		it("reference.conf binds the removed allowCredentialsForKnownUser nowhere, and captures its variable", () => {
+			expect(referenceConf).not.toMatch(/^\s*allowCredentialsForKnownUser\s*=/m);
+			expect(referenceConf).toMatch(/^\s*WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER = null$/m);
 			expect(referenceConf).toMatch(
-				/^\s*allowCredentialsForKnownUser = \$\{\?WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER\}$/m,
+				/^\s*WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER = \$\{\?WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER\}$/m,
 			);
 		});
 
 		it("WEBAUTHN_CHALLENGE_TTL_MS=60000 parses to the number 60000", () => {
 			const parsed = webauthnConfigSchema.parse({ ...VALID, challengeTtlMs: "60000" });
 			expect(parsed.challengeTtlMs).toBe(60_000);
-		});
-
-		it("WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER parses to a boolean", () => {
-			for (const [raw, expected] of [
-				["true", true],
-				["false", false],
-				["1", true],
-				["0", false],
-				// An exported-but-empty variable: off, as everywhere in core.
-				["", false],
-			] as const) {
-				const parsed = webauthnConfigSchema.parse({ ...VALID, allowCredentialsForKnownUser: raw });
-				expect(parsed.allowCredentialsForKnownUser, JSON.stringify(raw)).toBe(expected);
-			}
 		});
 
 		it("still refuses a TTL that is not a positive integer, in the string form too", () => {
@@ -548,7 +529,7 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 // hands `config.webauthn` to `webauthnConfigSchema`. Core cannot
 // import this package, so the parity is checked from this side, over the
 // whole key tree.
-describe("core's AppConfigSchema passes through every key webauthnConfigSchema reads", () => {
+describe("core's AppConfigSchema passes through every key webauthnConfigSchema reads, and every removed one", () => {
 	/** Every dotted key path in an object schema, through optional / default / pipe wrappers. */
 	const keyPaths = (schema: z.ZodType, prefix = ""): string[] => {
 		let inner: z.ZodType = schema;
@@ -570,10 +551,108 @@ describe("core's AppConfigSchema passes through every key webauthnConfigSchema r
 		});
 	};
 
-	it("names the same key tree in both schemas", () => {
+	it("names the same key tree in both schemas, and the keys the module declares removed", () => {
 		const coreSection = AppConfigSchema.shape.webauthn;
-		expect(keyPaths(coreSection).sort()).toEqual(keyPaths(webauthnConfigSchema).sort());
+		// A removed key stays in core's shape, presence-only, so the removed-key
+		// refusal still sees it in a configuration parsed before boot.
+		const removed = Object.entries(webauthnModule.section?.relocatedFrom ?? {})
+			.filter(([, to]) => to === null)
+			.map(([from]) => from.replace(/^webauthn\./, ""));
+		expect(removed).toEqual(["allowCredentialsForKnownUser"]);
+		expect(keyPaths(coreSection).sort()).toEqual(
+			[...keyPaths(webauthnConfigSchema), ...removed].sort(),
+		);
 		// Not vacuous: the walk reached the nested rate-limit spec.
 		expect(keyPaths(webauthnConfigSchema)).toContain("rateLimit.authenticationOptions.limit");
+	});
+});
+
+/**
+ * Every number setting is read as a whole number in decimal digits, held to the
+ * range core's schema holds the same key to: a typo such as `"1e3"` or `"0x10"`,
+ * or an exported-but-empty variable, fails boot naming the key.
+ */
+describe("webauthnConfigSchema reads each number setting in decimal digits", () => {
+	const KEYS: ReadonlyArray<
+		readonly [path: string, set: (value: unknown) => unknown, message: string]
+	> = [
+		[
+			"challengeTtlMs",
+			(value) => ({ ...VALID, challengeTtlMs: value }),
+			"must be a whole number of at least 1, in decimal digits",
+		],
+		[
+			"rateLimit.authenticationOptions.limit",
+			(value) => ({
+				...VALID,
+				rateLimit: { authenticationOptions: { limit: value, windowSeconds: 60 } },
+			}),
+			"must be a whole number of at least 1, in decimal digits",
+		],
+		[
+			"rateLimit.authenticationOptions.windowSeconds",
+			(value) => ({
+				...VALID,
+				rateLimit: { authenticationOptions: { limit: 30, windowSeconds: value } },
+			}),
+			`must be a whole number from 1 to ${MAX_DURATION_SECONDS}, in decimal digits`,
+		],
+	];
+
+	const REFUSED: ReadonlyArray<unknown> = [
+		"0x10",
+		"1e3",
+		"5.0",
+		"+5",
+		true,
+		"",
+		"  ",
+		"Infinity",
+		"NaN",
+		Number.POSITIVE_INFINITY,
+		Number.NaN,
+	];
+
+	const issuesAt = (result: ReturnType<typeof webauthnConfigSchema.safeParse>, path: string) =>
+		(result.error?.issues ?? [])
+			.filter((issue) => issue.path.map(String).join(".") === path)
+			.map((issue) => issue.message);
+
+	const readAt = (section: unknown, path: string): unknown =>
+		path
+			.split(".")
+			.reduce<unknown>(
+				(node, key) => (node as Record<string, unknown> | undefined)?.[key],
+				section,
+			);
+
+	describe.each(KEYS)("%s", (path, set, message) => {
+		it.each(REFUSED.map((value) => [value]))("refuses %j, naming the key", (value) => {
+			const result = webauthnConfigSchema.safeParse(set(value));
+			expect(result.success).toBe(false);
+			expect(issuesAt(result, path)).toEqual([message]);
+		});
+
+		it.each([[0], ["0"]])("refuses %j, below the minimum", (value) => {
+			expect(issuesAt(webauthnConfigSchema.safeParse(set(value)), path)).toEqual([message]);
+		});
+
+		it.each([[60], ["60"], [" 60 "]])("reads %j as 60", (value) => {
+			const result = webauthnConfigSchema.safeParse(set(value));
+			expect(result.error?.issues ?? []).toEqual([]);
+			expect(readAt(result.data, path)).toBe(60);
+		});
+	});
+
+	it("refuses a windowSeconds past one year", () => {
+		const [, set, message] = KEYS[2] ?? [];
+		expect(
+			set === undefined
+				? []
+				: issuesAt(
+						webauthnConfigSchema.safeParse(set(MAX_DURATION_SECONDS + 1)),
+						"rateLimit.authenticationOptions.windowSeconds",
+					),
+		).toEqual([message]);
 	});
 });

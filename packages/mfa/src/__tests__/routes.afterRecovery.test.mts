@@ -49,10 +49,12 @@ import {
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
 import {
+	addRecord,
 	beginEnrollment,
 	beginLogin,
 	completeEnrollment,
 	contributing,
+	dropRecord,
 	freezeClock,
 	giveEmailProof,
 	loggedText,
@@ -395,7 +397,7 @@ describe("recovery codes alone (required: a first binding)", () => {
 		if (sender === undefined) throw new Error("no sender");
 		await giveEmailProof(agent, reopened, sender);
 		const begun = await beginEnrollment(agent, reopened, "totp");
-		vi.spyOn(factorStore, "remove").mockRejectedValue(new Error("remove failed"));
+		vi.spyOn(factorStore, "removeIf").mockRejectedValue(new Error("remove failed"));
 
 		const done = await completeEnrollment(agent, reopened, totpProofOf(begun.body.secret));
 
@@ -428,7 +430,7 @@ describe("recovery codes alone (required: a first binding)", () => {
 		if (sender === undefined) throw new Error("no sender");
 		await giveEmailProof(agent, reopened, sender);
 		const begun = await beginEnrollment(agent, reopened, "totp");
-		vi.spyOn(factorStore, "remove").mockRejectedValue(new Error("remove failed"));
+		vi.spyOn(factorStore, "removeIf").mockRejectedValue(new Error("remove failed"));
 		logger.error.mockImplementation((_fields: unknown, event: unknown) => {
 			if (event === "mfa_recovery_codes_unreplaced") throw new Error("logger failed");
 		});
@@ -546,7 +548,7 @@ describe("recovery codes alone (required: a first binding)", () => {
 			const { agent, transaction } = await beginLogin(app);
 			// The TOTP record is gone by the time the code is given.
 			if (totp === undefined) throw new Error("no TOTP");
-			await factorStore.remove(ALICE.id, totp.record.id);
+			await dropRecord(factorStore, ALICE.id, totp.record.id);
 
 			const res = await verify(agent, transaction, set.record.id, set.codes[0]);
 
@@ -661,26 +663,31 @@ describe("recovery codes alone (required: a first binding)", () => {
 		expect(await transactionStore.get(transaction)).toMatchObject({ attempts: 0 });
 	});
 
-	it("loses a binding to a counting factor bound at once: its own removed, 401 login_required, mfa.first_binding_conflict", async () => {
+	it("loses a binding to a counting factor bound at once, after its lease read the set: its own never written, 401 login_required, nothing removed", async () => {
 		const { app, factorStore, set, audit } = await composed({ requireEmailProof: "never" });
 		const { agent, transaction } = await beginLogin(app);
 		const reopened = (await verify(agent, transaction, set.record.id, set.codes[0])).body
 			.transaction as string;
 		const begun = await beginEnrollment(agent, reopened, "totp");
-		// Another transaction binds a counting factor while this one completes.
+		// Another transaction past its lease binds a counting factor between this one's read and its write.
 		const other = await seedTotp(createMemoryMfaFactorStore());
-		const list = factorStore.list.bind(factorStore);
-		let reads = 0;
-		vi.spyOn(factorStore, "list").mockImplementation(async (subject) =>
-			reads++ === 0 ? list(subject) : [...(await list(subject)), other.record],
-		);
+		const createIf = factorStore.createIf.bind(factorStore);
+		vi.spyOn(factorStore, "createIf").mockImplementation(async (record, expected) => {
+			if (record.id !== other.record.id) await addRecord(factorStore, other.record);
+			return createIf(record, expected);
+		});
+		const removeIf = vi.spyOn(factorStore, "removeIf");
 
 		const done = await completeEnrollment(agent, reopened, totpProofOf(begun.body.secret));
 
 		expect(done.status).toBe(401);
 		expect(done.body).toEqual(LOGIN_REQUIRED);
-		expect(await kindsOf({ list } as MfaFactorStore)).toEqual(["recovery_code"]);
-		expect(audit.of("mfa.first_binding_conflict")).toHaveLength(1);
+		expect(await kindsOf(factorStore)).toEqual(["recovery_code", "totp"]);
+		expect((await factorStore.list(ALICE.id)).find((record) => record.kind === "totp")?.id).toBe(
+			other.record.id,
+		);
+		expect(removeIf).not.toHaveBeenCalled();
+		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
 	});
 });
 
@@ -767,7 +774,7 @@ describe("a compare-and-set round lost to another write", () => {
 		vi.spyOn(factorStore, "update").mockImplementation(async (...args) => {
 			if (rounds++ === 0) {
 				if (totp === undefined) throw new Error("no TOTP");
-				await factorStore.remove(ALICE.id, totp.record.id);
+				await dropRecord(factorStore, ALICE.id, totp.record.id);
 				return null;
 			}
 			return update(...args);

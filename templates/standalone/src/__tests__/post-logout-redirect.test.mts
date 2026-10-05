@@ -68,6 +68,7 @@ describe("a logout's post_logout_redirect_uri reaches the upstream only once it 
 				tokenType: "Bearer",
 				scope: undefined,
 				grantedScope: undefined,
+				obtainedAt: undefined,
 			},
 		});
 		return session;

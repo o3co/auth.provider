@@ -44,6 +44,14 @@ export function isNumericDate(value: unknown): value is number {
 	);
 }
 
+/**
+ * Whether `value` is whole seconds since the epoch, not negative: the shape of
+ * a claim minted from an instant rounded down to its second (`auth_time`).
+ */
+export function isWholeEpochSeconds(value: unknown): value is number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 /** The NumericDate claims RFC 7519 §4.1 defines. */
 export type NumericDateClaim = "exp" | "iat" | "nbf";
 

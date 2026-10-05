@@ -17,11 +17,15 @@
 /**
  * The oauth endpoints, booted by `createApp`, read a client record through
  * core's client-record boundary over the `clientRepository` slot's
- * repository: a record the registration schema refuses is an unknown
- * client, a record whose field read throws is the repository's outage, and
- * an ORM entity is read by name.
+ * repository: a record the registration schema refuses rejects the lookup
+ * with the boundary's refusal, answered `503` like the repository's outage
+ * and warned once; a record whose field read throws is refused the same
+ * way, naming the field and never what was thrown; and an ORM entity is
+ * read by name. The slot's boundary is the one
+ * oauth reads: a boundary the host put there is kept, with its own logger.
  */
 
+import { inspect } from "node:util";
 import {
 	type ClientRepository,
 	type CodeRepository,
@@ -31,6 +35,7 @@ import {
 	jwksModule,
 	memoryAccessTokenDenylistModule,
 	type PublicClient,
+	validatedClientRepository,
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
@@ -40,7 +45,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { oauthModule } from "#/module.mjs";
+import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
@@ -106,7 +111,7 @@ const boot = async (clientRepository: ClientRepository) => {
 	const config = { ...makeValidAppConfig(), ...oauthConfigForTests() };
 	const handle = await createTestApp({
 		modules: [
-			oauthModule({ config }),
+			oauthEndpointsModule,
 			memoryAccessTokenDenylistModule,
 			jwksModule,
 			authorizationCodeGrantModule,
@@ -154,17 +159,22 @@ const refusals = (logger: ReturnType<typeof createMockLogger>) =>
 	logger.warn.mock.calls.filter(([, message]) => message === "client_record_refused");
 
 describe("oauth endpoints behind core's client-record boundary", () => {
-	it("answer a record the registration schema refuses as an unknown client", async () => {
+	it("answer a record the registration schema refuses 503, naming the refusal as the cause", async () => {
 		const { app, handle, logger } = await boot(
 			answering(() => ({ ...VALID, allowedRedirectUris: ["javascript:alert(1)"] })),
 		);
 		const authorized = await authorize(app);
-		expect(authorized.status).toBe(400);
-		expect(authorized.body).toMatchObject({ error: "invalid_client" });
+		expect(authorized.status).toBe(503);
+		expect(authorized.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(authorized.headers.location).toBeUndefined();
 		const exchanged = await token(app);
-		expect(exchanged.status).toBe(401);
-		expect(exchanged.body).toMatchObject({ error: "invalid_client" });
+		expect(exchanged.status).toBe(503);
+		expect(exchanged.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(
+			logger.error.mock.calls
+				.filter(([, message]) => message === "client_repository_unavailable")
+				.map(([line]) => (line as { err?: { reason?: string } }).err?.reason),
+		).toEqual(["client_record_refused", "client_record_refused"]);
 		// Client authentication looks the client up before it checks the secret,
 		// so both requests stop at the lookup.
 		expect(refusals(logger).map(([line]) => [line.step, line.clientId])).toEqual([
@@ -174,11 +184,12 @@ describe("oauth endpoints behind core's client-record boundary", () => {
 		await handle.dispose();
 	});
 
-	it("answer a record whose field read throws as the repository's outage", async () => {
+	it("answer a record whose field read throws 503 as a refusal, saying nothing of what was thrown", async () => {
+		const LEAK = "tok-3f9a";
 		const unreadable = () =>
 			Object.defineProperty({ ...VALID }, "allowedScopes", {
 				get() {
-					throw new Error("lazy column failed to load");
+					throw new Error(`lazy column allowedScopes failed to load: openid ${LEAK}`);
 				},
 			});
 		const { app, handle, logger } = await boot(answering(unreadable));
@@ -188,7 +199,31 @@ describe("oauth endpoints behind core's client-record boundary", () => {
 		const exchanged = await token(app);
 		expect(exchanged.status).toBe(503);
 		expect(exchanged.body).toMatchObject({ error: "temporarily_unavailable" });
-		expect(refusals(logger)).toEqual([]);
+		expect(refusals(logger).map(([line]) => line.reasons)).toEqual([
+			["allowedScopes: unreadable"],
+			["allowedScopes: unreadable"],
+		]);
+		expect(
+			logger.error.mock.calls
+				.filter(([, message]) => message === "client_repository_unavailable")
+				.map(([line]) => (line as { err?: { reason?: string } }).err?.reason),
+		).toEqual(["client_record_refused", "client_record_refused"]);
+		// Errors expanded (name, message, stack, cause): `JSON.stringify`
+		// renders an Error as `{}`.
+		const said = inspect(
+			[
+				authorized.text,
+				exchanged.text,
+				authorized.headers,
+				exchanged.headers,
+				...Object.values(logger).map(
+					(method) => (method as { mock: { calls: unknown } }).mock.calls,
+				),
+			],
+			{ depth: null },
+		);
+		expect(said).not.toContain(LEAK);
+		expect(said).not.toContain("failed to load");
 		await handle.dispose();
 	});
 
@@ -204,6 +239,23 @@ describe("oauth endpoints behind core's client-record boundary", () => {
 		const exchanged = await token(app);
 		expect(exchanged.status).toBe(400);
 		expect(exchanged.body).toEqual({ error: "invalid_grant", error_description: "stand-in" });
+		expect(refusals(logger)).toEqual([]);
+		await handle.dispose();
+	});
+});
+
+describe("the clientRepository slot's boundary, as the oauth endpoints read it", () => {
+	it("keeps a boundary the host put in the slot: one warn per refusal, on that boundary's own logger", async () => {
+		const host = createMockLogger();
+		const boundary = validatedClientRepository(
+			answering(() => ({ ...VALID, allowedRedirectUris: ["javascript:alert(1)"] })),
+			{ logger: host },
+		);
+		const { app, handle, logger } = await boot(boundary);
+		expect(handle.components.clientRepository).toBe(boundary);
+		expect((await authorize(app)).status).toBe(503);
+		expect((await token(app)).status).toBe(503);
+		expect(refusals(host).map(([line]) => line.step)).toEqual(["find", "find"]);
 		expect(refusals(logger)).toEqual([]);
 		await handle.dispose();
 	});

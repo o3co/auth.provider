@@ -23,7 +23,11 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { FederationGrantStoreClient } from "#/clients.mjs";
+import type {
+	FederationGrantStoreClient,
+	RefundFederationGrantRotationInput,
+	TakeFederationGrantRotationInput,
+} from "#/clients.mjs";
 import { makeIoredisFederationGrantStoreClient } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
@@ -865,6 +869,359 @@ describe("noteRefreshFailure", () => {
 	it("refuses once the stored expiry has passed", async () => {
 		await activeWithCredential();
 		expect(await stamp({ nowMs: at(30 * DAY), atMs: at(30 * DAY) })).toBeNull();
+	});
+});
+
+describe("takeRotation", () => {
+	const HOUR = 3_600_000;
+	const take = (over: Partial<TakeFederationGrantRotationInput> = {}, id = "g-1") => {
+		return client.takeRotation(grantKey(id), {
+			nowMs: at(DAY),
+			expectedVersion: 2,
+			limit: 2,
+			windowMs: HOUR,
+			...over,
+		});
+	};
+	const fieldsOf = async (id = "g-1") => (await client.snapshot(grantKey(id), credKey(id)))?.fields;
+
+	it("opens a window with the first take, bumps the version once, and touches nothing else", async () => {
+		await activeWithCredential();
+		const before = await redis.hgetall(grantKey("g-1"));
+		const fields = await take();
+		expect(fields).toStrictEqual({
+			...before,
+			version: "3",
+			rotationsSince: String(at(DAY)),
+			rotationsCount: "1",
+		});
+		expect(await redis.get(credKey("g-1"))).toBe("v2.sealed-1");
+		expect(await deadline(grantKey("g-1"))).toBe(at(30 * DAY) + RETENTION);
+	});
+
+	it("counts on within the window up to the limit, then refuses and writes nothing", async () => {
+		await activeWithCredential();
+		await take();
+		expect(await take({ nowMs: at(DAY + MIN), expectedVersion: 3 })).toMatchObject({
+			version: "4",
+			rotationsSince: String(at(DAY)),
+			rotationsCount: "2",
+		});
+		const before = await redis.hgetall(grantKey("g-1"));
+		expect(await take({ nowMs: at(DAY + 2 * MIN), expectedVersion: 4 })).toBeNull();
+		expect(await redis.hgetall(grantKey("g-1"))).toStrictEqual(before);
+	});
+
+	it("opens a new window from since + windowMs on, and not a millisecond before", async () => {
+		await activeWithCredential();
+		await take({ limit: 1 });
+		expect(await take({ limit: 1, nowMs: at(DAY + HOUR - 1), expectedVersion: 3 })).toBeNull();
+		expect(await take({ limit: 1, nowMs: at(DAY + HOUR), expectedVersion: 3 })).toMatchObject({
+			version: "4",
+			rotationsSince: String(at(DAY + HOUR)),
+			rotationsCount: "1",
+		});
+	});
+
+	it("refuses a stale version, a time past the stored expiry, and a grant that is not active", async () => {
+		await activeWithCredential();
+		expect(await take({ expectedVersion: 3 })).toBeNull();
+		expect(await take({ nowMs: at(30 * DAY) })).toBeNull();
+		await pending("g-p");
+		expect(await take({ expectedVersion: 1, nowMs: at(MIN) }, "g-p")).toBeNull();
+		await activeWithCredential("g-r");
+		await client.requireReauthorization(grantKey("g-r"), credKey("g-r"), {
+			nowMs: at(MIN),
+			expectedVersion: 2,
+		});
+		expect(await take({ expectedVersion: 3 }, "g-r")).toBeNull();
+		expect(await take({}, "g-none")).toBeNull();
+		for (const id of ["g-1", "g-p", "g-r"]) {
+			expect((await fieldsOf(id))?.rotationsSince, id).toBeUndefined();
+		}
+		expect(await redis.exists(grantKey("g-none"))).toBe(0);
+	});
+
+	it("refuses a bound it cannot count with, in the script as well, and writes nothing", async () => {
+		await activeWithCredential();
+		for (const over of [
+			{ limit: 0 },
+			{ limit: -1 },
+			{ limit: Number.NaN },
+			{ windowMs: 0 },
+			{ windowMs: -1 },
+			{ windowMs: Number.NaN },
+			{ windowMs: Number.POSITIVE_INFINITY },
+		]) {
+			expect(await take(over), JSON.stringify(over)).toBeNull();
+		}
+		expect((await fieldsOf())?.rotationsSince).toBeUndefined();
+	});
+
+	it("reads a window it cannot parse as none, and opens a new one over it", async () => {
+		await activeWithCredential();
+		let version = 2;
+		for (const [since, count] of [
+			[String(at(DAY)), "1e0"],
+			[String(at(DAY)), "-1"],
+			[`${at(DAY)}.5`, "1"],
+			[String(at(DAY)), undefined],
+		] as const) {
+			await redis.hdel(grantKey("g-1"), "rotationsSince", "rotationsCount");
+			await redis.hset(grantKey("g-1"), {
+				rotationsSince: since,
+				...(count === undefined ? {} : { rotationsCount: count }),
+			});
+			expect(
+				await take({ nowMs: at(DAY + MIN), limit: 1, expectedVersion: version }),
+				`${since} ${count}`,
+			).toMatchObject({
+				rotationsSince: String(at(DAY + MIN)),
+				rotationsCount: "1",
+			});
+			version += 1;
+		}
+	});
+
+	it("is kept by every write but an activation, which clears it", async () => {
+		await activeWithCredential();
+		await take();
+		const kept = { rotationsSince: String(at(DAY)), rotationsCount: "1" };
+		await client.touch(grantKey("g-1"), at(DAY + MIN));
+		await client.noteRefreshFailure(grantKey("g-1"), {
+			nowMs: at(DAY + MIN),
+			expectedVersion: 3,
+			atMs: at(DAY + MIN),
+			kind: "unavailable",
+			rowMs: 300_000,
+			retryAfterSeconds: undefined,
+			upstreamCode: undefined,
+		});
+		await client.nameIntent(grantKey("g-1"), {
+			nowMs: at(DAY + MIN),
+			handle: JSON.stringify("h-re"),
+			intentExpiresAtMs: at(DAY + 10 * MIN),
+		});
+		await client.retireIntent(grantKey("g-1"), { nowMs: at(DAY + MIN) });
+		expect(
+			await client.replaceCredentials(grantKey("g-1"), credKey("g-1"), {
+				nowMs: at(DAY + MIN),
+				expectedVersion: 3,
+				credential: "v2.sealed-2",
+				ineligible: null,
+			}),
+		).toMatchObject({ version: "4", ...kept });
+		expect(
+			await client.requireReauthorization(grantKey("g-1"), credKey("g-1"), {
+				nowMs: at(DAY + MIN),
+				expectedVersion: 4,
+			}),
+		).toMatchObject({ status: "reauthorization_required", ...kept });
+		await client.nameIntent(grantKey("g-1"), {
+			nowMs: at(DAY + MIN),
+			handle: JSON.stringify("h-renew"),
+			intentExpiresAtMs: at(DAY + 10 * MIN),
+		});
+		const renewed = await client.activate(grantKey("g-1"), credKey("g-1"), {
+			nowMs: at(DAY + 2 * MIN),
+			handle: JSON.stringify("h-renew"),
+			authorization: authorization(),
+			expiresAtMs: at(30 * DAY),
+			identityRevision: "identity-1",
+			upstreamIssuer: "https://dev-1.okta.test",
+			upstreamSubject: "00u-alice",
+			credential: "v2.sealed-3",
+		});
+		expect(renewed?.status).toBe("active");
+		expect(renewed?.rotationsSince).toBeUndefined();
+		expect(renewed?.rotationsCount).toBeUndefined();
+	});
+
+	it("is kept by a revocation, which keeps what the grant was", async () => {
+		await activeWithCredential();
+		await take();
+		expect(
+			await client.revoke(grantKey("g-1"), credKey("g-1"), { atMs: at(DAY + MIN), by: "client" }),
+		).toMatchObject({ status: "revoked", rotationsSince: String(at(DAY)), rotationsCount: "1" });
+	});
+});
+
+describe("refundRotation", () => {
+	const refund = (over: Partial<RefundFederationGrantRotationInput> = {}, id = "g-1") => {
+		return client.refundRotation(grantKey(id), {
+			nowMs: at(DAY + MIN),
+			expectedVersion: 2,
+			sinceMs: at(DAY),
+			...over,
+		});
+	};
+	const rawOf = (id = "g-1") => redis.hgetall(grantKey(id));
+
+	it("reads a window opened outside the Date range as none, as the take does, and writes nothing", async () => {
+		await activeWithCredential();
+		const since = 9_000_000_000_000_000;
+		await redis.hset(grantKey("g-1"), { rotationsSince: String(since), rotationsCount: "1" });
+		const before = await rawOf();
+		expect(await refund({ sinceMs: since })).toBeNull();
+		expect(await rawOf()).toEqual(before);
+	});
+
+	it("refuses a stored version whose successor is not a safe integer, and writes nothing", async () => {
+		// 2^53 a bump could not move; the largest safe integer it would move to
+		// a version no reader accepts.
+		for (const version of [2 ** 53, Number.MAX_SAFE_INTEGER]) {
+			await activeWithCredential();
+			await redis.hset(grantKey("g-1"), {
+				version: String(version),
+				rotationsSince: String(at(DAY)),
+				rotationsCount: "2",
+			});
+			const before = await rawOf();
+			expect(await refund({ expectedVersion: version }), String(version)).toBeNull();
+			expect(await refund({ expectedVersion: version }), String(version)).toBeNull();
+			expect(await rawOf(), String(version)).toEqual(before);
+			await redis.del(grantKey("g-1"), credKey("g-1"));
+		}
+	});
+});
+
+describe("the stored version, as every script reads it", () => {
+	const MAX = Number.MAX_SAFE_INTEGER;
+	const rawOf = (id = "g-1") => redis.hgetall(grantKey(id));
+	/** A stored version the TypeScript reader does not read as a safe integer, though Lua's tonumber does. */
+	const LOOSE = ["2.0", "0x2", " 2", "2e0", "+2"];
+	const activateInput = () => ({
+		nowMs: at(2 * MIN),
+		handle: JSON.stringify("h-g-1"),
+		authorization: authorization(),
+		expiresAtMs: at(30 * DAY),
+		identityRevision: "identity-1",
+		upstreamIssuer: "https://dev-1.okta.test",
+		upstreamSubject: "00u-alice",
+		credential: "v2.sealed-2",
+	});
+	const take = (expectedVersion: number) => {
+		return client.takeRotation(grantKey("g-1"), {
+			nowMs: at(DAY),
+			expectedVersion,
+			limit: 2,
+			windowMs: 3_600_000,
+		});
+	};
+	const stamp = (expectedVersion: number) =>
+		client.noteRefreshFailure(grantKey("g-1"), {
+			nowMs: at(DAY),
+			expectedVersion,
+			atMs: at(DAY),
+			kind: "unavailable",
+			rowMs: 300_000,
+			retryAfterSeconds: undefined,
+			upstreamCode: undefined,
+		});
+	const refund = (expectedVersion: number) => {
+		return client.refundRotation(grantKey("g-1"), {
+			nowMs: at(DAY),
+			expectedVersion,
+			sinceMs: at(DAY - MIN),
+		});
+	};
+	const guarded = {
+		takeRotation: take,
+		replaceCredentials: (expectedVersion: number) =>
+			client.replaceCredentials(grantKey("g-1"), credKey("g-1"), {
+				nowMs: at(DAY),
+				expectedVersion,
+				credential: "v2.sealed-2",
+				ineligible: null,
+			}),
+		requireReauthorization: (expectedVersion: number) =>
+			client.requireReauthorization(grantKey("g-1"), credKey("g-1"), {
+				nowMs: at(DAY),
+				expectedVersion,
+			}),
+	};
+
+	it("is refused by every guarded bump at the largest safe integer, whose successor no reader accepts, and nothing is written", async () => {
+		for (const [name, write] of Object.entries(guarded)) {
+			await activeWithCredential();
+			await redis.hset(grantKey("g-1"), "version", String(MAX));
+			const before = await rawOf();
+			expect(await write(MAX), name).toBeNull();
+			expect(await rawOf(), name).toStrictEqual(before);
+			expect(await redis.get(credKey("g-1")), name).toBe("v2.sealed-1");
+			await redis.del(grantKey("g-1"), credKey("g-1"));
+		}
+	});
+
+	it("is refused by a take one below the largest safe integer: the version it would answer could not be bumped by the attempt's next write", async () => {
+		await activeWithCredential();
+		await redis.hset(grantKey("g-1"), "version", String(MAX - 1));
+		const before = await rawOf();
+		expect(await take(MAX - 1)).toBeNull();
+		expect(await rawOf()).toStrictEqual(before);
+	});
+
+	it("is refused by an activation at the largest safe integer, and by one that does not read as a safe integer, and nothing is written", async () => {
+		for (const version of [String(MAX), ...LOOSE]) {
+			await pending();
+			await redis.hset(grantKey("g-1"), "version", version);
+			const before = await rawOf();
+			expect(
+				await client.activate(grantKey("g-1"), credKey("g-1"), activateInput()),
+				version,
+			).toBeNull();
+			expect(await rawOf(), version).toStrictEqual(before);
+			expect(await redis.exists(credKey("g-1")), version).toBe(0);
+			await redis.del(grantKey("g-1"), credKey("g-1"));
+		}
+	});
+
+	it("does not stop a revocation at the largest safe integer, or at one that does not read as one: the grant ends, its version left as it was", async () => {
+		// A revocation has no version to match and always wins: a version it
+		// cannot bump to one the reader accepts is not a reason to leave the
+		// credential at rest.
+		for (const version of [String(MAX), "2.0"]) {
+			await activeWithCredential();
+			await redis.hset(grantKey("g-1"), "version", version);
+			const fields = await client.revoke(grantKey("g-1"), credKey("g-1"), {
+				atMs: at(DAY),
+				by: "operator",
+			});
+			expect(fields, version).toMatchObject({
+				status: "revoked",
+				version,
+				revokedBy: "operator",
+				revokedAt: String(at(DAY)),
+			});
+			expect(await redis.exists(credKey("g-1")), version).toBe(0);
+			await redis.del(grantKey("g-1"), credKey("g-1"));
+		}
+	});
+
+	it("matches the expected version only when it reads as the reader reads it", async () => {
+		const compared = { ...guarded, noteRefreshFailure: stamp, refundRotation: refund };
+		for (const [name, write] of Object.entries(compared)) {
+			// "2" first: the same write lands on the canonical spelling, so each
+			// refusal below is the spelling's.
+			for (const version of ["2", ...LOOSE]) {
+				const label = `${name} ${JSON.stringify(version)}`;
+				await activeWithCredential();
+				await redis.hset(grantKey("g-1"), {
+					version,
+					rotationsSince: String(at(DAY - MIN)),
+					rotationsCount: "1",
+				});
+				const before = await rawOf();
+				if (version === "2") {
+					expect(await write(2), label).not.toBeNull();
+				} else {
+					expect(await write(2), label).toBeNull();
+					expect(await rawOf(), label).toStrictEqual(before);
+					expect(await redis.get(credKey("g-1")), label).toBe("v2.sealed-1");
+				}
+				await redis.del(grantKey("g-1"), credKey("g-1"));
+			}
+		}
 	});
 });
 

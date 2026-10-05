@@ -42,6 +42,22 @@ local function fg_num(v)
   if v == false or v == nil then return nil end
   return tonumber(v)
 end
+-- A stored integer read as the TypeScript reader reads one: a string of
+-- digits within the safe-integer range, and not what tonumber also takes
+-- ("-1.5", "1e21", " 12").
+local function fg_int(v)
+  if type(v) ~= 'string' or string.match(v, '^%-?%d+$') == nil then return nil end
+  local n = tonumber(v)
+  if n == nil or n > 9007199254740991 or n < -9007199254740991 then return nil end
+  return n
+end
+-- A stored version a write may bump: read as fg_int reads it, and with a
+-- safe successor, so the bump moves it to a version the reader accepts.
+local function fg_bumpable(v)
+  local n = fg_int(v)
+  if n == nil or n >= 9007199254740991 then return nil end
+  return n
+end
 local function fg_fields(flat)
   local t = {}
   for i = 1, #flat, 2 do t[flat[i]] = flat[i + 1] end
@@ -231,8 +247,8 @@ return redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. string.format('%.0
  * none), so a renewal already superseded or retired by a subject-wide revocation can never be
  * activated. Unless `pending`, the stored expiry must not have passed, and the identity revision
  * and upstream account must match the recorded ones: a renewal never re-points a grant at
- * another account. The authorization is replaced whole, taking its marker and failure stamp with
- * it; a recorded use stays.
+ * another account. The authorization is replaced whole, taking its marker, failure stamp and
+ * rotation budget with it; a recorded use stays.
  */
 const LUA_FG_ACTIVATE = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -253,12 +269,13 @@ if g['authorization'] ~= nil then
   if g['upstreamIssuer'] ~= ARGV[6] then return {0} end
   if g['upstreamSubject'] ~= ARGV[7] then return {0} end
 end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 if version == nil then return {0} end
 redis.call('HDEL', KEYS[1],
   'intentHandle', 'intentExpiresAt', 'ineligible',
   'failureAt', 'failureKind', 'failureCount',
-  'failureRetryAfterSeconds', 'failureUpstreamCode')
+  'failureRetryAfterSeconds', 'failureUpstreamCode',
+  'rotationsSince', 'rotationsCount')
 redis.call('HSET', KEYS[1],
   'status', 'active',
   'version', string.format('%.0f', version + 1),
@@ -294,7 +311,7 @@ local expected = tonumber(ARGV[2])
 if now == nil or expected == nil then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 if version == nil or version ~= expected then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
@@ -334,7 +351,7 @@ local expected = tonumber(ARGV[2])
 if now == nil or expected == nil then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 if version == nil or version ~= expected then return {0} end
 redis.call('HDEL', KEYS[1],
   'ext', 'failureAt', 'failureKind', 'failureCount',
@@ -362,18 +379,11 @@ const LUA_FG_REVOKE = `${LUA_FG_PRELUDE}
 -- intent; a text that does not parse gives no horizon, which is the retention
 -- case below.
 --
--- Every number is read as the TypeScript reader reads it — a string of digits
--- within the safe-integer range, and the retention not negative — and not
--- with tonumber, which takes "-1.5" and "1e21": the reader answers nothing for
--- a record holding such a value, and a horizon computed from it here would
--- refuse to end exactly that record. Such a value gives no horizon, and the
--- revocation proceeds.
-local function fg_int(v)
-  if type(v) ~= 'string' or string.match(v, '^%-?%d+$') == nil then return nil end
-  local n = tonumber(v)
-  if n == nil or n > 9007199254740991 or n < -9007199254740991 then return nil end
-  return n
-end
+-- Every number is read as the TypeScript reader reads it (fg_int), and the
+-- retention not negative: the reader answers nothing for a record holding
+-- such a value, and a horizon computed from it here would refuse to end
+-- exactly that record. Such a value gives no horizon, and the revocation
+-- proceeds.
 local function fg_revoke_horizon(g)
   local retention = fg_int(g['retentionMs'])
   if retention == nil or retention < 0 then return nil end
@@ -401,7 +411,7 @@ if g['status'] == 'revoked' then return {0} end
 -- the state an operator reaches for this in.
 local horizon = fg_revoke_horizon(g)
 if horizon ~= nil and not (at < horizon) then return {0} end
-local version = fg_num(g['version'])
+local version = fg_bumpable(g['version'])
 local wasPending = g['status'] == 'pending'
 redis.call('HDEL', KEYS[1],
   'intentHandle', 'intentExpiresAt', 'ext',
@@ -411,9 +421,10 @@ redis.call('HSET', KEYS[1],
   'status', 'revoked',
   'revokedBy', ARGV[2],
   'revokedAt', ARGV[1])
--- A version that is not a number is left as it is: it cannot be bumped, and
--- refusing over it would be refusing the revocation. The caller is told the
--- write could not be represented, and the credential is gone all the same.
+-- A version that cannot be bumped (fg_bumpable) is left as it is: refusing
+-- over it would be refusing the revocation, and the credential is gone all
+-- the same. One the reader does not read tells the caller the write could not
+-- be represented.
 if version ~= nil then
   redis.call('HSET', KEYS[1], 'version', string.format('%.0f', version + 1))
 end
@@ -445,7 +456,7 @@ local row = tonumber(ARGV[5])
 if now == nil or expected == nil or failedAt == nil then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
-local version = fg_num(g['version'])
+local version = fg_int(g['version'])
 if version == nil or version ~= expected then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
@@ -477,6 +488,79 @@ if ARGV[8] == '1' then redis.call('HSET', KEYS[1], 'failureUpstreamCode', ARGV[9
 return {1, redis.call('HGETALL', KEYS[1])}
 `;
 
+/**
+ * Takes one rotation from the grant's budget. `KEYS[1]` = record; `ARGV` = the caller's clock,
+ * the expected version, the limit, the window. On an `active` grant at that version, before its
+ * stored expiry: a new window when there is none or the clock is at or past its end, else one
+ * more below the limit, else refused. Writes only `rotationsSince`, `rotationsCount` and the
+ * version, bumped once in the same step: no deadline moved. A window whose fields do not read as
+ * the TypeScript reader reads them is none, there and here alike; one counted down to 0 is still
+ * a window.
+ */
+const LUA_FG_TAKE_ROTATION = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+local window = tonumber(ARGV[4])
+if now == nil or expected == nil or limit == nil or window == nil then return {0} end
+if not (limit >= 1) or not (window > 0) or window == math.huge then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+local version = fg_bumpable(g['version'])
+if version == nil or version ~= expected then return {0} end
+-- The version this answers guards the attempt's next write, which bumps it:
+-- it must be bumpable itself.
+if version + 1 >= 9007199254740991 then return {0} end
+local expiresAt = fg_num(g['expiresAtMs'])
+if expiresAt == nil or not (now < expiresAt) then return {0} end
+local since = fg_int(g['rotationsSince'])
+local count = fg_int(g['rotationsCount'])
+-- The Date range: a since past it is no instant the reader can answer.
+if since ~= nil and (since > 8640000000000000 or since < -8640000000000000) then since = nil end
+if since == nil or count == nil or count < 0 or not (now < since + window) then
+  since = now
+  count = 1
+elseif count < limit then
+  count = count + 1
+else
+  return {0}
+end
+redis.call('HSET', KEYS[1],
+  'rotationsSince', string.format('%.0f', since),
+  'rotationsCount', string.format('%.0f', count),
+  'version', string.format('%.0f', version + 1))
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
+/**
+ * Gives back one rotation. `KEYS[1]` = record; `ARGV` = the caller's clock, the expected
+ * version, the window's opening. On an `active` grant at that version, before its stored
+ * expiry, whose window opened at exactly that instant and holds at least one: the count down by
+ * one and the version bumped, which makes it once per attempt. Writes only `rotationsCount` and
+ * `version`: no deadline moved. The window's fields are read as the take reads them.
+ */
+const LUA_FG_REFUND_ROTATION = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+local opened = tonumber(ARGV[3])
+if now == nil or expected == nil or opened == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+local version = fg_bumpable(g['version'])
+if version == nil or version ~= expected then return {0} end
+local expiresAt = fg_num(g['expiresAtMs'])
+if expiresAt == nil or not (now < expiresAt) then return {0} end
+local since = fg_int(g['rotationsSince'])
+local count = fg_int(g['rotationsCount'])
+-- The Date range: a since past it is no window, as the take reads it.
+if since ~= nil and (since > 8640000000000000 or since < -8640000000000000) then since = nil end
+if since == nil or since ~= opened or count == nil or count < 1 then return {0} end
+redis.call('HSET', KEYS[1],
+  'rotationsCount', string.format('%.0f', count - 1),
+  'version', string.format('%.0f', version + 1))
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
 export const FG_CREATE = defineScript(LUA_FG_CREATE);
 export const FG_SNAPSHOT = defineScript(LUA_FG_SNAPSHOT);
 export const FG_NAME_INTENT = defineScript(LUA_FG_NAME_INTENT);
@@ -491,3 +575,5 @@ export const FG_REPLACE = defineScript(LUA_FG_REPLACE);
 export const FG_REQUIRE_REAUTH = defineScript(LUA_FG_REQUIRE_REAUTH);
 export const FG_REVOKE = defineScript(LUA_FG_REVOKE);
 export const FG_NOTE_FAILURE = defineScript(LUA_FG_NOTE_FAILURE);
+export const FG_TAKE_ROTATION = defineScript(LUA_FG_TAKE_ROTATION);
+export const FG_REFUND_ROTATION = defineScript(LUA_FG_REFUND_ROTATION);

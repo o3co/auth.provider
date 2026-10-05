@@ -155,12 +155,12 @@ export function isMfaFactorUpdateWritten(
  * conditional-write convention for a set (docs/adapter-surface.md,
  * "Conditional writes"); what follows is only what it means here.
  *
- * - The membership writes are `createIf`, `removeIf`, `create`, `remove` and
+ * - The membership writes are `createIf`, `removeIf` and
  *   `removeAllForSubject`: each issues a fresh generation. `update` is a
- *   member's own update, fenced by the record's `version`, and keeps it. A
- *   membership decision that read a record's data is therefore not fenced
- *   against an update of that record, which holds only while every factor's
- *   next data keeps the three things `MfaVerification.next` names.
+ *   member's own update, fenced by the record's `version`, and keeps it. A membership decision that read a
+ *   record's data is therefore not fenced against an update of that record,
+ *   which holds only while every factor's next data keeps the three things
+ *   `MfaVerification.next` names.
  * - `removeAllForSubject` (account deletion, the operator reset) is
  *   unconditional and always wins, yet it is one atomic step serialised with
  *   `createIf` and `removeIf`, so neither interleaves with it (rule 1). It
@@ -184,10 +184,6 @@ export function isMfaFactorUpdateWritten(
  *
  * In SQL, the set's row is the subject's (docs/adapter-surface.md, "A SQL
  * store"), and `update` takes only its factor's row.
- *
- * `listVersioned`, `createIf` and `removeIf` are optional while the bundled
- * adapters gain them, and become required; `create` and `remove` then leave
- * the port.
  */
 export interface MfaFactorStore {
 	readonly kind: string;
@@ -201,14 +197,14 @@ export interface MfaFactorStore {
 	 * and no records while its tombstone stands. Read it with
 	 * {@link readMfaFactorSet}.
 	 */
-	listVersioned?(subject: string): Promise<VersionedSet<MfaFactorRecord>>;
+	listVersioned(subject: string): Promise<VersionedSet<MfaFactorRecord>>;
 	/**
 	 * Insert `record` only while its subject's set is at `expected`; `null`:
 	 * only while the set is absent, which makes a first binding atomic against
 	 * a concurrent one. A `(subject, id)` already held is a `conflict`, never
 	 * overwritten. Read the answer with `readConditionalCreateAnswer`.
 	 */
-	createIf?(
+	createIf(
 		record: MfaFactorRecord,
 		expected: StoreGeneration | null,
 	): Promise<ConditionalCreateAnswer>;
@@ -217,17 +213,11 @@ export interface MfaFactorStore {
 	 * stays, empty when that was its last record. Read the answer with
 	 * `readConditionalSetRemoveAnswer`.
 	 */
-	removeIf?(
+	removeIf(
 		subject: string,
 		id: string,
 		expected: StoreGeneration,
 	): Promise<ConditionalSetRemoveAnswer>;
-	/**
-	 * Insert a record, unconditionally, issuing a new generation. Rejects a
-	 * `(subject, id)` already present, and leaves that record and the
-	 * generation as they were.
-	 */
-	create(record: MfaFactorRecord): Promise<void>;
 	/**
 	 * Compare-and-set on `version`: replaces `data`, `label` and `lastUsedAt`
 	 * and bumps `version`, only if the record is still at `expectedVersion`.
@@ -242,8 +232,6 @@ export interface MfaFactorStore {
 		expectedVersion: number,
 		next: MfaFactorRecordUpdate,
 	): Promise<MfaFactorRecord | null>;
-	/** Remove one record, unconditionally. Idempotent. A new generation when it removed one; a set it empties stays as its tombstone. */
-	remove(subject: string, id: string): Promise<void>;
 	/**
 	 * Remove every record of `subject` — account deletion, the operator reset —
 	 * unconditionally: it always wins, as one atomic step serialised with the

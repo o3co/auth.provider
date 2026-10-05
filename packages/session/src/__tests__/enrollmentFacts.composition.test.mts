@@ -38,6 +38,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	federationTypeForTests,
 	makeValidAppConfig,
 	withFederation,
 	withInsecureSessionCookie,
@@ -69,18 +70,8 @@ const stubProvider: FederationProvider = {
 	}),
 };
 
-const stubFederationModule = defineModule({
-	name: "test:stub-federation",
-	contributes: {
-		federations: { stub: () => stubProvider },
-		federationRedirectPolicies: {
-			stub: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	},
-});
+/** The federation type `stub`, which registers `stubProvider` for the entry `stub`. */
+const stubFederationModule = federationTypeForTests("stub", { provider: () => stubProvider });
 
 let disposeLast: (() => Promise<void>) | undefined;
 
@@ -112,6 +103,7 @@ async function boot(user: User, created: string[] = []) {
 	// boot requires of the variables the package's modules declare renamed.
 	const config = withSessionCaptures(
 		withFederation(withInsecureSessionCookie(makeValidAppConfig()), "stub", {
+			type: "stub",
 			callbackURL: CALLBACK_URL,
 		}),
 	) as unknown as AppConfig;

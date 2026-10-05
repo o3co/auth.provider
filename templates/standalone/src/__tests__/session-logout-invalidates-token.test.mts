@@ -90,7 +90,7 @@ const config: AppConfig & Record<string, unknown> = {
 	},
 	// The session requirements this composition expects, as the shipped
 	// `application.conf` does (ADR 2026-09-28-session-admission): none.
-	...coreConfigForTests({ federations: { google: { enabled: false } } }),
+	...coreConfigForTests({ federations: { google: { enabled: false, type: "google" } } }),
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
@@ -124,7 +124,11 @@ const config: AppConfig & Record<string, unknown> = {
 } as unknown as AppConfig;
 
 /** What phase one hands `buildModules`: the configuration, and every store in process. */
-const switches = { ...config, adapters: inProcessAdapters() } as unknown as Switches;
+const switches = {
+	...config,
+	adapters: inProcessAdapters(),
+	mfaMode: "off",
+} as unknown as Switches;
 
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",
