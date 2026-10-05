@@ -336,9 +336,9 @@ Module-level messages that arrive wrapped in a factory failure:
   refresh token included. Set `maxmemory-policy` `noeviction`, or give the
   store a Redis of its own (`packages/redis/src/internal/federation-token-eviction.mts`).
   A policy it cannot read or does not know is an info line instead (§4).
-- The session lifecycle store on Redis: the module that provides
-  `sessionLifecycleStore` from `createRedisSessionLifecycleStore` reads the
-  server's `maxmemory-policy` before it provides the store
+- The session lifecycle store on Redis: `redisSessionStoresModule` reads the
+  server's `maxmemory-policy` before it provides `sessionLifecycleStore`, once
+  a module reads that slot
   (`checkSessionLifecycleEviction`). A `volatile-*` or `allkeys-*` policy is
   refused with a `RedisStoreEvictableError` `cause` whose `reason` is
   `session-lifecycle-store-evictable` and whose message names the policy: an

@@ -253,7 +253,7 @@ export {
 } from "./replay-seen-set.mjs";
 // SessionLifecycleStore: a session's state, participants and close work in
 // one key per session, spread over fixed shards that each keep a closing
-// index on the records' slot. No module wires it yet.
+// index on the records' slot. `redisSessionStoresModule` provides it.
 export {
 	createRedisSessionLifecycleStore,
 	DEFAULT_REDIS_SESSION_LIFECYCLE_KEY_PREFIX,
