@@ -854,6 +854,22 @@ describe("upstreamAuthTime — when the upstream last authenticated a federated 
 			expect(none === undefined ? true : Object.hasOwn(none, "upstreamAuthTime")).toBe(false);
 		});
 
+		it("refuses one on a password primary, a Date or null, naming the field", () => {
+			for (const upstreamAuthTime of [UPSTREAM, null]) {
+				expect(() =>
+					recordableSessionAuthentication(
+						"sid-1",
+						{ ...passwordSessionAuthentication().authentication, upstreamAuthTime },
+						NOW_MS,
+					),
+				).toThrow(
+					new RangeError(
+						"UserSession sid-1: authentication.upstreamAuthTime must be a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined — undefined for a password primary",
+					),
+				);
+			}
+		});
+
 		it.each([
 			["a string", UPSTREAM.toISOString()],
 			["a number", UPSTREAM.getTime()],
@@ -868,7 +884,7 @@ describe("upstreamAuthTime — when the upstream last authenticated a federated 
 				recordableSessionAuthentication("sid-1", { ...FEDERATED, upstreamAuthTime }, NOW_MS),
 			).toThrow(
 				new RangeError(
-					"UserSession sid-1: authentication.upstreamAuthTime must be a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined",
+					"UserSession sid-1: authentication.upstreamAuthTime must be a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined — undefined for a password primary",
 				),
 			);
 		});
@@ -892,12 +908,30 @@ describe("upstreamAuthTime — when the upstream last authenticated a federated 
 
 		it.each([
 			["a string", UPSTREAM.toISOString()],
+			["a number", UPSTREAM.getTime()],
 			["an Invalid Date", new Date(Number.NaN)],
 			["a date before the epoch", new Date(-1)],
 		])("cannot tell a session whose stored one is %s", (_label, upstreamAuthTime) => {
 			const session = recorded(["fed"], { ...FEDERATED, upstreamAuthTime } as never);
 			expect(sessionAuthentication(session)).toBeUndefined();
 			expect(vouchedAmr(session)).toEqual([]);
+		});
+
+		it("cannot tell a password session that records one, a Date or null: only a federation has an upstream", () => {
+			for (const upstreamAuthTime of [UPSTREAM, null]) {
+				const session = recorded(["pwd"], {
+					...passwordSessionAuthentication().authentication,
+					upstreamAuthTime,
+				});
+				expect(sessionAuthentication(session)).toBeUndefined();
+				expect(vouchedAmr(session)).toEqual([]);
+				expect(sessionFreshness({ ...session, authTime: AUTH })).toBeUndefined();
+			}
+		});
+
+		it("keeps null in the requirement's input", () => {
+			const session = recorded(["fed"], { ...FEDERATED, upstreamAuthTime: null });
+			expect(requirementSession(session)?.authentication?.upstreamAuthTime).toBeNull();
 		});
 
 		it("is kept by what a second factor makes of the session, and by the requirement's input", () => {

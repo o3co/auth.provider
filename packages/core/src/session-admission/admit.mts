@@ -27,6 +27,7 @@ import {
 	PASSWORD_AMR,
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
@@ -735,11 +736,20 @@ export function establishWithoutAsking(
 		throw new RangeError("establishWithoutAsking: trusted must be true or false");
 	}
 	const { upstreamAuthTime, callbackMeetsFreshness } = login;
+	// Refused here, before the callback spends anything, rather than by the
+	// store's `create`: an instant further ahead than hosts' clocks drift is
+	// no upstream clock's reading.
 	if (
 		upstreamAuthTime !== undefined &&
-		!(upstreamAuthTime instanceof Date && Number.isFinite(upstreamAuthTime.getTime()))
+		!(
+			upstreamAuthTime instanceof Date &&
+			Number.isFinite(upstreamAuthTime.getTime()) &&
+			upstreamAuthTime.getTime() <= Date.now() + DEFAULT_CLOCK_SKEW_MS
+		)
 	) {
-		throw new RangeError("establishWithoutAsking: upstreamAuthTime must be a valid date or absent");
+		throw new RangeError(
+			"establishWithoutAsking: upstreamAuthTime must be a valid date no further ahead than hosts' clocks drift, or absent",
+		);
 	}
 	if (callbackMeetsFreshness !== undefined && typeof callbackMeetsFreshness !== "boolean") {
 		throw new RangeError(
