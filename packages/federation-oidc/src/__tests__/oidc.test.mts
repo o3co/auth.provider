@@ -614,3 +614,70 @@ describe("createOidcProvider", () => {
 		});
 	});
 });
+
+describe("the freshness ask and the upstream's authentication instant", () => {
+	const ask = (
+		provider: Awaited<ReturnType<typeof createOidcProvider>>,
+		freshness: { readonly login?: true; readonly maxAgeSeconds?: number } | undefined,
+	) =>
+		provider.buildAuthorizationUrl({
+			redirectUri: CALLBACK,
+			state: "state-1",
+			codeVerifier: VERIFIER,
+			nonce: "n",
+			...(freshness === undefined ? {} : { ask: freshness }),
+		});
+
+	it("sends prompt=login and max_age when asked, and neither when not", async () => {
+		const { provider } = await build();
+		const none = ask(provider, undefined).searchParams;
+		expect(none.has("prompt")).toBe(false);
+		expect(none.has("max_age")).toBe(false);
+		const both = ask(provider, { login: true, maxAgeSeconds: 300 }).searchParams;
+		expect(both.get("prompt")).toBe("login");
+		expect(both.get("max_age")).toBe("300");
+		const maxAgeOnly = ask(provider, { maxAgeSeconds: 0 }).searchParams;
+		expect(maxAgeOnly.has("prompt")).toBe(false);
+		expect(maxAgeOnly.get("max_age")).toBe("0");
+		expect(ask(provider, {}).searchParams.has("prompt")).toBe(false);
+	});
+
+	it("refuses a max_age that is not a whole number of seconds, at least 0", async () => {
+		const { provider } = await build();
+		for (const maxAgeSeconds of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(() => ask(provider, { maxAgeSeconds }), String(maxAgeSeconds)).toThrow(RangeError);
+		}
+	});
+
+	it("reports the verified id_token's auth_time as authTime", async () => {
+		const { idp, provider } = await build();
+		idp.nonce = "nonce-1";
+		const authTime = Math.floor(Date.now() / 1000) - 120;
+		idp.idTokenClaims = { auth_time: authTime };
+		expect((await exchange(provider)).authTime).toEqual(new Date(authTime * 1000));
+	});
+
+	it("reports no authTime when the id_token carries no auth_time, whatever UserInfo says", async () => {
+		const { idp, provider } = await build();
+		idp.nonce = "nonce-1";
+		idp.userinfoClaims = { auth_time: Math.floor(Date.now() / 1000) };
+		const profile = await exchange(provider);
+		expect(profile).not.toHaveProperty("authTime");
+	});
+
+	it("takes the id_token's auth_time over UserInfo's", async () => {
+		const { idp, provider } = await build();
+		idp.nonce = "nonce-1";
+		const authTime = Math.floor(Date.now() / 1000) - 3600;
+		idp.idTokenClaims = { auth_time: authTime };
+		idp.userinfoClaims = { auth_time: Math.floor(Date.now() / 1000) };
+		expect((await exchange(provider)).authTime).toEqual(new Date(authTime * 1000));
+	});
+
+	it("fails the login on an auth_time far ahead of the clock", async () => {
+		const { idp, provider } = await build();
+		idp.nonce = "nonce-1";
+		idp.idTokenClaims = { auth_time: Math.floor(Date.now() / 1000) + 3600 };
+		await expect(exchange(provider)).rejects.toThrow(/auth_time/);
+	});
+});

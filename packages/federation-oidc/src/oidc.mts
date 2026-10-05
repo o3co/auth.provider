@@ -25,6 +25,7 @@ import {
 	type DelegatedTokens,
 	type EndSessionRequest,
 	type EndSessionResult,
+	type FederationAsk,
 	type FederationClientSecret,
 	type FederationProfile,
 	type FederationProvider,
@@ -34,6 +35,7 @@ import {
 	type MappedClaims,
 	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
 	type RefreshedTokens,
+	readUpstreamAuthTime,
 	type SupportsClaimMapping,
 	type SupportsDelegatedAuthorization,
 	type SupportsLogout,
@@ -290,6 +292,23 @@ async function resolveServerMetadata(
 		}
 	}
 	return metadata;
+}
+
+/**
+ * A freshness ask as OIDC Core §3.1.2.1 parameters: `prompt=login` and
+ * `max_age`. A `maxAgeSeconds` that is not a whole number of seconds, at
+ * least 0, is a `RangeError`.
+ */
+function askParameters(label: string, ask: FederationAsk | undefined): Record<string, string> {
+	if (ask === undefined) return {};
+	const { login, maxAgeSeconds } = ask;
+	if (maxAgeSeconds !== undefined && !(Number.isSafeInteger(maxAgeSeconds) && maxAgeSeconds >= 0)) {
+		throw new RangeError(`${label}: maxAgeSeconds must be a whole number of seconds, at least 0`);
+	}
+	return {
+		...(login === true ? { prompt: "login" } : {}),
+		...(maxAgeSeconds === undefined ? {} : { max_age: String(maxAgeSeconds) }),
+	};
 }
 
 export async function createOidcProvider(
@@ -578,6 +597,7 @@ export async function createOidcProvider(
 				code_challenge: codeChallenge(params.codeVerifier),
 				code_challenge_method: "S256",
 				nonce,
+				...askParameters(label, params.ask),
 			});
 		},
 
@@ -616,6 +636,13 @@ export async function createOidcProvider(
 			if (claims.at_hash !== undefined) {
 				verifyAtHash(label, tokens.id_token ?? "", tokens.access_token, claims.at_hash);
 			}
+			// From the verified id_token alone, never UserInfo: OIDC Core §3.1.2.1
+			// makes it REQUIRED once `max_age` was sent. Core judges freshness, so
+			// the library is not given `maxAge`, which would refuse a missing one.
+			const authTime = readUpstreamAuthTime(claims.auth_time);
+			if (authTime === "invalid") {
+				throw new Error(`${label}: id_token auth_time is not a usable instant (OIDC Core §2)`);
+			}
 
 			const info = useUserInfo
 				? await oidc.fetchUserInfo(configuration, tokens.access_token, sub)
@@ -636,6 +663,7 @@ export async function createOidcProvider(
 				// or none, the scope as sent (an empty one kept), the type.
 				...federationTokenSnapshot(tokens, obtainedAt),
 				...(groups ? { groups } : {}),
+				...(authTime === undefined ? {} : { authTime }),
 			};
 		},
 
