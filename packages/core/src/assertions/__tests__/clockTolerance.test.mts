@@ -59,6 +59,7 @@ const entryWith = (clockToleranceSeconds: unknown): AssertionIssuerEntry => ({
 	expiresAt: undefined,
 	profile: undefined,
 	clockToleranceSeconds: clockToleranceSeconds as number,
+	maxLifetimeSeconds: undefined,
 });
 
 const BAD: ReadonlyArray<readonly [string, unknown]> = [

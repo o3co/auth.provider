@@ -28,6 +28,10 @@
  * might have missed, which configuration bounds, so it is resolved.
  */
 
+import {
+	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
+	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
+} from "../assertions/lifetime.mjs";
 import type { SessionCookiePolicy } from "../browser-session/types.mjs";
 import {
 	type AccessTokenLifetime,
@@ -97,7 +101,11 @@ const slotLifetimeSeconds = (value: unknown, path: string): number => {
  * How long a sessions-only boundary must be retained, from this
  * deployment's lifetimes: the session, the refresh token and the access
  * token (nothing says an access token is shorter than a refresh token, and
- * `verifyJwt` consults the watermark for both). Each token counts with the
+ * `verifyJwt` consults the watermark for both), and a jwt-bearer assertion,
+ * which the grant holds to the boundary. An issuer entry's ceiling is not
+ * visible here, so an assertion counts at the limit any entry may name
+ * (`ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`, `exp − iat`), accepted the largest
+ * clock tolerance past its `exp`. Each token counts with the
  * clock tolerance it is accepted with past `exp` (`DEFAULT_CLOCK_SKEW_MS`),
  * not its nominal expiry; the revocation comparison's own allowance and a
  * second of rounding go on top.
@@ -158,10 +166,13 @@ export function resolveSubjectRevocationHorizonMs(
 		);
 	}
 	const sessionMs = slotLifetimeMs(sessionCookie.maxAgeMs, "sessionCookiePolicy.maxAgeMs");
+	const assertionMs =
+		(ASSERTION_MAX_LIFETIME_LIMIT_SECONDS + MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS) * 1000;
 	const longest = Math.max(
 		sessionMs,
 		refreshMs + DEFAULT_CLOCK_SKEW_MS,
 		accessMs + DEFAULT_CLOCK_SKEW_MS,
+		assertionMs,
 	);
 	// The revocation comparison's own allowance, and one whole second for the
 	// rounding a caller may have applied to the instant it stamped.
