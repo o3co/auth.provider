@@ -653,6 +653,7 @@
 . SignJwtOptions type
 . StepUpPage type
 . StoreGeneration type
+. SubjectBoundaryAnswer type
 . SubjectHandleReader type
 . SubjectRevocation type
 . SubjectRevocationFactory type
@@ -1115,6 +1116,7 @@
 . sessionEmailProofAnswer value
 . shownConfigValue value
 . stepUpReach value
+. subjectBoundaryCovers value
 . supportsClaimMapping value
 . supportsDelegatedAuthorization value
 . supportsLock value

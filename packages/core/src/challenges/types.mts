@@ -60,11 +60,14 @@ export interface ChallengeStore {
 	 * Non-mutating lookup; null for an absent or expired entry. Safe to call
 	 * repeatedly.
 	 *
-	 * Redis-backed adapters rebuild expiresAtMs from PTTL and may drift by
-	 * under 10 ms from the issued value. `ChallengeCeremony` uses it for the
-	 * following `markSeen` TTL and reports it on the `consumed` outcome, so a
-	 * reader of that outcome must tolerate the drift; the security window
-	 * stays TTL-bounded.
+	 * The expiresAtMs answered is never later than the issued expiry, beyond
+	 * the time the store took to record it, on the clock of the host that
+	 * reads it: an adapter that rebuilds it from a remaining life (Redis
+	 * `PTTL`) adds that life to an instant read before asking, so a slow
+	 * reply makes it earlier, never later. Hosts' clocks differ by what the
+	 * deployment's skew allowance covers.
+	 * `ChallengeCeremony` uses it for the following `markSeen` TTL and reports
+	 * it on the `consumed` outcome; the security window stays TTL-bounded.
 	 */
 	find(scope: string, value: string): Promise<Challenge | null>;
 
@@ -82,7 +85,8 @@ export interface ChallengeStore {
  *
  *   "consumed": deleted by this call and recorded in ReplaySeenSet. The
  *     caller MAY proceed with the protected operation. `expiresAtMs` is the
- *     expiry `ChallengeStore.find` answered for this challenge; a ceremony
+ *     expiry `ChallengeStore.find` answered for this challenge, never later
+ *     than the issued one (see `find`); a ceremony
  *     that cannot tell it omits it, so a reader MUST handle its absence.
  *   "replayed": consumed before (race loss, or an earlier call recorded in
  *     ReplaySeenSet). The caller MUST reject and treat it as a replay-attack

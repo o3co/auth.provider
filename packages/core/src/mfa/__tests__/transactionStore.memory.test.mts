@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { replicaUnsafeReason } from "#/boot/replica-safety.mjs";
 import { createApp, defineModule } from "#/index.mjs";
 import {
 	createMfaTransactionStoreFactory,
@@ -337,17 +338,17 @@ describe("the in-process MfaTransactionStore", () => {
 describe("memoryMfaTransactionStoreModule", () => {
 	it("declares itself replica-unsafe, saying what forks", () => {
 		expect(memoryMfaTransactionStoreModule.name).toBe("core-mfa-transaction-store-memory");
-		expect(memoryMfaTransactionStoreModule.replicaSafety?.unsafe).toBe(true);
-		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(
+		expect(memoryMfaTransactionStoreModule.replicaSafety).toMatchObject({ unsafe: true });
+		expect(replicaUnsafeReason(memoryMfaTransactionStoreModule)).toMatch(
 			/unknown to the replica that receives the verification/,
 		);
-		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(
+		expect(replicaUnsafeReason(memoryMfaTransactionStoreModule)).toMatch(
 			/the attempt limits and the lockout are counted per replica/,
 		);
 		// With a durable factor store beside it, a restart after an operator
 		// reset lets a password holder bind without the email proof (the MFA
 		// ADR's D25).
-		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(
+		expect(replicaUnsafeReason(memoryMfaTransactionStoreModule)).toMatch(
 			/a restart loses the email proof an operator reset required/,
 		);
 	});

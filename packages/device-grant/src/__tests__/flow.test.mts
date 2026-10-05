@@ -2244,6 +2244,52 @@ describe("a subject revocation between the approval and the poll", () => {
 		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
 	});
 
+	/** A memory store whose poll answers its approval with `instants` recorded. */
+	const answeringInstants = (instants: { approvedAtMs: number; authTimeMs: number }) => {
+		const inner = createMemoryDeviceCodeStore();
+		const poll = inner.poll as (...args: unknown[]) => Promise<unknown>;
+		return {
+			...inner,
+			poll: async (...args: unknown[]) => {
+				const answered = (await poll(...args)) as Record<string, unknown> | null;
+				return answered !== null && (answered.status === "approved" || answered.status === "ok")
+					? {
+							...answered,
+							authorization: { ...(answered.authorization as object), ...instants },
+						}
+					: answered;
+			},
+		} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+	};
+
+	it.each([
+		["approvedAtMs", APPROVAL + 1_101, 400],
+		["approvedAtMs", APPROVAL + 1_999, 400],
+		["approvedAtMs", APPROVAL + 2_000, 200],
+		["authTimeMs", APPROVAL + 1_101, 400],
+		["authTimeMs", APPROVAL + 1_999, 400],
+		["authTimeMs", APPROVAL + 2_000, 200],
+	] as const)(
+		"compares %s with the boundary in whole seconds, as token verification does (%i: %i)",
+		async (field, instantMs, status) => {
+			// The boundary 100 ms into a second: the allowance covers the next
+			// whole second, so an instant anywhere in it is refused.
+			const subjectRevocation = boundariesAsSet();
+			const harness = makeHarness({
+				subjectRevocation,
+				store: answeringInstants({
+					approvedAtMs: APPROVAL + 5_000,
+					authTimeMs: APPROVAL + 5_000,
+					[field]: instantMs,
+				}),
+			});
+			const deviceCode = await approvedDevice(harness);
+			await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 100), FAR);
+			const { result } = await harness.poll(deviceCode);
+			expect(result.status).toBe(status);
+		},
+	);
+
 	it("honours an approval whose session authenticated after the boundary", async () => {
 		const subjectRevocation = boundariesAsSet();
 		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);

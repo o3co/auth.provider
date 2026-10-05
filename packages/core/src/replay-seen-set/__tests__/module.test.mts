@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
+import { replicaUnsafeReason } from "#/boot/replica-safety.mjs";
 import { BootError, type BootstrapMap } from "#/boot/types.mjs";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { defineModule, type Module } from "#/modules/manifest/index.mjs";
@@ -166,9 +167,7 @@ describe("memoryReplaySeenSetModule", () => {
 		// assertion" would name something that does not fork. DPoP is named as
 		// conditional on being enabled: an operator with no DPoP module must
 		// not read DPoP as why their boot failed.
-		const reason = memoryReplaySeenSetModule.replicaSafety?.unsafe
-			? memoryReplaySeenSetModule.replicaSafety.reason
-			: "";
+		const reason = replicaUnsafeReason(memoryReplaySeenSetModule) ?? "";
 		expect(reason).toMatch(/a private_key_jwt client assertion/);
 		expect(reason).toMatch(/the jti of an ID-JAG \(jwt-bearer\) assertion/);
 		expect(reason).not.toMatch(/, a jwt-bearer assertion/);

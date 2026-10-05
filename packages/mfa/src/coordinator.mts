@@ -116,7 +116,7 @@
  */
 
 import {
-	coveredByRevocationBoundary,
+	claimCoveredByRevocationBoundary,
 	DEFAULT_CLOCK_SKEW_MS,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	getBoundMfaTransaction,
@@ -308,9 +308,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 	/**
 	 * Whether `tx`, a login's, was authenticated at or before its subject's
-	 * sessions boundary, the revocation skew allowed — a login without a
-	 * continuation is, under any boundary; a boundary that cannot be read, or
-	 * a time that cannot be compared, is the boundary's outage.
+	 * sessions boundary, the revocation skew allowed, in whole seconds as
+	 * `verifyJwt` compares `auth_time` — a login without a continuation is,
+	 * under any boundary; a boundary that cannot be read, or a time that
+	 * cannot be compared, is the boundary's outage.
 	 */
 	const pastSessionsBoundary = async (tx: MfaTransaction): Promise<boolean | MfaStoreOutage> => {
 		if (subjectRevocation === undefined) return false;
@@ -324,8 +325,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const authTimeMs = tx.continuation?.primary.authTimeMs;
 			return (
 				authTimeMs === undefined ||
-				coveredByRevocationBoundary(
-					new Date(authTimeMs),
+				claimCoveredByRevocationBoundary(
+					Math.floor(authTimeMs / 1000),
 					boundary,
 					DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 				)
