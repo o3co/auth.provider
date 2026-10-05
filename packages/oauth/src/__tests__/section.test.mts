@@ -457,13 +457,13 @@ describe("oauth.consentPage", () => {
 		},
 	);
 
-	it("refuses an empty url, naming the path and its variable", () => {
-		expect(issuesOf(withValue("consentPage.url", ""))).toEqual([
+	it.each(["", " ", "\t", "\n "])("refuses the url %j, naming the path and its variable", (url) => {
+		expect(issuesOf(withValue("consentPage.url", url))).toEqual([
 			{
 				path: "consentPage.url",
 				message:
-					'oauth.consentPage.url must not be empty: an exported-but-empty OAUTH_CONSENT_PAGE_URL reads as ""; unset it to keep the default, /consent, or set it to the consent page',
-				code: "too_small",
+					'oauth.consentPage.url must not be empty or blank: an exported-but-empty OAUTH_CONSENT_PAGE_URL reads as ""; unset it to keep the default, /consent, or set it to the consent page',
+				code: "custom",
 			},
 		]);
 	});

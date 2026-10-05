@@ -218,9 +218,11 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   (`ENDPOINTS_CONSENT_URL=` in a `.env`, a compose file or a ConfigMap) used
   to boot, and every client that
   is not first-party was then redirected to `?challenge=<id>` relative to
-  `/oauth/authorize` — a page that is not there. It now refuses the boot
-  (`config-validation-failed` at `oauth.consentPage.url`), as an empty
-  `session.loginPage.url` already did. Unset the variable to keep the
+  `/oauth/authorize` — a page that is not there. The old name is first
+  refused as renamed (`environment-variable-renamed`); renamed to
+  `OAUTH_CONSENT_PAGE_URL` and still exported empty or blank, it now refuses
+  the boot (`config-validation-failed` at `oauth.consentPage.url`), as an
+  empty `session.loginPage.url` already did. Unset the variable to keep the
   default, `/consent`, or set it to your consent page.
 - **BREAKING: `oauth {}` refuses a key it does not declare, at every level
   (#728).** Wherever the oauth module is installed (the standalone template

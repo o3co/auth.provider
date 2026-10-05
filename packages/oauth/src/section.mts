@@ -250,15 +250,15 @@ export const oauthSectionSchema = z
 		/**
 		 * The deployment-owned page a client that is not first-party is sent to
 		 * with `?challenge=<id>`: a path or an absolute URL, which may carry a
-		 * query of its own. Never empty: an empty url would send the browser to
+		 * query of its own. Never empty or blank: such a url would send the browser to
 		 * `?challenge=<id>` relative to `/oauth/authorize`, and an exported but
 		 * empty variable is a mistake to name, not an unset one to default.
 		 */
 		consentPage: z
 			.object({
-				url: z.string().min(1, {
+				url: z.string().refine((url) => url.trim() !== "", {
 					message:
-						'oauth.consentPage.url must not be empty: an exported-but-empty OAUTH_CONSENT_PAGE_URL reads as ""; unset it to keep the default, /consent, or set it to the consent page',
+						'oauth.consentPage.url must not be empty or blank: an exported-but-empty OAUTH_CONSENT_PAGE_URL reads as ""; unset it to keep the default, /consent, or set it to the consent page',
 				}),
 			})
 			.strict()
