@@ -731,6 +731,18 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens", () => {
 		expect(() => createWebAuthnGrant(deps as never)).toThrow(/tokenBindingSettings/);
 	});
 
+	it.each([
+		["null", null],
+		["an empty object", {}],
+		[
+			"a non-boolean rule",
+			{ dispatchPolicy: "intent-explicit", bindConfidentialClientRefreshTokens: "true" },
+		],
+	])("is never built with %s in the tokenBindingSettings slot, naming it", async (_label, slot) => {
+		const deps = { ...(await makeDeps()), tokenBindingSettings: slot };
+		expect(() => createWebAuthnGrant(deps as never)).toThrow(/tokenBindingSettings/);
+	});
+
 	it("emits no cnf when the request carried no binding", async () => {
 		const tokens = await issue(await makeDeps(), makeCtx(makeClient()));
 

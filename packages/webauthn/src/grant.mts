@@ -132,11 +132,16 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
 	const refreshTokenExpiresIn = tokenSettings.refreshTokenExpiresIn;
 	// The binding rule is read once, here, from core's `tokenBindingSettings` slot, which core
-	// fills frozen from `core.tokenBinding`: a deps built without it fails at composition too.
-	if (deps.tokenBindingSettings === undefined) {
-		throw new TypeError("webauthn grant: the tokenBindingSettings slot is not filled");
+	// fills frozen from `core.tokenBinding`: a deps built without it, or with a value whose
+	// rule is not a boolean, fails at composition too.
+	const bindConfidentialClients = (
+		deps.tokenBindingSettings as Partial<typeof deps.tokenBindingSettings> | null | undefined
+	)?.bindConfidentialClientRefreshTokens;
+	if (typeof bindConfidentialClients !== "boolean") {
+		throw new TypeError(
+			"webauthn grant: the tokenBindingSettings slot is not filled with a boolean bindConfidentialClientRefreshTokens",
+		);
 	}
-	const bindConfidentialClients = deps.tokenBindingSettings.bindConfidentialClientRefreshTokens;
 	// One logger for every line this grant writes. The module hands over the
 	// deployment's; a handler built without one still reports its outages.
 	const logger = deps.logger ?? consoleLogger;
