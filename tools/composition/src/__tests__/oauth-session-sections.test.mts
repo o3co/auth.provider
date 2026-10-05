@@ -19,8 +19,8 @@
  * through the template's own reading of the full set: the operator's layer
  * and environment read once, phase one's switches, then the layers over every
  * loaded package's `reference.conf` handed to boot. The grant switches sit in
- * the sections of the modules that install the grants: `oauth-session`'s,
- * which boot reads, and `oauth-authorization`'s, which phase one reads; the consent page and
+ * the sections of the modules that install the grants, `oauth-session` and
+ * `oauth-authorization`, which boot reads; the consent page and
  * the Client ID Metadata Documents in the oauth module's `oauth {}`; the
  * token-binding settings in core's `core {}`; the session cookie and its store
  * in the session store's `session-store {}`, whose storage phase one reads;
@@ -93,7 +93,7 @@ describe("the grant switches, read at their modules' sections", () => {
 		expect(parsedAt(composition, "oauth-session.enabled")).toBe(false);
 	});
 
-	it("oauth-authorization.grants.clientCredentials.enabled = false in the operator's layer: phase one leaves the grant out", async () => {
+	it("oauth-authorization.grants.clientCredentials.enabled = false in the operator's layer: the module's own section leaves the grant out", async () => {
 		const composition = await boot({
 			env: without("OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED"),
 			operatorHocon: "oauth-authorization.grants.clientCredentials.enabled = false\n",
@@ -107,7 +107,7 @@ describe("the grant switches, read at their modules' sections", () => {
 		);
 	});
 
-	it("OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED=true: phase one installs the grant", async () => {
+	it("OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED=true: the module's own section installs the grant", async () => {
 		const composition = await boot();
 
 		expect(await advertisedGrants(composition)).toContain("client_credentials");

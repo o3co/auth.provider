@@ -45,6 +45,7 @@ const OPTIONAL = [
 	"auditSink",
 	"userSessionStore",
 	"subjectRevocation",
+	"sessionLifecycleStore",
 	// The one CSRF policy: required once the grant is enabled.
 	"csrfGuard",
 	// Consulted by the grant at the poll, when wired.

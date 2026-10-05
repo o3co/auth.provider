@@ -155,6 +155,9 @@ const OPTIONAL = [
 	"rateLimiter",
 	"auditSink",
 	"subjectRevocation",
+	// The session lifecycle port the browser flow's admission reads after a
+	// live record: a session closing or closed connects nothing.
+	"sessionLifecycleStore",
 	"replaySeenSet",
 	"logger",
 	"federationProviders",
@@ -568,6 +571,7 @@ export const federationGrantsModule = defineModule<
 						// requirements it asks. Not the grants boundary, which the
 						// callback reads through `grantsBoundary`.
 						subjectRevocation: revocation,
+						sessionLifecycleStore: deps.sessionLifecycleStore,
 						requirements: deps.sessionRequirementResolver,
 						revocationSkewMs: limits.revocationSkewMs,
 						connections: acquisition.connections,

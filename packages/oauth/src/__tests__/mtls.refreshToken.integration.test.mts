@@ -47,6 +47,7 @@ import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -76,6 +77,7 @@ const mockConfig = {
 
 const mockDeps: RefreshTokenGrantDeps = {
 	config: mockConfig,
+	...grantSettingsFrom(mockConfig),
 	keyStore,
 	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 };

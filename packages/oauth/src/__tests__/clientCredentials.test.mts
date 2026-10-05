@@ -20,9 +20,14 @@ import {
 	type GrantDependencies,
 	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
+import {
+	type ClientCredentialsGrantDeps,
+	createClientCredentialsGrant,
+} from "#/grants/clientCredentials.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -33,14 +38,16 @@ const keyStore = createSymmetricKeyStore(SECRET);
 
 const CLIENT_ID = "c-1";
 
-const baseDeps: GrantDependencies = {
-	config: {
-		oauth: {
-			jwt: { issuer: "https://test.example" },
-			accessToken: { expiresIn: 3600 },
-			refreshToken: { expiresIn: 86400 },
-		},
-	} as unknown as GrantDependencies["config"],
+const baseConfig = {
+	oauth: {
+		jwt: { issuer: "https://test.example" },
+		accessToken: { expiresIn: 3600 },
+		refreshToken: { expiresIn: 86400 },
+	},
+} as unknown as GrantDependencies["config"];
+
+const baseDeps: ClientCredentialsGrantDeps = {
+	...grantSettingsFrom(baseConfig),
 	keyStore,
 };
 
@@ -71,22 +78,22 @@ function makeCtx(
 }
 
 describe("createClientCredentialsGrant — the lifetime it mints with, read when it is built", () => {
-	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
-		// Read per request, a hand-built lifetime failed every token request
+	it("is refused when it is built with an oauthTokenSettings slot whose access-token lifetime breaks its contract", () => {
+		// Read per request, a hand-filled lifetime failed every token request
 		// with a 500, after client authentication had spent whatever it spends.
-		const base = baseDeps.config as unknown as { oauth: Record<string, unknown> };
-		for (const accessToken of [
-			{ expiresIn: 1.5 },
-			{ expiresIn: 0 },
+		for (const accessTokenLifetime of [
+			{ defaultExpiresIn: 1.5, maxExpiresIn: 3600 },
+			{ defaultExpiresIn: 0, maxExpiresIn: 3600 },
 			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
 			{},
 		]) {
-			const config = {
-				oauth: { ...base.oauth, accessToken },
-			} as unknown as GrantDependencies["config"];
+			const oauthTokenSettings = {
+				...createTestOAuthTokenSettings(),
+				accessTokenLifetime,
+			} as never;
 			expect(
-				() => createClientCredentialsGrant({ ...baseDeps, config }),
-				JSON.stringify(accessToken),
+				() => createClientCredentialsGrant({ ...baseDeps, oauthTokenSettings }),
+				JSON.stringify(accessTokenLifetime),
 			).toThrow(RangeError);
 		}
 	});
@@ -153,12 +160,12 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const handler = createClientCredentialsGrant({
 			...baseDeps,
-			config: {
+			...grantSettingsFrom({
 				oauth: {
 					jwt: { issuer: "https://test.example" },
 					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
 				},
-			} as unknown as GrantDependencies["config"],
+			}),
 		});
 		const { result } = await handler.handle(
 			makeCtx(makeClient(), { grant_type: "client_credentials", expires_in: "7200" }),
@@ -359,14 +366,14 @@ describe("createClientCredentialsGrant — grantPolicy scope validation, fail-cl
 			error?: string;
 			errorDescription?: string;
 		}>,
-	): GrantDependencies => ({
+	): ClientCredentialsGrantDeps => ({
 		...baseDeps,
-		config: {
+		...grantSettingsFrom({
 			oauth: {
-				...baseDeps.config.oauth,
+				...baseConfig.oauth,
 				resourceIndicator: { enabled: true },
 			},
-		} as unknown as GrantDependencies["config"],
+		}),
 		grantPolicy: {
 			evaluate: evaluate as unknown as GrantDependencies["grantPolicy"],
 		} as unknown as GrantDependencies["grantPolicy"],
@@ -414,14 +421,14 @@ describe("createClientCredentialsGrant — grantPolicy audience validation", () 
 			error?: string;
 			errorDescription?: string;
 		}>,
-	): GrantDependencies => ({
+	): ClientCredentialsGrantDeps => ({
 		...baseDeps,
-		config: {
+		...grantSettingsFrom({
 			oauth: {
-				...baseDeps.config.oauth,
+				...baseConfig.oauth,
 				resourceIndicator: { enabled: true },
 			},
-		} as unknown as GrantDependencies["config"],
+		}),
 		grantPolicy: {
 			evaluate: evaluate as unknown as GrantDependencies["grantPolicy"],
 		} as unknown as GrantDependencies["grantPolicy"],
@@ -493,14 +500,14 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling", () => {
 			error?: string;
 			errorDescription?: string;
 		}>,
-	): GrantDependencies => ({
+	): ClientCredentialsGrantDeps => ({
 		...baseDeps,
-		config: {
+		...grantSettingsFrom({
 			oauth: {
-				...baseDeps.config.oauth,
+				...baseConfig.oauth,
 				resourceIndicator: { enabled: true },
 			},
-		} as unknown as GrantDependencies["config"],
+		}),
 		grantPolicy: {
 			evaluate: evaluate as unknown as GrantDependencies["grantPolicy"],
 		} as unknown as GrantDependencies["grantPolicy"],
@@ -573,9 +580,9 @@ describe("createClientCredentialsGrant — a grant policy that cannot answer is 
 		const handler = createClientCredentialsGrant({
 			...baseDeps,
 			// The policy is consulted here under RFC 8707 resource indicators.
-			config: {
-				oauth: { ...baseDeps.config.oauth, resourceIndicator: { enabled: true } },
-			} as unknown as GrantDependencies["config"],
+			...grantSettingsFrom({
+				oauth: { ...baseConfig.oauth, resourceIndicator: { enabled: true } },
+			}),
 			grantPolicy: {
 				kind: "decision-service",
 				evaluate: async () => {
@@ -612,7 +619,7 @@ describe("createClientCredentialsGrant — a grant policy that cannot answer is 
 
 describe("createClientCredentialsGrant — a wired grant policy is consulted whatever oauth.resourceIndicator.enabled", () => {
 	// `baseDeps` sets no `resourceIndicator`: the flag is off.
-	const withPolicy = (evaluate: GrantPolicyHook["evaluate"]): GrantDependencies => ({
+	const withPolicy = (evaluate: GrantPolicyHook["evaluate"]): ClientCredentialsGrantDeps => ({
 		...baseDeps,
 		grantPolicy: { kind: "stub", evaluate },
 	});

@@ -20,6 +20,7 @@ import {
 	admitSession,
 	auditErrorText,
 	authTimeAt,
+	checkOAuthTokenSettings,
 	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
@@ -39,9 +40,6 @@ import {
 	loggableError,
 	ownedConfirmation,
 	type ProviderDeps,
-	resolveAccessTokenLifetime,
-	resolveRefreshTokenLifetime,
-	resolveTokenBindingSettings,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -52,18 +50,20 @@ import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { behindClientBoundary } from "../clients/clientBoundary.mjs";
 import { joinSession } from "../logout/sessionEnd.mjs";
-import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
-import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
+import { PKCE_METHOD_S256, pkceMethodsForClient, resolvePkceOptions } from "./pkce.mjs";
+import { bindConfidentialClientRefreshTokensFrom } from "./tokenBindingRule.mjs";
 
 /**
  * What the authorization-code grant reads: the shared grant slots it uses,
- * plus the repositories only this grant redeems against. The module's
- * `ProviderDeps<R, O>` must satisfy this at the wiring, so a slot read here
- * without the module declaring it is a compile error.
+ * plus the repositories only this grant redeems against. The issuer, the
+ * lifetimes and the resource-indicator switch come from the
+ * `oauthTokenSettings` slot, and the refresh-token binding rule from core's
+ * `tokenBindingSettings`; nothing is read from the whole configuration. The
+ * module's `ProviderDeps<R, O>` must satisfy this at the wiring, so a slot
+ * read here without the module declaring it is a compile error.
  */
 export type AuthorizationGrantDeps = Pick<
 	GrantDependencies,
-	| "config"
 	| "keyStore"
 	| "logger"
 	| "userSessionStore"
@@ -80,7 +80,11 @@ export type AuthorizationGrantDeps = Pick<
 	// code's session go through (ADR 2026-09-28-session-admission). Required:
 	// a factory built by hand without one is refused.
 	ProviderDeps<
-		"codeRepository" | "clientRepository" | "sessionRequirementResolver",
+		| "codeRepository"
+		| "clientRepository"
+		| "sessionRequirementResolver"
+		| "oauthTokenSettings"
+		| "tokenBindingSettings",
 		"auditSink" | "sessionLifecycle"
 	>;
 
@@ -116,7 +120,7 @@ const requirementOrOutageRefusal = (
 };
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
-	const { config, codeRepository, keyStore, logger } = deps;
+	const { codeRepository, keyStore, logger } = deps;
 	// The client's logout metadata is snapshotted into the session RP
 	// registry, so the record is read through core's client-record boundary:
 	// a record it refuses rejects the lookup, answered as the store's outage.
@@ -164,7 +168,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	 * Revoke the family a refused exchange registered, whose tokens were never
 	 * served. Never throws: a failure is one error line, and the refusal
 	 * stands. With a rotation and no revocation wired, the record stays
-	 * active; `oauthAuthorizationModule` warns of that at boot.
+	 * active; `oauthAuthorizationGrantsModule` warns of that at boot.
 	 */
 	const revokeRefusedFamily = async (
 		familyId: string,
@@ -259,25 +263,30 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 		}
 	};
 
-	// id_token issuance requires a configured issuer URL, read from config and
-	// not `ctx.issuer`: the express adapter falls back to the Host header when
-	// the issuer is unset, and OIDC Core §2 requires `iss` to be a URL.
-	const configuredIssuer: string | undefined = (() => {
-		const jwt = (config.oauth as { jwt?: { issuer?: unknown } } | undefined)?.jwt;
-		const value = jwt?.issuer;
-		return typeof value === "string" && value.length > 0 ? value : undefined;
-	})();
+	// The token settings are read once, here, from the `oauthTokenSettings`
+	// slot alone, checked whole first: a hand-built value the check refuses,
+	// or none, fails at composition, naming the slot, rather than a request
+	// after `consumeByCode` has spent the code.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+
+	// id_token issuance uses the slot's canonical issuer, not `ctx.issuer`:
+	// the express adapter falls back to the Host header when the issuer is
+	// unset, and OIDC Core §2 requires `iss` to be a URL.
+	const configuredIssuer = tokenSettings.issuer;
 
 	// One PKCE policy, through the same resolver `/authorize` uses, so
-	// `/authorize` cannot mint a code that `/token` refuses. Resolved once at
-	// composition.
-	const pkce = resolveOAuthOptions(config.oauth).pkce;
+	// `/authorize` cannot mint a code that `/token` refuses.
+	const pkce = resolvePkceOptions();
 
-	// The lifetimes, also resolved once when the grant is built, so a
-	// hand-built configuration the resolvers refuse fails composition rather
-	// than a request after `consumeByCode` has spent the code.
-	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
-	const refreshTokenExpiresIn = resolveRefreshTokenLifetime(config);
+	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
+	const refreshTokenExpiresIn = tokenSettings.refreshTokenExpiresIn;
+	const resourceIndicatorEnabled = tokenSettings.resourceIndicatorEnabled;
+	// The refresh-token binding rule, read once from core's
+	// `tokenBindingSettings` slot.
+	const bindConfidentialClients = bindConfidentialClientRefreshTokensFrom(
+		deps.tokenBindingSettings,
+		"createAuthorizationGrant",
+	);
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -605,7 +614,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// evaluate-once-at-authorize, and ignoring it would hand back an `aud`
 			// the client did not ask for. See ADR
 			// 2026-07-31-rfc8707-resource-audience-binding.
-			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
 			if (resourceIndicatorEnabled) {
 				const requestedResource = extractResourceParam(body as Record<string, unknown>);
 				const unrepresented = unrepresentedResources(requestedResource, audience);
@@ -652,8 +660,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// Off by default: a bound RT pins the client to one key or certificate
 			// for the RT's lifetime. The refresh-time matrix runs off the RT's own
 			// `cnf`, so a newly bound confidential RT is enforced like any other.
-			const bindConfidentialClients =
-				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 			const bindRefreshToken =
 				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
@@ -849,17 +855,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				}
 			}
 
-			// An id_token needs the openid scope, a session (none without a
-			// userSessionStore) and a configured issuer (see `configuredIssuer`).
-			// A session implies a sid here; `&& sid` is defensive.
+			// An id_token needs the openid scope and a session (none without a
+			// userSessionStore); the issuer is always the slot's. A session
+			// implies a sid here; `&& sid` is defensive.
 			let idToken: Token | undefined;
-			if (
-				grantedScopes?.includes("openid") &&
-				userSession &&
-				sid &&
-				configuredIssuer &&
-				authTime !== undefined
-			) {
+			if (grantedScopes?.includes("openid") && userSession && sid && authTime !== undefined) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
 					aud: authenticatedClientId,
