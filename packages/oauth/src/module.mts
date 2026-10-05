@@ -148,7 +148,7 @@ export const oauthEndpointsModule: Module = defineModule<
 		"sessionFederationIndex",
 		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step
 		"federationTokenStore", // federation-token routes
-		"sessionLifecycle", // core's session lifecycle: where installed, introspection, userinfo and the federation-token route ask it whether a session is live
+		"sessionLifecycle", // core's session lifecycle: where installed, /oauth/logout closes the session through it, and introspection, userinfo and the federation-token route ask it whether a session is live
 		"consentStore", // the consent step for clients that are not first-party; such clients are refused without it
 		"pendingConsentStore", // where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 		"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
