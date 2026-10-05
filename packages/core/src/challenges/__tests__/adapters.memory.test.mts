@@ -43,14 +43,37 @@ const issueMany = async (
  * one resident for the life of the process, so the store also sweeps.
  */
 describe("createMemoryChallengeStore — the issuance it records", () => {
-	it("answers the issuance issue was given", async () => {
+	it("answers the issuance issue was given, and none for a challenge issued without one", async () => {
 		const store = createMemoryChallengeStore();
 		const issuedAtMs = Date.now() - 250;
 		await store.issue("scope-A", "v", issuedAtMs + 60_000, issuedAtMs);
+		await store.issue("scope-A", "v-plain", issuedAtMs + 60_000);
+
 		expect(await store.find("scope-A", "v")).toEqual({
 			expiresAtMs: issuedAtMs + 60_000,
 			issuedAtMs,
 		});
+		const plain = await store.find("scope-A", "v-plain");
+		expect(plain).not.toBeNull();
+		expect(plain?.issuedAtMs).toBeUndefined();
+	});
+
+	it("refuses an issuance that is not a finite instant within the Date range, or is after the expiry, and records nothing", async () => {
+		const store = createMemoryChallengeStore();
+		const expiresAtMs = Date.now() + 60_000;
+		for (const bad of [
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+			8_640_000_000_000_001,
+			expiresAtMs + 1,
+		]) {
+			await expect(store.issue("scope-A", "v-bad", expiresAtMs, bad)).rejects.toThrow(RangeError);
+			expect(await store.find("scope-A", "v-bad")).toBeNull();
+		}
+		// Nothing was recorded, so this is not a duplicate.
+		await store.issue("scope-A", "v-bad", expiresAtMs, expiresAtMs - 60_000);
+		expect(await store.consume("scope-A", "v-bad")).toBe(true);
 	});
 });
 

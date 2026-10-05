@@ -148,32 +148,6 @@ export function runChallengeStoreContract(
 			});
 		});
 
-		it("find answers the issuance issue was given, or none — never another", async () => {
-			// An adapter may not record it; one that does answers it exactly, and
-			// one issued without it answers none.
-			await withStore(async (store) => {
-				const issuedAtMs = Date.now();
-				await store.issue("scope-A", "v-issued", issuedAtMs + 60_000, issuedAtMs);
-				await store.issue("scope-A", "v-plain", future());
-				const issued = await store.find("scope-A", "v-issued");
-				const plain = await store.find("scope-A", "v-plain");
-				if (issued?.issuedAtMs !== undefined) expect(issued.issuedAtMs).toBe(issuedAtMs);
-				expect(plain?.issuedAtMs).toBeUndefined();
-			});
-		});
-
-		it("issue refuses an issuance that is not a finite instant within the Date range, or is after the expiry, and records nothing", async () => {
-			await withStore(async (store) => {
-				const expiresAtMs = future();
-				for (const bad of [...UNSTORABLE_EXPIRIES, expiresAtMs + 1]) {
-					await expect(store.issue("scope-A", "v-bad-issued", expiresAtMs, bad)).rejects.toThrow(
-						RangeError,
-					);
-					expect(await store.find("scope-A", "v-bad-issued")).toBeNull();
-				}
-			});
-		});
-
 		it("find returns null for nonexistent entries", async () => {
 			await withStore(async (store) => {
 				expect(await store.find("scope-A", "nope")).toBeNull();
