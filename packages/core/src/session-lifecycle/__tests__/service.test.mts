@@ -21,7 +21,7 @@
  * a close left pending, what each cause runs, and what liveness reads.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
@@ -67,6 +67,8 @@ interface HarnessOptions {
 	readonly familyIndexWithoutEnd?: boolean;
 	/** The lifecycle store's options. */
 	readonly lifecycleStore?: { readonly maxParticipants?: number; readonly now?: () => number };
+	/** Awaited before a revocation or a notice does its work, by the name of the call. */
+	readonly slow?: (call: string) => Promise<void> | undefined;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -104,6 +106,7 @@ function harness(options: HarnessOptions = {}) {
 	const revoked = new Set<string>();
 	const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 		async revokeFamily(familyId) {
+			await options.slow?.(`revoke_family:${familyId}`);
 			record(`revoke_family:${familyId}`);
 			revoked.add(familyId);
 		},
@@ -122,6 +125,7 @@ function harness(options: HarnessOptions = {}) {
 	const notices: SessionCloseNotice[] = [];
 	const notifier: SessionCloseNotifier = {
 		async notify(notice) {
+			await options.slow?.(`notify:${notice.clientId}`);
 			record(`notify:${notice.clientId}`);
 			notices.push(notice);
 		},
@@ -574,6 +578,136 @@ describe("close", () => {
 			expect(await h.sessions.get(SID)).toBeNull();
 			expect(h.revoked.has("f1")).toBe(true);
 		});
+	});
+});
+
+describe("a phase's items run together, at most eight at a time", () => {
+	/** How long each slow notice takes: the oauth notifier's timeout. */
+	const NOTICE_MS = 5_000;
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/** A harness whose every notice takes `NOTICE_MS`, counting how many are in flight at once. */
+	const slowNotices = () => {
+		vi.useFakeTimers({ toFake: ["setTimeout"] });
+		const flight = { now: 0, most: 0 };
+		const h = harness({
+			slow: async (call) => {
+				if (!call.startsWith("notify:")) return;
+				flight.now += 1;
+				flight.most = Math.max(flight.most, flight.now);
+				await new Promise((resolve) => setTimeout(resolve, NOTICE_MS));
+				flight.now -= 1;
+			},
+		});
+		return { h, flight };
+	};
+
+	it("tells eight slow relying parties in one notice's time, not eight", async () => {
+		const { h } = slowNotices();
+		await h.establish();
+		for (let i = 0; i < 8; i++) {
+			expect(await h.lifecycle.join(SID, { rp: relyingParty(`c${i}`) })).toEqual({
+				outcome: "joined",
+			});
+		}
+		const closing = h.lifecycle.close(SID, "rp_logout");
+		await vi.advanceTimersByTimeAsync(NOTICE_MS);
+		// Every notice has settled, and none is waiting to start.
+		expect(vi.getTimerCount()).toBe(0);
+		expect((await closing).outcome).toBe("done");
+		expect(h.notices).toHaveLength(8);
+		expect((await h.read())?.value.state).toBe("closed");
+	});
+
+	it("tells eight slow relying parties of the old registry in one notice's time, not eight", async () => {
+		const { h } = slowNotices();
+		const expiresAt = await h.establish();
+		for (let i = 0; i < 8; i++) {
+			await h.sessionRPRegistry.registerRP(SID, relyingParty(`old${i}`), expiresAt);
+		}
+		const closing = h.lifecycle.close(SID, "rp_logout");
+		await vi.advanceTimersByTimeAsync(NOTICE_MS);
+		expect(vi.getTimerCount()).toBe(0);
+		expect((await closing).outcome).toBe("done");
+		expect(h.notices).toHaveLength(8);
+	});
+
+	it("never has more than eight notices in flight", async () => {
+		const { h, flight } = slowNotices();
+		await h.establish();
+		for (let i = 0; i < 20; i++) await h.lifecycle.join(SID, { rp: relyingParty(`c${i}`) });
+		const closing = h.lifecycle.close(SID, "rp_logout");
+		await vi.advanceTimersByTimeAsync(3 * NOTICE_MS);
+		expect((await closing).outcome).toBe("done");
+		expect(flight.most).toBe(8);
+		expect(h.notices).toHaveLength(20);
+	});
+
+	it("records each item it ran, and keeps the one that failed pending with the phases after it", async () => {
+		const h = harness();
+		await h.establish();
+		for (let i = 0; i < 8; i++) await h.lifecycle.join(SID, { rp: relyingParty(`c${i}`) });
+		h.failing.set("notify:c3", 1);
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+		expect(h.notices.map((n) => n.clientId).sort()).toEqual(
+			["c0", "c1", "c2", "c4", "c5", "c6", "c7"].sort(),
+		);
+		const record = await h.read();
+		expect(record?.value.state).toBe("closing");
+		expect([...(record?.value.close?.pending ?? [])].sort()).toEqual([
+			"delete_user_session",
+			"remove_session_indexes",
+			"rp:c3",
+		]);
+		expect(h.calls).not.toContain("delete_user_session");
+		// A later close sends only the notice that failed.
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		expect(h.notices.filter((n) => n.clientId === "c3")).toHaveLength(1);
+		expect(h.notices).toHaveLength(8);
+	});
+
+	it("starts a phase only once every item of the earlier ones is done, however long each takes", async () => {
+		const delays = new Map([
+			["revoke_family:f1", 30],
+			["revoke_family:f2", 5],
+			["revoke_family:f3", 15],
+		]);
+		const h = harness({
+			slow: async (call) => {
+				const ms = delays.get(call) ?? 0;
+				if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
+			},
+		});
+		await h.establish();
+		for (const [i, familyId] of ["f1", "f2", "f3"].entries()) {
+			await h.lifecycle.join(SID, { rp: relyingParty(`c${i}`), familyId });
+		}
+		h.calls.length = 0;
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		const last = (prefix: string) => h.calls.findLastIndex((call) => call.startsWith(prefix));
+		const first = (prefix: string) => h.calls.findIndex((call) => call.startsWith(prefix));
+		expect(last("revoke_family:")).toBeLessThan(first("notify:"));
+		expect(last("notify:")).toBeLessThan(h.calls.indexOf("delete_user_session"));
+		expect(h.calls.at(-1)).toBe("delete_user_session");
+	});
+
+	it("tells no relying party while a revocation of the phase before has failed, though the others ran", async () => {
+		const h = harness();
+		await h.establish();
+		for (const [i, familyId] of ["f1", "f2", "f3"].entries()) {
+			await h.lifecycle.join(SID, { rp: relyingParty(`c${i}`), familyId });
+		}
+		h.failing.set("revoke_family:f2", 1);
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+		expect([...h.revoked].sort()).toEqual(["f1", "f3"]);
+		expect(h.notices).toEqual([]);
+		const pending = (await h.read())?.value.close?.pending ?? [];
+		expect(pending).toContain("family:f2");
+		expect(pending).not.toContain("family:f1");
+		expect(pending).not.toContain("family:f3");
 	});
 });
 

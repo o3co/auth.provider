@@ -700,8 +700,8 @@ export const CoreConfigSchema = z.object({
 			// registration or a request supplies; its shape is the policy's own
 			// (`net/outbound-policy.mts`).
 			outbound: OutboundSectionSchema.optional(),
-			// The session lifecycle's sweep of pending closes, off unless
-			// written. Read by `readSessionLifecycleSweepIntervalMs` alone, as
+			// The session lifecycle's sweep of pending closes: every 60 seconds
+			// unless written, 0 turning it off. Read by `readSessionLifecycleSweepIntervalMs` alone, as
 			// core's numbers are read.
 			sessionLifecycle: z
 				.object({ sweepIntervalSeconds: z.unknown().optional() })
