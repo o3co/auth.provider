@@ -345,9 +345,17 @@ export const ASK_REPLICA_SKEW_MS = 1_000;
  * made since an ask. Unreadable is a login trip, or `login_required` once a
  * login was asked for or under `prompt=none`.
  */
-export const readableAuthTime = (session: UserSession, nowMs: number): number | undefined => {
-	if (authTimeAt(session.authTime, nowMs) === undefined) return undefined;
-	const at = session.authTime.getTime();
+export const readableAuthTime = (session: UserSession, nowMs: number): number | undefined =>
+	readableInstant(session.authTime, nowMs);
+
+/**
+ * An instant in milliseconds, for comparing with an ask's, capped at the
+ * clock: `undefined` when core's `authTimeAt` cannot read it, or when it is
+ * more than `ASK_REPLICA_SKEW_MS` ahead.
+ */
+const readableInstant = (instant: Date, nowMs: number): number | undefined => {
+	if (authTimeAt(instant, nowMs) === undefined) return undefined;
+	const at = instant.getTime();
 	return at > nowMs + ASK_REPLICA_SKEW_MS ? undefined : Math.min(at, nowMs);
 };
 
@@ -377,31 +385,29 @@ export const loginSince = (
  */
 export const readableFreshness = (session: UserSession, nowMs: number): number | undefined => {
 	const fresh = sessionFreshness(session);
-	if (fresh === undefined || authTimeAt(fresh, nowMs) === undefined) return undefined;
-	const at = fresh.getTime();
-	return at > nowMs + ASK_REPLICA_SKEW_MS ? undefined : Math.min(at, nowMs);
+	return fresh === undefined ? undefined : readableInstant(fresh, nowMs);
 };
 
 /**
- * `loginSince` over the session's freshness (`readableFreshness`): whether
- * the authentication a freshness ask judges was made since `instant`, or
- * `unreadable`. Strictly after it, to the millisecond, as `loginSince`
- * reads — except where the upstream's authentication is what the freshness
- * is (earlier than the session's establishment): an `auth_time` is whole
- * seconds, so it is compared in whole seconds, one in the ask's second
- * counting.
+ * Whether the authentication a freshness ask judges was made since
+ * `instant`, or `unreadable`; never looser than `loginSince`, which it asks
+ * first: the session must have been established strictly after the ask.
+ * Then its freshness (`readableFreshness`) must be since it too — the
+ * establishment itself when that is the freshness, else the upstream's
+ * authentication, compared in whole seconds because an `auth_time` is
+ * whole seconds: one in the ask's second counts.
  */
 export const freshSince = (
 	session: UserSession,
 	instant: number,
 	nowMs: number,
 ): boolean | "unreadable" => {
+	const since = loginSince(session, instant, nowMs);
+	if (since !== true) return since;
 	const at = readableFreshness(session, nowMs);
 	if (at === undefined) return "unreadable";
-	const established = readableAuthTime(session, nowMs);
-	return established !== undefined && at < established
-		? Math.floor(at / 1000) >= Math.floor(instant / 1000)
-		: at > instant;
+	const established = readableAuthTime(session, nowMs) as number;
+	return at >= established || Math.floor(at / 1000) >= Math.floor(instant / 1000);
 };
 
 /**
@@ -458,9 +464,9 @@ export const evaluateReauthentication = (
 	const fresh = sessionFreshness(session);
 	const freshSeconds = fresh === undefined ? undefined : authTimeAt(fresh, now);
 	if (ask !== null && ask.loginAskedAt !== undefined) {
-		// Strictly after the ask, to the millisecond: an authentication made
-		// before it — even earlier in the same second — is not the one it
-		// asked for, and one that cannot be read is not shown to be.
+		// Made since the ask, as `freshSince` reads it: established strictly
+		// after it, and fresh since it; one that cannot be read is not shown
+		// to be.
 		if (freshSince(session, ask.loginAskedAt, now) === true) return "fresh_by_ask";
 		redirectError(
 			ctx,

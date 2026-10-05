@@ -91,4 +91,23 @@ describe("loginSince and freshSince", () => {
 		);
 		expect(freshSince(upstreamLater, ask, NOW)).toBe(false);
 	});
+
+	it("are never looser than loginSince: an establishment before the ask is not made fresh by an upstream in the same second", () => {
+		const ask = Date.parse("2026-10-05T11:59:00.800Z");
+		const session = federated(
+			Date.parse("2026-10-05T11:59:00.200Z"),
+			new Date("2026-10-05T11:59:00.000Z"),
+		);
+		expect(loginSince(session, ask, NOW)).toBe(false);
+		expect(freshSince(session, ask, NOW)).toBe(false);
+	});
+
+	it("read a session established further ahead than the replicas' skew as unreadable, whatever its upstream time", () => {
+		const ahead = NOW + 5_000;
+		for (const upstream of [new Date(NOW - 1_000), new Date(ahead + 1_000)]) {
+			const session = federated(ahead, upstream);
+			expect(loginSince(session, ASK, NOW)).toBe("unreadable");
+			expect(freshSince(session, ASK, NOW)).toBe("unreadable");
+		}
+	});
 });

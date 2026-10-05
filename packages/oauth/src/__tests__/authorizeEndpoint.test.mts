@@ -2090,6 +2090,21 @@ describe("/authorize — step-up and re-authentication", () => {
 			expect(createCode).not.toHaveBeenCalled();
 		});
 
+		it("answers login_required, without a second trip, when max_age's trip came back with an upstream authentication older than the ask", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(10), upstream: minutesAgo(10) as Date | null };
+			const harness = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "60" }));
+			state.authTime = await reauthenticatedNow();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("error")).toBe("login_required");
+			expect(createCode).not.toHaveBeenCalled();
+		});
+
 		it("is satisfied by an upstream authentication made after the ask", async () => {
 			const createCode = mintingCode();
 			const state = { authTime: minutesAgo(10), upstream: minutesAgo(10) as Date | null };
