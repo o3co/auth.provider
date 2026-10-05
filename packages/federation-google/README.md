@@ -23,7 +23,7 @@ logout URL contain, and the schema of a `google` entry's own keys
 
 **Does not own:** the contract (core); the `core.federations` map, the keys
 core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
-`callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier /
+`callbackMeetsFreshness`, `callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier /
 `nonce` generation, the redirect-allowlist rules and claim precedence
 ([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
 Store); the refresh and logout routes that call this adapter
@@ -117,7 +117,8 @@ Two entries of type `google` — two Google clients, say one per OAuth consent
 screen — are two federations side by side, each under its own name.
 
 An entry is flat, and its schema is strict: the keys core owns (`enabled`,
-`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+`type`, `trustUpstreamAmr`, `callbackMeetsFreshness`, `callbackURL`) and the keys
+below, nothing else.
 The schema is `googleEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
 does not name — a typo, or a nested `google { ... }` section — refuses boot with `config-validation-failed` at `core.federations.<name>`,
 naming the key; a missing or malformed key is refused at
@@ -147,6 +148,10 @@ configuration's to move. It stays a `GoogleProviderConfig` field.
   `access_type=offline` with `prompt=consent` (see below), and the `nonce` the
   session router minted. There is no request without a nonce:
   `buildAuthorizationUrl` and `exchangeCode` both throw when it is missing.
+  A freshness ask (`prompt=login`, `max_age`) is **not forwarded**: Google's
+  OpenID Connect documentation lists `prompt` values `none`, `consent` and
+  `select_account` only, and no `max_age` parameter. The request is the same
+  with or without one.
 - **Code exchange:** at Google's token endpoint, the client secret in the
   request body (`client_secret_post`, `openid-client`'s default), with the PKCE
   verifier. The callback's `iss` is checked first (below). The id_token's signature is
@@ -170,6 +175,7 @@ What `exchangeCode` returns:
 | `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when Google sent no `expires_in`** (Google documents it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
 | `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when Google sent none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
+| `authTime` | the verified id_token's `auth_time` as a `Date`, when Google sent one; absent otherwise (Google sends it only when it is requested and enabled for the client, and this adapter does not request it). Never read from UserInfo. A fraction is floored to its second; one that is not a non-negative number, or lies further ahead than the clock skew tolerated between hosts, fails the exchange |
 
 `mapClaims` maps `email`, `emailVerified`, `name`, `picture` and `hd`; the session
 package promotes only `email`, `name` and `picture`, and only where the local

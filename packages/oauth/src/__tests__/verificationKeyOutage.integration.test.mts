@@ -151,7 +151,6 @@ async function buildApp(lookup: "up" | "down"): Promise<Harness> {
 	registry.register(
 		"refresh_token",
 		createRefreshTokenGrant({
-			config,
 			...grantSettingsFrom(config),
 			keyStore,
 			logger,

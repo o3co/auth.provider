@@ -200,6 +200,7 @@
 . FederatedIdentityLookupResult type
 . FederatedIdentityRegistration type
 . FederatedLogin type
+. FederationAsk type
 . FederationClientSecret type
 . FederationGrant type
 . FederationGrantAcquisitionConnection type
@@ -497,6 +498,7 @@
 . PendingConsentStore type
 . PendingConsentStoreFactory type
 . PendingFederationGrant type
+. PlainJsonCopy type
 . PolicyAudienceOutcome type
 . PolicyDeniedOptions type
 . PolicyScopeCeiling type
@@ -650,6 +652,8 @@
 . SessionLiveness type
 . SessionMutation type
 . SessionOpenAnswer type
+. SessionOpenOutcome type
+. SessionOpenRequest type
 . SessionParticipant type
 . SessionParticipantKind type
 . SessionRPRegistry type
@@ -748,6 +752,7 @@
 . auditedError value
 . authTimeAt value
 . authTimeClaim value
+. authenticationFreshness value
 . boundPolicyAudience value
 . browserFacingCorsRoutes value
 . buildCanonicalRequestUrl value
@@ -805,6 +810,7 @@
 . cookieClaim value
 . cookieRenewedAway value
 . cookieSessionUser value
+. copyPlainJson value
 . coreReference value
 . corsMw value
 . coveredByRevocationBoundary value
@@ -904,6 +910,7 @@
 . extractConfirmation value
 . extractResourceParam value
 . federatedSessionAuthentication value
+. federationCallbackMeetsFreshness value
 . federationGrantAccessToken value
 . federationGrantAllowlist value
 . federationGrantAuditMetadata value
@@ -1075,6 +1082,7 @@
 . readSpaceDelimitedParameter value
 . readTargetParameter value
 . readTransitionalConfig value
+. readUpstreamAuthTime value
 . readUpstreamTokenLifetime value
 . readUserSnapshot value
 . readVersioned value
@@ -1130,6 +1138,7 @@
 . sessionAuthentication value
 . sessionCloseItemOf value
 . sessionEmailProofAnswer value
+. sessionFreshness value
 . sessionLifecycleModule value
 . shownConfigValue value
 . stepUpReach value

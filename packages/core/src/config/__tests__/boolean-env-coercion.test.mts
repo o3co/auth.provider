@@ -93,6 +93,21 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 		},
 		read: (parsed: Record<string, unknown>) => federationOf(parsed).trustUpstreamAmr,
 	},
+	{
+		// Whether a federation's callback alone meets a freshness ask. Set in
+		// config beside `enabled`; coerced as every boolean here is.
+		key: "core.federations.<name>.callbackMeetsFreshness",
+		envVar: "no variable wired; set in config",
+		set: (config: Record<string, unknown>, value: unknown) => {
+			config.core = {
+				...(config.core as object),
+				federations: {
+					google: { enabled: true, type: "google", callbackMeetsFreshness: value },
+				},
+			};
+		},
+		read: (parsed: Record<string, unknown>) => federationOf(parsed).callbackMeetsFreshness,
+	},
 ] as const;
 
 /**

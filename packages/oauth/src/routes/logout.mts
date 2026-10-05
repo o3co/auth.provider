@@ -25,6 +25,7 @@ import type {
 	RefreshTokenFamilyRevocation,
 	SessionFamilyIndex,
 	SessionFederationIndex,
+	SessionLifecycle,
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -46,7 +47,10 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
 import { cascadeLogoutFrom } from "../logout/cascadeLogout.mjs";
-import { usableFrontchannelRP } from "../logout/frontchannelLogoutUri.mjs";
+import {
+	type UsableFrontchannelRP,
+	usableFrontchannelRP,
+} from "../logout/frontchannelLogoutUri.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
 import { beginLogout, type LogoutLeftState } from "../logout/sessionEnd.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
@@ -216,6 +220,37 @@ export interface LogoutRouterOptions {
 	 * token and the id_token_hint.
 	 */
 	legacyTypAccept?: boolean;
+	/**
+	 * Core's session lifecycle. Where installed, `/oauth/logout` ends the
+	 * session with its `close`, and its notifier tells the relying parties
+	 * back-channel; without it, the route runs its own cascade over the
+	 * per-session stores.
+	 */
+	sessionLifecycle?: SessionLifecycle;
+}
+
+/**
+ * How a logout ended the session: `ended`, with the federations it joined,
+ * the upstream end-session URI and the relying parties' front-channel
+ * registrations (read only for an HTML answer); `absent`, a sid that names no
+ * session the lifecycle can hold, answered as a session already gone; or
+ * `unavailable`, already logged and audited, answered `503` with
+ * `description`.
+ */
+type LogoutEnd =
+	| { readonly outcome: "absent" }
+	| {
+			readonly outcome: "ended";
+			readonly federations: readonly string[];
+			readonly endSessionUri: string | undefined;
+			readonly frontchannelRps: () => Promise<readonly UsableFrontchannelRP[]>;
+	  }
+	| { readonly outcome: "unavailable"; readonly description: string };
+
+/** What an upstream end-session call is handed beside its hint. */
+interface UpstreamEndRequest {
+	readonly postLogoutRedirectUri: string | undefined;
+	readonly state: string | undefined;
 }
 
 /**
@@ -227,9 +262,13 @@ export interface LogoutRouterOptions {
  *      hold `post_logout_redirect_uri` to that client's registered list; a
  *      GET with a stale hint gets the confirmation page;
  *   3. load the session (missing → 200 no-op);
- *   4. broadcast back-channel logout (best effort);
- *   5. resolve the first federation's IdP end-session URI, if supported;
- *   6. run the cascade;
+ *   4–6. end the session. Where core's session lifecycle is installed:
+ *      read the first federation's upstream `id_token` (best effort), then
+ *      `close` it (`unavailable` → 503; `pending` → success, audited as
+ *      `logout.close_pending`); the lifecycle's notifier tells the relying
+ *      parties back-channel. Otherwise: broadcast back-channel logout (best
+ *      effort), resolve the first federation's IdP end-session URI, and run
+ *      the cascade over the per-session stores;
  *   7. respond: front-channel HTML | IdP redirect | post-logout redirect | JSON.
  *
  * Also mounts `POST /oauth/federation/:name/logout`, the bearer-authenticated
@@ -607,6 +646,282 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		},
 	);
 
+	/**
+	 * The stored upstream `id_token` of `federation` in `sid`, the hint its
+	 * end-session call is handed. Best effort: a record that cannot be read is
+	 * no hint, said once at warn, and the logout goes on — the IdP may then
+	 * ask the user to confirm, or choose the account itself.
+	 */
+	const readUpstreamIdToken = async (
+		sid: string,
+		federation: string,
+	): Promise<string | undefined> => {
+		try {
+			const tokens = await opts.federationTokenStore.get(sid, federation);
+			return tokens?.idToken ?? undefined;
+		} catch (err) {
+			(opts.logger ?? console).warn(
+				{
+					federation: auditErrorText(federation),
+					store: "federation_token",
+					step: "get",
+					err: loggableError(err),
+				},
+				"logout_federation_token_read_failed",
+			);
+			return undefined;
+		}
+	};
+
+	/**
+	 * The IdP end-session URI of `federation`, when its provider ends sessions
+	 * upstream; providers are looked up per request. Best effort: a call that
+	 * fails is logged and the logout answers without the redirect.
+	 */
+	const upstreamEndSessionUri = async (
+		federation: string,
+		idTokenHint: () => Promise<string | undefined>,
+		upstream: UpstreamEndRequest,
+	): Promise<string | undefined> => {
+		const provider = opts.getFederationProviders()?.get(federation);
+		if (!supportsLogout(provider)) return undefined;
+		try {
+			const result = await provider.endSession({
+				idTokenHint: await idTokenHint(),
+				postLogoutRedirectUri: upstream.postLogoutRedirectUri,
+				state: upstream.state,
+			});
+			return result.url.toString();
+		} catch (err) {
+			(opts.logger ?? console).warn(
+				{ federation: auditErrorText(federation), err: loggableError(err) },
+				"logout_federation_end_session_failed",
+			);
+			return undefined;
+		}
+	};
+
+	/**
+	 * The front-channel registrations of the relying parties `clientIds`
+	 * names, each read from its client registration. A registration that
+	 * cannot be read drops that relying party alone, logged once as
+	 * `client_repository_unavailable`; one gone, or with no usable URI, is
+	 * skipped.
+	 */
+	const registeredFrontchannelRps = async (
+		clientIds: readonly string[],
+	): Promise<readonly UsableFrontchannelRP[]> => {
+		const logger = opts.logger ?? console;
+		const usable = await Promise.all(
+			clientIds.map(async (clientId) => {
+				let client: Awaited<ReturnType<typeof opts.clientRepository.findById>>;
+				try {
+					client = await opts.clientRepository.findById(clientId);
+				} catch (error) {
+					logClientRepositoryUnavailable(logger, { site: "logout", step: "find", clientId }, error);
+					return undefined;
+				}
+				if (client === null || client === undefined) return undefined;
+				// Each field read through core's guarded read: a refused one drops this iframe alone.
+				return usableFrontchannelRP(client, "logout", logger);
+			}),
+		);
+		return usable.filter((rp): rp is UsableFrontchannelRP => rp !== undefined);
+	};
+
+	/**
+	 * Ends `sid` through core's session lifecycle. The upstream hint is read
+	 * first, since the close removes the federation tokens that carry it; it
+	 * goes upstream only to the federation it was read for. The relying
+	 * parties are told back-channel by the lifecycle's notifier, and the
+	 * front-channel and upstream steps read the close's answer.
+	 */
+	const endThroughLifecycle = async (
+		lifecycle: SessionLifecycle,
+		req: Request,
+		sid: string,
+		sub: string | null,
+		upstream: UpstreamEndRequest,
+	): Promise<LogoutEnd> => {
+		const listed = await lifecycle.federations(sid);
+		const hinted = listed.outcome === "listed" ? listed.federations[0] : undefined;
+		const hint =
+			hinted !== undefined && supportsLogout(opts.getFederationProviders()?.get(hinted))
+				? { federation: hinted, idToken: await readUpstreamIdToken(sid, hinted) }
+				: undefined;
+
+		let closed: Awaited<ReturnType<SessionLifecycle["close"]>>;
+		try {
+			closed = await lifecycle.close(sid, "rp_logout");
+		} catch (error) {
+			// The lifecycle refuses a sid it cannot hold as a key before it
+			// writes: no session of its can carry it.
+			if (error instanceof RangeError) return { outcome: "absent" };
+			throw error;
+		}
+		if (closed.outcome === "unavailable") {
+			// The lifecycle logged the error; this is the route's one line for its 503.
+			(opts.logger ?? console).error(
+				{ store: "session_lifecycle", step: "close" },
+				"logout_store_unavailable",
+			);
+			emitAuditEvent(opts.auditSink, {
+				timestamp: new Date(),
+				type: "logout.cascade_failed",
+				subject: sub ?? undefined,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { sid, store: "session_lifecycle" },
+			});
+			return { outcome: "unavailable", description: "session store unavailable" };
+		}
+		// The session has ended — nothing joins it and no liveness read answers
+		// it live — while some of its close work is left to a later close or
+		// the sweep.
+		if (closed.outcome === "pending") {
+			emitAuditEvent(opts.auditSink, {
+				timestamp: new Date(),
+				type: "logout.close_pending",
+				subject: sub ?? undefined,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { sid },
+			});
+		}
+
+		const first = closed.federations[0];
+		const endSessionUri =
+			first === undefined
+				? undefined
+				: await upstreamEndSessionUri(
+						first,
+						async () => (hint?.federation === first ? hint.idToken : undefined),
+						upstream,
+					);
+		return {
+			outcome: "ended",
+			federations: closed.federations,
+			endSessionUri,
+			frontchannelRps: () => registeredFrontchannelRps(closed.rps),
+		};
+	};
+
+	/**
+	 * Ends `sid` through the per-session stores: begins the logout (the
+	 * relying parties to tell, the federations, what the cascade starts
+	 * from), broadcasts back-channel logout, resolves the first federation's
+	 * IdP end-session URI, then runs the cascade.
+	 */
+	const endThroughStores = async (
+		req: Request,
+		sid: string,
+		sub: string | null,
+		expiresAt: Date,
+		upstream: UpstreamEndRequest,
+	): Promise<LogoutEnd> => {
+		// An outage is one log line, saying what it left of the session.
+		const begun = await beginLogout(opts, sid, expiresAt);
+		if (begun.outcome === "unavailable") {
+			const { outage } = begun;
+			logoutStoreUnavailable(opts.logger ?? console, outage.store, outage.step, outage.error, {
+				left: outage.left,
+				...("alsoUnavailable" in outage && outage.alsoUnavailable
+					? {
+							alsoUnavailable: {
+								store: outage.alsoUnavailable.store,
+								err: loggableError(outage.alsoUnavailable.error),
+							},
+						}
+					: {}),
+			});
+			// A begin that left state behind is the logout's first step failing,
+			// audited as the cascade's step 1 has always been.
+			if (outage.left !== "unchanged") {
+				emitAuditEvent(opts.auditSink, {
+					timestamp: new Date(),
+					type: "logout.cascade_failed",
+					subject: sub ?? undefined,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { sid, step: 1, store: outage.store, left: outage.left },
+				});
+			}
+			return { outcome: "unavailable", description: "session store unavailable" };
+		}
+		const { rps, federations } = begun;
+
+		// Back-Channel Logout, best effort: never throws.
+		if (sub) {
+			await broadcastBackchannelLogout({
+				rps,
+				issuer: opts.issuer,
+				sub,
+				sid,
+				keyStore: opts.keyStore,
+				fetchImpl: opts.fetchImpl,
+				logger: opts.logger,
+			});
+		}
+
+		// The first federation's IdP end-session URI, resolved before the
+		// cascade removes the federation tokens that carry its hint.
+		const first = federations[0];
+		const endSessionUri =
+			first === undefined
+				? undefined
+				: await upstreamEndSessionUri(first, () => readUpstreamIdToken(sid, first), upstream);
+
+		const cascade = await cascadeLogoutFrom(begun, {
+			sid,
+			refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
+			federationTokenStore: opts.federationTokenStore,
+			userSessionStore: opts.userSessionStore,
+			sessionRPRegistry: opts.sessionRPRegistry,
+			sessionFamilyIndex: opts.sessionFamilyIndex,
+			sessionFederationIndex: opts.sessionFederationIndex,
+			logger: opts.logger,
+		});
+
+		if (cascade.outcome === "failed") {
+			// The outage's one error-level line. Which step stopped the cascade,
+			// and how many operations failed there; the first failure's
+			// projection (each step-2 failure also has its own structured warn
+			// line from the cascade).
+			(opts.logger ?? console).error(
+				{
+					store: "logout_cascade",
+					cascadeStep: cascade.step,
+					failures: cascade.errors.length,
+					err: loggableError(cascade.errors[0]),
+				},
+				"logout_store_unavailable",
+			);
+			emitAuditEvent(opts.auditSink, {
+				timestamp: new Date(),
+				type: "logout.cascade_failed",
+				subject: sub ?? undefined,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { sid, step: cascade.step },
+			});
+			return { outcome: "unavailable", description: "logout cascade failed" };
+		}
+
+		// Only RPs with an http(s) front-channel URI get an iframe; one refused
+		// is logged once here and skipped. Each accepted RP is passed on as
+		// read here, once.
+		return {
+			outcome: "ended",
+			federations,
+			endSessionUri,
+			frontchannelRps: async () =>
+				rps.flatMap((rp) => {
+					const usable = usableFrontchannelRP(rp, "logout", opts.logger ?? console);
+					return usable === undefined ? [] : [usable];
+				}),
+		};
+	};
+
 	const handleLogout = async (req: Request, res: Response) => {
 		// RFC 6749 §5.1 / RFC 9207: cache headers on every response path.
 		res.setHeader("Cache-Control", "no-store");
@@ -682,6 +997,13 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			"logout",
 		);
 
+		// What the upstream end-session call is handed beside its hint.
+		const upstreamRequest: UpstreamEndRequest = {
+			// Registered for the client, or none.
+			postLogoutRedirectUri: validatedPostLogoutRedirectUri,
+			state: typeof state === "string" ? state : undefined,
+		};
+
 		if (req.method === "GET") {
 			const iat = typeof payload.iat === "number" ? payload.iat : 0;
 			const maxAgeMs = 24 * 60 * 60 * 1000;
@@ -716,142 +1038,23 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			return res.status(200).json({ logged_out: true });
 		}
 
-		// Begin the logout: the relying parties to tell, the federations, and
-		// what the cascade starts from. An outage is one log line, saying what
-		// it left of the session.
-		const begun = await beginLogout(opts, sid, session.expiresAt);
-		if (begun.outcome === "unavailable") {
-			const { outage } = begun;
-			logoutStoreUnavailable(opts.logger ?? console, outage.store, outage.step, outage.error, {
-				left: outage.left,
-				...("alsoUnavailable" in outage && outage.alsoUnavailable
-					? {
-							alsoUnavailable: {
-								store: outage.alsoUnavailable.store,
-								err: loggableError(outage.alsoUnavailable.error),
-							},
-						}
-					: {}),
-			});
-			// A begin that left state behind is the logout's first step failing,
-			// audited as the cascade's step 1 has always been.
-			if (outage.left !== "unchanged") {
-				emitAuditEvent(opts.auditSink, {
-					timestamp: new Date(),
-					type: "logout.cascade_failed",
-					subject: sub ?? undefined,
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: { sid, step: 1, store: outage.store, left: outage.left },
-				});
-			}
+		const ended = opts.sessionLifecycle
+			? await endThroughLifecycle(opts.sessionLifecycle, req, sid, sub, upstreamRequest)
+			: await endThroughStores(req, sid, sub, session.expiresAt, upstreamRequest);
+		if (ended.outcome === "absent") {
+			await endBrowserSession(req, sid, opts.logger ?? console);
+			return res.status(200).json({ logged_out: true });
+		}
+		if (ended.outcome === "unavailable") {
 			return res.status(503).json({
 				error: "temporarily_unavailable",
-				error_description: "session store unavailable",
+				error_description: ended.description,
 			});
 		}
-		const { rps, federations } = begun;
-
-		// Step 4: Broadcast Back-Channel Logout (best-effort — never throws).
-		if (sub) {
-			await broadcastBackchannelLogout({
-				rps,
-				issuer: opts.issuer,
-				sub,
-				sid,
-				keyStore: opts.keyStore,
-				fetchImpl: opts.fetchImpl,
-				logger: opts.logger,
-			});
-		}
-
-		// Step 5: resolve the IdP end-session URI for the first federation only.
-		// Providers are looked up per request.
-		let endSessionUri: string | undefined;
-		const firstFederation = federations[0];
-		if (firstFederation) {
-			const providers = opts.getFederationProviders();
-			const provider = providers?.get(firstFederation);
-			if (supportsLogout(provider)) {
-				try {
-					let idTokenHintForIdP: string | undefined;
-					try {
-						const tokens = await opts.federationTokenStore.get(sid, firstFederation);
-						idTokenHintForIdP = tokens?.idToken ?? undefined;
-					} catch (err) {
-						// Best effort: the logout proceeds, and the upstream end-session
-						// call goes without `id_token_hint` — the IdP may then ask the
-						// user to confirm, or choose the account itself. Said once, at
-						// warn: the route answers as it would have, not a 503.
-						(opts.logger ?? console).warn(
-							{
-								federation: auditErrorText(firstFederation),
-								store: "federation_token",
-								step: "get",
-								err: loggableError(err),
-							},
-							"logout_federation_token_read_failed",
-						);
-					}
-					const result = await provider.endSession({
-						idTokenHint: idTokenHintForIdP,
-						// Registered for the client, or none (Step 2).
-						postLogoutRedirectUri: validatedPostLogoutRedirectUri,
-						state: typeof state === "string" ? state : undefined,
-					});
-					endSessionUri = result.url.toString();
-				} catch (err) {
-					// Best-effort: log and proceed without the IdP redirect.
-					(opts.logger ?? console).warn(
-						{ federation: auditErrorText(firstFederation), err: loggableError(err) },
-						"logout_federation_end_session_failed",
-					);
-				}
-			}
-		}
-
-		// Step 6: Cascade logout.
-		const cascade = await cascadeLogoutFrom(begun, {
-			sid,
-			refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
-			federationTokenStore: opts.federationTokenStore,
-			userSessionStore: opts.userSessionStore,
-			sessionRPRegistry: opts.sessionRPRegistry,
-			sessionFamilyIndex: opts.sessionFamilyIndex,
-			sessionFederationIndex: opts.sessionFederationIndex,
-			logger: opts.logger,
-		});
-
-		if (cascade.outcome === "failed") {
-			// The outage's one error-level line. Which step stopped the cascade,
-			// and how many operations failed there; the first failure's
-			// projection (each step-2 failure also has its own structured warn
-			// line from the cascade).
-			(opts.logger ?? console).error(
-				{
-					store: "logout_cascade",
-					cascadeStep: cascade.step,
-					failures: cascade.errors.length,
-					err: loggableError(cascade.errors[0]),
-				},
-				"logout_store_unavailable",
-			);
-			emitAuditEvent(opts.auditSink, {
-				timestamp: new Date(),
-				type: "logout.cascade_failed",
-				subject: sub ?? undefined,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { sid, step: cascade.step },
-			});
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "logout cascade failed",
-			});
-		}
+		const { federations, endSessionUri } = ended;
 
 		// End the browser's own session so the cookie stops satisfying
-		// `/authorize`: after the cascade and before response selection, so
+		// `/authorize`: after the session ended and before response selection, so
 		// every success branch gets it once and the 503 above does not (a retry
 		// needs the cookie).
 		await endBrowserSession(req, sid, opts.logger ?? console);
@@ -885,16 +1088,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// Only when text/html explicitly outranks json (e.g. browser requests) do we serve HTML.
 		const negotiated = accepts(req).type(["application/json", "text/html"]);
 		const acceptsHtml = negotiated === "text/html";
-		// Only RPs with an http(s) front-channel URI get an iframe; one refused
-		// is logged once here and skipped. With none, the logout answers as
-		// without front-channel logout (7b–7d). Read only for an HTML answer.
-		// Each accepted RP is passed on as read here, once.
-		const frontchannelRps = acceptsHtml
-			? rps.flatMap((rp) => {
-					const usable = usableFrontchannelRP(rp, "logout", opts.logger ?? console);
-					return usable === undefined ? [] : [usable];
-				})
-			: [];
+		// The relying parties' usable front-channel registrations, read only
+		// for an HTML answer. With none, the logout answers as without
+		// front-channel logout (7b–7d).
+		const frontchannelRps = acceptsHtml ? await ended.frontchannelRps() : [];
 		if (frontchannelRps.length > 0) {
 			const html = renderFrontchannelLogoutHtml({
 				rps: frontchannelRps,

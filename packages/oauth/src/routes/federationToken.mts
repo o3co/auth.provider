@@ -26,6 +26,7 @@ import {
 	emitAuditEvent,
 	logClientRepositoryUnavailable,
 	loggableError,
+	type SessionLiveness,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
@@ -98,19 +99,53 @@ const checkCallerStanding = async (
 		return false;
 	}
 
-	// Step 6: Load session. null → 401 invalid_token. Throw → 503.
-	let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
-	try {
-		session = await opts.userSessionStore.get(sid);
-	} catch (error) {
-		storeUnavailable(federation, "user_session", "get", error);
-		res.status(503).json({
-			error: "temporarily_unavailable",
-			error_description: "session store unavailable",
-		});
-		return false;
+	// Step 6: the session must be live. Not live → 401 invalid_token; an
+	// outage → 503. Where core's session lifecycle is installed it answers, so
+	// a session whose close has committed is not live.
+	let live: boolean;
+	if (opts.sessionLifecycle) {
+		let liveness: SessionLiveness;
+		try {
+			liveness = await opts.sessionLifecycle.liveness(sid);
+		} catch (error) {
+			// A lifecycle filled by the host may throw: an outage all the same.
+			logger.error(
+				{ federation, store: "session_lifecycle", step: "liveness", err: loggableError(error) },
+				"federation_token_store_unavailable",
+			);
+			res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			return false;
+		}
+		if (liveness.outcome === "unavailable") {
+			// The lifecycle logs its own error; this line carries none.
+			logger.error(
+				{ federation, store: "session_lifecycle", step: "liveness" },
+				"federation_token_store_unavailable",
+			);
+			res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			return false;
+		}
+		// A live session of another subject is not this token's session.
+		live = liveness.outcome === "live" && liveness.session.sub === sub;
+	} else {
+		try {
+			live = (await opts.userSessionStore.get(sid)) !== null;
+		} catch (error) {
+			storeUnavailable(federation, "user_session", "get", error);
+			res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			return false;
+		}
 	}
-	if (!session) {
+	if (!live) {
 		res.setHeader(
 			"WWW-Authenticate",
 			'Bearer error="invalid_token", error_description="session not found"',

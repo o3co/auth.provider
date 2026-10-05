@@ -101,7 +101,6 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// purpose, with a different value: the new variable must win.
 	OAUTH_ACCESS_TOKEN_EXPIRES_IN: "3600",
 	OAUTH_REFRESH_TOKEN_EXPIRES_IN: "86400",
-	OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "reject",
 	OAUTH_OIDC_MODE: "dual",
 	OAUTH_REVOCATION_ACCESS_TOKEN: "denylist",
 	OAUTH_REVOCATION_SUBJECT: "unsupported",
@@ -134,6 +133,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_SESSION_ENABLED: "false",
 	OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "reject",
 	OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED: "false",
 
@@ -331,6 +331,8 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"renamed OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED, and only captured — set alone, or to another value, it fails boot",
 	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED:
 		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY, and only captured — set alone, or to another value, it fails boot",
 	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED:
 		"renamed OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED, and only captured — set alone, or to another value, it fails boot",
 	OAUTH_GRANTS_JWT_BEARER_ENABLED:

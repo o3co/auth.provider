@@ -391,6 +391,7 @@ export type {
 	DelegatedTokens,
 	EndSessionRequest,
 	EndSessionResult,
+	FederationAsk,
 	FederationProfile,
 	MappedClaims,
 	RefreshedTokens,
@@ -409,6 +410,7 @@ export {
 	supportsLogout,
 	supportsRefresh,
 } from "./federations/types.mjs";
+export { readUpstreamAuthTime } from "./federations/upstream-auth-time.mjs";
 // The authentication claims a token may carry
 export {
 	authTimeAt,
@@ -1233,6 +1235,8 @@ export {
 	type SessionLifecycle,
 	type SessionLifecycleOptions,
 	type SessionLiveness,
+	type SessionOpenOutcome,
+	type SessionOpenRequest,
 	type SessionResumeReport,
 } from "./session-lifecycle/service.mjs";
 // The token-exchange validator port. `ExchangeTokenValidator` is
@@ -1248,9 +1252,11 @@ export type { OAuthTokenSettings } from "./token-settings/types.mjs";
 // How a session was established and what this provider vouches for, read one
 // way by every consumer of a session.
 export {
+	authenticationFreshness,
 	checkSecondFactorEvent,
 	expectsRenewalNonce,
 	federatedSessionAuthentication,
+	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	type RecordedAuthentication,
@@ -1262,6 +1268,7 @@ export {
 	requirementSessionFromAmr,
 	sessionAfterSecondFactor,
 	sessionAuthentication,
+	sessionFreshness,
 	vouchedAmr,
 } from "./user-sessions/authentication.mjs";
 // What a session's enrollment facts may hold, read one way by every store.
@@ -1750,6 +1757,12 @@ export {
 	type SealingKey,
 	type SealingKeyRing,
 } from "./sealing/keyRing.mjs";
+
+// ===========================================================================
+// Plain JSON — the one rule for a value JSON gives back as it is, and its copy
+// ===========================================================================
+
+export { copyPlainJson, type PlainJsonCopy } from "./json/plainJson.mjs";
 
 // ===========================================================================
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628)

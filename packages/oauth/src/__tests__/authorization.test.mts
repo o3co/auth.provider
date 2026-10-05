@@ -1542,6 +1542,29 @@ describe("createAuthorizationGrant", () => {
 				expect(decodeJwt(tokens.refresh_token as string).auth_time).toBe(seconds);
 			});
 
+			it("stamps when this provider established the session, not when a federation's upstream last authenticated the user", async () => {
+				const authTime = new Date("2026-04-21T00:00:00Z");
+				const tokens = await redeemSessionCode(
+					makeUserSessionStore({
+						sid: "sid-1",
+						sub: "u-1",
+						authTime,
+						claims: {},
+						amr: ["fed"],
+						authentication: {
+							primary: "fed",
+							federation: "google",
+							upstreamAmr: undefined,
+							mfaAt: undefined,
+							upstreamAuthTime: new Date("2026-04-20T00:00:00Z"),
+						},
+					}),
+				);
+				const seconds = Math.floor(authTime.getTime() / 1000);
+				expect(decodeJwt(tokens.id_token as string).auth_time).toBe(seconds);
+				expect(decodeJwt(tokens.access_token).auth_time).toBe(seconds);
+			});
+
 			it("stamps no auth_time without a userSessionStore, which records no authentication", async () => {
 				const tokens = await redeemSessionCode();
 				expect(decodeJwt(tokens.access_token)).not.toHaveProperty("auth_time");

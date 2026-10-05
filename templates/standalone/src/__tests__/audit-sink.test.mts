@@ -91,11 +91,7 @@ const baseConfig: Switches & Record<string, unknown> = {
 			issuer: "https://auth.test",
 		},
 		accessToken: { expiresIn: 3600 },
-		refreshToken: {
-			expiresIn: 86400,
-			unknownFamilyPolicy: "reject" as const,
-			legacyRtPolicy: "reject" as const,
-		},
+		refreshToken: { expiresIn: 86400 },
 		grants: {},
 		oidcMode: "oidc-required",
 	},

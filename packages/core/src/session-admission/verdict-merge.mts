@@ -52,7 +52,13 @@ export function merge(
 	switch (R.outcome) {
 		case "met":
 			if (A === undefined || A.outcome === "met") {
-				return { outcome: "admitted", session, view: live?.view ?? null, acr: A?.acr };
+				return {
+					outcome: "admitted",
+					session,
+					view: live?.view ?? null,
+					acr: A?.acr,
+					...(live?.renewalNonce === undefined ? {} : { renewalNonce: live.renewalNonce }),
+				};
 			}
 			// A selection steps up only over a live session: step 6 hands it an
 			// empty reach otherwise.

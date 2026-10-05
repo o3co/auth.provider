@@ -62,7 +62,7 @@ const config = {
 	oauth: {
 		jwt: { issuer: ISSUER, secret: SECRET },
 		accessToken: { expiresIn: 300 },
-		refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject" },
+		refreshToken: { expiresIn: 86400 },
 		oidcMode: "dual",
 		grants: { session: { enabled: true }, refresh_token: { enabled: true } },
 	},
@@ -159,7 +159,6 @@ const buildApp = async (requirement: SessionRequirement) => {
 	registry.register(
 		"refresh_token",
 		createRefreshTokenGrant({
-			config,
 			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,

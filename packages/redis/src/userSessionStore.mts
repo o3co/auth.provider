@@ -53,15 +53,20 @@ export interface RedisUserSessionStoreOptions {
 }
 
 /**
- * `UserSession.authentication` as the envelope stores it: `mfaAt` as epoch
- * milliseconds, like every other instant here. A field that
- * holds `undefined` is left out by `JSON.stringify`.
+ * `UserSession.authentication` as the envelope stores it: `mfaAt` and
+ * `upstreamAuthTime` as epoch milliseconds, like every other instant here. A
+ * field that holds `undefined` is left out by `JSON.stringify`.
+ * `upstreamAuthTimeMs` is the one field that may hold `null`: the upstream
+ * showed no time, a value of its own. An envelope an older release wrote has
+ * no `upstreamAuthTimeMs` (read as none recorded); an older release reads one
+ * that has it as none recorded, and its step-up keeps it.
  */
 interface EnvelopeAuthentication {
 	primary: string;
 	federation: string | undefined;
 	upstreamAmr: string[] | undefined;
 	mfaAtMs: number | undefined;
+	upstreamAuthTimeMs?: number | null;
 }
 
 interface Envelope {
@@ -121,10 +126,10 @@ const isStringList = (x: unknown): x is string[] =>
 
 /**
  * `authentication` is absent, or well-formed: a non-empty string primary —
- * what `create` admits — and each other field absent or of its type. `null`
- * is neither — this store never writes one — and an envelope holding it is
- * refused rather than read as a session from before the key, which would
- * split it again and forget a verified second factor.
+ * what `create` admits — and each other field absent or of its type, with
+ * `upstreamAuthTimeMs` also `null`. An `authentication` of `null` is refused
+ * rather than read as a session from before the key, which would split it
+ * again and forget a verified second factor.
  */
 const isValidEnvelopeAuthentication = (v: unknown): v is EnvelopeAuthentication | undefined => {
 	if (v === undefined) return true;
@@ -135,7 +140,10 @@ const isValidEnvelopeAuthentication = (v: unknown): v is EnvelopeAuthentication 
 		a.primary.length > 0 &&
 		(a.federation === undefined || typeof a.federation === "string") &&
 		(a.upstreamAmr === undefined || isStringList(a.upstreamAmr)) &&
-		(a.mfaAtMs === undefined || isValidTimestamp(a.mfaAtMs))
+		(a.mfaAtMs === undefined || isValidTimestamp(a.mfaAtMs)) &&
+		(a.upstreamAuthTimeMs === undefined ||
+			a.upstreamAuthTimeMs === null ||
+			isValidTimestamp(a.upstreamAuthTimeMs))
 	);
 };
 
@@ -173,14 +181,26 @@ const toEnvelopeAuthentication = (a: SessionAuthentication): EnvelopeAuthenticat
 	federation: a.federation,
 	upstreamAmr: a.upstreamAmr ? [...a.upstreamAmr] : undefined,
 	mfaAtMs: a.mfaAt?.getTime(),
+	...(a.upstreamAuthTime === undefined
+		? {}
+		: { upstreamAuthTimeMs: a.upstreamAuthTime === null ? null : a.upstreamAuthTime.getTime() }),
 });
 
-/** Every field named, those holding `undefined` included, as the session's type requires. */
+/**
+ * Every field named, those holding `undefined` included, as the session's
+ * type requires; `upstreamAuthTime`, the one optional field, only when the
+ * envelope holds it.
+ */
 const fromEnvelopeAuthentication = (a: EnvelopeAuthentication): SessionAuthentication => ({
 	primary: a.primary,
 	federation: a.federation,
 	upstreamAmr: a.upstreamAmr ? [...a.upstreamAmr] : undefined,
 	mfaAt: a.mfaAtMs === undefined ? undefined : new Date(a.mfaAtMs),
+	...(a.upstreamAuthTimeMs === undefined
+		? {}
+		: {
+				upstreamAuthTime: a.upstreamAuthTimeMs === null ? null : new Date(a.upstreamAuthTimeMs),
+			}),
 });
 
 const toEnvelope = (input: CreateUserSessionInput, createdAtMs: number): Envelope => ({

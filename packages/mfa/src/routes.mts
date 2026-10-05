@@ -268,7 +268,7 @@ export interface MfaRoutesOptions {
 	/** What the regeneration of recovery codes reads beside the management's (`recoveryCodes.mts`). */
 	readonly recoveryCodes: Pick<
 		MfaRecoveryCodesOptions,
-		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMarkMs" | "leaseMs"
+		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMark"
 	>;
 }
 
@@ -362,8 +362,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 
 	/**
 	 * The session the request's cookie carries, admitted for `action`, and the
-	 * renewal nonce of the claim admission compared — what an escalation of
-	 * this session expects the record to hold.
+	 * record's renewal nonce as admission read it — what an escalation of this
+	 * session expects the record to hold. None for a record that holds none,
+	 * whatever the cookie session holds.
 	 */
 	const admitCookie = async (
 		req: Request,
@@ -374,9 +375,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	}> => {
 		// express-session's `req.session`, read without its type package.
 		const claim = cookieClaim(req as unknown as CookieCarrier);
+		const admitted = await admitSession(admission, { claim, action });
 		return {
-			admitted: await admitSession(admission, { claim, action }),
-			expectedRenewalNonce: claim.renewalNonce,
+			admitted,
+			expectedRenewalNonce: admitted.outcome === "admitted" ? admitted.renewalNonce : undefined,
 		};
 	};
 

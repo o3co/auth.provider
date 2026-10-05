@@ -34,7 +34,7 @@ import { oauthSectionSchema } from "#/section.mjs";
 const valid = (): Record<string, unknown> => ({
 	jwt: { issuer: "https://auth.test", legacyTypAccept: false },
 	accessToken: { expiresIn: 3600 },
-	refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+	refreshToken: { expiresIn: 86400 },
 	oidcMode: "oidc-required",
 	requireEmailVerified: false,
 	requireGrantTypeAllowlist: false,
@@ -89,7 +89,7 @@ describe("the section parses what the package's reference loads to", () => {
 		const required = {
 			jwt: { issuer: "https://auth.test" },
 			accessToken: { expiresIn: 3600 },
-			refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 		};
 		expect(issuesOf(required)).toEqual([]);
@@ -335,23 +335,14 @@ describe("oauth.accessToken", () => {
 });
 
 describe("oauth.refreshToken", () => {
-	it("accepts legacyRtPolicy = reject, the only value, and refuses accept-with-warning", () => {
-		expect(issuesOf(withValue("refreshToken.legacyRtPolicy", "reject"))).toEqual([]);
-		expect(
-			issuesOf(withValue("refreshToken.legacyRtPolicy", "accept-with-warning")).map(
-				(issue) => issue.path,
-			),
-		).toEqual(["refreshToken.legacyRtPolicy"]);
-	});
-
-	it.each(["accept", "reject"])("accepts unknownFamilyPolicy = %s", (policy) => {
-		expect(issuesOf(withValue("refreshToken.unknownFamilyPolicy", policy))).toEqual([]);
-	});
-
-	it("refuses any other unknownFamilyPolicy", () => {
-		expect(
-			issuesOf(withValue("refreshToken.unknownFamilyPolicy", "warn")).map((issue) => issue.path),
-		).toEqual(["refreshToken.unknownFamilyPolicy"]);
+	it.each([
+		["unknownFamilyPolicy", "reject"],
+		["unknownFamilyPolicy", "accept"],
+		["legacyRtPolicy", "reject"],
+	])("refuses %s = %j: a key the section no longer declares", (key, value) => {
+		const issues = issuesOf(withValue(`refreshToken.${key}`, value));
+		expect(issues.map((issue) => issue.path)).toEqual(["refreshToken"]);
+		expect(issues[0]?.message).toContain(`"${key}"`);
 	});
 
 	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "1.5", MAX_DURATION_SECONDS + 1])(
