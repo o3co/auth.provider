@@ -48,6 +48,10 @@ import {
 	UNOWNED_BINDINGS,
 } from "./_helpers/unownedBindings.mjs";
 
+afterEach(() => {
+	vi.useRealTimers();
+});
+
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 const config = {
 	oauth: { jwt: { issuer: "https://auth.example" }, accessToken: { expiresIn: 300 } },
@@ -116,6 +120,8 @@ describe("jwt-bearer grant — the happy path", () => {
 	});
 
 	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const { result } = await build({
 			config: {
 				oauth: {
@@ -1199,7 +1205,10 @@ describe("jwt-bearer grant — the token never outlives the assertion", () => {
 			}).handle(ctx());
 			const { expiresIn, claims } = tokensOf(result);
 			expect(claims.exp as number).toBeLessThanOrEqual(expiresAt);
-			expect((claims.exp as number) - (claims.iat as number)).toBe(expiresIn);
+			// `expires_in` is the time left when the response is built, which
+			// this clock has moved past `iat`: never more than the lifetime.
+			expect(expiresIn).toBeGreaterThan(0);
+			expect(expiresIn).toBeLessThanOrEqual((claims.exp as number) - (claims.iat as number));
 		} finally {
 			spy.mockRestore();
 		}

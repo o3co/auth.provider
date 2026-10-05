@@ -560,3 +560,23 @@ Second round, after the two reviews — recorded here for the owner's confirmati
 - Readiness probes as a registrar slot: `2026-08-26-readiness-probes-registered-by-connection-owners.md`.
 - Boot stages and their guarantees: `packages/core/src/boot/README.md`; the manifest vocabulary: `packages/core/src/modules/manifest/README.md`; declared absence: `docs/adapter-surface.md`.
 - Module boundaries: o3co/auth.provider#626 (P3: core owns the decision, the packages own the protocol).
+
+## Amendment 2026-10-05 — the session lifecycle's state
+
+Written against `develop` at `0bc8c5d1d`. After step 3 (the subject and the renewal nonce), admission gains a read
+([#1030](https://github.com/o3co/auth.provider/issues/1030); the session
+lifecycle ADR, `2026-10-05-session-lifecycle.md`): after a live record, where
+the consumer hands its `sessionLifecycleStore` (`AdmissionDeps`, optional),
+admission reads that port's record for the claim's `sid` through core's
+reader. A record closing or closed is `not_live` (`closing`), from the
+closing commit on, for admission's consumers, whatever the user session still
+holds. No record for the
+sid, or no store handed, reads as before. A store that throws, or answers
+outside the port's types — a record naming another subject than the user
+session's among them — is `unavailable` with the new store name
+`session_lifecycle`, which joins `ADMISSION_INFRASTRUCTURE_STORES` (so no
+requirement may be named it) and `describeAdmissionOutage` ("session
+lifecycle store unavailable"). The port is read, never the lifecycle service;
+the store reaches admission as each consumer's declared slot (D10), so each
+consumer wires it in its own change.
+
