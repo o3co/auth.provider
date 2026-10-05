@@ -23,7 +23,7 @@ logout URL contain, and the schema of a `google` entry's own keys
 
 **Does not own:** the contract (core); the `core.federations` map, the keys
 core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
-`callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier /
+`callbackMeetsFreshness`, `callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier /
 `nonce` generation, the redirect-allowlist rules and claim precedence
 ([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
 Store); the refresh and logout routes that call this adapter
@@ -117,7 +117,8 @@ Two entries of type `google` — two Google clients, say one per OAuth consent
 screen — are two federations side by side, each under its own name.
 
 An entry is flat, and its schema is strict: the keys core owns (`enabled`,
-`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+`type`, `trustUpstreamAmr`, `callbackMeetsFreshness`, `callbackURL`) and the keys
+below, nothing else.
 The schema is `googleEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
 does not name — a typo, or a nested `google { ... }` section — refuses boot with `config-validation-failed` at `core.federations.<name>`,
 naming the key; a missing or malformed key is refused at
