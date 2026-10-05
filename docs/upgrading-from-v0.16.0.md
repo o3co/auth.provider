@@ -574,7 +574,9 @@ modules fills them.
   copy; it no longer asks the requirements about it as `credential_change`,
   and `session_admission_remediation_undeclared` is no longer logged. Pass a
   route's own issued action to the resolver its requirement is registered
-  in (#798).
+  in, read in the boot that registered it: a requirement object registered
+  again (a second `createApp` with the same module instance) is issued new
+  actions, which the earlier boot's resolver refuses (#798).
 - **Slots one module owns.** An enabled device grant requires the
   `csrfGuard` slot, and enabled federation grants `csrfGuard` and
   `loginEntry` (#746, #784); `sessionModule` requires `csrfTokenSigner`, and

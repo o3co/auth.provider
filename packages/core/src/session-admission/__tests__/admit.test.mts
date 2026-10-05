@@ -1264,6 +1264,32 @@ describe("step 5 — the requirements", () => {
 		expect(lines).toEqual([]);
 	});
 
+	it("hands each requirement its own clock, so one that moves it moves no other's", async () => {
+		const seen: number[] = [];
+		const moving = met("first", {
+			admit: async ({ now }) => {
+				seen.push(now.getTime());
+				now.setTime(0);
+				return { outcome: "met" };
+			},
+		});
+		const reading = met("second", {
+			admit: async ({ now }) => {
+				seen.push(now.getTime());
+				return { outcome: "met" };
+			},
+		});
+
+		await admitSession(
+			deps({ requirements: resolverForTests([moving, reading], { actions: TEST_ACTIONS }) }),
+			request({ action: "test.use" }),
+		);
+
+		expect(seen).toHaveLength(2);
+		expect(seen[1]).toBe(seen[0]);
+		expect(seen[1]).not.toBe(0);
+	});
+
 	it("hands every requirement the same frozen action, so one cannot change the grade the next reads", async () => {
 		const seen: string[] = [];
 		const rewriting = met("first", {

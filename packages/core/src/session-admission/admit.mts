@@ -377,11 +377,12 @@ export async function admitSession(
 			subject: session === null ? presented.subject : session.sub,
 			action: effective,
 			asks,
-			now,
 		};
 		for (const [name, requirement] of requirements) {
 			const input: RequirementInput = Object.freeze({
 				...shared,
+				// Its own copy: a requirement that moves its clock moves no other's.
+				now: new Date(now.getTime()),
 				authentication:
 					presented.carrier === "token"
 						? requirementSessionFromAmr(presented.tokenAmr)

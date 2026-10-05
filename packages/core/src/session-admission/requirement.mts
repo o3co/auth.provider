@@ -580,6 +580,10 @@ const actionsByCopy = new WeakMap<
  * the registered copy, which carries none of them, so a consumer holding
  * the resolver cannot obtain a `remediation` action. `undefined` for an
  * object that was never registered, a copy of one, or the registered copy.
+ * A requirement object is registered once, and its actions are read in the
+ * boot that registered it: registering the same object again (the last
+ * registration wins) issues it new ones, which the earlier boot's resolver
+ * refuses.
  */
 export function issuedRemediationActions(
 	requirement: SessionRequirement,
