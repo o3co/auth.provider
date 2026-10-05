@@ -205,7 +205,12 @@ export const sessionModule = defineModule<
 	| "federationRedirectPolicyResolver"
 	| "sessionRequirementResolver"
 	| "deploymentMode",
-	"logger" | "attemptCounter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation",
+	| "logger"
+	| "attemptCounter"
+	| "auditSink"
+	| "subjectSessionIndex"
+	| "subjectRevocation"
+	| "sessionLifecycleStore",
 	typeof sessionSectionSchema
 >({
 	name: "session",
@@ -227,9 +232,17 @@ export const sessionModule = defineModule<
 	// `attemptCounter` the login's attempts are counted per process where the
 	// deployment mode allows it; without `auditSink` no events are emitted; without
 	// `subjectSessionIndex`, `revokeAllForSubject` reports the capability as
-	// unavailable; `subjectRevocation` is the boundary the link routes'
-	// admission reads when wired.
-	optional: ["logger", "attemptCounter", "auditSink", "subjectSessionIndex", "subjectRevocation"],
+	// unavailable; `subjectRevocation` is the boundary, and
+	// `sessionLifecycleStore` the lifecycle port, the link routes' admission
+	// reads when wired.
+	optional: [
+		"logger",
+		"attemptCounter",
+		"auditSink",
+		"subjectSessionIndex",
+		"subjectRevocation",
+		"sessionLifecycleStore",
+	],
 	// Optional to wire, not optional to decide: an unfilled `auditSink` must be
 	// declared (`auditSink` in `core.declaredAbsent`), and absent subject-level
 	// revocation must be declared (`oauth.revocation.subject = "unsupported"`),
@@ -320,6 +333,7 @@ export const sessionModule = defineModule<
 						// read per request, and the boundary when it is wired.
 						requirements: deps.sessionRequirementResolver,
 						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
+						sessionLifecycleStore: deps.sessionLifecycleStore,
 						federationTokenStore: deps.federationTokenStore,
 						sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
 						// Named after the deployment's session cookie, as the CSRF
