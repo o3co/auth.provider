@@ -61,7 +61,7 @@ const config = {
 	oauth: {
 		jwt: { issuer: "localhost" },
 		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+		refreshToken: { expiresIn: 86400 },
 		grants: { refresh_token: { enabled: true } },
 	},
 } as unknown as GrantDependencies["config"];

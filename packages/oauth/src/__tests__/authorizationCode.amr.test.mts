@@ -130,7 +130,6 @@ const world = async (
 	registry.register(
 		"refresh_token",
 		createRefreshTokenGrant({
-			config,
 			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
