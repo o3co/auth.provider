@@ -26,10 +26,12 @@
  */
 
 import {
+	createInMemorySessionLifecycleStore,
 	createMemoryDeviceCodeStore,
 	DEFAULT_CLOCK_SKEW_MS,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type SubjectRevocation,
 	type UserSession,
@@ -87,6 +89,7 @@ interface HarnessOptions {
 	readonly session?: Record<string, unknown>;
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectRevocation?: SubjectRevocation;
+	readonly sessionLifecycleStore?: SessionLifecycleStore;
 	readonly requireEmailVerified?: boolean;
 	/** The verification's attempt limit; five, as the package ships it, unless a test needs it spent sooner. */
 	readonly limit?: number;
@@ -120,6 +123,9 @@ const harness = async (options: HarnessOptions = {}) => {
 			...(options.subjectRevocation === undefined
 				? {}
 				: { subjectRevocation: options.subjectRevocation }),
+			...(options.sessionLifecycleStore === undefined
+				? {}
+				: { sessionLifecycleStore: options.sessionLifecycleStore }),
 			requirements: resolverForTests(options.requirements ?? [], {
 				issuer: ISSUER,
 				actions: DEVICE_GRANT_ADMISSION_ACTIONS,
@@ -312,6 +318,25 @@ describe("device verification on session admission", () => {
 		// On the handler's clock: a millisecond later is live.
 		const live = await harness({ userSessionStore: expiringAt(NOW + 1) });
 		expect((await live.verify({ action: "lookup", user_code: USER_CODE })).status).toBe(200);
+	});
+
+	it("refuses a session whose lifecycle record is closing, deciding nothing, and approves while it is active", async () => {
+		const lifecycle = createInMemorySessionLifecycleStore({ now: () => NOW });
+		await lifecycle.open(LIVE_SID, "user-1", new Date(NOW + 3_600_000));
+		const active = await harness({ sessionLifecycleStore: lifecycle });
+		expect((await active.verify({ action: "lookup", user_code: USER_CODE })).status).toBe(200);
+
+		await lifecycle.beginClose(LIVE_SID, {
+			cause: "rp_logout",
+			steps: ["tokens"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+		const closing = await harness({ sessionLifecycleStore: lifecycle });
+		const res = await closing.verify({ action: "approve", user_code: USER_CODE });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+		expect(await closing.undecided()).toBe(true);
 	});
 
 	it("answers a cookie that names no user 401 login_required, and warns admission's line", async () => {

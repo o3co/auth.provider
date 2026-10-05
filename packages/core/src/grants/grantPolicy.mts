@@ -264,7 +264,8 @@ function logRewrite(
  * The one reading of what a grant policy returned. Only an `outcome` that is
  * exactly `"allow"` allows, and only one that is exactly `"deny"` refuses;
  * anything else — another string or case, no `outcome`, a value that is not
- * an object, a field that throws when read — is `invalid`, never allow.
+ * an object, a field that throws when read, an element of `grantedScope` or
+ * `grantedAudience` that is not a string — is `invalid`, never allow.
  *
  * The decision handed back is a plain copy, each field read once —
  * `outcome`, `grantedScope` and `grantedAudience` for allow, `outcome`,
@@ -314,6 +315,10 @@ function plainCopyOf(
 		if (outcome === "allow") {
 			const grantedScope = copied(fields.grantedScope);
 			const grantedAudience = copied(fields.grantedAudience);
+			// Judged on the copy: an element that is not a string is in no ceiling
+			// of strings, and one that cannot be made a string would throw where
+			// a refusal names it.
+			if (!onlyStrings(grantedScope) || !onlyStrings(grantedAudience)) return undefined;
 			return {
 				verdict: outcome,
 				decision: {
@@ -345,6 +350,10 @@ function plainCopyOf(
 function copied(value: unknown): unknown {
 	return Array.isArray(value) ? Array.from(value) : value;
 }
+
+/** Whether `value`, when it is an array, holds strings alone. */
+const onlyStrings = (value: unknown): boolean =>
+	!Array.isArray(value) || value.every((element) => typeof element === "string");
 
 /** The rest of {@link evaluateGrantPolicy}'s inputs. */
 export interface EvaluateGrantPolicyOptions {

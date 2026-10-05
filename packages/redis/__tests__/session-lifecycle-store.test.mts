@@ -205,6 +205,44 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 		expect(after?.value.participants.map((p) => p.data)).toEqual(data);
 	});
 
+	it("keeps each participant's join ordinal beside it, written when it first joins and kept by a repeat join", async () => {
+		const { store, record } = fresh();
+		const sid = "ordinals";
+		await store.open(sid, "u", await later());
+		await store.join(sid, { kind: "federation", id: "oidc", data: "" });
+		await store.join(sid, { kind: "rp", id: "a", data: "" });
+		await store.join(sid, { kind: "federation", id: "oidc", data: "again" });
+		expect(await io.hget(record(sid), "o:federation:oidc")).toBe("1");
+		expect(await io.hget(record(sid), "o:rp:a")).toBe("2");
+	});
+
+	it("answers a participant written with no ordinal after those with one, by its item's bytes, and refuses an ordinal it cannot read", async () => {
+		const { store, record } = fresh();
+		const sid = "no-ordinal";
+		await store.open(sid, "u", await later());
+		for (const id of ["zeta", "beta", "alpha"]) await store.join(sid, { kind: "rp", id, data: "" });
+		await io.hdel(record(sid), "o:rp:zeta", "o:rp:alpha");
+		const read = readVersionedSessionLifecycle(await store.read(sid));
+		expect(read?.value.participants.map((p) => p.id)).toEqual(["beta", "alpha", "zeta"]);
+		await io.hset(record(sid), "o:rp:beta", "first");
+		await expect(store.read(sid)).rejects.toThrow();
+	});
+
+	it("refuses an ordinal not written as a decimal integer of at least 1, though it reads as a number", async () => {
+		const { store, record } = fresh();
+		const sid = "ordinal-form";
+		await store.open(sid, "u", await later());
+		await store.join(sid, { kind: "rp", id: "a", data: "" });
+		for (const ordinal of ["0x2", "1e1", "+3", " 2", "2.0", "02", "0", "-1", "9007199254740993"]) {
+			await io.hset(record(sid), "o:rp:a", ordinal);
+			await expect(store.read(sid), ordinal).rejects.toThrow(/join ordinal/);
+		}
+		await io.hset(record(sid), "o:rp:a", "1");
+		expect(readVersionedSessionLifecycle(await store.read(sid))?.value.participants).toHaveLength(
+			1,
+		);
+	});
+
 	it("a join past maxParticipants rejects and writes nothing; a participant joined again is not counted twice", async () => {
 		const { store } = fresh({ maxParticipants: 2 });
 		const sid = "full";

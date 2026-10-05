@@ -38,7 +38,11 @@ import {
 	type RefreshTokenFamilyStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
@@ -96,6 +100,10 @@ const grant = (deps: Partial<GrantDependencies>, logger: MockLogger) =>
 	createRefreshTokenGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config,
+		// The token settings the configuration above names; the grant
+		// verifies the presented token against the request's issuer.
+		oauthTokenSettings: createTestOAuthTokenSettings(),
+		tokenBindingSettings: createTestTokenBindingSettings(),
 		keyStore: createSymmetricKeyStore(SECRET),
 		logger,
 		...deps,

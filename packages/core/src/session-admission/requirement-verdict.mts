@@ -21,24 +21,16 @@
  * page. Each warning here is said once per process per name.
  */
 
-import type { Logger } from "../logging/Logger.mjs";
 import type { UserSession } from "../user-sessions/types.mjs";
 import type { AdmissionAction } from "./actions.mjs";
 import { isObject } from "./input-values.mjs";
-import {
-	type AdmissionDeps,
-	isIssuedAction,
-	issuedActionsOf,
-	type RegisteredRequirement,
-	type RegisteredStepUpPage,
-	type RequirementVerdict,
-	type SessionView,
+import type {
+	AdmissionDeps,
+	RegisteredRequirement,
+	RegisteredStepUpPage,
+	RequirementVerdict,
+	SessionView,
 } from "./requirement.mjs";
-
-/** The `remediation` names already said to be undeclared, once per process each, up to the cap; past it, once for all. */
-const undeclaredRemediations = new Set<string>();
-const UNDECLARED_REMEDIATION_CAP = 256;
-let undeclaredRemediationsOverflowed = false;
 
 /** The requirements already said to have stepped up without a page, once per process each. */
 const pagelessStepUps = new Set<string>();
@@ -131,36 +123,13 @@ export function stepUpVerdict(
 }
 
 /**
- * The action as the requirements see it: a registered action as registered;
- * `remediation` only for an object core issued to one of these requirements —
- * else, one issued to a requirement another composition registered, as
- * `credential_change`, the strictest grade, said once per process per name.
+ * The action as the requirements see it, one frozen object every requirement
+ * is handed: a registered action as registered, or the `remediation` core
+ * issued to one of these requirements (the request check refuses any other),
+ * which skips them.
  */
-export function effectiveAction(
-	requirements: readonly (readonly [string, RegisteredRequirement])[],
-	asked: AdmissionAction,
-	logger: Logger | undefined,
-): AdmissionAction {
-	if (asked.grade !== "remediation") return { name: asked.name, grade: asked.grade };
-	if (
-		isIssuedAction(asked) &&
-		// Every registered copy was issued its actions ({} when it declared none).
-		requirements.some(([, r]) => Object.values(issuedActionsOf(r) as object).includes(asked))
-	) {
-		return asked;
-	}
-	// Once per name, and once for all past the cap, so the log stays bounded.
-	if (undeclaredRemediations.size < UNDECLARED_REMEDIATION_CAP) {
-		if (!undeclaredRemediations.has(asked.name)) {
-			undeclaredRemediations.add(asked.name);
-			logger?.warn({ action: asked.name }, "session_admission_remediation_undeclared");
-		}
-	} else if (!undeclaredRemediations.has(asked.name) && !undeclaredRemediationsOverflowed) {
-		undeclaredRemediationsOverflowed = true;
-		logger?.warn(
-			{ action: asked.name, overflow: true },
-			"session_admission_remediation_undeclared",
-		);
-	}
-	return { name: asked.name, grade: "credential_change" };
+export function effectiveAction(asked: AdmissionAction): AdmissionAction {
+	return asked.grade === "remediation"
+		? asked
+		: Object.freeze({ name: asked.name, grade: asked.grade });
 }

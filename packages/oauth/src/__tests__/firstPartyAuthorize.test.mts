@@ -53,6 +53,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -113,7 +114,7 @@ const makeApp = async (opts: {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
-		config: makeConfig(opts.staleAllowUnmarkedClients ?? false),
+		...routerInputsOf(makeConfig(opts.staleAllowUnmarkedClients ?? false)),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -262,7 +263,7 @@ describe("/authorize first-party invariant, through a file-backed registry", () 
 			loginEntry: createTestLoginEntry(),
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry,
-			config: makeConfig(false),
+			...routerInputsOf(makeConfig(false)),
 			clientRepository,
 			codeRepository: {
 				createCode: async () =>

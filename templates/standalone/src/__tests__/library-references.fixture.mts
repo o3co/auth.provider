@@ -30,7 +30,7 @@ import {
 import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import {
-	oauthAuthorizationModule,
+	oauthAuthorizationGrantsModule,
 	oauthModule,
 	oauthSessionGrantModule,
 } from "@o3co/auth-provider-oauth";
@@ -55,11 +55,11 @@ import {
 } from "../modules.mjs";
 import type { Adapters, MfaSwitch } from "../sections.mjs";
 
-/** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
+/** The oauth package's modules: none reads the configuration it is handed. */
 const OAUTH_MODULES = [
 	oauthModule({ config: {} as never }),
 	oauthSessionGrantModule,
-	oauthAuthorizationModule({ config: {} as never }),
+	oauthAuthorizationGrantsModule,
 ];
 
 /** The modules the template composes that declare a renamed variable. */
