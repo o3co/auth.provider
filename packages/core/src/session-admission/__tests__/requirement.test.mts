@@ -517,14 +517,18 @@ describe("resolverForTests — the resolver a test builds", () => {
 		expect(() => resolverForTests([badReach])).toThrow(/a primary's marker/);
 	});
 
-	it("refuses a name admission gives an outage of one of its own stores — ADMISSION_INFRASTRUCTURE_STORES, user_session and revocation_boundary — which a consumer telling an outage by its store would take the requirement's for", () => {
-		expect(ADMISSION_INFRASTRUCTURE_STORES).toEqual(["user_session", "revocation_boundary"]);
+	it("refuses a name admission gives an outage of one of its own stores — ADMISSION_INFRASTRUCTURE_STORES, user_session, revocation_boundary and session_lifecycle — which a consumer telling an outage by its store would take the requirement's for", () => {
+		expect(ADMISSION_INFRASTRUCTURE_STORES).toEqual([
+			"user_session",
+			"revocation_boundary",
+			"session_lifecycle",
+		]);
 		expect(Object.isFrozen(ADMISSION_INFRASTRUCTURE_STORES)).toBe(true);
 		for (const name of ADMISSION_INFRASTRUCTURE_STORES) {
 			expect(() => resolverForTests([requirement(name)]), name).toThrow(RangeError);
 			// Worded by the two names, not by a constant core does not export.
 			expect(() => resolverForTests([requirement(name)]), name).toThrow(
-				/the name is one admission gives an outage of its own stores \(user_session, revocation_boundary\)/,
+				/the name is one admission gives an outage of its own stores \(user_session, revocation_boundary, session_lifecycle\)/,
 			);
 			expect(() => resolverForTests([requirement(name)]), name).not.toThrow(
 				/ADMISSION_INFRASTRUCTURE_STORES/,

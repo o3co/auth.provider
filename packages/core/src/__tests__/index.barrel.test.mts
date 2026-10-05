@@ -271,6 +271,10 @@ describe("core barrel — the trusted-proxy address vocabulary", () => {
 		expect(typeof core.checkOAuthTokenSettings).toBe("function");
 	});
 
+	it("re-exports the check a reader holds a composition's federationGrantPolicy to before reading it", () => {
+		expect(typeof core.checkFederationGrantPolicy).toBe("function");
+	});
+
 	it("re-exports the reader of core's own section, for a composition root before boot", () => {
 		expect(core.readCoreSection({ core: { deployment: { mode: "single" } } })).toEqual({
 			deployment: { mode: "single" },

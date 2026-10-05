@@ -28,7 +28,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-	type AppConfig,
 	BootError,
 	createApp,
 	createSymmetricKeyStore,
@@ -38,6 +37,8 @@ import {
 	moduleReferences,
 } from "@o3co/auth-provider-core";
 import {
+	createTestApp,
+	createTestOAuthTokenSettings,
 	makeValidAppConfig,
 	packageReferenceProblems,
 	sectionStrictnessProblems,
@@ -45,7 +46,10 @@ import {
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { oauthEndpointsModule, oauthSectionSchema } from "#/module.mjs";
-import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import {
+	oauthAuthorizationConfigSchema,
+	oauthAuthorizationGrantsModule,
+} from "#/oauthAuthorization.mjs";
 import { oauthSessionConfigSchema, oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { capturing, type GrantSwitches, withGrants } from "./_helpers/sections.mjs";
 
@@ -81,17 +85,12 @@ function bindings(): string[] {
 	);
 }
 
-/** The package's modules, built over a configuration that turns every grant on. */
-const everyModule = (): Module[] => {
-	const config = withGrants(makeValidAppConfig(), {
-		session: true,
-		authorizationCode: true,
-		refreshToken: true,
-		clientCredentials: true,
-		jwtBearer: true,
-	}) as AppConfig;
-	return [oauthEndpointsModule, oauthSessionGrantModule, oauthAuthorizationModule({ config })];
-};
+/** The package's modules. */
+const everyModule = (): Module[] => [
+	oauthEndpointsModule,
+	oauthSessionGrantModule,
+	oauthAuthorizationGrantsModule,
+];
 
 /** The package's reference, resolved with no variable set. */
 const defaults = (): Record<string, unknown> =>
@@ -113,15 +112,9 @@ describe("the package's config/reference.conf", () => {
 		// The issuer has no default: a deployment sets it, as here.
 		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
 			parseFile(path, { env: { OAUTH_JWT_ISSUER: "https://auth.test", ...env } }).toObject();
-		// Built from the reference itself, as a root that layers it builds them:
-		// each module's section holds the switches to what it was built with.
-		const config = { ...makeValidAppConfig(), ...defaults() } as AppConfig;
-		const modules = [
-			oauthEndpointsModule,
-			oauthSessionGrantModule,
-			oauthAuthorizationModule({ config }),
-		];
-		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
+		expect(
+			packageReferenceProblems({ reference: REFERENCE, modules: everyModule(), read }),
+		).toEqual([]);
 	});
 
 	it("ships every grant off and the consent page at /consent", () => {
@@ -289,28 +282,101 @@ describe("the oauth-session section, and the switch read from it as boot parses 
 	});
 });
 
-describe("the grant switches, read from the configuration handed to the module", () => {
-	/** The grant types a module contributes. */
-	const grantsOf = (module: Module): string[] => Object.keys(module.contributes?.grants ?? {});
+describe("the oauth-authorization section, and the switches read from it as boot parses it", () => {
+	/** The section as boot parses it. */
+	const parse = (section: unknown) => oauthAuthorizationConfigSchema.parse(section);
+	/** Whether the module is on for `section`, read as boot reads it. */
+	const isEnabled = (section: unknown): unknown =>
+		oauthAuthorizationGrantsModule.section?.isEnabled?.(parse(section));
+	/** Every grant's factory, by grant type. */
+	const factories = () => oauthAuthorizationGrantsModule.contributes?.grants ?? {};
+	/**
+	 * The grant types whose factory answers `null` for `section`: those it
+	 * switches off. One switched on goes on to read the slots it needs, which
+	 * these bare deps do not carry, and throws instead.
+	 */
+	const switchedOff = (section: unknown): string[] =>
+		Object.entries(factories())
+			.filter(([, factory]) => {
+				try {
+					return factory({ section: parse(section) } as never) === null;
+				} catch {
+					return false;
+				}
+			})
+			.map(([grant]) => grant);
 
-	it.each([
+	const GRANTS = [
 		["authorizationCode", "authorization_code"],
 		["refreshToken", "refresh_token"],
 		["clientCredentials", "client_credentials"],
 		["jwtBearer", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
-	] as const)("oauth-authorization.grants.%s.enabled registers %s, and only it", (key, grant) => {
-		const off = {
-			authorizationCode: false,
-			refreshToken: false,
-			clientCredentials: false,
-			jwtBearer: false,
-		};
-		for (const enabled of [true, "true"]) {
-			const config = withGrants(makeValidAppConfig(), { ...off, [key]: enabled }) as AppConfig;
-			expect(grantsOf(oauthAuthorizationModule({ config }))).toEqual([grant]);
-		}
-		const config = withGrants(makeValidAppConfig(), off) as AppConfig;
-		expect(grantsOf(oauthAuthorizationModule({ config }))).toEqual([]);
+	] as const;
+	const ALL_OFF = {
+		authorizationCode: { enabled: false },
+		refreshToken: { enabled: false },
+		clientCredentials: { enabled: false },
+		jwtBearer: { enabled: false },
+	};
+
+	it("is exported as a module value, and no factory builds it from a configuration", async () => {
+		const entry = (await import("#/index.mjs")) as Record<string, unknown>;
+		expect(entry.oauthAuthorizationGrantsModule).toBe(oauthAuthorizationGrantsModule);
+		expect(entry).not.toHaveProperty("oauthAuthorizationModule");
+	});
+
+	it("is one module that contributes every grant it installs, each switched by its own key", () => {
+		expect(Object.keys(factories()).sort()).toEqual(GRANTS.map(([, grant]) => grant).sort());
+		expect(typeof oauthAuthorizationGrantsModule.section?.isEnabled).toBe("function");
+	});
+
+	it.each(GRANTS)(
+		"oauth-authorization.grants.%s.enabled switches %s on, and only it, and the module with it",
+		(key, grant) => {
+			for (const enabled of [true, "true", "1", "TRUE"]) {
+				const section = { grants: { ...ALL_OFF, [key]: { enabled } } };
+				expect(isEnabled(section)).toBe(true);
+				expect(switchedOff(section).sort()).toEqual(
+					GRANTS.map(([, g]) => g)
+						.filter((g) => g !== grant)
+						.sort(),
+				);
+			}
+		},
+	);
+
+	it.each([
+		["an absent section", undefined],
+		["a section without grants", {}],
+		["grants without a switch", { grants: { authorizationCode: {} } }],
+		["every switch off", { grants: ALL_OFF }],
+		["every switch the string false", { grants: { clientCredentials: { enabled: "false" } } }],
+	] as const)("reads %s as every grant off, and the module off", (_what, section) => {
+		expect(isEnabled(section)).toBe(false);
+		expect(switchedOff(section).sort()).toEqual(GRANTS.map(([, grant]) => grant).sort());
+	});
+
+	it("resolves its defaults from the package's reference.conf alone, and holds none of its own", () => {
+		expect(parse(defaults()["oauth-authorization"])).toStrictEqual({ grants: ALL_OFF });
+		expect(parse({})).toStrictEqual({});
+		expect(parse({ grants: {} })).toStrictEqual({ grants: {} });
+		expect(parse(undefined)).toBeUndefined();
+	});
+
+	it("refuses an unknown key at every level of the section, at its path", () => {
+		expect(
+			sectionStrictnessProblems([oauthAuthorizationGrantsModule], {
+				tree: defaults(),
+				samples: { "oauth-authorization": [{ grants: ALL_OFF }] },
+			}),
+		).toEqual([]);
+		const pathOf = (section: unknown) =>
+			oauthAuthorizationConfigSchema
+				.safeParse(section)
+				.error?.issues.map((issue) => issue.path.join("."));
+		expect(pathOf({ grant: {} })).toEqual([""]);
+		expect(pathOf({ grants: { authCode: { enabled: true } } })).toEqual(["grants"]);
+		expect(pathOf({ grants: { refreshToken: { enable: true } } })).toEqual(["grants.refreshToken"]);
 	});
 });
 
@@ -318,11 +384,7 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	/** The package's modules, and the fixture's configuration with `change` laid over it, captured. */
 	const composition = (change: (config: Record<string, unknown>) => Record<string, unknown>) => {
 		const config = change(makeValidAppConfig() as unknown as Record<string, unknown>);
-		const modules = [
-			oauthEndpointsModule,
-			oauthSessionGrantModule,
-			oauthAuthorizationModule({ config: config as AppConfig }),
-		];
+		const modules = everyModule();
 		// What the modules require besides their sections, so a refusal names the configuration.
 		const slots = defineModule({
 			name: "test:slots",
@@ -509,6 +571,32 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		expect(err.message).toContain('"urll"');
 	});
 
+	it("refuses an empty oauth.consentPage.url, naming the path", async () => {
+		const err = await refusal((config) => oauthWith(config, { consentPage: { url: "" } }));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("oauth.consentPage.url must not be empty");
+	});
+
+	it("refuses OAUTH_CONSENT_PAGE_URL exported empty rather than reading it as unset", () => {
+		const tree = parseFile(fileURLToPath(REFERENCE), {
+			env: { OAUTH_JWT_ISSUER: "https://auth.test", OAUTH_CONSENT_PAGE_URL: "" },
+		}).toObject() as { oauth: { consentPage: unknown } };
+		expect(tree.oauth.consentPage).toEqual({ url: "" });
+
+		const result = oauthSectionSchema.shape.consentPage.safeParse(tree.oauth.consentPage);
+		expect(result.success).toBe(false);
+	});
+
+	it("refuses the boot with the variable captured empty, naming the path", async () => {
+		const err = await refusal((config) => oauthWith(config, { consentPage: { url: "" } }), {
+			OAUTH_CONSENT_PAGE_URL: "",
+		});
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("oauth.consentPage.url must not be empty");
+	});
+
 	it("refuses a key oauth.clientIdMetadataDocuments does not declare, naming it", async () => {
 		const err = await refusal((config) =>
 			oauthWith(config, {
@@ -534,7 +622,7 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	});
 });
 
-describe("the switches the modules were built with, held to the ones boot parses", () => {
+describe("the switches, read from the section boot parses", () => {
 	/** Every switch off, and `change` over them. */
 	const switches = (change: GrantSwitches): GrantSwitches => ({
 		session: false,
@@ -545,12 +633,9 @@ describe("the switches the modules were built with, held to the ones boot parses
 		...change,
 	});
 
-	/** What boot refused: the modules built from `built`'s switches, booted with `booted`'s. */
-	async function refusedBuiltFrom(built: GrantSwitches, booted: GrantSwitches): Promise<BootError> {
-		const base = makeValidAppConfig();
-		const builtConfig = withGrants(base, switches(built)) as AppConfig;
-		const modules = [oauthSessionGrantModule, oauthAuthorizationModule({ config: builtConfig })];
-		// What the grants require besides their sections, so a refusal names the configuration.
+	/** The grant types boot registers for `modules` over `booted`'s switches. */
+	async function registered(modules: readonly Module[], booted: GrantSwitches): Promise<string[]> {
+		// What the grants require besides their sections and the oauth module's slot.
 		const slots = defineModule({
 			name: "test:slots",
 			provides: {
@@ -558,46 +643,26 @@ describe("the switches the modules were built with, held to the ones boot parses
 				keyStore: () => createSymmetricKeyStore("oauth-sections-test-secret.at-least-32-bytes"),
 			},
 		});
+		const handle = await createTestApp({
+			modules: [...modules, slots],
+			bootstrapComponents: {
+				config: capturing(withGrants(makeValidAppConfig(), switches(booted)), modules),
+				pathResolver: (s: string) => s,
+				oauthTokenSettings: createTestOAuthTokenSettings(),
+			},
+		});
 		try {
-			const handle = await createApp({
-				modules: [...modules, slots],
-				bootstrapComponents: {
-					config: capturing(withGrants(base, switches(booted)), modules),
-					pathResolver: (s: string) => s,
-				} as never,
-			});
+			return ["authorization_code", "refresh_token", "client_credentials"].filter((grant) =>
+				handle.inspect.grants.has(grant),
+			);
+		} finally {
 			await handle.dispose();
-		} catch (err) {
-			expect(err).toBeInstanceOf(BootError);
-			return err as BootError;
 		}
-		return expect.fail("boot should have been refused");
 	}
 
-	it.each([
-		[
-			"off, and boot parses it on",
-			{ clientCredentials: false },
-			{ clientCredentials: true },
-			"off",
-			"on",
-		],
-		[
-			"on, and boot parses it off",
-			{ clientCredentials: true },
-			{ clientCredentials: false },
-			"on",
-			"off",
-		],
-	] as const)(
-		"oauth-authorization: built with client_credentials %s: refused, naming oauth-authorization.grants.clientCredentials.enabled",
-		async (_what, built, booted, decided, parsed) => {
-			const err = await refusedBuiltFrom(built, booted);
-
-			expect(err.reason).toBe("config-validation-failed");
-			expect(err.message).toContain(
-				`built from a configuration with grants.clientCredentials ${decided}, but the configuration createApp parsed has oauth-authorization.grants.clientCredentials.enabled ${parsed}`,
-			);
-		},
-	);
+	it("registers the grant the booted section turns on, the module listed as it is", async () => {
+		expect(await registered([oauthAuthorizationGrantsModule], { clientCredentials: true })).toEqual(
+			["client_credentials"],
+		);
+	});
 });

@@ -47,6 +47,10 @@ import {
 	tokenSettings,
 } from "./fixtures.mjs";
 
+afterEach(() => {
+	vi.useRealTimers();
+});
+
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
 const client: PublicClient = {
@@ -246,7 +250,7 @@ describe("token_exchange — integration", () => {
 	// reads `deps.grantPolicy` in grant.mts to enforce fail-closed
 	// policy decisions on exchange requests. Other OAuth grants
 	// (createAuthorizationGrant / createRefreshTokenGrant) declare grantPolicy
-	// in oauthAuthorizationModule.optional; without declaring it here as well,
+	// in oauthAuthorizationGrantsModule's optional slots; without declaring it here as well,
 	// token-exchange would silently sit outside the policy gate while sibling
 	// grants are enforced — a structural inconsistency in the gate's coverage.
 	it("declares grantPolicy in optional so the grant-policy gate reaches token-exchange", async () => {
@@ -297,6 +301,8 @@ describe("tokenExchangeModule booted without the oauth module", () => {
 		});
 
 	it("boots from the slot a host fills, holding a subject token to its issuer and minting its lifetime, not the configuration's", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		handle = await boot({
 			config: configWith(),
 			oauthTokenSettings: createTestOAuthTokenSettings({
@@ -1992,6 +1998,8 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings, never the
 	});
 
 	it("mints the slot's default lifetime, not the configuration's", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const factory = tokenExchangeModule.contributes?.grants?.[TOKEN_EXCHANGE_GRANT_TYPE];
 		if (factory === undefined) throw new Error("the module contributes no token_exchange grant");
 		const grant = (factory as (deps: unknown) => GrantHandler)({

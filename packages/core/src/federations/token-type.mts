@@ -30,6 +30,14 @@ import { isIPv6 } from "node:net";
  */
 export const BEARER_TOKEN_TYPE = "Bearer";
 
+/**
+ * The longest value read as a token type, in characters: 4 KiB, far above
+ * every registered type name and any realistic URI-form type. A longer value
+ * is not a type, and is refused before the grammar runs, whose regular
+ * expressions exhaust the stack on a long enough string.
+ */
+export const MAX_TOKEN_TYPE_LENGTH = 4096;
+
 // RFC 3986 Appendix A, as regular-expression source. Composed from the ABNF
 // rule by rule so each piece can be checked against the RFC by name.
 const UNRESERVED = "A-Za-z0-9\\-._~";
@@ -84,10 +92,12 @@ const IP_FUTURE = new RegExp(`^[vV][0-9A-Fa-f]+\\.[${UNRESERVED}${SUB_DELIMS}:]+
  * must be an IPv6 address or an IPvFuture.
  *
  * `""` is a URI reference but is refused: §5.1 makes `token_type` REQUIRED,
- * and an empty one is a broken adapter answer, not a type.
+ * and an empty one is a broken adapter answer, not a type. So is one longer
+ * than {@link MAX_TOKEN_TYPE_LENGTH}, refused before any regular expression
+ * runs, so this never throws.
  */
 function isTokenType(value: string): boolean {
-	if (value.length === 0) return false;
+	if (value.length === 0 || value.length > MAX_TOKEN_TYPE_LENGTH) return false;
 	if (!URI.test(value) && !RELATIVE_REF.test(value)) return false;
 	const literal = /\[([^\]]*)\]/.exec(value);
 	return literal === null || isIPv6(literal[1] ?? "") || IP_FUTURE.test(literal[1] ?? "");
@@ -96,7 +106,7 @@ function isTokenType(value: string): boolean {
 /**
  * The stored form of an upstream `token_type`: the upstream's spelling,
  * neither trimmed nor re-cased, or `undefined` when it is not a token type at
- * all ({@link isTokenType}).
+ * all ({@link isTokenType}). Total: it never throws, whatever the value.
  *
  * This separates a broken adapter answer from a real type this provider may
  * not hand on, the two refusals `POST /oauth/federation/:name/token` gives on

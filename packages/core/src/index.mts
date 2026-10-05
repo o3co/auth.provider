@@ -1229,6 +1229,7 @@ export type {
 export {
 	createSessionLifecycle,
 	type SessionCloseOutcome,
+	type SessionFederations,
 	type SessionJoinOutcome,
 	type SessionJoinRequest,
 	type SessionLifecycle,
@@ -1626,6 +1627,13 @@ export {
 	memoryFederationGrantIntentStoreModule,
 	memoryFederationGrantStoreModule,
 } from "./federation-grants/module.mjs";
+// What modules outside the federation-grants module read of its section —
+// the switch and the keep policy — through the `federationGrantPolicy` slot,
+// and the check a reader holds the slot to.
+export {
+	checkFederationGrantPolicy,
+	type FederationGrantPolicy,
+} from "./federation-grants/policy.mjs";
 export {
 	assertFederationGrantRetrievalLimits,
 	type FederationGrantAuditEvent,

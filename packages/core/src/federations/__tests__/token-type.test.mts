@@ -19,6 +19,7 @@ import {
 	BEARER_TOKEN_TYPE,
 	canonicalTokenType,
 	isBearerTokenType,
+	MAX_TOKEN_TYPE_LENGTH,
 } from "#/federations/token-type.mjs";
 
 describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
@@ -129,5 +130,27 @@ describe("isBearerTokenType — §5.1's case-insensitive comparison", () => {
 
 	it("is the spelling BEARER_TOKEN_TYPE is written in", () => {
 		expect(isBearerTokenType(BEARER_TOKEN_TYPE)).toBe(true);
+	});
+});
+
+describe("canonicalTokenType — a value longer than any token type", () => {
+	it.each([
+		["plain", "a".repeat(10_000_000)],
+		["URI-shaped", `https://example.com/${"a".repeat(10_000_000)}`],
+		["percent-encoded", `x${"%20".repeat(4_000_000)}`],
+	])("answers undefined for a %s one, and never throws", (_label, value) => {
+		expect(() => canonicalTokenType(value)).not.toThrow();
+		expect(canonicalTokenType(value)).toBeUndefined();
+	});
+
+	it("reads a type of exactly the bound by the grammar, and refuses one a character longer", () => {
+		const at = `urn:x:${"a".repeat(MAX_TOKEN_TYPE_LENGTH - 6)}`;
+		expect(at).toHaveLength(MAX_TOKEN_TYPE_LENGTH);
+		expect(canonicalTokenType(at)).toBe(at);
+		expect(canonicalTokenType(`${at}a`)).toBeUndefined();
+	});
+
+	it("is far above every registered type name and realistic URI-form type", () => {
+		expect(MAX_TOKEN_TYPE_LENGTH).toBeGreaterThanOrEqual(1024);
 	});
 });

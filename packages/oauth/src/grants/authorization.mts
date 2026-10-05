@@ -20,6 +20,7 @@ import {
 	admitSession,
 	auditErrorText,
 	authTimeAt,
+	checkOAuthTokenSettings,
 	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
@@ -39,9 +40,6 @@ import {
 	loggableError,
 	ownedConfirmation,
 	type ProviderDeps,
-	resolveAccessTokenLifetime,
-	resolveRefreshTokenLifetime,
-	resolveTokenBindingSettings,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -52,18 +50,20 @@ import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { behindClientBoundary } from "../clients/clientBoundary.mjs";
 import { joinSession } from "../logout/sessionEnd.mjs";
-import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
-import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
+import { PKCE_METHOD_S256, pkceMethodsForClient, resolvePkceOptions } from "./pkce.mjs";
+import { bindConfidentialClientRefreshTokensFrom } from "./tokenBindingRule.mjs";
 
 /**
  * What the authorization-code grant reads: the shared grant slots it uses,
- * plus the repositories only this grant redeems against. The module's
- * `ProviderDeps<R, O>` must satisfy this at the wiring, so a slot read here
- * without the module declaring it is a compile error.
+ * plus the repositories only this grant redeems against. The issuer, the
+ * lifetimes and the resource-indicator switch come from the
+ * `oauthTokenSettings` slot, and the refresh-token binding rule from core's
+ * `tokenBindingSettings`; nothing is read from the whole configuration. The
+ * module's `ProviderDeps<R, O>` must satisfy this at the wiring, so a slot
+ * read here without the module declaring it is a compile error.
  */
 export type AuthorizationGrantDeps = Pick<
 	GrantDependencies,
-	| "config"
 	| "keyStore"
 	| "logger"
 	| "userSessionStore"
@@ -73,11 +73,20 @@ export type AuthorizationGrantDeps = Pick<
 	| "sessionFamilyIndex"
 	| "sessionRPRegistry"
 > &
+	// `sessionLifecycle`, where core's session lifecycle module is installed, is
+	// what the family and the client join the session through.
 	// `sessionRequirementResolver` (the synthetic key, by its slot's name, so
 	// the module hands its deps over whole) is what the two reads of the
 	// code's session go through (ADR 2026-09-28-session-admission). Required:
 	// a factory built by hand without one is refused.
-	ProviderDeps<"codeRepository" | "clientRepository" | "sessionRequirementResolver", "auditSink">;
+	ProviderDeps<
+		| "codeRepository"
+		| "clientRepository"
+		| "sessionRequirementResolver"
+		| "oauthTokenSettings"
+		| "tokenBindingSettings",
+		"auditSink" | "sessionLifecycle" | "sessionLifecycleStore"
+	>;
 
 /**
  * A requirement's verdict or an outage, as the token endpoint answers it:
@@ -111,7 +120,7 @@ const requirementOrOutageRefusal = (
 };
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
-	const { config, codeRepository, keyStore, logger } = deps;
+	const { codeRepository, keyStore, logger } = deps;
 	// The client's logout metadata is snapshotted into the session RP
 	// registry, so the record is read through core's client-record boundary:
 	// a record it refuses rejects the lookup, answered as the store's outage.
@@ -119,6 +128,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	// No acr table: the acr was chosen at /authorize and travels on the code.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		subjectRevocation: deps.subjectRevocation,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createAuthorizationGrant"),
 		acrTable: {},
@@ -144,12 +154,22 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			"authorization_grant_store_unavailable",
 		);
 	};
+	/**
+	 * The session lifecycle's outage at the join, said once at error on the
+	 * grant's line; the error is on the lifecycle's own line.
+	 */
+	const lifecycleUnavailable = (clientId: string): void => {
+		logger?.error(
+			{ store: "session_lifecycle", step: "join", clientId: auditErrorText(clientId) },
+			"authorization_grant_store_unavailable",
+		);
+	};
 
 	/**
 	 * Revoke the family a refused exchange registered, whose tokens were never
 	 * served. Never throws: a failure is one error line, and the refusal
 	 * stands. With a rotation and no revocation wired, the record stays
-	 * active; `oauthAuthorizationModule` warns of that at boot.
+	 * active; `oauthAuthorizationGrantsModule` warns of that at boot.
 	 */
 	const revokeRefusedFamily = async (
 		familyId: string,
@@ -244,25 +264,30 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 		}
 	};
 
-	// id_token issuance requires a configured issuer URL, read from config and
-	// not `ctx.issuer`: the express adapter falls back to the Host header when
-	// the issuer is unset, and OIDC Core §2 requires `iss` to be a URL.
-	const configuredIssuer: string | undefined = (() => {
-		const jwt = (config.oauth as { jwt?: { issuer?: unknown } } | undefined)?.jwt;
-		const value = jwt?.issuer;
-		return typeof value === "string" && value.length > 0 ? value : undefined;
-	})();
+	// The token settings are read once, here, from the `oauthTokenSettings`
+	// slot alone, checked whole first: a hand-built value the check refuses,
+	// or none, fails at composition, naming the slot, rather than a request
+	// after `consumeByCode` has spent the code.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+
+	// id_token issuance uses the slot's canonical issuer, not `ctx.issuer`:
+	// the express adapter falls back to the Host header when the issuer is
+	// unset, and OIDC Core §2 requires `iss` to be a URL.
+	const configuredIssuer = tokenSettings.issuer;
 
 	// One PKCE policy, through the same resolver `/authorize` uses, so
-	// `/authorize` cannot mint a code that `/token` refuses. Resolved once at
-	// composition.
-	const pkce = resolveOAuthOptions(config.oauth).pkce;
+	// `/authorize` cannot mint a code that `/token` refuses.
+	const pkce = resolvePkceOptions();
 
-	// The lifetimes, also resolved once when the grant is built, so a
-	// hand-built configuration the resolvers refuse fails composition rather
-	// than a request after `consumeByCode` has spent the code.
-	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
-	const refreshTokenExpiresIn = resolveRefreshTokenLifetime(config);
+	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
+	const refreshTokenExpiresIn = tokenSettings.refreshTokenExpiresIn;
+	const resourceIndicatorEnabled = tokenSettings.resourceIndicatorEnabled;
+	// The refresh-token binding rule, read once from core's
+	// `tokenBindingSettings` slot.
+	const bindConfidentialClients = bindConfidentialClientRefreshTokensFrom(
+		deps.tokenBindingSettings,
+		"createAuthorizationGrant",
+	);
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -590,7 +615,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// evaluate-once-at-authorize, and ignoring it would hand back an `aud`
 			// the client did not ask for. See ADR
 			// 2026-07-31-rfc8707-resource-audience-binding.
-			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
 			if (resourceIndicatorEnabled) {
 				const requestedResource = extractResourceParam(body as Record<string, unknown>);
 				const unrepresented = unrepresentedResources(requestedResource, audience);
@@ -637,8 +661,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// Off by default: a bound RT pins the client to one key or certificate
 			// for the RT's lifetime. The refresh-time matrix runs off the RT's own
 			// `cnf`, so a newly bound confidential RT is enforced like any other.
-			const bindConfidentialClients =
-				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 			const bindRefreshToken =
 				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
@@ -765,49 +787,66 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// The revalidated session drives the TTLs below and the id_token's other claims.
 					userSession = revalidation.session;
 
-					// Composition-root invariant: the session-stores module wires its
-					// sibling stores together, so with userSessionStore present these
-					// two are too. `?.` would silently no-op on a misconfigured root.
-					const joined = await joinSession(
-						{
-							// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
-							sessionRPRegistry: deps.sessionRPRegistry!,
-							// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
-							sessionFamilyIndex: deps.sessionFamilyIndex!,
-						},
-						{
-							sid,
-							rp: {
-								clientId: authenticatedClientId,
-								// Typed reads: a misspelt field would silently drop the RP
-								// from the logout cascade.
-								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
-								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-								// http(s) only: the record is the boundary's validated
-								// copy (above), which refuses any other value (a
-								// document client registers none).
-								frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
-								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
-								registeredAt: new Date(),
+					const rp = {
+						clientId: authenticatedClientId,
+						// Typed reads: a misspelt field would silently drop the RP
+						// from the logout cascade.
+						backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
+						backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
+						// http(s) only: the record is the boundary's validated
+						// copy (above), which refuses any other value (a
+						// document client registers none).
+						frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
+						frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
+						registeredAt: new Date(),
+					};
+					if (deps.sessionLifecycle) {
+						// Core's session lifecycle joins the session: it refuses one
+						// closing, closed or gone, and on a refusal has already revoked
+						// the family it was handed, or logged its failure as
+						// `session_join_withdraw_failed`.
+						const joined = await deps.sessionLifecycle.join(sid, { rp, familyId });
+						if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
+						if (joined.outcome === "unavailable") {
+							lifecycleUnavailable(authenticatedClientId);
+							await revokeRefusedFamily(familyId, at);
+							return {
+								result: {
+									status: 503,
+									error: "temporarily_unavailable",
+									errorDescription: "session linking unavailable",
+								},
+							};
+						}
+					} else {
+						// Composition-root invariant: the session-stores module wires its
+						// sibling stores together, so with userSessionStore present these
+						// two are too. `?.` would silently no-op on a misconfigured root.
+						const joined = await joinSession(
+							{
+								// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
+								sessionRPRegistry: deps.sessionRPRegistry!,
+								// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
+								sessionFamilyIndex: deps.sessionFamilyIndex!,
 							},
-							familyId,
-							expiresAt: userSession.expiresAt,
-						},
-					);
-					if (joined.outcome === "ended") {
-						const refusal = sessionInvalidated(at);
-						await revokeRefusedFamily(familyId, at);
-						return { result: refusal };
-					}
-					if (joined.outcome === "unavailable") {
-						storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
-						return {
-							result: {
-								status: 503,
-								error: "temporarily_unavailable",
-								errorDescription: "session linking unavailable",
-							},
-						};
+							{ sid, rp, familyId, expiresAt: userSession.expiresAt },
+						);
+						if (joined.outcome === "ended") {
+							const refusal = sessionInvalidated(at);
+							await revokeRefusedFamily(familyId, at);
+							return { result: refusal };
+						}
+						if (joined.outcome === "unavailable") {
+							storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
+							await revokeRefusedFamily(familyId, at);
+							return {
+								result: {
+									status: 503,
+									error: "temporarily_unavailable",
+									errorDescription: "session linking unavailable",
+								},
+							};
+						}
 					}
 				} catch (err) {
 					// The family is registered and its tokens are never served: revoked
@@ -817,17 +856,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				}
 			}
 
-			// An id_token needs the openid scope, a session (none without a
-			// userSessionStore) and a configured issuer (see `configuredIssuer`).
-			// A session implies a sid here; `&& sid` is defensive.
+			// An id_token needs the openid scope and a session (none without a
+			// userSessionStore); the issuer is always the slot's. A session
+			// implies a sid here; `&& sid` is defensive.
 			let idToken: Token | undefined;
-			if (
-				grantedScopes?.includes("openid") &&
-				userSession &&
-				sid &&
-				configuredIssuer &&
-				authTime !== undefined
-			) {
+			if (grantedScopes?.includes("openid") && userSession && sid && authTime !== undefined) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
 					aud: authenticatedClientId,

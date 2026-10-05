@@ -204,11 +204,15 @@ describe("rateLimitBudgets — no module overrides a prefix", () => {
 		["login", "session.rateLimit.login"],
 		["device_verification", "device-grant.rateLimit"],
 	])(
-		"refuses an override of %s, a verifier's own limit, naming the setting it is made at",
+		"refuses an override of %s, a verifier's own limit, naming the setting its owner declared",
 		async (prefix, setting) => {
 			const err = await refusal(
 				createApp({
 					modules: [
+						defineModule({
+							name: "verifier-owner",
+							contributes: { rateLimitBudgets: { [prefix]: verifierLimitClaim({ setting }) } },
+						}),
 						defineModule({
 							name: "budget-replacer",
 							overrides: {
@@ -738,7 +742,7 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 		expect(err.message).not.toContain("limits.token");
 	});
 
-	it("names the declared setting for login in place of the one core falls back to", async () => {
+	it("names the setting its owner declared for login", async () => {
 		const err = await refusal(
 			createApp({
 				modules: [memoryRateLimiterModule, verifierModule("login", "fixture.login.attempts")],
@@ -799,27 +803,19 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 		await handle.dispose();
 	});
 
-	it.each([
-		["login", "session.rateLimit.login"],
-		["device_verification", "device-grant.rateLimit"],
-	])(
-		"still refuses %s, which core names itself, while its claim declares nothing",
-		async (prefix, setting) => {
+	it.each(["login", "device_verification"])(
+		"boots with a limits entry for %s when no module declares it a verifier's limit: only declarations count",
+		async (prefix) => {
 			const undeclared = defineModule({
 				name: "undeclared-owner",
 				contributes: { rateLimitBudgets: { [prefix]: () => null } },
 			});
 
-			const err = await refusal(
-				createApp({
-					modules: [memoryRateLimiterModule, undeclared],
-					bootstrapComponents: limitsOn(prefix),
-				}),
-			);
-
-			expect(err.reason).toBe("config-validation-failed");
-			expect(err.message).toContain(`core-rate-limiter-memory.limits.${prefix}`);
-			expect(err.message).toContain(setting);
+			const handle = await createApp({
+				modules: [memoryRateLimiterModule, undeclared],
+				bootstrapComponents: limitsOn(prefix),
+			});
+			await handle.dispose();
 		},
 	);
 

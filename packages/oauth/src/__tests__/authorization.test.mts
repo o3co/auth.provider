@@ -28,14 +28,19 @@ import {
 	type SessionRPRegistry,
 	type UserSession,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 // codeData must carry client_id and redirect_uri (required fields), and
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
@@ -86,7 +91,7 @@ function makeDeps(
 ) {
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config: mockConfig,
+		...grantSettingsFrom(mockConfig),
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {
 			consumeByCode: consumeByCodeImpl,
@@ -119,19 +124,23 @@ function makeSessionRPRegistry(override?: Partial<SessionRPRegistry>): SessionRP
 }
 
 describe("createAuthorizationGrant — the lifetimes it mints with", () => {
-	// A configuration built by hand never met the schema. Read when the grant is
+	// A slot filled by hand never met boot's check. Read when the grant is
 	// built, a bad lifetime is a composition fault that never reaches a code;
 	// read per request, it would be refused only after `consumeByCode` had spent
 	// the code: a 500, and a code the client can never redeem.
+	const settings = createTestOAuthTokenSettings();
 	const broken: Array<[string, Record<string, unknown>]> = [
-		["oauth.refreshToken.expiresIn = 1.5", { refreshToken: { expiresIn: 1.5 } }],
-		["oauth.refreshToken.expiresIn = NaN", { refreshToken: { expiresIn: Number.NaN } }],
-		["oauth.refreshToken.expiresIn = 0", { refreshToken: { expiresIn: 0 } }],
-		["no oauth.refreshToken.expiresIn", { refreshToken: {} }],
-		["oauth.accessToken.expiresIn = 1.5", { accessToken: { expiresIn: 1.5 } }],
+		["refreshTokenExpiresIn = 1.5", { ...settings, refreshTokenExpiresIn: 1.5 }],
+		["refreshTokenExpiresIn = NaN", { ...settings, refreshTokenExpiresIn: Number.NaN }],
+		["refreshTokenExpiresIn = 0", { ...settings, refreshTokenExpiresIn: 0 }],
+		["no refreshTokenExpiresIn", { ...settings, refreshTokenExpiresIn: undefined }],
+		[
+			"accessTokenLifetime.defaultExpiresIn = 1.5",
+			{ ...settings, accessTokenLifetime: { defaultExpiresIn: 1.5, maxExpiresIn: 3600 } },
+		],
 	];
 	for (const [label, over] of broken) {
-		it(`is refused when it is built with ${label}, and no code is spent`, async () => {
+		it(`is refused when it is built with an oauthTokenSettings slot whose ${label}, and no code is spent`, async () => {
 			const codes = new InMemoryCodeRepository();
 			try {
 				const { code } = await codes.createCode({
@@ -149,9 +158,7 @@ describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 				const deps = {
 					...makeDeps(vi.fn()),
 					codeRepository: codes,
-					config: {
-						oauth: { ...mockConfig.oauth, ...over },
-					} as unknown as GrantDependencies["config"],
+					oauthTokenSettings: over as never,
 				};
 
 				let refused: unknown;
@@ -179,7 +186,9 @@ describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 
 				expect(await codes.findByCode(code)).not.toBeNull();
 				expect(refused).toBeInstanceOf(RangeError);
-				expect((refused as Error).message).toMatch(/oauth\.(refreshToken|accessToken)\.expiresIn/);
+				expect((refused as Error).message).toMatch(
+					/oauthTokenSettings\.(refreshTokenExpiresIn|accessTokenLifetime)/,
+				);
 			} finally {
 				codes.dispose();
 			}
@@ -187,26 +196,18 @@ describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 	}
 });
 
-describe("createAuthorizationGrant — lifetimes are fixed when it is built", () => {
-	it("mints the lifetimes it was built with, whatever the configuration object says afterwards", async () => {
-		// Read once, in the factory: changing `oauth.*.expiresIn` on the object
-		// after boot does nothing until the grant is built again. The README
-		// says so; this pins it.
-		const config = {
-			oauth: {
-				...mockConfig.oauth,
-				accessToken: { expiresIn: 600 },
-				refreshToken: { expiresIn: 7200 },
-			},
-		} as unknown as {
-			oauth: { accessToken: { expiresIn: number }; refreshToken: { expiresIn: number } };
-		};
+describe("createAuthorizationGrant — the lifetimes come from the oauthTokenSettings slot", () => {
+	it("mints the slot's lifetimes, read once when it is built", async () => {
+		// Read once, in the factory, from the slot boot hands it frozen: a
+		// change to `oauth.*` takes a restart. The README says so; this pins
+		// that the slot, not the configuration, decides.
 		const handler = createAuthorizationGrant({
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
-			config: config as unknown as GrantDependencies["config"],
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				accessTokenLifetime: { defaultExpiresIn: 600, maxExpiresIn: 600 },
+				refreshTokenExpiresIn: 7200,
+			}),
 		});
-		config.oauth.accessToken.expiresIn = 60;
-		config.oauth.refreshToken.expiresIn = 120;
 
 		const { result } = await handler.handle({
 			body: {
@@ -327,17 +328,19 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			// `expires_in` is the time left when answered: read on a frozen clock.
+			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 			// A configuration with only `defaultExpiresIn` / `maxExpiresIn`: read
 			// through `resolveAccessTokenLifetime`, not the deprecated `expiresIn`,
 			// which is absent here. Only token exchange honours `expires_in`.
 			const deps = {
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode })),
-				config: {
+				...grantSettingsFrom({
 					oauth: {
 						...mockConfig.oauth,
 						accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
 					},
-				} as unknown as GrantDependencies["config"],
+				}),
 			};
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({
@@ -810,7 +813,7 @@ describe("createAuthorizationGrant", () => {
 
 			const makeLegacyDeps = (requireS256: boolean, codeData: Record<string, unknown>) => ({
 				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-				config: legacyConfig(requireS256),
+				...grantSettingsFrom(legacyConfig(requireS256)),
 				keyStore: createSymmetricKeyStore("test-secret"),
 				codeRepository: {
 					consumeByCode: vi.fn().mockResolvedValue({ code: "abc", ...codeData }),
@@ -1144,7 +1147,7 @@ describe("createAuthorizationGrant", () => {
 				codeData: Record<string, unknown>,
 			) => ({
 				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-				config: makePkceConfig(pkce),
+				...grantSettingsFrom(makePkceConfig(pkce)),
 				keyStore: createSymmetricKeyStore("test-secret"),
 				codeRepository: {
 					consumeByCode: vi.fn().mockResolvedValue({ code: "abc", ...codeData }),
@@ -1240,9 +1243,9 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		describe("id_token issuance on openid scope", () => {
-			// id_token issuance reads config.oauth.jwt.issuer directly (not
-			// ctx.issuer), so the request-derived host fallback never becomes an OIDC
-			// iss claim. Tests must supply a configured issuer.
+			// id_token issuance reads the issuer from the oauthTokenSettings slot
+			// (not ctx.issuer), so the request-derived host fallback never becomes
+			// an OIDC iss claim.
 			const mockConfigWithIssuer = {
 				oauth: {
 					jwt: { secret: "test-secret", issuer: "https://auth.example.com" },
@@ -1262,7 +1265,7 @@ describe("createAuthorizationGrant", () => {
 			) {
 				return {
 					sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-					config: mockConfigWithIssuer,
+					...grantSettingsFrom(mockConfigWithIssuer),
 					keyStore: createSymmetricKeyStore("test-secret"),
 					codeRepository: {
 						consumeByCode: consumeByCodeImpl,
@@ -1545,7 +1548,7 @@ describe("createAuthorizationGrant", () => {
 				expect(decodeJwt(tokens.refresh_token as string)).not.toHaveProperty("auth_time");
 			});
 
-			it("does NOT include id_token when issuer is absent (avoids OIDC-noncompliant iss:'')", async () => {
+			it("stamps the slot's issuer on the id_token when the request carries none (never an OIDC-noncompliant iss:'')", async () => {
 				const authTime = new Date("2026-04-21T00:00:00Z");
 				const userSessionStore = makeUserSessionStore({
 					sid: "sid-noiss",
@@ -1587,7 +1590,9 @@ describe("createAuthorizationGrant", () => {
 				expect(result.status).toBe(200);
 				if (!("tokens" in result)) throw new Error("expected tokens");
 				expect(typeof result.tokens.access_token).toBe("string");
-				expect(result.tokens.id_token).toBeUndefined();
+				expect(decodeJwt(result.tokens.id_token as string).iss).toBe(
+					grantSettingsFrom(mockConfig).oauthTokenSettings.issuer,
+				);
 			});
 
 			it("does NOT include id_token when scope lacks openid", async () => {
@@ -2637,7 +2642,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 	it("issues a sub on a cookie-less back-channel code exchange", async () => {
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
-			config: configWithIssuer,
+			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: makeStore("sid-259", "u-259"),
 			sessionFamilyIndex: makeSessionFamilyIndex(),
 			sessionRPRegistry: makeSessionRPRegistry(),
@@ -2674,7 +2679,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 					...validCode,
 				}),
 			),
-			config: configWithIssuer,
+			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: makeStore("sid-259", "u-259"),
 			sessionFamilyIndex: makeSessionFamilyIndex(),
 			sessionRPRegistry: makeSessionRPRegistry(),
@@ -2734,7 +2739,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 		const sessionFamilyIndex = makeSessionFamilyIndex();
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
-			config: configWithIssuer,
+			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: store,
 			sessionFamilyIndex,
 			sessionRPRegistry: makeSessionRPRegistry(),
@@ -2783,7 +2788,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 		};
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
-			config: configWithIssuer,
+			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: store,
 			sessionFamilyIndex: makeSessionFamilyIndex(),
 			sessionRPRegistry: makeSessionRPRegistry(),
