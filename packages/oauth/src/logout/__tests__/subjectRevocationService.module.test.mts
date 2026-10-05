@@ -371,7 +371,10 @@ describe("subjectRevocationServiceModule", () => {
 			expect(attempt).toThrow(/federationGrantStore/);
 			expect(attempt).toThrow(/no federationGrantPolicy/);
 			expect(attempt).toThrow(/federationGrantsModule/);
-			expect(attempt).toThrow(/fill federationGrantPolicy/);
+			expect(attempt).toThrow(/federation-grants.enabled = true/);
+			expect(attempt).toThrow(
+				/federationGrantPolicy { enabled: false, allowKeepOnSubjectRevocation: false } in bootstrapComponents/,
+			);
 		});
 
 		it("refuses it at boot, from createApp, naming the module", async () => {

@@ -864,10 +864,13 @@ modules fills them.
   an `oauthTokenSettings` value in `bootstrapComponents`, or the boot is
   refused for the missing component. A composition that wires a
   `federationGrantStore` and holds no `federationGrantPolicy` — grants on
-  without the federation-grants module — is refused at boot
-  (`provides-factory-failed`, naming both), where grants used to be read
-  from `federation-grants.enabled`: install the federation-grants module, or
-  put a `federationGrantPolicy` value in `bootstrapComponents`. A deps
+  without the federation-grants module, or the module installed but switched
+  off (`federation-grants.enabled = false`) with a grant store still wired —
+  is refused at boot (`provides-factory-failed`, naming both), where grants
+  used to be read from `federation-grants.enabled`: install the
+  federation-grants module and switch it on, or, to keep grants off with the
+  store wired, put `federationGrantPolicy` `{ enabled: false,
+  allowKeepOnSubjectRevocation: false }` in `bootstrapComponents`. A deps
   object handed to the module's provider carries `oauthTokenSettings` and,
   for grants, `federationGrantPolicy` (in a test,
   `createTestOAuthTokenSettings()` and `createTestFederationGrantPolicy()`);

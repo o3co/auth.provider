@@ -103,8 +103,9 @@ const GRANTS_OFF: FederationGrantPolicy = Object.freeze({
 /**
  * The federation grants' switch and keep policy, from the slot held to its
  * contract. No slot is grants off, except beside a grant store: that store
- * says grants may exist, and reading them as off would leave every grant in
- * it standing after a subject-wide revocation that reported itself complete.
+ * says grants may exist, and reading them as off would skip it in a
+ * subject-wide revocation that reported itself complete. Grants off with a
+ * store wired is a value the host states, not one read from an absence.
  */
 const grantPolicyOf = (deps: SubjectRevocationServiceModuleDeps): FederationGrantPolicy => {
 	if (deps.federationGrantPolicy !== undefined) {
@@ -115,9 +116,11 @@ const grantPolicyOf = (deps: SubjectRevocationServiceModuleDeps): FederationGran
 			`${NAME}: a federationGrantStore component is wired, but the composition holds no ` +
 				"federationGrantPolicy, so whether federation grants are on cannot be read. Read as " +
 				"off, a subject-wide revocation would end the sessions and the tokens, report itself " +
-				"complete, and leave every grant in that store standing. Install the federation-grants " +
-				"module (federationGrantsModule), which provides federationGrantPolicy while " +
-				"federation-grants.enabled = true, or fill federationGrantPolicy yourself.",
+				"complete, and skip the grants in that store. Install the federation-grants module " +
+				"(federationGrantsModule) and switch it on (federation-grants.enabled = true), which " +
+				"provides federationGrantPolicy; or, to keep grants off with the store wired, put " +
+				"federationGrantPolicy { enabled: false, allowKeepOnSubjectRevocation: false } in " +
+				"bootstrapComponents.",
 		);
 	}
 	return GRANTS_OFF;
