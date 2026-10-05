@@ -51,6 +51,7 @@ import {
 	mergeSessionStore,
 } from "#/session-admission/testing/merge.rows.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
+import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 import {
 	supportsSecondFactorUpdate,
 	type UserSession,
@@ -237,6 +238,35 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 				name,
 			).toThrow(/does not declare the second-factor authority/);
 		}
+	});
+
+	it("maps an admitted row over a record holding a renewal nonce onto what admission answers, the nonce included", async () => {
+		const nonce = newRenewalNonce();
+		const escalated: UserSession = { ...session, renewalNonce: nonce };
+		const store = recordingStoreOf(escalated);
+		const admission = await admitSession(
+			depsOver(store, resolverForTests([], { issuer: ISSUER, actions: TEST_ACTIONS })),
+			{
+				claim: cookieClaim({
+					session: {
+						isAuthenticated: true,
+						sid: "sid-1",
+						user: { id: "user-1" },
+						renewalNonce: nonce,
+					},
+				}),
+				action: "test.use",
+			},
+		);
+		const expected = mergeAdmission(
+			{ outcome: "met", acr: undefined },
+			escalated,
+			undefined,
+			store,
+		);
+
+		expect(expected).toMatchObject({ outcome: "admitted", renewalNonce: nonce });
+		expect(admission).toEqual(expected);
 	});
 
 	it("maps a row that names no requirement with no authority given — what a composition without one registers — and throws for one that names it", () => {
