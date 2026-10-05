@@ -196,6 +196,7 @@ const ALL_ON_MODULES = [
 	"core-federation-grant-store-memory",
 	"core-federation-grant-intent-store-memory",
 	"standalone-in-memory-session-stores",
+	"core-session-lifecycle",
 	"core-rate-limiter-memory",
 	"standalone-in-memory-code-repository",
 	"core-access-token-denylist-memory",
@@ -826,6 +827,9 @@ const oidcCallback = async (app: express.Express, outage: Outage, c: Composition
 const VERIFIER_WARN =
 	"core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) writes its own `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) beside the route's error line: two lines for one outage (the runbook's outage table documents both)";
 
+const LIFECYCLE_LOGS =
+	"core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) logs the store's failure at warn (`session_lifecycle_unavailable`, with the error's projection) and answers `unavailable`; the consumer's error line names the step but carries no projection: two lines for one outage, the cause on the warn";
+
 const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "oauth-authorization",
@@ -842,6 +846,7 @@ const OUTAGES: readonly OutageCase[] = [
 		run: codeExchange,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "authorization_grant_store_unavailable",
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth-authorization",
@@ -850,6 +855,7 @@ const OUTAGES: readonly OutageCase[] = [
 		run: codeExchange,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "authorization_grant_store_unavailable",
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth",
@@ -927,6 +933,7 @@ const OUTAGES: readonly OutageCase[] = [
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "userinfo_store_unavailable",
 		unrelatedWarns: ["jwt_verify_aud_skipped"],
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth-session",

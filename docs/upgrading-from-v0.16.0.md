@@ -123,6 +123,16 @@ rather than `workspace:*`, and refresh the lockfile. Then:
   `MFA_MODE` still turns it on later. Keep it off until the whole fleet runs
   this release ([Rolling out](#rolling-out-across-a-mixed-fleet)), then turn
   it on as [Turning MFA on](#turning-mfa-on) says.
+- **The template composes core's session lifecycle** (`sessionLifecycleModule`,
+  over the session stores' `sessionLifecycleStore`). A login opens its
+  session's record, a code exchange joins its relying party and family to
+  it, and both `POST /session/logout` and `POST /oauth/logout` close the
+  session through it. So `/session/logout` now revokes the session's
+  refresh-token families and tells its relying parties, as `/oauth/logout`
+  does, and answers `503 temporarily_unavailable` when the close cannot
+  commit, keeping the cookie for a retry. The lifecycle's sweep resumes a
+  close left pending every 60 seconds (`core.sessionLifecycle.sweepIntervalSeconds`;
+  `0` turns it off).
 
 ## Configuration
 

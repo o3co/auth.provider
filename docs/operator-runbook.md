@@ -685,7 +685,9 @@ already does. Without the lifecycle, only `/oauth/logout` stops a **refresh**
 token: if the session completed an `/authorize` → `authorization_code` flow,
 call that one. With it, `/session/logout` revokes the families too. The
 `session` grant issues no refresh token, so a deployment whose tokens all come
-from it is fully served by `/session/logout` either way.
+from it is fully served by `/session/logout` either way. The standalone
+template composes core's session lifecycle, so both of its logout endpoints
+close the session through it.
 
 Neither endpoint reaches a resource server that validates the JWT offline —
 signature and `exp`, no introspection call. Such a consumer cannot observe a

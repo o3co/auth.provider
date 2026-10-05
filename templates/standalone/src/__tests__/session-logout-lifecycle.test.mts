@@ -26,7 +26,6 @@ import {
 	readVersionedSessionLifecycle,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
-	sessionLifecycleModule,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import request from "supertest";
@@ -51,7 +50,6 @@ const csrfTokenOf = (cookies: readonly string[]): string => {
 describe("POST /session/logout with the session lifecycle module", () => {
 	it("revokes the session's families, tells its relying parties and closes its record", async () => {
 		const { app, handle } = await compose({
-			extraModules: () => [sessionLifecycleModule],
 			extraClients: {
 				"rp-bc": {
 					tokenEndpointAuthMethod: "client_secret_basic",
