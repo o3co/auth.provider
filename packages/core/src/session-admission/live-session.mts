@@ -28,8 +28,10 @@
 
 import { emitAuditEvent } from "../audit/factory.mjs";
 import type { AuditSink } from "../audit/types.mjs";
-import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
-import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
+import {
+	claimCoveredByRevocationBoundary,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+} from "../jwt/verify.mjs";
 import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
 import {
 	supportsSecondFactorUpdate,
@@ -158,7 +160,9 @@ export async function readLiveSession(
 
 	// Step 4: the revocation boundary, against a live record; a token's is
 	// verifyJwt's, so the two readings do not double up. The boundary is read
-	// off `deps` once, in the same guarded section as its answer.
+	// off `deps` once, in the same guarded section as its answer. Compared in
+	// whole seconds by verifyJwt's rule, as the `auth_time` the session's
+	// tokens carry is: a session admitted here is one whose tokens verify.
 	if (session !== null && presented.carrier !== "token") {
 		try {
 			const subjectRevocation = checked.readSubjectRevocation();
@@ -168,7 +172,11 @@ export async function readLiveSession(
 				throw new TypeError("the sessions boundary is neither a date nor null");
 			}
 			if (
-				coveredByRevocationBoundary(session.authTime, boundary, DEFAULT_SUBJECT_REVOCATION_SKEW_MS)
+				claimCoveredByRevocationBoundary(
+					Math.floor(session.authTime.getTime() / 1000),
+					boundary,
+					DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+				)
 			) {
 				return { answer: { outcome: "revoked" } };
 			}
