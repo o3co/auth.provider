@@ -33,24 +33,14 @@ import {
 	type ConditionalReplaceAnswer,
 	readConditionalReplaceAnswer,
 	type Versioned,
-} from "../../adapters/conditionalWrite.mjs";
-import { MAX_DURATION_MS } from "../../config/durations.mjs";
-import type { FederationTokenStore } from "../../federation-tokens/types.mjs";
-import { consoleLogger } from "../../logging/consoleLogger.mjs";
-import type { EventLogger } from "../../logging/Logger.mjs";
-import { loggableError } from "../../logging/loggableError.mjs";
-import type { RefreshTokenFamilyRevocation } from "../../refresh-token-family/types.mjs";
-import type {
-	RegisteredRP,
-	SessionFamilyIndex,
-	SessionFederationIndex,
-	SessionRPRegistry,
-	SubjectSessionIndex,
-	UserSession,
-	UserSessionStore,
-} from "../types.mjs";
-import { type BridgedClose, createSessionStoresBridge } from "./bridge.mjs";
-import type { SessionCloseNotifier } from "./notifier.mjs";
+} from "../adapters/conditionalWrite.mjs";
+import { MAX_DURATION_MS } from "../config/durations.mjs";
+import type { FederationTokenStore } from "../federation-tokens/types.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
+import type { EventLogger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
+import type { RefreshTokenFamilyRevocation } from "../refresh-token-family/types.mjs";
+import { readRecord } from "../session-admission/live-session.mjs";
 import {
 	checkSessionLifecycleKey,
 	checkSessionParticipant,
@@ -59,7 +49,7 @@ import {
 	readSessionLifecycleListing,
 	readSessionOpenAnswer,
 	readVersionedSessionLifecycle,
-} from "./readers.mjs";
+} from "../user-sessions/lifecycle/readers.mjs";
 import {
 	SESSION_CLOSE_CAUSES,
 	type SessionCloseCause,
@@ -69,7 +59,18 @@ import {
 	type SessionParticipant,
 	type SessionParticipantKind,
 	sessionCloseItemOf,
-} from "./types.mjs";
+} from "../user-sessions/lifecycle/types.mjs";
+import type {
+	RegisteredRP,
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+	SubjectSessionIndex,
+	UserSession,
+	UserSessionStore,
+} from "../user-sessions/types.mjs";
+import { type BridgedClose, createSessionStoresBridge } from "./bridge.mjs";
+import type { SessionCloseNotifier } from "./notifier.mjs";
 
 /** What a join adds to a session. At least one is named. */
 export interface SessionJoinRequest {
@@ -283,10 +284,12 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	};
 
 	/**
-	 * The service's one read of a user session: liveness answers it, and a
-	 * join or a close reads its subject and end from it.
+	 * The service's one read of a user session, through admission's one read
+	 * of a session record: liveness answers it, and a join or a close reads
+	 * its subject and end from it.
 	 */
-	const userSessionOf = (sid: string): Promise<UserSession | null> => userSessionStore.get(sid);
+	const userSessionOf = async (sid: string): Promise<UserSession | null> =>
+		(await readRecord(userSessionStore, sid)) ?? null;
 
 	const unavailable = (operation: string, sid: string, error: unknown): void => {
 		logger.warn({ operation, sid, err: loggableError(error) }, "session_lifecycle_unavailable");

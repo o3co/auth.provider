@@ -1210,6 +1210,21 @@ export {
 	type SessionView,
 	type StepUpPage,
 } from "./session-admission/requirement.mjs";
+export { sessionLifecycleModule } from "./session-lifecycle/module.mjs";
+export type {
+	SessionCloseNotice,
+	SessionCloseNotifier,
+} from "./session-lifecycle/notifier.mjs";
+export {
+	createSessionLifecycle,
+	type SessionCloseOutcome,
+	type SessionJoinOutcome,
+	type SessionJoinRequest,
+	type SessionLifecycle,
+	type SessionLifecycleOptions,
+	type SessionLiveness,
+	type SessionResumeReport,
+} from "./session-lifecycle/service.mjs";
 // The token-exchange validator port. `ExchangeTokenValidator` is
 // exported with the manifest types below, as the contribution value type.
 export type {
@@ -1259,11 +1274,6 @@ export {
 	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS,
 	type InMemorySessionLifecycleStoreOptions,
 } from "./user-sessions/lifecycle/memory.mjs";
-export { sessionLifecycleModule } from "./user-sessions/lifecycle/module.mjs";
-export type {
-	SessionCloseNotice,
-	SessionCloseNotifier,
-} from "./user-sessions/lifecycle/notifier.mjs";
 export {
 	checkSessionCloseRequest,
 	checkSessionParticipant,
@@ -1273,16 +1283,6 @@ export {
 	readSessionOpenAnswer,
 	readVersionedSessionLifecycle,
 } from "./user-sessions/lifecycle/readers.mjs";
-export {
-	createSessionLifecycle,
-	type SessionCloseOutcome,
-	type SessionJoinOutcome,
-	type SessionJoinRequest,
-	type SessionLifecycle,
-	type SessionLifecycleOptions,
-	type SessionLiveness,
-	type SessionResumeReport,
-} from "./user-sessions/lifecycle/service.mjs";
 export {
 	SESSION_CLOSE_CAUSES,
 	SESSION_LIFECYCLE_MAX_KEY_LENGTH,

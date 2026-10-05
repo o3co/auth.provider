@@ -9,7 +9,8 @@ store and the callers' switch follow in the order below
 
 - Written against: `develop` at `72ba648aa`.
 - Amended 2026-10-05: the service, its answers, the close work, resumption,
-  the cause policy, the relying-party notifier and the bridge (D8–D14).
+  the cause policy, the relying-party notifier, the bridge and where the
+  service lives (D8–D15).
   Written against `develop` at `5871ff698`.
 
 ## Context
@@ -159,7 +160,7 @@ index kept in the same atomic step as the record.
 ## Amendment 2026-10-05 — the service
 
 **D8. The service and its answers.** `SessionLifecycle`
-(`src/user-sessions/lifecycle/service.mts`) fills the `sessionLifecycle`
+(`src/session-lifecycle/service.mts`) fills the `sessionLifecycle`
 slot through `sessionLifecycleModule`, which nothing installs until the
 callers switch. `join(sid, { rp?, familyId?, federation? })` answers
 `joined`, `refused` or `unavailable`; on `refused` the service revokes the
@@ -211,7 +212,7 @@ relying parties; `expiry` tells none, as natural expiry never has. Without a
 notifier no relying-party item is saved.
 
 **D13. The relying-party notifier.** `SessionCloseNotifier`
-(`src/user-sessions/lifecycle/notifier.mts`, the `sessionCloseNotifier`
+(`src/session-lifecycle/notifier.mts`, the `sessionCloseNotifier`
 slot) is core's contract; the module that issues to relying parties
 implements it. `notify` resolves once a notice is settled — delivered, or
 given up by its own policy — and rejects only to be tried again; it may be
@@ -232,7 +233,7 @@ only, which die with liveness.
 **D14. The bridge to the per-session stores, and adoption.** While
 `SessionRPRegistry`, `SessionFamilyIndex` (with its end mark) and
 `SessionFederationIndex` are still read elsewhere, the service writes them
-too (`src/user-sessions/lifecycle/bridge.mts`). A join writes the relying
+too (`src/session-lifecycle/bridge.mts`). A join writes the relying
 party, then the family through `addFamilyIdUnlessEnded`, then the
 federation, before the lifecycle join; an `ended` refuses the join. A close
 writes the end mark (`endSession`) before its commit, so nothing joins
@@ -252,6 +253,15 @@ mark is present". Liveness of a session with no record reads its user
 session alone. The bridge and adoption go with the old stores; an absent
 record then reads as closed.
 
-The service's one read of a user session is a token-side site of the
-session-admission ADR's D9, registered in its guard; the token-side reads
-listed there move to `liveness` as their callers switch.
+**D15. Where the service lives.** The service, its module, the bridge, the
+notifier contract and the sweep are in `src/session-lifecycle/`, apart from
+the port in `src/user-sessions/lifecycle/`. The service reads a session
+record only through `session-admission/`'s `readRecord`, the one read of a
+record admission makes, so no new site reads a session outside admission;
+and since `session-admission/` imports values from `user-sessions/`, the
+service inside `user-sessions/` would close a value cycle between the two.
+`session-lifecycle/` imports `session-admission/` and `user-sessions/`, and
+nothing in core imports it. So admission's own `not_live` read, when it
+learns the lifecycle state, reads the port in `user-sessions/`, never the
+service. The token-side liveness reads move to `liveness` as their callers
+switch.

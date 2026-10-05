@@ -22,7 +22,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionResumeReport } from "#/index.mjs";
-import { startSessionLifecycleSweeper } from "#/user-sessions/lifecycle/sweeper.mjs";
+import { startSessionLifecycleSweeper } from "#/session-lifecycle/sweeper.mjs";
 
 const REPORT: SessionResumeReport = { done: 0, pending: 0, unavailable: 0 };
 

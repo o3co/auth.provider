@@ -20,8 +20,8 @@
  * keeps the process alive, and `stop` waits for the sweep in flight.
  */
 
-import type { EventLogger } from "../../logging/Logger.mjs";
-import { loggableError } from "../../logging/loggableError.mjs";
+import type { EventLogger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import type { SessionLifecycle } from "./service.mjs";
 
 export interface SessionLifecycleSweeper {

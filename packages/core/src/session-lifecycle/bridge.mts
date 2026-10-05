@@ -31,7 +31,7 @@ import {
 	type SessionFederationIndex,
 	type SessionRPRegistry,
 	supportsSessionEnd,
-} from "../types.mjs";
+} from "../user-sessions/types.mjs";
 
 export interface SessionStoresBridgeStores {
 	readonly sessionRPRegistry: SessionRPRegistry;

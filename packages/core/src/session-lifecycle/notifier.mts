@@ -21,7 +21,7 @@
  * notice is delivered.
  */
 
-import type { SessionCloseCause } from "./types.mjs";
+import type { SessionCloseCause } from "../user-sessions/lifecycle/types.mjs";
 
 /** One relying party to tell that one session has closed. */
 export interface SessionCloseNotice {

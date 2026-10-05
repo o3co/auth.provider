@@ -31,12 +31,12 @@
 import {
 	type RefreshTokenLifetimeSource,
 	resolveRefreshTokenLifetime,
-} from "../../config/application.schema.mjs";
-import { configuredNumber, shownConfigValue } from "../../config/configuredValue.mjs";
-import { MAX_DURATION_MS } from "../../config/durations.mjs";
-import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
-import { consoleLogger } from "../../logging/consoleLogger.mjs";
-import { defineModule } from "../../modules/manifest/define-module.mjs";
+} from "../config/application.schema.mjs";
+import { configuredNumber, shownConfigValue } from "../config/configuredValue.mjs";
+import { MAX_DURATION_MS } from "../config/durations.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
+import { defineModule } from "../modules/manifest/define-module.mjs";
 import { createSessionLifecycle } from "./service.mjs";
 import { startSessionLifecycleSweeper } from "./sweeper.mjs";
 
