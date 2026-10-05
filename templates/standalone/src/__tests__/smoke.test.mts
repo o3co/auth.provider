@@ -445,7 +445,7 @@ describe("standalone smoke test", () => {
 			});
 			const names = modules.map((m) => m.name);
 			expect(names).toContain("redis-session-stores");
-			expect(names).not.toContain("stores");
+			expect(names).not.toContain("standalone-in-memory-session-stores");
 			expect(names).toContain("redis-clients");
 		});
 

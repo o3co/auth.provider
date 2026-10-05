@@ -49,8 +49,11 @@
  * log in; a witness `enrolled` or malformed sends a password session to log
  * in, whose own read of the `User` records a real loss, and is recorded and
  * thrown for any other primary, a federated login having no such read —
- * then a recent primary (`authTime`; a second factor does not stand in for
- * it), then the subject's first-binding mark (`firstBindingMark.mts`): a
+ * then a recent primary (core's `authenticationFreshness`: `authTime`, or for
+ * a federated login the earlier of that and the upstream's recorded
+ * authentication once the federation callback records it, never recent when
+ * the upstream showed no time; a second factor does not stand in for it), then the subject's first-binding mark
+ * (`firstBindingMark.mts`), read against when the session was established: a
  * session it distrusts, whose recorded witness may predate the subject's
  * enrollment, is sent to log in — said at info — and a mark that cannot be
  * read throws;
@@ -79,6 +82,7 @@ import {
 	type AdmissionAction,
 	type AdmissionGrade,
 	type AuditSink,
+	authenticationFreshness,
 	DEFAULT_CLOCK_SKEW_MS,
 	emitAuditEvent,
 	FEDERATED_AMR,
@@ -438,20 +442,34 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return (await mayHoldCountingFactor(session.sub)) ? verdict : REAUTHENTICATE;
 	};
 
+	/** Whether `freshness` is a recent primary at `nowMs`: within `mfa.manage.maxAgeSeconds`. */
+	const recentPrimary = (freshness: Date | undefined, nowMs: number): boolean =>
+		freshness !== undefined &&
+		isRecentMfa(
+			{ authTime: freshness, mfaAt: undefined },
+			{ holdsCountingFactor: false },
+			recentMfaMaxAgeSeconds,
+			nowMs,
+		);
+
 	/**
 	 * A first binding in `session`, whose subject holds no record that may
 	 * count: what the session recorded of its login's `User` — none is a new
 	 * login; a witness other than `not_enrolled` is a new login for a
-	 * password session, and recorded and thrown for any other — then a recent primary, then the subject's first-binding mark —
+	 * password session, and recorded and thrown for any other — then a recent primary, read over the
+	 * session's freshness (`authenticationFreshness`: for a federated login, the earlier of the
+	 * callback and the upstream's authentication, none when the upstream showed no time), then
+	 * the subject's first-binding mark, read against when the session was established —
 	 * a session it distrusts is a new login — then the gate, a proof asked
 	 * for admitted only while one given in this session stands.
 	 */
 	const firstBindingIn = async (
 		session: SessionView,
-		primary: string,
+		recorded: SessionAuthentication,
 		action: AdmissionAction,
 		nowMs: number,
 	): Promise<RequirementVerdict> => {
+		const { primary } = recorded;
 		const facts = session.enrollmentFacts;
 		if (facts === undefined) return REAUTHENTICATE;
 		if (facts.witness !== "not_enrolled") {
@@ -460,13 +478,22 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			if (primary === PASSWORD_AMR) return REAUTHENTICATE;
 			inconsistent(session.sub, facts.witness, { purpose: "session", action: action.name });
 		}
-		const recentPrimary = isRecentMfa(
-			{ authTime: session.authTime, mfaAt: undefined },
-			{ holdsCountingFactor: false },
-			recentMfaMaxAgeSeconds,
-			nowMs,
-		);
-		if (!recentPrimary) return REAUTHENTICATE;
+		if (!recentPrimary(authenticationFreshness(session.authTime, recorded), nowMs)) {
+			// Said only where the upstream is why: the callback alone was recent.
+			const reason =
+				recorded.upstreamAuthTime === null
+					? "upstream_unknown"
+					: recorded.upstreamAuthTime !== undefined && recentPrimary(session.authTime, nowMs)
+						? "upstream_stale"
+						: undefined;
+			if (reason !== undefined) {
+				logger.info(
+					{ sub: session.sub, action: action.name, reason },
+					"mfa_first_binding_upstream_not_recent",
+				);
+			}
+			return REAUTHENTICATE;
+		}
 		const mark = readFirstBindingMark(await firstBindingAt(session.sub, nowMs), nowMs);
 		if (firstBindingMark.distrusts(session.authTime.getTime(), mark)) {
 			logger.info({ sub: session.sub, action: action.name }, "mfa_first_binding_distrusted");
@@ -492,7 +519,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			return REAUTHENTICATE;
 		}
 		if (!(await mayHoldCountingFactor(session.sub))) {
-			return firstBindingIn(session, recorded.primary, action, nowMs);
+			return firstBindingIn(session, recorded, action, nowMs);
 		}
 		const recentMfa = isRecentMfa(
 			{ authTime: session.authTime, mfaAt: recorded.mfaAt },

@@ -16,7 +16,6 @@
 
 import {
 	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
-	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
 	defineModule,
@@ -504,11 +503,3 @@ export const oauthEndpointsModule: Module = defineModule<
 		],
 	},
 });
-
-/**
- * The oauth module.
- *
- * @deprecated Use {@link oauthEndpointsModule}: the module is one value, and
- * this parameter was never read. Answers that value, whatever it is handed.
- */
-export const oauthModule = (_params?: { config: AppConfig }): Module => oauthEndpointsModule;

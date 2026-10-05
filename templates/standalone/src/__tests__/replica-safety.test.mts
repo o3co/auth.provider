@@ -50,7 +50,7 @@ import {
 	registerBuiltinKeyStores,
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
-import { sessionStoreModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionStoreModule } from "@o3co/auth-provider-session";
 import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
@@ -387,14 +387,18 @@ describe("express-session's store declares its replica safety from its own secti
 
 	for (const [storage, env] of STORAGE) {
 		for (const [mode, withMode] of MODES) {
-			it(`${storage} under ${mode} settles as sessionStoreModuleFor(config) does`, async () => {
+			it(`${storage} under ${mode}`, async () => {
 				const config = resolveConfig(withMode(env));
 				const modules = modulesFor(config);
 				expect(modules[0]).toBe(sessionStoreModule);
 				const outcome = await outcomeOf(config, modules);
-				expect(outcome).toEqual(
-					await outcomeOf(config, [sessionStoreModuleFor(config), ...modules.slice(1)]),
-				);
+				if (
+					storage === "SESSION_STORE_STORAGE_TYPE=redis" ||
+					storage === "no SESSION_STORE_STORAGE_TYPE, the reference's default"
+				) {
+					// A shared store: nothing is refused or warned about.
+					expect(outcome).toEqual({ warned: [] });
+				}
 				if (storage === "SESSION_STORE_STORAGE_TYPE=memory") {
 					const named = { modules: ["session-store"] };
 					expect(outcome).toEqual(

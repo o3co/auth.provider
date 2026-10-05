@@ -62,7 +62,6 @@ const EXEMPT: Readonly<Record<string, string>> = {
  * full sets do not call is built in `BUILT`.
  */
 const FACTORIES: Readonly<Record<string, readonly string[]>> = {
-	"@o3co/auth-provider-device-grant:deviceGrantModule": ["device-grant"],
 	"@o3co/auth-provider-federation-apple:appleFederationTypeModule": [],
 	"@o3co/auth-provider-federation-github:githubFederationTypeModule": [],
 	"@o3co/auth-provider-federation-google:googleFederationTypeModule": [],
@@ -75,11 +74,8 @@ const FACTORIES: Readonly<Record<string, readonly string[]>> = {
 		"mfa-recovery-code-factor",
 		"mfa-email-factor",
 	],
-	"@o3co/auth-provider-oauth:oauthModule": ["oauth"],
-	"@o3co/auth-provider-oauth:oauthSessionModule": ["oauth-session"],
 	"@o3co/auth-provider-redis:redisFederationGrantStoreModuleFor": ["redis-federation-grant-store"],
 	"@o3co/auth-provider-redis:redisFederationTokenStoreModuleFor": ["redis-federation-token-store"],
-	"@o3co/auth-provider-session:sessionStoreModuleFor": ["session-store"],
 	"@o3co/auth-provider-standard:standardDevelopmentMailSenderModule": [],
 	"@o3co/auth-provider-webauthn:webauthnSessionSubjectModule": [],
 };

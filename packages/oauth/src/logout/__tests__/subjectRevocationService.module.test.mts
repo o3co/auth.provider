@@ -27,11 +27,21 @@ import {
 	type AuditEvent,
 	BootError,
 	createApp,
+	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
+	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
+	createInMemoryUserSessionStore,
 	createMemoryFederationGrantStore,
+	createSessionLifecycle,
 	type FederationGrantStore,
+	type FederationTokenStore,
+	type RefreshTokenFamilyRevocation,
 	resolveSubjectRevocationHorizonMs,
+	type SessionCloseNotice,
+	type SessionLifecycle,
 	type SubjectRevocation,
 	type SubjectRevocationService,
 } from "@o3co/auth-provider-core";
@@ -229,6 +239,202 @@ describe("subjectRevocationServiceModule", () => {
 			expect(result.sessionsFailed).toEqual(["sid-1"]);
 			expect(result.complete).toBe(false);
 			expect(await index.listSids("u-1")).toEqual(["sid-1"]);
+		});
+	});
+
+	describe("with the session lifecycle installed", () => {
+		/** A lifecycle whose close answers `outcome`, recording each call and what it was called after. */
+		const lifecycleAnswering = (
+			outcome: "done" | "pending" | "unavailable",
+			order: string[] = [],
+		) => {
+			const close = vi.fn(async (sid: string, cause: string) => {
+				order.push(`close:${sid}:${cause}`);
+				return outcome === "unavailable"
+					? ({ outcome } as const)
+					: ({ outcome, rps: [], federations: [] } as const);
+			});
+			return { close, lifecycle: { close } as unknown as SessionLifecycle };
+		};
+
+		it("closes each of the subject's sessions for subject_revocation, not through cascadeLogout", async () => {
+			const index = createInMemorySubjectSessionIndex();
+			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
+			await index.addSid("u-1", "sid-2", new Date(Date.now() + HOUR));
+			const stores = cascadeStores();
+			const { close, lifecycle } = lifecycleAnswering("done");
+			const service = build({ ...stores, subjectSessionIndex: index, sessionLifecycle: lifecycle });
+
+			const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(close.mock.calls.map(([sid, cause]) => `${sid}:${cause}`).sort()).toEqual([
+				"sid-1:subject_revocation",
+				"sid-2:subject_revocation",
+			]);
+			expect(stores.sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
+			expect(stores.userSessionStore.delete).not.toHaveBeenCalled();
+			expect([...result.sessionsRevoked].sort()).toEqual(["sid-1", "sid-2"]);
+			expect(result.complete).toBe(true);
+			expect(await index.listSids("u-1")).toEqual([]);
+		});
+
+		it("stamps the subject's boundary before it closes a session", async () => {
+			const order: string[] = [];
+			const index = createInMemorySubjectSessionIndex();
+			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
+			const boundary = createInMemorySubjectRevocation();
+			const subjectRevocation: SubjectRevocation = {
+				...boundary,
+				revokeBefore: async (...args) => {
+					order.push("stamp");
+					return boundary.revokeBefore(...args);
+				},
+			};
+			const { lifecycle } = lifecycleAnswering("done", order);
+			const service = build({
+				subjectSessionIndex: index,
+				subjectRevocation,
+				sessionLifecycle: lifecycle,
+			});
+
+			await service.revokeAllForSubject({ subject: "u-1" });
+
+			// Both of the boundary's stamps (`stampSubjectBoundary`), then the close.
+			expect(order).toEqual(["stamp", "stamp", "close:sid-1:subject_revocation"]);
+		});
+
+		it.each(["pending", "unavailable"] as const)(
+			"reads a close answering %s as a session not revoked: the report is not complete, and the sid stays for a retry",
+			async (outcome) => {
+				const index = createInMemorySubjectSessionIndex();
+				await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
+				const { lifecycle } = lifecycleAnswering(outcome);
+				const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });
+
+				const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+				expect(result.sessionsFailed).toEqual(["sid-1"]);
+				expect(result.complete).toBe(false);
+				expect(await index.listSids("u-1")).toEqual(["sid-1"]);
+			},
+		);
+
+		/**
+		 * Core's session lifecycle over in-memory stores, holding one session of
+		 * `u-1` that relying party `rp-1` and family `fam-1` joined. Its notifier
+		 * fails the first `failingNotices` notices.
+		 */
+		const lifecycleOverMemory = async (failingNotices = 0) => {
+			const expiresAt = new Date(Date.now() + HOUR);
+			const userSessionStore = createInMemoryUserSessionStore();
+			await userSessionStore.create({
+				sid: "sid-1",
+				sub: "u-1",
+				authTime: new Date(),
+				expiresAt,
+				claims: {},
+				amr: ["pwd"],
+				authentication: undefined,
+			});
+			const index = createInMemorySubjectSessionIndex();
+			await index.addSid("u-1", "sid-1", expiresAt);
+			const revoked: string[] = [];
+			const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
+				revokeFamily: async (familyId) => {
+					revoked.push(familyId);
+				},
+				isFamilyRevoked: async (familyId) => revoked.includes(familyId),
+			};
+			const notices: SessionCloseNotice[] = [];
+			let failing = failingNotices;
+			const lifecycle = createSessionLifecycle({
+				store: createInMemorySessionLifecycleStore(),
+				userSessionStore,
+				refreshTokenFamilyRevocation,
+				federationTokenStore: {
+					removeBySid: async () => undefined,
+					delete: async () => undefined,
+				} as unknown as FederationTokenStore,
+				subjectSessionIndex: index,
+				notifier: () => ({
+					notify: async (notice) => {
+						if (failing > 0) {
+							failing -= 1;
+							throw new Error("relying party unreachable");
+						}
+						notices.push(notice);
+					},
+				}),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+				sessionFederationIndex: createInMemorySessionFederationIndex(),
+				retainMs: HOUR,
+				logger: { warn: () => undefined, error: () => undefined },
+			});
+			expect(
+				await lifecycle.join("sid-1", {
+					rp: {
+						clientId: "rp-1",
+						backchannelLogoutUri: "https://rp-1.example/logout",
+						backchannelLogoutSessionRequired: true,
+						frontchannelLogoutUri: undefined,
+						frontchannelLogoutSessionRequired: undefined,
+						registeredAt: new Date(),
+					},
+					familyId: "fam-1",
+				}),
+			).toEqual({ outcome: "joined" });
+			return { lifecycle, index, userSessionStore, revoked, notices };
+		};
+
+		it("keeps a session whose close is pending listed, and a retry resumes the close and reports complete", async () => {
+			const { lifecycle, index, userSessionStore, notices } = await lifecycleOverMemory(1);
+			const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });
+
+			const first = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(first.sessionsFailed).toEqual(["sid-1"]);
+			expect(first.complete).toBe(false);
+			expect(await index.listSids("u-1")).toEqual(["sid-1"]);
+			expect(await lifecycle.liveness("sid-1")).toEqual({ outcome: "not_live" });
+
+			const retry = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(retry.sessionsRevoked).toEqual(["sid-1"]);
+			expect(retry.complete).toBe(true);
+			expect(await index.listSids("u-1")).toEqual([]);
+			expect(notices.map((n) => n.clientId)).toEqual(["rp-1"]);
+			expect(await userSessionStore.get("sid-1")).toBeNull();
+		});
+
+		it("counts a listed sid with neither a lifecycle record nor a user session revoked, running no work", async () => {
+			const { lifecycle, index, userSessionStore, revoked } = await lifecycleOverMemory();
+			await index.addSid("u-1", "sid-gone", new Date(Date.now() + HOUR));
+			const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });
+			await userSessionStore.delete("sid-1");
+			await index.removeSid("u-1", "sid-1");
+
+			const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(result.sessionsRevoked).toEqual(["sid-gone"]);
+			expect(result.complete).toBe(true);
+			expect(await index.listSids("u-1")).toEqual([]);
+			expect(revoked).toEqual([]);
+		});
+
+		it("tells the session's relying parties and revokes its families through the close", async () => {
+			const { lifecycle, index, userSessionStore, revoked, notices } = await lifecycleOverMemory();
+			const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });
+
+			const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(result.complete).toBe(true);
+			expect(revoked).toEqual(["fam-1"]);
+			expect(notices).toEqual([
+				{ sid: "sid-1", sub: "u-1", clientId: "rp-1", cause: "subject_revocation" },
+			]);
+			expect(await userSessionStore.get("sid-1")).toBeNull();
+			expect(await lifecycle.liveness("sid-1")).toEqual({ outcome: "not_live" });
 		});
 	});
 

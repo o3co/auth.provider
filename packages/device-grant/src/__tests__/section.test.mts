@@ -25,11 +25,7 @@
 
 import { sectionStrictnessProblems } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import {
-	deviceAuthorizationGrantModule,
-	deviceGrantConfigSchema,
-	deviceGrantModule,
-} from "#/module.mjs";
+import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
 import { referenceTree, shippedDeviceGrantSection } from "./shippedSection.mjs";
 
 /** The paths `section`'s parse refuses, sorted. */
@@ -84,7 +80,6 @@ describe("the device-grant section", () => {
 						shippedDeviceGrantSection({
 							enabled: true,
 							verificationUri: "https://example.test/device",
-							store: "unsupported",
 						}),
 					],
 				},
@@ -110,15 +105,5 @@ describe("the device-grant module", () => {
 		expect(deviceAuthorizationGrantModule.requires).not.toContain("config");
 		expect(deviceAuthorizationGrantModule.optional).not.toContain("config");
 		expect(deviceAuthorizationGrantModule.optional).not.toContain("oauthTokenSettings");
-	});
-
-	it("is what the deprecated deviceGrantModule returns, whatever it is handed", () => {
-		expect(deviceGrantModule()).toBe(deviceAuthorizationGrantModule);
-		expect(deviceGrantModule({ config: { "device-grant": { enabled: true } } as never })).toBe(
-			deviceAuthorizationGrantModule,
-		);
-		expect(deviceGrantModule({ config: { "device-grant": { enabled: false } } as never })).toBe(
-			deviceAuthorizationGrantModule,
-		);
 	});
 });

@@ -28,8 +28,9 @@
  * - A factor's data and state are plain JSON-shaped values: plain objects,
  *   plain arrays, strings, finite numbers, booleans and `null`. What is sealed
  *   is their copy (`copyFactorValue`, over core's `copyPlainJson`), each field
- *   read once, an own getter's included, frozen; the coordinator takes that copy where it reads a
- *   factor's answer and hands the same copy to everything that acts on it.
+ *   read once, an own getter's included, frozen; the coordinator takes that
+ *   copy where it reads a factor's answer and hands the same copy to
+ *   everything that acts on it.
  *   Anything else — a class's instance, an Array subclass, a built-in, a
  *   cycle, a read that throws — is one `RangeError` that quotes nothing, never
  *   sealed in part.

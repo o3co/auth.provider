@@ -212,7 +212,7 @@ export const AUDIT_SINK_ABSENCE_POLICY = {
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge (optional slot)
 //
-// Declared here so oauthModule can list "auditSink" in its `optional` array
+// Declared here so oauthEndpointsModule can list "auditSink" in its `optional` array
 // and the DI graph types deps.auditSink as AuditSink | undefined. Optional to
 // wire, not to decide: an unfilled slot must be listed in
 // core.declaredAbsent or boot refuses (AUDIT_SINK_ABSENCE_POLICY).

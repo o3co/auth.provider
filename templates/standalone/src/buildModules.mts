@@ -32,7 +32,7 @@ import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import {
 	oauthAuthorizationGrantsModule,
-	oauthModule,
+	oauthEndpointsModule,
 	oauthSessionGrantModule,
 	subjectRevocationServiceModule,
 } from "@o3co/auth-provider-oauth";
@@ -95,7 +95,6 @@ export interface BuildModulesOverrides {
 	readonly logger?: Logger;
 	readonly keyStoreModule?: Module;
 	readonly repositoriesModule?: Module;
-	readonly storesModule?: Module;
 	/**
 	 * Replaces the refresh-token family store modules (default
 	 * `[redisRefreshTokenFamilyStoreModule]`, on the shared ioredis socket).
@@ -232,9 +231,7 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 	const sessionStoresModules: Module[] =
 		adapters.userSessionStores === "redis"
 			? [redisSessionStoresModule]
-			: overrides.storesModule
-				? [overrides.storesModule]
-				: [inMemorySessionStoresModule];
+			: [inMemorySessionStoresModule];
 
 	const rateLimiterModules: Module[] =
 		adapters.rateLimiter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
@@ -251,7 +248,7 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 			? [redisCodeRepositoryModule]
 			: [inMemoryCodeRepositoryModule];
 
-	// The RFC 7009 access-token denylist has no "none": `oauthModule` mounts
+	// The RFC 7009 access-token denylist has no "none": `oauthEndpointsModule` mounts
 	// `/oauth/revoke` and reads the `accessTokenDenylist` slot, and core's boot
 	// validator refuses a composition that reads the slot with nothing filling
 	// it, since the endpoint would answer 200 while the token kept working. The
@@ -344,15 +341,15 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		// It declares `session-store.storage.type = "memory"` replica-unsafe from
 		// its own section, so `core.deployment.mode = "multi"` refuses it.
 		sessionStoreModule,
-		// Under `/oauth` beside `oauthModule`, each parsing its own requests, so
+		// Under `/oauth` beside `oauthEndpointsModule`, each parsing its own requests, so
 		// their relative order does not matter; the browser half orders itself
 		// after the session middleware by its own `after`.
 		...(federationGrantsEnabled ? federationGrantsModules : []),
-		oauthModule({ config }),
+		oauthEndpointsModule,
 		oauthSessionGrantModule,
 		oauthAuthorizationGrantsModule,
 		// Always wired: a provider that signs tokens must publish its
-		// verification keys regardless of OIDC issuer config, and `oauthModule`'s
+		// verification keys regardless of OIDC issuer config, and `oauthEndpointsModule`'s
 		// discovery `jwks_uri` (advertised when an issuer is set) must resolve.
 		jwksModule,
 		sessionModule,

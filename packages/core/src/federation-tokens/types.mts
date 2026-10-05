@@ -172,7 +172,7 @@ export interface FederationTokenStore {
 
 export type FederationTokenStoreFactory = AdapterFactory<FederationTokenStore>;
 
-// ComponentMap declaration-merge: an optional slot, so oauthModule can list
+// ComponentMap declaration-merge: an optional slot, so oauthEndpointsModule can list
 // "federationTokenStore" as optional. When absent, federation-token routes
 // answer 503.
 declare module "@o3co/auth-provider-core" {

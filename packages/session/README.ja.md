@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-10-05
+最終更新: 2026-10-06
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージの type がプロバイダーと並べて作るリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -10,7 +10,7 @@
 
 1. **`/session` ルート** — `sessionModule`。パスワードログイン、ログアウト、CSRF トークンのルート、フェデレーションの開始ルートとコールバックルート。パスワード検証または上流 IdP の応答を `UserSession` レコードと認証済みの express session に変え — どちらも一つの関数 [`establishSession`](#セッションの確立) を通して。この関数は core の [セッションアドミッション](../core/src/session-admission/README.md) が確立したものを書き、セッション requirement の完了（MFA パッケージのもの）もこれを呼ぶ — ログアウトでそれを取り消す。パスワードログインは何かを書く前に登録済みのセッション requirement に問い合わせ、requirement はそれを [中断する](#requirement-がログインを中断するとき) ことがある。
 2. **フェデレーションアダプターのツールキット** — アダプターパッケージが、自分が差し込まれるルーターから import するもの: `createFederationRedirectPolicy` とその元になる許可リストの規則。アダプターが上流への要求を組み立てるヘルパー — `codeChallenge`、`callbackUrlForExchange`、`FederationClientSecret` / `resolveClientSecret` — は core のもの。
-3. **ブラウザセッションストア** — `sessionStoreModule`（と、同じモジュールが replica safety を `config` から宣言する `sessionStoreModuleFor(config)`）と `createSessionStoreFactory` / `registerBuiltinSessionStores`。express-session ミドルウェア、その cookie、そのストア（memory、または `connect-redis` 経由の Redis）。
+3. **ブラウザセッションストア** — `sessionStoreModule` と `createSessionStoreFactory` / `registerBuiltinSessionStores`。express-session ミドルウェア、その cookie、そのストア（memory、または `connect-redis` 経由の Redis）。
 
 **持つもの:**
 
@@ -118,7 +118,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 - **マウント順はリスト順。ただしこのルートを名指しするルートは別。** このルートは `before` / `after` を宣言しない。デプロイが含まないかもしれないルート（`oauth` だけのデプロイには `sessionModule` が無い）を名指しすると `route-order-target-missing` で起動に失敗するからである。したがって **`req.session` を読むすべてのモジュールより前に** 並べる。これより前に並べたモジュールはセッションを読めず、起動時にそれを検査するものは無い。standalone テンプレートはこれを先頭に置いている。例外は逆向きの宣言である: federation grants が有効なとき、そのブラウザ向けルートは `after: ["session-middleware"]` を宣言するので、どちらがどこに並んでいてもこのルートの後にマウントされ、その id のルートが無い組み立ては `route-order-target-missing` で起動に失敗する。
 - **ブラウザが保持しない cookie は設定の検証で拒否される**（`config-validation-failed`、issue がキーを名指しする）: `__Host-` の名前 — デフォルトの `__Host-auth.session` — で `session-store.secure = true` かつ `session-store.domain = null` でないもの、`__Secure-` の名前で `session-store.secure = true` でないもの（どちらの接頭辞も、ブラウザと同じく大文字小文字を問わない）、RFC 6265 のトークンでない `session-store.name`、ホスト名でない `session-store.domain`（先頭のドット一つは可。スキーム、ポート、パスは不可）、`session-store.secure = true` でない `session-store.sameSite = "none"`、1 ms から 1 年の範囲外の `session-store.maxAge`。平文 HTTP で動かすときは `session-store.secure = false` と、接頭辞の無い名前（`auth.sid`）を設定する。
 - **新しいセッションに渡す cookie は `sessionCookiePolicy` のもの:** ルートはスロットが持つポリシーから express-session をマウントする。保存済みのセッションは作られたときの cookie の属性を保つ（express-session はレコードから cookie を組み立て直す）ので、これらの設定を厳しくしたときはセッションストアを空にし、すべてのブラウザに新しい cookie でサインインし直させる。
-- **`memory` は `core.deployment.mode = "multi"` で拒否される。** express-session の `MemoryStore` はレプリカごとに分岐する: あるレプリカが処理したログインは他のレプリカに知られず、ログアウトは到達したレプリカ上しか消さず、再起動ですべてのセッションが失われる。`sessionStoreModule` は replica safety を自分のパース済みセクションから宣言する: `session-store.storage.type` が `memory` なら replica-unsafe、それ以外の種別なら何も宣言しない。そのため core の replica-safety ガードが起動時に他の違反と並べて名指しで拒否し、`core.deployment.mode` が未設定なら警告し、`"single"` なら何も言わない。`sessionStoreModuleFor(config)` は同じモジュールが同じことを、組み立て時に読んだ `config` から宣言するもので、起動がパースするセクションは見ない。`sessionStoreModule` を並べる。ルートファクトリーも実行時に同じ組み合わせを拒否する（`replica-unsafe-adapter`）。起動したものと別の config から組み立てたモジュールのためである。どちらの形も core の `deploymentMode` スロット（core が `core.deployment.mode` から埋める）を requires し、`deployment` を自分では読まない。スロットの値が `single`、`multi`、`unset` のどれでもなければ TypeError になる。
+- **`memory` は `core.deployment.mode = "multi"` で拒否される。** express-session の `MemoryStore` はレプリカごとに分岐する: あるレプリカが処理したログインは他のレプリカに知られず、ログアウトは到達したレプリカ上しか消さず、再起動ですべてのセッションが失われる。`sessionStoreModule` は replica safety を自分のパース済みセクションから宣言する: `session-store.storage.type` が `memory` なら replica-unsafe、それ以外の種別なら何も宣言しない。そのため core の replica-safety ガードが起動時に他の違反と並べて名指しで拒否し、`core.deployment.mode` が未設定なら警告し、`"single"` なら何も言わない。ガードはどのルートを組み立てるよりも前に、ルートがマウントするのと同じセクションで判断するので、モジュール自身はモードを読まない: `deploymentMode` を requires せず、`deployment` も読まない。
 - **Redis ストアは自前の接続を開く。** `session-store.storage.redis.url`（設定されていれば `password` も）への `redis`（node-redis）クライアントを `connect-redis` の `RedisStore` の下に置く。readiness registrar が配線されていれば probe `session-store`（`PING`）を登録し、Redis を失ったレプリカはトラフィックを受けなくなる。lifecycle registrar が配線されていれば `AppHandle.dispose()` がクライアントを quit する。クライアントの `error` イベントはプロセスを落とさず `session_store_redis_error` としてログに出る。再接続は node-redis の仕事。`url` が無ければ起動に失敗し、`redis` か `connect-redis` のパッケージが無くても起動に失敗する（[インストール](#インストール) を参照）。
 - **フェデレーショントランザクションは同じストアを共有する。** キーの接頭辞は `fedtx:` — [トランザクション cookie](#トランザクション-cookie) を参照。
 - **答えられないストアは `500` ではなく障害である。** リクエストのセッションをストアが読み込めない（到達できない、またはタイムアウトする）とき、そのリクエストはどのルートも動く前に `503 temporarily_unavailable` で答えられる。ルートが答えたあとでセッションの保存や有効期限の更新ができないときは、その答えがそのまま残る。どちらも error レベルで 1 行、`session_middleware_store_unavailable`（`store: "cookie_session"`、`step`: `load` または `save`、エラーの射影）としてログに出て、それ以上先へは渡らない — express-session はこれを `next(err)` に渡しており、ルートの前ならターミナルハンドラーの `500`、後なら Express の最終ハンドラーに届いていた（[`src/internal/cookieSession.mts`](src/internal/cookieSession.mts)）。このパッケージのルートは、それが重要な場所 — ログイン、フェデレーションの開始とコールバック — では答える前に自分でセッションを保存するので、そこでの保存の失敗はルート自身の `503` になる。cookie ストアの障害を答えたルートはリクエストのセッションを手放すので、express-session が応答の終わりに失敗中のストアへもう一度書くことはない。
@@ -137,7 +137,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | GET | `/session/csrf` | double-submit CSRF トークンの発行 |
 | POST | `/session/login` | パスワードログイン |
 | POST | `/session/logout` | ブラウザセッションの終了 — [無効化するもの](#post-sessionlogout-が無効化するもの) を参照 |
-| GET | `/session/oauth/federation/:name` | フェデレーションの開始（`?redirect_to=`、`?link=1`） |
+| GET | `/session/oauth/federation/:name` | フェデレーションの開始（`?redirect_to=`、`?link=1`、鮮度のヒント `?prompt=` — `login` だけを数える — と `?max_age=`、2^53−1 以下の負でない整数。繰り返しや不正なヒントは `400 invalid_request`） |
 | GET | `/session/oauth/federation/:name/callback` | `query` フェデレーションのコールバック。`form_post` フェデレーションには `405`（`Allow: POST`） |
 | POST | `/session/oauth/federation/:name/callback` | `form_post` フェデレーションのコールバック。`query` フェデレーションには `405`（`Allow: GET`） |
 
@@ -186,7 +186,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 
 このプロバイダーにはログアウトのエンドポイントが **二つ** あり、無効化するものが同じではない。セッションが何を持っているかで選ぶ。
 
-`POST /session/logout` — ブラウザ自身のログアウトであり、BFF / `auth.proxy` の injection トポロジーが呼ぶもの。`200 {"message": "Logged out successfully"}` を返し、次を無効化する:
+`POST /session/logout` — ブラウザ自身のログアウトであり、BFF / `auth.proxy` の injection トポロジーが呼ぶもの。core のセッションライフサイクルがないとき、`200 {"message": "Logged out successfully"}` を返し、次を無効化する（ライフサイクルがあるときは下記）:
 
 | 対象 | 結果 |
 |------|--------|
@@ -196,13 +196,20 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | その `sid` の `federationTokenStore` と `sessionFederationIndex` のエントリー | 削除。上流 IdP のトークンが保存されたまま残らない |
 | **その `sid` に紐づくリフレッシュトークンファミリー** | **失効しない** |
 
-最後の行は二度読むこと。ここでログインしたあと `/authorize` → `authorization_code` フローを完了したブラウザはリフレッシュトークンを持っており、このエンドポイントはそのファミリーを **失効させない**。リフレッシュトークンは期限切れまで使える。そのセッションには `id_token_hint` 付きの `POST /oauth/logout` を使う — 完全なカスケード（リフレッシュファミリーの失効、RP レジストリ、フェデレーション、セッション削除）を実行し、ブラウザセッションも終わらせる。
+最後の行は二度読むこと — ライフサイクルがないときの話である。ここでログインしたあと `/authorize` → `authorization_code` フローを完了したブラウザはリフレッシュトークンを持っており、このエンドポイントはそのファミリーを **失効させない**。リフレッシュトークンは期限切れまで使える。そのセッションには `id_token_hint` 付きの `POST /oauth/logout` を使う — 完全なカスケード（リフレッシュファミリーの失効、RP レジストリ、フェデレーション、セッション削除）を実行し、ブラウザセッションも終わらせる。
 
 この境界は構造的なもの: カスケード（`packages/oauth/src/logout/cascadeLogout.mts`）は `refreshTokenFamilyRevocation`、`sessionFamilyIndex`、`sessionRPRegistry` を必要とし、このモジュールはそのどれも宣言しない。そして `@o3co/auth-provider-session` は `@o3co/auth-provider-oauth` を import しない — 両者は core の上の兄弟である。
 
 `session` グラントはリフレッシュトークンを発行しないので、トークンがすべてそのグラント由来のデプロイには失効させるファミリーが無く、`/session/logout` だけで足りる。
 
-**失敗時の振る舞い。** 上の表のレコードに対する各ステップはベストエフォートでログに出し、呼び出し側には伝えない: それらのストアの障害でログアウトが `5xx` になり、ユーザーが生きた cookie を持ったままになってはならない。`UserSession` の削除が **最初に**、express session の破棄とベストエフォートの後片付けより前に実行されるので、フェデレーション系ストアの障害が肝心の無効化を妨げることはない。失敗は `logout_user_session_delete_failed`、`logout_subject_session_index_remove_failed`、`logout_federation_token_remove_failed`、`logout_session_federation_index_remove_failed` としてログに出る — アラートは最初のものに掛ける。唯一の例外は express session そのものである: その破棄が失敗する — cookie ストアの障害 — とユーザーはログアウトできていないので、応答は `503 temporarily_unavailable` で、error レベルで 1 行、`session_logout_store_unavailable`（`store: "cookie_session"`、`step: "destroy"`、`sid`）としてログに出て、クライアントは再試行する。その時点でレコードは既に消えているので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには無効化するレコードが無く、express session だけが破棄される。
+**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、ログアウトは上の表の代わりに `sessionLifecycle.close(sid, "session_logout")` でセッションを終了する。終了は `/oauth/logout` と同じ順で進む: セッションのリフレッシュトークンファミリーを失効させてフェデレーショントークンを削除し、次に relying party にバックチャネルで知らせ（`oauthEndpointsModule` が寄与する通知器を通して）、次にセッションごとのインデックスを削除し、次に `UserSession` を削除し、最後に subject インデックスのエントリーを削除する。終了が保留のあいだ、sid は subject 単位の失効が見つける場所に残る。
+- コミットされた終了は、作業が `done` でも `pending` でも同じ `200` を返し、express session を破棄する。コミットの時点から、どの liveness の読み取りもそのセッションを live と答えず、残りは後の終了かライフサイクルの巡回が再開する。`pending` の終了は `/oauth/logout` と同じく `logout.close_pending`（`subject`、`sid`）として監査する。
+- `UserSession` が既に失効したログアウトには終了するものが無い: `done` を返して express session を破棄し、セッションの残りは `/oauth/logout` と同じく TTL で失効する。
+- コミットされなかった終了、または例外を投げたライフサイクルは `503 temporarily_unavailable` を返し、再試行のために express session を残す。コミットが live なレコードを見つけず（ストアの時計でセッションの終わりが過ぎていた）、保存するレコードなしにその場で走らせた作業が失敗した終了もこれに含まれ、再試行がそれを再び走らせる。`session_logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`、`sid`）として 1 回ログに出し、エラーの射影はライフサイクルが例外を投げたときだけ持つ。ライフサイクル自身はその障害を `session_lifecycle_unavailable` としてログに出す。
+- ライフサイクルが保持できない `sid` は、それ自身のどのセッションも指さない: ログアウトは express session を破棄して `200` を返し、warn で 1 回 `session_logout_sid_not_closable` と記録する。
+- 終了の作業の一つが失敗すると core の `session_close_item_failed`（warn、`item` 付き）となり、終了は保留のまま残る。下の `logout_user_session_delete_failed` に当たるものとして、`item: "delete_user_session"` にアラートを掛ける。
+
+**失敗時の振る舞い（core のセッションライフサイクルがないとき）。** 上の表のレコードに対する各ステップはベストエフォートでログに出し、呼び出し側には伝えない: それらのストアの障害でログアウトが `5xx` になり、ユーザーが生きた cookie を持ったままになってはならない。`UserSession` の削除が **最初に**、express session の破棄とベストエフォートの後片付けより前に実行されるので、フェデレーション系ストアの障害が肝心の無効化を妨げることはない。失敗は `logout_user_session_delete_failed`、`logout_subject_session_index_remove_failed`、`logout_federation_token_remove_failed`、`logout_session_federation_index_remove_failed` としてログに出る — アラートは最初のものに掛ける。唯一の例外は express session そのものである: その破棄が失敗する — cookie ストアの障害 — とユーザーはログアウトできていないので、応答は `503 temporarily_unavailable` で、error レベルで 1 行、`session_logout_store_unavailable`（`store: "cookie_session"`、`step: "destroy"`、`sid`）としてログに出て、クライアントは再試行する。その時点でレコードは既に消えているので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには無効化するレコードが無く、express session だけが破棄される。
 
 ### 状態変更ルートの CSRF 対策
 
@@ -219,19 +226,19 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 
 ### セッションが認証について記録するもの
 
-すべてのセッションは `authTime`、`amr` — ユーザーがどう認証したかを表す RFC 8176 の値のうち、このプロバイダーが保証するもの — と `authentication` — セッションがどう確立されたか（MFA ADR の D9: primary、どのフェデレーションか、信頼しない上流 IdP が主張したもの、第 2 要素がいつ検証されたか） — を持つ。これにより `/authorize` は `max_age`・`prompt=login`・`acr_values` を扱え、id_token は `auth_time`・`amr`・`acr` を示せる（全体像は [oauth パッケージの README](../oauth/README.ja.md) にある）。各ログイン経路について両方を core が組み立てる（`passwordSessionAuthentication`、`federatedSessionAuthentication`）:
+すべてのセッションは `authTime`、`amr` — ユーザーがどう認証したかを表す RFC 8176 の値のうち、このプロバイダーが保証するもの — と `authentication` — セッションがどう確立されたか（MFA ADR の D9: primary、どのフェデレーションか、信頼しない上流 IdP が主張したもの、第 2 要素がいつ検証されたか、フェデレーションログインなら上流がユーザーを最後に認証した時刻 `upstreamAuthTime`） — を持つ。これにより `/authorize` は `max_age`・`prompt=login`・`acr_values` を扱え、id_token は `auth_time`・`amr`・`acr` を示せる（全体像は [oauth パッケージの README](../oauth/README.ja.md) にある）。各ログイン経路について両方を core が組み立てる（`passwordSessionAuthentication`、`federatedSessionAuthentication`）:
 
 | ログイン経路 | `amr` | `authentication` |
 | --- | --- | --- |
 | `POST /session/login` | `["pwd"]`（core の `PASSWORD_AMR`） | primary は `pwd` |
-| フェデレーションのコールバック | `["fed"]` — `fed` は「フェデレーション経由」を表すデプロイ定義のマーカーで、core の `FEDERATED_AMR`。このパッケージも re-export する。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。`trustUpstreamAmr = true` のフェデレーションでは、その横に上流 IdP の `amr` | primary は `fed`、フェデレーションの名前、そして — フェデレーションが IdP を信頼しない限り — IdP の `amr` を `upstreamAmr` として |
+| フェデレーションのコールバック | `["fed"]` — `fed` は「フェデレーション経由」を表すデプロイ定義のマーカーで、core の `FEDERATED_AMR`。このパッケージも re-export する。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。`trustUpstreamAmr = true` のフェデレーションでは、その横に上流 IdP の `amr` | primary は `fed`、フェデレーションの名前、そして — フェデレーションが IdP を信頼しない限り — IdP の `amr` を `upstreamAmr` として。`upstreamAuthTime` はアダプターが報告する `auth_time`、報告が無くフェデレーションの `callbackMeetsFreshness` が `false`（既定）なら `null`、`true` なら何も記録しない |
 | アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない | 変わらない |
 
 **上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`core.federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのエントリの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationSettings` スロットから読む。その `trustsUpstreamAmr` は core の `federationTrustsUpstreamAmr` — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは起動を拒否し、環境変数が渡す綴りはスキーマが変換する。各フェデレーションのスイッチはインストールされた名前ごとに保持され、ログインはそのコールバックが来た名前のスイッチを取る。`authentication.federation` が名指すのもその名前である。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
 
 **信頼の取り消し。** `trustUpstreamAmr` を `true` から `false` にしても、既にそのもとで記録されたセッションには届かない: その `amr` は IdP の値を持ち続ける — 書かれたときには保証されていた — ので、そこから発行されたトークンはそれを運び続け、そこから発行されたリフレッシュトークンはファミリーが終わるまで（ログインから `oauth.refreshToken.expiresIn`、既定 1 日）それを引き継ぐ。すぐに取り消すには、そのフェデレーション経由でサインインした subject について core の `revokeAllForSubject` を呼ぶ: そのセッション、そこから発行されたリフレッシュファミリーとコード、そしてこのプロバイダー自身が検証するすべてのアクセストークン（イントロスペクション、`/oauth/userinfo`、フェデレーショントークンのルート、トークン交換、リフレッシュグラント）を終わらせ、利用者は新しい設定のもとで再びログインする。リソースサーバーがオフラインで検証するアクセストークンは `exp` まで生きる。`revokeAllForSubject` には `subjectRevocation` と `subjectSessionIndex` の配線が要り、無ければ自身を `incomplete` と報告する。手順は [運用ランブック](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust) にある。
 
-再認証は *新しい* セッションである: `POST /session/login` とフェデレーションのコールバックは常に新しい `authTime` でセッションを作り、`max_age` と `prompt=login` が測るのはそれである。既に認証済みのブラウザをそのまま `/authorize` に送り返すログインページは、そこで `login_required` を返され、ループしない。
+再認証は *新しい* セッションである: `POST /session/login` とフェデレーションのコールバックは常に新しい `authTime` でセッションを作る。`max_age` と `prompt=login` が測るのはセッションの鮮度（core の `sessionFreshness`）で、`authTime`、フェデレーションログインならそれと記録された上流の認証時刻の早いほうである。フェデレーションの開始（`GET /session/oauth/federation/:name`）は任意の `prompt` と `max_age` のヒントを受け取り — `login` だけを数える空白区切りの一覧と、2^53−1 以下の負でない整数。それ以外は `400 invalid_request` — アダプターに `ask` として渡す。アダプターは上流が文書化しているものだけを渡す。既にアプリケーションのセッションを持つブラウザーからの開始は、リンクでなければ再認証であり、ヒントにかかわらず新しいログイン（`login: true`）を求める。それを尊重する上流（OIDC アダプターは `prompt=login` を渡す）は、自分のシングルサインオンで答えずにユーザーにもう一度サインインを求める — その代わり、サインイン済みのユーザーがもう一度フェデレーションログインを始めると IdP のサインイン画面が出る。コールバックはアダプターが報告する上流の `auth_time` を、エポック以降で `DEFAULT_CLOCK_SKEW_MS` より先でない時刻なら記録する（`authentication.upstreamAuthTime`）。アダプターが報告するそれ以外の値は交換の失敗である（`502 exchange_failed`、`federation_callback_exchange_failed`）。報告が無いとき、`core.federations.<name>.callbackMeetsFreshness` が `false`（既定）のフェデレーションは `null`（決して新しくない）を記録し、`true` のものは何も記録しないので、そのセッションは `authTime` と同じだけ新しい。既に認証済みのブラウザをそのまま `/authorize` に送り返すログインページは、そこで `login_required` を返され、ループしない。
 
 ### フェデレーション間のアカウントリンク（#482）
 
