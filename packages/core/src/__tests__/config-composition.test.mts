@@ -38,11 +38,7 @@ const minimalCoreConfig = {
 			},
 		},
 		accessToken: { expiresIn: 3600 },
-		refreshToken: {
-			expiresIn: 86400,
-			unknownFamilyPolicy: "reject",
-			legacyRtPolicy: "reject",
-		},
+		refreshToken: { expiresIn: 86400 },
 		grants: {},
 		oidcMode: "oidc-required",
 	},
