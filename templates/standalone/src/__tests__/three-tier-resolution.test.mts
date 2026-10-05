@@ -221,8 +221,11 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 			});
 			const modules = buildModules(config);
 			expect(modules.map((m) => m.name)).toContain("redis-access-token-denylist");
+			// Each module's section at its name: a declaration made from the
+			// section is answered for it.
+			const sections = config as unknown as Record<string, unknown>;
 			for (const module of modules) {
-				expect(replicaUnsafeReason(module), module.name).toBeUndefined();
+				expect(replicaUnsafeReason(module, sections[module.name]), module.name).toBeUndefined();
 			}
 		});
 

@@ -22,8 +22,8 @@
  * - Every memory branch must be refused by name, and the all-Redis
  *   environment must boot. The replica-safety guard reads each module's
  *   manifest declaration, which covers the template's own in-memory modules
- *   and express-session's store (`buildModules` builds it from config,
- *   `sessionStoreModuleFor`).
+ *   and express-session's store (`sessionStoreModule`, which declares from
+ *   its own section).
  * - `federationTokenStore.type = "redis"` mounts
  *   `redisFederationTokenStoreModule` off the shared ioredis socket.
  * - The Redis federation store's `allow-plaintext` guard reads the
@@ -45,10 +45,12 @@ import {
 	defineModule,
 	InMemoryClientRepository,
 	InMemoryUserRepository,
+	type Module,
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
+import { sessionStoreModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
@@ -219,6 +221,13 @@ const modulesFor = (config: Switches, environment?: string) =>
 		...(environment === undefined ? {} : { environment }),
 	});
 
+/**
+ * `module`'s section in `config`, for a declaration made from it: each module
+ * here that has one sits at its name.
+ */
+const sectionOf = (config: Switches, module: Module): unknown =>
+	(config as unknown as Record<string, unknown>)[module.name];
+
 const boot = (config: Switches, environment?: string) =>
 	createApp({
 		modules: modulesFor(config, environment),
@@ -244,8 +253,8 @@ describe('the standalone\'s memory modules are refused under core.deployment.mod
 		["ADAPTERS_USER_SESSION_STORES", "standalone-in-memory-session-stores"],
 		["ADAPTERS_CODE_REPOSITORY", "standalone-in-memory-code-repository"],
 		["ADAPTERS_FEDERATION_TOKEN_STORE", "standalone-in-memory-federation-token-store"],
-		// express-session's own store. Not a module of this template but
-		// built here from its config, which is what lets the manifest declare.
+		// express-session's own store. Not a module of this template: it
+		// declares from its own section, which boot parses.
 		["SESSION_STORE_STORAGE_TYPE", "session-store"],
 		// The consent store, wired only when the switch says so.
 		["ADAPTERS_CONSENT_STORE", "core-consent-store-memory"],
@@ -313,11 +322,103 @@ describe('the standalone\'s memory modules are refused under core.deployment.mod
 	it("boots the all-Redis environment, with nothing declaring replica-unsafe state", async () => {
 		const config = resolveConfig(ALL_REDIS_ENV);
 		for (const m of modulesFor(config)) {
-			expect(replicaUnsafeReason(m), m.name).toBeUndefined();
+			expect(replicaUnsafeReason(m, sectionOf(config, m)), m.name).toBeUndefined();
 		}
 		handleRef = await boot(config);
 		expect(handleRef).toBeDefined();
 	});
+});
+
+describe("express-session's store declares its replica safety from its own section", () => {
+	it("is the session package's sessionStoreModule, listed first", () => {
+		expect(modulesFor(resolveConfig(ALL_REDIS_ENV))[0]).toBe(sessionStoreModule);
+	});
+
+	/** Each way the storage type is set, laid over the all-Redis environment. */
+	const STORAGE: ReadonlyArray<readonly [string, Record<string, string>]> = [
+		[
+			"SESSION_STORE_STORAGE_TYPE=memory",
+			{ ...ALL_REDIS_ENV, SESSION_STORE_STORAGE_TYPE: "memory" },
+		],
+		["SESSION_STORE_STORAGE_TYPE=redis", ALL_REDIS_ENV],
+		[
+			"no SESSION_STORE_STORAGE_TYPE, the reference's default",
+			without(ALL_REDIS_ENV, "SESSION_STORE_STORAGE_TYPE"),
+		],
+		[
+			"the variable it was renamed from, SESSION_STORAGE_TYPE=memory",
+			{ ...without(ALL_REDIS_ENV, "SESSION_STORE_STORAGE_TYPE"), SESSION_STORAGE_TYPE: "memory" },
+		],
+	];
+	const MODES: ReadonlyArray<
+		readonly [string, (env: Record<string, string>) => Record<string, string>]
+	> = [
+		["multi", (env) => ({ ...env, CORE_DEPLOYMENT_MODE: "multi" })],
+		["single", (env) => ({ ...env, CORE_DEPLOYMENT_MODE: "single" })],
+		["unset", (env) => without(env, "CORE_DEPLOYMENT_MODE")],
+	];
+
+	/** What a boot of `modules` settles as: the refusal, or the replica-safety warnings it logged. */
+	async function outcomeOf(config: Switches, modules: readonly Module[]): Promise<unknown> {
+		const warn = vi.fn();
+		const logger = {
+			warn,
+			info: vi.fn(),
+			error: vi.fn(),
+			debug: vi.fn(),
+			trace: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
+		try {
+			const handle = await createApp({
+				modules: [...modules],
+				bootstrapComponents: { config, logger, pathResolver: (s: string) => s } as never,
+			});
+			await handle.dispose();
+		} catch (err) {
+			const e = err as { reason?: string; message?: string; details?: unknown };
+			return { refused: { reason: e.reason, message: e.message, details: e.details } };
+		}
+		return {
+			warned: warn.mock.calls.filter(([, event]) => event === "replica_unsafe_adapters"),
+		};
+	}
+
+	for (const [storage, env] of STORAGE) {
+		for (const [mode, withMode] of MODES) {
+			it(`${storage} under ${mode} settles as sessionStoreModuleFor(config) does`, async () => {
+				const config = resolveConfig(withMode(env));
+				const modules = modulesFor(config);
+				expect(modules[0]).toBe(sessionStoreModule);
+				const outcome = await outcomeOf(config, modules);
+				expect(outcome).toEqual(
+					await outcomeOf(config, [sessionStoreModuleFor(config), ...modules.slice(1)]),
+				);
+				if (storage === "SESSION_STORE_STORAGE_TYPE=memory") {
+					const named = { modules: ["session-store"] };
+					expect(outcome).toEqual(
+						mode === "multi"
+							? {
+									refused: expect.objectContaining({
+										reason: "replica-unsafe-adapter",
+										message: expect.stringContaining(
+											"session-store: the express-session store forks per replica",
+										),
+										details: expect.objectContaining(named),
+									}),
+								}
+							: {
+									warned:
+										mode === "unset"
+											? [[expect.objectContaining(named), "replica_unsafe_adapters"]]
+											: [],
+								},
+					);
+				}
+			});
+		}
+	}
 });
 
 describe('adapters.federationTokenStore = "redis" in the standalone', () => {
