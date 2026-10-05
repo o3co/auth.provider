@@ -110,6 +110,8 @@ const storeWith = (session: UserSession | null) =>
 
 const fixture = (
 	verdict: () => RequirementVerdict,
+	/** Runs before the verdict is answered, as a slow requirement's own reads would. */
+	answering: () => Promise<void> = async () => {},
 ): SessionRequirement & { readonly inputs: RequirementInput[] } => {
 	const inputs: RequirementInput[] = [];
 	return {
@@ -121,6 +123,7 @@ const fixture = (
 		inputs,
 		async admit(input) {
 			inputs.push(input);
+			await answering();
 			return verdict();
 		},
 	};
@@ -366,6 +369,60 @@ describe("the session grant — admission is read again after the policy", () =>
 		const { result } = await grant({ userSessionStore: store }).handle(ctx(LIVE_COOKIE));
 		expect(result.status).toBe(200);
 		expect(store.get).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("the session grant — a boundary stamped while a requirement answers", () => {
+	/** A requirement that stamps the subject's boundary before answering `met` on its `stampOn`th call. */
+	const stamping = (revocation: SubjectRevocation, stampOn: number) => {
+		let calls = 0;
+		return fixture(
+			() => ({ outcome: "met" }),
+			async () => {
+				calls += 1;
+				if (calls === stampOn) {
+					await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
+				}
+			},
+		);
+	};
+	const allow: GrantPolicyHook = { kind: "allow", evaluate: async () => ({ outcome: "allow" }) };
+
+	it("mints nothing: 400 invalid_grant", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const requirement = stamping(revocation, 1);
+		const result = await refused(
+			grant({
+				userSessionStore: storeWith(record()),
+				subjectRevocation: revocation,
+				requirements: [requirement],
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(requirement.inputs).toHaveLength(1);
+	});
+
+	it("on the admission read again after the policy, mints nothing: 400 invalid_grant", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const requirement = stamping(revocation, 2);
+		const result = await refused(
+			grant({
+				userSessionStore: storeWith(record()),
+				subjectRevocation: revocation,
+				requirements: [requirement],
+				grantPolicy: allow,
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(requirement.inputs).toHaveLength(2);
 	});
 });
 
