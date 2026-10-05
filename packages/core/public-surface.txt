@@ -483,6 +483,7 @@
 . OrderedRouteContribution type
 . OutboundFetchOptions type
 . OutboundLimits type
+. OutboundPolicy type
 . OutboundUrlSource type
 . OverrideTargetMissingDetails type
 . PASSWORD_AMR value
@@ -1225,6 +1226,7 @@
 ./testing OutboundAnswer type
 ./testing OutboundExchange type
 ./testing OutboundFetchForTestingOptions type
+./testing OutboundPolicyContractInput type
 ./testing OutboundSectionForTests type
 ./testing OutboundTransport type
 ./testing PackageReferenceCheck type
@@ -1267,6 +1269,7 @@
 ./testing createTestMfaDigests value
 ./testing createTestMfaFactor value
 ./testing createTestOAuthTokenSettings value
+./testing createTestOutboundPolicy value
 ./testing createTestRateLimiter value
 ./testing createTestSessionCookiePolicy value
 ./testing createTestTokenBindingSettings value
@@ -1283,6 +1286,7 @@
 ./testing mergeAdmission value
 ./testing mergeSessionStore value
 ./testing oauthTokenSettingsContract value
+./testing outboundPolicyContract value
 ./testing packageReferenceProblems value
 ./testing rateLimiterContract value
 ./testing referenceConfProblems value
