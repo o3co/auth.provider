@@ -650,6 +650,8 @@
 . SessionLiveness type
 . SessionMutation type
 . SessionOpenAnswer type
+. SessionOpenOutcome type
+. SessionOpenRequest type
 . SessionParticipant type
 . SessionParticipantKind type
 . SessionRPRegistry type

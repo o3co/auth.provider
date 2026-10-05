@@ -12,6 +12,8 @@ store and the callers' switch follow in the order below
   the cause policy, the relying-party notifier, the bridge and where the
   service lives (D8–D15); and how the notifier is wired (D16).
   Written against `develop` at `5871ff698`.
+- Amended 2026-10-05: the service opens a record where a session is
+  established (D8).
 
 ## Context
 
@@ -162,7 +164,11 @@ index kept in the same atomic step as the record.
 **D8. The service and its answers.** `SessionLifecycle`
 (`src/session-lifecycle/service.mts`) fills the `sessionLifecycle`
 slot through `sessionLifecycleModule`, which nothing installs until the
-callers switch. `join(sid, { rp?, familyId?, federation? })` answers
+callers switch. `open(sid, { sub, expiresAt })`, called where a session is
+established, writes its record active and answers `opened` (a repeat for the
+same subject and end too), `refused` or `unavailable`: the service is the
+port's one writer, so no caller opens a record through the port.
+`join(sid, { rp?, familyId?, federation? })` answers
 `joined`, `refused` or `unavailable`; on `refused` the service revokes the
 family and deletes that federation's tokens it was handed, and the caller
 hands out nothing. `close(sid, cause)` answers `done`, `pending` or
