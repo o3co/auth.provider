@@ -31,6 +31,12 @@ const hidden = Object.defineProperty({}, "x", { value: 1, enumerable: false });
 const hiddenToJSON = Object.defineProperty({}, "toJSON", { value: () => 1, enumerable: false });
 const cycle: Record<string, unknown> = { a: 1 };
 cycle.self = cycle;
+const throwingEntry = Object.defineProperty([] as unknown[], 0, {
+	get: () => {
+		throw new Error("unreadable");
+	},
+	enumerable: true,
+});
 const revoked = Proxy.revocable({}, {});
 revoked.revoke();
 
@@ -105,6 +111,7 @@ const REFUSED: readonly (readonly [string, unknown, string | undefined])[] = [
 	["a class's instance", { a: new (class {})() }, ".a"],
 	["a function", () => 1, ""],
 	["a revoked Proxy", { a: revoked.proxy }, ".a"],
+	["a list entry whose getter throws", { a: throwingEntry }, ".a[0]"],
 	["nesting past the stack", nested(200_000), undefined],
 ];
 
