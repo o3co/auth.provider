@@ -82,7 +82,6 @@ import { createRevokeRouter } from "./routes/revoke.mjs";
 import { createTokenHandler } from "./routes/token.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
 import type { OAuthSection } from "./section.mjs";
-import { tokenSessionLiveness } from "./sessionLiveness.mjs";
 import {
 	extractConfirmation,
 	type IntrospectResponse,
@@ -277,7 +276,7 @@ const createIntrospectHandler = ({
 			// still there.
 			const sid = livenessSidOf(payload as Record<string, unknown>);
 			if (sid !== null && sessionLifecycle) {
-				const liveness = await tokenSessionLiveness(sessionLifecycle, sid);
+				const liveness = await sessionLifecycle.liveness(sid);
 				if (liveness.outcome === "unavailable") {
 					return answerStoreUnavailable(req, res, {
 						store: "session_lifecycle",

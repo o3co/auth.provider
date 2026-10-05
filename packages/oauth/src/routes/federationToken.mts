@@ -29,7 +29,6 @@ import {
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { tokenSessionLiveness } from "../sessionLiveness.mjs";
 import { identifyCaller } from "./federationTokenCaller.mjs";
 import {
 	createStoreUnavailableLog,
@@ -104,7 +103,7 @@ const checkCallerStanding = async (
 	// a session whose close has committed is not live.
 	let live: boolean;
 	if (opts.sessionLifecycle) {
-		const liveness = await tokenSessionLiveness(opts.sessionLifecycle, sid);
+		const liveness = await opts.sessionLifecycle.liveness(sid);
 		if (liveness.outcome === "unavailable") {
 			// The lifecycle logs its own error; this line carries none.
 			logger.error(

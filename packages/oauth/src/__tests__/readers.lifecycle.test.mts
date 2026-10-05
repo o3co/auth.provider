@@ -56,6 +56,7 @@ import * as userinfoRoute from "#/routes/userinfo.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -177,7 +178,7 @@ describe("/oauth/introspect through the session lifecycle", () => {
 		const { router } = await createOAuthRouter(express, {
 			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
-			config,
+			...routerInputsOf(config),
 			clientRepository,
 			codeRepository,
 			keyStore,
