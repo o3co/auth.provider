@@ -65,7 +65,11 @@ export const isRefusal = <T extends object & { readonly result?: never }>(
 export function tokenAnswer(accessToken: Token, expiresIn: number): GrantHandlerResult {
 	// RFC 9449 §5: a DPoP-bound token is `token_type: "DPoP"`; mTLS keeps "Bearer"
 	// (RFC 8705 §3). Read off the stamped confirmation, so the two cannot disagree.
-	const tokens = generateTokenResponse({ accessToken: { ...accessToken, expiresIn } });
+	// Without `expiresAt`, core answers `expiresIn` as given: the exchange's own
+	// time left, which it refuses rather than answer at zero.
+	const tokens = generateTokenResponse({
+		accessToken: { ...accessToken, expiresIn, expiresAt: undefined },
+	});
 	const tokensWithIssuedType: typeof tokens & { issued_token_type: string } = {
 		...tokens,
 		issued_token_type: ACCESS_TOKEN_TYPE,

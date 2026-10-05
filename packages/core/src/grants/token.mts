@@ -67,9 +67,12 @@ export interface TokenResponse {
  * `expires_in` is the access token's time left when the response is built:
  * `max(0, min(expiresIn, expiresAt − floor(now)))` when the token carries
  * `expiresAt`, else `expiresIn` as given. Never above the lifetime, even on a
- * clock that stepped back. A lifetime that ran out while the request was
- * handled answers `0` (the floor), not a negative number: every reader
- * refuses that token by its `exp`, and the client asks again.
+ * clock that stepped back, and within a second of the token's real remaining
+ * life (`now` is floored). A lifetime that ran out while the request was
+ * handled answers `0`, not a negative number: every reader refuses that
+ * token by its `exp`, and the client asks again. The `0` floor is this
+ * function's rule; a route may be stricter and refuse instead (token
+ * exchange and the federation token route answer 503).
  *
  * `token_type` is read off the access token's own confirmation, not handed
  * in, so the envelope cannot disagree with the `cnf` claim: a `cnf.jkt` token
