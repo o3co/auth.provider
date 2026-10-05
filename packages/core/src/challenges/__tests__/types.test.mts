@@ -7,14 +7,17 @@ import type { ChallengeStorageErrorReason } from "#/single-use/errors.mjs";
 import type { Challenge, ChallengeStore } from "../types.mjs";
 
 describe("ChallengeStore type contract", () => {
-	it("Challenge has readonly expiresAtMs: number", () => {
-		expectTypeOf<Challenge>().toEqualTypeOf<{ readonly expiresAtMs: number }>();
+	it("Challenge has readonly expiresAtMs: number and an optional readonly issuedAtMs", () => {
+		expectTypeOf<Challenge>().toEqualTypeOf<{
+			readonly expiresAtMs: number;
+			readonly issuedAtMs?: number;
+		}>();
 	});
 
 	it("ChallengeStore exposes readonly kind + issue/find/consume signatures", () => {
 		expectTypeOf<ChallengeStore["kind"]>().toEqualTypeOf<string>();
 		expectTypeOf<ChallengeStore["issue"]>().toEqualTypeOf<
-			(scope: string, value: string, expiresAtMs: number) => Promise<void>
+			(scope: string, value: string, expiresAtMs: number, issuedAtMs?: number) => Promise<void>
 		>();
 		expectTypeOf<ChallengeStore["find"]>().toEqualTypeOf<
 			(scope: string, value: string) => Promise<Challenge | null>
@@ -55,7 +58,11 @@ import type { ChallengeCeremony, ChallengeCeremonyOutcome } from "../types.mjs";
 describe("ChallengeCeremony type contract", () => {
 	it("ChallengeCeremonyOutcome is a discriminated union of three outcomes", () => {
 		type Want =
-			| { readonly outcome: "consumed"; readonly expiresAtMs?: number }
+			| {
+					readonly outcome: "consumed";
+					readonly expiresAtMs?: number;
+					readonly issuedAtMs?: number;
+			  }
 			| { readonly outcome: "replayed" }
 			| { readonly outcome: "unknown" };
 		expectTypeOf<ChallengeCeremonyOutcome>().toEqualTypeOf<Want>();
