@@ -704,6 +704,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+checkDeploymentMode\b/,
 	},
 	{
+		concept:
+			"the federation grants' switch and keep policy as a reader outside the module holds it — the check of the federationGrantPolicy slot",
+		home: "packages/core/src/federation-grants/policy.mts",
+		definition: /(?:function|const)\s+checkFederationGrantPolicy\b/,
+	},
+	{
 		concept: "a control character in configured text — C0, DEL or C1, but those a rule allows",
 		home: "packages/core/src/security/controlCharacters.mts",
 		definition: /(?:function|const)\s+hasControlCharacter\b/,

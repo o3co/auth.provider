@@ -139,6 +139,11 @@ export {
 	deploymentModeContract,
 } from "./slots/deploymentMode.mjs";
 export {
+	createTestFederationGrantPolicy,
+	type FederationGrantPolicyContractInput,
+	federationGrantPolicyContract,
+} from "./slots/federationGrantPolicy.mjs";
+export {
 	createTestFederationSettings,
 	type FederationSettingsContractInput,
 	federationSettingsContract,
