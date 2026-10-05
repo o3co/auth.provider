@@ -102,8 +102,12 @@ describe("each store's section read at its module's name, through the template's
 			].join("\n"),
 		});
 
+		// The operator's entry beside the template's own `limits.mfa`.
 		expect(sectionOf(composition, "core-rate-limiter-memory")).toEqual({
-			limits: { token: { limit: 7, windowSeconds: 60 } },
+			limits: {
+				mfa: { limit: 60, windowSeconds: 300 },
+				token: { limit: 7, windowSeconds: 60 },
+			},
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 			maxBuckets: 500,
 		});
