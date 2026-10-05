@@ -1235,6 +1235,8 @@ export {
 	type SessionLifecycle,
 	type SessionLifecycleOptions,
 	type SessionLiveness,
+	type SessionOpenOutcome,
+	type SessionOpenRequest,
 	type SessionResumeReport,
 } from "./session-lifecycle/service.mjs";
 // The token-exchange validator port. `ExchangeTokenValidator` is
@@ -1755,6 +1757,12 @@ export {
 	type SealingKey,
 	type SealingKeyRing,
 } from "./sealing/keyRing.mjs";
+
+// ===========================================================================
+// Plain JSON — the one rule for a value JSON gives back as it is, and its copy
+// ===========================================================================
+
+export { copyPlainJson, type PlainJsonCopy } from "./json/plainJson.mjs";
 
 // ===========================================================================
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628)

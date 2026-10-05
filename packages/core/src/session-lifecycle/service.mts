@@ -17,9 +17,10 @@
 /**
  * The session lifecycle service, the one writer of `SessionLifecycleStore`
  * (session admission reads a record's state):
- * joins a session, closes it and runs the close work, says whether it is
- * live, and resumes closes left pending. Its callers see `joined` /
- * `refused`, `done` / `pending`, `live` / `not_live` and `unavailable`;
+ * opens a session's record as it is established, joins a session, closes it
+ * and runs the close work, says whether it is live, and resumes closes left
+ * pending. Its callers see `opened` / `joined` / `refused`, `done` /
+ * `pending`, `live` / `not_live` and `unavailable`;
  * generations, states, work items, the cause policy and the bridge to the
  * per-session stores stay here.
  *
@@ -45,6 +46,7 @@ import { loggableError } from "../logging/loggableError.mjs";
 import type { RefreshTokenFamilyRevocation } from "../refresh-token-family/types.mjs";
 import { readRecord } from "../session-admission/live-session.mjs";
 import {
+	checkSessionExpiresAt,
 	checkSessionLifecycleKey,
 	checkSessionParticipant,
 	isSessionLifecycleKey,
@@ -75,6 +77,25 @@ import type {
 } from "../user-sessions/types.mjs";
 import { type BridgedClose, createSessionStoresBridge } from "./bridge.mjs";
 import type { SessionCloseNotifier } from "./notifier.mjs";
+
+/** The session a record is opened for: its subject and its own end. */
+export interface SessionOpenRequest {
+	readonly sub: string;
+	/** The end the user session will carry. */
+	readonly expiresAt: Date;
+}
+
+/**
+ * `opened`: the session's record is active for that subject and end, written
+ * now or already. `refused`: the sid holds another session's record (another
+ * subject or end, or one closing or closed), or the end has passed; nothing
+ * was written, and nothing is established on that sid. `unavailable`: the
+ * store could not answer; nothing is established on it.
+ */
+export type SessionOpenOutcome =
+	| { readonly outcome: "opened" }
+	| { readonly outcome: "refused" }
+	| { readonly outcome: "unavailable" };
 
 /** What a join adds to a session. At least one is named. */
 export interface SessionJoinRequest {
@@ -143,6 +164,8 @@ export interface SessionResumeReport {
 
 /** The session lifecycle, filled in the `sessionLifecycle` slot. */
 export interface SessionLifecycle {
+	/** Opens the lifecycle of the session `sid` as it is established. Idempotent for the same subject and end. */
+	open(sid: string, request: SessionOpenRequest): Promise<SessionOpenOutcome>;
 	/** Adds what `request` names to the live session `sid`, only while it is not closing. */
 	join(sid: string, request: SessionJoinRequest): Promise<SessionJoinOutcome>;
 	/** Closes `sid` for `cause` (the first close's cause is kept), and runs or resumes its close work. */
@@ -580,6 +603,18 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	};
 
 	return {
+		async open(sid, { sub, expiresAt }) {
+			checkSessionLifecycleKey(sid, "sid");
+			checkSessionLifecycleKey(sub, "sub");
+			const end = checkSessionExpiresAt(expiresAt);
+			try {
+				return readSessionOpenAnswer(await store.open(sid, sub, end));
+			} catch (error) {
+				unavailable("open", sid, error);
+				return { outcome: "unavailable" };
+			}
+		},
+
 		async join(sid, request) {
 			checkSessionLifecycleKey(sid, "sid");
 			const participants = participantsOf(request);

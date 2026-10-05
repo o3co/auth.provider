@@ -38,6 +38,7 @@ import {
 	type SessionCloseNotice,
 	type SessionCloseNotifier,
 	type SessionLifecycleStore,
+	type SessionOpenAnswer,
 	type UserSessionStore,
 } from "#/index.mjs";
 
@@ -349,6 +350,122 @@ describe("join", () => {
 	it("refuses a request that joins nothing with a RangeError", async () => {
 		const h = harness();
 		await expect(h.lifecycle.join(SID, {})).rejects.toThrow(RangeError);
+	});
+});
+
+describe("open", () => {
+	const inADay = (): Date => new Date(Date.now() + DAY);
+
+	it("writes the record active for the subject and end, with no participant", async () => {
+		const h = harness();
+		const expiresAt = inADay();
+		expect(await h.lifecycle.open(SID, { sub: SUB, expiresAt })).toEqual({ outcome: "opened" });
+		const record = await h.read();
+		expect(record?.value).toMatchObject({ sub: SUB, state: "active", participants: [] });
+		expect(record?.value.expiresAt.getTime()).toBe(expiresAt.getTime());
+	});
+
+	it("lets a join with no family land on the opened session, which an absent record would refuse", async () => {
+		const h = harness();
+		const expiresAt = await h.establish(SID, { open: false });
+		expect(await h.lifecycle.open(SID, { sub: SUB, expiresAt })).toEqual({ outcome: "opened" });
+		expect(await h.lifecycle.join(SID, { federation: "google" })).toEqual({ outcome: "joined" });
+	});
+
+	it("is idempotent: a repeat for the same subject and end answers opened and keeps what joined", async () => {
+		const h = harness();
+		const expiresAt = await h.establish(SID, { open: false });
+		expect(await h.lifecycle.open(SID, { sub: SUB, expiresAt })).toEqual({ outcome: "opened" });
+		await joinAll(h);
+		const before = await h.read();
+		expect(
+			await h.lifecycle.open(SID, { sub: SUB, expiresAt: new Date(expiresAt.getTime()) }),
+		).toEqual({ outcome: "opened" });
+		expect(await h.read()).toEqual(before);
+	});
+
+	it("refuses a sid holding another subject's record, or a closing one, and writes nothing", async () => {
+		const h = harness();
+		const expiresAt = await h.establish();
+		const before = await h.read();
+		expect(await h.lifecycle.open(SID, { sub: "user-2", expiresAt })).toEqual({
+			outcome: "refused",
+		});
+		expect(await h.read()).toEqual(before);
+		h.failing.set("delete_user_session", Number.POSITIVE_INFINITY);
+		expect((await h.lifecycle.close(SID, "session_logout")).outcome).toBe("pending");
+		const closing = await h.read();
+		expect(await h.lifecycle.open(SID, { sub: SUB, expiresAt })).toEqual({ outcome: "refused" });
+		expect(await h.read()).toEqual(closing);
+	});
+
+	it("refuses a repeat for the same subject with another end, and a closed record, writing nothing", async () => {
+		const h = harness();
+		const expiresAt = await h.establish();
+		const before = await h.read();
+		expect(
+			await h.lifecycle.open(SID, { sub: SUB, expiresAt: new Date(expiresAt.getTime() + 1) }),
+		).toEqual({ outcome: "refused" });
+		expect(await h.read()).toEqual(before);
+		expect((await h.lifecycle.close(SID, "session_logout")).outcome).toBe("done");
+		const closed = await h.read();
+		expect(closed?.value.state).toBe("closed");
+		expect(await h.lifecycle.open(SID, { sub: SUB, expiresAt })).toEqual({ outcome: "refused" });
+		expect(await h.read()).toEqual(closed);
+	});
+
+	it("refuses an end already past and writes nothing", async () => {
+		const h = harness();
+		expect(
+			await h.lifecycle.open(SID, { sub: SUB, expiresAt: new Date(Date.now() - 1000) }),
+		).toEqual({ outcome: "refused" });
+		expect(await h.read()).toBeNull();
+	});
+
+	it("answers unavailable when the lifecycle store cannot answer, or answers outside the port", async () => {
+		const down = harness({
+			store: (inner) => ({
+				...inner,
+				open: async () => {
+					throw new Error("lifecycle store down");
+				},
+			}),
+		});
+		expect(await down.lifecycle.open(SID, { sub: SUB, expiresAt: inADay() })).toEqual({
+			outcome: "unavailable",
+		});
+		const malformed = harness({
+			store: (inner) => ({
+				...inner,
+				open: async () => ({ outcome: "joined" }) as unknown as SessionOpenAnswer,
+			}),
+		});
+		expect(await malformed.lifecycle.open(SID, { sub: SUB, expiresAt: inADay() })).toEqual({
+			outcome: "unavailable",
+		});
+	});
+
+	it("refuses a sid, sub or end the port cannot hold with a RangeError, before the store is asked", async () => {
+		let asked = 0;
+		const h = harness({
+			store: (inner) => ({
+				...inner,
+				open: (...args) => {
+					asked += 1;
+					return inner.open(...args);
+				},
+			}),
+		});
+		await expect(h.lifecycle.open("", { sub: SUB, expiresAt: inADay() })).rejects.toThrow(
+			RangeError,
+		);
+		await expect(h.lifecycle.open(SID, { sub: "", expiresAt: inADay() })).rejects.toThrow(
+			RangeError,
+		);
+		await expect(
+			h.lifecycle.open(SID, { sub: SUB, expiresAt: new Date(Number.NaN) }),
+		).rejects.toThrow(RangeError);
+		expect(asked).toBe(0);
 	});
 });
 

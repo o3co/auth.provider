@@ -27,8 +27,8 @@
  *   surrogate as U+FFFD's bytes, which would make two bindings one.
  * - A factor's data and state are plain JSON-shaped values: plain objects,
  *   plain arrays, strings, finite numbers, booleans and `null`. What is sealed
- *   is their copy (`copyFactorValue`), each field read once, an own getter's
- *   included, frozen; the coordinator takes that copy where it reads a
+ *   is their copy (`copyFactorValue`, over core's `copyPlainJson`), each field
+ *   read once, an own getter's included, frozen; the coordinator takes that copy where it reads a
  *   factor's answer and hands the same copy to everything that acts on it.
  *   Anything else — a class's instance, an Array subclass, a built-in, a
  *   cycle, a read that throws — is one `RangeError` that quotes nothing, never
@@ -52,6 +52,7 @@ import {
 	checkSealingKeyRing,
 	consoleLogger,
 	constantTimeStringEqual,
+	copyPlainJson,
 	isSealingKeyId,
 	type Logger,
 	type MfaDigestMatch,
@@ -158,39 +159,17 @@ const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>
 const NOT_PLAIN_VALUE =
 	"a factor's data, state or response must be a plain JSON object of plain JSON values";
 
-/** What `copies` holds for an object while it is copied: met again inside itself, it is a cycle. */
-const COPYING: unique symbol = Symbol("being copied");
-
 const refuse = (): never => {
 	throw new RangeError(NOT_PLAIN_VALUE);
 };
 
 /**
- * A factor's data, state or response as a plain JSON-shaped copy, each field
- * read once, frozen at every depth: what is sealed or answered, and what the
- * coordinator hands everything that acts on the value, so nothing acts on
- * what was not taken.
- *
- * - `null`, a boolean, a string or a finite number other than `-0` (JSON writes
- *   it as `0`), as it is;
- * - a plain array (prototype `Array.prototype`): its `length` read once, its
- *   own keys exactly its indices — a hole, or a field of its own JSON would
- *   drop, is refused — and each index read once; `undefined` in it is
- *   refused, since JSON would write `null`;
- * - a plain object (prototype `Object.prototype` or none, read once): each
- *   own key read once — an own getter runs once — one read as `undefined`
- *   left out as JSON leaves it out, an own `__proto__` kept as the field it is.
- *
- * Every own key of either must be one JSON writes — a string, enumerable — so
- * a symbol's field or a hidden one, a hidden `toJSON` among them, is refused
- * rather than lost.
- *
- * Anything else is a `RangeError` with one fixed text: a class's instance, an
- * Array subclass, a built-in (a Date, a Map, a RegExp, a boxed number, a
- * Proxy over any of them), a function — a `toJSON` among them — a bigint,
- * NaN, an infinity, `-0`, a cycle, a read that throws, and nesting past the
- * stack, the copy's or JSON's. So a value is sealed whole or not at all, never in part. An object
- * two fields share is copied once.
+ * A factor's data, state or response as its plain JSON copy (core's
+ * `copyPlainJson`): each field read once, frozen at every depth, what is
+ * sealed or answered, and what the coordinator hands everything that acts on
+ * the value, so nothing acts on what was not taken. It must be an object, not
+ * a list. Anything else is a `RangeError` with one fixed text that quotes
+ * nothing of the value, so a value is sealed whole or not at all, never in part.
  *
  * Not core's `copyByName` (beside `readPlainFields`), which snapshots a
  * record by the fields its type declares and so takes a record of any shape:
@@ -198,19 +177,17 @@ const refuse = (): never => {
  * from a class's instance, and only a value JSON writes whole is taken.
  */
 export function copyFactorValue(value: unknown): Readonly<Record<string, unknown>> {
+	let object: boolean;
 	try {
-		if (!isJsonObject(value)) return refuse();
-		const copy = copyPlain(value, new Map()) as Readonly<Record<string, unknown>>;
-		// Written once here, so a copy JSON cannot write — nesting a shared object
-		// keeps shallow for the copy, deep for JSON — is refused where it is taken,
-		// before anything acts on it.
-		JSON.stringify(copy);
-		return copy;
+		object = isJsonObject(value);
 	} catch {
-		// A value refused, a getter or a Proxy trap that throws, or nesting past
-		// the stack: one answer, quoting nothing.
-		throw new RangeError(NOT_PLAIN_VALUE);
+		// A revoked Proxy: `Array.isArray` throws on it.
+		object = false;
 	}
+	if (!object) return refuse();
+	const taken = copyPlainJson(value);
+	if (!taken.ok) return refuse();
+	return taken.copy as Readonly<Record<string, unknown>>;
 }
 
 /** `value`'s copy ({@link copyFactorValue}) as JSON text; writing it is inside the same refusal. */
@@ -221,78 +198,6 @@ function factorValueText(value: unknown): string {
 	} catch {
 		throw new RangeError(NOT_PLAIN_VALUE);
 	}
-}
-
-function copyPlain(value: unknown, copies: Map<object, unknown>): unknown {
-	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-	// -0 is refused: JSON writes it as 0, which would open as another value.
-	if (typeof value === "number") {
-		return Number.isFinite(value) && !Object.is(value, -0) ? value : refuse();
-	}
-	if (typeof value !== "object") return refuse();
-	const known = copies.get(value);
-	if (known === COPYING) return refuse();
-	if (known !== undefined) return known;
-	copies.set(value, COPYING);
-	const prototype = Object.getPrototypeOf(value);
-	const list = Array.isArray(value);
-	if (list ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) {
-		return refuse();
-	}
-	const copy = list ? copyList(value, copies) : copyFields(value, copies);
-	copies.set(value, copy);
-	return copy;
-}
-
-/**
- * `value`'s own keys, listed once, when each is a field JSON writes: a string
- * key, enumerable — else refused, since a field JSON would skip (a symbol's,
- * a hidden one) or call (a hidden `toJSON`) is content the copy would lose.
- * A list's `length` is not a field.
- */
-function fieldsOf(value: object, list: boolean): string[] {
-	const fields: string[] = [];
-	for (const key of Reflect.ownKeys(value)) {
-		if (list && key === "length") continue;
-		if (typeof key !== "string" || !Object.prototype.propertyIsEnumerable.call(value, key)) {
-			return refuse();
-		}
-		fields.push(key);
-	}
-	return fields;
-}
-
-function copyList(list: readonly unknown[], copies: Map<object, unknown>): readonly unknown[] {
-	const length = list.length;
-	const keys = fieldsOf(list, true);
-	if (keys.length !== length || keys.some((key, index) => key !== String(index))) return refuse();
-	const copy: unknown[] = [];
-	for (let index = 0; index < length; index++) {
-		const element = list[index];
-		if (element === undefined) return refuse();
-		copy.push(copyPlain(element, copies));
-	}
-	return Object.freeze(copy);
-}
-
-function copyFields(
-	value: object,
-	copies: Map<object, unknown>,
-): Readonly<Record<string, unknown>> {
-	const source = value as Readonly<Record<string, unknown>>;
-	const copy: Record<string, unknown> = {};
-	for (const key of fieldsOf(source, false)) {
-		const field = source[key];
-		if (field === undefined) continue;
-		// Defined, not assigned: an own `__proto__` stays the field it is.
-		Object.defineProperty(copy, key, {
-			value: copyPlain(field, copies),
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
-	}
-	return Object.freeze(copy);
 }
 
 /** What a digest's refusal of its parts says. */

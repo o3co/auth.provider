@@ -1136,7 +1136,8 @@ ADR's D5, D21, D24).
   that marks the witness (where the directory can write it), first notes
   the subject's first-binding mark in the MFA transaction store
   (`mfat:first-binding:`): a session, or a login, authenticated no later
-  than it plus `DEFAULT_CLOCK_SKEW_MS` (5 minutes) may have recorded the
+  than it plus `DEFAULT_CLOCK_SKEW_MS` (5 minutes) and one factor-set lease
+  (16 × `mfa.storeTimeoutMs`, 80 seconds by default) may have recorded the
   account as not enrolled before it enrolled, so it binds no first factor —
   `401 login_required` wherever the first binding would open or complete,
   nothing spent, one `mfa_first_binding_distrusted` line at info; the MFA
@@ -1147,9 +1148,10 @@ ADR's D5, D21, D24).
   lets one through unmarked. **The re-login wait.** Any noted mark — a
   first binding that stands, one refused or failed after its note (a lost
   race, a factor store failing at the write), or a login that marked the
-  witness — refuses a first binding to every sign-in up to the skew after
-  it: fresh logins too, for 5 minutes, up to 10 across replicas whose
-  clocks differ by the skew. Under `mfa.mode = "required"`, a factor-store
+  witness — refuses a first binding to every sign-in up to the skew and a
+  factor-set lease after it: fresh logins too, for 6 minutes 20 seconds by
+  default, up to 5 minutes more across replicas whose clocks differ by the
+  skew. Under `mfa.mode = "required"`, a factor-store
   blip at a first binding keeps that subject from logging in for that long;
   a Store that keeps the witness answers such a login `503` first (D12).
   It fails closed by design: tell users to wait the `Retry-After`. **Keep
@@ -1160,8 +1162,8 @@ ADR's D5, D21, D24).
   **What the mark leaves open.** The stretch between a mark's note and the
   witness's mark is a documented residual (the MFA ADR's D12): the mark is
   noted once, so a sign-in past it can make a first binding only when all
-  three hold — a request stalled past `DEFAULT_CLOCK_SKEW_MS` between its
-  note and its witness's mark; another sign-in of the same subject in that
+  three hold — a request stalled past `DEFAULT_CLOCK_SKEW_MS` and one
+  factor-set lease between its note and its witness's mark; another sign-in of the same subject in that
   stretch; and a lost factor-store record, the one that request wrote. A
   durable factor store (AOF on, no eviction) stands against the third.
   A login whose subject's sessions were revoked, or whose password changed,
@@ -1215,14 +1217,13 @@ ADR's D5, D21, D24).
   `regenerate` the old id keeps what it held. A factor bound in a session
   is answered with its recovery codes whatever its escalation came to: they
   are shown once. A record that fails after the renewal leaves the cookie
-  session holding a nonce the record does not: a session never escalated
-  before stays as it was and is answered `401` at its next step-up, and one
-  escalated before keeps the earlier nonce on its record, so it is
-  `not_live` at once — either way the user signs in again. The first case
-  goes once the step-up's finish expects the nonce admission reports from the
-  record (`renewalNonce` on the admitted outcome). The second is kept
-  fail-closed: a cookie session the record's nonce does not match cannot be
-  told from an old id saved back after the renewal.
+  session holding a nonce the record does not. A session never escalated
+  before stays as it was and steps up at its next try: the finish expects the
+  nonce admission read from the record (`renewalNonce` on the admitted
+  outcome), none here, not the cookie session's. One escalated before keeps
+  the earlier nonce on its record, so it is `not_live` at once and the user
+  signs in again: a cookie session the record's nonce does not match cannot
+  be told from an old id saved back after the renewal.
   A store that answers the escalated record without the new nonce has the
   session ended (`mfa_escalation_unbound`). A step-up's email code goes to
   the address the session's `User` carried at its sign-in: after the
