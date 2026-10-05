@@ -32,7 +32,11 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	createTestOAuthTokenSettings,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -144,7 +148,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 	registry.register(
 		"session",
 		createSessionGrant({
-			config,
+			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			userSessionStore,
 			sessionRequirementResolver: requirements,

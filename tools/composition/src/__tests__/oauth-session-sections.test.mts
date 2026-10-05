@@ -86,7 +86,7 @@ async function advertisedGrants(composition: FullSet): Promise<string[]> {
 }
 
 describe("the grant switches, read by phase one at their modules' sections", () => {
-	it("OAUTH_SESSION_ENABLED=false: phase one leaves the session grant out", async () => {
+	it("OAUTH_SESSION_ENABLED=false: the module's own section leaves the session grant out", async () => {
 		const composition = await boot({ env: { ...SINGLE_ENV, OAUTH_SESSION_ENABLED: "false" } });
 
 		expect(await advertisedGrants(composition)).not.toContain("session");

@@ -36,7 +36,7 @@
 |---|---|---|
 | [`oauthEndpointsModule`](./src/module.mts) | `/oauth` のルートとディスカバリーの一部。グラントは 1 つも登録しない: `/oauth/token` は core の `grantHandlerResolver` を引いて振り分け、それはインストールされた各モジュールの `grants` 提供で埋まる。 | トークンエンドポイントはどのグラントがインストールされていても同じで、セッションストアが 1 つも無くても動く。 |
 | [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれ有効化されたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` と `auditSink` の absence policy を宣言する。セッションを読む 2 つのグラントがそれを通してセッションを読む `sessionRequirementResolver` を要求する。`refresh_token` が有効なときは、トークンファミリーの 2 つのスロットが両方配線されていなければ起動を拒否する（[`refresh_token`](#refresh_token) を参照）。 |
-| [`oauthSessionModule`](./src/oauthSession.mts) | `session` グラント。有効化されたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `config`、`keyStore`、`sessionRequirementResolver` と、任意でアドミッションがその横で読むもの — `userSessionStore`、`subjectRevocation`、`auditSink`、障害の行を書き出す `logger` — と、参照する `grantPolicy` だけで、`subjectRevocation` と `auditSink` の absence policy を付ける。 |
+| [`oauthSessionGrantModule`](./src/oauthSession.mts) | `session` グラント。セクションが有効にしたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `keyStore`、`sessionRequirementResolver`、`oauthTokenSettings` と、任意でアドミッションがその横で読むもの — `userSessionStore`、`subjectRevocation`、`auditSink`、障害の行を書き出す `logger` — と、参照する `grantPolicy` だけで、`subjectRevocation` と `auditSink` の absence policy を付ける。 |
 | [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthEndpointsModule` のルートはそれを要求しない。`federation-grants.enabled = true` のときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。そのカスケードはセッションを読まず `expiresAt` を渡さないので、ファミリーを列挙するだけで終了の印は書かない。そのため `subjectRevocation` を配線しない構成では、失効と同時に交換されたコードがそのファミリーを失効させないまま残しうる。`subjectRevocation` を配線すれば、サブジェクトのウォーターマークがそれを覆う。core がカスケードに `expiresAt` を渡すのは MFA 後の後続作業である（#894）。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
 
 どれも明示的にインストールする: どのモジュールも他のモジュールを登録しない。
@@ -60,7 +60,7 @@ import { createApp, jwksModule } from "@o3co/auth-provider-core";
 import {
   oauthAuthorizationModule,
   oauthEndpointsModule,
-  oauthSessionModule,
+  oauthSessionGrantModule,
 } from "@o3co/auth-provider-oauth";
 import { sessionStoreModuleFor } from "@o3co/auth-provider-session";
 
@@ -70,7 +70,7 @@ const handle = await createApp({
     // ブラウザーセッションを読むすべてのモジュールより前に並べること。
     sessionStoreModuleFor(config),
     oauthEndpointsModule,
-    oauthSessionModule({ config }),
+    oauthSessionGrantModule,
     oauthAuthorizationModule({ config }),
     jwksModule, // core のもの: `jwks_uri` はこのパッケージの担当ではない
     // …clientRepository、codeRepository、keyStore と下記の任意スロットを提供する
@@ -95,9 +95,9 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `/authorize` は、ルーターを組み立てる時点でグラントレジストリが `authorization_code` グラントを持つときだけ存在し、そのときはコードを発行する先の `codeRepository` が要る: 無ければルーターは組み立てを拒否する。同意ステップと Client ID Metadata Document もそれと並んでだけ存在する。このグラントの無い構成 — マシン向けのトークンだけ — はそのどれもマウントせず、discovery で authorization endpoint を示さず、コードリポジトリも要らない。
 - `authorization_code` グラントを有効にした `oauthAuthorizationModule` は、グラントがコードを引き換える `codeRepository` を要求し、無ければスイッチを名指しして boot を拒否する（`contribute-factory-failed`）。ほかのグラントはこれを読まない。
 - `subjectRevocation`、`auditSink`、`accessTokenDenylist` は配線は任意だが決定は任意ではない: 埋めないスロットは不在を宣言すること — `oauth.revocation.subject = "unsupported"`、`core.declaredAbsent = ["auditSink"]`、`oauth.revocation.accessToken = "unsupported"` — さもなければ boot が拒否する。
-- `oauthEndpointsModule` と、グラントを登録するときの `oauthAuthorizationModule` / `oauthSessionModule` は `sessionRequirementResolver` — boot プランナーが埋める core の合成キー — を要求する。したがってそのどれかをインストールする構成は、インストールするセッション要件を `core.sessionRequirements.expected` で宣言しなければならず（無ければ `[]`）、さもなければ boot が拒否する（core の session-admission ADR、D7）。
+- `oauthEndpointsModule`、グラントを登録するときの `oauthAuthorizationModule`、セクションが有効にしている間の `oauthSessionGrantModule` は `sessionRequirementResolver` — boot プランナーが埋める core の合成キー — を要求する。したがってそのどれかをインストールする構成は、インストールするセッション要件を `core.sessionRequirements.expected` で宣言しなければならず（無ければ `[]`）、さもなければ boot が拒否する（core の session-admission ADR、D7）。
 - `oauth.jwt.issuer` が正規の issuer URL でなければルーターの構築が失敗する: `iss` はデプロイの属性であり、リクエストから読むものではない。
-- `oauthEndpointsModule` は `oauthTokenSettings` を provide する（[#728](https://github.com/o3co/auth.provider/issues/728)）: ほかのモジュールが `oauth {}` から読むもの — 正規の issuer、`legacyTypAccept`、アクセストークンとリフレッシュトークンの寿命、`resourceIndicator.enabled`、`requireEmailVerified` — をモジュール自身のセクションから一度だけ解決して凍結したもの（[`tokenSettings.mts`](src/tokenSettings.mts)。スロットを自分で provide する組み立てのために `oauthTokenSettingsFrom(section)` を export している: 受け取るのは `oauth {}` で、設定全体ではない）。eager に provide されるので、このモジュールがインストールされていれば必ず埋まり、core 自身の仕組みもこれを読む。このモジュールはこれを `authoritative` に挙げる: ロードされている間、このスロットへの `overrideComponents` のエントリは boot を拒否させる（`authoritative-component-overridden`）— モジュール自身のコードは `oauth {}` を読むので、二つ目の出どころはスロットを読む側とモジュールの動きを食い違わせる。このモジュールを含まない組み立ては、自分でスロットを埋める。device、DPoP、token exchange、WebAuthn、federation-grants、MFA の各パッケージと subject revocation service は、組み立てがこれを持っていればこれを、持っていなければ設定を読む。トークンバインディングの設定 — dispatch policy と `bindConfidentialClientRefreshTokens` — はここに含まれない: core のトークンバインディングの拡張点全体に適用されるので、その所有者である core のものであり、core が自身のセクション `core.tokenBinding` から `resolveTokenBindingSettings` で読む。このパッケージのグラントもバインドの規則をこれを通して読む。
+- `oauthEndpointsModule` は `oauthTokenSettings` を provide する（[#728](https://github.com/o3co/auth.provider/issues/728)）: ほかのモジュールが `oauth {}` から読むもの — 正規の issuer、`legacyTypAccept`、アクセストークンとリフレッシュトークンの寿命、`resourceIndicator.enabled`、`requireEmailVerified` — をモジュール自身のセクションから一度だけ解決して凍結したもの（[`tokenSettings.mts`](src/tokenSettings.mts)。スロットを自分で provide する組み立てのために `oauthTokenSettingsFrom(section)` を export している: 受け取るのは `oauth {}` で、設定全体ではない）。eager に provide されるので、このモジュールがインストールされていれば必ず埋まり、core 自身の仕組みもこれを読む。このモジュールはこれを `authoritative` に挙げる: ロードされている間、このスロットへの `overrideComponents` のエントリは boot を拒否させる（`authoritative-component-overridden`）— モジュール自身のコードは `oauth {}` を読むので、二つ目の出どころはスロットを読む側とモジュールの動きを食い違わせる。このモジュールを含まない組み立ては、自分でスロットを埋める。このパッケージの session グラントは、有効な間これを要求し、アクセストークンの寿命と `requireEmailVerified` をこれだけから読む。device、DPoP、token exchange、WebAuthn、federation-grants、MFA の各パッケージと subject revocation service は、組み立てがこれを持っていればこれを、持っていなければ設定を読む。トークンバインディングの設定 — dispatch policy と `bindConfidentialClientRefreshTokens` — はここに含まれない: core のトークンバインディングの拡張点全体に適用されるので、その所有者である core のものであり、core が自身のセクション `core.tokenBinding` から `resolveTokenBindingSettings` で読む。このパッケージのグラントもバインドの規則をこれを通して読む。
 - `/oauth` 配下の各モジュールは自分のボディを自分でパースし、モジュールを並べる順は関係しない。`oauthEndpointsModule` のルーターが JSON とフォームのボディを（Express の既定の上限で）パースするのは、[エンドポイント](#エンドポイント) の表にあるルートのうち、この構成で実際にマウントしたものだけ、それもそれぞれのパスちょうどに対してだけで、その下の長いパスは含まない（[`routes.mts`](src/routes.mts) の `oauthRoutePaths`。authorize のルートは `authorization_code` グラントがあるときだけ、ログアウト、federation token、同意のルートは、ストアが配線されたときだけマウントされる）。`/oauth` 配下のそれ以外のパス — device グラント、federation grants、WebAuthn、デプロイ独自のもの、oauth がマウントしないときの `/oauth/logout` や `/oauth/consent`、`/oauth/token/custom` のように oauth のルートの下にあるものを含む — へのリクエストは、ボディを読まれないままそのルートに届き、`/oauth/revoke` のスロットルにも数えられない。そこにルートをマウントして `req.body` を読むモジュールは、自分のパーサーをマウントする。
 
 ## 設定
@@ -106,7 +106,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 - **どの階層も strict。** セクションが宣言しないキーは、どの階層でも boot を拒否する（`config-validation-failed`）。そのパスを名指す — たとえば `oauth.nonce.maxLenght`。以前は読まれずに捨てられていた。
 - **廃止したものは core が持ち続ける。** core のスキーマは、セクションの宣言をやめるまで、同じキー・規則・メッセージで `oauth {}` を宣言し続け、core の `reference.conf` も同じ既定値を同じ変数で設定し続ける。boot は core のスキーマで先にパースするので、両方が拒否する値は core の言葉で拒否され、それは同じ言葉である。廃止したキーをその行き先を名指して拒否するのは core だけで（`oauth.jwt` のフラットな鍵のフィールド、`oauth.refreshToken.legacyTokenCompat`、`oauth.authorize.allowUnmarkedClients`）、ほかのセクションの移動元のパス（`oauth.grants`、`oauth.dpop`、`oauth.mtls`、`oauth.deviceAuthorization`、`oauth.tokenExchange`、`oauth.code`、`oauth.tokenBinding`、`oauth.jwt.signingKey`）の下に置いたキーを、移動先のモジュールが読み込まれている間、新しいパスを名指して拒否するのも core である。ここではそうしたパスは空のオブジェクトか `null` — どちらも何も設定しない — であることしか許されない。
-- core は宣言による不在のガードのために、パース済みのセクションから `oauth.revocation.*` を読む。`oauthSessionModule` と `oauthAuthorizationModule` のグラントは、まだ `config` から `oauth {}` を読む。
+- core は宣言による不在のガードのために、パース済みのセクションから `oauth.revocation.*` を読む。`oauthAuthorizationModule` のグラントは、まだ `config` から `oauth {}` を読む。session グラントはそのどれも読まず、必要なものは `oauthTokenSettings` スロットから得る。
 
 ## エンドポイント
 
@@ -144,7 +144,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 - `oauthEndpointsModule`（ファクトリーではなくモジュールの値） — [`module.mts`](./src/module.mts)。`oauthModule({ config })` は非推奨: `oauthEndpointsModule` を返し、引数を一度も読んでいない。
 - `oauthAuthorizationModule({ config })` — [`oauthAuthorization.mts`](./src/oauthAuthorization.mts)
-- `oauthSessionModule({ config })` — [`oauthSession.mts`](./src/oauthSession.mts)
+- `oauthSessionGrantModule`（ファクトリではなくモジュールの値）— [`oauthSession.mts`](./src/oauthSession.mts)。`oauthSessionModule({ config })` は非推奨: 引数を無視して `oauthSessionGrantModule` を返す。
 - `subjectRevocationServiceModule`（ファクトリではなくモジュールの値） — [`logout/subjectRevocationService.mts`](./src/logout/subjectRevocationService.mts)
 
 **ルーター。** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — 明示的なオプションから `/oauth` ルーターを組み立てる。`oauthEndpointsModule` が解決済みの deps と自分のセクション（`section`、型は `OAuthSection`）を渡して呼ぶものであり、ルーターを自分でマウントする composition root 向け。`section` なしで組み立てたルーターは、`config` が持つ `oauth {}` を読む。ルーターが読む `oauth.*` の設定はすべてその 1 つのセクションから来る。`config` をそれ以上に読むのは、インストールされたフェデレーションのどれが上流 IdP の `amr` を信頼するかだけである。グラントレジストリは生成しない: `registry` は呼び出し元が渡す `get(grantType)` を持つ任意のオブジェクトで、同じ値がそのまま返る。`/oauth/token` はこれに対して振り分け、`/authorize` はこれが `authorization_code` グラントを持つときだけマウントされる。そのとき `codeRepository` は必須である。登録済みのグラントタイプが必要な呼び出し元は core の `grantHandlerResolver` を読むこと。`requirements` は必須である: boot プランナーが組み立てた `sessionRequirementResolver` で、`/authorize` と同意ステップはそれを通してセッションを読む。それが無い場合も、プランナーが組み立てていないものが渡された場合も、ルーターは組み立てを拒否する。この二つが許可を求めるアクションは `oauth.authorize` と `oauth.consent` で、`oauthEndpointsModule` が登録する。ルーターを自分でマウントする root は `OAUTH_ROUTER_ADMISSION_ACTIONS` を `contributes.admissionActions` に登録する。登録しなければ、ルーターはハンドラーとアクションを名指して組み立てを拒否する。テストは `@o3co/auth-provider-core/testing` の `resolverForTests` でリゾルバーを作り、それらを登録する。ルーターが読む登録済みクライアントはすべて、渡された `clientRepository` の上に置いた core のクライアントレコード境界（`validatedClientRepository`）を通して読む。Client ID Metadata Documents の有効・無効によらない。登録のスキーマが拒否するレコードは `client_record_refused` を warn で出し、検索は core のブランド付きの拒否（`isClientRecordRefused`）で reject する: `/authorize`・`/token`・`/introspect`・`/revoke`・同意は、読み取りが例外を投げたときと同じく `503 temporarily_unavailable` で答え、エラーの射影に `reason: "client_record_refused"` を載せた `client_repository_unavailable` をログに出す。ドキュメントが有効なときも同じである（[Client ID Metadata Documents](#client-id-metadata-documents-529)）。すでに境界の後ろにあるリポジトリはそのまま読み、二重にはラップしない。ドキュメントが有効なときは、渡されたセクションの `oauth.clientIdMetadataDocuments` から、ルーターがそのリポジトリの上に自分のドキュメントのフォールバックを置く。フォールバックは登録済みクライアントを自分で境界を通して読む。
@@ -172,7 +172,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 | ディレクトリ | 責務 |
 |---|---|
-| `src/`（ルート） | 組み立て: `oauthEndpointsModule`、`oauthAuthorizationModule`、`oauthSessionModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（`routes.mts`。下のすべてのルートを組み合わせる）、オプションの解決（`oauth.*` のオプションを解決する `resolveOAuthOptions.mts` と、ルーターが組み立て時にそこから 1 度だけ解決するもの — acr の表、正規の issuer、クライアントリポジトリ — を持つ `routerSettings.mts`）、core のアクセストークンヘッダーパーサーの再 export、そして依存先が落ちていて検証できなかったトークンに全ルートが返す 1 つの答え（`verificationUnavailable.mts`）。 |
+| `src/`（ルート） | 組み立て: `oauthEndpointsModule`、`oauthAuthorizationModule`、`oauthSessionGrantModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（`routes.mts`。下のすべてのルートを組み合わせる）、オプションの解決（`oauth.*` のオプションを解決する `resolveOAuthOptions.mts` と、ルーターが組み立て時にそこから 1 度だけ解決するもの — acr の表、正規の issuer、クライアントリポジトリ — を持つ `routerSettings.mts`）、core のアクセストークンヘッダーパーサーの再 export、そして依存先が落ちていて検証できなかったトークンに全ルートが返す 1 つの答え（`verificationUnavailable.mts`）。 |
 | [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー（`/authorize` はハンドラーと、それが順に呼ぶ段階ごとのファイル） — authorize、consent、logout、federation token（ハンドラーと、それが順に呼ぶ段階ごとのファイル。呼び出し元がまだ有効かの確認は `routes/federationToken.mts` に残る。そのセッションの読み取りを core のドリフトガードがそのファイルに固定しているため）、revoke、token（`/oauth/token` のディスパッチ）、introspect（誰が問い合わせてよいかと、必要なストアが落ちているときの答え。トークンそのものへの答えは `routes.mts` に残る。そのセッションと `amr` の読み取りを core のドリフトガードがそのファイルに固定しているため）、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorizeRequest.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
 | [`grants/`](./src/grants) | グラントハンドラー: core のグラント契約の上での、リクエストからトークンへの純粋な判断。HTTP を持たない。 |
 | [`middleware/`](./src/middleware) | クライアント認証。兄弟パッケージが再利用する。 |
@@ -197,13 +197,15 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 無効なグラントは登録されない: `/oauth/token` はそれに `unsupported_grant_type` を返し、`grant_types_supported` にも載らない。
 
-`oauthSessionModule({ config })` と `oauthAuthorizationModule({ config })` は、組み立てられるときに渡された `config` から登録するグラントを決める。`createApp` に渡すものと同じファイルと環境変数から解決した設定 — パッケージの reference を含むすべての層。スイッチの環境変数はこのパッケージの `config/reference.conf` で束縛されている — を渡すこと。boot は各スイッチを改めて parse し、モジュールが組み立てられたときと読みが違う構成は、どちら向きでもキーを名指しして拒否する（`config-validation-failed`）。
+`oauthSessionGrantModule` は何からも組み立てない 1 つのモジュールで、`oauth-session.enabled` を boot が parse したセクションから読む。セクションやキーが無ければ無効で、無効のときは何も登録せず何も要求しない。セクションは strict — 宣言していないキーは、そのパスを名指しして boot を拒否する — で、スキーマは既定値を持たない: パッケージの `config/reference.conf` が `enabled = false` を出荷する。
+
+`oauthAuthorizationModule({ config })` は、組み立てられるときに渡された `config` から登録するグラントを決める。`createApp` に渡すものと同じファイルと環境変数から解決した設定 — パッケージの reference を含むすべての層。スイッチの環境変数はこのパッケージの `config/reference.conf` で束縛されている — を渡すこと。boot は各スイッチを改めて parse し、モジュールが組み立てられたときと読みが違う構成は、どちら向きでもキーを名指しして拒否する（`config-validation-failed`）。
 
 登録済みのグラントも、クライアントの登録の `allowedGrantTypes` で許可されている必要がある — `/oauth/token` では拒否は `400 unauthorized_client` で、`authorization_code` については `/authorize` でも確認し、拒否は `unauthorized_client` エラーとしてクライアントの `redirect_uri` にリダイレクトされる。リストは名指したグラントタイプだけを許すので、空のリストは何も許さない。リストが無ければすべてのグラントを許すが、無いことを拒否として扱うもの — `client_credentials`、jwt-bearer、token exchange、device グラント、WebAuthn グラント — は例外で、リストに名指しが必要である。`oauth.requireGrantTypeAllowlist = true`（`OAUTH_REQUIRE_GRANT_TYPE_ALLOWLIST`、既定は無効）にすると、リストが無いときはすべてのグラントを拒否する。基本の規則は core の `isGrantTypeAllowed`（[`repositories/allowedGrantTypes.mts`](../core/src/repositories/allowedGrantTypes.mts)）で、無いことを拒否として扱うグラントは `requiresExplicitGrantAllowlist` を宣言し、`/oauth/token` のディスパッチ（[`routes/token.mts`](src/routes/token.mts)）がそれを強制する。
 
 `userRepository` か `assertionVerifier` の無い状態で jwt-bearer を有効にすると boot が失敗する — [jwt-bearer](#jwt-bearer-信頼する発行者-525) を参照。
 
-**トークンの有効期間はグラントの構築時に読む。** ここのすべてのグラントは `oauth.accessToken` を core の `resolveAccessTokenLifetime` で、`authorization_code` と `refresh_token` は `oauth.refreshToken.expiresIn` を `resolveRefreshTokenLifetime` で、ファクトリーの中で一度だけ読む。それらのリゾルバーが拒否する config — スキーマが同じ値を起動時に拒否するので、手組みのものでしかあり得ない — ではファクトリーがキーを名指しした `RangeError` を投げ、グラントは登録されない。リクエストがそれに出会うことはない: 応答を発行できない config のために、認可コードも ID-JAG の `jti` もリフレッシュトークンも消費されない。一度だけ読むことの裏返しとして、グラントは構築時の有効期間で発行するので、起動後に config オブジェクトの `oauth.accessToken.*` や `oauth.refreshToken.expiresIn` を変えても、グラントを作り直すまで効果は無い — 他の設定変更と同じく再起動する。
+**トークンの有効期間はグラントの構築時に読む。** session グラントはアクセストークンの寿命を `oauthTokenSettings` スロットから読み、core の `checkOAuthTokenSettings` で全体を確かめる。スロットの契約に反する値は、そのメンバーを名指しする `RangeError` で拒否される。ほかのグラントは `oauth.accessToken` を core の `resolveAccessTokenLifetime` で、`authorization_code` と `refresh_token` は `oauth.refreshToken.expiresIn` を `resolveRefreshTokenLifetime` で、ファクトリーの中で一度だけ読む。それらのリゾルバーが拒否する config — スキーマが同じ値を起動時に拒否するので、手組みのものでしかあり得ない — ではファクトリーがキーを名指しした `RangeError` を投げ、グラントは登録されない。リクエストがそれに出会うことはない: 応答を発行できない config のために、認可コードも ID-JAG の `jti` もリフレッシュトークンも消費されない。一度だけ読むことの裏返しとして、グラントは構築時の有効期間で発行するので、起動後に config オブジェクトの `oauth.accessToken.*` や `oauth.refreshToken.expiresIn` を変えても、グラントを作り直すまで効果は無い — 他の設定変更と同じく再起動する。
 
 ### `authorization_code`: セッション、`sid`、`family_id` と id_token
 

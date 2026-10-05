@@ -33,7 +33,7 @@ import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import {
 	oauthAuthorizationModule,
 	oauthModule,
-	oauthSessionModule,
+	oauthSessionGrantModule,
 	subjectRevocationServiceModule,
 } from "@o3co/auth-provider-oauth";
 import {
@@ -349,7 +349,7 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		// after the session middleware by its own `after`.
 		...(federationGrantsEnabled ? federationGrantsModules : []),
 		oauthModule({ config }),
-		oauthSessionModule({ config }),
+		oauthSessionGrantModule,
 		oauthAuthorizationModule({ config }),
 		// Always wired: a provider that signs tokens must publish its
 		// verification keys regardless of OIDC issuer config, and `oauthModule`'s
