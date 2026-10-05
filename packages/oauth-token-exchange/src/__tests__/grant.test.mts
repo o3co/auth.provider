@@ -2204,12 +2204,15 @@ describe("createTokenExchangeGrant — the session rule through the session life
 	});
 
 	it("answers a lifecycle that cannot answer, or throws, with 503, logged at error, and issues nothing", async () => {
-		for (const answer of [
-			async (): Promise<SessionLiveness> => ({ outcome: "unavailable" }),
-			async (): Promise<SessionLiveness> => {
-				throw new Error("lifecycle down");
-			},
-		]) {
+		for (const [answer, thrown] of [
+			[async (): Promise<SessionLiveness> => ({ outcome: "unavailable" }), false],
+			[
+				async (): Promise<SessionLiveness> => {
+					throw new Error("lifecycle down");
+				},
+				true,
+			],
+		] as const) {
 			const { lifecycle } = lifecycleAnswering(answer);
 			const logger = spyLogger();
 			const { result } = await buildGrant({ sessionLifecycle: lifecycle, logger }).handle(
@@ -2229,7 +2232,85 @@ describe("createTokenExchangeGrant — the session rule through the session life
 				expect.objectContaining({ store: "session_lifecycle", step: "liveness", role: "subject" }),
 				"token_exchange_session_store_unavailable",
 			);
+			// An `unavailable` answer carries no error; a throw is projected.
+			const [fields] = logger.error.mock.calls.at(-1) as [Record<string, unknown>];
+			if (thrown) {
+				expect(fields.err).toEqual(expect.objectContaining({ name: "Error" }));
+			} else {
+				expect(fields).not.toHaveProperty("err");
+			}
 		}
+	});
+
+	it("reads the session again at the end of the exchange: a session that stops being live meanwhile mints nothing", async () => {
+		const answers: SessionLiveness[] = [
+			{ outcome: "live", session: session("user-1") },
+			{ outcome: "not_live" },
+		];
+		const { lifecycle, asked } = lifecycleAnswering(async () => answers.shift() as SessionLiveness);
+		const { result } = await buildGrant({ sessionLifecycle: lifecycle }).handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+			}),
+		);
+		expect(result).toMatchObject({ status: 400, errorDescription: "session_invalid" });
+		expect(asked).toEqual(["sid-live", "sid-live"]);
+	});
+
+	describe("the actor's session", () => {
+		/** A lifecycle answering the subject's session live and the actor's by `actor`. */
+		const byRole = (actor: () => Promise<SessionLiveness>) =>
+			({
+				liveness: async (sid: string) =>
+					sid === "sid-actor" ? actor() : { outcome: "live", session: session("user-1") },
+			}) as unknown as SessionLifecycle;
+		const delegated = async (lifecycle: SessionLifecycle, logger?: ReturnType<typeof spyLogger>) =>
+			buildGrant({ sessionLifecycle: lifecycle, ...(logger ? { logger } : {}) }).handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					subject_token: await signSelfIssuedAccessToken({
+						sid: "sid-live",
+						may_act: [{ sub: "svc-a", iss: ISSUER }],
+					}),
+					actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", sid: "sid-actor" }),
+					actor_token_type: ACCESS_TOKEN_TYPE,
+				}),
+			);
+
+		it("refuses an actor token whose session the lifecycle answers not live, naming the actor", async () => {
+			const { result } = await delegated(byRole(async () => ({ outcome: "not_live" })));
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "actor_token session_invalid",
+			});
+		});
+
+		it("answers an actor's lifecycle that cannot answer, or throws, with 503 naming the actor, logged with the actor's role", async () => {
+			for (const answer of [
+				async (): Promise<SessionLiveness> => ({ outcome: "unavailable" }),
+				async (): Promise<SessionLiveness> => {
+					throw new Error("lifecycle down");
+				},
+			]) {
+				const logger = spyLogger();
+				const { result } = await delegated(byRole(answer), logger);
+				expect(result).toEqual({
+					status: 503,
+					error: "temporarily_unavailable",
+					errorDescription: "actor_token session store unavailable",
+				});
+				expect(logger.error).toHaveBeenCalledWith(
+					expect.objectContaining({ store: "session_lifecycle", step: "liveness", role: "actor" }),
+					"token_exchange_session_store_unavailable",
+				);
+			}
+		});
 	});
 
 	it("refuses a subject token whose sid the lifecycle cannot hold as session_invalid, not as an outage", async () => {

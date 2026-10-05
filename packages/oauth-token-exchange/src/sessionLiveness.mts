@@ -36,7 +36,12 @@ export async function liveSessionSubject(
 			return { subject: answer.session.sub };
 		case "not_live":
 			return "not_live";
-		default:
+		case "unavailable":
 			return "unavailable";
+		default: {
+			// Every answer the port names is handled above.
+			const unhandled: never = answer;
+			return unhandled;
+		}
 	}
 }
