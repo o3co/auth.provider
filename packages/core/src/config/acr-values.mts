@@ -19,8 +19,8 @@
  * name. `/authorize` reads `acr_values` as space-delimited RFC 6749 §3.3
  * scope-tokens (`readSpaceDelimitedParameter`), so a key is one only when it
  * is a scope-token (`isScopeToken`); any other key would be advertised in
- * `acr_values_supported` and never be asked for. Every schema that declares
- * the table refuses a key with `checkAcrValueName`, so each says the same.
+ * `acr_values_supported` and never be asked for. A schema that declares the
+ * table refuses a key with `checkAcrValueName`, so each says the same.
  */
 
 import { isScopeToken } from "../federations/scope.mjs";

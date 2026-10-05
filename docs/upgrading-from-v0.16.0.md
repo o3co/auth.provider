@@ -643,7 +643,7 @@ modules fills them.
   `grants` or `mfaFactors` factory may answer `null` — switched off by its
   module's settings while the module is on; the entry stays claimed, and an
   `overrides.grants` or `overrides.mfaFactors` entry for it refuses the boot
-  before any factory runs (`override-target-missing`, naming the kind, the
+  before the overriding module's factories run (`override-target-missing`, naming the kind, the
   name and the overriding module; the message says the entry is switched
   off), so an override never switches on what its owner switched off. Switch
   the entry on at its owner's setting and keep the override, or drop the
