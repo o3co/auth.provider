@@ -38,7 +38,7 @@ import {
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createJwtBearerGrant } from "#/grants/jwtBearer.mjs";
@@ -46,6 +46,10 @@ import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { capturing, withGrants } from "./_helpers/sections.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const keyStore = createSymmetricKeyStore("oauth-authorization-slots-secret-32b!");
 
@@ -90,6 +94,8 @@ describe("a composition without the oauth module, filling oauthTokenSettings its
 	};
 
 	it("mints with the slot's lifetime and its resource-indicator switch, not the configuration's", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		// The configuration's access-token lifetime is 3600 s and its resource
 		// indicators are off; the slot's lifetime is shorter, which boot
 		// accepts, and its resource indicators are on.
