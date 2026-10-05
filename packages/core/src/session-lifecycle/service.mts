@@ -222,9 +222,10 @@ const RP_ITEM = sessionCloseItemOf({ kind: "rp", id: "" });
 
 /**
  * What each cause runs beyond the work every close runs (revoke the
- * families, remove the federation tokens, the subject's entry and the
- * per-session indexes, delete the user session): whether it tells the
- * relying parties, those of the record and those of the per-session stores.
+ * families, remove the federation tokens and the per-session indexes,
+ * delete the user session, and remove the subject's entry last): whether it
+ * tells the relying parties, those of the record and those of the
+ * per-session stores.
  */
 const CLOSE_POLICY: Readonly<Record<SessionCloseCause, { readonly tellsRelyingParties: boolean }>> =
 	Object.freeze({
@@ -243,8 +244,9 @@ const CLOSE_POLICY: Readonly<Record<SessionCloseCause, { readonly tellsRelyingPa
  * the relying parties (and an item this code does not know), then the
  * per-session indexes the bridge steps read, then the user session, and the
  * subject's index entry last: a close still pending keeps the sid where a
- * subject-wide revocation enumerates it, so a retry of that revocation finds
- * the close and resumes it.
+ * subject-wide revocation enumerates it, so where subject revocation closes
+ * through the lifecycle a retry of that revocation finds the sid and
+ * resumes its close.
  */
 const phaseOf = (item: string): number => {
 	if (
@@ -364,10 +366,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			steps: [
 				REVOKE_BRIDGED_FAMILIES,
 				REMOVE_FEDERATION_TOKENS,
-				...(subjectSessionIndex === undefined ? [] : [REMOVE_SUBJECT_SESSION]),
 				...(tells ? [NOTIFY_BRIDGED_RPS] : []),
 				REMOVE_SESSION_INDEXES,
 				DELETE_USER_SESSION,
+				...(subjectSessionIndex === undefined ? [] : [REMOVE_SUBJECT_SESSION]),
 			],
 			perParticipant: tells ? ["family", "rp"] : ["family"],
 			retainMs,

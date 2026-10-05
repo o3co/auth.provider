@@ -556,6 +556,20 @@ describe("close", () => {
 		},
 	);
 
+	it("keeps the sid listed when its own removal fails, with the user session deleted, and the sweep finishes it", async () => {
+		const h = harness();
+		await h.establish();
+		await joinAll(h);
+		h.failing.set(`remove_subject_session:${SID}`, 1);
+		expect((await h.lifecycle.close(SID, "subject_revocation")).outcome).toBe("pending");
+		expect(await h.sessions.get(SID)).toBeNull();
+		expect(await h.subjects.listSids(SUB)).toEqual([SID]);
+		expect((await h.read())?.value.close?.pending).toEqual(["remove_subject_session"]);
+		expect(await h.lifecycle.resumePending()).toEqual({ done: 1, pending: 0, unavailable: 0 });
+		expect(await h.subjects.listSids(SUB)).toEqual([]);
+		expect((await h.read())?.value.state).toBe("closed");
+	});
+
 	it("resumes a half-ended close on a later close of the same sid, keeping the first cause", async () => {
 		const h = harness();
 		await h.establish();
