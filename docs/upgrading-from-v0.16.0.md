@@ -227,7 +227,11 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
   too (#1329): an empty `mfa.factors` block an older configuration leaves
   behind (the TOTP factor's old path, its variables unset) is such a key —
-  delete it. So does `webauthn`, at every level (#1336). The keys under `audit-sink` are the
+  delete it. So does `webauthn`, at every level (#1336), and so does
+  `federation-grants`, at every level: the keys under
+  `federation-grants.connections` are the connections you name, and a
+  connection's `authorizationParams` the upstream's parameters, so those stay
+  open. The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -701,6 +705,27 @@ modules fills them.
   false }` alone, without the package's `reference.conf`, is refused; delete
   the section or layer the reference. Parsed directly, an absent section is
   `undefined`.
+- **BREAKING: enabled federation grants require `oauthTokenSettings`, and
+  `federationGrantsModule` no longer reads the configuration (#728).** It
+  takes the issuer every route, `connect_uri` and callback check is built on
+  from the slot alone, and no longer falls back to `oauth.jwt.issuer` when no
+  module provides it. With `oauthModule` installed nothing changes. A
+  composition with `federation-grants.enabled = true` and without
+  `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`,
+  or the boot is refused for the missing component. The federations a
+  connection names — whether each is configured and on, its `issuer` and
+  `clientId` — come from core's `federationSettings` slot, which core fills
+  from `core.federations` in every composition: nothing to do under
+  `createApp`, and the refusals are unchanged. A deps object handed to the
+  module's route factories carries `oauthTokenSettings`,
+  `federationSettings` and `section`; `config` is no longer read. The audit
+  sink's declared absence is now core's guard: enabled with no `auditSink`
+  and no `core.declaredAbsent = ["auditSink"]`, the boot is refused at
+  manifest validation with core's `component-absence-undeclared`
+  (`consumedBy` naming `federation-grants`), ahead of the module's other
+  refusals, and no longer with the module's own
+  `federationGrantsModule: … with no auditSink component` error; match on
+  the reason. Disabled, the module requires nothing.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from

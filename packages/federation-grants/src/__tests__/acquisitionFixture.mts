@@ -26,6 +26,7 @@ import { createMemoryFederationGrantIntentStore, defineModule } from "@o3co/auth
 import {
 	createTestCsrfGuard,
 	createTestLoginEntry,
+	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
 
@@ -54,12 +55,20 @@ export const callbackUrlFor = (connection: string): string =>
 export const acquisitionCsrfGuard = () => createTestCsrfGuard();
 
 /**
- * Merged into `bootstrapComponents`, with the login entry and the CSRF guard. The Store covers every registration and
+ * The `oauthTokenSettings` slot on the test issuer: the oauth module provides
+ * it in a real composition, and one without that module fills it itself.
+ */
+export const acquisitionTokenSettings = () => createTestOAuthTokenSettings({ issuer: ISSUER });
+
+/**
+ * Merged into `bootstrapComponents`, with the login entry, the CSRF guard and the
+ * token settings. The Store covers every registration and
  * establishes "linked to nobody" — a test composition's answer, not a
  * production one: a real Store says `unlinked` only after it has looked
  * everywhere a link could be.
  */
 export const acquisitionComponents = () => ({
+	oauthTokenSettings: acquisitionTokenSettings(),
 	federationGrantIntentStore: createMemoryFederationGrantIntentStore(),
 	loginEntry: acquisitionLoginEntry(),
 	csrfGuard: acquisitionCsrfGuard(),
