@@ -433,7 +433,11 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 			const tokens = tokensOf(result);
 			const claims = decodeJwt(tokens.access_token);
 			expect(claims.exp as number).toBeLessThanOrEqual(subjectExp);
-			expect((claims.exp as number) - (claims.iat as number)).toBe(tokens.expires_in);
+			// `expires_in` counts from the answer (RFC 6749 §5.1), never past `exp`.
+			expect(tokens.expires_in).toBeGreaterThan(0);
+			expect(tokens.expires_in).toBeLessThanOrEqual(
+				(claims.exp as number) - (claims.iat as number),
+			);
 		});
 	});
 

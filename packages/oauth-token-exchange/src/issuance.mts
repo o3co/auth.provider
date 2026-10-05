@@ -69,7 +69,14 @@ export async function issueAccessToken(
 		requestedExpiresIn,
 		issuedConfirmation,
 	}: Issuance,
-): Promise<{ readonly accessToken: Token } | GrantHandlerResult> {
+): Promise<
+	| {
+			readonly accessToken: Token;
+			/** Seconds left of the lifetime when it was signed: the answer's `expires_in`. */
+			readonly expiresIn: number;
+	  }
+	| GrantHandlerResult
+> {
 	const act = buildActClaim({
 		subject: subjectValidated,
 		actor: actorValidated ?? undefined,
@@ -91,31 +98,16 @@ export async function issueAccessToken(
 	// `iat`/`exp` carry, so `exp` cannot pass the subject's; the expiry is judged
 	// at the minting clock, so a subject that expired while the exchange ran is
 	// refused.
-	const mintedAt = Math.floor(Date.now() / 1000);
 	const subjectExpiry = subjectValidated.claims.exp;
 	if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
 		// `<= 0` includes a token expiring within this second: capping would mint a dead
 		// token, so refuse instead.
-		if (Math.floor(subjectExpiry - mintedAt) <= 0) {
+		if (Math.floor(subjectExpiry - Math.floor(Date.now() / 1000)) <= 0) {
 			return invalidRequest("subject_token has expired");
 		}
 		expiresIn = Math.min(expiresIn, Math.floor(subjectExpiry - issuedAt));
 	}
-	// The lifetime runs from the issuance instant: one the exchange itself has
-	// used up would be minted already expired, so it is refused, and retryable.
-	if (issuedAt + expiresIn <= mintedAt) {
-		(deps.logger ?? consoleLogger).warn(
-			{ clientId: client.clientId, expiresIn, elapsed: mintedAt - issuedAt },
-			"token_exchange_lifetime_elapsed",
-		);
-		return {
-			result: {
-				status: 503,
-				error: "temporarily_unavailable",
-				errorDescription: "issued token lifetime elapsed during the exchange",
-			},
-		};
-	}
+
 	// A subject token without `exp` leaves the lifetime above standing: `exp` is a
 	// property of the presented credential, and a validator returning none asserts a
 	// credential with no expiry. The built-in validator never takes this path.
@@ -143,5 +135,23 @@ export async function issueAccessToken(
 			...(issuedConfirmation ? { confirmation: issuedConfirmation } : {}),
 		},
 	);
-	return { accessToken };
+	// The lifetime runs from the issuance instant, so what is left of it once the
+	// token is signed is the answer's `expires_in` (RFC 6749 §5.1). One the
+	// exchange used up is refused, and retryable, rather than answered expired.
+	const answeredAt = Math.floor(Date.now() / 1000);
+	const remaining = issuedAt + expiresIn - answeredAt;
+	if (remaining <= 0) {
+		(deps.logger ?? consoleLogger).warn(
+			{ clientId: client.clientId, expiresIn, elapsed: answeredAt - issuedAt },
+			"token_exchange_lifetime_elapsed",
+		);
+		return {
+			result: {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "issued token lifetime elapsed during the exchange",
+			},
+		};
+	}
+	return { accessToken, expiresIn: remaining };
 }

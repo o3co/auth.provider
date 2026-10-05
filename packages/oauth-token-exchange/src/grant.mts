@@ -193,7 +193,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			);
 			if (isRefusal(issuedToken)) return issuedToken;
 
-			return tokenAnswer(issuedToken.accessToken);
+			return tokenAnswer(issuedToken.accessToken, issuedToken.expiresIn);
 		},
 	};
 }
