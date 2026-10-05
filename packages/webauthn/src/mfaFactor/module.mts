@@ -19,28 +19,27 @@
  * `webauthn` second factor under core's `mfaFactors` kind, where the MFA
  * package's coordinator reads it through `mfaFactorResolver`; this package
  * imports nothing of the MFA package. Built from the relying party the
- * `webauthnConfig` slot holds and its own section, `webauthn-mfa-factor`,
- * which boot parses with the module's schema before any factory runs; it
- * answers `null` when `webauthn-mfa-factor.enabled` is false, which leaves
- * the kind claimed and absent from the resolver. The relying party is taken
- * when wired: off, the module boots without it; on without it, the factory
- * refuses, naming the slot and the keys it is built from. Installed while the
- * relying party has `allowCredentialsForKnownUser` on, on or off, the factory
- * refuses: a second factor's credential that returns no user handle could
- * then sign its owner in, through the grant, as another account that
- * registered it. Stateless: nothing forks per replica.
+ * `webauthnConfig` slot holds (which `webauthnModule` provides from its
+ * section) and its own section, `webauthn-mfa-factor`,
+ * which boot parses with the module's schema before any factory runs.
+ * `webauthn-mfa-factor.enabled` is the module's switch (`section.isEnabled`):
+ * false, and the module registers nothing. The relying party is taken when
+ * wired: off, the module boots without it; on without it, the factory
+ * refuses, naming the slot and the keys it is built from. Stateless: nothing
+ * forks per replica.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
 import { webauthnMfaFactorConfigSchema } from "./config.mjs";
 import { createWebAuthnMfaFactor, WEBAUTHN_MFA_FACTOR_KIND } from "./factor.mjs";
 
-/** The WebAuthn second factor, contributed as `mfaFactors.webauthn`; `null` when switched off by its section. */
+/** The WebAuthn second factor, contributed as `mfaFactors.webauthn`; nothing when switched off by its section. */
 export const webauthnMfaFactorModule = defineModule({
 	name: "webauthn-mfa-factor",
 	section: {
 		schema: webauthnMfaFactorConfigSchema,
 		reference: new URL("../../config/reference.conf", import.meta.url),
+		isEnabled: (section) => section.enabled,
 	},
 	// Needed only when the factor is on, so a composition may install the
 	// module and leave the factor off without a relying party.
@@ -48,23 +47,14 @@ export const webauthnMfaFactorModule = defineModule({
 	contributes: {
 		mfaFactors: {
 			[WEBAUTHN_MFA_FACTOR_KIND]: ({ webauthnConfig, section }) => {
-				if (webauthnConfig?.allowCredentialsForKnownUser === true) {
-					throw new Error(
-						"webauthnMfaFactorModule: webauthn.allowCredentialsForKnownUser " +
-							"(WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER) is on while the WebAuthn second " +
-							"factor is installed. With both, a second factor's credential that returns no " +
-							"user handle can be registered by another account as its passkey, and then sign " +
-							"its owner in as that account through the passwordless grant. Turn " +
-							"allowCredentialsForKnownUser off, or remove webauthnMfaFactorModule.",
-					);
-				}
 				if (!section.enabled) return null;
 				if (webauthnConfig === undefined) {
 					throw new Error(
 						"webauthnMfaFactorModule: webauthn-mfa-factor.enabled = true requires the " +
 							"webauthnConfig component — the relying party, built from webauthn.rpId, " +
-							"webauthn.rpName and webauthn.origin, which the deployment's WebAuthn bootstrap " +
-							"module provides. Provide it, or leave the factor off " +
+							"webauthn.rpName and webauthn.origin, which webauthnModule provides from its " +
+							"section. Install webauthnModule (or, without it, provide the slot), or leave " +
+							"the factor off " +
 							"(WEBAUTHN_MFA_FACTOR_ENABLED).",
 					);
 				}

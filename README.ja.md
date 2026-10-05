@@ -1,6 +1,6 @@
 # auth.provider
 
-最終更新: 2026-10-02
+最終更新: 2026-10-03
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -106,6 +106,7 @@ core                          contracts, module system, config, tokens, keys
 │   └── device-grant          (also depends on session)
 ├── session                   /session/*
 │   └── federation-*          one package per upstream identity provider
+├── mfa                       /session/mfa/*, the second factor
 ├── dpop · mtls · webauthn · oauth-token-exchange
 ├── redis                     (ioredis is an optional peer)
 ├── foundation
@@ -130,6 +131,7 @@ templates/standalone          composes the packages above; create-app copies it
 | [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | ブラウザセッション: `/session/login`、`/session/logout`、CSRF、`express-session` のストア、そして `federation-*` アダプターが差し込まれるフェデレーションログインのルート | 任意: API のみのデプロイメントにはブラウザセッションがない |
 | [`packages/device-grant`](packages/device-grant/) | `@o3co/auth-provider-device-grant` | RFC 8628 デバイス認可グラント — TV、CLI、IoT 向けのデバイスコードフロー | 独自のエンドポイントとストアを持つ任意のグラント |
 | [`packages/oauth-token-exchange`](packages/oauth-token-exchange/) | `@o3co/auth-provider-oauth-token-exchange` | RFC 8693 トークン交換 — on-behalf-of、委譲 (`act`)、scope と audience の縮小 | 任意のグラント |
+| [`packages/mfa`](packages/mfa/) | `@o3co/auth-provider-mfa` | 多要素認証: `mfa` セッション要件、`/session/mfa/*` のブラウザ API、TOTP・リカバリーコード・メールの各要素、要素のデータを封じる鍵リング、サブジェクトのロックとオペレーターによるリセット | 任意: MFA を使わないデプロイメントは何も入れない。session パッケージのログインの後段には core の `loginCompletion` スロットを通して届き、core だけに依存する |
 | [`packages/webauthn`](packages/webauthn/) | `@o3co/auth-provider-webauthn` | パスキーの登録とパスキー認証グラント | 任意。バージョンを厳密に固定した WebAuthn ライブラリを含む |
 | [`packages/dpop`](packages/dpop/) | `@o3co/auth-provider-dpop` | DPoP (RFC 9449) の送信者制約付きトークン | core のトークンバインディングスロットへのプラグイン。組み込んで有効化しない限り動かない |
 | [`packages/mtls`](packages/mtls/) | `@o3co/auth-provider-mtls` | mTLS (RFC 8705) の証明書に束縛されたトークン。X.509 のパス検証と失効確認を含む | dpop と同じ。加えて X.509 ライブラリと失効情報の取得処理を含む |
@@ -225,11 +227,12 @@ oauth-session.enabled = true
 # 32 bytes (256 bits), e.g. `openssl rand -hex 32`.
 session-store { secret = ${SESSION_STORE_SECRET} }
 
-# One section per federation. `type` names the adapter package and defaults
-# to the section's name; each adapter's README lists its settings.
+# One section per federation. `type` names the module that handles it and
+# is required, enabled or not; each adapter's README lists its settings.
 core.federations {
   google {
     enabled = false
+    type = "google"
     # clientId, clientSecret, callbackURL — required when enabled = true
   }
   # okta { enabled = false, type = "oidc" }   # any OpenID Connect IdP, by issuer
@@ -263,6 +266,7 @@ compose ファイル、secret としての鍵ファイル、それなしでは�
 
 ## 運用
 
+- [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md) — v0.16.0 からのアップグレード: それ以降の破壊的変更すべてと各々への対処、Store 実装者のチェックリスト。
 - [docs/operator-runbook.md](docs/operator-runbook.md) — 運用: デプロイ形態と起動拒否、liveness と readiness、各依存先で fail-closed がどう見えるか、アラート対象のログ・監査イベント、Redis のキーファミリーとサイジング、鍵のローテーション、アップグレードとロールバック。
 - [docs/release-runbook.md](docs/release-runbook.md) — リリースの切り方。[docs/release-policy.md](docs/release-policy.md) — リリースと廃止された設定キーのラベル付け。
 - [docs/adapter-surface.md](docs/adapter-surface.md) — コンポジションルートが埋められる全コンポーネントスロットと、何がスロットになり得るかを決める境界。

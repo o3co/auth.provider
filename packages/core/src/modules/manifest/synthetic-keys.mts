@@ -27,6 +27,8 @@ import type {
  * Read-only projection of the boot planner's `grants` collector, for route
  * factories that dispatch by `grant_type` at request time. The planner builds
  * it before the `provides` factories run and freezes the registry behind it.
+ * A grant whose factory answered `null` (switched off) is absent from both
+ * `get` and `entries`, exactly like a grant type no module contributes.
  */
 export interface GrantHandlerResolver {
 	readonly get: (grantType: string) => GrantHandler | undefined;
@@ -72,7 +74,13 @@ export type { FederationProvider };
  * the contribution kind of the same stem; `federationRedirectPolicies` is
  * typed in `@o3co/auth-provider-session`. `deploymentMode` is the
  * configuration's `core.deployment.mode` (`deployment/mode.mts`), typed with its
- * slot in `deployment/types.mts`.
+ * slot in `deployment/types.mts`; `tokenBindingSettings` is its
+ * `core.tokenBinding` (`resolveTokenBindingSettings`), typed with its slot in
+ * `middleware/tokenBinding.mts`; `federationSettings` is its
+ * `core.federations` (`boot/federation-settings.mts`), typed with its slot in
+ * `federations/settings.mts`; `outboundPolicy` is its `core.outbound`
+ * (`outboundPolicyOf`, `net/outbound-fetch.mts`), typed with its slot in
+ * `net/outbound-policy.mts`.
  *
  * Immutability rests on the `ReadonlySet<string>` type. `Object.freeze` does
  * not stop the built-in Set methods from mutating `[[SetData]]`, so a cast to
@@ -99,6 +107,18 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		// host that set it would be a second statement of the replica count,
 		// beside the one the replica-safety guard reads.
 		"deploymentMode",
+		// Filled the same way, from `core.tokenBinding`: a module or host that
+		// set it would be a second source of the token-binding settings, beside
+		// the one boot's dispatch policy reads.
+		"tokenBindingSettings",
+		// Filled the same way, from `core.federations`: a module or host that
+		// set it would be a second statement of the federations, beside the
+		// one boot dispatches by.
+		"federationSettings",
+		// Filled the same way, from `core.outbound`: a module or host that set
+		// it would be a second statement of the outbound policy, beside the one
+		// a fetch built from the configuration reads.
+		"outboundPolicy",
 	]),
 );
 

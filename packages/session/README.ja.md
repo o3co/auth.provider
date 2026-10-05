@@ -1,23 +1,23 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-10-02
+最終更新: 2026-10-05
 
-[auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージがプロバイダーと並べて contribute するリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
+[auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージの type がプロバイダーと並べて作るリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
 ## 責務と役割
 
 **役割。** 認証のブラウザ側の半分。このパッケージが使うポート（`UserRepository`、`UserSessionStore`、`FederationTokenStore`、`SessionFederationIndex`、フェデレーションアダプター契約）は core が持ち、core はルートを一つも実装しない。このパッケージはそれらのポートをブラウザ向けに駆動するドライバーである。責務は三つ:
 
 1. **`/session` ルート** — `sessionModule`。パスワードログイン、ログアウト、CSRF トークンのルート、フェデレーションの開始ルートとコールバックルート。パスワード検証または上流 IdP の応答を `UserSession` レコードと認証済みの express session に変え — どちらも一つの関数 [`establishSession`](#セッションの確立) を通して。この関数は core の [セッションアドミッション](../core/src/session-admission/README.md) が確立したものを書き、セッション requirement の完了（MFA パッケージのもの）もこれを呼ぶ — ログアウトでそれを取り消す。パスワードログインは何かを書く前に登録済みのセッション requirement に問い合わせ、requirement はそれを [中断する](#requirement-がログインを中断するとき) ことがある。
-2. **フェデレーションアダプターのツールキット** — アダプターパッケージが、自分が差し込まれるルーターから import するもの: `createFederationRedirectPolicy` とその元になる許可リストの規則、`extractFederationSection`。アダプターが上流への要求を組み立てるヘルパー — `codeChallenge`、`callbackUrlForExchange`、`FederationClientSecret` / `resolveClientSecret` — は core のもの。
+2. **フェデレーションアダプターのツールキット** — アダプターパッケージが、自分が差し込まれるルーターから import するもの: `createFederationRedirectPolicy` とその元になる許可リストの規則。アダプターが上流への要求を組み立てるヘルパー — `codeChallenge`、`callbackUrlForExchange`、`FederationClientSecret` / `resolveClientSecret` — は core のもの。
 3. **ブラウザセッションストア** — `sessionStoreModule` / `sessionStoreModuleFor` と `createSessionStoreFactory` / `registerBuiltinSessionStores`。express-session ミドルウェア、その cookie、そのストア（memory、または `connect-redis` 経由の Redis）。
 
 **持つもの:**
 
-- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログインのレート制限ガードの配線とその予算（`session.rateLimit.login`。session モジュールがこれを `login` の予算として寄与する）。リダイレクト許可リスト（`session.redirectAllowlist`、`core.federations.<name>.redirectAllowlist`）。
+- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログイン自身の試行上限（`session.rateLimit.login`）。core の試行ガードが `attemptCounter` スロットの上で数え、レートリミッターの予算は使わない。リダイレクト許可リスト（`session.redirectAllowlist`、`core.federations.<name>.redirectAllowlist`）。
 - モジュールが、契約が core にあるスロットを通して他のパッケージに提供するもの: `csrfGuard`、`loginEntry`、`loginCompletion`、そして `sessionCookiePolicy` と `csrfTokenSigner` — [後述](#モジュールが他のパッケージに提供するもの)。
 - フェデレーションの駆動方法: `state`・PKCE・`nonce`、`form_post` トランザクションとその cookie、クレームの優先順位、ログインが記録する `amr`、コールバックがストアに書き込む内容。
-- `federationRedirectPolicies` という contribution 種別と、それが core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
+- core の `ContributesMap` に宣言する `federationRedirectPolicies` キー（フェデレーション type の `redirectPolicy` が返すリダイレクトポリシーの型を与える。モジュールによるその contribution や override は起動が拒否する）と、core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
 - express-session ミドルウェア、その cookie、そのストア（`session-store.*`）。
 - 二つのセクション `session` と `session-store`、およびそのデフォルト値を置く [`config/reference.conf`](config/reference.conf) — [設定](#設定)。
 
@@ -34,7 +34,7 @@
 
 **三つが同居する理由。** 他の二つはどちらもルートのために存在する。
 
-- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する contribution 種別であり、`extractFederationSection` はルーターがコールバック URL を読むのと同じ設定の形を読む。どちらもルーターのものであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。要求を組み立てる純粋関数のヘルパーはここにはない: ルーターはそのどれも使わないので、それらを使うようアダプターに指示する契約と並んで core にある。
+- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する契約である — その型が、フェデレーション type の `redirectPolicy` が返すものになる。これはルーターのものであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。フェデレーションのエントリはここでは読まない: `core.federations` は core が読み、各エントリについて読んだものを `federationSettings` スロットでモジュールに渡す。ルーターのコールバック URL もそこから取る。要求を組み立てる純粋関数のヘルパーはここにはない: ルーターはそのどれも使わないので、それらを使うようアダプターに指示する契約と並んで core にある。
 - ストア: `req.session` そのものであり、それを書くのはここのルートである。フェデレーションルーターは `form_post` トランザクションも同じストアに置く。`sessionModule` とは別のモジュールになっているのは、他のパッケージがこれらのルートなしに `req.session` を読むから — `oauth` の `/authorize`・同意・ログアウト、`device-grant` の検証ページ、`federation-grants` のブラウザ向けルート — であり、独自のログインを持つデプロイはストアだけをインストールする。
 
 **ソースの配置。** [`src/routes/`](src/routes/) は二つのルーター。[`src/establish-session.mts`](src/establish-session.mts) は二つのルーターが共有するログインの末尾。[`src/federations/`](src/federations/) はツールキットとルーターのフェデレーション部品（クレームの優先順位、同意済みスコープ、トランザクションストア、リダイレクトポリシー）。[`src/modules/`](src/modules/) と [`src/store/`](src/store/) はブラウザセッションストア。[`src/internal/`](src/internal/) は cookie の読み取り、定数時間の比較、`User` から読むクレーム。[`src/csrf.mts`](src/csrf.mts) は CSRF の規則。[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) はログインとフェデレーションのルートが共有する許可リストの規則。[`src/login-entry.mts`](src/login-entry.mts)、[`src/login-completion.mts`](src/login-completion.mts)、[`src/session-cookie-policy.mts`](src/session-cookie-policy.mts)、[`src/csrf-token-signer.mts`](src/csrf-token-signer.mts) は、CSRF ガードのほかにモジュールが他のパッケージに提供するもの。各ファイルが何をするかはそのファイルのヘッダーコメントにある。
@@ -51,22 +51,22 @@ peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-sess
 optional peer dependencies: Redis セッションストアのライブラリである `redis@^6.2.1` と `connect-redis@^10.0.0`。
 このパッケージ自身の dependency は、セクションのスキーマを書く `zod` だけである。
 
-core が peer なのは、このパッケージが core を拡張する（`federationRedirectPolicies` の contribution 種別とそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。`session-store.storage.type = "memory"` のデプロイは Redis のライブラリをどちらもインストールしない。Redis ストアを組み立てるまで何もそれらを import しない。`"redis"`（デフォルト）なら両方をインストールする: どちらかが無ければ、無いパッケージとインストールコマンドを示して起動に失敗する。
+core が peer なのは、このパッケージが core を拡張する（フェデレーションのリダイレクトポリシーの型を与える `federationRedirectPolicies` キーとそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。`session-store.storage.type = "memory"` のデプロイは Redis のライブラリをどちらもインストールしない。Redis ストアを組み立てるまで何もそれらを import しない。`"redis"`（デフォルト）なら両方をインストールする: どちらかが無ければ、無いパッケージとインストールコマンドを示して起動に失敗する。
 
 ## 組み立て
 
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
-import { googleFederationModule } from "@o3co/auth-provider-federation-google";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 
 const handle = await createApp({
   modules: [
     sessionStoreModuleFor(config), // 先頭に置く。後に続くすべてのモジュールが req.session を読めるように。csrfTokenSigner も提供する
     sessionModule,                 // factory ではなく const Module
-    googleFederationModule,        // federations.google と federationRedirectPolicies.google を contribute
+    googleFederationTypeModule(),  // type が "google" の core.federations エントリをすべて扱う
     // ... userRepository、userSessionStore、federationTokenStore、
-    //     sessionFederationIndex、googleFederationConfig を提供するモジュール
+    //     sessionFederationIndex を提供するモジュール
   ],
   bootstrapComponents: { config, pathResolver },
 });
@@ -90,7 +90,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 
 ## 設定
 
-モジュールはそれぞれ自分のセクションを読む。デフォルト値と環境変数はパッケージの [`config/reference.conf`](config/reference.conf) にあり、モジュールがそれを宣言するので composition root が重ねる。
+モジュールはそれぞれ自分のセクションを読み、設定のほかの部分は読まない: `sessionModule` が `core.federations` について必要とするものは core の `federationSettings` スロットから来る。デフォルト値と環境変数はパッケージの [`config/reference.conf`](config/reference.conf) にあり、モジュールがそれを宣言するので composition root が重ねる。
 
 | キー | 環境変数 | デフォルト | |
 | --- | --- | --- | --- |
@@ -105,9 +105,9 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | `session.redirectAllowlist` | | `[]` | [リダイレクト許可リスト](#リダイレクト許可リスト) |
 | `session.csrf.trustedOrigins`、`.ttlSeconds` | `SESSION_CSRF_TTL_SECONDS`（`ttlSeconds`） | `[]`、`7200` | [CSRF](#状態変更ルートの-csrf-対策) |
 | `session.loginPage.url` | `SESSION_LOGIN_PAGE_URL` | `/login` | 必須。`loginEntry` スロットが示すページ: パスか絶対 URL で、自身の `redirect_to` を持たない |
-| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | 必須。`POST /session/login` の予算。モジュールが `login` として寄与する |
+| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | 必須。`POST /session/login` 自身の試行上限: `windowMs` は 1 日（86400000）以下のミリ秒の整数で、秒に切り上げて読む。`limit` は正の整数 |
 
-各セクションは厳格: 宣言されていないキーは、キーを名指しして起動を拒否する。これらのキーの移動元のパス — `session` の下の cookie とそのストアの各キー、`endpoints.login.url`、`rateLimit.login` — は、新しいパスとその環境変数を名指しして起動を拒否する（`config-path-relocated`）。一緒に改名された環境変数 — `SESSION_<KEY>` は `SESSION_STORE_<KEY>` へ、`ENDPOINTS_LOGIN_URL` は `SESSION_LOGIN_PAGE_URL` へ — は、旧名だけが設定されているか新名と違う値で設定されていると起動を拒否し（`environment-variable-renamed`）、同じ値ならどちらも起動する。
+各セクションはどの階層でも厳格: 宣言されていないキーは、キーを名指しして起動を拒否する。`session-store.storage` が持つのは `type` と `redis` ブロックだけなので、ほかのストレージ種別のブロックも拒否される。これらのキーの移動元のパス — `session` の下の cookie とそのストアの各キー、`endpoints.login.url`、`rateLimit.login` — は、新しいパスとその環境変数を名指しして起動を拒否する（`config-path-relocated`）。一緒に改名された環境変数 — `SESSION_<KEY>` は `SESSION_STORE_<KEY>` へ、`ENDPOINTS_LOGIN_URL` は `SESSION_LOGIN_PAGE_URL` へ — は、旧名だけが設定されているか新名と違う値で設定されていると起動を拒否し（`environment-variable-renamed`）、同じ値ならどちらも起動する。
 
 ## ブラウザセッションストア
 
@@ -141,22 +141,22 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | GET | `/session/oauth/federation/:name/callback` | `query` フェデレーションのコールバック。`form_post` フェデレーションには `405`（`Allow: POST`） |
 | POST | `/session/oauth/federation/:name/callback` | `form_post` フェデレーションのコールバック。`query` フェデレーションには `405`（`Allow: GET`） |
 
-`:name` はフェデレーションの名前。どのモジュールも contribute していない名前は `404`。
+`:name` はフェデレーションの名前。有効な `core.federations` のエントリがどれも登録しない名前は `404`。
 
 マニフェスト（[`src/module.mts`](src/module.mts)）:
 
-- `requires`: `config`、`userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`、`csrfTokenSigner`（CSRF トークンを署名・検査するもの。セッションストアのモジュールが提供する）、`sessionCookiePolicy`（セッション cookie の名前・属性・寿命。これもセッションストアのモジュールが提供する）、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは per-federation モジュールの `federations.<name>` と `federationRedirectPolicies.<name>` の contribution から boot planner が組み立てる。さらに `sessionRequirementResolver` — パスワードログインは何かを書く前に core の [セッションアドミッション](../core/src/session-admission/README.md) を通して登録済みの requirement に問い合わせ、アカウントリンクのルートはそれを通してセッションを読むので、`sessionModule` を入れる構成は `core.sessionRequirements.expected` を宣言する。手で組み立てるルーター（`routes/Session.mts`、`routes/Federation.mts`）は resolver を必須のオプション `requirements` として受け取り、無ければ例外を投げる。テストは core の `resolverForTests` で作る。そして `deploymentMode` — core が `core.deployment.mode` から埋める。ログインのスロットルのプロセス内フォールバックは `multi` で拒否されるので、モードは未設定として読まれるのではなく必須になっている。手で組み立てるセッションルーターは、署名器も必須のオプション `csrfTokenSigner` として受け取って無ければ例外を投げ、モードを必須のオプション `deploymentMode` として受け取って、三つの値のどれでもない値（無い場合も含む）は構築時に TypeError になる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
-- `optional`: `logger`、`rateLimiter`、`auditSink`、`subjectSessionIndex`、`subjectRevocation`（リンクのルートのアドミッションが読む境界）。`auditSink` を配線しないなら `core.declaredAbsent = ["auditSink"]`、`subjectSessionIndex` と `subjectRevocation` を配線しないなら `oauth.revocation.subject = "unsupported"` で宣言しなければ起動は拒否される。
+- `requires`: `userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`、`csrfTokenSigner`（CSRF トークンを署名・検査するもの。セッションストアのモジュールが提供する）、core の `federationSettings`（core がどの構成でも埋める `core.federations` の見え方。有効な各エントリのコールバック URL と、インストールされたフェデレーションの上流 `amr` が数えられるかどうか。モジュールは自分のセクション以外の設定を読まない）、`sessionCookiePolicy`（セッション cookie の名前・属性・寿命。これもセッションストアのモジュールが提供する）、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは、core が type で振り分けるフェデレーションから組み立てる — 有効な `core.federations` のエントリごとに、その `type` を登録するモジュールが作るプロバイダーとリダイレクトポリシー。さらに `sessionRequirementResolver` — パスワードログインは何かを書く前に core の [セッションアドミッション](../core/src/session-admission/README.md) を通して登録済みの requirement に問い合わせ、アカウントリンクのルートはそれを通してセッションを読むので、`sessionModule` を入れる構成は `core.sessionRequirements.expected` を宣言する。手で組み立てるルーター（`routes/Session.mts`、`routes/Federation.mts`）は resolver を必須のオプション `requirements` として受け取り、無ければ例外を投げる。テストは core の `resolverForTests` で作る。そして `deploymentMode` — core が `core.deployment.mode` から埋める。ログインの試行をプロセスごとに数えることは `multi` で拒否されるので、モードは未設定として読まれるのではなく必須になっている。手で組み立てるセッションルーターは、署名器も必須のオプション `csrfTokenSigner` として受け取って無ければ例外を投げ、モードを必須のオプション `deploymentMode` として受け取って、三つの値のどれでもない値（無い場合も含む）は構築時に TypeError になる。手で組み立てるフェデレーションルーターは、core のフェデレーションの見え方を必須のオプション `federationSettings` として、トランザクション cookie の名前を必須の `federationTransactionCookieName` として（モジュールは `sessionCookiePolicy` スロットの cookie の名前から付ける）、リンクを始めてよい場所を `linkTrustedOrigins` として（モジュールは `session.csrf.trustedOrigins` を渡す。無ければこのサイト自身のページだけ）受け取り、前の二つが無ければ例外を投げる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
+- `optional`: `logger`、`attemptCounter`、`auditSink`、`subjectSessionIndex`、`subjectRevocation`（リンクのルートのアドミッションが読む境界）。`auditSink` を配線しないなら `core.declaredAbsent = ["auditSink"]`、`subjectSessionIndex` と `subjectRevocation` を配線しないなら `oauth.revocation.subject = "unsupported"` で宣言しなければ起動は拒否される。
 
 ### パスワードログイン
 
 `POST /session/login` は `username` と `password` を受け取る（JSON またはフォーム）。
 
 - どちらかが欠けていれば `400 invalid_request`。`UserRepository.authenticate` が `null` を返せば `401 invalid_credentials`。ログインに必要なストアが答えられなければ `503 temporarily_unavailable` — `UserRepository` が例外を投げた、`UserSession` の書き込みが例外を投げた、または express session を再生成（そのストアが古いレコードを破棄できなかった）・保存できなかった場合。いずれも error レベルで 1 行、`login_store_unavailable` として `store`（`user_repository`、`user_session`、`cookie_session`）、`step`（`authenticate`、`create`、`regenerate`、`save`）、エラーの射影とともにログに出る。ユーザー名は出さない。成功時は再生成したセッションを答える前に保存するので、保存できないストアは、次のリクエストが見つけられないセッションへの `200` ではなく `503` になる。再生成または保存に失敗したときは `UserSession` とその subject index のエントリーをベストエフォートでロールバックし、失敗したロールバックの各ステップは `login_cleanup_failed` の warn 1 行になる。この手順は [セッションの確立](#セッションの確立) にある。
-- Store がユーザーを検証したら、何かを書く前に、ルートは core の [セッションアドミッション](../core/src/session-admission/README.md)（`admitPrimary`）に、core がログインから組み立てる primary（`passwordPrimary`: subject、`User`、レコードが持つクレーム、`authTime`、許可リストを通った `redirect_to`、クライアントのアドレスとユーザーエージェント — `amr` と `authentication` は core のもので、ルートのものではない）について問い合わせる。requirement が一つも登録されていなければ、どのログインにも `establish` が返る。requirement の障害は `503 temporarily_unavailable`（"session requirement unavailable"。core の `describeAdmissionOutage`）で何も書かれず、アドミッションが `session_admission_unavailable`（`store` は requirement の名前、`phase: "establishment"`）として一度だけログに出す。requirement による中断は [下](#requirement-がログインを中断するとき) にある。core が primary にコピーできない値（関数）を持つ `User` は、何かを書く前にルートのエラー（`500`）として拒否される。
+- Store がユーザーを検証したら、何かを書く前に、ルートは core の [セッションアドミッション](../core/src/session-admission/README.md)（`admitPrimary`）に、core がログインから組み立てる primary（`passwordPrimary`: subject、`User` のスナップショット、レコードが持つクレーム、`authTime`、許可リストを通った `redirect_to`、クライアントのアドレスとユーザーエージェント — `amr` と `authentication` は core のもので、ルートのものではない）について問い合わせる。requirement が一つも登録されていなければ、どのログインにも `establish` が返る。requirement の障害は `503 temporarily_unavailable`（"session requirement unavailable"。core の `describeAdmissionOutage`）で何も書かれず、アドミッションが `session_admission_unavailable`（`store` は requirement の名前、`phase: "establishment"`）として一度だけログに出す。requirement による中断は [下](#requirement-がログインを中断するとき) にある。ルートは core の `readUserSnapshot` で `User` を一度だけ読み、subject とクレームをそのスナップショットから取る。スナップショットが拒否する `User`（宣言されたフィールドがプレーンなデータでない値 — `Date` の証跡や関数 — を持つもの）は、何かを書く前にルートのエラー（`500`）として拒否される。
 - 成功すると — すべての requirement が `establish` と答えたとき — `UserSession`（`amr: ["pwd"]`、`authentication` の primary は `pwd`、寿命 `session-store.maxAge`）を作り、配線されていれば `subjectSessionIndex` に記録し、express session を再生成し、新しい CSRF cookie と共に `200` を返す。
 - `redirect_to` を送るなら `session.redirectAllowlist` に載っていなければならず（[リダイレクト許可リスト](#リダイレクト許可リスト) を参照）、`req.session.redirectTo` に保存される。このパッケージの中にそこへリダイレクトするものは無い。
-- ブルートフォース対策のガードは共有の `rateLimiter`（接頭辞 `login`、クライアント IP ごと）の上で `session.rateLimit.login` の窓と上限で動き — session モジュールがこれを `login` の予算として寄与し、リミッター自身の `limits.login` がそれを上書きする — 拒否すれば `429`、リミッター自体が失敗すればリミッター自身の `failMode` に従う。`rateLimiter` が配線されていなければルートはプロセス内のリミッターにフォールバックする: `core.deployment.mode = "multi"` では起動が拒否され、未設定なら `login_rate_limiter_not_shared` の警告がログに出て、`"single"` では何も言わない。モードはモジュールが requires する core の `deploymentMode` スロットであり、ルーターは `deployment` を自分では読まない。
+- ログインの試行上限は資格情報を読む前に効く: リクエストごとに 1 回、`login:ip:<クライアント IP>` をキーに、core の試行ガード（`createAttemptGuard`）が `attemptCounter` スロットのカウンターの上で `session.rateLimit.login` に対して数える。レートリミッターは関わらない: リミッターの `limits`・`defaultLimit`・`failMode` はこれを緩めも置き換えもせず、モジュールは `login` 接頭辞を予算なしで確保する。拒否した試行は `Retry-After` と `Cache-Control: no-store` を付けた `429 rate_limited` で、`RateLimit-*` ヘッダーは付けない（推測する側に残りの回数を教えることになるため）。カウンターが例外を投げる、2 秒以内に答えない、core が読めない値を返す場合は、どのリミッターの宣言にかかわらず `503 service_unavailable` で、`attempt_counter_unavailable` としてログに出し、`rate_limit.unavailable`（`tag: "login"`）として監査する。`attemptCounter` が配線されていなければガードはプロセスごとに数える: `core.deployment.mode = "multi"` では起動が拒否され、未設定なら `attempt_counter_not_shared` の警告がログに出て、`"single"` では何も言わない。モードはモジュールが requires する core の `deploymentMode` スロットであり、ルーターは `deployment` を自分では読まない。拒否した試行は監査しない。
 
 #### requirement がログインを中断するとき
 
@@ -172,7 +172,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 
 ### セッションの確立
 
-ログインの末尾 — ユーザーを検証してからセッションを保存するまで — は一つの関数 `establishSession`（[`src/establish-session.mts`](src/establish-session.mts)）で、`POST /session/login` とフェデレーションのコールバックの両方がこれを呼び、requirement の完了（core の `resumePrimary` のあとの MFA パッケージのもの）が同じようにログインを終えられるよう、パッケージは呼び出し側に必要な型とともにこれを export する。core のセッションアドミッションが組み立てた `Establishment` — パスワードログインでは `admitPrimary` の、フェデレーションのコールバックでは `establishWithoutAsking` の、完了では `resumePrimary` のもの — を受け取り、その primary だけから書く: subject、`User`、クレームのエンベロープ、`authTime`、core が組み立てた `amr` / `authentication`、core が `User` から導いた `enrollmentFacts`（MFA の登録の証跡と、そのアドレスが何か — 無い、プロバイダーが読めるアドレス、読めないもの。アドレスそのものではない）、そして `redirectTo`。呼び出し側がその横に渡すものは何も書かない。core が組み立てた `Establishment` でないもの — それに似せたオブジェクト、そのコピー — は何かを書く前に `RangeError` になる。どちらの経路でも core は `User` を `structuredClone` で primary にコピーするので、Store の `toJSON` は適用されず、コピーできない値（関数）はログインを何も書かずに拒否する（`500`）: `UserRepository` はプレーンなデータを返すこと。次を順に行う: `UserSession` レコードの作成（新しい `sid`、有効期限は `authTime` から `session-store.maxAge` 後）。配線されていれば `subjectSessionIndex` のエントリー（ベストエフォート: 失敗は報告され、ログインは進む）。再生成の前に呼び出し側が渡すステップ。express session の再生成（session fixation 対策）。再生成の後に呼び出し側が渡すステップ。再生成されたセッションへの `isAuthenticated`、`user`、`sid`、primary の `redirectTo`。そしてその保存。答えは `sid` を伴う `established` か、ストアとステップを名指しする `unavailable` で、後者を呼び出し側は `503 temporarily_unavailable` として答える。
+ログインの末尾 — ユーザーを検証してからセッションを保存するまで — は一つの関数 `establishSession`（[`src/establish-session.mts`](src/establish-session.mts)）で、`POST /session/login` とフェデレーションのコールバックの両方がこれを呼び、requirement の完了（core の `resumePrimary` のあとの MFA パッケージのもの）が同じようにログインを終えられるよう、パッケージは呼び出し側に必要な型とともにこれを export する。core のセッションアドミッションが組み立てた `Establishment` — パスワードログインでは `admitPrimary` の、フェデレーションのコールバックでは `establishWithoutAsking` の、完了では `resumePrimary` のもの — を受け取り、その primary だけから書く: subject、`User`、クレームのエンベロープ、`authTime`、core が組み立てた `amr` / `authentication`、core が `User` から導いた `enrollmentFacts`（MFA の登録の証跡と、そのアドレスが何か — 無い、プロバイダーが読めるアドレス、読めないもの。アドレスそのものではない）、そして `redirectTo`。呼び出し側がその横に渡すものは何も書かない。core が組み立てた `Establishment` でないもの — それに似せたオブジェクト、そのコピー — は何かを書く前に `RangeError` になる。どちらの経路でも、ログインのルートは core の `readUserSnapshot` で `User` を一度だけプレーンなスナップショットに読む — `User` が宣言するフィールドだけを、オブジェクトがどう保持していても名前で一度ずつ読むので、getter を持つクラスのインスタンスや ORM エンティティでもログインできる — そして `User` ではなくそのスナップショットを組み立て関数（`passwordPrimary`、`establishWithoutAsking`）に渡す。subject、クレーム、ルートのログ行もそこから読む。`req.session.user` はそのスナップショットを持つ: 宣言されたフィールドだけで、Store が答えたほかのものは持たず、Store の `toJSON` は適用されない。`id` が空でない文字列でない `User`、または宣言されたフィールドがプレーンなデータでない値を持つ `User` はスナップショットが拒否し、ログインは何も書かずに `500` を答える。次を順に行う: `UserSession` レコードの作成（新しい `sid`、有効期限は `authTime` から `session-store.maxAge` 後）。配線されていれば `subjectSessionIndex` のエントリー（ベストエフォート: 失敗は報告され、ログインは進む）。再生成の前に呼び出し側が渡すステップ。express session の再生成（session fixation 対策）。再生成の後に呼び出し側が渡すステップ。再生成されたセッションへの `isAuthenticated`、`user`、`sid`、primary の `redirectTo`。そしてその保存。答えは `sid` を伴う `established` か、ストアとステップを名指しする `unavailable` で、後者を呼び出し側は `503 temporarily_unavailable` として答える。
 
 成り立つこと:
 
@@ -227,7 +227,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | フェデレーションのコールバック | `["fed"]` — `fed` は「フェデレーション経由」を表すデプロイ定義のマーカーで、core の `FEDERATED_AMR`。このパッケージも re-export する。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。`trustUpstreamAmr = true` のフェデレーションでは、その横に上流 IdP の `amr` | primary は `fed`、フェデレーションの名前、そして — フェデレーションが IdP を信頼しない限り — IdP の `amr` を `upstreamAmr` として |
 | アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない | 変わらない |
 
-**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`core.federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのセクションの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationTrustsUpstreamAmr` で読む — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは合成を拒否し（`RangeError`）、環境変数が渡す綴りはスキーマが変換する。各フェデレーションのスイッチはインストールされた名前ごとに保持され、ログインはそのコールバックが来た名前のスイッチを取る。`authentication.federation` が名指すのもその名前である。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
+**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`core.federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのエントリの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationSettings` スロットから読む。その `trustsUpstreamAmr` は core の `federationTrustsUpstreamAmr` — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは起動を拒否し、環境変数が渡す綴りはスキーマが変換する。各フェデレーションのスイッチはインストールされた名前ごとに保持され、ログインはそのコールバックが来た名前のスイッチを取る。`authentication.federation` が名指すのもその名前である。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
 
 **信頼の取り消し。** `trustUpstreamAmr` を `true` から `false` にしても、既にそのもとで記録されたセッションには届かない: その `amr` は IdP の値を持ち続ける — 書かれたときには保証されていた — ので、そこから発行されたトークンはそれを運び続け、そこから発行されたリフレッシュトークンはファミリーが終わるまで（ログインから `oauth.refreshToken.expiresIn`、既定 1 日）それを引き継ぐ。すぐに取り消すには、そのフェデレーション経由でサインインした subject について core の `revokeAllForSubject` を呼ぶ: そのセッション、そこから発行されたリフレッシュファミリーとコード、そしてこのプロバイダー自身が検証するすべてのアクセストークン（イントロスペクション、`/oauth/userinfo`、フェデレーショントークンのルート、トークン交換、リフレッシュグラント）を終わらせ、利用者は新しい設定のもとで再びログインする。リソースサーバーがオフラインで検証するアクセストークンは `exp` まで生きる。`revokeAllForSubject` には `subjectRevocation` と `subjectSessionIndex` の配線が要り、無ければ自身を `incomplete` と報告する。手順は [運用ランブック](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust) にある。
 
@@ -240,7 +240,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 アカウントが二つ目の ID を得るのは、明示的で認証済みの操作によってだけ:
 
 1. ブラウザが既にセッションを持っている（`isAuthenticated`、生きている `UserSession`）。
-2. `?link=1` 付きでフェデレーションを開始する: `GET /session/oauth/federation/<name>?link=1` を **デプロイ自身のページ上のリンクまたはフォームから**。開始は GET でセッション cookie は `SameSite=Lax` なので、検査が無ければどのページでもサインイン中のユーザーをそこへ送れ、IdP 側のログイン CSRF と組み合わせれば攻撃者の ID が被害者のアカウントにリンクされてしまう。そのため開始には積極的な証拠が要る: `Sec-Fetch-Site: same-origin`、または `none`（入力された URL やブックマーク）。`cross-site` は拒否。`same-site` はそれだけでは足りない — 登録可能ドメイン上のすべてのホスト、ユーザーが管理する `blog.example.com` も含む — ので、それと `Sec-Fetch-Site` の無いリクエスト（古いブラウザ）は `Referer` にこのオリジンか `session.csrf.trustedOrigins` 上のオリジンを示さなければならない。`Referer` が無ければ拒否する。遷移元のページが自分でリファラーポリシーを選ぶからである。したがって兄弟ホスト上のアカウントページは `session.csrf.trustedOrigins` に載せ、`Referrer-Policy: no-referrer` を送ってはならない。拒否は `403 link_requires_trusted_origin`。次に、Store のリポジトリが `linkFederatedIdentity` を実装していなければ `400 link_unsupported` — 構成の不備であり、セッションを読む前に返すので、セッションストアの状態に関わらず同じ応答になる。開始は続いて core の [セッションアドミッション](../core/src/session-admission/README.md) を通して `session.link`（グレード `credential_change`）としてセッションを読む — リンクした ID はアカウントへの新しい入口なので、登録された requirement の「最近の認証」規則は、ステップアップに戻る先のページがあるここで決まる: 認証されていない、`sid` か `user.id` の無い cookie、`UserSession` が消えた・`expiresAt` を過ぎた・別の subject のもの・（`subjectRevocation` が配線されていれば）subject 失効の境界に覆われたセッション、そして requirement の `reauthenticate` と `unmet` は `401 login_required`。requirement のステップアップは `403 step_up_required` で、`error_description`、`requirement` と requirement が登録した `page`（`{ url, params }`）を運ぶ — [開始がステップアップを返すとき](#開始がステップアップを返すとき) を参照。セッションストア・境界・requirement の障害は `503 temporarily_unavailable` で、何が答えられなかったかで説明し（core の `describeAdmissionOutage`: "session store unavailable"、"revocation store unavailable"、"session requirement unavailable"）、アドミッションが 1 行ログに出す（`session_admission_unavailable`、`action: "session.link"`）。いずれもブラウザをどこかへ送る前に返る。
+2. `?link=1` 付きでフェデレーションを開始する: `GET /session/oauth/federation/<name>?link=1` を **デプロイ自身のページ上のリンクまたはフォームから**。開始は GET でセッション cookie は `SameSite=Lax` なので、検査が無ければどのページでもサインイン中のユーザーをそこへ送れ、IdP 側のログイン CSRF と組み合わせれば攻撃者の ID が被害者のアカウントにリンクされてしまう。そのため開始には積極的な証拠が要る: `Sec-Fetch-Site: same-origin`、または `none`（入力された URL やブックマーク）。`cross-site` は拒否。`same-site` はそれだけでは足りない — 登録可能ドメイン上のすべてのホスト、ユーザーが管理する `blog.example.com` も含む — ので、それと `Sec-Fetch-Site` の無いリクエスト（古いブラウザ）は `Referer` にこのオリジンか `session.csrf.trustedOrigins` 上のオリジンを示さなければならない。`Referer` が無ければ拒否する。遷移元のページが自分でリファラーポリシーを選ぶからである。したがって兄弟ホスト上のアカウントページは `session.csrf.trustedOrigins` に載せ、`Referrer-Policy: no-referrer` を送ってはならない。拒否は `403 link_requires_trusted_origin`。次に、Store のリポジトリが `linkFederatedIdentity` を実装していなければ `400 link_unsupported` — 構成の不備であり、セッションを読む前に返すので、セッションストアの状態に関わらず同じ応答になる。開始は続いて core の [セッションアドミッション](../core/src/session-admission/README.md) を通して `session.link`（グレード `credential_change`）としてセッションを読む — リンクした ID はアカウントへの新しい入口なので、登録された requirement の「最近の認証」規則は、ステップアップに戻る先のページがあるここで決まる: 認証されていない、`sid` か `user.id` の無い cookie、`UserSession` が消えた・`expiresAt` を過ぎた・別の subject のもの・（`subjectRevocation` が配線されていれば）subject 失効の境界に覆われたセッション、そして requirement の `reauthenticate` と `unmet` は `401 login_required`。requirement のステップアップは `403 step_up_required` で、`error_description`、`requirement` と `page`（requirement が登録したステップアップページを 1 つの絶対 URL 文字列で）を運ぶ — [開始がステップアップを返すとき](#開始がステップアップを返すとき) を参照。セッションストア・境界・requirement の障害は `503 temporarily_unavailable` で、何が答えられなかったかで説明し（core の `describeAdmissionOutage`: "session store unavailable"、"revocation store unavailable"、"session requirement unavailable"）、アドミッションが 1 行ログに出す（`session_admission_unavailable`、`action: "session.link"`）。いずれもブラウザをどこかへ送る前に返る。
 3. コールバックでは、`state`・PKCE・`nonce` をログインとまったく同じく検査したあと、ID を解決する:
    - **誰でもない** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`。`ok` ならリンクされ、Store の `refused` は `403 link_refused`、`conflict` は `409 identity_conflict`。Store が `description` を返せば、RFC 6749 の文字の範囲で（範囲外の文字は `?` として）それを説明に載せる。
    - **別のアカウント** → `409 identity_conflict`。Store には問い合わせない。リンクでアカウントがマージされることはない。
@@ -289,16 +289,15 @@ if (res.type === "opaqueredirect") {
 ### コールバックがプロファイルで行うこと
 
 1. **アダプターは `callbackParams` を見る** — コールバックの文字列パラメーターから、ルーターが既に束縛した `code` と `state` を除いたもの。ユーザーエージェント経由で中継され署名されていない。アダプターはその中の RFC 9207 `iss` を core の `callbackUrlForExchange` 経由で渡す。
-2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`sub` の無いプロファイルは `400 invalid_profile`。警告 `federation_callback_exchange_failed`（その行にはプロバイダーが束縛される）が運ぶのは core の `loggableError(err)` であり、エラーそのものではない: OAuth ライブラリは拒否したトークン応答を、アクセストークンとリフレッシュトークンを含めてエラーの cause の連鎖に載せるので、エラー全体をシリアライズするロガーはそれを書き出してしまう。これらのルートがログに書く他の失敗 — ストア、リポジトリ、express-session のもの — も同じように射影する（Redis ストアのエラーは拒否されたコマンドの引数を運ぶ。`allow-plaintext` ならトークンレコードである）。
+2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`expiresIn` か `expiresAt` を読むと例外を投げる応答、および `expiresAt` が無し・`null`・時刻を持つ `Date` のいずれでもない応答も同じである。`sub` の無いプロファイルは `400 invalid_profile`。警告 `federation_callback_exchange_failed`（その行にはプロバイダーが束縛される）が運ぶのは core の `loggableError(err)` であり、エラーそのものではない: OAuth ライブラリは拒否したトークン応答を、アクセストークンとリフレッシュトークンを含めてエラーの cause の連鎖に載せるので、エラー全体をシリアライズするロガーはそれを書き出してしまう。これらのルートがログに書く他の失敗 — ストア、リポジトリ、express-session のもの — も同じように射影する（Redis ストアのエラーは拒否されたコマンドの引数を運ぶ。`allow-plaintext` ならトークンレコードである）。
 3. **ID は Store が解決する。** `<name>:<sub>` を `UserRepository.authenticateByToken` に渡し、例外なら `503 temporarily_unavailable`、`null` なら `401 unknown_user`（開始でリンクを求めていない限り）。
 4. **クレーム** はローカルの `User` のものに、`mapClaims` の結果を [クレームの優先順位](#クレームの優先順位-ローカルが勝ちfederated-は名前空間に隔離される) に従って合わせたもの。`amr` は `fed` — 信頼するフェデレーションではその横に `profile.amr`、そうでなければ `profile.amr` は `authentication.upstreamAmr` に保持される（[上](#セッションが認証について記録するもの)）。
 5. **セッション** は新しい `UserSession`（寿命 `session-store.maxAge`）、配線されていれば `subjectSessionIndex` のエントリー、`sessionFederationIndex` のエントリー、そして再生成された express session — [セッションの確立](#セッションの確立) に、index のエントリーと下のトークンをコールバック自身のステップとして加えたもの。その establishment は core の `establishWithoutAsking` がフェデレーション自身の事実から組み立てるもので、このリリースではフェデレーションのログインでセッション requirement に問い合わせない（そこでの中断はナビゲーションでなければならない）。だからパスワードログインを中断する requirement もこれは中断しない。requirement の利用時のアドミッションは、セッションが使われるたびにそのセッションに適用される。コールバックに欠かせないストアが失敗した場合 — Store の照会、`UserSession` か `sessionFederationIndex` の書き込み、express session の再生成・保存、下のトークンの紐づけ、そしてそれらすべてに先立つ一時状態の破棄（[トランザクションが消費されるとき](#トランザクションが消費されるとき) を参照） — はいずれも `503 temporarily_unavailable` で、error レベルで 1 行、`federation_callback_store_unavailable` として `store`、`step`、エラーの射影とともにログに出る。書き込んだものはベストエフォートで逆順にロールバックされ、失敗したロールバックの各ステップは `federation_cleanup_failed` の warn 1 行になる。`subjectSessionIndex` の書き込みが失敗してもログに出る（`subject_session_index_write_failed`）だけでログインは進む。
 6. **トークン** は、プロファイルが `accessToken` を持つときにだけ、新しい `sid` の下で `federationTokenStore` に紐づけられる:
-   - `accessToken`、`refreshToken`、`idToken`、`expiresAt` はアダプターが返したまま — `expiresAt: null` は `null`（「リフレッシュしない」）として保存され、ルーターが有効期限をでっち上げることはない。
+   - `accessToken`、`refreshToken`、`idToken` はアダプターが返したまま。
+   - 有効期間は、`profile.expiresIn` と `profile.expiresAt` を core の `readUpstreamTokenLifetime` で 1 度だけ読む（下限 0、上限なし）。`expires_in` が示され読み取りが有限なら、`obtainedAt` は `exchangeCode` を呼ぶ直前の時刻、`expiresAt` は読み取りの終わり（アダプターの時刻と `obtainedAt + expiresIn` の早いほう）。それ以外（時刻だけで示された終わり — 上流の時計の上にある — 、無し、不正・矛盾・使い切りのもの）では `expiresAt` はアダプターのもので、`null` は `null`（「リフレッシュしない」）として保存され、レコードに `obtainedAt` は無い。そのため `oauth` はこのレコードにリフレッシュのバッファを保つ。ルーターが有効期限をでっち上げることはない。リンクのコールバックも同じ有効期間を書く。
    - `scope` と `grantedScope`: アダプターが `profile.scope` を返していればそれ（空や使えない文字列は何も表さない）、返していなければプロバイダーが要求した `scope` — RFC 6749 §3.3 は応答の欠落を「要求どおり」と読む（[`src/federations/consented-scope.mts`](src/federations/consented-scope.mts)）。
    - `tokenType`: `profile.tokenType` をそのまま、文字列でなければ `""`、アダプターが返さなければ `undefined`（`oauth` はそれを `Bearer` と読む）。
-
-   `profile.expiresIn` はここでは読まれない。
 7. **リダイレクト** はそのフェデレーションのリダイレクトポリシーの `resolveCallbackRedirect` が決める。デフォルトのポリシーは、開始時に `redirect_to` があればその `authCallbackUrl` に `redirect_to` を付けたもの、無ければその `clientUrl` を返す。
 
 ### response mode: `query` と `form_post`
@@ -394,47 +393,44 @@ cookie を厳密に一つのホストに固定するのは `__Host-` であり�
 
 ### フェデレーションの設定
 
-`core.federations.<name>` がフェデレーションに名前を付け、`extractFederationSection`（[`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts)）がそれを読むモジュールのためにセクションを正規化する。受け付ける形は三つ:
+`core.federations.<name>` のエントリはそれぞれ一つのフェデレーションで、`/session/oauth/federation/<name>` で到達する。エントリはフラットで、core が所有するキーとその `type` のキーが並んで置かれる。
 
 ```hocon
 core.federations {
-  # 省略形: キーが type を表す（ここでは "google"）。
   google {
     enabled = true
+    type = "google"
     clientId = ${CORE_FEDERATIONS_GOOGLE_CLIENT_ID}
     clientSecret = ${CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
     clientUrl = "https://app.example.com/"
   }
 
-  # type を明示したフラットな形。
   okta {
     enabled = true
     type = "oidc"
     issuer = "https://dev-123.okta.com"
+    callbackURL = "https://auth.example.com/session/oauth/federation/okta/callback"
     # …
   }
 
-  # ネストした形: type の名前のサブセクションの下に資格情報を置く。
   keycloak {
-    enabled = true
+    enabled = false
     type = "oidc"
-    oidc {
-      issuer = "https://sso.example.com/realms/staff"
-      # …
-    }
+    issuer = "https://sso.example.com/realms/staff"
+    # …
   }
 }
 ```
 
-ネストした形のセクションがトップレベルにも `clientId`・`clientSecret`・`callbackURL` を持つと起動に失敗する。それ以外のトップレベルのフィールドはサブセクションと並んで残り、サブセクションも同じフィールドを持てばサブセクションの値で上書きされる。`enabled = true` の無いセクションは無視される。Google・GitHub・Apple のモジュールはシングルテナント — それぞれ固定の名前（`google`、`github`、`apple`）でプロバイダーを登録する — なので、デプロイが持てるのはそれぞれ高々一つ。`type = "oidc"` のセクション（[`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md)）は一セクションが一フェデレーションになる。
+core が所有するのは `enabled`、`type`、`trustUpstreamAmr`、`callbackURL` で、それ以外のキーはエントリの type のもの。すべてのエントリは、有効か無効かにかかわらず `type` を名指しする: 無いもの、または空のものは起動を拒否される（`core.federations.<name>.type` における `config-validation-failed`）。有効なエントリを扱うのは、その type を `federationTypes` に登録したモジュールで、そのモジュールがエントリごとにプロバイダーとリダイレクトポリシーを一つずつ、どちらもエントリの名前で作る。したがって一つの type はいくつでもエントリを持てる。Google・GitHub・Apple・OIDC の各パッケージはそのようなモジュール — `googleFederationTypeModule()`、`githubFederationTypeModule()`、`appleFederationTypeModule()`、`oidcFederationTypeModule()` — を export し、それぞれ type `"google"`、`"github"`、`"apple"`、`"oidc"` を扱う（任意の OpenID Connect IdP には [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md)）。各パッケージの README がその type のキーを挙げる。無効なエントリは core のスキーマより先では読まれない。
 
 起動時の規則:
 
-- 有効なセクションはすべて `callbackURL` を持たなければならず、無ければ `sessionModule` が起動に失敗する。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
-- `trustUpstreamAmr` はどの形でもセクションの最上位、`enabled` の横に置く。無ければ `false` で、（スキーマの変換のあと）真偽値でないものは起動に失敗する。ネストした形のサブセクションの中（`core.federations.okta.oidc.trustUpstreamAmr`）に書いても起動に失敗し、`enabled` の横に置くよう告げる — さもなければ無視されてしまう。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
-- すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。
-- `sessionModule` は設定と contribution を突き合わせない。設定で有効だがどのモジュールも contribute していないフェデレーションは起動し、そのルートは `404` を返す。有効なセクションなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。どちらかで起動を失敗させたい組み立ては自分で検査を加える。
+- core は type に振り分けるすべてのエントリに空でない `callbackURL` を要求し、無ければ起動を拒否する（`core.federations.<name>.callbackURL` における `config-validation-failed`）。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
+- `trustUpstreamAmr` はエントリの最上位、`enabled` の横でだけ読まれる。無ければ `false` で、（環境変数が渡す綴りを変換したあと）真偽値でないものは core のスキーマが拒否する。別のキーの下に置いた `trustUpstreamAmr`（`core.federations.okta.oidc.trustUpstreamAmr`）は読まれない。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
+- フェデレーションのプロバイダーとリダイレクトポリシーは、その `type` を `federationTypes` に登録するモジュールから一緒に来る: 有効なエントリごとに一つずつ、エントリの名前で。モジュールは `federations` も `federationRedirectPolicies` も contribute・override できず、どちらも起動時に拒否される（`contribution-kind-guarded`）。
+- `sessionModule` は設定と登録されたフェデレーションを突き合わせない。core の起動が検査する: その `type` をインストールされたどのモジュールも登録しない有効なエントリは起動を拒否される（`federation-type-unhandled`）。無効なエントリはフェデレーションを登録しないので、その開始は `404` を返す。
 
 ### リダイレクト許可リスト
 
@@ -468,31 +464,36 @@ core.federations {
 
 `authCallbackUrl` と `clientUrl` は許可リストではなく `resolveCallbackRedirect` が読む: 前者は `redirect_to` を受け渡すブリッジページ、後者は開始時に `redirect_to` が無かったコールバックの戻り先。どちらかが必要なのに未設定のコールバックは、セッションを保存したあとで `500 misconfiguration` を返し、ポリシーが答える `5xx` がすべてそうであるように error レベルで 1 行、`redirect_policy_server_fault` としてログに出る。したがって、すべての開始が `redirect_to` を持つのでない限りどのフェデレーションにも `clientUrl` が必要で、`redirect_to` を持つ開始には `authCallbackUrl` が必要になる。
 
-`FederationRedirectPolicy`（[`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts)）が差し替え点である: モジュールはフェデレーションに独自のポリシーを contribute でき、そのポリシーは fail closed でなければならない。`createFederationRedirectPolicy` がデフォルトで、`checkRedirectShape`、`createRedirectAllowlistValidator`、`describeRedirectRejection`、`isLoopbackHostname` は独自のポリシーが同じ規則と拒否の語彙を再利用できるよう export されている。ポリシーのメソッドは [`FederationResult`](src/federations/types.mts) で答える: 値を持つ `ok`、または返すステータス・OAuth エラーコード・説明。ルートはステータスをそのまま返し、コードと説明は core の `errorEnvelope` を通して送る。そこが RFC 6749 の文字（`"` と `\` を除く印字可能な ASCII）に収めるので、範囲外の説明の文字は `?` として出る。形式に合わないコードは、4xx なら `invalid_request` として出し（拒否はあくまでクライアントのものであり、`400 server_error` は自己矛盾になる）、`redirect_policy_error_malformed` をログに残す。それ以外のステータスでは `server_error` として出る。`describeRedirectRejection` のテキストは最初から範囲内である。`5xx` はクライアントへの判定ではなく、サーバーが答えられないというポリシーの表明なので、error レベルで 1 行、`redirect_policy_server_fault` としてステータスとポリシーのコード・説明（サニタイズして上限で切る。開始レグではプロバイダーも）とともにログにも出る。`4xx` はログに出ない（[`src/internal/refusalEnvelope.mts`](src/internal/refusalEnvelope.mts)）。
+`FederationRedirectPolicy`（[`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts)）が差し替え点である: フェデレーション type の `redirectPolicy` がその各エントリのポリシーを作り、デフォルト以外のポリシーは fail closed でなければならない。フェデレーションのリダイレクトポリシーを変えたいデプロイは、その type を override する（`overrides.federationTypes.<type>`）。`createFederationRedirectPolicy` がデフォルトで、`checkRedirectShape`、`createRedirectAllowlistValidator`、`describeRedirectRejection`、`isLoopbackHostname` は独自のポリシーが同じ規則と拒否の語彙を再利用できるよう export されている。ポリシーのメソッドは [`FederationResult`](src/federations/types.mts) で答える: 値を持つ `ok`、または返すステータス・OAuth エラーコード・説明。ルートはステータスをそのまま返し、コードと説明は core の `errorEnvelope` を通して送る。そこが RFC 6749 の文字（`"` と `\` を除く印字可能な ASCII）に収めるので、範囲外の説明の文字は `?` として出る。形式に合わないコードは、4xx なら `invalid_request` として出し（拒否はあくまでクライアントのものであり、`400 server_error` は自己矛盾になる）、`redirect_policy_error_malformed` をログに残す。それ以外のステータスでは `server_error` として出る。`describeRedirectRejection` のテキストは最初から範囲内である。`5xx` はクライアントへの判定ではなく、サーバーが答えられないというポリシーの表明なので、error レベルで 1 行、`redirect_policy_server_fault` としてステータスとポリシーのコード・説明（サニタイズして上限で切る。開始レグではプロバイダーも）とともにログにも出る。`4xx` はログに出ない（[`src/internal/refusalEnvelope.mts`](src/internal/refusalEnvelope.mts)）。
 
 ### アダプターの書き方
 
-OpenID Connect の discovery ドキュメントを公開する IdP なら、コードは書かない: [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) の `type = "oidc"` セクションがアダプターになる。そうでなければ、アダプターは `federations.<name>`（`FederationProvider`）と `federationRedirectPolicies.<name>` の両方を contribute するモジュールであり、設定は小さなブリッジモジュールが `extractFederationSection` から埋める型付きの `ComponentMap` スロットに載せる:
+OpenID Connect の discovery ドキュメントを公開する IdP なら、コードは書かない: [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) の `type = "oidc"` エントリがアダプターになる。そうでなければ、アダプターは `federationTypes` に type を登録するモジュールである: エントリ自身のキーのスキーマ（フラット）と、その type の有効なエントリごとに core が呼ぶ二つのファクトリー。ファクトリーにはエントリの名前、その `callbackURL`、スキーマが返したキーが渡される。core は自分が所有するキー（`enabled`、`type`、`trustUpstreamAmr`、`callbackURL`）を取り除いてからスキーマにエントリを読ませる:
 
 ```ts
-import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
+import { defineFederationType, defineModule } from "@o3co/auth-provider-core";
 import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
+import { z } from "zod";
 
-declare module "@o3co/auth-provider-core" {
-  interface ComponentMap {
-    readonly exampleFederationConfig?: ExampleConfig;
-  }
-}
+const exampleEntrySchema = z.strictObject({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  clientUrl: z.string().optional(),
+  redirectAllowlist: z.array(z.string()).optional(),
+  authCallbackUrl: z.string().optional(),
+  sessionDomain: z.string().optional(),
+});
 
-export const exampleFederationModule = defineModule({
-  name: "federation:example",
-  requires: ["exampleFederationConfig"] as const,
+export const exampleFederationTypeModule = defineModule({
+  name: "federation-example-type",
   contributes: {
-    federations: {
-      example: (deps): FederationProvider => createExampleProvider(deps.exampleFederationConfig),
-    },
-    federationRedirectPolicies: {
-      example: (deps) => createFederationRedirectPolicy(deps.exampleFederationConfig),
+    federationTypes: {
+      example: defineFederationType()({
+        entrySchema: exampleEntrySchema,
+        factory: (_deps, { name, callbackURL, entry }) =>
+          createExampleProvider(name, { ...entry, callbackURL }),
+        redirectPolicy: (_deps, { entry }) => createFederationRedirectPolicy(entry),
+      }),
     },
   },
 });
@@ -519,11 +520,11 @@ export const exampleFederationModule = defineModule({
 | [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | セッションストアの `csrfTokenSigner`: core の契約、固定ベクター、エントロピーの下限、`session-store.secret` の下で署名したトークンが `/session/*` と `csrfGuard` スロットを通ること、override がそれを置き換えること。`sessionModule` と手で組み立てたルーターが署名器なしでは拒否されること、スロットの署名器で署名すること、トークンがスロットと `/session/*` の間で通ること、どのルートでも `session-store.secret` を読まないこと |
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts)、[`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts)、[`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts)、[`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | モジュールが他のパッケージに提供するもの: それぞれ core の契約を守ること、モジュールが提供すること、ガードが `/session/login` のものと同じく応答・ログし `GET /session/csrf` が渡すトークンを受け入れること、ログインエントリがページなしで作られ読まれる場所で失敗すること、cookie ポリシーが契約を破るものを cookie の属性のすべての組み合わせにわたって拒否し、それが拒否する名前とドメインが同じメッセージで検証時に拒否されること。ストアのモジュールと並べたポリシーの override が起動を拒否し、モジュールの無い組み立てはスロットを埋めること |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | ログインの末尾: 書くもの（establishment の primary だけ、そして偽の establishment の拒否）、その手順、各書き込みに渡すもの、失敗しうるあらゆる点でのロールバック |
-| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、障害時の応答とそのログ 1 行、ログインのレート制限ガード |
+| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginAttempts.test.mts`](src/routes/__tests__/loginAttempts.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、障害時の応答とそのログ 1 行、ログインの試行上限 |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | セッションアドミッション上のパスワードログイン: requirement に問われること、各 outcome への応答、中断の二段階と再生成以降の各失敗への応答。単独の `answerInterruption` — その応答、各失敗での reporter と答え、拒否するもの |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | 開始とコールバックのレグ、アカウントリンク、ストアへの書き込みとそのロールバック、障害時の応答とそのログ、`amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | セッションアドミッション上のリンクの開始とコールバック: 各 outcome への応答、`sid` と並べて記録される subject、requirement に問われること、アップグレード前のトランザクション |
-| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | 問い合わせずに確立されるコールバックのログイン: パスワードログインを中断する requirement もこれは中断せず、レコードは core が組み立てたものであること、core がコピーできないユーザーは何も書かずに拒否されること |
+| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | 問い合わせずに確立されるコールバックのログイン: パスワードログインを中断する requirement もこれは中断せず、レコードは core が組み立てたものであること、`User` は一度だけ読まれること、スナップショットが拒否するユーザーは何も書かずに拒否されること |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts)、[`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts)、[`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts)、[`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response mode、トランザクション cookie、手を付けられないセッション cookie、トランザクションの失敗経路、「一度きり」が保証すること |
 | [`src/federations/__tests__/`](src/federations/__tests__/) | ツールキットとルーターのフェデレーション部品。要求を組み立てるヘルパーは core で固定される（[`core/src/federations/__tests__/`](../core/src/federations/__tests__/)） |
 

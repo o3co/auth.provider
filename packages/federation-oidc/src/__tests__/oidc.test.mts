@@ -78,6 +78,16 @@ describe("createOidcProvider", () => {
 			expect(`${url.origin}${url.pathname}`).toBe(`${ISSUER}/authorize`);
 		});
 
+		it("refuses a name that cannot be one route segment, before any request", async () => {
+			const idp = await createFakeIdp({ issuer: ISSUER });
+			for (const bad of ["", "a/b", "with space", "../x", "a?b", "__proto__"]) {
+				await expect(createOidcProvider(bad, baseConfig(idp)), bad).rejects.toThrow(
+					/OIDC federation name/,
+				);
+			}
+			expect(idp.requestsTo("/.well-known/openid-configuration")).toHaveLength(0);
+		});
+
 		it("refuses an empty clientSecret at construction, not at the first token request", async () => {
 			const idp = await createFakeIdp({ issuer: ISSUER });
 			await expect(

@@ -205,14 +205,15 @@ export function federatedSessionAuthentication(login: {
 }
 
 /**
- * Whether `ms` is an instant a session may take as when a second factor was
- * verified, on the store's clock `nowMs`: at or after the epoch, and no
- * further ahead than the clock skew tolerated between hosts
- * (`DEFAULT_CLOCK_SKEW_MS`, the JWT verifier's `iat` tolerance). Clocks are
- * NTP-synced; one further ahead is no clock's reading. What is accepted is
- * still recorded no later than `nowMs` (`notAfter`).
+ * Whether `ms` is an instant a session may record as when the user
+ * authenticated (`authTime`) or a second factor was verified (`mfaAt`), on
+ * the store's clock `nowMs`: at or after the epoch, and no further ahead than
+ * the clock skew tolerated between hosts (`DEFAULT_CLOCK_SKEW_MS`, the JWT
+ * verifier's `iat` tolerance). Clocks are NTP-synced; one further ahead is no
+ * clock's reading. What is accepted is still recorded no later than `nowMs`
+ * (`notAfter`).
  */
-const isRecordableVerificationTime = (ms: number, nowMs: number): boolean =>
+const isRecordableSessionInstant = (ms: number, nowMs: number): boolean =>
 	isReadableVerificationTime(ms) && ms <= nowMs + DEFAULT_CLOCK_SKEW_MS;
 
 /**
@@ -248,7 +249,7 @@ const notAfter = (ms: number, nowMs: number): Date => new Date(Math.min(ms, nowM
  * values; a value that is not a non-empty string; a primary's marker (`pwd`,
  * `fed`: a second factor must not change the primary the baseline is
  * decided on); `mfa` alone (it comes beside a factor's own values, and alone
- * names no factor); a time `isRecordableVerificationTime` refuses on
+ * names no factor); a time `isRecordableSessionInstant` refuses on
  * `nowMs`, the store's clock. Every bundled store's `recordSecondFactor`
  * runs this, and {@link readRenewalNonces}, before it reads anything. The
  * message quotes nothing but a primary's marker.
@@ -275,7 +276,7 @@ export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number):
 	}
 	const at: unknown = event.at;
 	const atMs = at instanceof Date ? at.getTime() : Number.NaN;
-	if (!isRecordableVerificationTime(atMs, nowMs)) {
+	if (!isRecordableSessionInstant(atMs, nowMs)) {
 		throw new RangeError(
 			"recordSecondFactor: at must be a valid date at or after the epoch, and no further ahead than hosts' clocks drift",
 		);
@@ -330,7 +331,7 @@ export function expectsRenewalNonce(held: string | undefined, nonces: RenewalNon
  *
  * `undefined` is a session written as one from before the key; anything
  * else must be what `SessionAuthentication` admits, its `mfaAt` passing
- * `isRecordableVerificationTime`.
+ * `isRecordableSessionInstant`.
  *
  * @throws RangeError naming the session and the field, quoting nothing of
  *   the value.
@@ -342,7 +343,7 @@ export function recordableSessionAuthentication(
 ): SessionAuthentication | undefined {
 	if (authentication === undefined) return undefined;
 	const read = readAuthentication(authentication, {
-		admitsMfaAt: (ms) => isRecordableVerificationTime(ms, nowMs),
+		admitsMfaAt: (ms) => isRecordableSessionInstant(ms, nowMs),
 		nullFederationIsNone: false,
 	});
 	if (read.admitted === undefined) {
@@ -355,6 +356,26 @@ export function recordableSessionAuthentication(
 		...read.admitted,
 		mfaAt: mfaAt === undefined ? undefined : notAfter(mfaAt.getTime(), nowMs),
 	};
+}
+
+/**
+ * What a store records as a session's `authTime`: a new `Date` no later than
+ * `nowMs`, the store's clock, by the rule `mfaAt` is recorded by
+ * (`isRecordableSessionInstant`, then `notAfter`). Every bundled store's `create`
+ * records this answer, never its own input.
+ *
+ * @throws RangeError naming the session, quoting nothing of the value, for a
+ *   value that is not a valid `Date`, is before the epoch, or is further
+ *   ahead of `nowMs` than `DEFAULT_CLOCK_SKEW_MS`.
+ */
+export function recordableAuthTime(sid: string, authTime: unknown, nowMs: number): Date {
+	const ms = authTime instanceof Date ? authTime.getTime() : Number.NaN;
+	if (!isRecordableSessionInstant(ms, nowMs)) {
+		throw new RangeError(
+			`UserSession ${sid}: authTime must be a valid date at or after the epoch, no further ahead than hosts' clocks drift`,
+		);
+	}
+	return notAfter(ms, nowMs);
 }
 
 /** The fields {@link readAuthentication} may refuse. */
@@ -525,17 +546,17 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
 
 /**
  * Whether federation `name`'s upstream IdP's `amr` counts: only when
- * `core.federations.<name>.trustUpstreamAmr` is `true` beside `enabled: true`,
- * in either section shape. Then the IdP's values sit in the session's `amr`
- * beside `fed`, where tokens carry them and `acr` is matched against them;
- * otherwise they are kept apart, for the record only.
+ * `core.federations.<name>.trustUpstreamAmr` is `true` beside `enabled: true`.
+ * Then the IdP's values sit in the session's `amr` beside `fed`, where tokens
+ * carry them and `acr` is matched against them; otherwise they are kept
+ * apart, for the record only. An entry is flat: a key named after its type is
+ * one of the type's keys, and a switch under it is not read.
  *
- * A non-boolean value, or the switch inside the nested shape's sub-section,
- * is a `RangeError` naming the key and quoting nothing of the value: read
- * either way, a typo would decide what this provider vouches for. The
- * refusals come first, so a disabled section's bad switch still refuses the
- * composition. Core's schema coerces environment-variable spellings first;
- * a hand-built configuration meets the refusal.
+ * A non-boolean value is a `RangeError` naming the key and quoting nothing of
+ * the value: read either way, a typo would decide what this provider vouches
+ * for. A disabled section's bad switch still refuses the composition. Core's
+ * schema coerces environment-variable spellings first; a hand-built
+ * configuration meets the refusal.
  *
  * The federation callback (which writes the split) and the `acr` drop both
  * read this one function, so they cannot disagree.
@@ -545,19 +566,6 @@ export function federationTrustsUpstreamAmr(config: unknown, name: string): bool
 	if (!Object.hasOwn(federations, name)) return false;
 	const section = federations[name];
 	if (typeof section !== "object" || section === null) return false;
-	// The nested shape's sub-section (keyed by `type`, or by the name for a
-	// shorthand: session's `extractFederationSection`) holds the adapter's own
-	// settings. A switch there would be silently ignored, so it is refused.
-	const type =
-		typeof (section as { type?: unknown }).type === "string"
-			? (section as { type: string }).type
-			: name;
-	const sub = Object.hasOwn(section, type) ? (section as Record<string, unknown>)[type] : undefined;
-	if (typeof sub === "object" && sub !== null && Object.hasOwn(sub, "trustUpstreamAmr")) {
-		throw new RangeError(
-			`core.federations.${name}.${type}.trustUpstreamAmr belongs beside enabled, as core.federations.${name}.trustUpstreamAmr`,
-		);
-	}
 	const trust = Object.hasOwn(section, "trustUpstreamAmr")
 		? (section as { trustUpstreamAmr?: unknown }).trustUpstreamAmr
 		: undefined;

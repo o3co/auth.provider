@@ -32,6 +32,7 @@ import {
 	type FederationGrantLockResult,
 	type FederationGrantRefreshFailureKind,
 	type FederationGrantRevokedBy,
+	type FederationGrantRotations,
 	type FederationGrantStore,
 	type FederationGrantUsage,
 	type FederationGrantWrite,
@@ -260,6 +261,22 @@ const parseMarker = (text: string | undefined): FederationGrantIneligibilityMark
 	};
 };
 
+/**
+ * The rotation budget's window, or none: both fields whole numbers, the
+ * opening a date and the count not below 0, as the scripts read them.
+ */
+const parseRotations = (
+	since: string | undefined,
+	count: string | undefined,
+): FederationGrantRotations | undefined => {
+	const opened = dateFrom(since);
+	const taken = numberFrom(count);
+	if (opened === undefined || !isDate(opened) || taken === undefined || taken < 0) {
+		return undefined;
+	}
+	return { since: opened, count: taken };
+};
+
 const encodeMarker = (marker: FederationGrantIneligibilityMarker): string =>
 	JSON.stringify([marker.reason, String(marker.at.getTime()), String(marker.judgedAgainst)]);
 
@@ -379,6 +396,7 @@ function decode(
 						count: failureCount,
 					}
 				: undefined,
+		rotations: parseRotations(fields.rotationsSince, fields.rotationsCount),
 	};
 	const grant: AuthorizedFederationGrant | RevokedFederationGrant =
 		revocation === undefined
@@ -979,6 +997,46 @@ export function createRedisFederationGrantStore(
 					rowMs: Math.floor(input.rowMs),
 					retryAfterSeconds: input.failure.retryAfterSeconds,
 					upstreamCode: input.failure.upstreamCode,
+				}),
+				input.grantId,
+			);
+		},
+
+		async takeRotation(input) {
+			const nowMs = instant(input.now, "now");
+			// The bounds are refused before anything is sent; the script checks every state.
+			if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+				throw RANGE("takeRotation: limit must be a whole number of at least 1");
+			}
+			if (!Number.isFinite(input.windowMs) || input.windowMs <= 0) {
+				throw RANGE("takeRotation: windowMs must be a positive finite number");
+			}
+			// As in `replaceCredentials`: a fractional version would round into a match.
+			if (!Number.isSafeInteger(input.expectedVersion)) return { ok: false };
+			return written(
+				await client.takeRotation(grantKey(input.grantId), {
+					nowMs,
+					expectedVersion: input.expectedVersion,
+					limit: input.limit,
+					// Rounded up: the instants are whole milliseconds, so
+					// `now >= since + windowMs` holds exactly when it does for the
+					// next whole number, and the client sends whole numbers.
+					windowMs: Math.ceil(input.windowMs),
+				}),
+				input.grantId,
+			);
+		},
+
+		async refundRotation(input) {
+			const nowMs = instant(input.now, "now");
+			const sinceMs = instant(input.since, "since");
+			// As in `replaceCredentials`: a fractional version would round into a match.
+			if (!Number.isSafeInteger(input.expectedVersion)) return { ok: false };
+			return written(
+				await client.refundRotation(grantKey(input.grantId), {
+					nowMs,
+					expectedVersion: input.expectedVersion,
+					sinceMs,
 				}),
 				input.grantId,
 			);

@@ -33,7 +33,7 @@ describe("redisRateLimiterModule", () => {
 		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
 		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
 			section: {
-				limits: { login: { limit: 4, windowSeconds: 45 } },
+				limits: { token: { limit: 4, windowSeconds: 45 } },
 				defaultLimit: { limit: 60, windowSeconds: 60 },
 				failMode: "closed",
 			},
@@ -50,10 +50,33 @@ describe("redisRateLimiterModule", () => {
 		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(2);
 		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(true);
 		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
-		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
-		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
-		expect(windows).toEqual([300, 300, 300, 45, 60]);
+		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(20);
+		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
+		expect((await limiter.check("authorize:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
+		expect(windows).toEqual([300, 300, 300, 900, 45, 60]);
 	});
+
+	it.each([
+		["login", "session.rateLimit.login"],
+		["device_verification", "device-grant.rateLimit"],
+	])(
+		"refuses a limits entry for %s, a verifier's own limit, in its section's schema, naming the key and the setting",
+		(prefix, setting) => {
+			const parsed = redisRateLimiterModule.section?.schema.safeParse({
+				limits: {
+					[prefix]: { limit: 5, windowSeconds: 60 },
+					token: { limit: 5, windowSeconds: 60 },
+				},
+			});
+			expect(parsed?.success).toBe(false);
+			expect(parsed?.error?.issues).toEqual([
+				expect.objectContaining({
+					path: ["limits", prefix],
+					message: expect.stringContaining(setting),
+				}),
+			]);
+		},
+	);
 
 	it("provides rateLimiter", () => {
 		expect(typeof redisRateLimiterModule.provides?.rateLimiter).toBe("function");

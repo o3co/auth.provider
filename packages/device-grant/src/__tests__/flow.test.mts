@@ -24,13 +24,15 @@
  */
 
 import type {
+	AttemptCount,
+	AttemptCounter,
+	AttemptSpec,
 	AuditEvent,
 	AuditSink,
 	AuthenticatedClient,
 	ClientRepository,
+	DeploymentMode,
 	GrantContext,
-	RateLimiter,
-	RateLimitFailMode,
 	SubjectRevocation,
 	TokenBinding,
 	UserSession,
@@ -38,12 +40,14 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	consoleLogger,
+	coveredByRevocationBoundary,
 	createInMemorySubjectRevocation,
+	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
-	createMemoryRateLimiter,
 	createOutboundFetch,
 	createSymmetricKeyStore,
 	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	generateUserCode,
 	normaliseUserCode,
 } from "@o3co/auth-provider-core";
@@ -135,10 +139,16 @@ const makeClock = (start = 1_800_000_000_000) => {
 	};
 };
 
+/** The verification's attempt limit as the package ships it: five per five minutes. */
+const SHIPPED_ATTEMPT_LIMIT: AttemptSpec = { limit: 5, windowSeconds: 300 };
+
 const makeHarness = (
 	overrides: {
 		settings?: Partial<typeof settings>;
-		rateLimiter?: RateLimiter;
+		clock?: ReturnType<typeof makeClock>;
+		attemptCounter?: AttemptCounter;
+		attemptLimit?: AttemptSpec;
+		deploymentMode?: DeploymentMode;
 		session?: Record<string, unknown>;
 		auditSink?: AuditSink;
 		logger?: ReturnType<typeof makeLogger>;
@@ -148,15 +158,9 @@ const makeHarness = (
 		subjectRevocation?: SubjectRevocation;
 	} = {},
 ) => {
-	const clock = makeClock();
+	const clock = overrides.clock ?? makeClock();
 	const store = overrides.store ?? createMemoryDeviceCodeStore();
 	const resolved = { ...settings, ...(overrides.settings ?? {}) };
-	const rateLimiter =
-		overrides.rateLimiter ??
-		createMemoryRateLimiter({
-			limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
 
 	const session = overrides.session ?? liveCookieSession();
 	const userSessionStore = overrides.userSessionStore ?? liveSessionStore();
@@ -174,7 +178,7 @@ const makeHarness = (
 		createClientAuthMiddleware(clientRepository, {
 			issuer: ISSUER,
 			allowPublicClients: true,
-			fetch: createOutboundFetch({ source: "registration" }),
+			fetch: createOutboundFetch({ config: {}, source: "registration" }),
 		}),
 		createDeviceAuthorizationHandler({
 			store,
@@ -187,7 +191,9 @@ const makeHarness = (
 		createDeviceVerificationHandler({
 			store,
 			settings: resolved,
-			rateLimiter,
+			attemptLimit: overrides.attemptLimit ?? SHIPPED_ATTEMPT_LIMIT,
+			...(overrides.attemptCounter ? { attemptCounter: overrides.attemptCounter } : {}),
+			deploymentMode: overrides.deploymentMode ?? "single",
 			userSessionStore,
 			// No requirement registered; what admission changes here (the
 			// session-admission ADR's D8) is admission.test.mts's.
@@ -205,6 +211,7 @@ const makeHarness = (
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 		accessTokenExpiresIn: 300,
 		now: clock.now,
+		grantPolicy: undefined,
 		...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
 		...(overrides.logger ? { logger: overrides.logger } : {}),
 	});
@@ -223,7 +230,7 @@ const makeHarness = (
 			...(tokenBinding === undefined ? {} : { tokenBinding }),
 		} as unknown as GrantContext);
 
-	return { app, store, clock, grant, poll, rateLimiter };
+	return { app, store, clock, grant, poll };
 };
 
 const startDevice = async (app: express.Express, body: Record<string, unknown> = {}) =>
@@ -252,20 +259,83 @@ const makeSink = () => {
 	return { sink, events };
 };
 
+/** The poll's answer for an approval whose record cannot be read. */
+const UNREADABLE_APPROVAL = {
+	status: 400,
+	error: "invalid_grant",
+	errorDescription: "the approval cannot be read; start a new device authorization request",
+} as const;
+
+/** How a store's record is broken: a field holding `value`, or one whose read throws. */
+type Broken = { readonly value: unknown } | "throws";
+
+/** `authorization` with `field` broken as `broken` says. */
+const breakRecord = (authorization: object, field: string, broken: Broken): object => {
+	const copy: Record<string, unknown> = { ...authorization };
+	if (broken === "throws") {
+		Object.defineProperty(copy, field, {
+			enumerable: true,
+			get() {
+				throw new Error(`${field} unreadable`);
+			},
+		});
+	} else {
+		copy[field] = broken.value;
+	}
+	return copy;
+};
+
+/** A memory store whose `method` answers its record with `field` broken. */
+const answeringBroken = (
+	method: "poll" | "findPendingByUserCode" | "approve" | "deny",
+	field: string,
+	broken: Broken,
+) => {
+	const inner = createMemoryDeviceCodeStore();
+	const answer = inner[method] as (...args: unknown[]) => Promise<unknown>;
+	return {
+		...inner,
+		[method]: async (...args: unknown[]) => {
+			const answered = (await answer(...args)) as Record<string, unknown> | null;
+			if (answered === null) return null;
+			if (method === "findPendingByUserCode") return breakRecord(answered, field, broken);
+			return answered.status === "approved" || answered.status === "ok"
+				? {
+						...answered,
+						authorization: breakRecord(answered.authorization as object, field, broken),
+					}
+				: answered;
+		},
+	} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+};
+
 /** The sink is fire-and-forget, so give the detached promise a turn. */
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-/**
- * A limiter whose backend is down: every check rejects, as a Redis client
- * would, and `failMode` is its own outage policy.
- */
-const brokenLimiter = (failMode: RateLimitFailMode): RateLimiter => ({
-	kind: "broken",
-	failMode,
-	check: async () => {
-		throw new Error("redis down");
-	},
-});
+/** A counter whose backend is down: every consume rejects, as a Redis client would. */
+const brokenCounter = (): AttemptCounter & { calls: number } => {
+	const counter = {
+		calls: 0,
+		consume: async (): Promise<AttemptCount> => {
+			counter.calls += 1;
+			throw new Error("redis down");
+		},
+	};
+	return counter;
+};
+
+/** An in-process counter on `clock`, recording each key and spec it is handed. */
+const recordingCounter = (clock: ReturnType<typeof makeClock>) => {
+	const inner = createMemoryAttemptCounter({ now: clock.now });
+	const calls: { key: string; spec: AttemptSpec }[] = [];
+	return {
+		calls,
+		consume: (key: string, spec: AttemptSpec) => {
+			calls.push({ key, spec });
+			return inner.consume(key, spec);
+		},
+	} satisfies AttemptCounter & { calls: unknown };
+};
 
 describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 	it("returns the codes, the verification URI, and the polling contract", async () => {
@@ -520,13 +590,12 @@ describe("verification endpoint", () => {
 		expect((await verify(app, { action: "deny", user_code: userCode })).status).toBe(200);
 	});
 
-	it("does not spend the subject's budget on an approval the email gate refuses", async () => {
+	it("does not spend the subject's attempts on an approval the email gate refuses", async () => {
 		// Refused before the code is read: no oracle, and no attempt counted.
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
+		const { app } = makeHarness({
+			requireEmailVerified: true,
+			attemptLimit: { limit: 1, windowSeconds: 300 },
 		});
-		const { app } = makeHarness({ requireEmailVerified: true, rateLimiter });
 		for (let i = 0; i < 3; i++) {
 			const res = await verify(app, { action: "approve", user_code: "BCDF-GHJK" });
 			expect(res.status).toBe(403);
@@ -570,16 +639,39 @@ describe("verification endpoint", () => {
 	});
 });
 
-describe("rate limiting (RFC 8628 §5.1)", () => {
-	it("counts lookups against the same budget as approvals", async () => {
+describe("verification attempts (RFC 8628 §5.1)", () => {
+	it.each([
+		["lookup", 404, "invalid_user_code"],
+		["approve", 410, "expired_token"],
+		["deny", 410, "expired_token"],
+	] as const)(
+		"judges a %s against the clock after the attempt is counted: a code that expires while the counter answers is refused",
+		async (action, status, error) => {
+			const clock = makeClock();
+			const inner = createMemoryAttemptCounter({ now: clock.now });
+			const slow = { during: (): void => undefined };
+			const counter: AttemptCounter = {
+				consume: (key, spec) => {
+					slow.during();
+					return inner.consume(key, spec);
+				},
+			};
+			const { app } = makeHarness({ clock, attemptCounter: counter });
+			const started = await startDevice(app);
+			slow.during = () => clock.advance(settings.codeLifetimeSeconds * 1000 + 1_000);
+
+			const res = await verify(app, { action, user_code: started.body.user_code });
+
+			expect(res.status).toBe(status);
+			expect(res.body.error).toBe(error);
+		},
+	);
+
+	it("counts lookups against the same limit as approvals", async () => {
 		// The lookup is the same brute-force oracle: it answers "is this a real
 		// code?". A lookup route that did not count would be a free oracle
 		// beside a limited one.
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 3, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
-		const { app } = makeHarness({ rateLimiter });
+		const { app } = makeHarness({ attemptLimit: { limit: 3, windowSeconds: 300 } });
 
 		const statuses: number[] = [];
 		for (let i = 0; i < 5; i++) {
@@ -592,11 +684,7 @@ describe("rate limiting (RFC 8628 §5.1)", () => {
 	it("counts a malformed code as an attempt", async () => {
 		// Excluding malformed input would hand an attacker an unmetered way to
 		// probe which shapes the endpoint accepts.
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 2, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
-		const { app } = makeHarness({ rateLimiter });
+		const { app } = makeHarness({ attemptLimit: { limit: 2, windowSeconds: 300 } });
 
 		await verify(app, { action: "lookup", user_code: "!!!!" });
 		await verify(app, { action: "lookup", user_code: "!!!!" });
@@ -604,22 +692,119 @@ describe("rate limiting (RFC 8628 §5.1)", () => {
 		expect(third.status).toBe(429);
 	});
 
-	it("keys the budget on the user, not the code", async () => {
+	it("counts on the attemptCounter it is handed, keyed on the user, not the code, against its own limit", async () => {
 		// Keying on the code would spend whichever code the attacker happened
-		// to hit, which is nobody's budget. Keying on the subject means an
+		// to hit, which is nobody's limit. Keying on the subject means an
 		// attacker needs an account and burns their own.
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 2, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
-		const spy = { check: vi.fn(rateLimiter.check), kind: rateLimiter.kind };
-		const { app } = makeHarness({ rateLimiter: spy as RateLimiter });
+		const clock = makeClock();
+		const counter = recordingCounter(clock);
+		const { app } = makeHarness({ clock, attemptCounter: counter });
 
 		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
-		expect(spy.check).toHaveBeenCalledWith(
-			"device_verification:user:user-1",
-			expect.objectContaining({ userId: "user-1" }),
+		expect(counter.calls).toEqual([
+			{ key: "device_verification:user:user-1", spec: { limit: 5, windowSeconds: 300 } },
+		]);
+	});
+
+	it("answers a refused attempt 429 slow_down with Retry-After alone, never RateLimit-*", async () => {
+		const { app } = makeHarness({ attemptLimit: { limit: 1, windowSeconds: 300 } });
+
+		const first = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(Object.keys(first.headers).filter((h) => h.startsWith("ratelimit-"))).toEqual([]);
+		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+
+		expect(limited.status).toBe(429);
+		expect(limited.body).toEqual({
+			error: "slow_down",
+			error_description: "too many device code attempts",
+		});
+		expect(Number(limited.headers["retry-after"])).toBe(300);
+		expect(limited.headers["cache-control"]).toBe("no-store");
+		expect(Object.keys(limited.headers).filter((h) => h.startsWith("ratelimit-"))).toEqual([]);
+	});
+});
+
+describe("verification attempts — no counter wired", () => {
+	const handlerFor = (deploymentMode: unknown, logger = makeLogger()) =>
+		createDeviceVerificationHandler({
+			store: createMemoryDeviceCodeStore(),
+			settings,
+			attemptLimit: SHIPPED_ATTEMPT_LIMIT,
+			deploymentMode: deploymentMode as DeploymentMode,
+			userSessionStore: liveSessionStore(),
+			requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
+			requireEmailVerified: false,
+			logger,
+		});
+
+	it("still limits, per process", async () => {
+		const { app } = makeHarness({ attemptLimit: { limit: 1, windowSeconds: 300 } });
+		expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(404);
+		expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(429);
+	});
+
+	it('refuses to build under "multi", naming the verification and the slot', () => {
+		expect(() => handlerFor("multi")).toThrow(
+			/core\.deployment\.mode is "multi" but no shared attemptCounter is wired for "device_verification"/,
 		);
+	});
+
+	it('builds under "multi" when a counter is wired, without warning', () => {
+		const logger = makeLogger();
+		expect(() =>
+			createDeviceVerificationHandler({
+				store: createMemoryDeviceCodeStore(),
+				settings,
+				attemptLimit: SHIPPED_ATTEMPT_LIMIT,
+				attemptCounter: createMemoryAttemptCounter(),
+				deploymentMode: "multi",
+				userSessionStore: liveSessionStore(),
+				requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
+				requireEmailVerified: false,
+				logger,
+			}),
+		).not.toThrow();
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it('is silent under "single", and warns attempt_counter_not_shared when the mode is "unset"', () => {
+		const single = makeLogger();
+		handlerFor("single", single);
+		expect(single.warn).not.toHaveBeenCalled();
+		const unset = makeLogger();
+		handlerFor("unset", unset);
+		expect(unset.warn).toHaveBeenCalledWith(
+			{ tag: "device_verification", limit: 5, windowSeconds: 300 },
+			"attempt_counter_not_shared",
+		);
+	});
+
+	it("refuses a mode it cannot read, absent included, as a TypeError", () => {
+		for (const deploymentMode of [undefined, "MULTI", null]) {
+			expect(() => handlerFor(deploymentMode), String(deploymentMode)).toThrow(TypeError);
+		}
+	});
+
+	it("refuses an attempt limit no counter takes, a window over a day included", () => {
+		for (const attemptLimit of [
+			undefined,
+			{ limit: 0, windowSeconds: 300 },
+			{ limit: 5, windowSeconds: 86_401 },
+		]) {
+			expect(
+				() =>
+					createDeviceVerificationHandler({
+						store: createMemoryDeviceCodeStore(),
+						settings,
+						attemptLimit: attemptLimit as never,
+						deploymentMode: "single",
+						userSessionStore: liveSessionStore(),
+						requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
+						requireEmailVerified: false,
+					}),
+				JSON.stringify(attemptLimit),
+			).toThrow(RangeError);
+		}
 	});
 });
 
@@ -662,18 +847,21 @@ describe("audit trail for the human's decision", () => {
 		});
 	});
 
-	it("records device.rate_limited when the subject's budget runs out", async () => {
+	it("records device.rate_limited when the subject's attempts run out", async () => {
 		// The 429 is the signal that someone is guessing codes from an account
 		// — exactly what a dashboard wants to see, and exactly what a
 		// `logger.warn` nobody tails does not deliver.
 		const { sink, events } = makeSink();
 		const logger = makeLogger();
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
+		const clock = makeClock();
+		const counter = recordingCounter(clock);
+		const { app } = makeHarness({
+			auditSink: sink,
+			clock,
+			attemptCounter: counter,
+			attemptLimit: { limit: 1, windowSeconds: 300 },
+			logger,
 		});
-		const spy = { check: vi.fn(rateLimiter.check), kind: rateLimiter.kind };
-		const { app } = makeHarness({ auditSink: sink, rateLimiter: spy as RateLimiter, logger });
 
 		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
@@ -687,9 +875,8 @@ describe("audit trail for the human's decision", () => {
 			subject: "user-1",
 			details: { action: "lookup", remaining: 0 },
 		});
-		// The check sits behind the shared outage policy; the budget is the
-		// subject's, and the operator-facing line fires.
-		expect(spy.check.mock.calls.map(([key]) => key)).toEqual([
+		// The attempts are the subject's, and the operator-facing line fires.
+		expect(counter.calls.map(({ key }) => key)).toEqual([
 			"device_verification:user:user-1",
 			"device_verification:user:user-1",
 		]);
@@ -699,29 +886,20 @@ describe("audit trail for the human's decision", () => {
 		);
 	});
 
-	it.each(["open", "closed"] as const)(
-		"answers 429 for an exhausted budget under failMode = %s — the policy is for outages, not decisions",
-		async (failMode) => {
-			// `failMode = "open"` waves a request through when the limiter has
-			// no answer; a limiter that answered "no" is not that case.
-			const { sink, events } = makeSink();
-			const rateLimiter: RateLimiter = {
-				...createMemoryRateLimiter({
-					limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				}),
-				failMode,
-			};
-			const { app } = makeHarness({ auditSink: sink, rateLimiter });
+	it("audits a refusal as device.rate_limited alone: a counter that answered is not an outage", async () => {
+		const { sink, events } = makeSink();
+		const { app } = makeHarness({
+			auditSink: sink,
+			attemptLimit: { limit: 1, windowSeconds: 300 },
+		});
 
-			await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
-			const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
-			await settle();
+		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		await settle();
 
-			expect(limited.status).toBe(429);
-			expect(events.map((e) => e.type)).toEqual(["device.rate_limited"]);
-		},
-	);
+		expect(limited.status).toBe(429);
+		expect(events.map((e) => e.type)).toEqual(["device.rate_limited"]);
+	});
 
 	it("never puts the code itself in an event", async () => {
 		// The user code is the thing being brute-forced and the device code is
@@ -750,43 +928,39 @@ describe("audit trail for the human's decision", () => {
 	});
 });
 
-describe("limiter outage — the limiter's failMode applies here too", () => {
-	// This endpoint runs the limiter itself rather than through
-	// `createRateLimitGuard`, so a limiter-backend outage must still follow
-	// the limiter's `failMode` and raise the `rate_limit.unavailable` event the alert
-	// operators page on — on the one endpoint RFC 8628 §5.1 sizes the user
-	// code's entropy against.
+describe("attempt counter outage — fails closed", () => {
+	// RFC 8628 §5.1 sizes the user code's entropy against the attempt limit,
+	// so a counter that cannot count refuses every attempt, whatever any rate
+	// limiter's `failMode` says, and raises the `rate_limit.unavailable`
+	// event operators page on.
 
-	it('failMode = "closed": answers 503 with the guard\'s envelope and does not decide', async () => {
-		const { app, store, clock } = makeHarness({
-			rateLimiter: brokenLimiter("closed"),
-			logger: makeLogger(),
-		});
-		const started = await startDevice(app);
+	it.each(["lookup", "approve", "deny"] as const)(
+		"answers %s 503 with the guard's envelope and does not decide",
+		async (action) => {
+			const { app, store, clock } = makeHarness({
+				attemptCounter: brokenCounter(),
+				logger: makeLogger(),
+			});
+			const started = await startDevice(app);
 
-		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+			const res = await verify(app, { action, user_code: started.body.user_code });
 
-		expect(res.status).toBe(503);
-		// The same body every guarded route answers, so a client and a
-		// dashboard see one outage shape rather than two.
-		expect(res.body).toEqual({
-			error: "service_unavailable",
-			error_description: "Rate limiter temporarily unavailable",
-		});
-		expect(res.headers["cache-control"]).toContain("no-store");
-		// The approval did not happen: the code is still pending.
-		const userCode = normaliseUserCode(started.body.user_code as string) as string;
-		expect(await store.findPendingByUserCode(userCode, clock.now())).not.toBeNull();
-	});
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "service_unavailable",
+				error_description: "Attempt counter temporarily unavailable",
+			});
+			expect(res.headers["cache-control"]).toContain("no-store");
+			// No decision was made: the code is still pending.
+			const userCode = normaliseUserCode(started.body.user_code as string) as string;
+			expect(await store.findPendingByUserCode(userCode, clock.now())).not.toBeNull();
+		},
+	);
 
-	it('failMode = "closed": emits rate_limit.unavailable with the guard\'s fields, and no device.rate_limited', async () => {
+	it("emits rate_limit.unavailable tagged device_verification, and no device.rate_limited", async () => {
 		const { sink, events } = makeSink();
 		const logger = makeLogger();
-		const { app } = makeHarness({
-			rateLimiter: brokenLimiter("closed"),
-			auditSink: sink,
-			logger,
-		});
+		const { app } = makeHarness({ attemptCounter: brokenCounter(), auditSink: sink, logger });
 
 		await request(app)
 			.post("/oauth/device/verification")
@@ -798,16 +972,18 @@ describe("limiter outage — the limiter's failMode applies here too", () => {
 		expect(events[0]).toMatchObject({
 			type: "rate_limit.unavailable",
 			userAgent: "device-test/1.0",
-			details: { tag: "device_verification", cause: { name: "Error" } },
+			details: { tag: "device_verification", failure: "threw", cause: { name: "Error" } },
 		});
 		expect(typeof events[0]?.ip).toBe("string");
-		expect(events[0]?.timestamp).toBeInstanceOf(Date);
 		// An outage is not a subject guessing codes: the
-		// `device_verification_rate_limited` line stays reserved for a limiter
-		// that answered "no".
+		// `device_verification_rate_limited` line stays reserved for a refusal.
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ error: "redis down", mode: "closed", tag: "device_verification" }),
-			"rate_limiter_failed_closed",
+			expect.objectContaining({
+				tag: "device_verification",
+				failure: "threw",
+				error: "redis down",
+			}),
+			"attempt_counter_unavailable",
 		);
 		expect(logger.warn).not.toHaveBeenCalledWith(
 			expect.anything(),
@@ -815,50 +991,27 @@ describe("limiter outage — the limiter's failMode applies here too", () => {
 		);
 	});
 
-	it.each(["lookup", "approve", "deny"] as const)(
-		'failMode = "open": lets %s proceed and reports the outage',
-		async (action) => {
-			const { sink, events } = makeSink();
-			const logger = makeLogger();
+	it("writes the outage line to core's console logger when the logger has no error channel", async () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
 			const { app } = makeHarness({
-				rateLimiter: brokenLimiter("open"),
-				auditSink: sink,
-				logger,
+				attemptCounter: brokenCounter(),
+				logger: { warn: vi.fn() } as unknown as ReturnType<typeof makeLogger>,
 			});
-			const started = await startDevice(app);
-
-			const res = await verify(app, { action, user_code: started.body.user_code });
-			await settle();
-
-			expect(res.status).toBe(200);
-			expect(res.body.client_id).toBe(CLIENT_ID);
-			expect(events.map((e) => e.type)).toContain("rate_limit.unavailable");
-			expect(logger.error).toHaveBeenCalledWith(
-				expect.objectContaining({ error: "redis down", mode: "open", tag: "device_verification" }),
-				"rate_limiter_failed_open",
-			);
-		},
-	);
-
-	it('failMode = "open": an approval made during the outage is a real approval', async () => {
-		// Fail-open means the request is served as if allowed, all the way to
-		// the device collecting its token — not half-served.
-		const { app, poll, clock } = makeHarness({ rateLimiter: brokenLimiter("open") });
-		const started = await startDevice(app);
-
-		const approval = await verify(app, { action: "approve", user_code: started.body.user_code });
-		expect(approval.status).toBe(200);
-
-		clock.advance(10_000);
-		expect((await poll(started.body.device_code as string)).result.status).toBe(200);
+			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(503);
+			expect(spy.mock.calls.map(([, event]) => event)).toEqual(["attempt_counter_unavailable"]);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
-	it("still answers 401 and 400 before consulting the limiter at all", async () => {
-		// The outage policy sits where the check sits: after the action and
-		// the session are validated. An anonymous caller during an outage is
-		// still told to log in, not that the limiter is down.
+	it("still answers 401 and 400 before counting an attempt at all", async () => {
+		// The count sits after the action and the session are validated. An
+		// anonymous caller during an outage is still told to log in, not that
+		// the counter is down.
+		const counter = brokenCounter();
 		const anonymous = makeHarness({
-			rateLimiter: brokenLimiter("closed"),
+			attemptCounter: counter,
 			session: { isAuthenticated: false },
 		});
 		const unauthenticated = await verify(anonymous.app, {
@@ -867,9 +1020,10 @@ describe("limiter outage — the limiter's failMode applies here too", () => {
 		});
 		expect(unauthenticated.status).toBe(401);
 
-		const { app } = makeHarness({ rateLimiter: brokenLimiter("closed") });
+		const { app } = makeHarness({ attemptCounter: counter });
 		const badAction = await verify(app, { action: "revoke", user_code: "BCDF-GHJK" });
 		expect(badAction.status).toBe(400);
+		expect(counter.calls).toBe(0);
 	});
 });
 
@@ -1165,11 +1319,27 @@ describe("the token carries the approving session's authentication", () => {
 		expect(claims.iat).toBe((LOGIN + 10_000) / 1000);
 	});
 
+	it("refuses an authentication time further ahead of the minting clock than the skew: invalid_grant, nothing minted, warned", async () => {
+		const logger = makeLogger();
+		const harness = makeHarness({
+			logger,
+			store: pollingWith((nowMs) => ({ authTimeMs: nowMs + DEFAULT_CLOCK_SKEW_MS + 1_000 })),
+		});
+		const { result } = await approvedAndPolled(harness);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approving session's authentication time cannot be read; start a new device authorization request",
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ clientId: CLIENT_ID }),
+			"auth_time_ahead_of_clock",
+		);
+	});
+
 	it.each([
-		[
-			"further ahead of the minting clock than the skew",
-			(nowMs: number) => nowMs + DEFAULT_CLOCK_SKEW_MS + 1_000,
-		],
 		["before the epoch", () => -1_000],
 		["a fraction before the epoch", () => -0.5],
 		["a fraction of a millisecond", (nowMs: number) => nowMs - 60_000.5],
@@ -1177,7 +1347,7 @@ describe("the token carries the approving session's authentication", () => {
 		["NaN", () => Number.NaN],
 		["null", () => null],
 	])(
-		"refuses an authentication time %s: invalid_grant, nothing minted, warned",
+		"refuses an authentication time %s as a record it cannot read: invalid_grant, nothing minted, logged",
 		async (_label, authTimeMs) => {
 			const logger = makeLogger();
 			const harness = makeHarness({
@@ -1185,16 +1355,10 @@ describe("the token carries the approving session's authentication", () => {
 				store: pollingWith((nowMs) => ({ authTimeMs: authTimeMs(nowMs) })),
 			});
 			const { result } = await approvedAndPolled(harness);
-			expect(result).toEqual({
-				status: 400,
-				error: "invalid_grant",
-				errorDescription:
-					"the approving session's authentication time cannot be read; start a new device authorization request",
-			});
-			expect(logger.warn).toHaveBeenCalledTimes(1);
-			expect(logger.warn).toHaveBeenCalledWith(
-				expect.objectContaining({ clientId: CLIENT_ID }),
-				"auth_time_ahead_of_clock",
+			expect(result).toEqual(UNREADABLE_APPROVAL);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, refused: "malformed", field: "authTimeMs" },
+				"device_code_grant_record_unreadable",
 			);
 		},
 	);
@@ -1222,8 +1386,11 @@ describe("the token carries the approving session's authentication", () => {
 		const logger = makeLogger();
 		const harness = makeHarness({ logger, store: throwingOn("authTimeMs") });
 		const { result } = await approvedAndPolled(harness);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
-		expect(logger.warn).toHaveBeenCalledWith({ clientId: CLIENT_ID }, "auth_time_ahead_of_clock");
+		expect(result).toEqual(UNREADABLE_APPROVAL);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ clientId: CLIENT_ID, refused: "malformed", field: "authTimeMs" },
+			"device_code_grant_record_unreadable",
+		);
 	});
 
 	it.each([
@@ -1262,6 +1429,280 @@ describe("the token carries the approving session's authentication", () => {
 	});
 });
 
+describe("a record the store answers that cannot be read", () => {
+	const BROKEN: ReadonlyArray<readonly [string, Broken]> = [
+		["clientId", "throws"],
+		["clientId", { value: 42 }],
+		["subject", "throws"],
+		["subject", { value: 42 }],
+		["grantedScope", "throws"],
+		["grantedScope", { value: "openid profile" }],
+		["approvedAtMs", "throws"],
+		["approvedAtMs", { value: "1800000000000" }],
+		["status", "throws"],
+		["userCode", "throws"],
+		["expiresAtMs", { value: Number.NaN }],
+		["intervalSeconds", "throws"],
+		["requestedScope", { value: ["openid admin"] }],
+		["requestedScope", { value: [""] }],
+	];
+
+	it.each(BROKEN)(
+		"refuses an approval whose %s is %o at the poll: invalid_grant, nothing minted, logged",
+		async (field, broken) => {
+			const logger = makeLogger();
+			const { app, poll } = makeHarness({
+				logger,
+				store: answeringBroken("poll", field, broken),
+			});
+			const started = await startDevice(app);
+			await verify(app, { action: "approve", user_code: started.body.user_code });
+			const { result } = await poll(started.body.device_code as string);
+			expect(result).toEqual(UNREADABLE_APPROVAL);
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, refused: "malformed", field },
+				"device_code_grant_record_unreadable",
+			);
+			// The refused poll consumed the approval: the code is gone.
+			const again = await poll(started.body.device_code as string);
+			expect(again.result).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "unknown or already-used device_code",
+			});
+		},
+	);
+
+	it("refuses an approved poll that answers no record at all", async () => {
+		const logger = makeLogger();
+		const inner = createMemoryDeviceCodeStore();
+		const store = {
+			...inner,
+			poll: async (code: string, nowMs: number) => {
+				const outcome = await inner.poll(code, nowMs);
+				return outcome.status === "approved"
+					? { status: "approved", authorization: null }
+					: outcome;
+			},
+		} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+		const { app, poll } = makeHarness({ logger, store });
+		const started = await startDevice(app);
+		await verify(app, { action: "approve", user_code: started.body.user_code });
+		const { result } = await poll(started.body.device_code as string);
+		expect(result).toEqual(UNREADABLE_APPROVAL);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ clientId: CLIENT_ID, refused: "not_an_object" },
+			"device_code_grant_record_unreadable",
+		);
+	});
+
+	it.each(BROKEN)(
+		"answers a lookup whose record's %s is %o with 503, logged at error",
+		async (field, broken) => {
+			const logger = makeLogger();
+			const { app } = makeHarness({
+				logger,
+				store: answeringBroken("findPendingByUserCode", field, broken),
+			});
+			const started = await startDevice(app);
+			const res = await verify(app, { action: "lookup", user_code: started.body.user_code });
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "the device authorization store is unavailable; retry later",
+			});
+			expect(logger.error).toHaveBeenCalledWith(
+				{ action: "lookup", refused: "malformed", field },
+				"device_verification_record_unreadable",
+			);
+		},
+	);
+
+	it.each(["approve", "deny"] as const)(
+		"answers a %s whose recorded decision cannot be read with 503, audited as an unknown outcome",
+		async (action) => {
+			const logger = makeLogger();
+			const { sink, events } = makeSink();
+			const { app } = makeHarness({
+				logger,
+				auditSink: sink,
+				store: answeringBroken(action, "clientId", "throws"),
+			});
+			const started = await startDevice(app);
+			const res = await verify(app, { action, user_code: started.body.user_code });
+			await settle();
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			expect(logger.error).toHaveBeenCalledWith(
+				{ action, refused: "malformed", field: "clientId" },
+				"device_verification_record_unreadable",
+			);
+			expect(events.map((event) => event.type)).toEqual(["device.decision_outcome_unknown"]);
+			expect(events[0]).toMatchObject({ subject: "user-1", details: { action } });
+		},
+	);
+});
+
+describe("a store answer that cannot be read around its record", () => {
+	/** A memory store whose `method` runs, then answers what `answer` builds instead. */
+	const answering = (method: "poll" | "approve" | "deny", answer: () => unknown) => {
+		const inner = createMemoryDeviceCodeStore();
+		const run = inner[method] as (...args: unknown[]) => Promise<unknown>;
+		return {
+			...inner,
+			[method]: async (...args: unknown[]) => {
+				await run(...args);
+				return answer();
+			},
+		} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+	};
+
+	const throwingOn = (field: string, rest: Record<string, unknown>): object =>
+		Object.defineProperty({ ...rest }, field, {
+			enumerable: true,
+			get() {
+				throw new Error(`${field} unreadable`);
+			},
+		});
+
+	const STORE_UNAVAILABLE = {
+		status: 503,
+		error: "temporarily_unavailable",
+		errorDescription: "the device authorization store is unavailable; retry later",
+	} as const;
+
+	const POLL_ANSWERS: ReadonlyArray<readonly [string, () => unknown, Record<string, unknown>]> = [
+		["null", () => null, { refused: "outcome_not_an_object" }],
+		["a string", () => "approved", { refused: "outcome_not_an_object" }],
+		[
+			"an unknown status",
+			() => ({ status: "granted" }),
+			{ refused: "outcome_malformed", field: "status" },
+		],
+		[
+			"a status whose read throws",
+			() => throwingOn("status", {}),
+			{ refused: "outcome_malformed", field: "status" },
+		],
+		[
+			"a slow_down with a text interval",
+			() => ({ status: "slow_down", intervalSeconds: "10 seconds; retry" }),
+			{ refused: "outcome_malformed", field: "intervalSeconds" },
+		],
+		[
+			"a slow_down with no interval",
+			() => ({ status: "slow_down" }),
+			{ refused: "outcome_malformed", field: "intervalSeconds" },
+		],
+		[
+			"a slow_down with a negative interval",
+			() => ({ status: "slow_down", intervalSeconds: -5 }),
+			{ refused: "outcome_malformed", field: "intervalSeconds" },
+		],
+		[
+			"a slow_down whose interval's read throws",
+			() => throwingOn("intervalSeconds", { status: "slow_down" }),
+			{ refused: "outcome_malformed", field: "intervalSeconds" },
+		],
+	];
+
+	it.each(POLL_ANSWERS)(
+		"answers a poll the store answers with %s as a store outage: 503, logged at error",
+		async (_label, answer, logged) => {
+			const logger = makeLogger();
+			const { app, poll } = makeHarness({ logger, store: answering("poll", answer) });
+			const started = await startDevice(app);
+			const { result } = await poll(started.body.device_code as string);
+			expect(result).toEqual(STORE_UNAVAILABLE);
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, ...logged },
+				"device_code_grant_record_unreadable",
+			);
+		},
+	);
+
+	it("still answers a readable slow_down with its interval", async () => {
+		const { app, poll } = makeHarness({
+			store: answering("poll", () => ({ status: "slow_down", intervalSeconds: 15 })),
+		});
+		const started = await startDevice(app);
+		const { result } = await poll(started.body.device_code as string);
+		expect(result).toEqual({
+			status: 400,
+			error: "slow_down",
+			errorDescription: "polling too frequently; the interval is now 15 seconds",
+		});
+	});
+
+	const DECISION_ANSWERS: ReadonlyArray<readonly [string, () => unknown, Record<string, unknown>]> =
+		[
+			["null", () => null, { refused: "outcome_not_an_object" }],
+			[
+				"an unknown status",
+				() => ({ status: "done" }),
+				{ refused: "outcome_malformed", field: "status" },
+			],
+			[
+				"an already_decided with a current no status holds",
+				() => ({ status: "already_decided", current: "<b>approved</b>" }),
+				{ refused: "outcome_malformed", field: "current" },
+			],
+			[
+				"an already_decided that is still pending",
+				() => ({ status: "already_decided", current: "pending" }),
+				{ refused: "outcome_malformed", field: "current" },
+			],
+			[
+				"an already_decided whose current's read throws",
+				() => throwingOn("current", { status: "already_decided" }),
+				{ refused: "outcome_malformed", field: "current" },
+			],
+		];
+
+	for (const action of ["approve", "deny"] as const) {
+		it.each(DECISION_ANSWERS)(
+			`answers a ${action} the store answers with %s with 503, audited as an unknown outcome`,
+			async (_label, answer, logged) => {
+				const logger = makeLogger();
+				const { sink, events } = makeSink();
+				const { app } = makeHarness({
+					logger,
+					auditSink: sink,
+					store: answering(action, answer),
+				});
+				const started = await startDevice(app);
+				const res = await verify(app, { action, user_code: started.body.user_code });
+				await settle();
+				expect(res.status).toBe(503);
+				expect(res.body).toEqual({
+					error: "temporarily_unavailable",
+					error_description: "the device authorization store is unavailable; retry later",
+				});
+				expect(logger.error).toHaveBeenCalledWith(
+					{ action, ...logged },
+					"device_verification_record_unreadable",
+				);
+				expect(events.map((event) => event.type)).toEqual(["device.decision_outcome_unknown"]);
+			},
+		);
+	}
+
+	it("still answers a readable already_decided with the decision it holds", async () => {
+		const { app } = makeHarness({
+			store: answering("approve", () => ({ status: "already_decided", current: "denied" })),
+		});
+		const started = await startDevice(app);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(409);
+		expect(res.body).toEqual({
+			error: "already_decided",
+			error_description: "this code was already denied",
+		});
+	});
+});
+
 describe("the access-token lifetime it is built with", () => {
 	it("refuses one that is not a positive whole number of seconds, when it is built", () => {
 		// `createDeviceCodeGrant` is public, so the lifetime can arrive without
@@ -1275,6 +1716,7 @@ describe("the access-token lifetime it is built with", () => {
 						store: createMemoryDeviceCodeStore(),
 						keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 						accessTokenExpiresIn,
+						grantPolicy: undefined,
 					}),
 				String(accessTokenExpiresIn),
 			).toThrow(RangeError);
@@ -1291,6 +1733,7 @@ describe("the access-token lifetime it is built with", () => {
 				store: createMemoryDeviceCodeStore(),
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 				accessTokenExpiresIn,
+				grantPolicy: undefined,
 			});
 		expect(() => build(31_536_001)).toThrow(RangeError);
 		expect(() => build(31_536_000)).not.toThrow();
@@ -1633,13 +2076,14 @@ describe("the session check, further", () => {
 		expect(line.err).not.toBeInstanceOf(Error);
 	});
 
-	it("spends none of the subject's budget on a session that has ended", async () => {
-		const rateLimiter = createMemoryRateLimiter({
-			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		});
+	it("spends none of the subject's attempts on a session that has ended", async () => {
+		const clock = makeClock();
+		const attemptCounter = createMemoryAttemptCounter({ now: clock.now });
+		const attemptLimit = { limit: 1, windowSeconds: 300 };
 		const dead = makeHarness({
-			rateLimiter,
+			clock,
+			attemptCounter,
+			attemptLimit,
 			session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-gone" },
 		});
 		for (let i = 0; i < 3; i++) {
@@ -1647,7 +2091,7 @@ describe("the session check, further", () => {
 				401,
 			);
 		}
-		const live = makeHarness({ rateLimiter });
+		const live = makeHarness({ clock, attemptCounter, attemptLimit });
 		expect((await verify(live.app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(404);
 	});
 
@@ -1707,11 +2151,7 @@ describe("the session check, further", () => {
 	it("writes the rate-limited warning to core's console logger when no logger is wired", async () => {
 		const spy = vi.spyOn(consoleLogger, "warn").mockImplementation(() => {});
 		try {
-			const rateLimiter = createMemoryRateLimiter({
-				limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-			});
-			const { app } = makeHarness({ rateLimiter });
+			const { app } = makeHarness({ attemptLimit: { limit: 1, windowSeconds: 300 } });
 			await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(429);
 			expect(spy).toHaveBeenCalledWith(
@@ -1728,10 +2168,8 @@ describe("the session check, further", () => {
 			createDeviceVerificationHandler({
 				store: createMemoryDeviceCodeStore(),
 				settings,
-				rateLimiter: createMemoryRateLimiter({
-					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				}),
+				attemptLimit: SHIPPED_ATTEMPT_LIMIT,
+				deploymentMode: "single",
 				requireEmailVerified: false,
 			} as never),
 		).toThrow(/userSessionStore/);
@@ -1769,6 +2207,129 @@ describe("a subject revocation between the approval and the poll", () => {
 			errorDescription:
 				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
 		});
+	});
+
+	it("refuses the poll when the approving session authenticated at or before a boundary its approval postdates", async () => {
+		// Admission saw no boundary; the boundary is stamped, and the clock
+		// moves past it, while the attempt is counted, so the approval's own
+		// instant postdates the boundary and only the session's does not.
+		const subjectRevocation = boundariesAsSet();
+		const clock = makeClock(APPROVAL);
+		const inner = createMemoryAttemptCounter({ now: clock.now });
+		const counter: AttemptCounter = {
+			consume: async (key, spec) => {
+				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 2_000), FAR);
+				clock.advance(5_000);
+				return inner.consume(key, spec);
+			},
+		};
+		const harness = makeHarness({ clock, attemptCounter: counter, subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+		});
+	});
+
+	it("refuses an approval at or before the boundary whatever authentication time it records", async () => {
+		const subjectRevocation = boundariesAsSet();
+		const harness = makeHarness({
+			subjectRevocation,
+			store: answeringBroken("poll", "authTimeMs", { value: APPROVAL + 9_000 }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	it("honours an approval whose session authenticated after the boundary", async () => {
+		const subjectRevocation = boundariesAsSet();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const harness = makeHarness({ subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+		expect(result).toHaveProperty("tokens.access_token");
+	});
+
+	it("refuses an approval that records no authentication time while a boundary is in force", async () => {
+		// The approval's own instant postdates the boundary; the session's
+		// authentication, which the boundary is held against, cannot be shown to.
+		const subjectRevocation = boundariesAsSet();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const harness = makeHarness({
+			subjectRevocation,
+			store: answeringBroken("poll", "authTimeMs", { value: undefined }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+		});
+	});
+
+	it("honours an approval that records no authentication time while no boundary is in force", async () => {
+		const harness = makeHarness({
+			subjectRevocation: boundariesAsSet(),
+			store: answeringBroken("poll", "authTimeMs", { value: undefined }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+	});
+
+	it.each([
+		["with a boundary in force", true],
+		["with no boundary", false],
+	])(
+		"refuses an approval recorded further ahead of the poll's clock than the skew, %s",
+		async (_label, withBoundary) => {
+			// A far-future instant would postdate any boundary.
+			const subjectRevocation = boundariesAsSet();
+			const logger = makeLogger();
+			const harness = makeHarness({
+				subjectRevocation,
+				logger,
+				store: answeringBroken("poll", "approvedAtMs", {
+					value: APPROVAL + 10_000 + DEFAULT_CLOCK_SKEW_MS + 1_000,
+				}),
+			});
+			const deviceCode = await approvedDevice(harness);
+			if (withBoundary) {
+				// Before the session's authentication: only the future approval
+				// instant is left for the clock check to refuse.
+				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+			}
+			const { result } = await harness.poll(deviceCode);
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					"the approval's time is ahead of this server's clock; start a new device authorization request",
+			});
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, aheadMs: DEFAULT_CLOCK_SKEW_MS + 1_000 },
+				"device_approval_ahead_of_clock",
+			);
+		},
+	);
+
+	it("honours an approval recorded within the skew ahead of the poll's clock", async () => {
+		const harness = makeHarness({
+			subjectRevocation: boundariesAsSet(),
+			store: answeringBroken("poll", "approvedAtMs", {
+				value: APPROVAL + 10_000 + DEFAULT_CLOCK_SKEW_MS,
+			}),
+		});
+		const deviceCode = await approvedDevice(harness);
+		expect((await harness.poll(deviceCode)).result.status).toBe(200);
 	});
 
 	it("honours an approval given after the boundary", async () => {
@@ -1818,6 +2379,48 @@ describe("a subject revocation between the approval and the poll", () => {
 		const harness = makeHarness({ subjectRevocation, store: legacy as never });
 		const deviceCode = await approvedDevice(harness);
 		expect((await harness.poll(deviceCode)).result.status).toBe(200);
+	});
+
+	it("mints a token the boundary covers when the boundary is stamped while the poll reads it", async () => {
+		// The reader answers what it read before the stamp, and replies after
+		// the clock has moved on: the token's `iat` must still fall at or
+		// before the boundary, so every surface that checks `iat` refuses it.
+		const inner = boundariesAsSet();
+		const clock = makeClock(APPROVAL);
+		let stamped: Date | null = null;
+		// Armed for the poll's read only: verification's admission reads it too.
+		let armed = false;
+		const subjectRevocation: SubjectRevocation = {
+			kind: "stamped-while-read",
+			revokeBefore: (...args) => inner.revokeBefore(...args),
+			revokedBefore: async (subject) => {
+				const read = await inner.revokedBefore(subject);
+				if (!armed) return read;
+				armed = false;
+				clock.advance(1_000);
+				stamped = new Date(clock.now());
+				await inner.revokeBefore(subject, stamped, FAR);
+				clock.advance(4_000);
+				return read;
+			},
+		};
+		const harness = makeHarness({ clock, subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		armed = true;
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+		const accessToken = (result as { tokens: { access_token: string } }).tokens.access_token;
+		const claims = JSON.parse(
+			Buffer.from(accessToken.split(".")[1] as string, "base64url").toString("utf8"),
+		) as { iat: number };
+		expect(stamped).not.toBeNull();
+		expect(
+			coveredByRevocationBoundary(
+				new Date(claims.iat * 1000),
+				stamped,
+				DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+			),
+		).toBe(true);
 	});
 
 	it("answers a boundary it cannot read at the poll with 503, logged once at error", async () => {

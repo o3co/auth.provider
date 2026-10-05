@@ -343,12 +343,12 @@ describe("InMemoryClientRepository", () => {
 			expect(parse([uri]).success).toBe(false);
 		});
 
-		it("names the field and the offending entry when it refuses", () => {
+		it("names the field and the offending entry's position when it refuses, never the URI", () => {
 			const result = parse(["javascript:alert(1)"]);
 			expect(result.success).toBe(false);
 			const message = result.success ? "" : (result.error.issues[0]?.message ?? "");
-			expect(message).toContain("postLogoutRedirectUris");
-			expect(message).toContain("javascript:alert(1)");
+			expect(message).toContain("postLogoutRedirectUris[0]: ");
+			expect(message).not.toContain("alert(1)");
 		});
 
 		it("leaves backchannelLogoutUri and frontchannelLogoutUri on http/https", () => {
@@ -366,6 +366,63 @@ describe("InMemoryClientRepository", () => {
 					frontchannelLogoutUri: "com.example.app:/frontchannel",
 				}).success,
 			).toBe(false);
+		});
+	});
+
+	// Front-channel logout sets `iss` and `sid` on the registered URI's query:
+	// a registered one would be replaced, or read by the client as this
+	// server's own when no `sid` is sent.
+	describe("frontchannelLogoutUri query names", () => {
+		const baseEntry = {
+			tokenEndpointAuthMethod: "client_secret_basic" as const,
+			clientSecret: "secret",
+			allowedRedirectUris: [],
+			allowedScopes: [],
+		};
+		const parse = (frontchannelLogoutUri: string) =>
+			ClientEntrySchema.safeParse({ ...baseEntry, frontchannelLogoutUri });
+		const messages = (result: ReturnType<typeof parse>) =>
+			result.success ? [] : result.error.issues.map((issue) => issue.message);
+
+		it.each([
+			["iss", "https://rp.example/fc?iss=x"],
+			["sid", "https://rp.example/fc?sid=x"],
+			["sid", "https://rp.example/fc?a=1&SID=x"],
+			["iss", "https://rp.example/fc?_Iss=x"],
+			["sid", "http://localhost:3000/fc?s-id"],
+		])(
+			"refuses a query carrying %s, naming the field and the parameter, never the URI",
+			(parameter, uri) => {
+				const result = parse(uri);
+				expect(result.success).toBe(false);
+				const found = messages(result);
+				expect(
+					found.some(
+						(m) => m.startsWith("frontchannelLogoutUri: ") && m.includes(`"${parameter}"`),
+					),
+				).toBe(true);
+				for (const message of found) expect(message).not.toContain("rp.example");
+			},
+		);
+
+		it.each([
+			"https://rp.example/fc?%73id=x",
+			"https://rp.example/fc?i%73s=x",
+			"https://rp.example/fc?a=1;sid=x",
+			"https://rp.example/fc?=x",
+		])("refuses a query name outside [A-Za-z0-9_-]: %s", (uri) => {
+			const result = parse(uri);
+			expect(result.success).toBe(false);
+			expect(messages(result).some((m) => m.startsWith("frontchannelLogoutUri: "))).toBe(true);
+		});
+
+		it.each([
+			"https://rp.example/fc",
+			"https://rp.example/fc?tenant=a&state=b&code=c",
+			"https://rp.example/fc?x=iss&y=sid",
+			"http://localhost:3000/fc?session_id=1",
+		])("accepts %s", (uri) => {
+			expect(parse(uri).success).toBe(true);
 		});
 	});
 

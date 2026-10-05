@@ -166,6 +166,22 @@ describe("the paths core's settings moved from", () => {
 		expect(err.message).not.toMatch(/\(environment variable [A-Z0-9_]+\)/);
 	});
 
+	it("refuses sessionRequirements.secondFactorAuthority, naming core.sessionRequirements.secondFactorAuthority and no variable", async () => {
+		const err = await refusal(boot({}, 'sessionRequirements.secondFactorAuthority = "mfa"\n'));
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "core",
+					from: "sessionRequirements.secondFactorAuthority",
+					to: "core.sessionRequirements.secondFactorAuthority",
+				},
+			],
+		});
+		expect(err.message).not.toMatch(/\(environment variable [A-Z0-9_]+\)/);
+	});
+
 	it.each([
 		['deployment = "old-value-5e2d"', "deployment", "core.deployment"],
 		["deployment.other = 1", "deployment.other", "core.deployment.other"],
@@ -249,8 +265,11 @@ describe("the federations, under core.federations", () => {
 	});
 
 	it("refuses an enabled federation without the stores it needs, naming it under core.federations", async () => {
-		const err = await refusal(boot({}, "core.federations.upstream.enabled = true\n"));
+		const err = await refusal(
+			boot({}, "core.federations.upstream.enabled = true\ncore.federations.upstream.type = oidc\n"),
+		);
 
+		expect(err.reason).toBe("federation-stores-incomplete");
 		expect(err.message).toContain("core.federations.upstream");
 	});
 

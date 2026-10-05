@@ -44,6 +44,8 @@ describe("the federation-grants section", () => {
 			refreshLockTtlMs: 30000,
 			lockWaitMs: 5000,
 			persistRetryBudgetMs: 3000,
+			rotationBudget: 24,
+			rotationWindow: 3600,
 			allowKeepOnSubjectRevocation: false,
 			identityLookup: "unsupported",
 			consent: { url: "/consent/grants" },
@@ -102,6 +104,19 @@ describe("the federation-grants section", () => {
 		// hand out tokens with milliseconds left.
 		for (const value of ["thirty", "", "1e3", "0x10", -1, 0, 1.5, null, true, false, [], [45]]) {
 			expect(() => parse({ maxExpiresIn: value }), JSON.stringify(value)).toThrow();
+		}
+	});
+
+	it("reads the rotation budget's count and window as it reads the durations", () => {
+		expect(parse({ rotationBudget: "2", rotationWindow: " 600 " })).toStrictEqual({
+			rotationBudget: 2,
+			rotationWindow: 600,
+		});
+		// A budget of 0 admits nothing, and a window of 0 reopens on every take.
+		for (const key of ["rotationBudget", "rotationWindow"]) {
+			for (const value of ["two", "", "1e3", "0x10", -1, 0, 1.5, null, true, [], [45]]) {
+				expect(() => parse({ [key]: value }), `${key} ${JSON.stringify(value)}`).toThrow();
+			}
 		}
 	});
 

@@ -36,7 +36,7 @@ import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { oauthModule } from "#/module.mjs";
+import { oauthEndpointsModule } from "#/module.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { withOauthCaptures } from "./_helpers/sections.mjs";
@@ -462,7 +462,7 @@ describe("oauthModule — refreshTokenFamilyRevocation composition via createTes
 
 		const handle = await createTestApp({
 			modules: [
-				oauthModule({ config }),
+				oauthEndpointsModule,
 				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,

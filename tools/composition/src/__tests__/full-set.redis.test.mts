@@ -59,6 +59,7 @@ import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TestRedis, testRedis } from "../../../../packages/redis/__tests__/support/redis.mts";
 import {
+	addFactorRecord,
 	BINDER,
 	browser,
 	composeFullSet,
@@ -66,6 +67,7 @@ import {
 	type FullSet,
 	type FullSetOptions,
 	memoryWebAuthnCredentialStoreModule,
+	removeFactorRecords,
 	seedTotp,
 	TV,
 } from "./full-set.fixture.mts";
@@ -235,6 +237,27 @@ describe("two replicas on one Redis database share every flow's state", () => {
 		expect(tokens.status).toBe(200);
 	});
 
+	it("a subject's device verification attempts are counted once across replicas, on the Redis attempt counter", async () => {
+		// Earlier tests approve as the same subject: start from no counts.
+		await inspect.flushdb();
+		const hocon = "device-grant.rateLimit { limit = 2, windowSeconds = 300 }";
+		const a = await replica({ operatorHocon: hocon });
+		const b = await replica({ operatorHocon: hocon });
+		expect(a.handle.components.attemptCounter).toBeDefined();
+		const { cookies } = await login(a.app);
+		const lookup = (app: FullSet["app"]) =>
+			postWith(app, cookies, "/oauth/device/verification", {
+				action: "lookup",
+				user_code: "BCDF-GHJK",
+			});
+		expect((await lookup(a.app)).status).toBe(404);
+		expect((await lookup(b.app)).status).toBe(404);
+		const limited = await lookup(a.app);
+		expect(limited.status).toBe(429);
+		expect(limited.body.error).toBe("slow_down");
+		expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+	});
+
 	it("a DPoP proof accepted on one replica is refused on the other", async () => {
 		const a = await replica();
 		const b = await replica();
@@ -261,7 +284,7 @@ describe("two replicas on one Redis database share every flow's state", () => {
 				mfaTransactionStore: MfaTransactionStore;
 			};
 		// A factor enrolled through one replica's store is the other's too.
-		await components(a).mfaFactorStore.create({
+		await addFactorRecord(components(a).mfaFactorStore, {
 			id: "f-alice",
 			subject: ALICE.sub,
 			kind: "totp",
@@ -326,8 +349,7 @@ describe("two replicas on one Redis database share every flow's state", () => {
 		// database are set aside for the test, and put back after it, whatever it came to.
 		const factors = (a.handle.components as unknown as { mfaFactorStore: MfaFactorStore })
 			.mfaFactorStore;
-		const setAside = await factors.list(ALICE.sub);
-		for (const record of setAside) await factors.remove(ALICE.sub, record.id);
+		const setAside = await removeFactorRecords(factors, ALICE.sub);
 		try {
 			const create = vi.spyOn(sessions(a), "create");
 			const page = browser();
@@ -369,10 +391,8 @@ describe("two replicas on one Redis database share every flow's state", () => {
 				200,
 			);
 		} finally {
-			for (const record of await factors.list(ALICE.sub)) {
-				await factors.remove(ALICE.sub, record.id);
-			}
-			for (const record of setAside) await factors.create(record);
+			await removeFactorRecords(factors, ALICE.sub);
+			for (const record of setAside) await addFactorRecord(factors, record);
 		}
 	});
 

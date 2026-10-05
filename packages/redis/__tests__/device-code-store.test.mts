@@ -287,6 +287,24 @@ describe("redis DeviceCodeStore — the approving session's amr and authenticati
 			expect(polled.authorization).toHaveProperty("authTimeMs", undefined);
 		}
 	});
+
+	it.each([
+		["epoch zero", "0"],
+		["the last instant a Date holds", "8640000000000000"],
+	])("reads a stored authentication time at %s as that instant", async (_label, value) => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await store.create(seed);
+		await store.approve({
+			userCode: seed.userCode,
+			subject: "user-1",
+			nowMs: NOW,
+			authTime: new Date(NOW - 60_000),
+		});
+		await raw.hset(keysAt(prefix).codeKey, "authTimeMs", value);
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		expect(polled.status === "approved" && polled.authorization.authTimeMs).toBe(Number(value));
+	});
 });
 
 /**

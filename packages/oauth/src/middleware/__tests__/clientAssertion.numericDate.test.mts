@@ -96,7 +96,7 @@ const verify = async (dates: Partial<Record<"exp" | "iat" | "nbf", string>>) => 
 		tokenEndpoint: TOKEN_ENDPOINT,
 		replaySeenSet: createMemoryReplaySeenSet(),
 		logger: logger as unknown as Logger,
-		fetch: createOutboundFetch({ source: "registration" }),
+		fetch: createOutboundFetch({ config: {}, source: "registration" }),
 	}).verify(
 		{
 			client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,

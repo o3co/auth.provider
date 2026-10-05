@@ -262,9 +262,10 @@ describe("GET /oauth/authorize", () => {
 
 describe("GET /session/oauth/federation/google", () => {
 	// NOTE: Development config has Google federation disabled (google.enabled: false).
-	// The googleEnabled check runs first and returns 404, so redirect_to validation
-	// tests cannot run in this environment. Validation logic is identical to
-	// POST /session/login and covered by those tests.
+	// No federation is registered under that name, so the route answers 404 before
+	// redirect_to is validated, and redirect_to validation tests cannot run in this
+	// environment. Validation logic is identical to POST /session/login and covered
+	// by those tests.
 
 	it("returns 404 when Google federation is disabled", async () => {
 		const res = await client.get(

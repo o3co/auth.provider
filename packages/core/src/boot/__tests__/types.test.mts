@@ -32,8 +32,8 @@ import type {
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
 	DuplicateSecondFactorAuthorityDetails,
-	FederationRedirectPolicyUnpairedDetails,
 	FederationStoresIncompleteDetails,
+	FederationTypeUnhandledDetails,
 	GrantPolicyWithoutIssuerDetails,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
@@ -44,6 +44,8 @@ import type {
 	ProvidesFactoryFailedDetails,
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
+	SecondFactorAuthorityNotDeclaredDetails,
+	SessionRequirementMissingDetails,
 	SyntheticKeyCollisionDetails,
 	UnknownContributionKindDetails,
 } from "../types.mjs";
@@ -71,7 +73,7 @@ describe("BootStage", () => {
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 39 reason literals", () => {
+	it("contains exactly the 40 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -93,9 +95,9 @@ describe("BootErrorReason", () => {
 			| "contribute-factory-failed"
 			| "route-order-cycle"
 			| "route-order-target-missing"
-			| "federation-redirect-policy-unpaired"
 			| "grant-policy-without-issuer"
 			| "federation-stores-incomplete"
+			| "federation-type-unhandled"
 			| "discovery-document-invalid"
 			| "replica-unsafe-adapter"
 			| "component-absence-undeclared"
@@ -103,6 +105,7 @@ describe("BootErrorReason", () => {
 			| "session-requirements-undeclared"
 			| "session-requirement-missing"
 			| "duplicate-second-factor-authority"
+			| "second-factor-authority-not-declared"
 			| "reserved-component-key"
 			| "module-section-path-invalid"
 			| "contribution-kind-guarded"
@@ -112,6 +115,7 @@ describe("BootErrorReason", () => {
 			| "authoritative-without-provides"
 			| "authoritative-component-overridden"
 			| "token-settings-lifetime-exceeds-configuration"
+			| "config-defaults-invalid"
 		>();
 	});
 });
@@ -229,16 +233,20 @@ describe("per-reason *Details discriminators", () => {
 		>().toEqualTypeOf<"route-order-target-missing">();
 	});
 
-	it("FederationRedirectPolicyUnpairedDetails.reason", () => {
-		expectTypeOf<
-			FederationRedirectPolicyUnpairedDetails["reason"]
-		>().toEqualTypeOf<"federation-redirect-policy-unpaired">();
-	});
-
 	it("GrantPolicyWithoutIssuerDetails.reason", () => {
 		expectTypeOf<
 			GrantPolicyWithoutIssuerDetails["reason"]
 		>().toEqualTypeOf<"grant-policy-without-issuer">();
+	});
+
+	it("FederationTypeUnhandledDetails lists each unhandled entry with the type it names, and the types handled", () => {
+		expectTypeOf<
+			FederationTypeUnhandledDetails["reason"]
+		>().toEqualTypeOf<"federation-type-unhandled">();
+		expectTypeOf<FederationTypeUnhandledDetails["unhandled"]>().toEqualTypeOf<
+			readonly { readonly federationName: string; readonly type: string }[]
+		>();
+		expectTypeOf<FederationTypeUnhandledDetails["handled"]>().toEqualTypeOf<readonly string[]>();
 	});
 
 	it("FederationStoresIncompleteDetails.reason", () => {
@@ -253,6 +261,28 @@ describe("per-reason *Details discriminators", () => {
 		>().toEqualTypeOf<"duplicate-second-factor-authority">();
 		expectTypeOf<DuplicateSecondFactorAuthorityDetails["requirements"]>().toEqualTypeOf<
 			readonly { readonly name: string; readonly module: string }[]
+		>();
+	});
+
+	it("SecondFactorAuthorityNotDeclaredDetails names the key, the requirement, its module when registered, and what is unmet", () => {
+		expectTypeOf<
+			SecondFactorAuthorityNotDeclaredDetails["reason"]
+		>().toEqualTypeOf<"second-factor-authority-not-declared">();
+		expectTypeOf<
+			SecondFactorAuthorityNotDeclaredDetails["configKey"]
+		>().toEqualTypeOf<"core.sessionRequirements.secondFactorAuthority">();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["name"]>().toEqualTypeOf<string>();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["module"]>().toEqualTypeOf<
+			string | undefined
+		>();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["unmet"]>().toEqualTypeOf<
+			readonly ("not-expected" | "not-registered" | "not-declared")[]
+		>();
+	});
+
+	it("SessionRequirementMissingDetails names the second-factor authority when it is among the missing", () => {
+		expectTypeOf<SessionRequirementMissingDetails["secondFactorAuthority"]>().toEqualTypeOf<
+			string | undefined
 		>();
 	});
 });

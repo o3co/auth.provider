@@ -18,16 +18,13 @@ import { describe, expect, it } from "vitest";
 import { resolveOAuthOptions } from "#/resolveOAuthOptions.mjs";
 
 describe("resolveOAuthOptions", () => {
-	it("carries every knob through from a schema-validated config", () => {
+	it("carries every knob through from the section the module parsed", () => {
 		const options = resolveOAuthOptions({
-			oauth: {
-				jwt: { issuer: "https://issuer.example", legacyTypAccept: true },
-				oidcMode: "dual",
-				requireEmailVerified: true,
-				grants: { authorization_code: {} },
-				nonce: { maxLength: 64 },
-				resourceIndicator: { enabled: true },
-			},
+			jwt: { issuer: "https://issuer.example", legacyTypAccept: true },
+			oidcMode: "dual",
+			requireEmailVerified: true,
+			nonce: { maxLength: 64 },
+			resourceIndicator: { enabled: true },
 		});
 
 		expect(options.issuer).toBe("https://issuer.example");
@@ -39,12 +36,10 @@ describe("resolveOAuthOptions", () => {
 		expect(options.resourceIndicatorEnabled).toBe(true);
 	});
 
-	it("tolerates a hand-built partial config (issuer only) and applies the defaults", () => {
-		// The shape router tests hand-build: no oauth.grants, no oidcMode —
-		// everything the zod schema would have required.
-		const options = resolveOAuthOptions({
-			oauth: { jwt: { issuer: "https://issuer.example" } },
-		});
+	it("tolerates a hand-built partial section (issuer only) and applies the defaults", () => {
+		// The shape router tests hand-build: no oidcMode, nothing else the
+		// module's schema would have required.
+		const options = resolveOAuthOptions({ jwt: { issuer: "https://issuer.example" } });
 
 		expect(options.issuer).toBe("https://issuer.example");
 		expect(options.legacyTypAccept).toBeUndefined();
@@ -56,7 +51,8 @@ describe("resolveOAuthOptions", () => {
 		expect(options.resourceIndicatorEnabled).toBe(false);
 	});
 
-	it("resolves a config with no oauth block at all to pure defaults", () => {
+	it("resolves no section at all, or an empty one, to pure defaults", () => {
+		expect(resolveOAuthOptions(undefined)).toEqual(resolveOAuthOptions({}));
 		const options = resolveOAuthOptions({});
 
 		expect(options.issuer).toBeUndefined();
@@ -73,10 +69,8 @@ describe("resolveOAuthOptions", () => {
 		// A hand-built config can carry an uncoerced env-var string. The strict
 		// `=== true` reads must not widen.
 		const options = resolveOAuthOptions({
-			oauth: {
-				requireEmailVerified: "true",
-				resourceIndicator: { enabled: "true" },
-			},
+			requireEmailVerified: "true",
+			resourceIndicator: { enabled: "true" },
 		});
 
 		expect(options.requireEmailVerified).toBe(false);
@@ -87,9 +81,7 @@ describe("resolveOAuthOptions", () => {
 		// A hand-built config bypasses the schema tombstone, so the resolver
 		// must not carry the stale key onto the options object — the /authorize
 		// handler has nothing to read even if an embedder still sets it.
-		const options = resolveOAuthOptions({
-			oauth: { authorize: { allowUnmarkedClients: true } },
-		});
+		const options = resolveOAuthOptions({ authorize: { allowUnmarkedClients: true } });
 
 		expect("allowUnmarkedClients" in options).toBe(false);
 	});
@@ -97,17 +89,15 @@ describe("resolveOAuthOptions", () => {
 	it("keeps issuer raw so checkCanonicalIssuer stays the single validator", () => {
 		// Non-string issuers must survive resolution untouched — the router's
 		// checkCanonicalIssuer call is what rejects them, with its own message.
-		expect(resolveOAuthOptions({ oauth: { jwt: { issuer: 123 } } }).issuer).toBe(123);
-		expect(resolveOAuthOptions({ oauth: { jwt: { issuer: "" } } }).issuer).toBe("");
+		expect(resolveOAuthOptions({ jwt: { issuer: 123 } }).issuer).toBe(123);
+		expect(resolveOAuthOptions({ jwt: { issuer: "" } }).issuer).toBe("");
 	});
 
 	it("resolves PKCE to required and S256 alone, whatever the configuration carries", () => {
 		const options = resolveOAuthOptions({
-			oauth: {
-				grants: {
-					authorization_code: {
-						pkce: { requireS256: false, supportedMethods: ["S256", "plain"] },
-					},
+			grants: {
+				authorization_code: {
+					pkce: { requireS256: false, supportedMethods: ["S256", "plain"] },
 				},
 			},
 		});
@@ -118,8 +108,7 @@ describe("resolveOAuthOptions", () => {
 
 describe("resolveOAuthOptions — Client ID Metadata Documents", () => {
 	const cimd = (config: Record<string, unknown>) =>
-		resolveOAuthOptions({ oauth: { clientIdMetadataDocuments: config } } as never)
-			.clientIdMetadataDocuments;
+		resolveOAuthOptions({ clientIdMetadataDocuments: config }).clientIdMetadataDocuments;
 
 	it("reads a list from an array, a comma-separated string, or neither", () => {
 		// HOCON gives an array; an environment override gives one string.
@@ -145,6 +134,35 @@ describe("resolveOAuthOptions — Client ID Metadata Documents", () => {
 		expect(cimd({ maxBytes: 1.5 }).maxBytes).toBeUndefined();
 		expect(cimd({ maxBytes: "not-a-number" }).maxBytes).toBeUndefined();
 		expect(cimd({}).maxBytes).toBeUndefined();
+	});
+
+	describe.each([
+		"maxBytes",
+		"timeoutMs",
+		"cacheMaxAgeMs",
+		"maxCacheEntries",
+		"staleIfErrorMs",
+		"negativeCacheMs",
+		"maxConcurrentFetches",
+	] as const)("%s", (key) => {
+		it.each([
+			["0x10"],
+			["1e3"],
+			["5.0"],
+			["+5"],
+			[true],
+			[""],
+			["  "],
+			["Infinity"],
+			[Number.POSITIVE_INFINITY],
+			[Number.NaN],
+		])("does not read %j as a bound", (value) => {
+			expect(cimd({ [key]: value })[key]).toBeUndefined();
+		});
+
+		it.each([[60], ["60"], [" 60 "]])("reads %j as 60", (value) => {
+			expect(cimd({ [key]: value })[key]).toBe(60);
+		});
 	});
 
 	it("is off unless the flag says exactly true", () => {

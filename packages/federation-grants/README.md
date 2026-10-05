@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-10-02
+Last updated: 2026-10-05
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -18,7 +18,7 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 
 - the client routes: the order of their guards (correlation id, throttle, body bound and parsing, client authentication), their answers and their error identifiers;
 - the browser half: the connect handle, the consent page's contract, and the checks the callback runs before a grant is activated;
-- the boot refusals of an enabled feature that is missing what it needs, and what a disabled deployment answers;
+- the boot refusals of an enabled feature that is missing what it needs;
 - the shutdown drain of work still in flight after a response (`federationGrantBackgroundModule`).
 
 **Does not own:**
@@ -140,6 +140,12 @@ say what each one means and what to do.
   time is `err` "not answered in time; no longer waited for"; a credential
   write retried within the persist budget is one line, with `attempts`. A
   lodging's `connection_not_configured` names the `connection` it asked for.
+  A grant the status route reads whose stored date holds no instant is the
+  grant store's outage too, as retrieval answers it: a consent instant the
+  status cannot be judged against is `step: "status"` with core's
+  `RangeError` as `err`; a date the answer cannot put on the wire is
+  `step: "inspect"`, `err` a `TypeError` naming its field on the wire. Never
+  the value.
 - **The browser's session that cannot be judged** — the session store, the
   subject's sessions boundary, or a session requirement that throws — is the
   same `503` or redirect, and its one line is session admission's:
@@ -190,53 +196,30 @@ say what each one means and what to do.
 - **The throttles** log and audit a limiter outage through core with the
   deployment's own logger and sink — `rate_limiter_failed_closed` /
   `rate_limiter_failed_open` and `rate_limit.unavailable`, tagged
-  `federation_grants` or `federation_grants_browser`. The module claims both
-  prefixes with no budget of its own (`rateLimitBudgets`), whether or not the
-  feature is enabled: the limiter's `limits` entry or its default applies,
-  and no other module can set a budget for them.
+  `federation_grants` or `federation_grants_browser`. While the feature is on,
+  the module claims both prefixes with no budget of its own
+  (`rateLimitBudgets`): the limiter's `limits` entry or its default applies,
+  and no other module can set a budget for them. Request volume is the
+  deployment's limiter's to bound: the module does not require one. With no
+  `rateLimiter` wired, both halves let every request through, and core's
+  policy for the slot refuses the boot (`component-absence-undeclared`) unless
+  `core.declaredAbsent` lists `"rateLimiter"`.
 
 ## Public API
 
 Exported from [`src/index.mts`](src/index.mts); the linked file holds each definition and its doc comment:
 
 - `federationGrantsModules` — the pair to install — and its two halves `federationGrantsModule` and `federationGrantBackgroundModule`, with `federationGrantsConfigSchema` — [`module.mts`](src/module.mts).
-- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication), for a root that mounts them itself; and what a disabled deployment mounts instead. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`. It requires `fetch`, the fetch for a `private_key_jwt` client's `jwksUri`: pass `createOutboundFetch({ config, source: "registration" })`, as the module does, so `core.outbound` applies.
+- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication), for a root that mounts them itself; and a 404 that names no feature, for a root that mounts the path itself while the feature is off. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`. It requires `fetch`, the fetch for a `private_key_jwt` client's `jwksUri`: pass `createOutboundFetch({ config, source: "registration" })`, as the module does, so `core.outbound` applies.
 - `createFederationGrantTokenHandler`, `FederationGrantTokenHandlerOptions` — [`tokenRoute.mts`](src/tokenRoute.mts); `createFederationGrantStatusHandler`, `FederationGrantStatusHandlerOptions` — [`statusRoute.mts`](src/statusRoute.mts). Single handlers, without that chain.
 - `createFederationGrantBackground`, `FederationGrantBackground`, `federationGrantsCleanupTailMs` — [`background.mts`](src/background.mts). The shutdown registry, and the tail its drain is registered with ([below](#shutting-down-without-losing-a-rotated-credential)).
 - `FEDERATION_GRANTS_MOUNT_PATH` — [`types.mts`](src/types.mts).
 
 The browser half is mounted only by the module. The store ports, the grant domain types and retrieval are core's and are not re-exported.
 
-## A disabled deployment names no feature and runs nothing
+## A disabled deployment registers nothing
 
-`federation-grants.enabled` defaults to `false`, and while it is false the package still mounts both of its paths, each answering every request with a `404` that says nothing about the feature.
-
-Under `/oauth/federation-grants`, the client routes' JSON shape:
-
-```http
-HTTP/1.1 404 Not Found
-Cache-Control: no-store
-Pragma: no-cache
-x-request-id: 4f1e…
-
-{"error":"not_found"}
-```
-
-Under `/session/federation-grants`, the browser half's shape — a navigation, so plain text and no redirect, and no `x-request-id`:
-
-```http
-HTTP/1.1 404 Not Found
-Cache-Control: no-store
-Pragma: no-cache
-Referrer-Policy: no-referrer
-Content-Type: text/plain; charset=utf-8
-
-Not found.
-```
-
-No description, deliberately. A body naming the feature would tell an unauthenticated caller that this deployment could do offline delegation if someone flipped one key. Nothing on either path parses a body, authenticates a client or reads a store either, so there is no timing to measure it by — and a deployment that leaves the feature off needs none of the components it would need to turn it on.
-
-What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. The difference is the headers and the content type, not what the body reveals. So the property this has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a 404 of its own. [`disabledRoutes.test.mts`](src/__tests__/disabledRoutes.test.mts) pins both shapes.
+`federation-grants.enabled` defaults to `false`, and it is the routes module's switch (`section.isEnabled`): while it is false, `federationGrantsModule` registers nothing — no route, admission action or rate-limit prefix — and reads none of the feature's configuration or components, so a deployment that leaves the feature off needs none of what it would need to turn it on. Its section is still parsed, and its old path still refused. Nothing is mounted under `/oauth/federation-grants` or `/session/federation-grants`: the host's own fallback answers both, as for a deployment that never installed the package, so nothing in the answer names the feature. A root that wants the client routes' JSON `404`, with its cache directives, while the feature is off mounts `createDisabledFederationGrantRouter` at `FEDERATION_GRANTS_MOUNT_PATH` itself. [`disabledRoutes.test.mts`](src/__tests__/disabledRoutes.test.mts) pins it.
 
 ## The routes a client calls
 
@@ -418,6 +401,16 @@ on the credential, whatever OAuth code its body names — a 503 saying
 `invalid_grant` does not end the credential, and one naming an interaction code
 is not the user's absence. A 429 is no outage.
 
+Each grant has a rotation budget: at most `federation-grants.rotationBudget`
+upstream refresh-token rotations (24 by default) in a window of
+`federation-grants.rotationWindow` seconds (3600 by default). The window
+opens when its first rotation is taken, and a rotation given back (a refresh
+the upstream provably did not act on) leaves it where it opened. With the
+budget spent, a good stored token is still answered; otherwise the answer is `429 rate_limited/provider` with
+`Retry-After` until the window closes. Each setting is a whole number of at
+least 1, refused at boot otherwise. The [operator
+runbook](../../docs/operator-runbook.md) says how to tune them.
+
 An unknown grant id, a grant belonging to another client and one belonging to
 another subject all answer the same `404` body, byte for byte.
 
@@ -527,11 +520,8 @@ admitted by core's session admission, on the cookie's claim, as the step's own
 action — `federation_grants.connect`, `federation_grants.consent` (the read
 and the answer) and `federation_grants.callback` (check 3, and again, with
 the same claim, just before the activation), each graded `use` as
-`federationGrantsModule` registers it — whether or not `federation-grants.enabled`
-is set, so `admission_actions_registered` lists them either way: a module's
-registration follows a switch only when the module decides, as it is built,
-whether it installs the admitting code, and this one reads its switch when the
-routes are built. Admission
+`federationGrantsModule` registers it while `federation-grants.enabled` is set;
+switched off, the module registers none of them. Admission
 reads the durable session behind the cookie — live, the cookie's own
 subject's, not past its `expiresAt` — the subject's sessions boundary through
 `subjectRevocation`, and the registered session requirements. What stays
@@ -878,23 +868,28 @@ It checks, in this order:
    that both claims are issued for your registration and account types, and
    the scope set Entra reports with `profile` added. Otherwise, choose
    `identityLookup = "unsupported"` and accept the loss of this one check.
-6. **Eligibility**: a refresh token, and an access token with a finite lifetime
-   within `maxAccessTokenLifetime`, of a type a route without a proof key can
-   present. The lifetime is read as a refresh's is (core's
-   `readUpstreamTokenLifetime`): both `expiresIn` and `expiresAt` must state
-   it, with life left when the answer arrives. An answer with only one of
-   them, or whose `expiresAt` has passed, is `upstream_token_ineligible`.
-7. **Scope containment**: nothing beyond what the user was shown. The
-   upstream's `scope` is read tolerantly by RFC 6749 §3.3's grammar (core's
-   `parseScopeTokens`, as every upstream answer is): whitespace separates, and
-   only scope-tokens count. An omitted `scope` means as requested; one that
-   names no scope-token is not an answer; an upstream that granted more is
-   refused, because a token cannot be narrowed after the fact.
+6. **Eligibility**: a refresh token, then an access token with a finite
+   lifetime within `maxAccessTokenLifetime`. The answer is read by the rule a
+   refresh's is (core's `readFederationGrantUpstreamAnswer`): each field once,
+   and a field that throws when read, or is not what its type says, makes the
+   answer `upstream_token_ineligible`, never an outage. Both `expiresIn` and
+   `expiresAt` must state the lifetime, with life left when the answer
+   arrives. An answer with only one of them, or whose `expiresAt` has passed,
+   is `upstream_token_ineligible`.
+7. **Scope containment, then the token type**, judged by the same rule, in
+   that order. Nothing beyond what the user was shown: the upstream's `scope`
+   is read tolerantly by RFC 6749 §3.3's grammar, where whitespace separates
+   and only scope-tokens count. An omitted or blank `scope` means as
+   requested; one that names no scope-token is `upstream_token_ineligible`;
+   an upstream that granted more is `scope_exceeded`, because a token cannot
+   be narrowed after the fact. Then the type: one a route without a proof key
+   can present, and required (RFC 6749 §5.1); any other, or none, is
+   `upstream_token_ineligible`.
 8. **Activation**, immediately after admitting the session again — a second
    admission with the same claim — and re-reading the current-intent pointer
    and the grants boundary. It replaces
    the authorization and the credentials together — the access token stored
-   as a refresh stores one (core's `federationGrantAccessToken`): obtained at
+   as a refresh stores one (built by the same rule): obtained at
    the exchange's start, and ending at the earlier of `expiresAt` and that
    start plus `expiresIn` — and clears with them the
    ineligibility marker and the stamp of a refresh the upstream refused for

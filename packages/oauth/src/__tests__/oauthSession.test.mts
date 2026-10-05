@@ -14,15 +14,30 @@
  * limitations under the License.
  */
 
-import { createSymmetricKeyStore, defineModule, type GrantHandler } from "@o3co/auth-provider-core";
-import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	BootError,
+	createSymmetricKeyStore,
+	defineModule,
+	type GrantHandler,
+} from "@o3co/auth-provider-core";
+import {
+	createTestApp,
+	createTestOAuthTokenSettings,
+	makeValidAppConfig,
+} from "@o3co/auth-provider-core/testing";
+import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
-import { oauthSessionModule } from "#/oauthSession.mjs";
+import { oauthSessionGrantModule, oauthSessionModule } from "#/oauthSession.mjs";
 import { capturing, withGrants } from "./_helpers/sections.mjs";
 
 /** `config` with the captures of the renames the module declares, as a resolution under an empty environment makes them. */
-const captured = <C extends object>(config: C): C =>
-	capturing(config, [oauthSessionModule({ config: config as never })]);
+const captured = <C extends object>(config: C): C => capturing(config, [oauthSessionGrantModule]);
+
+/**
+ * The `oauthTokenSettings` slot a composition without the oauth module fills
+ * itself: what the grant reads of `oauth {}`.
+ */
+const oauthTokenSettings = createTestOAuthTokenSettings();
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs
@@ -40,13 +55,13 @@ const keyStoreModule = defineModule({
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("oauthSessionModule", () => {
+describe("oauthSessionGrantModule", () => {
 	it("wires session liveness into the registered grant", async () => {
 		const config = withGrants(makeValidAppConfig(), { session: true });
 		const get = vi.fn(async () => null);
 		const handle = await createTestApp({
 			modules: [
-				oauthSessionModule({ config }),
+				oauthSessionGrantModule,
 				keyStoreModule,
 				defineModule({
 					name: "test:session-store",
@@ -60,7 +75,7 @@ describe("oauthSessionModule", () => {
 					},
 				}),
 			],
-			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
 		});
 		try {
 			const grant = handle.inspect.grants.get("session") as GrantHandler;
@@ -94,7 +109,7 @@ describe("oauthSessionModule", () => {
 		};
 		const handle = await createTestApp({
 			modules: [
-				oauthSessionModule({ config }),
+				oauthSessionGrantModule,
 				keyStoreModule,
 				defineModule({
 					name: "test:session-store",
@@ -110,7 +125,12 @@ describe("oauthSessionModule", () => {
 					},
 				}),
 			],
-			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, logger },
+			bootstrapComponents: {
+				config: captured(config),
+				pathResolver: (s) => s,
+				oauthTokenSettings,
+				logger,
+			},
 		});
 		try {
 			const grant = handle.inspect.grants.get("session") as GrantHandler;
@@ -138,17 +158,147 @@ describe("oauthSessionModule", () => {
 		}
 	});
 
+	it("refuses a mint the composition's grantPolicy denies", async () => {
+		// Boot hands a module only the slots its manifest names: without the
+		// declaration the grant reads no policy and mints.
+		const config = withGrants(makeValidAppConfig(), { session: true });
+		const evaluate = vi.fn(async () => ({
+			outcome: "deny" as const,
+			error: "access_denied",
+			errorDescription: "browser tokens are closed",
+		}));
+		const handle = await createTestApp({
+			modules: [
+				oauthSessionGrantModule,
+				keyStoreModule,
+				defineModule({
+					name: "test:grant-policy",
+					provides: { grantPolicy: () => ({ kind: "deny-all", evaluate }) },
+				}),
+			],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
+		});
+		try {
+			const grant = handle.inspect.grants.get("session") as GrantHandler;
+			const { result } = await grant.handle({
+				body: {},
+				session: { isAuthenticated: true, user: { id: "user" } },
+				issuer: "https://issuer.test",
+				metadata: {},
+				authenticatedClient: { clientId: "app", tokenEndpointAuthMethod: "none" },
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "browser tokens are closed",
+				policyDenial: { error: "access_denied" },
+			});
+			expect(evaluate).toHaveBeenCalledTimes(1);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("declares grantPolicy among the slots it reads", () => {
+		expect(oauthSessionGrantModule.optional).toContain("grantPolicy");
+	});
+
 	it("has name 'oauth-session'", () => {
-		const config = makeValidAppConfig();
-		const module = oauthSessionModule({ config });
-		expect(module.name).toBe("oauth-session");
+		expect(oauthSessionGrantModule.name).toBe("oauth-session");
+	});
+
+	it("is one module, switched by its own section", () => {
+		expect(typeof oauthSessionGrantModule.section?.isEnabled).toBe("function");
+	});
+
+	it("reads no whole configuration: it requires oauthTokenSettings, and neither requires nor reads config", () => {
+		expect(oauthSessionGrantModule.requires).toContain("oauthTokenSettings");
+		expect(oauthSessionGrantModule.requires).not.toContain("config");
+		expect(oauthSessionGrantModule.optional).not.toContain("config");
+		expect(oauthSessionGrantModule.optional).not.toContain("oauthTokenSettings");
+	});
+
+	it("is what the deprecated oauthSessionModule returns, whatever it is handed", () => {
+		expect(oauthSessionModule()).toBe(oauthSessionGrantModule);
+		for (const session of [true, false]) {
+			const config = withGrants(makeValidAppConfig(), { session });
+			expect(oauthSessionModule({ config })).toBe(oauthSessionGrantModule);
+		}
+	});
+
+	it("mints with the lifetime the oauthTokenSettings slot holds, not one of the configuration's", async () => {
+		// The configuration's access-token lifetime is 3600 s; the slot's is
+		// shorter, which boot accepts. The grant reads the slot alone.
+		const config = withGrants(makeValidAppConfig(), { session: true });
+		const handle = await createTestApp({
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: {
+				config: captured(config),
+				pathResolver: (s) => s,
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					accessTokenLifetime: { defaultExpiresIn: 600, maxExpiresIn: 600 },
+				}),
+			},
+		});
+		try {
+			const grant = handle.inspect.grants.get("session") as GrantHandler;
+			const { result } = await grant.handle({
+				body: {},
+				session: { isAuthenticated: true, user: { id: "user" } },
+				issuer: "https://auth.test",
+				metadata: {},
+				authenticatedClient: { clientId: "app", tokenEndpointAuthMethod: "none" },
+			});
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
+			expect(result.tokens.expires_in).toBe(600);
+			const claims = decodeJwt(result.tokens.access_token);
+			expect((claims.exp as number) - (claims.iat as number)).toBe(600);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses boot with the grant on and no oauthTokenSettings, naming the slot", async () => {
+		const config = withGrants(makeValidAppConfig(), { session: true });
+		const err = await createTestApp({
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect(String((err as BootError).message)).toContain("oauthTokenSettings");
+	});
+
+	it("requires nothing with the grant off: it boots without oauthTokenSettings or a key store", async () => {
+		const config = withGrants(makeValidAppConfig(), { session: false });
+		const handle = await createTestApp({
+			modules: [oauthSessionGrantModule],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+		});
+		expect(handle.inspect.grants.has("session")).toBe(false);
+		await handle.dispose();
+	});
+
+	it("reads an absent oauth-session section as off", async () => {
+		const { "oauth-session": _section, ...config } = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
+		});
+		expect(handle.inspect.grants.has("session")).toBe(false);
+		await handle.dispose();
 	});
 
 	it("registers the session grant when oauth-session.enabled is explicitly true", async () => {
 		const config = withGrants(makeValidAppConfig(), { session: true });
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(true);
 		await handle.dispose();
@@ -157,8 +307,8 @@ describe("oauthSessionModule", () => {
 	it("contributes no grant when oauth-session.enabled === false", async () => {
 		const config = withGrants(makeValidAppConfig(), { session: false });
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(false);
 		await handle.dispose();
@@ -169,8 +319,8 @@ describe("oauthSessionModule", () => {
 		// switch reads as the section's schema does: `"false"` is off.
 		const config = withGrants(makeValidAppConfig(), { session: "false" });
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(false);
 		await handle.dispose();
@@ -182,8 +332,8 @@ describe("oauthSessionModule", () => {
 		// env-enable pattern works at runtime.
 		const config = withGrants(makeValidAppConfig(), { session: "true" });
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(true);
 		await handle.dispose();
@@ -192,8 +342,8 @@ describe("oauthSessionModule", () => {
 	it("registered handler returns 401 unauthorized for an unauthenticated session", async () => {
 		const config = makeValidAppConfig();
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
 		});
 		const handler = handle.inspect.grants.get("session") as GrantHandler | undefined;
 		if (!handler) throw new Error("expected session grant to be registered");

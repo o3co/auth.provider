@@ -5,7 +5,11 @@
 
 import type { FederationTokens } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import type { FederationTokenStoreClient } from "#/clients.mjs";
+import type {
+	FederationTokenAttachInput,
+	FederationTokenReadInput,
+	FederationTokenStoreClient,
+} from "#/clients.mjs";
 import { createRedisFederationTokenStore } from "#/federation-tokens.mjs";
 
 function createFakeRedis() {
@@ -74,6 +78,22 @@ function createFakeRedis() {
 			}
 			return false;
 		}),
+		// The conditional members' primitives; these tests write unconditionally.
+		attachRecord: vi.fn(async (k: string, input: FederationTokenAttachInput) => {
+			data.set(k, input.value);
+			ttls.set(k, input.ttlMs);
+			return "attached" as const;
+		}),
+		readVersioned: vi.fn(async (_k: string, _input: FederationTokenReadInput) => null),
+		replaceIfGeneration: vi.fn(async () => "missing" as const),
+		removeIfGeneration: vi.fn(async () => "missing" as const),
+		pExpireGT: vi.fn(async (_key: string, _ttlMs: number) => {}),
+		durability: async () => ({
+			maxmemoryPolicy: "noeviction",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		}),
 	} satisfies FederationTokenStoreClient & {
 		data: Map<string, string>;
 		sets: Map<string, Set<string>>;
@@ -90,6 +110,7 @@ const tokens: FederationTokens = {
 	tokenType: undefined,
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 describe("redis FederationTokenStore.removeBySid, and no deleteBySession", () => {

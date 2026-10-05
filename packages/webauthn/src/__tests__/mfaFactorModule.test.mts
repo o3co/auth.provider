@@ -22,9 +22,10 @@
  * `webauthn-mfa-factor.enabled = false`, the reference default — leaves the
  * kind absent from the resolver. The relying party is needed only when the
  * factor is on: on without it, the boot is refused, naming the slot and the
- * keys it is built from; off, the module boots without it. The grant
- * installed alone, with the package's reference layered, names no section
- * ignored.
+ * keys it is built from; off, the module boots without it. Beside the grant,
+ * the slot is the one `webauthnModule` provides from its section; without
+ * the grant, the composition provides it. The grant installed alone, with
+ * the package's reference layered, names no section ignored.
  */
 
 import { fileURLToPath } from "node:url";
@@ -48,7 +49,7 @@ import * as entry from "#/index.mjs";
 import { webauthnMfaFactorModule } from "#/mfaFactor/module.mjs";
 import { webauthnModule } from "#/module.mjs";
 import { createTestWebAuthnConfig, webauthnMfaFactorConfigForTests } from "#/testing/index.mjs";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, testTokenSettings, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
 const REFERENCE = fileURLToPath(new URL("../../config/reference.conf", import.meta.url));
 
@@ -94,11 +95,18 @@ afterEach(async () => {
 	disposable = undefined;
 });
 
+/** The `oauthTokenSettings` slot `webauthnModule` requires, for the issuer `configWith` names. */
+const tokenSettings = testTokenSettings({ issuer: "https://test.example" });
+
 async function boot(config: Record<string, unknown>, modules: readonly Module[] = [relyingParty]) {
 	const seen: { resolver?: MfaFactorResolver } = {};
 	const handle = await createApp({
 		modules: [webauthnMfaFactorModule, ...modules, reader(seen)],
-		bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+		bootstrapComponents: {
+			config,
+			pathResolver: (p: string) => p,
+			...(modules.includes(webauthnModule) ? { oauthTokenSettings: tokenSettings } : {}),
+		} as never,
 	});
 	disposable = handle;
 	return { handle, resolver: seen.resolver };
@@ -209,21 +217,7 @@ describe("webauthnMfaFactorModule", () => {
 	});
 });
 
-describe("the factor installed beside the grant's allowCredentialsForKnownUser", () => {
-	/** The relying party the grant and the factor share, `allowCredentialsForKnownUser` as given. */
-	const relyingPartyWith = (allowCredentialsForKnownUser: boolean): Module =>
-		defineModule({
-			name: "test:webauthn-config",
-			provides: {
-				webauthnConfig: () =>
-					createTestWebAuthnConfig({
-						rpId: "login.example",
-						rpName: "Login",
-						allowCredentialsForKnownUser,
-					}),
-			},
-		});
-
+describe("the factor installed beside the grant", () => {
 	/** The grant's module and what it requires beside the relying party. */
 	const grant: readonly Module[] = [
 		webauthnModule,
@@ -246,41 +240,65 @@ describe("the factor installed beside the grant's allowCredentialsForKnownUser",
 		memoryWebAuthnCredentialStoreModule,
 	];
 
-	it.each([true, false])(
-		"refuses the boot with the flag on, the factor enabled: %s, naming the setting and its variable and quoting no value",
-		async (enabled) => {
-			const refused = await refusal(configWith({ ...ON, enabled }), [
-				relyingPartyWith(true),
-				...grant,
-			]);
-			expect(refused.reason).toBe("contribute-factory-failed");
-			const said = `${refused.message} ${String((refused as { cause?: unknown }).cause)}`;
-			expect(said).toContain("webauthn.allowCredentialsForKnownUser");
-			expect(said).toContain("WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER");
-			expect(said).not.toContain("login.example");
-		},
-	);
-
-	it("boots the grant with the flag on when the factor is not installed", async () => {
-		disposable = await createApp({
-			modules: [relyingPartyWith(true), ...grant],
-			bootstrapComponents: {
-				config: configWith(undefined),
-				pathResolver: (p: string) => p,
-			} as never,
+	it("boots beside the grant, on the relying party the grant's module provides from its section", async () => {
+		const { resolver } = await boot(withWebAuthnSection(configWith(ON), RELYING_PARTY), grant);
+		const factor = resolver?.get("webauthn");
+		if (factor === undefined) throw new Error("no webauthn factor");
+		const { response } = await factor.beginEnrollment({
+			subject: "u-alice",
+			transactionId: "tx-1",
+			nowMs: Date.now(),
+			request: {},
+			digests: {} as never,
+			user: { id: "u-alice", username: "alice" },
+			factors: [],
 		});
-		expect(disposable).toBeDefined();
+		expect(response).toMatchObject({ rp: { id: "login.example", name: "Login" } });
 	});
 
-	it("boots the factor beside the grant with the flag off, and contributes it", async () => {
-		const { resolver } = await boot(configWith(ON), [relyingPartyWith(false), ...grant]);
-		expect(resolver?.get("webauthn")).toBeDefined();
+	it("refuses a module of the deployment's providing the relying party beside the grant's", async () => {
+		const refused = await refusal(withWebAuthnSection(configWith(ON), RELYING_PARTY), [
+			relyingParty,
+			...grant,
+		]);
+		expect(refused.reason).toBe("duplicate-provides");
+	});
+});
+
+describe("webauthn-mfa-factor.enabled as the module's switch", () => {
+	it("is declared as the module's switch (isEnabled), answering the parsed section's enabled", () => {
+		const isEnabled = webauthnMfaFactorModule.section?.isEnabled;
+		expect(isEnabled).toBeTypeOf("function");
+		expect(isEnabled?.({ ...ON, enabled: true })).toBe(true);
+		expect(isEnabled?.({ ...ON, enabled: false })).toBe(false);
+	});
+
+	it("switched off, runs no factory: a relying party whose slot factory throws is never read", async () => {
+		const throwing = defineModule({
+			name: "test:webauthn-config",
+			provides: {
+				webauthnConfig: () => {
+					throw new Error("the relying party was built");
+				},
+			},
+		});
+		const { resolver } = await boot(configWith({ ...ON, enabled: false }), [throwing]);
+		expect(resolver).toBeDefined();
+		expect(resolver?.get("webauthn")).toBeUndefined();
+		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 });
 
 describe("the grant installed without the factor", () => {
 	it("names no section ignored when the package's reference.conf is layered: the factor's section is declared", async () => {
-		const reference = parseFile(REFERENCE, { env: {} }).toObject() as Record<string, unknown>;
+		// The relying party is the operator's, from the three variables the reference binds it to.
+		const reference = parseFile(REFERENCE, {
+			env: {
+				WEBAUTHN_RP_ID: "login.example",
+				WEBAUTHN_RP_NAME: "Login",
+				WEBAUTHN_ORIGIN: "https://login.example",
+			},
+		}).toObject() as Record<string, unknown>;
 		const warn = vi.fn();
 		const logger = {
 			trace: vi.fn(),
@@ -303,7 +321,6 @@ describe("the grant installed without the factor", () => {
 		disposable = await createApp({
 			modules: [
 				webauthnModule,
-				relyingParty,
 				defineModule({
 					name: "test:key-store",
 					provides: { keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!") },
@@ -322,7 +339,12 @@ describe("the grant installed without the factor", () => {
 				defaultChallengeCeremonyModule,
 				memoryWebAuthnCredentialStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (p: string) => p, logger } as never,
+			bootstrapComponents: {
+				config,
+				pathResolver: (p: string) => p,
+				logger,
+				oauthTokenSettings: tokenSettings,
+			} as never,
 		});
 
 		expect(reference).toHaveProperty("webauthn-mfa-factor");

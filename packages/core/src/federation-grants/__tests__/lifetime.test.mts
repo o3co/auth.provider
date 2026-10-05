@@ -87,6 +87,13 @@ describe("federation grant lifetime", () => {
 	});
 
 	describe("federationGrantExpiresAt", () => {
+		it("holds no instant, and does not throw, for a consent that is no Date", () => {
+			for (const stored of ["2026-09-18T00:00:00.000Z", null, {}]) {
+				const expiresAt = federationGrantExpiresAt(stored as unknown as Date, 30 * DAY);
+				expect(Number.isNaN(expiresAt.getTime())).toBe(true);
+			}
+		});
+
 		it("counts from consent, not from the callback that follows it", () => {
 			expect(federationGrantExpiresAt(CONSENT, 30 * DAY)).toEqual(at(30 * DAY));
 		});
@@ -108,6 +115,14 @@ describe("federation grant lifetime", () => {
 			expect(withinFederationGrantLifetimeCeiling(INVALID, at(DAY))).toBe(false);
 			expect(withinFederationGrantLifetimeCeiling(CONSENT, INVALID)).toBe(false);
 		});
+
+		it("refuses, and does not throw on, a value that is no Date at all", () => {
+			for (const stored of ["2026-09-18T00:00:00.000Z", null, CONSENT.getTime(), {}]) {
+				const notADate = stored as unknown as Date;
+				expect(withinFederationGrantLifetimeCeiling(notADate, at(DAY))).toBe(false);
+				expect(withinFederationGrantLifetimeCeiling(CONSENT, notADate)).toBe(false);
+			}
+		});
 	});
 
 	describe("federationGrantEffectiveExpiry", () => {
@@ -121,6 +136,20 @@ describe("federation grant lifetime", () => {
 
 		it("is never lengthened by a maximum raised after the consent", () => {
 			expect(federationGrantEffectiveExpiry(grant(30 * DAY), 300 * DAY)).toEqual(at(30 * DAY));
+		});
+
+		it("holds no instant, and does not throw, when a stored date is no Date: every `now <` reads it as passed", () => {
+			for (const stored of ["2026-12-18T00:00:00.000Z", null, CONSENT.getTime(), {}]) {
+				const notADate = stored as unknown as Date;
+				for (const fields of [
+					{ consent: { at: CONSENT }, expiresAt: notADate },
+					{ consent: { at: notADate }, expiresAt: at(30 * DAY) },
+				]) {
+					const effective = federationGrantEffectiveExpiry(fields, 90 * DAY);
+					expect(effective).toBeInstanceOf(Date);
+					expect(Number.isNaN(effective.getTime())).toBe(true);
+				}
+			}
 		});
 	});
 
@@ -179,6 +208,26 @@ describe("federation grant lifetime", () => {
 			expect(federationGrantExpiryState(grant(90 * DAY), at(DAY), Number.NaN)).toBe(
 				"operator_maximum",
 			);
+		});
+
+		it("reads a stored date that is not a Date as one holding no instant: expired, never live, and never a throw", () => {
+			for (const stored of ["2026-12-18T00:00:00.000Z", null, 1_789_000_000_000, {}]) {
+				const notADate = stored as unknown as Date;
+				expect(
+					federationGrantExpiryState(
+						{ consent: { at: CONSENT }, expiresAt: notADate },
+						at(DAY),
+						90 * DAY,
+					),
+				).toBe("consented_lifetime");
+				expect(
+					federationGrantExpiryState(
+						{ consent: { at: notADate }, expiresAt: at(90 * DAY) },
+						at(DAY),
+						90 * DAY,
+					),
+				).toBe("operator_maximum");
+			}
 		});
 	});
 });

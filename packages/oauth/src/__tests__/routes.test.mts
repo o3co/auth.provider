@@ -324,6 +324,41 @@ describe("createOAuthRouter", () => {
 			expect(issuedEvent?.clientId).toBe(TEST_CLIENT_ID);
 		});
 
+		it("audits a grant policy's deny as policy_denied with the policy's own code, and sends neither", async () => {
+			const events: AuditEvent[] = [];
+			const auditSink: AuditSink = {
+				kind: "spy",
+				record: async (e) => {
+					events.push(e);
+				},
+			};
+			const stubGrant: GrantHandler = {
+				handle: async () => ({
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "not today",
+						policyDenial: { error: 'access"denied' },
+					},
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: "stub" });
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({ error: "invalid_request", error_description: "not today" });
+			await new Promise((r) => setImmediate(r));
+			expect(events.find((e) => e.type === "token.issued.failure")?.details).toEqual({
+				grant_type: "stub",
+				error: "invalid_request",
+				reason: "policy_denied",
+				policy_error: "access?denied",
+			});
+		});
+
 		it("error path with errorDescription + 401 does NOT inject WWW-Authenticate", async () => {
 			// A grant handler returning status 401 (e.g. ctx.authenticatedClient
 			// missing in a custom wiring) does NOT cause a `WWW-Authenticate:

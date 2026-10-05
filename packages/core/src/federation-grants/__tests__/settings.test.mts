@@ -227,6 +227,33 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 		);
 	});
 
+	it("reads the rotation budget: 24 rotations a window of an hour, unless written otherwise", () => {
+		expect(resolveFederationGrantRetrievalLimits({})).toMatchObject({
+			rotationBudget: 24,
+			rotationWindowMs: 3_600_000,
+		});
+		expect(
+			resolveFederationGrantRetrievalLimits({ rotationBudget: 6, rotationWindow: "600" }),
+		).toMatchObject({ rotationBudget: 6, rotationWindowMs: 600_000 });
+	});
+
+	it("refuses a rotation budget that admits nothing, or a window that never closes or never opens", () => {
+		// A budget of 0 would still let a store admit a window's first take; a
+		// window of 0 reopens on every take.
+		expect(() => resolveFederationGrantRetrievalLimits({ rotationBudget: 0 })).toThrow(
+			/rotationBudget/,
+		);
+		expect(() => resolveFederationGrantRetrievalLimits({ rotationBudget: 1.5 })).toThrow(
+			/rotationBudget.*whole number of rotations/,
+		);
+		expect(() => resolveFederationGrantRetrievalLimits({ rotationWindow: 0 })).toThrow(
+			/rotationWindow/,
+		);
+		expect(() => resolveFederationGrantRetrievalLimits({ rotationWindow: 0.5 })).toThrow(
+			/rotationWindow.*whole number of seconds/,
+		);
+	});
+
 	it("refuses a backoff longer than the interval that is meant to bound it", () => {
 		expect(() =>
 			resolveFederationGrantRetrievalLimits({

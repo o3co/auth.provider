@@ -115,10 +115,8 @@ const ALL_ON_REDIS_MODULES = [
 	"oauth-authorization",
 	"jwks",
 	"session",
-	"federation-google",
-	"google-federation-config",
-	"oidc-federation-config",
-	"federation-oidc-oidc",
+	"federation-google-type",
+	"federation-oidc",
 	"logging",
 	"http",
 	"key-store",
@@ -131,6 +129,7 @@ const ALL_ON_REDIS_MODULES = [
 	"redis-federation-grant-intent-store",
 	"redis-session-stores",
 	"redis-rate-limiter",
+	"redis-attempt-counter",
 	"redis-code-repository",
 	"redis-access-token-denylist",
 	"redis-replay-seen-set",
@@ -205,6 +204,18 @@ describe('every module on, every shared store on Redis, core.deployment.mode = "
 			name: "BootError",
 			reason: "replica-unsafe-adapter",
 			details: { modules: [module] },
+		});
+	});
+
+	it("ADAPTERS_ATTEMPT_COUNTER=memory is refused at boot: the login would count its attempts per replica", async () => {
+		await expect(
+			compose({ ...MULTI, env: { ...MULTI_ENV, ADAPTERS_ATTEMPT_COUNTER: "memory" } }),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			cause: {
+				message: expect.stringContaining('no shared attemptCounter is wired for "login"'),
+			},
 		});
 	});
 

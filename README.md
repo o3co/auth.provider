@@ -1,6 +1,6 @@
 # auth.provider
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -112,6 +112,7 @@ core                          contracts, module system, config, tokens, keys
 │   └── device-grant          (also depends on session)
 ├── session                   /session/*
 │   └── federation-*          one package per upstream identity provider
+├── mfa                       /session/mfa/*, the second factor
 ├── dpop · mtls · webauthn · oauth-token-exchange
 ├── redis                     (ioredis is an optional peer)
 ├── foundation
@@ -136,6 +137,7 @@ Each package's README states what it owns and why it is separate. In brief:
 | [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Browser sessions: `/session/login`, `/session/logout`, CSRF, the `express-session` store, and the federated-login routes the `federation-*` adapters plug into | Optional: an API-only deployment has no browser session |
 | [`packages/device-grant`](packages/device-grant/) | `@o3co/auth-provider-device-grant` | RFC 8628 device authorization grant — the device-code flow for TVs, CLIs and IoT | Optional grant with endpoints and a store of its own |
 | [`packages/oauth-token-exchange`](packages/oauth-token-exchange/) | `@o3co/auth-provider-oauth-token-exchange` | RFC 8693 token exchange — on-behalf-of, delegation (`act`), scope and audience narrowing | Optional grant |
+| [`packages/mfa`](packages/mfa/) | `@o3co/auth-provider-mfa` | Multi-factor authentication: the `mfa` session requirement, the browser API under `/session/mfa/*`, the TOTP, recovery-code and email factors, the key ring the factors' data is sealed under, the subject lock and the operator reset | Optional: a deployment without MFA installs none of it. It reaches the session package's login tail through core's `loginCompletion` slot, depending on core alone |
 | [`packages/webauthn`](packages/webauthn/) | `@o3co/auth-provider-webauthn` | Passkey registration and the passkey authentication grant | Optional; carries an exactly pinned WebAuthn library |
 | [`packages/dpop`](packages/dpop/) | `@o3co/auth-provider-dpop` | DPoP (RFC 9449) sender-constrained tokens | A plug-in to core's token-binding slot, off unless installed and enabled |
 | [`packages/mtls`](packages/mtls/) | `@o3co/auth-provider-mtls` | mTLS (RFC 8705) certificate-bound tokens, with X.509 path validation and revocation | As dpop; also carries the X.509 libraries and the revocation fetcher |
@@ -231,11 +233,12 @@ oauth-session.enabled = true
 # 32 bytes (256 bits), e.g. `openssl rand -hex 32`.
 session-store { secret = ${SESSION_STORE_SECRET} }
 
-# One section per federation. `type` names the adapter package and defaults
-# to the section's name; each adapter's README lists its settings.
+# One section per federation. `type` names the module that handles it and
+# is required, enabled or not; each adapter's README lists its settings.
 core.federations {
   google {
     enabled = false
+    type = "google"
     # clientId, clientSecret, callbackURL — required when enabled = true
   }
   # okta { enabled = false, type = "oidc" }   # any OpenID Connect IdP, by issuer
@@ -269,6 +272,7 @@ section and `docker-compose.production.yml`.
 
 ## Operating
 
+- [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md) — upgrading from v0.16.0: every breaking change since, what to do about each, and the Store implementer checklist.
 - [docs/operator-runbook.md](docs/operator-runbook.md) — running it: deployment shapes and boot refusals, liveness vs readiness, what fail-closed looks like on each dependency, which log and audit events to alert on, Redis key families and sizing, key rotation, upgrading and rollback.
 - [docs/release-runbook.md](docs/release-runbook.md) — cutting a release; [docs/release-policy.md](docs/release-policy.md) — how releases and retired config keys are labelled.
 - [docs/adapter-surface.md](docs/adapter-surface.md) — every component slot a composition root can fill, and the boundary that decides what may become one.

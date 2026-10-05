@@ -287,7 +287,7 @@ const RESERVED_RESULT_PARAMETERS = ["grant_id", "state", "error"] as const;
  *
  * Exported so that where the URI is REGISTERED can refuse it too — at boot, for
  * a deployment whose clients are configured — and lodging keeps refusing it as
- * the belt for a repository that validates nothing.
+ * the belt for a record its caller hands it directly.
  */
 export function federationGrantRedirectUriReservedParameter(uri: string): string | undefined {
 	return redirectUriQueryCarries(uri, RESERVED_RESULT_PARAMETERS);
@@ -337,8 +337,9 @@ function checkRequest(
 	request: CommonRequest,
 	connection: FederationGrantAcquisitionConnection,
 ): RequestCheck {
-	// Read as a list or as nothing (`federationGrantAllowlist`): a repository
-	// answering a string would otherwise match by substring.
+	// Read as a list or as nothing (`federationGrantAllowlist`): lodging is
+	// exported and takes the record from its caller, which need not have read
+	// it through the client-record boundary; a string would match by substring.
 	const registered = federationGrantAllowlist(request.client.federationGrantRedirectUris);
 	// Exact membership, and nothing else: no prefix, no normalization, no
 	// fallback to the client's ordinary redirect URIs.
@@ -346,9 +347,9 @@ function checkRequest(
 		return { ok: false, reason: "redirect_uri_not_registered" };
 	}
 	// Registered, and still held to what registration would have refused: a
-	// repository that validates nothing could hand back a URI that does not
-	// parse, and the flow would fail only at its end — after activating the
-	// grant — when the browser has to be sent there.
+	// record handed to lodging directly could carry a URI that does not parse,
+	// and the flow would fail only at its end — after activating the grant —
+	// when the browser has to be sent there.
 	if (checkRedirectUri(request.redirectUri) !== null) {
 		return { ok: false, reason: "redirect_uri_invalid" };
 	}
@@ -385,6 +386,10 @@ function checkRequest(
 	return { ok: true, scopes: scopes.scopes, lifetimeMs };
 }
 
+/**
+ * The connection allowlist of the record lodging was handed, read as
+ * `checkRequest` reads its redirect URIs.
+ */
 const permits = (client: FederationGrantLodgingClient, connection: string): boolean =>
 	federationGrantAllowlist(client.allowedFederationGrantConnections).includes(connection);
 
@@ -659,22 +664,37 @@ export async function lodgeFederationGrantReauthorization(
 
 type Inspection = NonNullable<Awaited<ReturnType<FederationGrantStore["inspect"]>>>;
 
-/** The grant's effective status against `connection`, the grant's as configured now. */
+/**
+ * The grant's effective status against `connection`, the grant's as configured
+ * now; or, for a record holding a date that cannot be compared, the storage
+ * refusal naming the read that answered it: judged neither way, as retrieval
+ * does. Anything else that is thrown is a bug, and is not dressed up as an
+ * outage.
+ */
 function statusOf(
 	deps: FederationGrantLodgingDeps,
 	inspection: Inspection,
 	connection: FederationGrantAcquisitionConnection | undefined,
 	boundary: Date | null,
 	at: Date,
-) {
-	return effectiveFederationGrantStatus(inspection.grant, {
-		now: at,
-		connection,
-		maxExpiresInMs: deps.maxExpiresInMs,
-		grantsBoundary: boundary,
-		revocationSkewMs: deps.revocationSkewMs,
-		credentials: inspection.credentials === "ok" ? "ok" : "unreadable",
-	});
+):
+	| { readonly status: ReturnType<typeof effectiveFederationGrantStatus> }
+	| { readonly unreadable: ReturnType<typeof storage> } {
+	try {
+		return {
+			status: effectiveFederationGrantStatus(inspection.grant, {
+				now: at,
+				connection,
+				maxExpiresInMs: deps.maxExpiresInMs,
+				grantsBoundary: boundary,
+				revocationSkewMs: deps.revocationSkewMs,
+				credentials: inspection.credentials === "ok" ? "ok" : "unreadable",
+			}),
+		};
+	} catch (error) {
+		if (!(error instanceof RangeError)) throw error;
+		return { unreadable: storage({ store: "federation_grant", step: "inspect", error }) };
+	}
 }
 
 /** The statuses a renewal is admitted from, which its 201 reports unchanged. */
@@ -741,7 +761,8 @@ function admission(
 		case "connection_identity_changed":
 			return { refused: { ok: false, reason: "connection_identity_changed" } };
 		case "upstream_token_ineligible":
-			return status.reason === "scope_exceeded"
+			// A scope problem is what a renewal can mend; the others it cannot.
+			return status.reason === "scope_exceeded" || status.reason === "scope_not_granted"
 				? { admitted: "upstream_token_ineligible", connection }
 				: {
 						refused: {
@@ -766,7 +787,9 @@ async function judgeAndLodge(
 ): Promise<FederationGrantReauthorizationResult> {
 	const { grant } = inspection;
 	const configured = deps.connections.get(grant.connection);
-	const status = statusOf(deps, inspection, configured, boundary, now());
+	const read = statusOf(deps, inspection, configured, boundary, now());
+	if ("unreadable" in read) return read.unreadable;
+	const { status } = read;
 
 	if (status.status === "revoked" && status.reason === "backstop") {
 		// Written down, not only reported: a revocation that lived only in the
@@ -881,11 +904,9 @@ async function judgeAndLodge(
 	// honest answer is that this attempt did not take — with the write's own
 	// error as what failed.
 	const configuredNow = deps.connections.get(fresh.grant.connection);
-	const again = admission(
-		statusOf(deps, fresh, configuredNow, boundary, now()),
-		configuredNow,
-		request.client,
-	);
+	const reread = statusOf(deps, fresh, configuredNow, boundary, now());
+	if ("unreadable" in reread) return absorbing(reread.unreadable, [...writeThrew, ...after]);
+	const again = admission(reread.status, configuredNow, request.client);
 	return "refused" in again
 		? absorbing(again.refused, [...writeThrew, ...after])
 		: absorbing(storage({ store: "federation_grant", step: "name_intent", ...named.why }), after);

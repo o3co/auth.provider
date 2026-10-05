@@ -274,8 +274,8 @@ const unrecordable = (amr: unknown): UserSession => record({ amr: amr as never }
 const UNRECORDABLE_AMRS: readonly unknown[] = [["pwd", ""], ["pwd", 1], "pwd"];
 
 describe("secondFactorRecordable: whether a second factor can be recorded on the session", () => {
-	it("is typed `boolean | undefined` on SessionView", () => {
-		expectTypeOf<SessionView["secondFactorRecordable"]>().toEqualTypeOf<boolean | undefined>();
+	it("is typed `boolean` on SessionView: every view says it", () => {
+		expectTypeOf<SessionView["secondFactorRecordable"]>().toEqualTypeOf<boolean>();
 		expect(true).toBe(true);
 	});
 
@@ -355,7 +355,7 @@ describe("secondFactorRecordable: whether a second factor can be recorded on the
 		expect(seen[0]?.secondFactorRecordable).toBe(false);
 	});
 
-	it("is read off the store once per admission, however many requirements are asked and whether the merge steps up through the authority", async () => {
+	it("is read off the store once per reading, however many requirements are asked and whether the merge steps up through the authority", async () => {
 		const MFA = "urn:example:mfa";
 		const table = readAcrTable({ [MFA]: ["mfa"] });
 		const authority = (seen: Array<RequirementInput["session"]>): SessionRequirement =>
@@ -391,7 +391,8 @@ describe("secondFactorRecordable: whether a second factor can be recorded on the
 					: { outcome, requirement: "acr" },
 			);
 			expect(seen).toHaveLength(2);
-			expect(reads(), outcome).toBe(1);
+			// Requirements were asked: the first reading and the last.
+			expect(reads(), outcome).toBe(2);
 		}
 	});
 

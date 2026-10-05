@@ -77,6 +77,8 @@ const alternating = (keyPrefix: string): FederationGrantStore => {
 		requireReauthorization: (input) => pick().requireReauthorization(input),
 		revoke: (id, by, at) => pick().revoke(id, by, at),
 		noteRefreshFailure: (input) => pick().noteRefreshFailure(input),
+		takeRotation: (input) => pick().takeRotation(input),
+		refundRotation: (input) => pick().refundRotation(input),
 		touch: (id, at) => pick().touch(id, at),
 		acquireRefreshLock: (id, bounds) => pick().acquireRefreshLock(id, bounds),
 	};

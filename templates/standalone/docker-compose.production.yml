@@ -161,6 +161,9 @@ services:
       # The memory rate limiter is per-process and evadable under bucket
       # exhaustion (see README) — production points it at Redis.
       ADAPTERS_RATE_LIMITER: redis
+      # The counter behind the login's own attempt limit: on Redis, a restart
+      # does not reset it. Redis must keep `maxmemory-policy noeviction`.
+      ADAPTERS_ATTEMPT_COUNTER: redis
       # The federation token store is deliberately left at its `memory`
       # default, and that is coherent here rather than an oversight: this
       # template ships every federation disabled, so nothing writes to the
@@ -170,6 +173,22 @@ services:
       # a federation means setting BOTH, together:
       #   ADAPTERS_FEDERATION_TOKEN_STORE: redis
       #   REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: <openssl rand -base64 32, from .env>
+      #
+      # MFA is on by default (MFA_MODE, `required`): every password login
+      # needs a second factor. Its two stores are left at their `memory`
+      # default, which the template refuses in production before boot; that
+      # refusal names everything MFA needs and the opt-out, so it is the first
+      # thing a deployment that has decided nothing about MFA meets. Decide in
+      # `.env`: either turn it on with all of
+      #   ADAPTERS_MFA_FACTOR_STORE=redis       (or `store`, the factors in your Store)
+      #   ADAPTERS_MFA_TRANSACTION_STORE=redis
+      #   MFA_ENCRYPTION_KEY=<openssl rand -base64 32>
+      #   STANDARD_SMTP_MAIL_SENDER_HOST=... and STANDARD_SMTP_MAIL_SENDER_FROM=...
+      #   MFA_PAGE_URL=<your MFA page, /mfa by default>
+      # or keep the provider without MFA:
+      #   MFA_MODE=off
+      # The Redis below persists (appendonly), as the MFA stores need: a lost
+      # factor lets whoever holds the password bind one of their own.
 
   redis:
     # Tag-pinned, not digest-pinned. The Dockerfile argues for digests (#289)

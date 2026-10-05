@@ -35,7 +35,7 @@ import type {
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { vi } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
@@ -56,9 +56,9 @@ type StoredSession = {
 export type HarnessSessionStore = Map<string, StoredSession>;
 
 /**
- * The transaction cookie these harness apps issue. Named from a session cookie
- * name the harness picks, and passed to the router explicitly, so a test never
- * has to guess at the router's own fallback.
+ * The transaction cookie these harness apps issue, named from a session
+ * cookie name the harness picks, as the session module names it from the
+ * deployment's: the router is handed its name and has none of its own.
  */
 export const HARNESS_SESSION_COOKIE_NAME = "harness.session";
 export const HARNESS_TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookieName(
@@ -235,7 +235,9 @@ export function makeFederationTokenStore(): FederationTokenStore & {
 		kind: "memory",
 		attach: vi.fn(async () => {}),
 		get: vi.fn(async () => null),
-		update: vi.fn(async () => {}),
+		getVersioned: vi.fn(async () => null),
+		replaceIf: vi.fn(async () => ({ outcome: "missing" as const })),
+		removeIf: vi.fn(async () => ({ outcome: "missing" as const })),
 		removeBySid: vi.fn(async () => {}),
 		delete: vi.fn(async () => {}),
 	};
@@ -296,7 +298,7 @@ export function buildFederationApp({
 
 	app.use(
 		createRouter(express, {
-			config: {} as never,
+			federationSettings: createTestFederationSettings(),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map(
 				[...providers.keys()].map((name) => [name, makePermissivePolicy()]),

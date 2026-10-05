@@ -28,6 +28,9 @@ importers:
 
   create-app:
     devDependencies:
+      '@o3co/ts.hocon':
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.6.5)
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
@@ -175,6 +178,9 @@ importers:
       openid-client:
         specifier: ^6.8.8
         version: 6.8.8
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@o3co/auth-provider-core':
         specifier: workspace:*
@@ -182,9 +188,21 @@ importers:
       '@o3co/auth-provider-session':
         specifier: workspace:*
         version: link:../session
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/supertest':
+        specifier: ^7.2.1
+        version: 7.2.1
       '@vitest/coverage-v8':
         specifier: ^5.0.2
         version: 5.0.2(vitest@5.0.2)
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      supertest:
+        specifier: ^7.3.0
+        version: 7.3.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -197,6 +215,9 @@ importers:
       openid-client:
         specifier: ^6.8.8
         version: 6.8.8
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@o3co/auth-provider-core':
         specifier: workspace:*
@@ -204,9 +225,21 @@ importers:
       '@o3co/auth-provider-session':
         specifier: workspace:*
         version: link:../session
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/supertest':
+        specifier: ^7.2.1
+        version: 7.2.1
       '@vitest/coverage-v8':
         specifier: ^5.0.2
         version: 5.0.2(vitest@5.0.2)
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      supertest:
+        specifier: ^7.3.0
+        version: 7.3.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -219,6 +252,9 @@ importers:
       openid-client:
         specifier: ^6.8.8
         version: 6.8.8
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@o3co/auth-provider-core':
         specifier: workspace:*
@@ -226,12 +262,24 @@ importers:
       '@o3co/auth-provider-session':
         specifier: workspace:*
         version: link:../session
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/supertest':
+        specifier: ^7.2.1
+        version: 7.2.1
       '@vitest/coverage-v8':
         specifier: ^5.0.2
         version: 5.0.2(vitest@5.0.2)
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
       jose:
         specifier: ^6.2.12
         version: 6.2.12
+      supertest:
+        specifier: ^7.3.0
+        version: 7.3.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -299,6 +347,9 @@ importers:
       openid-client:
         specifier: ^6.8.8
         version: 6.8.8
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@o3co/auth-provider-core':
         specifier: workspace:*
@@ -720,6 +771,9 @@ importers:
       '@o3co/auth-provider-foundation':
         specifier: workspace:*
         version: link:../../packages/foundation
+      '@o3co/auth-provider-mfa':
+        specifier: workspace:*
+        version: link:../../packages/mfa
       '@o3co/auth-provider-oauth':
         specifier: workspace:*
         version: link:../../packages/oauth

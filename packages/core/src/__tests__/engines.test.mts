@@ -38,6 +38,10 @@ const PUBLISHED_PACKAGES = [
 	"packages/mtls",
 	"packages/test-kit",
 	"packages/standard",
+	"packages/mfa",
+	"packages/device-grant",
+	"packages/federation-apple",
+	"packages/federation-grants",
 	"create-app",
 ];
 

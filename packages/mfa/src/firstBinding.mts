@@ -38,7 +38,12 @@
  * binding a login reopens after a non-counting proof (`reopenedEnrollment`).
  */
 
-import type { MailAddressFact, MfaFactorRecord, MfaFactorResolver } from "@o3co/auth-provider-core";
+import type {
+	MailAddressFact,
+	MfaFactor,
+	MfaFactorRecord,
+	MfaFactorResolver,
+} from "@o3co/auth-provider-core";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
 import { replacesStandingSets } from "./recovery/issue.mjs";
 
@@ -70,13 +75,13 @@ export const reopenedEnrollment = (
 	records.some((record) => mayCount(factors, record)) ? "allowed" : "required";
 
 /**
- * How many records the subject holds once a first binding by `binding`
- * stands beside `records` (its own factor not among them): those records,
- * less the recovery-code sets the binding's new set replaces, plus its
- * factor and — the recovery-code factor installed — the new set. Held to
+ * How many records the subject holds once a recovery-code set issued beside
+ * a binding by `binding` — `mfa` for a regeneration — stands beside
+ * `records`: those records, less the sets the new one replaces, plus — the
+ * recovery-code factor installed — the new set. Held to
  * `mfa.maxFactorsPerSubject`.
  */
-export const recordsAfterFirstBinding = (
+export const recordsAfterRecoveryCodes = (
 	factors: MfaFactorResolver,
 	records: readonly Pick<MfaFactorRecord, "kind">[],
 	binding: NonNullable<MfaFactorRecord["binding"]>,
@@ -85,8 +90,20 @@ export const recordsAfterFirstBinding = (
 	const staying = records.filter(
 		(record) => !(replaced && record.kind === RECOVERY_CODE_FACTOR_KIND),
 	).length;
-	return staying + 1 + (factors.get(RECOVERY_CODE_FACTOR_KIND) === undefined ? 0 : 1);
+	return staying + (factors.get(RECOVERY_CODE_FACTOR_KIND) === undefined ? 0 : 1);
 };
+
+/**
+ * How many records the subject holds once a first binding by `binding`
+ * stands beside `records` (its own factor not among them): what its
+ * recovery codes leave (`recordsAfterRecoveryCodes`), plus its factor. Held
+ * to `mfa.maxFactorsPerSubject`.
+ */
+export const recordsAfterFirstBinding = (
+	factors: MfaFactorResolver,
+	records: readonly Pick<MfaFactorRecord, "kind">[],
+	binding: NonNullable<MfaFactorRecord["binding"]>,
+): number => recordsAfterRecoveryCodes(factors, records, binding) + 1;
 
 /** A factor's `enrollable` that threw: its `kind`, and the factor's error as `cause`, never quoted. */
 export class MfaEnrollableError extends Error {
@@ -104,25 +121,34 @@ export const countingKinds = (factors: MfaFactorResolver): string[] =>
 	[...factors.entries()].filter(([, factor]) => factor.counting).map(([kind]) => kind);
 
 /**
+ * Whether `user` may enroll `factor`, contributed as `kind`. A factor whose
+ * `enrollable` throws cannot answer — an outage, never "not offered" — so
+ * the throw goes through, as an {@link MfaEnrollableError} naming its kind.
+ */
+export const mayEnroll = (
+	kind: string,
+	factor: MfaFactor,
+	user: Readonly<Record<string, unknown>>,
+): boolean => {
+	try {
+		return Boolean(factor.enrollable?.(user) ?? true);
+	} catch (cause) {
+		throw new MfaEnrollableError(kind, cause);
+	}
+};
+
+/**
  * The counting factors `user` may enroll, in registration order: what a
- * first binding offers. A factor whose `enrollable` throws cannot answer —
- * an outage, never "not offered" — so the throw goes through, as an
- * {@link MfaEnrollableError} naming its kind.
+ * first binding offers. A factor whose `enrollable` throws is an outage
+ * ({@link mayEnroll}).
  */
 export const enrollableKinds = (
 	factors: MfaFactorResolver,
 	user: Readonly<Record<string, unknown>>,
 ): string[] =>
-	[...factors.entries()].flatMap(([kind, factor]) => {
-		if (!factor.counting) return [];
-		let offered: boolean;
-		try {
-			offered = factor.enrollable?.(user) ?? true;
-		} catch (cause) {
-			throw new MfaEnrollableError(kind, cause);
-		}
-		return offered ? [kind] : [];
-	});
+	[...factors.entries()].flatMap(([kind, factor]) =>
+		factor.counting && mayEnroll(kind, factor, user) ? [kind] : [],
+	);
 
 /** `mfa.enrollment.requireEmailProof`. */
 export const REQUIRE_EMAIL_PROOF = ["when-mail", "always", "never"] as const;

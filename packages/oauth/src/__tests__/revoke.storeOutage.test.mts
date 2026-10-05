@@ -50,7 +50,7 @@ import { createRevokeRouter } from "#/routes/revoke.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 
 /** Core's outbound fetch, as the composed router hands the endpoint. */
-const outboundFetch = createOutboundFetch({ source: "registration" });
+const outboundFetch = createOutboundFetch({ config: {}, source: "registration" });
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);

@@ -64,6 +64,8 @@ const baseConfig: Switches & Record<string, unknown> = {
 		codeRepository: "memory",
 		userRepository: "yaml",
 	},
+	mfaMode: "off",
+	storeTransport: undefined,
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
@@ -83,7 +85,7 @@ const baseConfig: Switches & Record<string, unknown> = {
 	},
 	// The shipped `application.conf` expects no session requirement (ADR
 	// 2026-09-28-session-admission).
-	...coreConfigForTests({ federations: { google: { enabled: false } } }),
+	...coreConfigForTests({ federations: { google: { enabled: false, type: "google" } } }),
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

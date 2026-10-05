@@ -34,6 +34,7 @@ import {
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	federatedSessionAuthentication,
 	MFA_AMR,
 	type MfaFactor,
 	type MfaFactorRecord,
@@ -45,6 +46,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createRecordingMailSender,
+	createTestMfaFactor,
 	type RecordingMailSender,
 } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
@@ -62,6 +64,7 @@ import {
 } from "./moduleHarness.mjs";
 import { stubFactor } from "./requirementHarness.mjs";
 import {
+	addRecord,
 	beginLogin,
 	completeEnrollment,
 	contributing,
@@ -182,6 +185,24 @@ const percentDecoded = (text: string): string =>
 			return run;
 		}
 	});
+
+/** Every session `store` answers read as one signed in through a federation, as its callback records it. */
+function federatedSessions(store: UserSessionStore): void {
+	const get = store.get.bind(store);
+	vi.spyOn(store, "get").mockImplementation(async (sid) => {
+		const session = await get(sid);
+		return session === null
+			? null
+			: {
+					...session,
+					...federatedSessionAuthentication({
+						federation: "google",
+						upstreamAmr: [],
+						trusted: false,
+					}),
+				};
+	});
+}
 
 /** Alice's records as the factor store holds them, by kind. */
 const recordsOf = async (store: { list(subject: string): Promise<readonly MfaFactorRecord[]> }) =>
@@ -497,15 +518,17 @@ describe("the enroll transaction", () => {
 		expect(await factorStore.list(ALICE.id)).toEqual([]);
 	});
 
-	it("binds nothing beside a record that appeared once the first binding began: a first binding stands only alone, and the session, which stands, is answered 409", async () => {
+	it("binds nothing beside a record that landed after the lease read the set: a first binding stands only alone, its factor never written, and the session, which stands, is answered 409", async () => {
 		const { app, factorStore, userSessionStore, audit, users } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
 		const begun = await enrollFromAccount(agent, "totp");
 		const intruder = (await seedTotp(createMemoryMfaFactorStore())).record;
-		const create = factorStore.create.bind(factorStore);
-		vi.spyOn(factorStore, "create").mockImplementation(async (record) => {
-			await create(record);
-			if (record.kind === "totp" && record.id !== intruder.id) await create(intruder);
+		const createIf = factorStore.createIf.bind(factorStore);
+		vi.spyOn(factorStore, "createIf").mockImplementation(async (record, expected) => {
+			// A binding past its lease lands between this one's read and its write.
+			if (record.kind === "totp" && record.id !== intruder.id)
+				await addRecord(factorStore, intruder);
+			return createIf(record, expected);
 		});
 
 		const res = await completeEnrollment(
@@ -516,10 +539,8 @@ describe("the enroll transaction", () => {
 
 		expect(res.status).toBe(409);
 		expect(res.body).toEqual(ENROLLMENT_CONFLICT);
-		expect((await factorStore.list(ALICE.id)).map((record) => record.kind)).toEqual(["totp"]);
-		expect(audit.of("mfa.first_binding_conflict")).toEqual([
-			expect.objectContaining({ subject: ALICE.id, details: { kind: "totp", removed: true } }),
-		]);
+		expect((await factorStore.list(ALICE.id)).map((record) => record.id)).toEqual([intruder.id]);
+		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
 		expect(audit.of("mfa.factor.enrolled")).toEqual([]);
 		expect(users.marks).toEqual([]);
 	});
@@ -530,7 +551,7 @@ describe("the enroll transaction", () => {
 		const begun = await enrollFromAccount(agent, "totp");
 		const seeded = await seedTotp(createMemoryMfaFactorStore());
 		const list = factorStore.list.bind(factorStore);
-		const create = vi.spyOn(factorStore, "create");
+		const create = vi.spyOn(factorStore, "createIf");
 		// Admission lists first and finds none; every later read finds a counting factor.
 		let reads = 0;
 		vi.spyOn(factorStore, "list").mockImplementation(async (subject) =>
@@ -581,6 +602,72 @@ describe("the enroll transaction", () => {
 		});
 	});
 
+	it("binds a first factor in a session signed in through a federation by federated, and keeps its recovery codes beside the new ones: the federation proved no second factor", async () => {
+		const { app, factorStore, userSessionStore, audit } = await composed();
+		const { agent } = await signIn(app, userSessionStore);
+		federatedSessions(userSessionStore);
+		const old = await seedFactor(factorStore, "recovery_code", { codes: [] });
+
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body.recovery_codes).toHaveLength(10);
+		const records = await factorStore.list(ALICE.id);
+		expect(records.map((record) => [record.kind, record.binding]).sort()).toEqual([
+			["recovery_code", "federated"],
+			["recovery_code", "password"],
+			["totp", "federated"],
+		]);
+		expect(records.some((record) => record.id === old.id)).toBe(true);
+		expect(audit.of("mfa.factor.enrolled")[0]?.details).toMatchObject({ binding: "federated" });
+		expect(audit.of("mfa.recovery_codes.generated")[0]?.details).toEqual({
+			kind: "recovery_code",
+			purpose: "enroll",
+			binding: "federated",
+			by: "user",
+			regenerated: true,
+			unreplaced: true,
+			kept: "federated_binding",
+		});
+	});
+
+	it("binds a first factor in a session signed in through a federation by email_proof once the proof was given there, replacing the recovery codes that stood", async () => {
+		const sender = createRecordingMailSender();
+		const { app, factorStore, userSessionStore, audit } = await composed({ sender });
+		const { agent } = await signIn(app, userSessionStore);
+		federatedSessions(userSessionStore);
+		const old = await seedFactor(factorStore, "recovery_code", { codes: [] });
+
+		const asked = await enrollFromAccount(agent, "totp");
+		expect(asked.status, JSON.stringify(asked.body)).toBe(403);
+		expect(asked.body).toMatchObject(STEP_UP_REQUIRED);
+		const opened = await stepUp(agent);
+		const proved = await giveEmailProof(agent, opened.body.transaction as string, sender);
+		expect(proved.status, JSON.stringify(proved.body)).toBe(200);
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		const records = await factorStore.list(ALICE.id);
+		expect(records.map((record) => [record.kind, record.binding]).sort()).toEqual([
+			["recovery_code", "email_proof"],
+			["totp", "email_proof"],
+		]);
+		expect(records.some((record) => record.id === old.id)).toBe(false);
+		expect(audit.of("mfa.recovery_codes.generated")[0]?.details).not.toHaveProperty("kept");
+	});
+
 	it("refuses a first factor 409 mfa_factor_limit, opening nothing, when the factor and its codes beside a record that does not count would pass mfa.maxFactorsPerSubject", async () => {
 		const { app, factorStore, transactionStore, userSessionStore } = await composed({
 			maxFactorsPerSubject: 2,
@@ -622,7 +709,7 @@ describe("the enroll transaction", () => {
 		]);
 	});
 
-	it("re-checks the limit once its factor is written: a set another binding wrote at once takes it past, and its own factor is removed, 409", async () => {
+	it("judges the limit again on the records read under the lease: a set another binding wrote since the completion's first read takes it past, 409, nothing written and the transaction standing", async () => {
 		const { app, factorStore, userSessionStore } = await composed({
 			mode: "optional",
 			requireEmailProof: "never",
@@ -632,21 +719,28 @@ describe("the enroll transaction", () => {
 		await seedFactor(factorStore, "recovery_code", { codes: [] });
 		const begun = await enrollFromAccount(agent, "totp");
 		const other = await seedFactor(createMemoryMfaFactorStore(), "recovery_code", { codes: [] });
-		const list = factorStore.list.bind(factorStore);
-		let reads = 0;
-		vi.spyOn(factorStore, "list").mockImplementation(async (subject) =>
-			reads++ === 0 ? list(subject) : [...(await list(subject)), other],
-		);
+		const listVersioned = factorStore.listVersioned.bind(factorStore);
+		vi.spyOn(factorStore, "listVersioned").mockImplementationOnce(async (subject) => {
+			// Another binding lands before this one's lease reads the set.
+			await addRecord(factorStore, other);
+			return listVersioned(subject);
+		});
+		const createIf = vi.spyOn(factorStore, "createIf");
+		const transaction = begun.body.transaction as string;
 
-		const done = await completeEnrollment(
-			agent,
-			begun.body.transaction as string,
-			totpProofOf(begun.body.secret),
-		);
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
 
 		expect(done.status).toBe(409);
 		expect(done.body).toEqual(FACTOR_LIMIT);
-		expect((await list(ALICE.id)).map((record) => record.kind)).toEqual(["recovery_code"]);
+		expect(createIf.mock.calls.filter(([record]) => record.kind === "totp")).toEqual([]);
+		expect((await factorStore.list(ALICE.id)).map((record) => record.kind)).toEqual([
+			"recovery_code",
+			"recovery_code",
+		]);
+		// Nothing was consumed: the transaction is still the enrollment's to complete.
+		expect(
+			(await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret))).body,
+		).toEqual(FACTOR_LIMIT);
 	});
 
 	it("keeps the owner's codes under optional with no proof asked: an old code still logs in after a first factor bound by password", async () => {
@@ -915,10 +1009,9 @@ describe("the account page's calls", () => {
 	});
 });
 
-describe("a factor bound past the limit that cannot be removed", () => {
-	/** Alice with a TOTP factor and a session that verified it, a limit of 2, and another TOTP begun: its completion writes the third record. */
-	async function pastTheLimit() {
-		const { app, factorStore, userSessionStore, audit, logger } = await composed({
+describe("another factor whose write finds the set changed since the lease read it", () => {
+	it("is never written: 409, nothing audited as bound and nothing removed, when another binding past its lease landed first — the subject held at the limit", async () => {
+		const { app, factorStore, userSessionStore, audit } = await composed({
 			maxFactorsPerSubject: 2,
 		});
 		const seeded = await seedTotp(factorStore);
@@ -926,23 +1019,13 @@ describe("a factor bound past the limit that cannot be removed", () => {
 		const begun = await enrollFromAccount(agent, "totp");
 		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
 		const other = (await seedTotp(createMemoryMfaFactorStore())).record;
-		const list = factorStore.list.bind(factorStore);
-		const create = factorStore.create.bind(factorStore);
-		let written = false;
-		vi.spyOn(factorStore, "create").mockImplementation(async (record) => {
-			await create(record);
-			written = true;
+		const createIf = factorStore.createIf.bind(factorStore);
+		vi.spyOn(factorStore, "createIf").mockImplementation(async (record, expected) => {
+			// A binding made at once lands between this one's read and its write.
+			if (record.id !== other.id) await addRecord(factorStore, { ...other, binding: "mfa" });
+			return createIf(record, expected);
 		});
-		vi.spyOn(factorStore, "remove").mockRejectedValue(new Error("factor store unreachable"));
-		return { agent, begun, factorStore, audit, logger, list, other, written: () => written };
-	}
-
-	it("is answered 503 with the enrollment audited and one error line naming the account and the kind — the factor stands — when the records read again are past the limit", async () => {
-		const { agent, begun, factorStore, audit, logger, list, other, written } = await pastTheLimit();
-		// A binding made at once beside it: the read after the write finds three records.
-		vi.spyOn(factorStore, "list").mockImplementation(async (subject) =>
-			written() ? [...(await list(subject)), other] : list(subject),
-		);
+		const removeIf = vi.spyOn(factorStore, "removeIf");
 
 		const res = await completeEnrollment(
 			agent,
@@ -950,43 +1033,104 @@ describe("a factor bound past the limit that cannot be removed", () => {
 			totpProofOf(begun.body.secret),
 		);
 
-		expect(res.status).toBe(503);
-		expect(res.body.error).toBe("temporarily_unavailable");
-		const standing = (await list(ALICE.id)).filter((record) => record.binding === "mfa");
-		expect(standing).toHaveLength(1);
-		expect(audit.of("mfa.factor.enrolled")).toEqual([
-			expect.objectContaining({
-				subject: ALICE.id,
-				details: { kind: "totp", purpose: "enroll", binding: "mfa", by: "user" },
-			}),
-		]);
-		const lines = logger.error.mock.calls.filter(
-			(call) => call[1] === "mfa_enrollment_factor_standing",
+		expect(res.status).toBe(409);
+		expect(res.body).toEqual(ENROLLMENT_CONFLICT);
+		expect((await factorStore.list(ALICE.id)).map((record) => record.id).sort()).toEqual(
+			[seeded.record.id, other.id].sort(),
 		);
-		expect(lines).toHaveLength(1);
-		expect(lines[0]?.[0]).toMatchObject({ sub: ALICE.id, kind: "totp", err: expect.anything() });
-		expect(JSON.stringify(lines)).not.toContain(standing[0]?.data as string);
+		expect(audit.of("mfa.factor.enrolled")).toEqual([]);
+		expect(removeIf).not.toHaveBeenCalled();
+	});
+});
+
+describe("a factor that answers an identity a record of the subject holds", () => {
+	const DUPLICATE = {
+		error: "mfa_factor_duplicate",
+		error_description: "This second factor is already enrolled",
+	};
+	/** A factor every record of which is one authenticator, and whose completion checks no duplicate of its own. */
+	const oneAuthenticator = (): MfaFactor => ({
+		...createTestMfaFactor({ kind: "acme", amrValues: ["hwk"] }),
+		identity: () => "the-one-authenticator",
 	});
 
-	it("is answered 503 the same way when the records cannot be read again, the read's outage said too", async () => {
-		const { agent, begun, factorStore, audit, logger, list, written } = await pastTheLimit();
-		vi.spyOn(factorStore, "list").mockImplementation(async (subject) => {
-			if (written()) throw new Error("factor store unreachable");
-			return list(subject);
-		});
+	/** Alice signed in with TOTP, an acme enrollment begun from her account page. */
+	async function begunBeside() {
+		const booted = await composed({ extraModules: [contributing(oneAuthenticator())] });
+		const seeded = await seedTotp(booted.factorStore);
+		const { agent } = await signInWithTotp(booted.app, booted.userSessionStore, seeded);
+		const begun = await enrollFromAccount(agent, "acme");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		return { ...booted, agent, begun: begun.body as { transaction: string; secret: string } };
+	}
 
-		const res = await completeEnrollment(
-			agent,
-			begun.body.transaction as string,
-			totpProofOf(begun.body.secret),
+	it("refuses the completion on the records read before the lease, 409 mfa_factor_duplicate: the attempt spent, the lease never taken", async () => {
+		const { agent, begun, factorStore, transactionStore } = await begunBeside();
+		await seedFactor(factorStore, "acme", { secret: "enrolled-before" });
+		const leased = vi.spyOn(transactionStore, "acquireSubjectLease");
+
+		const res = await completeEnrollment(agent, begun.transaction, begun.secret);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(DUPLICATE);
+		expect(leased).not.toHaveBeenCalled();
+		expect((await transactionStore.get(begun.transaction))?.attempts).toBe(1);
+	});
+
+	it("refuses the completion on the records its lease reads, when the record landed after the read before it: nothing written", async () => {
+		const { agent, begun, factorStore, transactionStore } = await begunBeside();
+		const acquire = transactionStore.acquireSubjectLease.bind(transactionStore);
+		vi.spyOn(transactionStore, "acquireSubjectLease").mockImplementation(
+			async (subject, options) => {
+				await seedFactor(factorStore, "acme", { secret: "enrolled-at-once" });
+				return acquire(subject, options);
+			},
 		);
 
-		expect(res.status).toBe(503);
-		expect((await list(ALICE.id)).filter((record) => record.binding === "mfa")).toHaveLength(1);
-		expect(audit.of("mfa.factor.enrolled")).toHaveLength(1);
-		const said = logger.error.mock.calls.map((call) => call[1]);
-		expect(said).toContain("mfa_store_unavailable");
-		expect(said.filter((name) => name === "mfa_enrollment_factor_standing")).toHaveLength(1);
+		const res = await completeEnrollment(agent, begun.transaction, begun.secret);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(DUPLICATE);
+		expect(
+			(await factorStore.list(ALICE.id)).filter((record) => record.kind === "acme"),
+		).toHaveLength(1);
+		expect(await transactionStore.get(begun.transaction)).toBeDefined();
+	});
+});
+
+describe("a factor whose identity throws on a stored record", () => {
+	it("reads that record as no identity, said at warn by its kind for each read of it, and binds beside it", async () => {
+		const factor: MfaFactor = {
+			...createTestMfaFactor({ kind: "acme", amrValues: ["hwk"] }),
+			identity: (data) => {
+				if (data.secret === "stored") {
+					throw Object.assign(new Error(`no identity for ${ALICE.email}`), { code: "E_ACME" });
+				}
+				return `acme:${String(data.secret)}`;
+			},
+		};
+		const booted = await composed({ extraModules: [contributing(factor)] });
+		const seeded = await seedTotp(booted.factorStore);
+		await seedFactor(booted.factorStore, "acme", { secret: "stored" });
+		const { agent } = await signInWithTotp(booted.app, booted.userSessionStore, seeded);
+		const begun = await enrollFromAccount(agent, "acme");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+
+		const res = await completeEnrollment(agent, begun.body.transaction, begun.body.secret);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(
+			(await booted.factorStore.list(ALICE.id)).filter((record) => record.kind === "acme"),
+		).toHaveLength(2);
+		// The records read before the lease, then the lease's read: one line for each.
+		const said = booted.logger.warn.mock.calls.filter(
+			(call) => call[1] === "mfa_factor_identity_unavailable",
+		);
+		expect(said.map((call) => call[0])).toEqual([
+			{ kind: "acme", err: { name: "Error", code: "E_ACME" } },
+			{ kind: "acme", err: { name: "Error", code: "E_ACME" } },
+		]);
+		expect(loggedText(booted.logger)).not.toContain(ALICE.email);
 	});
 });
 
@@ -1014,6 +1158,80 @@ describe("a factor's own failure", () => {
 			(call) => call[1] === "mfa_factor_enrollment_unavailable",
 		);
 		expect(line?.[0]).toMatchObject({ kind: "acme", err: { name: "Error", code: "E_ACME" } });
+		expect(loggedText(booted.logger)).not.toContain(ALICE.email);
+	});
+
+	it("answers a kind whose enrollable throws 503, naming the kind, with nothing opened: an outage, never an unknown kind", async () => {
+		const throwing: MfaFactor = {
+			...stubFactor("acme", ["hwk"]),
+			enrollable: () => {
+				throw new TypeError("the directory's user could not be read");
+			},
+		};
+		const booted = await composed({ extraModules: [contributing(throwing)] });
+		const { agent } = await signIn(booted.app, booted.userSessionStore);
+		const opened = vi.spyOn(booted.transactionStore, "create");
+
+		const res = await enrollFromAccount(agent, "acme");
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(events(booted.logger, "error")).toEqual(["mfa_factor_enrollment_unavailable"]);
+		expect(booted.logger.error.mock.calls[0]?.[0]).toMatchObject({
+			route: "enrollment",
+			kind: "acme",
+			err: { name: "MfaEnrollableError" },
+		});
+		expect(opened).not.toHaveBeenCalled();
+		expect(await booted.factorStore.list(ALICE.id)).toEqual([]);
+	});
+
+	it("answers a completion whose factor's enrollable throws 503, naming the kind, before an attempt is spent", async () => {
+		let failing = false;
+		const throwing: MfaFactor = {
+			...stubFactor("acme", ["hwk"]),
+			enrollable: () => {
+				if (failing) throw new TypeError("the directory's user could not be read");
+				return true;
+			},
+		};
+		const booted = await composed({ extraModules: [contributing(throwing)] });
+		const { agent } = await signIn(booted.app, booted.userSessionStore);
+		const begun = await enrollFromAccount(agent, "acme");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		failing = true;
+
+		const res = await completeEnrollment(agent, begun.body.transaction, "proof");
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(events(booted.logger, "error")).toEqual(["mfa_factor_enrollment_unavailable"]);
+		expect(booted.logger.error.mock.calls[0]?.[0]).toMatchObject({
+			route: "enrollment",
+			kind: "acme",
+		});
+		expect((await booted.transactionStore.get(begun.body.transaction))?.attempts).toBe(0);
+	});
+
+	it("judges a factor whose identity throws a duplicate of none, said at warn by its kind and name alone: the binding stands", async () => {
+		const throwing: MfaFactor = {
+			...createTestMfaFactor({ kind: "acme", amrValues: ["hwk"] }),
+			identity: () => {
+				throw Object.assign(new Error(`no identity for ${ALICE.email}`), { code: "E_ACME" });
+			},
+		};
+		const booted = await composed({ extraModules: [contributing(throwing)] });
+		const { agent } = await signIn(booted.app, booted.userSessionStore);
+		const begun = await enrollFromAccount(agent, "acme");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+
+		const res = await completeEnrollment(agent, begun.body.transaction, begun.body.secret);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		const said = booted.logger.warn.mock.calls.filter(
+			(call) => call[1] === "mfa_factor_identity_unavailable",
+		);
+		expect(said.map((call) => call[0])).toEqual([
+			{ kind: "acme", err: { name: "Error", code: "E_ACME" } },
+		]);
 		expect(loggedText(booted.logger)).not.toContain(ALICE.email);
 	});
 });

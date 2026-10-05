@@ -101,4 +101,30 @@ describe("the MfaTransactionStore port", () => {
 		>();
 		expect(true).toBe(true);
 	});
+
+	it("answers, on every outcome, from when a rebind counts exactly while the hard hold stands: hard narrows rebindAfterMs", () => {
+		type Outcome = MfaSubjectRecoveryAnswer["outcome"];
+		expectTypeOf<MfaSubjectRecoveryAnswer["rebindAfterMs"]>().toEqualTypeOf<number | null>();
+		expectTypeOf<
+			Extract<MfaSubjectRecoveryAnswer, { readonly hard: true }>["rebindAfterMs"]
+		>().toEqualTypeOf<number>();
+		expectTypeOf<
+			Extract<MfaSubjectRecoveryAnswer, { readonly hard: false }>["rebindAfterMs"]
+		>().toEqualTypeOf<null>();
+		expectTypeOf<
+			Extract<MfaSubjectRecoveryAnswer, { readonly hard: true }>["outcome"]
+		>().toEqualTypeOf<Outcome>();
+		expectTypeOf<
+			Extract<MfaSubjectRecoveryAnswer, { readonly hard: false }>["outcome"]
+		>().toEqualTypeOf<Outcome>();
+		const after = (answer: MfaSubjectRecoveryAnswer): number | undefined => {
+			if (!answer.hard) {
+				expectTypeOf(answer.rebindAfterMs).toEqualTypeOf<null>();
+				return undefined;
+			}
+			expectTypeOf(answer.rebindAfterMs).toEqualTypeOf<number>();
+			return answer.rebindAfterMs;
+		};
+		expect(after({ outcome: "refused", reason: "expired", hard: true, rebindAfterMs: 1 })).toBe(1);
+	});
 });

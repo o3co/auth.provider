@@ -28,6 +28,7 @@ import type {
 	ClientRepository,
 	FederationProvider,
 	LoginEntry,
+	RateLimiter,
 } from "@o3co/auth-provider-core";
 import {
 	BootError,
@@ -41,8 +42,11 @@ import {
 import {
 	coreConfigForTests,
 	createTestOAuthTokenSettings,
+	federationTypeForTests,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
+import express from "express";
+import request from "supertest";
 import { describe, expect, it } from "vitest";
 import {
 	createFederationGrantBackground,
@@ -55,6 +59,7 @@ import {
 	callbackUrlFor,
 	sessionMiddlewareModule,
 } from "./acquisitionFixture.mjs";
+import { refusingLimiter } from "./harness.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -107,6 +112,18 @@ const durableStoreModule = defineModule({
 	} as never,
 });
 
+/** The memory store without `member`, as a store written against an earlier port would be. */
+const storeModuleWithout = (member: "takeRotation" | "refundRotation") =>
+	defineModule({
+		name: `test-federation-grant-store-without-${member}`,
+		provides: {
+			federationGrantStore: () => {
+				const { [member]: _none, ...store } = createMemoryFederationGrantStore();
+				return store;
+			},
+		} as never,
+	});
+
 /** A single-boundary adapter: `revokeBefore` and `revokedBefore`, with no grants boundary on it. */
 const olderRevocation = {
 	kind: "redis",
@@ -116,6 +133,7 @@ const olderRevocation = {
 
 /** An adapter with all three delegated methods: the whole capability (the federation-grants ADR, D17). */
 const delegated = {
+	name: "upstream",
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	exchangeDelegatedCode: async () => ({
 		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
@@ -126,12 +144,14 @@ const delegated = {
 
 /** Two of the three delegated methods, without the code exchange. */
 const slice2Pair = {
+	name: "upstream",
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	refreshDelegatedToken: async () => ({}),
 } as unknown as FederationProvider;
 
 /** A custom adapter with the capability, whose callbacks arrive as a cross-site POST. */
 const formPost = {
+	name: "upstream",
 	responseMode: "form_post",
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	exchangeDelegatedCode: async () => ({
@@ -142,23 +162,21 @@ const formPost = {
 } as unknown as FederationProvider;
 
 /** An adapter with an ordinary session refresh and nothing else. */
-const sessionOnly = { refreshToken: async () => ({}) } as unknown as FederationProvider;
+const sessionOnly = {
+	name: "upstream",
+	refreshToken: async () => ({}),
+} as unknown as FederationProvider;
 
-const federationModule = (name: string, provider: FederationProvider) =>
-	defineModule({
-		name: `test-federation-${name}`,
-		contributes: {
-			federations: { [name]: () => provider },
-			// A federation must be contributed with its redirect policy, which
-			// is a boot invariant of its own and nothing to do with grants.
-			federationRedirectPolicies: {
-				[name]: () => ({
-					validateRedirect: () => ({ ok: true as const, value: undefined }),
-					resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-				}),
-			},
-		} as never,
-	});
+/** The type of the `upstream` entry, handled by the module below. */
+const UPSTREAM_TYPE = "upstream-idp";
+
+/**
+ * The module that handles the `upstream` entry's type: its provider is the
+ * one a test passes, and the fixture's redirect policy, which is a boot
+ * invariant of its own and nothing to do with grants, stands beside it.
+ */
+const federationModule = (provider: FederationProvider) =>
+	federationTypeForTests(UPSTREAM_TYPE, { provider: () => provider });
 
 const CONNECTION = {
 	federation: "upstream",
@@ -173,11 +191,18 @@ interface Setup {
 	readonly connections?: Record<string, unknown>;
 	readonly grants?: Record<string, unknown>;
 	readonly withStore?: boolean;
-	/** `"memory"` is the bundled pair; `"durable"` says grants outlive the process. */
-	readonly store?: "memory" | "durable";
+	/**
+	 * `"memory"` is the bundled pair; `"durable"` says grants outlive the
+	 * process; `"without-take"` / `"without-refund"` lack a rotation member.
+	 */
+	readonly store?: "memory" | "durable" | "without-take" | "without-refund";
 	/** What ends a grant a user withdrew on a replica that never saw the withdrawal. */
 	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
+	/** The limiter wired in place of the memory one. */
+	readonly limiter?: RateLimiter;
+	/** Lists `rateLimiter` in `core.declaredAbsent`. */
+	readonly declareLimiterAbsent?: boolean;
 	readonly withAudit?: boolean;
 	/** Also writes `audit.sink.type = "none"`, the path the audit sink's declared absence moved from. */
 	readonly oldAuditDeclaration?: boolean;
@@ -235,8 +260,7 @@ const UNCONFIGURED_LOGIN_ENTRY: LoginEntry = Object.freeze(
 );
 
 const boot = (setup: Setup) => {
-	const federation =
-		setup.provider === null ? [] : [federationModule("upstream", setup.provider ?? delegated)];
+	const federation = setup.provider === null ? [] : [federationModule(setup.provider ?? delegated)];
 	const modules = [
 		...(setup.federationFirst === false ? [] : federation),
 		sessionMiddlewareModule,
@@ -246,9 +270,13 @@ const boot = (setup: Setup) => {
 			: [
 					setup.store === "durable"
 						? durableStoreModule
-						: setup.storeClosed === undefined
-							? storeModule
-							: storeModuleClosingInto(setup.storeClosed),
+						: setup.store === "without-take"
+							? storeModuleWithout("takeRotation")
+							: setup.store === "without-refund"
+								? storeModuleWithout("refundRotation")
+								: setup.storeClosed === undefined
+									? storeModule
+									: storeModuleClosingInto(setup.storeClosed),
 				]),
 		...(setup.federationFirst === false ? federation : []),
 	];
@@ -261,10 +289,25 @@ const boot = (setup: Setup) => {
 			config: {
 				...makeValidCoreConfig(),
 				...coreConfigForTests({
-					federations: {
-						upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
-					},
-					...(setup.withAudit === false ? {} : { declaredAbsent: ["auditSink"] }),
+					// Configured only beside the module that handles its type, so no
+					// composition here holds an enabled federation that nothing handles.
+					...(setup.provider === null
+						? {}
+						: {
+								federations: {
+									upstream: {
+										enabled: true,
+										type: UPSTREAM_TYPE,
+										callbackURL: "https://provider.example/federation/upstream/callback",
+										issuer: "https://issuer.example",
+										clientId: "cid",
+									},
+								},
+							}),
+					declaredAbsent: [
+						...(setup.withAudit === false ? [] : ["auditSink"]),
+						...(setup.declareLimiterAbsent === true ? ["rateLimiter"] : []),
+					],
 				}),
 				rateLimit: { failMode: "closed" },
 				...(setup.oldAuditDeclaration === true ? { audit: { sink: { type: "none" } } } : {}),
@@ -328,10 +371,12 @@ const boot = (setup: Setup) => {
 			...(setup.withLimiter === false
 				? {}
 				: {
-						rateLimiter: createMemoryRateLimiter({
-							limits: {},
-							defaultLimit: { limit: 60, windowSeconds: 60 },
-						}),
+						rateLimiter:
+							setup.limiter ??
+							createMemoryRateLimiter({
+								limits: {},
+								defaultLimit: { limit: 60, windowSeconds: 60 },
+							}),
 					}),
 		} as unknown as BootstrapMap,
 	});
@@ -351,6 +396,42 @@ describe("enabling the feature", () => {
 		// author happened to write.
 		const handle = await boot({ federationFirst: false });
 		await handle.dispose();
+	});
+
+	it.each(["without-take", "without-refund"] as const)(
+		"refuses to boot with a grant store %s, naming both rotation members",
+		async (store) => {
+			// A store without them keeps no rotation budget, or keeps every rotation
+			// it took: refused here, not met as a storage outage at every refresh.
+			await expect(boot({ store })).rejects.toThrow(/takeRotation.*refundRotation/s);
+		},
+	);
+
+	it("boots with the rotation budget's settings written", async () => {
+		const handle = await boot({ grants: { rotationBudget: 2, rotationWindow: "600" } });
+		await handle.dispose();
+	});
+
+	it("refuses a rotation budget or window below one, naming the key", async () => {
+		for (const [key, value] of [
+			["rotationBudget", 0],
+			["rotationBudget", "1.5"],
+			["rotationWindow", 0],
+			["rotationWindow", "an hour"],
+		] as const) {
+			const error = await boot({ grants: { [key]: value } }).then(
+				() => undefined,
+				(thrown: unknown) => thrown,
+			);
+			expect(error, `${key} ${value}`).toBeInstanceOf(BootError);
+			const { issues } = (error as BootError).details as {
+				issues: readonly { readonly path: readonly PropertyKey[] }[];
+			};
+			expect(
+				issues.map((i) => i.path.join(".")),
+				`${key} ${value}`,
+			).toContain(`federation-grants.${key}`);
+		}
 	});
 
 	it("refuses to boot with nowhere to keep grants", async () => {
@@ -375,8 +456,55 @@ describe("enabling the feature", () => {
 		await expect(boot({ store: "durable" })).rejects.toThrow(/outlive the process/);
 	});
 
-	it("refuses to boot with no throttle in front of an opaque grant id", async () => {
-		await expect(boot({ withLimiter: false })).rejects.toThrow(/rateLimiter/);
+	it("refuses to boot with no limiter and no declaration, by core's absence policy", async () => {
+		const error = await boot({ withLimiter: false }).then(
+			() => undefined,
+			(thrown: unknown) => thrown,
+		);
+		expect(error).toBeInstanceOf(BootError);
+		expect(error).toMatchObject({
+			reason: "component-absence-undeclared",
+			details: { componentKey: "rateLimiter", absentValue: "rateLimiter" },
+		});
+		expect((error as BootError).details).toHaveProperty(
+			"consumedBy",
+			expect.arrayContaining(["federation-grants"]),
+		);
+	});
+
+	it("boots with no limiter declared absent, and both halves let requests through", async () => {
+		const handle = await boot({ withLimiter: false, declareLimiterAbsent: true });
+		try {
+			const app = express().use(handle.router);
+			// The client routes reach client authentication, unthrottled.
+			const token = await request(app)
+				.post("/oauth/federation-grants/g-1/token")
+				.send({ sub: "alice" });
+			expect(token.status).toBe(401);
+			expect(token.headers["ratelimit-limit"]).toBeUndefined();
+			// The browser half reaches connect, which reads the link.
+			const connect = await request(app).get("/session/federation-grants/connect");
+			expect(connect.status).toBe(400);
+			expect(connect.text).toBe("This link is not valid.");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("throttles both halves with a limiter wired", async () => {
+		const handle = await boot({ limiter: refusingLimiter });
+		try {
+			const app = express().use(handle.router);
+			const token = await request(app)
+				.post("/oauth/federation-grants/g-1/token")
+				.send({ sub: "alice" });
+			expect(token.status).toBe(429);
+			expect(token.body).toEqual({ error: "rate_limited", error_description: "provider" });
+			const connect = await request(app).get("/session/federation-grants/connect");
+			expect(connect.status).toBe(429);
+		} finally {
+			await handle.dispose();
+		}
 	});
 
 	it("refuses a retrieval limit the promises cannot be kept under", async () => {
@@ -419,7 +547,9 @@ describe("enabling the feature", () => {
 	});
 
 	it("refuses a connection pointing at a federation nothing contributes", async () => {
-		await expect(boot({ provider: null })).rejects.toThrow(/upstream/);
+		await expect(boot({ provider: null })).rejects.toThrow(
+			/federation-grants\.connections\.calendar: federation "upstream" is not configured/,
+		);
 	});
 
 	it("refuses a federation whose adapter cannot act without the user", async () => {
@@ -541,7 +671,7 @@ describe("the actions it registers", () => {
 		}
 	});
 
-	it("registers them while the feature is off too: the switch is read when the routes are built, after the actions register", async () => {
+	it("registers none of them while the feature is off: the switched-off module registers nothing", async () => {
 		const handle = await boot({
 			enabled: false,
 			withStore: false,
@@ -552,7 +682,7 @@ describe("the actions it registers", () => {
 		try {
 			expect(
 				handle.components.sessionRequirementResolver?.action("federation_grants.connect"),
-			).toEqual({ name: "federation_grants.connect", grade: "use" });
+			).toBeUndefined();
 		} finally {
 			await handle.dispose();
 		}
@@ -631,8 +761,10 @@ describe("what creating a grant needs", () => {
 	});
 
 	it("refuses a deployment with no durable sessions for the connect flow to re-read", async () => {
+		// A userSessionStore slot holding undefined is unwired: core's federation
+		// store guard refuses it before the module is built.
 		await expect(boot({ withUserSessionStore: false })).rejects.toThrow(
-			/federationGrantsModule: federation grants are enabled and no userSessionStore/,
+			/required federation stores are missing: userSessionStore/,
 		);
 	});
 

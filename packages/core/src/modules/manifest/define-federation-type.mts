@@ -16,13 +16,13 @@
 
 /**
  * The way to author a `federationTypes` declaration: a helper that ties the
- * factory's entry to the schema.
+ * factories' entry to the schema.
  *
  * Inside `defineModule({ … })` the record fixes the entry at `unknown` (no
  * per-key inference, and a method is bivariant in its entry), so a schema for
  * `{ issuer }` could pair with a factory typed for `{ clientId }` unnoticed.
- * The helper infers `E` from `entrySchema` and checks the factory, a property
- * here, strictly. `Deps` is written, not inferred: a nested call inside an
+ * The helper infers `E` from `entrySchema` and checks both factories,
+ * properties here, strictly. `Deps` is written, not inferred: a nested call inside an
  * inferring `defineModule` cannot pick up the module's deps.
  */
 
@@ -31,12 +31,14 @@ import type {
 	Contributed,
 	FederationInstance,
 	FederationProvider,
+	FederationRedirectPolicyContribution,
 	FederationTypeContribution,
 } from "./contributes-map.mjs";
 
 /**
- * A `federationTypes` declaration as the helper takes it. The factory is a
- * function property, so its pairing with the schema is checked contravariantly.
+ * A `federationTypes` declaration as the helper takes it. The factories are
+ * function properties, so their pairing with the schema is checked
+ * contravariantly.
  */
 export interface FederationTypeDeclaration<Deps, E> {
 	readonly entrySchema: z.ZodType<E>;
@@ -44,10 +46,14 @@ export interface FederationTypeDeclaration<Deps, E> {
 		deps: Deps,
 		instance: FederationInstance<E>,
 	) => Contributed<FederationProvider>;
+	readonly redirectPolicy: (
+		deps: Deps,
+		instance: FederationInstance<E>,
+	) => Contributed<FederationRedirectPolicyContribution>;
 }
 
 /**
- * Author a `federationTypes` declaration whose factory's entry is the entry
+ * Author a `federationTypes` declaration whose factories' entry is the entry
  * schema's output:
  *
  * ```typescript
@@ -56,6 +62,7 @@ export interface FederationTypeDeclaration<Deps, E> {
  *     oidc: defineFederationType<OidcModuleDeps>()({
  *       entrySchema: OidcEntry,
  *       factory: (deps, { name, entry }) => createOidcProvider(name, entry), // entry: z.output<typeof OidcEntry>
+ *       redirectPolicy: (deps, { entry }) => createRedirectPolicy(entry),
  *     }),
  *   },
  * }

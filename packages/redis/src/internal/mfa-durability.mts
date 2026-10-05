@@ -24,8 +24,13 @@
  * - the policy is judged by an allow-list. `noeviction` passes. The three
  *   `allkeys-*`, which may evict any key, refuse the boot, whatever else could
  *   not be read. The four `volatile-*` pass: they never pick the factors or
- *   the requirement, which carry no TTL. The transaction store still warns on
- *   them, naming the key families an eviction fails open on: its subject
+ *   the requirement, which carry no TTL. Each store still warns on them,
+ *   naming the key families an eviction fails open on. The factor store's:
+ *   an emptied factor set's tombstone carries a TTL, and an evicted one reads
+ *   as a set never written before the write lifetime has passed, so a first
+ *   binding read before the set came and went may land; a write's replay key
+ *   carries one until the write's deadline, and an evicted one lets a copy
+ *   the driver resends apply again. The transaction store's: its subject
  *   lock and weekly window carry a TTL once no run is counted, and an evicted
  *   one lifts a lockout hold early; a subject's first-binding mark carries one
  *   always, and an evicted one no longer refuses a stale session's first
@@ -47,21 +52,11 @@
 
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
 import type { RedisDurability } from "../clients.mjs";
-
-/** The policies that cannot evict a key without a TTL, which is what each store's durable keys are. */
-const VOLATILE_POLICIES: ReadonlySet<string> = new Set([
-	"volatile-lru",
-	"volatile-lfu",
-	"volatile-random",
-	"volatile-ttl",
-]);
-
-/** The policies that may evict any key. */
-const ALLKEYS_POLICIES: ReadonlySet<string> = new Set([
-	"allkeys-lru",
-	"allkeys-lfu",
-	"allkeys-random",
-]);
+import {
+	ALLKEYS_POLICIES,
+	RedisStoreEvictableError,
+	VOLATILE_POLICIES,
+} from "./eviction-policy.mjs";
 
 /** The two stores the check guards, by their slot. */
 export type RedisMfaStoreSlot = "mfaFactorStore" | "mfaTransactionStore";
@@ -75,7 +70,7 @@ const NAMES: Readonly<
 			readonly volatile: string;
 			readonly unchecked: string;
 			/** The notice a `volatile-*` policy is given, where some of the store's keys carry a TTL. */
-			readonly lockEvictable: string | undefined;
+			readonly volatileEvictable: string | undefined;
 			/** The key families that notice names: each carries a TTL, and losing one fails open. */
 			readonly evictableFamilies: readonly string[] | undefined;
 			/** What an eviction would lose, for the refusal's message. */
@@ -90,19 +85,18 @@ const NAMES: Readonly<
 		lossy: "mfa_factor_store_lossy",
 		volatile: "mfa_factor_store_volatile",
 		unchecked: "mfa_factor_store_durability_unchecked",
-		lockEvictable: undefined,
-		evictableFamilies: undefined,
+		volatileEvictable: "mfa_factor_store_tombstone_evictable",
+		evictableFamilies: ["tombstone", "replay"],
 		holds:
 			"enrolled second factors, and an account whose factors are evicted reads as never enrolled",
-		remedy:
-			'"noeviction" (or a "volatile-*" policy, which never picks these keys: they carry no TTL)',
+		remedy: '"noeviction"',
 	},
 	mfaTransactionStore: {
 		evictable: "mfa-transaction-store-evictable",
 		lossy: "mfa_transaction_store_lossy",
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
-		lockEvictable: "mfa_transaction_store_lock_evictable",
+		volatileEvictable: "mfa_transaction_store_lock_evictable",
 		evictableFamilies: ["lock", "week", "first-binding", "lease"],
 		holds:
 			"the email proof an operator reset requires at the next first binding, which a password holder could then skip",
@@ -116,18 +110,18 @@ const NAMES: Readonly<
  * the module; `reason` and `maxmemoryPolicy` say what refused it. It quotes
  * the server's policy and nothing else.
  */
-export class RedisMfaStoreEvictableError extends Error {
-	readonly reason: "mfa-factor-store-evictable" | "mfa-transaction-store-evictable";
-	readonly maxmemoryPolicy: string;
-
+export class RedisMfaStoreEvictableError extends RedisStoreEvictableError<
+	"mfa-factor-store-evictable" | "mfa-transaction-store-evictable"
+> {
 	constructor(store: RedisMfaStoreSlot, maxmemoryPolicy: string) {
 		const names = NAMES[store];
-		super(
-			`${store}: the Redis server's maxmemory-policy is "${maxmemoryPolicy}", which may evict any key — ${names.holds}; set maxmemory-policy to ${names.remedy}, or give ${store} a server of its own (${names.evictable})`,
-		);
+		super(store, maxmemoryPolicy, {
+			reason: names.evictable,
+			evicts: "any key",
+			holds: names.holds,
+			remedy: names.remedy,
+		});
 		this.name = "RedisMfaStoreEvictableError";
-		this.reason = names.evictable;
-		this.maxmemoryPolicy = maxmemoryPolicy;
 	}
 }
 
@@ -150,7 +144,11 @@ export async function checkRedisMfaStoreDurability(
 	if (policy !== undefined && ALLKEYS_POLICIES.has(policy)) {
 		throw new RedisMfaStoreEvictableError(store, policy);
 	}
-	if (names.lockEvictable !== undefined && policy !== undefined && VOLATILE_POLICIES.has(policy)) {
+	if (
+		names.volatileEvictable !== undefined &&
+		policy !== undefined &&
+		VOLATILE_POLICIES.has(policy)
+	) {
 		logger.warn(
 			{
 				store,
@@ -158,7 +156,7 @@ export async function checkRedisMfaStoreDurability(
 				maxmemoryPolicy: policy,
 				evictableFamilies: names.evictableFamilies,
 			},
-			names.lockEvictable,
+			names.volatileEvictable,
 		);
 	}
 	/** A policy read but not one the allow-list knows: it cannot be judged. */

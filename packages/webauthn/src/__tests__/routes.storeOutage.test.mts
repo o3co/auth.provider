@@ -16,9 +16,9 @@
 
 /**
  * The three ceremony routes answer a store that cannot answer as an outage.
- * Every store call they make (the credential list behind `excludeCredentials`
- * and `allowCredentials`, the challenge write, the ceremony's consume, the
- * credential insert) that throws is `503 temporarily_unavailable`, logged once
+ * Every store call they make (the credential list behind `excludeCredentials`,
+ * the challenge write, the ceremony's consume, the credential insert) that
+ * throws is `503 temporarily_unavailable`, logged once
  * at error level as `webauthn_ceremony_store_unavailable` with the route's
  * `site`, the `store`, the `step` and the error's projection. A duplicate
  * credential is still the client's `400 credential_id_conflict`.
@@ -42,7 +42,7 @@ import {
 import express from "express";
 import supertest from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, testTokenSettings, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
 vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAttestation: vi.fn(),
@@ -65,8 +65,6 @@ const webauthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	// On, so the authentication options route reads the credential store.
-	allowCredentialsForKnownUser: true,
 	rateLimit: { authenticationOptions: { limit: 100, windowSeconds: 60 } },
 };
 
@@ -130,10 +128,6 @@ async function boot(stores: Stores, logger: SpyLogger): Promise<express.Express>
 		modules: [
 			webauthnModule,
 			defineModule({
-				name: "test:webauthn-outage-config",
-				provides: { webauthnConfig: () => webauthnConfig },
-			}),
-			defineModule({
 				name: "test:webauthn-outage-key-store",
 				provides: { keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!") },
 			}),
@@ -157,8 +151,9 @@ async function boot(stores: Stores, logger: SpyLogger): Promise<express.Express>
 			}),
 		],
 		bootstrapComponents: {
-			config,
+			config: withWebAuthnSection(config, webauthnConfig),
 			pathResolver: (p: string) => p,
+			oauthTokenSettings: testTokenSettings({ issuer: "https://test.example" }),
 			logger: logger as unknown as Logger,
 		} as never,
 	});
@@ -393,37 +388,28 @@ describe("POST /oauth/webauthn/registration/verify", () => {
 });
 
 describe("POST /oauth/webauthn/authentication/options", () => {
-	it.each([
-		["the credential list", "listByUserId", "webauthn_credential", "list", "credential store"],
-		["the challenge write", "issue", "challenge", "issue", "challenge store"],
-	] as const)(
-		"answers 503 and logs once when %s cannot be done",
-		async (_label, method, store, step, name) => {
-			const stores = memoryStores();
-			const logger = spyLogger();
-			const broken: Stores =
-				method === "listByUserId"
-					? {
-							...stores,
-							credentialStore: { ...stores.credentialStore, listByUserId: down(`the ${name}`) },
-						}
-					: { ...stores, challengeStore: { ...stores.challengeStore, issue: down(`the ${name}`) } };
-			const app = await boot(broken, logger);
+	it("answers 503 and logs once when the challenge write cannot be done", async () => {
+		const stores = memoryStores();
+		const logger = spyLogger();
+		const app = await boot(
+			{
+				...stores,
+				challengeStore: { ...stores.challengeStore, issue: down("the challenge store") },
+			},
+			logger,
+		);
 
-			const res = await supertest(app)
-				.post("/oauth/webauthn/authentication/options")
-				.send({ userId: USER_ID });
+		const res = await supertest(app).post("/oauth/webauthn/authentication/options").send({});
 
-			expect(res.status).toBe(503);
-			expect(res.body).toEqual({
-				error: "temporarily_unavailable",
-				error_description: `${name} unavailable`,
-			});
-			expectOneOutageLine(
-				logger,
-				{ site: "authentication_options", store, step },
-				`the ${name} is down`,
-			);
-		},
-	);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "challenge store unavailable",
+		});
+		expectOneOutageLine(
+			logger,
+			{ site: "authentication_options", store: "challenge", step: "issue" },
+			"the challenge store is down",
+		);
+	});
 });

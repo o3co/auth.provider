@@ -1,28 +1,31 @@
 import { expect, expectTypeOf, test } from "vitest";
 import type { z } from "zod";
 import type { RateLimitSpec } from "../../../ratelimit/types.mjs";
+import type { verifierLimitClaim } from "../../../ratelimit/verifierLimits.mjs";
 import type { Contributed } from "../contributed.mjs";
 import type {
 	AuditHookFactory,
 	ContributesMap,
-	FederationFactory,
 	FederationInstance,
 	FederationTypeContribution,
 	GrantFactory,
+	GrantHandler,
 	RateLimitBudgetFactory,
+	VerifierLimitDeclaration,
 } from "../contributes-map.mjs";
 import type { ProviderDeps } from "../provider.mjs";
 
 // Local fixture deps — does NOT augment shared ComponentMap.
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
-test("ContributesMap has exactly core's fourteen contribution kinds", () => {
-	// `federationRedirectPolicies` is absent: the session package adds it
-	// through `declare module` augmentation.
+test("ContributesMap has exactly core's thirteen contribution kinds", () => {
+	// `federations` is absent: a federation registers through the type its
+	// entry names (`federationTypes`). `federationRedirectPolicies` is absent
+	// too: the session package declares it, for its policy's type, through
+	// `declare module` augmentation.
 	type Keys = keyof ContributesMap<LocalDeps>;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "grants"
-		| "federations"
 		| "tokenExchangeValidators"
 		| "mfaFactors"
 		| "auditHooks"
@@ -46,6 +49,12 @@ test("Per-kind factories receive Deps as argument", () => {
 test("List-shaped kinds are readonly arrays", () => {
 	type AuditField = NonNullable<ContributesMap<LocalDeps>["auditHooks"]>;
 	expectTypeOf<AuditField>().toMatchTypeOf<readonly AuditHookFactory<LocalDeps>[]>();
+});
+
+test("A grant factory answers a grant handler, or null to switch the grant off", () => {
+	expectTypeOf<GrantFactory<LocalDeps>>().toEqualTypeOf<
+		(deps: LocalDeps) => Contributed<GrantHandler | null>
+	>();
 });
 
 test("Name-keyed kinds are readonly records", () => {
@@ -83,22 +92,25 @@ test("grantMiddleware is list-shaped (factory array)", () => {
 // it handles
 // ---------------------------------------------------------------------------
 
-test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget or null", () => {
+test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget or null, a verifier's claim declaring its setting", () => {
 	type Field = NonNullable<ContributesMap<LocalDeps>["rateLimitBudgets"]>;
 	expectTypeOf<Field>().toEqualTypeOf<{
 		readonly [prefix: string]: RateLimitBudgetFactory<LocalDeps>;
 	}>();
 	expectTypeOf<RateLimitBudgetFactory<LocalDeps>>().toEqualTypeOf<
-		(deps: LocalDeps) => Contributed<RateLimitSpec | null>
+		((deps: LocalDeps) => Contributed<RateLimitSpec | null>) & {
+			readonly verifier?: VerifierLimitDeclaration;
+		}
+	>();
+	expectTypeOf<VerifierLimitDeclaration>().toEqualTypeOf<{ readonly setting: string }>();
+	// A plain factory is still one, and the claim core builds is one too.
+	expectTypeOf<() => null>().toExtend<RateLimitBudgetFactory<LocalDeps>>();
+	expectTypeOf<ReturnType<typeof verifierLimitClaim>>().toExtend<
+		RateLimitBudgetFactory<LocalDeps>
 	>();
 });
 
-test("a federations entry is the factory alone, name-keyed by the federation's name", () => {
-	type Entry = NonNullable<ContributesMap<LocalDeps>["federations"]>[string];
-	expectTypeOf<Entry>().toEqualTypeOf<FederationFactory<LocalDeps>>();
-});
-
-test("federationTypes is name-keyed by the type an entry names, each declaring its entry schema and a factory given the entry", () => {
+test("federationTypes is name-keyed by the type an entry names, each declaring its entry schema and the provider and redirect-policy factories given the entry", () => {
 	type Field = NonNullable<ContributesMap<LocalDeps>["federationTypes"]>;
 	expectTypeOf<Field>().toEqualTypeOf<{
 		readonly [type: string]: FederationTypeContribution<LocalDeps>;
@@ -109,8 +121,12 @@ test("federationTypes is name-keyed by the type an entry names, each declaring i
 	expectTypeOf<Parameters<Declared["factory"]>>().toEqualTypeOf<
 		[deps: LocalDeps, instance: FederationInstance<Entry>]
 	>();
+	expectTypeOf<Parameters<Declared["redirectPolicy"]>>().toEqualTypeOf<
+		[deps: LocalDeps, instance: FederationInstance<Entry>]
+	>();
 	expectTypeOf<FederationInstance<Entry>>().toEqualTypeOf<{
 		readonly name: string;
+		readonly callbackURL: string;
 		readonly entry: Entry;
 	}>();
 	// A declaration typed for its entry is one the record accepts.

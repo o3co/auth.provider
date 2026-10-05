@@ -22,9 +22,9 @@
 
 import type { AppConfig, Module } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
-import { oauthModule } from "#/module.mjs";
+import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
-import { oauthSessionModule } from "#/oauthSession.mjs";
+import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 
 /**
  * `config` with what a resolution of the modules' references under an
@@ -50,8 +50,8 @@ export function capturing<C extends object>(config: C, modules: readonly Module[
 export function withOauthCaptures<C extends object>(config: C): C {
 	const built = makeValidAppConfig() as AppConfig;
 	return capturing(config, [
-		oauthModule({ config: built }),
-		oauthSessionModule({ config: built }),
+		oauthEndpointsModule,
+		oauthSessionGrantModule,
 		oauthAuthorizationModule({ config: built }),
 	]);
 }

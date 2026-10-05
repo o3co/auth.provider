@@ -27,7 +27,7 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
-import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
+import type { GrantHandler, MfaFactor } from "../modules/manifest/contributes-map.mjs";
 import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
@@ -36,7 +36,7 @@ import type {
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
 import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
-import { isBoundedRateLimitSpec, isUsableRateLimitSpec } from "../ratelimit/usableSpec.mjs";
+import { isBoundedRateLimitSpec } from "../ratelimit/usableSpec.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
@@ -48,6 +48,7 @@ import {
 } from "../session-admission/requirement.mjs";
 import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
+import { buildDispatchedFederation } from "./federation-entries.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
 	CleanupRecord,
@@ -55,6 +56,7 @@ import type {
 	ComponentWorld,
 	ContributionCollectorMap,
 	ContributionKind,
+	GrantCollector,
 	ListCollector,
 	NameKeyedCollector,
 	RegistryWorld,
@@ -70,9 +72,10 @@ import { BootError } from "./types.mjs";
  * Build a typed deps object for a module from the working component map,
  * using the module's DepsBlueprint from the plan.
  *
- * A missing `requires` key means an earlier stage (validate-manifests or
- * planBoot's activation closure) broke an invariant, so it throws a plain
- * Error, not a BootError; this mirrors materialize-components.buildDeps as
+ * A `requires` key missing or holding `undefined` means an earlier stage
+ * (validate-manifests, planBoot's activation closure, or
+ * materializeComponents) broke an invariant, so it throws a plain Error, not
+ * a BootError; this mirrors materialize-components.buildDeps as
  * defence in depth. `optional` keys may be absent and are included as
  * `undefined`. `deps.section`, the module's own configuration section parsed
  * at stage 1, is set only when the module declares one.
@@ -86,9 +89,9 @@ function buildDeps(
 ): Record<string, unknown> {
 	const deps: Record<string, unknown> = {};
 	for (const key of requires) {
-		if (!(key in components)) {
+		if (!Object.hasOwn(components, key) || components[key as string] === undefined) {
 			throw new Error(
-				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/2 should have caught this`,
+				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/3 should have caught this`,
 			);
 		}
 		deps[key as string] = components[key as string];
@@ -129,15 +132,21 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 
 /**
  * Instantiate a stable read-side `GrantHandlerResolver` backed by the given
- * `NameKeyedCollector`. `get` / `entries` read through at call time, so a
- * factory that captures the resolver before the collector is populated sees
- * the full view at request time.
+ * `NameKeyedCollector`. A grant type whose factory answered `null` — the
+ * grant switched off by its module's settings — is absent from what it
+ * answers, as a grant type no module contributes is. `get` / `entries` read
+ * through at call time, so a factory that captures the resolver before the
+ * collector is populated sees the full view at request time.
  * @internal
  */
-function makeGrantHandlerResolver(collector: NameKeyedCollector<unknown>): GrantHandlerResolver {
+function makeGrantHandlerResolver(collector: GrantCollector): GrantHandlerResolver {
 	return {
-		get: (grantType: string) => collector.get(grantType) as ReturnType<GrantHandlerResolver["get"]>,
-		entries: () => collector.entries() as ReturnType<GrantHandlerResolver["entries"]>,
+		get: (grantType: string) => collector.get(grantType) ?? undefined,
+		entries: function* (): IterableIterator<readonly [string, GrantHandler]> {
+			for (const [grantType, handler] of collector.entries()) {
+				if (handler !== null) yield [grantType, handler] as const;
+			}
+		},
 	};
 }
 
@@ -191,7 +200,8 @@ function makeFederationProviders<T>(collector: NameKeyedCollector<T>): ReadonlyM
 /**
  * Instantiate a stable read-through view of the `federationRedirectPolicies`
  * collector, shaped like `makeFederationProviders`. The reference is stable
- * from step 0; its contents are complete after step 2.
+ * from step 0; its contents are complete after step 2a, which registers the
+ * entries dispatched by type, and it is readable from then on.
  * @internal
  */
 function makeFederationRedirectPolicyResolver(
@@ -264,30 +274,57 @@ function makeRateLimitBudgetResolver(
 
 /**
  * Whether the projections of one boot's working map may be read: closed while
- * stage 3 runs the `provides` factories, open from stage 4 on. Keyed by the
- * working map, which stages 3 and 4 share.
+ * stage 3 runs the `provides` factories, open from stage 4 on (`open`). The
+ * two federation projections stay closed through the name-keyed pass too,
+ * until step 2a has registered the entries dispatched by type
+ * (`federationsOpen`). Keyed by the working map, which stages 3 and 4 share.
  */
-const projectionGates = new WeakMap<object, { open: boolean }>();
+interface ProjectionGate {
+	open: boolean;
+	federationsOpen: boolean;
+}
+const projectionGates = new WeakMap<object, ProjectionGate>();
+
+/** What a projection waits for before its contents may be read. */
+type ReadableFrom = "contributions" | "dispatched federations";
+
+/** Why a read of a projection is refused now, or `undefined` when it may be read. */
+function closedWhile(gate: ProjectionGate, from: ReadableFrom): string | undefined {
+	if (!gate.open) {
+		return "while the provides factories run: it fills as the contributions register, so read it at request time";
+	}
+	if (from === "dispatched federations" && !gate.federationsOpen) {
+		return "before every federation was registered (during the name-keyed contribution factories or the federation dispatch): read it in a routes factory or at request time";
+	}
+	return undefined;
+}
 
 /**
  * A projection that refuses a read of its contents while its gate is closed.
  * During stage 3 it would be empty (its contributions register in stage 4),
  * and a provider that computed from it would keep an empty answer; the read
- * throws instead and the boot is refused (`provides-factory-failed`). Only
- * the view's own members (`get`, `entries`, a map view's `size` and
- * iterator) are guarded. `then` answers `undefined`, so the view is not
- * thenable, and `Symbol.toStringTag`, `Symbol.toPrimitive` and
- * `Object.prototype` members pass, so a factory may hold, await, return or
- * print it.
+ * throws instead and the boot is refused (`provides-factory-failed`). A
+ * federation projection read before step 2a has finished — by a name-keyed
+ * contribution factory, or by a type's factory during step 2a — would miss
+ * entries step 2a registers, so that read throws too
+ * (`contribute-factory-failed`). Only the view's own members (`get`,
+ * `entries`, a map view's `size` and iterator) are guarded. `then` answers
+ * `undefined`, so the view is not thenable, and `Symbol.toStringTag`,
+ * `Symbol.toPrimitive` and `Object.prototype` members pass, so a factory may
+ * hold, await, return or print it.
  */
-function readableFromStage4<T extends object>(view: T, key: string, gate: { open: boolean }): T {
+function readableFromStage4<T extends object>(
+	view: T,
+	key: string,
+	gate: ProjectionGate,
+	from: ReadableFrom = "contributions",
+): T {
 	return new Proxy(view, {
 		get(target, property, receiver) {
 			if (property === "then") return undefined;
-			if (!gate.open && Object.hasOwn(target, property)) {
-				throw new Error(
-					`${key} was read while the provides factories run: it fills as the contributions register, so read it at request time`,
-				);
+			const closed = Object.hasOwn(target, property) ? closedWhile(gate, from) : undefined;
+			if (closed !== undefined) {
+				throw new Error(`${key} was read ${closed}`);
 			}
 			return Reflect.get(target, property, receiver);
 		},
@@ -295,12 +332,19 @@ function readableFromStage4<T extends object>(view: T, key: string, gate: { open
 }
 
 /**
- * Stage 4 opens the projections of `components` for reading (step 0).
+ * Stage 4 opens the projections of `components` for reading (step 0), all
+ * but the two federation projections, which open after step 2a.
  * @internal
  */
 export function openSyntheticProjections(components: Record<string, unknown>): void {
 	const gate = projectionGates.get(components);
 	if (gate !== undefined) gate.open = true;
+}
+
+/** Stage 4 opens the federation projections of `components` for reading, after step 2a. */
+function openFederationProjections(components: Record<string, unknown>): void {
+	const gate = projectionGates.get(components);
+	if (gate !== undefined) gate.federationsOpen = true;
 }
 
 /**
@@ -324,13 +368,13 @@ export function prepareSyntheticProjections(
 ): void {
 	let gate = projectionGates.get(components);
 	if (gate === undefined) {
-		gate = { open: false };
+		gate = { open: false, federationsOpen: false };
 		projectionGates.set(components, gate);
 	}
 	const readGate = gate;
-	const inject = (key: string, make: () => object): void => {
+	const inject = (key: string, make: () => object, from?: ReadableFrom): void => {
 		if (!Object.hasOwn(components, key)) {
-			components[key] = readableFromStage4(make(), key, readGate);
+			components[key] = readableFromStage4(make(), key, readGate, from);
 		}
 	};
 	const {
@@ -344,9 +388,7 @@ export function prepareSyntheticProjections(
 		admissionActions,
 	} = contributionKinds;
 	if (grants !== undefined) {
-		inject("grantHandlerResolver", () =>
-			makeGrantHandlerResolver(grants as NameKeyedCollector<unknown>),
-		);
+		inject("grantHandlerResolver", () => makeGrantHandlerResolver(grants));
 	}
 	if (tokenExchangeValidators !== undefined) {
 		inject("tokenExchangeValidatorResolver", () =>
@@ -354,15 +396,20 @@ export function prepareSyntheticProjections(
 		);
 	}
 	if (federations !== undefined) {
-		inject("federationProviders", () =>
-			makeFederationProviders(federations as NameKeyedCollector<unknown>),
+		inject(
+			"federationProviders",
+			() => makeFederationProviders(federations as NameKeyedCollector<unknown>),
+			"dispatched federations",
 		);
 	}
 	if (federationRedirectPolicies !== undefined) {
-		inject("federationRedirectPolicyResolver", () =>
-			makeFederationRedirectPolicyResolver(
-				federationRedirectPolicies as NameKeyedCollector<unknown>,
-			),
+		inject(
+			"federationRedirectPolicyResolver",
+			() =>
+				makeFederationRedirectPolicyResolver(
+					federationRedirectPolicies as NameKeyedCollector<unknown>,
+				),
+			"dispatched federations",
 		);
 	}
 	if (mfaFactors !== undefined) {
@@ -417,11 +464,11 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  *   is the copy `registeredRequirement` makes, its page held to the issuer's
  *   origin; its `reach` is read later (`checkSessionRequirements`);
  * - a `rateLimitBudgets` budget no limiter can apply as written
- *   (`isUsableRateLimitSpec`). What registers is the frozen copy that was
+ *   (`isBoundedRateLimitSpec`). What registers is the frozen copy that was
  *   validated.
  *
- * `null` (switched off by configuration) passes for `mfaFactors` and
- * `rateLimitBudgets` and keeps the name claimed.
+ * `null` (switched off by configuration) passes for `grants`, `mfaFactors`
+ * and `rateLimitBudgets` and keeps the name claimed.
  * @internal
  */
 function checkNameKeyedValue(
@@ -431,6 +478,7 @@ function checkNameKeyedValue(
 	issuer: string | undefined,
 ): unknown {
 	if (kind === "grants") {
+		if (value === null) return value;
 		// What `/oauth/token` dispatches to, calling `handle`, and what the
 		// resolver lists as registered: one answer to both only when the value
 		// is a handler.
@@ -440,7 +488,7 @@ function checkNameKeyedValue(
 				: undefined;
 		if (typeof handle !== "function") {
 			throw new RangeError(
-				`grants "${name}": the factory must answer a grant handler, an object whose handle is a function`,
+				`grants "${name}": the factory must answer a grant handler, an object whose handle is a function, or null to switch the grant off`,
 			);
 		}
 		return value;
@@ -517,40 +565,6 @@ function checkNameKeyedValue(
 	return value;
 }
 
-/** A budget as a refusal shows it. */
-const describedBudget = (spec: RateLimitSpec): string =>
-	`limit ${spec.limit}, windowSeconds ${spec.windowSeconds}`;
-
-/**
- * Refuses a `rateLimitBudgets` override that loosens the budget it replaces:
- * a higher `limit` or a shorter `windowSeconds`. A `null` side counts as the
- * wired limiter's `defaultLimit`; without one it cannot be compared, and is
- * refused.
- * @internal
- */
-function checkBudgetOverride(
-	name: string,
-	replaced: RateLimitSpec | null,
-	overriding: RateLimitSpec | null,
-	limiter: unknown,
-): void {
-	if (replaced === null && overriding === null) return;
-	const declared = (limiter as { readonly defaultLimit?: unknown } | undefined)?.defaultLimit;
-	const defaultLimit = isUsableRateLimitSpec(declared) ? declared : undefined;
-	const from = replaced ?? defaultLimit;
-	const to = overriding ?? defaultLimit;
-	if (from === undefined || to === undefined) {
-		throw new RangeError(
-			`rateLimitBudgets "${name}": an override may only tighten the budget it replaces, and a switched-off budget counts as the wired limiter's defaultLimit, which no wired limiter declares`,
-		);
-	}
-	if (to.limit > from.limit || to.windowSeconds < from.windowSeconds) {
-		throw new RangeError(
-			`rateLimitBudgets "${name}": an override may only tighten the budget it replaces — limit no higher and windowSeconds no shorter than ${describedBudget(from)}${replaced === null ? ", the limiter's defaultLimit" : ""} (got ${describedBudget(to)}${overriding === null ? ", the limiter's defaultLimit" : ""})`,
-		);
-	}
-}
-
 /** The wired limiter's kind and the outage policy the guard applies for it. */
 function limiterInForce(
 	limiter: RateLimiter | undefined,
@@ -568,7 +582,7 @@ function limiterInForce(
 /**
  * Logs `rate_limit_budgets_registered` at info — the wired limiter's kind and
  * outage policy, and each prefix with its contributed budget and the module
- * that set it; a limiter's own `limits` entry wins over that budget and is
+ * that claimed it; a limiter's own `limits` entry wins over that budget and is
  * not shown — and `rate_limit_fail_mode_not_applied` at warn when
  * `rateLimit.failMode` says `open` and the wired limiter applies another
  * policy: the path `redis-rate-limiter.failMode` moved from, which only the
@@ -581,34 +595,28 @@ function logRateLimitBudgets(
 	components: Record<string, unknown>,
 	collector: NameKeyedCollector<RateLimitSpec | null> | undefined,
 ): void {
-	const setters = new Map<string, { module: string; by: "contribution" | "override" }>();
+	const claimants = new Map<string, string>();
 	for (const moduleName of material.plan.initOrder) {
 		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
 		const normalised = material.plan.validated.byName.get(moduleName)!.normalised;
-		for (const [entries, by] of [
-			[normalised.contributesEntries, "contribution"],
-			[normalised.overridesEntries, "override"],
-		] as const) {
-			for (const entry of entries) {
-				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
-				setters.set(entry.key, { module: moduleName, by });
-			}
+		for (const entry of normalised.contributesEntries) {
+			if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+			claimants.set(entry.key, moduleName);
 		}
 	}
 	const limiter = limiterInForce(components.rateLimiter as RateLimiter | undefined);
-	if (setters.size === 0 && limiter === null) return;
+	if (claimants.size === 0 && limiter === null) return;
 	const logger = (components.logger as Logger | undefined) ?? consoleLogger;
 	logger.info(
 		{
 			limiter,
-			budgets: [...setters].map(([prefix, { module, by }]) => {
+			budgets: [...claimants].map(([prefix, module]) => {
 				const budget = collector?.get(prefix) ?? null;
 				return {
 					prefix,
 					budget:
 						budget === null ? null : { limit: budget.limit, windowSeconds: budget.windowSeconds },
 					module,
-					by,
 				};
 			}),
 		},
@@ -708,6 +716,85 @@ const quotedNames = (names: readonly string[]): string =>
 const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
 	a.size === b.size && [...a].every((value) => b.has(value));
 
+/** `core.sessionRequirements` as boot reads it: the expected names, when a list of strings, and the authority, when a string. */
+interface SessionRequirementsDeclaration {
+	readonly declared: readonly string[] | undefined;
+	readonly authority: string | undefined;
+}
+
+function sessionRequirementsDeclaration(
+	components: Record<string, unknown>,
+): SessionRequirementsDeclaration {
+	const section = (
+		components.config as
+			| { core?: { sessionRequirements?: { expected?: unknown; secondFactorAuthority?: unknown } } }
+			| undefined
+	)?.core?.sessionRequirements;
+	const expected = section?.expected;
+	return {
+		declared:
+			Array.isArray(expected) && expected.every((name) => typeof name === "string")
+				? (expected as readonly string[])
+				: undefined,
+		authority:
+			typeof section?.secondFactorAuthority === "string"
+				? section.secondFactorAuthority
+				: undefined,
+	};
+}
+
+/**
+ * Once `core.sessionRequirements.secondFactorAuthority` is written, refuses
+ * the requirement it names unless the list expects it, a module registers it
+ * and it declares the second-factor authority
+ * (`second-factor-authority-not-declared`, every unmet condition listed).
+ * Runs the stage-3 cleanups first.
+ */
+async function checkDeclaredAuthority(
+	material: ComponentWorld,
+	{ declared, authority }: SessionRequirementsDeclaration,
+	registrations: readonly RequirementRegistration[],
+): Promise<void> {
+	if (authority === undefined) return;
+	const registration = registrations.find(({ name }) => name === authority);
+	const unmet: ("not-expected" | "not-registered" | "not-declared")[] = [];
+	const fixes: string[] = [];
+	if (declared?.includes(authority) !== true) {
+		unmet.push("not-expected");
+		fixes.push("core.sessionRequirements.expected does not list it: add it there");
+	}
+	if (registration === undefined) {
+		unmet.push("not-registered");
+		fixes.push(
+			"no installed module registers it: install a module whose requirement declares the second-factor authority",
+		);
+	} else if (!registration.requirement.secondFactorAuthority) {
+		unmet.push("not-declared");
+		fixes.push(
+			`module ${JSON.stringify(registration.module)} registers it without declaring the second-factor authority, ` +
+				`so it enforces no second factor: replace module ${JSON.stringify(registration.module)} with a module ` +
+				"whose requirement declares the second-factor authority",
+		);
+	}
+	if (unmet.length === 0) return;
+	const cleanupErrors = await runCleanupsReverse(material.cleanups);
+	throw new BootError({
+		message:
+			`core.sessionRequirements.secondFactorAuthority names ${JSON.stringify(authority)}, and ${fixes.join("; ")}. ` +
+			"Or name the requirement this composition holds to the second-factor authority.",
+		reason: "second-factor-authority-not-declared",
+		stage: "applyContributions",
+		details: {
+			reason: "second-factor-authority-not-declared",
+			configKey: "core.sessionRequirements.secondFactorAuthority",
+			name: authority,
+			...(registration === undefined ? {} : { module: registration.module }),
+			unmet,
+			...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+		},
+	});
+}
+
 /**
  * Step 2b: once the name-keyed pass is done and before any list-shaped
  * factory reads a reach, check every registered session requirement (see ADR
@@ -731,11 +818,16 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *   a name in it that no module registers is `session-requirement-missing`
  *   (the composition would believe a requirement is in force that is not),
  *   checked first so a composition is told to install the module rather than
- *   to fix the list; a registered name it leaves out is
+ *   to fix the list; then, once
+ *   `core.sessionRequirements.secondFactorAuthority` is written, the
+ *   requirement it names must be expected, registered and declare the
+ *   second-factor authority (`checkDeclaredAuthority`); a registered name the
+ *   list leaves out is
  *   `session-requirements-undeclared`;
  * - when a module requires or reads `sessionRequirementResolver`, require the
  *   key written (`session-requirements-undeclared`). With no such module and
- *   no key, nothing is compared.
+ *   no key, nothing is compared. Without a `sessionRequirements` collector
+ *   nothing registers, and only a written authority is checked.
  *
  * A refused requirement is `contribute-factory-failed`. Logs
  * `session_requirements_registered` at info when a consumer or a requirement
@@ -748,7 +840,11 @@ async function checkSessionRequirements(
 	collector: NameKeyedCollector<RegisteredRequirement> | undefined,
 	actions: NameKeyedCollector<AdmissionAction> | undefined,
 ): Promise<void> {
-	if (collector === undefined) return;
+	const declaration = sessionRequirementsDeclaration(components);
+	if (collector === undefined) {
+		await checkDeclaredAuthority(material, declaration, []);
+		return;
+	}
 	const registrants = admissionActionRegistrants(material);
 	const registrations: RequirementRegistration[] = [];
 	// An override of the kind never reaches here: stage 1's guard refuses it
@@ -861,21 +957,19 @@ async function checkSessionRequirements(
 			...(normalised.optional as readonly string[]),
 		].includes("sessionRequirementResolver");
 	});
-	const expected = (
-		components.config as { core?: { sessionRequirements?: { expected?: unknown } } } | undefined
-	)?.core?.sessionRequirements?.expected;
-	const declared =
-		Array.isArray(expected) && expected.every((name) => typeof name === "string")
-			? (expected as readonly string[])
-			: undefined;
+	const { declared, authority } = declaration;
 	const missing = [...new Set(declared)].filter((name) => !registered.includes(name));
 	if (declared !== undefined && missing.length > 0) {
+		const authorityMissing = authority !== undefined && missing.includes(authority);
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({
 			message:
 				`core.sessionRequirements.expected names ${quotedNames(missing)}, which no installed module registers ` +
 				`(${quotedNames(registered)} registered): install the module that registers each, ` +
-				"or remove the name from core.sessionRequirements.expected.",
+				"or remove the name from core.sessionRequirements.expected" +
+				(authorityMissing
+					? `; core.sessionRequirements.secondFactorAuthority names ${JSON.stringify(authority)} too, so remove it there as well.`
+					: "."),
 			reason: "session-requirement-missing",
 			stage: "applyContributions",
 			details: {
@@ -884,10 +978,12 @@ async function checkSessionRequirements(
 				missing,
 				declared,
 				registered,
+				...(authorityMissing ? { secondFactorAuthority: authority } : {}),
 				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
 			},
 		});
 	}
+	await checkDeclaredAuthority(material, declaration, registrations);
 	if (
 		declared === undefined
 			? consumedBy.length > 0
@@ -1016,6 +1112,15 @@ function warnOnTokenBindingSurfaceOverlap(
  *      factories runs, so a failing module leaves no side effect; factories
  *      then feed `collector.register` (contributes) or `collector.replace`
  *      (overrides).
+ *   2a. Each `core.federations` entry stage 1 dispatched to its type
+ *      (`ValidatedManifests.dispatchedFederations`), in the configuration's
+ *      key order: the type's factories build its provider and redirect
+ *      policy, which register under the entry's name together — after every
+ *      name-keyed contribution, so the types are registered, and before any
+ *      list-shaped factory reads `federationProviders`. The two federation
+ *      projections open for reading once this step ends: a name-keyed
+ *      factory or a type's factory that reads one throws
+ *      (`readableFromStage4`).
  *   2b. `checkSessionRequirements`, before a list-shaped factory reads a
  *      requirement's reach; then the rate-limit budgets' and the admission
  *      actions' boot lines.
@@ -1113,9 +1218,25 @@ export async function applyContributions(
 				| undefined;
 			if (collector === undefined) continue;
 			const name = entry.key as string;
-			if (collector.get(name) === undefined) {
+			const target = collector.get(name);
+			if (target === undefined) {
 				throw new BootError({
 					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".`,
+					reason: "override-target-missing",
+					stage: "applyContributions",
+					details: {
+						reason: "override-target-missing",
+						kind: entry.kind,
+						name,
+						overridingModule: moduleName,
+					},
+				});
+			}
+			// A switched-off grant has no handler to replace: an override of it
+			// would switch on what its owner's settings switched off.
+			if (entry.kind === "grants" && target === null) {
+				throw new BootError({
+					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}". Its contributor answered null: the grant is switched off, so there is no handler to override.`,
 					reason: "override-target-missing",
 					stage: "applyContributions",
 					details: {
@@ -1175,14 +1296,6 @@ export async function applyContributions(
 			let value: unknown;
 			try {
 				value = checkNameKeyedValue(entry.kind, name, await factory(deps), issuerOf(components));
-				if (entry.kind === "rateLimitBudgets") {
-					checkBudgetOverride(
-						name,
-						collector.get(name) as RateLimitSpec | null,
-						value as RateLimitSpec | null,
-						components.rateLimiter,
-					);
-				}
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
@@ -1204,6 +1317,41 @@ export async function applyContributions(
 			collector.replace(name, value);
 		}
 	}
+
+	// ---------------------------------------------------------------------------
+	// Step 2a: each entry stage 1 dispatched by type, once every type has
+	// registered and before any list-shaped factory reads the providers.
+	// ---------------------------------------------------------------------------
+
+	for (const federation of material.plan.validated.dispatchedFederations) {
+		const { name } = federation.instance;
+		try {
+			const pair = await buildDispatchedFederation(federation, contributionKinds.federationTypes);
+			// Both, under the entry's name, or neither: the pair is made here.
+			(contributionKinds.federations as NameKeyedCollector<unknown>).register(name, pair.provider);
+			(contributionKinds.federationRedirectPolicies as NameKeyedCollector<unknown>).register(
+				name,
+				pair.redirectPolicy,
+			);
+		} catch (thrownValue) {
+			const cleanupErrors = await runCleanupsReverse(material.cleanups);
+			throw new BootError({
+				message: `Module "${federation.module}" contribution factory for kind "federations" name "${name}" (type "${federation.type}") failed: ${failureSummary(thrownValue)}`,
+				reason: "contribute-factory-failed",
+				stage: "applyContributions",
+				details: {
+					reason: "contribute-factory-failed",
+					module: federation.module,
+					kind: "federations",
+					name,
+					originalError: thrownValue,
+					...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+				},
+				cause: thrownValue,
+			});
+		}
+	}
+	openFederationProjections(components);
 
 	// ---------------------------------------------------------------------------
 	// Step 2b: the session-requirement checks and the boot line, once every

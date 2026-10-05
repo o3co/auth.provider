@@ -15,7 +15,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { classifyFederationRefreshError } from "#/federation-tokens/refresh-error.mjs";
+import {
+	classifyFederationRefreshError,
+	isDefiniteFederationRefreshFailure,
+} from "#/federation-tokens/refresh-error.mjs";
 
 /** An error shaped as openid-client v6 surfaces a token-endpoint rejection. */
 const upstream = (
@@ -475,5 +478,73 @@ describe("classifyFederationRefreshError", () => {
 			);
 			expect(classifyFederationRefreshError(proxy)).toEqual(UNKNOWN);
 		});
+	});
+});
+
+describe("isDefiniteFederationRefreshFailure — a refresh the upstream provably did not act on", () => {
+	it("is an answer that proves it, or a request that never left", () => {
+		for (const error of [
+			upstream({ error: "invalid_client", status: 401 }),
+			upstream({ error: "invalid_grant", status: 400 }),
+			upstream({ error: "interaction_required", status: 400 }),
+			upstream({ status: 429 }),
+			upstream({ status: 503 }),
+			upstream({ status: 501 }),
+			// A known refusal code on the thrown value, with no status beside it.
+			{ error: "invalid_client" },
+			new TypeError("fetch failed", {
+				cause: Object.assign(new Error("connect"), { code: "ECONNREFUSED" }),
+			}),
+		]) {
+			expect(isDefiniteFederationRefreshFailure(error), JSON.stringify(error)).toBe(true);
+		}
+	});
+
+	it("is not a status a forwarded request may have come back with", () => {
+		for (const status of [408, 499, 500, 502, 504, 522]) {
+			expect(isDefiniteFederationRefreshFailure(upstream({ status })), String(status)).toBe(false);
+		}
+	});
+
+	it("is not an outage the IdP names, nor a code it does not know: either may have been processed", () => {
+		for (const error of [
+			upstream({ error: "temporarily_unavailable", status: 400 }),
+			upstream({ error: "server_error", status: 400 }),
+			upstream({ error: "upstream_timeout", status: 400 }),
+			upstream({ error: "a secret it echoed", status: 401 }),
+			{ error: "temporarily_unavailable" },
+			{ error: "upstream_timeout" },
+		]) {
+			expect(isDefiniteFederationRefreshFailure(error), JSON.stringify(error)).toBe(false);
+		}
+	});
+
+	it("is not a request given up on, whatever status it carries", () => {
+		expect(
+			isDefiniteFederationRefreshFailure(
+				Object.assign(new Error("t"), { name: "TimeoutError", status: 503 }),
+			),
+		).toBe(false);
+		expect(
+			isDefiniteFederationRefreshFailure(
+				Object.assign(new Error("t"), { name: "AbortError", error: "invalid_client" }),
+			),
+		).toBe(false);
+	});
+
+	it("is not an outage named at a deeper level, beside a status that would have proved it", () => {
+		expect(
+			isDefiniteFederationRefreshFailure(
+				new Error("adapter", {
+					cause: Object.assign(new Error("e"), { error: "temporarily_unavailable", status: 400 }),
+				}),
+			),
+		).toBe(false);
+	});
+
+	it("is not what says nothing", () => {
+		expect(isDefiniteFederationRefreshFailure(new Error("something"))).toBe(false);
+		expect(isDefiniteFederationRefreshFailure("thrown string")).toBe(false);
+		expect(isDefiniteFederationRefreshFailure(undefined)).toBe(false);
 	});
 });

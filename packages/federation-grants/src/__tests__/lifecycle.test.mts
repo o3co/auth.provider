@@ -27,7 +27,9 @@
  * feature off must still boot with no store. An optional key still produces
  * the ordering edge whenever a *module* fills it, the case that has anything
  * to close; a slot filled from `bootstrapComponents` is the host's own, and the
- * boot planner neither orders nor disposes of it.
+ * boot planner neither orders nor disposes of it. The registry is built for a
+ * module that reads it — the routes module while the feature is on, a reader
+ * of the slot here.
  */
 
 import type { BootstrapMap, FederationGrantStore } from "@o3co/auth-provider-core";
@@ -72,6 +74,13 @@ const storeModuleWriting = (order: string[]) =>
 		},
 	});
 
+/** A module whose contribution reads the registry, so it is built and placed in the shutdown. */
+const backgroundReader = defineModule({
+	name: "test-background-reader",
+	requires: ["federationGrantBackground"] as const,
+	contributes: { grantMiddleware: [() => null] },
+});
+
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 10));
 
 describe("the background component's place in a shutdown", () => {
@@ -80,11 +89,11 @@ describe("the background component's place in a shutdown", () => {
 		// process — which is what a test suite is, and what a host embedding
 		// two providers is. Disposing one would drain the other's work.
 		const first = await createApp({
-			modules: [federationGrantBackgroundModule, federationGrantsModule],
+			modules: [federationGrantBackgroundModule, backgroundReader],
 			bootstrapComponents: bootstrap(),
 		});
 		const second = await createApp({
-			modules: [federationGrantBackgroundModule, federationGrantsModule],
+			modules: [federationGrantBackgroundModule, backgroundReader],
 			bootstrapComponents: bootstrap(),
 		});
 
@@ -103,7 +112,7 @@ describe("the background component's place in a shutdown", () => {
 	it("waits for a late write before the store it was written through closes", async () => {
 		const order: string[] = [];
 		const handle = await createApp({
-			modules: [storeModuleWriting(order), federationGrantBackgroundModule, federationGrantsModule],
+			modules: [storeModuleWriting(order), federationGrantBackgroundModule, backgroundReader],
 			bootstrapComponents: bootstrap(),
 		});
 
@@ -138,7 +147,7 @@ describe("the background component's place in a shutdown", () => {
 		// its module was written last would be a coincidence, not a contract.
 		const order: string[] = [];
 		const handle = await createApp({
-			modules: [federationGrantsModule, federationGrantBackgroundModule, storeModuleWriting(order)],
+			modules: [backgroundReader, federationGrantBackgroundModule, storeModuleWriting(order)],
 			bootstrapComponents: bootstrap(),
 		});
 
@@ -185,7 +194,7 @@ describe("the background component's place in a shutdown", () => {
 				sinkModule,
 				storeModuleWriting(order),
 				federationGrantBackgroundModule,
-				federationGrantsModule,
+				backgroundReader,
 			],
 			bootstrapComponents: bootstrap(),
 		});
@@ -215,7 +224,7 @@ describe("the background component's place in a shutdown", () => {
 	it("is idempotent, and disposing twice does not wait again", async () => {
 		const order: string[] = [];
 		const handle = await createApp({
-			modules: [storeModuleWriting(order), federationGrantBackgroundModule, federationGrantsModule],
+			modules: [storeModuleWriting(order), federationGrantBackgroundModule, backgroundReader],
 			bootstrapComponents: bootstrap(),
 		});
 
@@ -226,7 +235,7 @@ describe("the background component's place in a shutdown", () => {
 
 	it("refuses to admit new work once the drain has begun", async () => {
 		const handle = await createApp({
-			modules: [federationGrantBackgroundModule, federationGrantsModule],
+			modules: [federationGrantBackgroundModule, backgroundReader],
 			bootstrapComponents: bootstrap(),
 		});
 		const background = handle.components.federationGrantBackground;
@@ -250,7 +259,10 @@ describe("the background component's place in a shutdown", () => {
 		await expect(
 			createApp({
 				modules: [federationGrantsModule],
-				bootstrapComponents: bootstrap(),
+				bootstrapComponents: {
+					...bootstrap(),
+					config: { ...makeValidCoreConfig(), "federation-grants": { enabled: true } },
+				} as unknown as BootstrapMap,
 			}),
 		).rejects.toThrow(/federationGrantBackground/);
 	});

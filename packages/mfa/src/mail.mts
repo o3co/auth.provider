@@ -159,6 +159,18 @@ export function matchesRecordedAddress(
 	return to === undefined ? "no_address" : compareAddress(digests, to, recorded);
 }
 
+/**
+ * The keyed digest of `address`, as the account's user record holds it,
+ * that a mail to it keeps; `undefined` for an account with no address.
+ */
+export function addressDigestOf(digests: MfaDigests, address: unknown): MfaKeyedDigest | undefined {
+	const to = normaliseMailAddress(address);
+	return to === undefined ? undefined : digestOf(digests, to);
+}
+
+/** The keyed digest of `to`, an address as `normaliseMailAddress` spells it. */
+const digestOf = (digests: MfaDigests, to: string): MfaKeyedDigest => digests.digest([to]);
+
 /** Sends `options.mail` in the order this file's header states. */
 export async function sendMfaMail<Refusal>(
 	options: SendMfaMailOptions<Refusal>,
@@ -176,7 +188,7 @@ export async function sendMfaMail<Refusal>(
 	}
 	if (to === undefined) return { outcome: "no_address" };
 	const expiresAtMs = Math.min(mail.expiresAtMs ?? notAfterMs, notAfterMs);
-	const kept = await options.keep(digests.digest([to]), expiresAtMs);
+	const kept = await options.keep(digestOf(digests, to), expiresAtMs);
 	if (!kept.kept) return { outcome: "not_kept", refusal: kept.refusal };
 
 	let answer: "delivered" | "refused_at_limit" | "outage";
@@ -320,12 +332,22 @@ export interface MfaKeptState {
 	readonly addressDigest: MfaKeyedDigest | undefined;
 }
 
-/** What is sealed for a pending state: `state` and `addressDigest`, each when present. */
+/**
+ * What is sealed for a pending state: `state` and `addressDigest`, each when
+ * present. A `RangeError`, quoting nothing, for one {@link readKeptState}
+ * would not read back — it is the one rule for both.
+ */
 export function keptState(kept: MfaKeptState): Readonly<Record<string, unknown>> {
-	return {
+	const envelope = {
 		...(kept.state === undefined ? {} : { state: kept.state }),
 		...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),
 	};
+	if (readKeptState(envelope) === undefined) {
+		throw new RangeError(
+			"a pending state is kept only as readKeptState reads it back: a state that is an object and not a list, and an address digest of a key id and a digest, both text",
+		);
+	}
+	return envelope;
 }
 
 /** A pending state as opened, read back; `undefined` when it is not what {@link keptState} seals. */

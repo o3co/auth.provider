@@ -42,7 +42,6 @@
 import {
 	type AdapterBuilder,
 	type ApproveDeviceAuthorizationInput,
-	authTimeClaim,
 	type CreateDeviceAuthorizationInput,
 	type DeviceAuthorization,
 	type DeviceCodeStore,
@@ -106,14 +105,21 @@ const parseInstant = (value: string | undefined): number | undefined => {
 
 /**
  * A stored authentication instant, or `undefined` when there is none to read.
- * Only an approval writes it, as the whole epoch milliseconds of a `Date`
- * `approve` accepts; any other spelling (empty, signed, fractional, exponent
- * form, past the Date range) reads as absent rather than as an instant.
+ * Only an approval writes it, in decimal, as core's `recordableDeviceApproval`
+ * records one: any other spelling (empty, signed, fractional, exponent form),
+ * or a value that rule would not record (past the Date range), reads as
+ * absent rather than as an instant. Held to the rule on its own clock: the
+ * clock it was recorded against is not stored, and reading it against one is
+ * the consumer's.
  */
 const parseAuthTimeMs = (value: string | undefined): number | undefined => {
 	if (value === undefined || !/^(?:0|[1-9][0-9]*)$/.test(value)) return undefined;
-	const ms = Number(value);
-	return authTimeClaim(new Date(ms)) === undefined ? undefined : ms;
+	const stored = { authTime: new Date(Number(value)) };
+	try {
+		return recordableDeviceApproval(stored, stored.authTime.getTime()).authTimeMs;
+	} catch {
+		return undefined;
+	}
 };
 
 /**

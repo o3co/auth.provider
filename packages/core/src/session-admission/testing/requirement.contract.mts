@@ -31,7 +31,7 @@ import { requirementSession } from "../../user-sessions/authentication.mjs";
 import type { UserSession, UserSessionStore } from "../../user-sessions/types.mjs";
 import { readAcrTable } from "../acr.mjs";
 import { type ActionGrade, ADMISSION_GRADES } from "../actions.mjs";
-import { admitPrimary, admitSession, cookieClaim } from "../admit.mjs";
+import { admitPrimary, admitSession, cookieClaim, viewOf } from "../admit.mjs";
 import {
 	isHintKey,
 	issuedRemediationActions,
@@ -133,12 +133,8 @@ export function sessionRequirementContract(
 	const liveInput = (grade: ActionGrade): RequirementInput => {
 		const session = liveSession();
 		return {
-			session: {
-				sid: session.sid,
-				sub: session.sub,
-				authTime: session.authTime,
-				expiresAt: session.expiresAt,
-			},
+			// Admission's view over the contract's stores, none of which can record a second factor.
+			session: viewOf(session, false),
 			authentication: requirementSession(session),
 			carrier: "cookie",
 			subject: session.sub,

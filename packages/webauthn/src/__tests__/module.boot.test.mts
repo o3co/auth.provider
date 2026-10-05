@@ -37,13 +37,14 @@ import {
 	memoryReplaySeenSetModule,
 	memoryWebAuthnCredentialStoreModule,
 } from "@o3co/auth-provider-core";
+import { renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { type WebAuthnConfig, webauthnConfigSchema } from "../config.mjs";
+import type { WebAuthnConfig } from "../config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
 import { webauthnModule } from "../module.mjs";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, testTokenSettings, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared boot components
@@ -65,20 +66,7 @@ const coreConfig = {
 	},
 };
 
-/** Minimal bootstrap: config + pathResolver + keyStore. */
-const minBoot = {
-	config: coreConfig,
-	pathResolver: (p: string) => p,
-} as never;
-
-const keyStoreModule = defineModule({
-	name: "test:webauthn-boot-key-store",
-	provides: {
-		keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
-	},
-});
-
-/** Stub webauthnConfig values — not used for real ceremonies. */
+/** Stub relying party — not used for real ceremonies. */
 const stubWebAuthnConfig: WebAuthnConfig = {
 	rpId: "example.com",
 	rpName: "Example App",
@@ -86,18 +74,25 @@ const stubWebAuthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	// Enumeration-resistant default, and a throttle limit high enough that the
-	// body-parser probes below are never denied; the throttle itself is covered
-	// by module.rateLimit.test.mts.
-	allowCredentialsForKnownUser: false,
+	// A throttle limit high enough that the body-parser probes below are never
+	// denied; the throttle itself is covered by module.rateLimit.test.mts.
 	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
 
-/** Bootstrap module: satisfies the `webauthnConfig` DI slot. */
-const webauthnConfigModule = defineModule({
-	name: "test:webauthn-config-bootstrap",
+/** The `oauthTokenSettings` slot webauthnModule requires, for the issuer above. */
+const tokenSettings = testTokenSettings({ issuer: "https://test.example" });
+
+/** Minimal bootstrap: the configuration with the module's section, and the token settings. */
+const minBoot = {
+	config: withWebAuthnSection(coreConfig, stubWebAuthnConfig),
+	pathResolver: (p: string) => p,
+	oauthTokenSettings: tokenSettings,
+} as never;
+
+const keyStoreModule = defineModule({
+	name: "test:webauthn-boot-key-store",
 	provides: {
-		webauthnConfig: () => stubWebAuthnConfig,
+		keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 	},
 });
 
@@ -139,7 +134,6 @@ const activatorModule = defineModule({
 
 const happyPathModules = [
 	webauthnModule,
-	webauthnConfigModule,
 	keyStoreModule,
 	memoryChallengeStoreModule,
 	memoryReplaySeenSetModule,
@@ -154,7 +148,7 @@ const happyPathModules = [
 // ---------------------------------------------------------------------------
 
 describe("webauthnModule boot integration", () => {
-	it("boots successfully when webauthnConfig is provided and materialises the webauthn grant", async () => {
+	it("boots on its own section and materialises the webauthn grant", async () => {
 		const handle = await createApp({
 			modules: happyPathModules,
 			bootstrapComponents: minBoot,
@@ -199,34 +193,6 @@ describe("webauthnModule boot integration", () => {
 		await handle.dispose();
 	});
 
-	it("throws BootError missing-required-component for webauthnConfig when the slot is not provided", async () => {
-		const { BootError } = await import("@o3co/auth-provider-core");
-
-		// Omit webauthnConfigModule — the slot remains unwired.
-		const modulesWithoutConfig = [
-			webauthnModule,
-			keyStoreModule,
-			memoryChallengeStoreModule,
-			memoryReplaySeenSetModule,
-			defaultChallengeCeremonyModule,
-			memoryWebAuthnCredentialStoreModule,
-			activatorModule,
-		];
-
-		const error = await createApp({
-			modules: modulesWithoutConfig,
-			bootstrapComponents: minBoot,
-		}).then(
-			() => undefined,
-			(e: unknown) => e,
-		);
-		expect(error).toBeInstanceOf(BootError);
-		expect(error).toMatchObject({
-			reason: "missing-required-component",
-			details: { missingKey: "webauthnConfig" },
-		});
-	});
-
 	/**
 	 * The webauthn grant requires grantPolicy at boot. It has no library-side
 	 * scope ceiling (client_credentials falls back to `client.allowedScopes`), so
@@ -236,7 +202,6 @@ describe("webauthnModule boot integration", () => {
 		// All deps present EXCEPT grantPolicy.
 		const modulesWithoutPolicy = [
 			webauthnModule,
-			webauthnConfigModule,
 			keyStoreModule,
 			memoryChallengeStoreModule,
 			memoryReplaySeenSetModule,
@@ -257,7 +222,6 @@ describe("webauthnModule boot integration", () => {
 		const error = await createApp({
 			modules: [
 				webauthnModule,
-				webauthnConfigModule,
 				keyStoreModule,
 				memoryChallengeStoreModule,
 				memoryReplaySeenSetModule,
@@ -313,7 +277,6 @@ describe("webauthnModule boot integration", () => {
 		const handle = await createApp({
 			modules: [
 				webauthnModule,
-				webauthnConfigModule,
 				keyStoreModule,
 				memoryChallengeStoreModule,
 				memoryReplaySeenSetModule,
@@ -370,14 +333,17 @@ describe("webauthnModule boot integration", () => {
 		} as unknown as typeof coreConfig;
 
 		const bootWithPolicy = {
-			config: configWithRI,
+			config: withWebAuthnSection(configWithRI, stubWebAuthnConfig),
 			pathResolver: (p: string) => p,
+			oauthTokenSettings: testTokenSettings({
+				issuer: "https://example.com",
+				resourceIndicatorEnabled: true,
+			}),
 		} as never;
 
 		const handle = await createApp({
 			modules: [
 				webauthnModule,
-				webauthnConfigModule,
 				keyStoreModule,
 				memoryChallengeStoreModule,
 				memoryReplaySeenSetModule,
@@ -447,8 +413,8 @@ describe("webauthnModule boot integration", () => {
 /**
  * The operator's path for `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN`: the
  * composition root parses its resolved HOCON with core's `AppConfigSchema`,
- * and the bootstrap module this package's README describes hands
- * `config.webauthn` to `webauthnConfigSchema`.
+ * and boot parses `webauthn` with `webauthnConfigSchema`, the module's section
+ * schema, which the module provides as the `webauthnConfig` slot.
  *
  * `hoconWebauthn` is the `webauthn` section as the shipped reference.conf
  * resolves with these variables set: literals keep their types, every `${?VAR}`
@@ -462,7 +428,6 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 		challengeTtlMs: 120000,
 		attestationPreference: "none",
 		userVerification: "preferred",
-		allowCredentialsForKnownUser: false,
 		rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
 		rpId: "example.com",
 		rpName: "Example App",
@@ -475,14 +440,24 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 		// AppConfigSchema passes the origin list on as the one string it is.
 		expect(config.webauthn?.origin).toBe(`https://example.com,${ANDROID}`);
 
+		let resolved: WebAuthnConfig | undefined;
 		const handle = await createApp({
 			modules: [
 				webauthnModule,
 				defineModule({
-					name: "test:webauthn-config-from-app-config",
-					requires: ["config"] as const,
-					provides: {
-						webauthnConfig: ({ config }) => webauthnConfigSchema.parse(config.webauthn),
+					name: "test:webauthn-config-reader",
+					requires: ["webauthnConfig"] as const,
+					contributes: {
+						routes: [
+							({ webauthnConfig }) => {
+								resolved = webauthnConfig;
+								return {
+									id: "test-webauthn-config-reader",
+									mountPath: "/__test_webauthn_config_reader__",
+									handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+								};
+							},
+						],
 					},
 				}),
 				keyStoreModule,
@@ -498,14 +473,120 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 			bootstrapComponents: {
 				config: { ...config, "renamed-variables": coreConfig["renamed-variables"] },
 				pathResolver: (p: string) => p,
+				oauthTokenSettings: tokenSettings,
 			} as never,
 		});
-		const resolved = (handle.components as Record<string, unknown>).webauthnConfig as
-			| WebAuthnConfig
-			| undefined;
 		expect(resolved?.origin).toEqual(["https://example.com", ANDROID]);
 		expect(resolved?.topOrigin).toEqual(["https://partner.example"]);
 		await handle.dispose();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The retired allowCredentialsForKnownUser
+// ---------------------------------------------------------------------------
+
+/**
+ * `webauthn.allowCredentialsForKnownUser` is removed: a configuration still
+ * setting it, at any value, and an environment still setting its variable, at
+ * any value, refuse the boot wherever `webauthnModule` is installed.
+ */
+describe("the retired webauthn.allowCredentialsForKnownUser", () => {
+	const VARIABLE = "WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER";
+
+	async function refusedWith(config: Record<string, unknown>): Promise<Error> {
+		try {
+			const handle = await createApp({
+				modules: happyPathModules,
+				bootstrapComponents: {
+					config,
+					pathResolver: (p: string) => p,
+					oauthTokenSettings: tokenSettings,
+				} as never,
+			});
+			await handle.dispose();
+		} catch (error) {
+			return error as Error;
+		}
+		throw new Error("expected the boot to be refused");
+	}
+
+	it.each([true, false, "true", "false", "", { nested: true }])(
+		"refuses a configuration setting it to %j, naming the key",
+		async (value) => {
+			const refused = await refusedWith({
+				...coreConfig,
+				webauthn: { allowCredentialsForKnownUser: value },
+			});
+			expect(refused).toMatchObject({ name: "BootError", reason: "config-path-relocated" });
+			expect(refused.message).toMatch(
+				/webauthn\.allowCredentialsForKnownUser(\.nested)? was removed/,
+			);
+		},
+	);
+
+	it.each([true, false])(
+		"refuses it set to %j in a configuration a composition parsed with AppConfigSchema before the boot",
+		async (value) => {
+			const parsed = AppConfigSchema.parse({
+				...coreConfig,
+				webauthn: { allowCredentialsForKnownUser: value },
+			});
+			const refused = await refusedWith({
+				...parsed,
+				"renamed-variables": coreConfig["renamed-variables"],
+			});
+			expect(refused).toMatchObject({ name: "BootError", reason: "config-path-relocated" });
+			expect(refused.message).toContain("webauthn.allowCredentialsForKnownUser was removed");
+		},
+	);
+
+	it.each(["true", "false", ""])(
+		`refuses an environment setting ${VARIABLE} to %j, naming the variable`,
+		async (value) => {
+			const refused = await refusedWith({
+				...coreConfig,
+				"renamed-variables": {
+					...coreConfig["renamed-variables"],
+					...renamedVariableCaptures({ modules: [webauthnModule], env: { [VARIABLE]: value } }),
+				},
+			});
+			expect(refused).toMatchObject({ name: "BootError", reason: "environment-variable-renamed" });
+			expect(refused.message).toContain(VARIABLE);
+		},
+	);
+
+	it("lists no known user's credentials on authentication/options", async () => {
+		const handle = await createApp({
+			modules: happyPathModules,
+			bootstrapComponents: minBoot,
+		});
+		try {
+			const store = handle.components.webauthnCredentialStore;
+			if (store === undefined) throw new Error("no credential store");
+			await store.registerCredential({
+				credentialId: "Y3JlZC0x",
+				publicKey: new Uint8Array(64),
+				signCount: 0,
+				transports: ["usb"],
+				backedUp: false,
+				userId: "alice",
+				createdAt: new Date("2026-01-01T00:00:00Z"),
+			});
+			const list = vi.spyOn(store, "listByUserId");
+			const app = express();
+			app.use(handle.router);
+
+			const res = await supertest(app)
+				.post("/oauth/webauthn/authentication/options")
+				.send({ userId: "alice" });
+
+			expect(res.status).toBe(200);
+			expect(res.body).not.toHaveProperty("allowCredentials");
+			expect(list).not.toHaveBeenCalled();
+		} finally {
+			await handle.dispose();
+		}
 	});
 });
 
@@ -537,8 +618,8 @@ describe("webauthnModule body parser integration", () => {
 			.set("Content-Type", "application/json")
 			.send(JSON.stringify({}));
 
-		// authentication/options parses `req.body ?? {}`, so without a parser it would
-		// still answer 200; registration/verify, below, has no `?? {}` fallback.
+		// authentication/options reads no body, so it answers 200 with or without a
+		// parser; registration/verify, below, reads one.
 		expect(res.status).toBe(200);
 		expect(res.body).toHaveProperty("challenge");
 

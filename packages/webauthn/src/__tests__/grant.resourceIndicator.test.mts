@@ -50,7 +50,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WebAuthnConfig } from "#/config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
 import { webauthnModule } from "#/module.mjs";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
+import { makeAppConfig, withWebAuthnSection } from "./appConfig.fixture.mjs";
 
 const ISSUER = "https://auth.example";
 const RP_ID = "example.com";
@@ -111,6 +111,7 @@ function createSoftwareAuthenticator() {
 					clientDataJSON: clientDataJSON.toString("base64url"),
 					authenticatorData: authenticatorData.toString("base64url"),
 					signature: signature.toString("base64url"),
+					userHandle: Buffer.from(USER_ID, "utf8").toString("base64url"),
 				},
 				clientExtensionResults: {},
 			};
@@ -129,7 +130,6 @@ const webauthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	allowCredentialsForKnownUser: false,
 	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
 
@@ -143,18 +143,15 @@ afterEach(async () => {
 /**
  * Boots `webauthnModule` with core's memory challenge store and ceremony, a
  * credential store holding the authenticator's key, the policy spy in the
- * `grantPolicy` slot, and `oauth.resourceIndicator.enabled` on — the flag
- * under which the grant forwards `resource` at all.
+ * `grantPolicy` slot, and the `oauthTokenSettings` slot's
+ * `resourceIndicatorEnabled` on unless `slot` is false — the switch under
+ * which the grant forwards `resource` at all. The configuration's
+ * `oauth.resourceIndicator.enabled` is the opposite unless `configuration`
+ * says, so a grant that read it would fail.
  */
-async function boot(
-	options: { readonly flagIn?: "configuration" | "slot" | "configuration-over-slot-off" } = {},
-) {
-	// `slot`: the configuration leaves resource indicators off, and the
-	// `oauthTokenSettings` the composition holds turns them on.
-	// `configuration-over-slot-off`: the other way round — the configuration
-	// turns them on, and the slot the composition holds leaves them off.
-	const inSlot = options.flagIn === "slot";
-	const slotOff = options.flagIn === "configuration-over-slot-off";
+async function boot(options: { readonly slot?: boolean; readonly configuration?: boolean } = {}) {
+	const inSlot = options.slot ?? true;
+	const inConfiguration = options.configuration ?? !inSlot;
 	const authenticator = createSoftwareAuthenticator();
 	const credentialStore = createMemoryWebAuthnCredentialStore();
 	await credentialStore.registerCredential({
@@ -175,7 +172,7 @@ async function boot(
 		oauth: {
 			...base.oauth,
 			jwt: { ...base.oauth.jwt, issuer: ISSUER },
-			resourceIndicator: { enabled: !inSlot },
+			resourceIndicator: { enabled: inConfiguration },
 		},
 	};
 
@@ -188,19 +185,11 @@ async function boot(
 			defineModule({
 				name: "test:resource-indicator-slots",
 				provides: {
-					webauthnConfig: () => webauthnConfig,
 					webauthnCredentialStore: () => credentialStore,
 					keyStore: () => createSymmetricKeyStore("resource-indicator-secret-32-bytes!"),
 					grantPolicy: (): GrantPolicyHook => ({ kind: "test-spy", evaluate }),
-					...(inSlot || slotOff
-						? {
-								oauthTokenSettings: () =>
-									createTestOAuthTokenSettings({
-										issuer: ISSUER,
-										resourceIndicatorEnabled: inSlot,
-									}),
-							}
-						: {}),
+					oauthTokenSettings: () =>
+						createTestOAuthTokenSettings({ issuer: ISSUER, resourceIndicatorEnabled: inSlot }),
 				},
 			}),
 			// Makes the planner materialise the grant registry into the handle.
@@ -209,7 +198,10 @@ async function boot(
 				requires: ["grantHandlerResolver"] as never,
 			}),
 		],
-		bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+		bootstrapComponents: {
+			config: withWebAuthnSection(config, webauthnConfig),
+			pathResolver: (p: string) => p,
+		} as never,
 	});
 	handles.push(handle);
 
@@ -258,8 +250,8 @@ describe("webauthn grant — the `resource` grantPolicy receives (RFC 8707)", ()
 		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
 	});
 
-	it("forwards resource when the oauthTokenSettings the composition holds turn resource indicators on, though the configuration leaves them off", async () => {
-		const { evaluate, signIn } = await boot({ flagIn: "slot" });
+	it("forwards resource when the oauthTokenSettings slot turns resource indicators on, though the configuration leaves them off", async () => {
+		const { evaluate, signIn } = await boot({ slot: true, configuration: false });
 
 		const { result } = await signIn("https://rs.example");
 
@@ -267,10 +259,10 @@ describe("webauthn grant — the `resource` grantPolicy receives (RFC 8707)", ()
 		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
 	});
 
-	it("forwards no resource when the oauthTokenSettings the composition holds leave resource indicators off, though the configuration turns them on", async () => {
-		// The slot's `false` is read: a reader that took it for "unset" would
-		// fall through to the configuration's `true` and forward the resource.
-		const { evaluate, signIn } = await boot({ flagIn: "configuration-over-slot-off" });
+	it("forwards no resource when the oauthTokenSettings slot leaves resource indicators off, though the configuration turns them on", async () => {
+		// The slot's `false` is read: a reader that fell back to the
+		// configuration would read its `true` and forward the resource.
+		const { evaluate, signIn } = await boot({ slot: false, configuration: true });
 
 		const { result } = await signIn("https://rs.example");
 

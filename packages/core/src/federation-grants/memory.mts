@@ -34,6 +34,7 @@ import {
 	type FederationGrantAuthorization,
 	type FederationGrantCredentials,
 	type FederationGrantIneligibilityMarker,
+	type FederationGrantRotations,
 	hasFederationGrantAuthorization,
 	type PendingFederationGrant,
 } from "./types.mjs";
@@ -485,9 +486,10 @@ export function createMemoryFederationGrantStore(
 				...copyAuthorization(authorization),
 				lastUsedAt: grant.lastUsedAt,
 				// The authorization is replaced, so what was judged against the
-				// old one goes with it.
+				// old one goes with it, and the rotation budget starts afresh.
 				ineligible: undefined,
 				refreshFailure: undefined,
+				rotations: undefined,
 			};
 			entry.intent = null;
 			entry.credentials = credentials;
@@ -573,12 +575,14 @@ export function createMemoryFederationGrantStore(
 			const grant = entry.grant;
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
-			if (!isDate(input.failure.at)) return failed();
+			// Each field read once, by name, and not spread: a report's fields may
+			// be accessors, and what was judged is what is stamped.
+			const { at, kind, retryAfterSeconds: retryAfter, upstreamCode } = input.failure;
+			if (!isDate(at)) return failed();
 			// A backoff that is not a finite number is not one the classifier
 			// bounded, nor one every adapter can keep.
-			const retryAfter = input.failure.retryAfterSeconds;
 			if (retryAfter !== undefined && !Number.isFinite(retryAfter)) return failed();
-			const atMs = input.failure.at.getTime();
+			const atMs = at.getTime();
 			const previous = grant.refreshFailure;
 			// Never back: a stamp that outlived its caller's budget arrives after a
 			// newer one, and must not replace it.
@@ -595,11 +599,63 @@ export function createMemoryFederationGrantStore(
 			const next: AuthorizedFederationGrant = {
 				...grant,
 				refreshFailure: federationGrantRefreshFailureStamp(
-					{ ...input.failure, at: new Date(atMs) },
+					{ at: new Date(atMs), kind, retryAfterSeconds: retryAfter, upstreamCode },
 					inRow ? previous.count + 1 : 1,
 				),
 			};
 			return written(entry, next);
+		},
+
+		async takeRotation(input) {
+			const nowMs = instant(input.now, "now");
+			if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+				throw new RangeError("takeRotation: limit must be a whole number of at least 1");
+			}
+			if (!Number.isFinite(input.windowMs) || input.windowMs <= 0) {
+				throw new RangeError("takeRotation: windowMs must be a positive finite number");
+			}
+			const entry = visible(input.grantId, nowMs);
+			if (entry === undefined) return failed();
+			const grant = entry.grant;
+			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
+			if (!(nowMs < grant.expiresAt.getTime())) return failed();
+			// Checked and counted with no await in between, so takes at once are
+			// each counted.
+			const previous = grant.rotations;
+			let rotations: FederationGrantRotations;
+			// A `since` that holds no instant is no window: this take opens one.
+			if (previous === undefined || !(nowMs < previous.since.getTime() + input.windowMs)) {
+				rotations = { since: new Date(nowMs), count: 1 };
+			} else if (previous.count < input.limit) {
+				rotations = { since: new Date(previous.since), count: previous.count + 1 };
+			} else {
+				return failed();
+			}
+			return written(entry, { ...grant, version: grant.version + 1, rotations });
+		},
+
+		async refundRotation(input) {
+			const nowMs = instant(input.now, "now");
+			const sinceMs = instant(input.since, "since");
+			const entry = visible(input.grantId, nowMs);
+			if (entry === undefined) return failed();
+			const grant = entry.grant;
+			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
+			if (!(nowMs < grant.expiresAt.getTime())) return failed();
+			const previous = grant.rotations;
+			if (
+				previous === undefined ||
+				previous.since.getTime() !== sinceMs ||
+				!(previous.count >= 1)
+			) {
+				return failed();
+			}
+			// The bump is what makes it once per attempt.
+			return written(entry, {
+				...grant,
+				version: grant.version + 1,
+				rotations: { since: new Date(sinceMs), count: previous.count - 1 },
+			});
 		},
 
 		async touch(grantId, at) {

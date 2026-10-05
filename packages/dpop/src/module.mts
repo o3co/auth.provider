@@ -19,23 +19,23 @@
  * `tokenBindingMechanisms` slot (composed into `tokenBindingMw` and the
  * protected-resource check) and `dpop_signing_alg_values_supported` to
  * discovery metadata, both built from its own section, `dpop {}`, parsed
- * with {@link dpopConfigSchema} before any factory runs. DPoP is off unless
- * `dpop.enabled = true`. A key still written at `oauth.dpop`, the section's
- * old path, refuses boot naming the new one, and so does a nonce variable's
- * old name unless its new name carries the same value.
+ * with {@link dpopConfigSchema} before any factory runs. The section's
+ * defaults live in the package's `config/reference.conf` alone. DPoP is off
+ * unless `dpop.enabled = true`, the module's switch (`section.isEnabled`),
+ * which reads an absent section or key as off: off, the module registers
+ * nothing and requires nothing. A key still written at `oauth.dpop`, the
+ * section's old path, refuses boot naming the new one, and so does a nonce
+ * variable's old name unless its new name carries the same value.
  *
- * DI requires `config`: `oauth.jwt.issuer` when no module provides
- * `oauthTokenSettings` (the issuer's origin is the authority half of every
- * proof's expected `htu`).
+ * DI requires `oauthTokenSettings`: the deployment's issuer, whose origin is
+ * the authority half of every proof's expected `htu`. The oauth module
+ * provides it; a composition without that module fills the slot itself.
  *
  * DI optional:
  *   - `logger` — handed to the mechanism; core's `consoleLogger` when absent.
  *   - `replaySeenSet` — where every accepted proof's `jti` is recorded
- *     (`dpop-proof:<jkt>`). Optional because disabled DPoP records nothing;
- *     with DPoP enabled and the slot empty, boot is refused in every
- *     `core.deployment.mode`.
- *   - `oauthTokenSettings` — the issuer, provided by the oauth module from
- *     `oauth {}`; the configuration's when absent.
+ *     (`dpop-proof:<jkt>`). Optional so that the slot's absence is refused
+ *     by the module, in every `core.deployment.mode`, naming why.
  */
 
 import {
@@ -44,6 +44,7 @@ import {
 	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createDPoPNonceIssuer } from "./nonce.mjs";
@@ -56,54 +57,61 @@ import { createDPoPMechanism, type DPoPMechanismOptions } from "./verifier.mjs";
 /**
  * The schema of `dpop {}`, the module's own section. Strict at every level: a
  * key it does not declare refuses boot. Each leaf reads the string an
- * environment variable carries.
+ * environment variable carries. It fills no default: the package's
+ * `config/reference.conf` ships every value, so a key a composition leaves
+ * out of a section it writes refuses boot, naming the key. Absent, the
+ * section is `undefined`, which the switch reads as off.
  */
 export const dpopConfigSchema = z
 	.object({
-		/** When false (default), the dpop mechanism factory returns null — no DPoP mechanism contributed. */
-		enabled: coerceBooleanFromEnv.default(false),
-		/** Acceptance window for the iat claim in seconds. Default: 60. */
-		iatWindowSeconds: z.coerce.number().int().positive().default(60),
-		/** JOSE algorithm allowlist. Default: ES256, ES384, EdDSA, RS256. */
-		algWhitelist: z.array(z.string()).default(["ES256", "ES384", "EdDSA", "RS256"]),
-		/** How long a proof's replay record is kept, in seconds. Default: 300. */
-		replayStoreTtlSeconds: z.coerce.number().int().positive().default(300),
-		// Server-provided nonce (RFC 9449 §8 / §9). "never" (the default) asks
-		// for none; "as" asks at the token endpoint; "as+rs" also at protected
+		/** The module's switch: on only when true; absent is off. */
+		enabled: coerceBooleanFromEnv.optional(),
+		/** Acceptance window for the iat claim in seconds. */
+		iatWindowSeconds: wholeNumberInRangeFromEnv(1),
+		/** JOSE algorithm allowlist. */
+		algWhitelist: z.array(z.string()),
+		/** How long a proof's replay record is kept, in seconds. */
+		replayStoreTtlSeconds: wholeNumberInRangeFromEnv(1),
+		// Server-provided nonce (RFC 9449 §8 / §9). "never" asks for none;
+		// "as" asks at the token endpoint; "as+rs" also at protected
 		// resources. The nonce is an HMAC under `secret`, which every replica
 		// shares — required once `required` is not "never", and at least 32
 		// bytes of decoded key material.
 		nonce: z
 			.object({
-				required: z.enum(["never", "as", "as+rs"]).default("never"),
-				ttlSeconds: z.coerce.number().int().positive().default(300),
+				required: z.enum(["never", "as", "as+rs"]),
+				ttlSeconds: wholeNumberInRangeFromEnv(1),
 				secret: z.string().optional(),
 			})
-			.strict()
-			.default(() => ({ required: "never" as const, ttlSeconds: 300 })),
+			.strict(),
 	})
 	.strict()
-	.default(() => ({
-		enabled: false,
-		iatWindowSeconds: 60,
-		algWhitelist: ["ES256", "ES384", "EdDSA", "RS256"],
-		replayStoreTtlSeconds: 300,
-		nonce: { required: "never" as const, ttlSeconds: 300 },
-	}));
+	.optional();
+
+/** The section a factory reads. */
+type DPoPSection = NonNullable<z.output<typeof dpopConfigSchema>>;
+
+/**
+ * The section a factory is handed. Boot runs a factory only while the
+ * switch answers true, which an absent section does not; a factory called
+ * directly with none is refused, naming the section.
+ */
+function enabledSection(section: DPoPSection | undefined): DPoPSection {
+	if (section === undefined) {
+		throw new Error("dpopModule: a factory ran with no dpop section; DPoP is off without one.");
+	}
+	return section;
+}
 
 // ---------------------------------------------------------------------------
 // Module manifest
 // ---------------------------------------------------------------------------
 
-/** `oauth.jwt.issuer` as the configuration carries it. */
-const configuredIssuer = (config: unknown): unknown =>
-	(config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt?.issuer;
-
 /**
  * Declarative manifest for the DPoP package.
  *
- * With `dpop.enabled` false (the default) the mechanism factory
- * returns `null` and core leaves DPoP out of the composed `tokenBindingMw`.
+ * With `dpop.enabled` false (the shipped value) or absent the module
+ * registers nothing.
  * With it true, core composes the mechanism alongside any other binding
  * mechanism (mTLS) under `core.tokenBinding.dispatchPolicy`.
  *
@@ -118,8 +126,8 @@ const configuredIssuer = (config: unknown): unknown =>
  * See ADR 2026-05-20-token-binding-first-class-abstraction.
  */
 export const dpopModule = defineModule<
-	"config",
-	"logger" | "replaySeenSet" | "oauthTokenSettings",
+	"oauthTokenSettings",
+	"logger" | "replaySeenSet",
 	typeof dpopConfigSchema
 >({
 	name: "dpop",
@@ -148,32 +156,28 @@ export const dpopModule = defineModule<
 			OAUTH_DPOP_NONCE_TTL_SECONDS: "oauth.dpop.nonce.ttl-seconds",
 			OAUTH_DPOP_NONCE_SECRET: "oauth.dpop.nonce.secret",
 		},
+		isEnabled: (section) => section?.enabled === true,
 	},
-	requires: ["config"],
-	// `oauthTokenSettings`: the issuer, which the oauth module provides;
-	// read from the configuration when no module does.
-	optional: ["logger", "replaySeenSet", "oauthTokenSettings"],
+	// `oauthTokenSettings`: the issuer, which the oauth module provides.
+	requires: ["oauthTokenSettings"],
+	optional: ["logger", "replaySeenSet"],
 	contributes: {
 		// RFC 9449 §5.1 authorization-server metadata: without it a client
 		// cannot discover that DPoP is accepted, or with which algorithms.
 		// The list is the same `algWhitelist` the mechanism is built from
 		// below, so an algorithm picked off discovery is never one the
-		// verifier rejects. Disabled DPoP contributes `{}`, not `null`: the
+		// verifier rejects. An empty list contributes `{}`, not `null`: the
 		// `discoveryMetadata` kind has no null-filtering contract.
 		discoveryMetadata: [
-			({ section }) => {
-				if (!section.enabled || section.algWhitelist.length === 0) return {};
-				return { metadata: { dpop_signing_alg_values_supported: [...section.algWhitelist] } };
+			(deps) => {
+				const { algWhitelist } = enabledSection(deps.section);
+				if (algWhitelist.length === 0) return {};
+				return { metadata: { dpop_signing_alg_values_supported: [...algWhitelist] } };
 			},
 		],
 		tokenBindingMechanisms: [
 			(deps) => {
-				const { section } = deps;
-				if (!section.enabled) {
-					// Disabled by config — no mechanism contributed.
-					return null;
-				}
-
+				const section = enabledSection(deps.section);
 				// Core's `consoleLogger` when no `logger` is wired, so the mechanism's
 				// own warnings (a replay TTL too short for the iat window, an
 				// unreachable seen-set) do not vanish.
@@ -181,23 +185,11 @@ export const dpopModule = defineModule<
 
 				// The expected `htu` is built from the deployment's own origin, not
 				// from `req.protocol` and `Host`, which `X-Forwarded-*` rewrites
-				// under Express `trust proxy`. That origin is `oauth.jwt.issuer`,
-				// read through the `oauthTokenSettings` slot, checked, when the
-				// oauth module provides it, else from the configuration. The guard
-				// is for a hand-built config; `createDPoPMechanism` validates the
-				// value itself and produces the operator-facing message.
-				const issuer =
-					deps.oauthTokenSettings === undefined
-						? configuredIssuer(deps.config)
-						: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).issuer;
-				if (typeof issuer !== "string" || issuer === "") {
-					throw new Error(
-						"dpopModule: oauth.jwt.issuer is required when DPoP is enabled. Its origin " +
-							"is what every DPoP proof's `htu` is checked against; without it the AS would " +
-							"have to rebuild that origin from the request's own forwarded headers, which a " +
-							"caller can choose.",
-					);
-				}
+				// under Express `trust proxy`. That origin is the issuer the
+				// `oauthTokenSettings` slot carries. Boot holds the slot to its
+				// contract before any reader; the check here refuses a value a
+				// direct caller hands in, naming the member it lacks.
+				const { issuer } = checkOAuthTokenSettings(deps.oauthTokenSettings);
 
 				// Without a seen-set no replay could be refused. There is no
 				// per-process fallback: which set backs the slot, and whether it is

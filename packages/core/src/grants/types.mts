@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { Contributed } from "../modules/manifest/contributed.mjs";
 import type { ProviderDeps } from "../modules/manifest/provider.mjs";
 import type { TokenEndpointAuthMethod } from "../repositories/types.mjs";
 import type { SenderConstraint } from "./senderConstraint.mjs";
@@ -150,6 +151,12 @@ export interface GrantError {
 	status: number;
 	error: string;
 	errorDescription?: string;
+	/**
+	 * Present when the refusal is a grant policy's deny: the policy's own
+	 * code, sanitised and capped, which the token endpoint's audit records
+	 * beside the code it answered. Never sent to the client.
+	 */
+	readonly policyDenial?: { readonly error: string };
 }
 
 export type GrantResult = GrantSuccess | GrantError;
@@ -212,6 +219,18 @@ export interface GrantHandler {
  *   `iat`, so only RTs minted before the change are caught.
  * - `logger`: security audit events (RT replay, unknown-family decisions,
  *   legacy-token acceptance); silent when absent, for minimal test harnesses.
+ * - `oauthTokenSettings`: the issuer, lifetimes and switches a grant reads of
+ *   the oauth module's settings, held whole with `checkOAuthTokenSettings`
+ *   rather than read from `config`; absent in a composition without the
+ *   oauth module.
+ * - `tokenBindingSettings`: core's token-binding settings (the dispatch
+ *   policy, and whether a confidential client's refresh token is bound),
+ *   which boot fills for every composition from `core.tokenBinding`; a grant
+ *   whose module requires the slot reads them from it rather than from
+ *   `config`. Optional because a factory is handed only the slots its module
+ *   lists; a grant whose module requires the slot always gets it.
+ *
+ * `config` stays required while grants still read it.
  */
 export type GrantDependencies = ProviderDeps<
 	"config" | "keyStore",
@@ -224,10 +243,16 @@ export type GrantDependencies = ProviderDeps<
 	| "sessionFederationIndex"
 	| "subjectRevocation"
 	| "logger"
+	| "oauthTokenSettings"
+	| "tokenBindingSettings"
 >;
 
 /**
- * Factory function type for creating grant handlers.
- * Used by OSS consumers to implement custom grant types.
+ * Factory function type for creating grant handlers: a module's
+ * `contributes.grants` entry over `GrantDependencies`. Used by OSS consumers
+ * to implement custom grant types. It answers the handler, or `null` when the
+ * module's settings switch the grant off — the grant type is then absent from
+ * the token endpoint's dispatch and from discovery, as one no module
+ * contributes is — and may answer either through a promise.
  */
-export type GrantFactory = (deps: GrantDependencies) => GrantHandler;
+export type GrantFactory = (deps: GrantDependencies) => Contributed<GrantHandler | null>;

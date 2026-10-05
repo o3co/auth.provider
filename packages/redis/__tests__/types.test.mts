@@ -8,11 +8,13 @@ import { describe, expectTypeOf, it } from "vitest";
 // so this type-shape test exercises the consumer-facing surface — any drift
 // between `index.mts` re-exports and `clients.mts` definitions fails here.
 import type {
+	AttemptCounterClient,
 	ChallengeStoreClient,
 	ConsentRecordFields,
 	ConsentStoreClient,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
+	FederationGrantStoreClient,
 	FederationTokenStoreClient,
 	GrantConsentInput,
 	MfaFactorStoreClient,
@@ -45,6 +47,13 @@ describe("makeIoredisClients return shape", () => {
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionFederationIndexClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("federationTokenStoreClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("rateLimiterClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("attemptCounterClient");
+	});
+
+	it("attemptCounterClient satisfies AttemptCounterClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["attemptCounterClient"]
+		>().toMatchTypeOf<AttemptCounterClient>();
 	});
 
 	it("challengeStoreClient satisfies ChallengeStoreClient", () => {
@@ -197,6 +206,12 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 		>();
 	});
 
+	it("attemptCounterClient slot is optional and of AttemptCounterClient type", () => {
+		expectTypeOf<ComponentMap["attemptCounterClient"]>().toEqualTypeOf<
+			AttemptCounterClient | undefined
+		>();
+	});
+
 	it("deviceCodeStoreClient slot is optional and of DeviceCodeStoreClient type", () => {
 		expectTypeOf<ComponentMap["deviceCodeStoreClient"]>().toEqualTypeOf<
 			DeviceCodeStoreClient | undefined
@@ -255,6 +270,17 @@ describe("Per-purpose multi-client interfaces", () => {
 
 /** `true` when `K` must be present on `T` — not merely declared. */
 type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, K> ? false : true;
+
+describe("the federation grant client's rotation primitives, as required members", () => {
+	// The grant store's take and give-back are required on the port, and the
+	// store has nothing to offer them over without these.
+	it("FederationGrantStoreClient names takeRotation and refundRotation", () => {
+		expectTypeOf<IsRequiredKey<FederationGrantStoreClient, "takeRotation">>().toEqualTypeOf<true>();
+		expectTypeOf<
+			IsRequiredKey<FederationGrantStoreClient, "refundRotation">
+		>().toEqualTypeOf<true>();
+	});
+});
 
 describe("the consent client's expiry, as a required key", () => {
 	// `undefined` here means until revoked — the value that widens what a

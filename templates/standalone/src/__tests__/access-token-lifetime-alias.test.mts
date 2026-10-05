@@ -32,7 +32,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
-import { adaptersOf } from "./library-references.fixture.mjs";
+import { rootSectionsOf } from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -50,7 +50,7 @@ function loadShipped(env: Record<string, string> = {}): Switches {
 		.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env: resolvedEnv }))
 		.withFallback(parseFile(fileURLToPath(coreReference()), { env: resolvedEnv }));
-	return { ...validate(layers, AppConfigSchema), adapters: adaptersOf(layers, resolvedEnv) };
+	return { ...validate(layers, AppConfigSchema), ...rootSectionsOf(layers, resolvedEnv) };
 }
 
 /** What `buildModules` hands the logger it is given, per level. */

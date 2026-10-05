@@ -17,7 +17,9 @@
 /**
  * A browser session with Google linked, on the standalone composed as a
  * deployment does: `oauthModule`, the session module and the real Google
- * adapter, booted through `createApp` under the shipped configuration.
+ * adapter — the Google federation type `buildModules` lists, handed the
+ * shipped `core.federations.google` entry — booted through `createApp` under
+ * the shipped configuration.
  *
  * The two logout routes and `POST /oauth/federation/:name/token` live in
  * `@o3co/auth-provider-oauth`, which depends on no adapter; only here can a
@@ -45,10 +47,7 @@ import {
 	type SessionFederationIndex,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import {
-	type GoogleProviderConfig,
-	googleFederationModule,
-} from "@o3co/auth-provider-federation-google";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -58,9 +57,9 @@ import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths, type Switches } from "#/configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
-	adaptersOf,
 	capturedRenames,
 	libraryLayers,
+	rootSectionsOf,
 	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
@@ -85,6 +84,8 @@ const GOOGLE_CLIENT_SECRET = "google-secret";
 const GOOGLE_CALLBACK = `${ISSUER}/session/oauth/federation/google/callback`;
 
 const ENV: Readonly<Record<string, string>> = {
+	// A session signed in through Google alone, no second factor.
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: JWT_SECRET,
 	OAUTH_JWT_ISSUER: ISSUER,
@@ -104,36 +105,49 @@ const ENV: Readonly<Record<string, string>> = {
 };
 
 /**
- * `"shipped"`: Google switched on the way an operator does, through its
- * environment variables and the template's own configuration bridge — which
- * has no setting for an end-session endpoint or a `fetch`. Otherwise the
- * adapter's configuration beyond its credentials, composed with
- * `googleFederationModule` directly.
+ * Google switched on the way an operator does, through its environment
+ * variables, and handled by the Google federation type the template lists.
+ * `"shipped"` is that alone. Otherwise, beside it: `endSessionEndpoint`, a key
+ * of the entry with no environment form, written into the entry as an
+ * operator's own layer would; and `fetch`, the one the type module is built
+ * with in place of the global one.
  */
 export type GoogleWiring =
 	| "shipped"
-	| Omit<GoogleProviderConfig, "clientId" | "clientSecret" | "callbackURL">;
+	| { readonly endSessionEndpoint?: string; readonly fetch?: typeof fetch };
+
+const GOOGLE_ENV: Readonly<Record<string, string>> = {
+	CORE_FEDERATIONS_GOOGLE_ENABLED: "true",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_ID: GOOGLE_CLIENT_ID,
+	CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET: GOOGLE_CLIENT_SECRET,
+	CORE_FEDERATIONS_GOOGLE_CALLBACK_URL: GOOGLE_CALLBACK,
+};
 
 function resolveConfig(google: GoogleWiring): Switches {
-	const env: Record<string, string> =
-		google === "shipped"
-			? {
-					...ENV,
-					CORE_FEDERATIONS_GOOGLE_ENABLED: "true",
-					CORE_FEDERATIONS_GOOGLE_CLIENT_ID: GOOGLE_CLIENT_ID,
-					CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET: GOOGLE_CLIENT_SECRET,
-					CORE_FEDERATIONS_GOOGLE_CALLBACK_URL: GOOGLE_CALLBACK,
-				}
-			: { ...ENV };
+	const env: Record<string, string> = { ...ENV, ...GOOGLE_ENV };
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env })
 		.withFallback(parseFile(applicationConfPath, { env }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 		.withFallback(libraryLayers(env));
+	const config = validate(layers, AppConfigSchema);
+	const endSessionEndpoint = google === "shipped" ? undefined : google.endSessionEndpoint;
+	const federations = config.core?.federations;
 	return {
 		...sectionsCoreDoesNotDeclare(layers),
-		adapters: adaptersOf(layers, env),
-		...validate(layers, AppConfigSchema),
+		...rootSectionsOf(layers, env),
+		...config,
+		...(endSessionEndpoint === undefined
+			? {}
+			: {
+					core: {
+						...config.core,
+						federations: {
+							...federations,
+							google: { ...federations?.google, endSessionEndpoint },
+						},
+					},
+				}),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(env),
@@ -241,32 +255,18 @@ export async function signInLinkedToGoogle(options: {
 }): Promise<GoogleSession> {
 	const { google, tokens } = options;
 	const config = resolveConfig(google);
-	const googleModules =
-		google === "shipped"
-			? []
-			: [
-					googleFederationModule,
-					defineModule({
-						name: "test:google-federation-config",
-						provides: {
-							googleFederationConfig: (): GoogleProviderConfig => ({
-								clientId: GOOGLE_CLIENT_ID,
-								clientSecret: GOOGLE_CLIENT_SECRET,
-								callbackURL: GOOGLE_CALLBACK,
-								...google,
-							}),
-						},
-					}),
-				];
+	const upstreamFetch = google === "shipped" ? undefined : google.fetch;
+	const googleType = googleFederationTypeModule().name;
 	const handle = await createApp({
-		modules: [
-			...buildModules(config, {
-				keyStoreModule: testKeyStoreModule,
-				repositoriesModule: testRepositoriesModule,
-				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
-			}),
-			...googleModules,
-		],
+		modules: buildModules(config, {
+			keyStoreModule: testKeyStoreModule,
+			repositoriesModule: testRepositoriesModule,
+			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+		}).map((module) =>
+			module.name === googleType && upstreamFetch !== undefined
+				? googleFederationTypeModule({ fetch: upstreamFetch })
+				: module,
+		),
 		bootstrapComponents: { config, pathResolver: (s) => s },
 	});
 	try {

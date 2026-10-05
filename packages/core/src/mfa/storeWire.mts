@@ -30,8 +30,35 @@
  * with a `RangeError`; an update names the record by `subject` and `id` and
  * carries the expected version and, as its changes, only `data`, `label` and
  * `lastUsedAtMs`.
+ *
+ * The factor set's store generation travels under the conditional-write
+ * convention's HTTP wire (docs/adapter-surface.md, "Conditional writes"):
+ * the versioned list answers `factors` with the set's `generation`, `null`
+ * only for an absent set; a conditional create or remove carries
+ * `expectedGeneration` (`null`, for a create only: the set was read as
+ * absent) and `deadlineMs`, and is answered `200`, `404` or `409` with an
+ * outcome body. `deadlineMs` is an instant on the provider's clock, the send
+ * time plus the adapter's request timeout. The Store checks it against its own
+ * clock in the same atomic step as the conditional write; at or after it, the
+ * write is not applied and the answer is `408`. This assumes the provider's
+ * and the Store's clocks agree within the clock skew assumed between the two;
+ * under that assumption a conditional write commits or fails within W, the
+ * request timeout plus that skew. This codec is
+ * the only place those field names and statuses meet the port's words: its
+ * readers answer the port's types, and throw a `TypeError` for any other
+ * answer, a bare `404` or `409` and a `408` included.
  */
 
+import {
+	type ConditionalCreateAnswer,
+	type ConditionalSetRemoveAnswer,
+	isStoreGeneration,
+	readConditionalCreateAnswer,
+	readConditionalSetRemoveAnswer,
+	readVersionedSet,
+	type StoreGeneration,
+	type VersionedSet,
+} from "../adapters/conditionalWrite.mjs";
 import { isStorableExpiry } from "../adapters/expiry.mjs";
 import {
 	isMfaFactorId,
@@ -85,10 +112,66 @@ export interface MfaStoreListAnswer {
 	readonly factors: readonly unknown[];
 }
 
-/** `createMfaFactor`: one new record, refused as a duplicate when its `(subject, id)` is held. */
-export interface MfaStoreCreateRequest {
-	readonly factor: MfaStoreFactor;
+/**
+ * What the list endpoint answers with a `200` to a versioned read: every
+ * record, and the set's generation from the same snapshot. `generation` is
+ * required, and `null` only for an absent set, which holds no records.
+ */
+export interface MfaStoreVersionedListAnswer {
+	readonly factors: readonly unknown[];
+	readonly generation: string | null;
 }
+
+/**
+ * `createMfaFactor`, conditional: one new record, written only while the
+ * subject's set is at `expectedGeneration`; `null`: only while the set is
+ * absent.
+ */
+export interface MfaStoreCreateIfRequest {
+	readonly factor: MfaStoreFactor;
+	readonly expectedGeneration: string | null;
+	/**
+	 * Epoch milliseconds on the provider's clock, within the Date range: the
+	 * send time plus the adapter's request timeout. The Store checks it against
+	 * its own clock in the same atomic step as the write; at or after it, the
+	 * write is not applied and the answer is `408`.
+	 */
+	readonly deadlineMs: number;
+}
+
+/**
+ * A conditional create's answer body: `created` with a `200` and the set's
+ * new generation, `conflict` with a `409`. A create is never `missing`.
+ */
+export type MfaStoreCreateIfAnswer =
+	| { readonly outcome: "created"; readonly generation: string }
+	| { readonly outcome: "conflict" };
+
+/**
+ * `deleteMfaFactor`, conditional: the record `(subject, id)`, removed only
+ * while the subject's set is at `expectedGeneration`.
+ */
+export interface MfaStoreRemoveIfRequest {
+	readonly subject: string;
+	readonly id: string;
+	readonly expectedGeneration: string;
+	/**
+	 * Epoch milliseconds on the provider's clock, within the Date range: the
+	 * send time plus the adapter's request timeout. The Store checks it against
+	 * its own clock in the same atomic step as the write; at or after it, the
+	 * write is not applied and the answer is `408`.
+	 */
+	readonly deadlineMs: number;
+}
+
+/**
+ * A conditional remove's answer body: `removed` with a `200` and the set's
+ * new generation, `missing` with a `404`, `conflict` with a `409`.
+ */
+export type MfaStoreRemoveIfAnswer =
+	| { readonly outcome: "removed"; readonly generation: string }
+	| { readonly outcome: "missing" }
+	| { readonly outcome: "conflict" };
 
 /**
  * `updateMfaFactor`: `subject` and `id` name the record, `expectedVersion`
@@ -106,10 +189,11 @@ export interface MfaStoreUpdateAnswer {
 	readonly factor: unknown;
 }
 
-/** `deleteMfaFactor`: one record, or every record of the subject. */
-export type MfaStoreDeleteRequest =
-	| { readonly subject: string; readonly id: string }
-	| { readonly subject: string; readonly all: true };
+/** `deleteMfaFactor`, the reset: every record of the subject, unconditionally. */
+export interface MfaStoreDeleteRequest {
+	readonly subject: string;
+	readonly all: true;
+}
 
 /** `markMfaEnrolled`: the enrollment witness the Store answers back as `User.mfaEnrolled`. */
 export interface MfaStoreMarkEnrolledRequest {
@@ -330,4 +414,186 @@ export function toMfaStoreUpdateRequest(
 		expectedVersion,
 		changes: toMfaStoreFactorChanges(next),
 	};
+}
+
+/** `expected` as the wire carries it; a `RangeError` for one no Store may answer. */
+function checkGeneration(expected: unknown): StoreGeneration {
+	if (!isStoreGeneration(expected)) {
+		throw refuse('expectedGeneration must be 1 to 128 visible ASCII characters, none of them "');
+	}
+	return expected;
+}
+
+/**
+ * `deadlineMs` as the wire carries it; a `RangeError` for one that is not a
+ * whole instant above 0 within the Date range, which a Store could not read
+ * as a time and so would never refuse.
+ */
+function checkDeadline(deadlineMs: unknown): number {
+	if (!isInstant(deadlineMs) || deadlineMs <= 0) {
+		throw refuse("deadlineMs must be a whole instant above 0 within the Date range");
+	}
+	return deadlineMs;
+}
+
+/** `value[key]` when it is the answer's own; a `TypeError` naming `what` when it cannot be read. */
+function answerField(value: unknown, key: string, what: string): unknown {
+	if (typeof value !== "object" || value === null) throw new TypeError(`${what}: not an object`);
+	try {
+		return Array.isArray(value) ? undefined : own(value as Record<string, unknown>, key);
+	} catch {
+		throw new TypeError(`${what}: ${key} could not be read`);
+	}
+}
+
+/**
+ * The list endpoint's `200` to a versioned read of `subject`, as the port's
+ * set: `factors` read as `items` by the convention's `readVersionedSet`,
+ * each a record of `subject` ({@link readMfaStoreFactor}), no id twice, and
+ * `generation` the set's. `{ factors: [], generation: null }` is an absent
+ * set. A fresh frozen answer of fresh frozen records. Throws a `TypeError`
+ * for anything else, a missing `generation`, one holding `"`, and a single
+ * record that cannot be read included: the Store's fault, never a set with
+ * fewer records.
+ */
+export function readMfaStoreVersionedListAnswer(
+	value: unknown,
+	subject: string,
+): VersionedSet<MfaFactorRecord> {
+	const what = "MfaStoreVersionedListAnswer";
+	const set = readVersionedSet<unknown>({
+		items: answerField(value, "factors", what),
+		generation: answerField(value, "generation", what),
+	} as VersionedSet<unknown>);
+	const ids = new Set<string>();
+	const records: MfaFactorRecord[] = [];
+	for (const item of set.items) {
+		let factor: MfaStoreFactor | undefined;
+		try {
+			factor = readMfaStoreFactor(item);
+		} catch {
+			throw new TypeError(`${what}: a record could not be read`);
+		}
+		if (factor === undefined) throw new TypeError(`${what}: a record the provider cannot read`);
+		if (factor.subject !== subject) throw new TypeError(`${what}: a record of another subject`);
+		if (ids.has(factor.id)) throw new TypeError(`${what}: a record id repeats`);
+		ids.add(factor.id);
+		records.push(Object.freeze(fromMfaStoreFactor(factor)));
+	}
+	return Object.freeze({ items: Object.freeze(records), generation: set.generation });
+}
+
+/**
+ * The body of a create of `record` while its subject's set is at `expected`;
+ * `null`: while the set is absent. `deadlineMs` is the send time plus the
+ * adapter's request timeout, in epoch milliseconds. A `RangeError` for an
+ * `expected` that is neither a store generation nor `null`, a `deadlineMs`
+ * that is not a whole instant above 0 within the Date range, and a record
+ * {@link toMfaStoreFactor} refuses.
+ */
+export function toMfaStoreCreateIfRequest(
+	record: MfaFactorRecord,
+	expected: StoreGeneration | null,
+	deadlineMs: number,
+): MfaStoreCreateIfRequest {
+	return {
+		factor: toMfaStoreFactor(record),
+		expectedGeneration: expected === null ? null : checkGeneration(expected),
+		deadlineMs: checkDeadline(deadlineMs),
+	};
+}
+
+/**
+ * The body of a removal of `(subject, id)` while the set is at `expected`.
+ * `deadlineMs` is the send time plus the adapter's request timeout, in epoch
+ * milliseconds. A `RangeError` for an `expected` that is no store generation
+ * (`null` included: a removal never targets an absent set), a `deadlineMs`
+ * that is not a whole instant above 0 within the Date range, an id no record
+ * can have, and a `subject` that is no string.
+ */
+export function toMfaStoreRemoveIfRequest(
+	subject: string,
+	id: string,
+	expected: StoreGeneration,
+	deadlineMs: number,
+): MfaStoreRemoveIfRequest {
+	return {
+		subject: checkString(subject, "subject"),
+		id: checkId(id),
+		expectedGeneration: checkGeneration(expected),
+		deadlineMs: checkDeadline(deadlineMs),
+	};
+}
+
+/**
+ * `body` read by `read`, the convention's reader of the answer, and held to
+ * the outcome its `status` stands for. A `TypeError` for a status with no
+ * outcome, a body the reader refuses (none at all included), and a body
+ * whose outcome is another status's.
+ */
+function readStatusAnswer<A extends { readonly outcome: string }>(
+	status: number,
+	body: unknown,
+	outcomes: ReadonlyMap<number, A["outcome"]>,
+	read: (body: unknown) => A,
+	what: string,
+): A {
+	const outcome = outcomes.get(status);
+	if (outcome === undefined)
+		throw new TypeError(`${what}: status ${String(status)} has no outcome`);
+	const answer = read(body);
+	if (answer.outcome !== outcome) {
+		throw new TypeError(`${what}: status ${String(status)} answered ${answer.outcome}`);
+	}
+	return answer;
+}
+
+const CREATE_IF_OUTCOMES: ReadonlyMap<number, ConditionalCreateAnswer["outcome"]> = new Map([
+	[200, "created"],
+	[409, "conflict"],
+]);
+
+const REMOVE_IF_OUTCOMES: ReadonlyMap<number, ConditionalSetRemoveAnswer["outcome"]> = new Map([
+	[200, "removed"],
+	[404, "missing"],
+	[409, "conflict"],
+]);
+
+/**
+ * A conditional create's answer, its `status` and its parsed `body`, as the
+ * port's answer (`readConditionalCreateAnswer`): `200` `created` with the
+ * set's new generation, `409` `conflict`. A `TypeError` for anything else: a
+ * `404` (a create is never `missing`), a `408` (read past its deadline, it
+ * wrote nothing), another status, a `409` or `200` without its body, or a
+ * body naming another status's outcome.
+ */
+export function readMfaStoreCreateIfAnswer(status: number, body: unknown): ConditionalCreateAnswer {
+	return readStatusAnswer(
+		status,
+		body,
+		CREATE_IF_OUTCOMES,
+		readConditionalCreateAnswer,
+		"MfaStoreCreateIfAnswer",
+	);
+}
+
+/**
+ * A conditional remove's answer, its `status` and its parsed `body`, as the
+ * port's answer (`readConditionalSetRemoveAnswer`): `200` `removed` with the
+ * set's new generation, `404` `missing`, `409` `conflict`. A `TypeError` for
+ * anything else: a `408` (read past its deadline, it wrote nothing), another
+ * status, one of the three without its body, or a body naming another
+ * status's outcome.
+ */
+export function readMfaStoreRemoveIfAnswer(
+	status: number,
+	body: unknown,
+): ConditionalSetRemoveAnswer {
+	return readStatusAnswer(
+		status,
+		body,
+		REMOVE_IF_OUTCOMES,
+		readConditionalSetRemoveAnswer,
+		"MfaStoreRemoveIfAnswer",
+	);
 }

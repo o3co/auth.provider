@@ -142,9 +142,9 @@ export interface SessionAuthentication {
 	/**
 	 * The federation, for `"fed"`: the name it is installed under — the key
 	 * its callback resolved it by, whose `trustUpstreamAmr` applied. Equal to
-	 * the adapter's `provider.name` in every bundled composition; the
-	 * federation index, logout and the federation-token store use
-	 * `provider.name`.
+	 * the adapter's `provider.name` for every provider a module registers,
+	 * which boot refuses when named otherwise than its key; the federation
+	 * index, logout and the federation-token store use `provider.name`.
 	 */
 	readonly federation: string | undefined;
 	/** What an untrusted upstream IdP asserted: kept for the record, never stamped, never read for `acr`. */
@@ -160,6 +160,12 @@ export interface SessionAuthentication {
 export interface CreateUserSessionInput {
 	readonly sid: string;
 	readonly sub: string;
+	/**
+	 * When the user authenticated. Must be a valid date at or after the epoch,
+	 * no further ahead of the store's clock than `DEFAULT_CLOCK_SKEW_MS`: a
+	 * `RangeError` otherwise, nothing recorded. Recorded no later than the
+	 * store's clock (`recordableAuthTime`), as `authentication.mfaAt` is.
+	 */
 	readonly authTime: Date;
 	readonly expiresAt: Date;
 	readonly claims: UserSessionClaims;
@@ -174,7 +180,9 @@ export interface CreateUserSessionInput {
 	 * `passwordSessionAuthentication` / `federatedSessionAuthentication`
 	 * (`./authentication.mts`); `undefined` writes a session read as a
 	 * pre-upgrade one. A required key. `mfaAt`, when present, must be a valid
-	 * date at or after the epoch: a `RangeError` otherwise, nothing recorded.
+	 * date at or after the epoch, no further ahead of the store's clock than
+	 * `DEFAULT_CLOCK_SKEW_MS`: a `RangeError` otherwise, nothing recorded.
+	 * Recorded no later than the store's clock (`recordableSessionAuthentication`).
 	 */
 	readonly authentication: SessionAuthentication | undefined;
 	/**
@@ -206,8 +214,14 @@ export interface UserSessionStore {
 	 * Record a new session. Rejects when `sid` already has one, when
 	 * `expiresAt` is already past, and — with a `RangeError`, recording
 	 * nothing — when `expiresAt` is an Invalid Date, `authTime` or
-	 * `authentication.mfaAt` is an Invalid Date or before the epoch, or
+	 * `authentication.mfaAt` is an Invalid Date, before the epoch or further
+	 * ahead of the store's clock than `DEFAULT_CLOCK_SKEW_MS`, or
 	 * `enrollmentFacts` is not what `SessionEnrollmentFacts` admits.
+	 *
+	 * `authTime` and `mfaAt` are each recorded no later than the store's
+	 * clock: a store records what `recordableAuthTime` and
+	 * `recordableSessionAuthentication` answer, never its input, so a session
+	 * is never dated ahead of the clock that recorded it.
 	 */
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;
@@ -298,6 +312,14 @@ export function supportsSecondFactorUpdate(
  * Every `registerRP` MUST pass the session's `expiresAt`, which the adapter
  * uses as the entry's TTL. An Invalid Date (as `expiresAt` or the RP's
  * `registeredAt`) is a `RangeError`, and nothing is recorded.
+ *
+ * A `registerRP` that has resolved is visible to every `listRPs` on that sid
+ * that starts after it, until the entry expires or `removeBySid`. A logout
+ * reads the list after it ends the session, and a code exchange registers
+ * the RP before it joins the session; a registry read from a replica, or
+ * eventually consistent, can miss the RP and skip its logout. As with
+ * {@link SupportsSessionEnd}, a backend that can lose a write it acknowledged
+ * breaks it.
  */
 export interface SessionRPRegistry {
 	readonly kind: string;
@@ -455,11 +477,12 @@ export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
  * change must invalidate outstanding tokens whose jtis are not enumerable, so
  * the watermark names the moment before which none count.
  *
- * Compared inclusively against `iat` (`iat <= watermark` is revoked): `iat`
- * is second-truncated and replica clocks differ, so a token minted just
- * before the reset often shares the watermark's second. Killing one minted
- * just after costs a retry; letting one from just before survive is the
- * vulnerability this closes.
+ * Compared inclusively against `iat`, and against `auth_time` when a token
+ * carries one (either at or before the watermark is revoked;
+ * `claimCoveredByRevocationBoundary`): `iat` is second-truncated and replica
+ * clocks differ, so a token minted just before the reset often shares the
+ * watermark's second. Killing one minted just after costs a retry; letting
+ * one from just before survive is the vulnerability this closes.
  *
  * `revokeBefore`'s `expiresAt` MUST reach at least as far as the
  * longest-lived credential the watermark must refuse, since it is the

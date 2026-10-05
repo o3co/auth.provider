@@ -257,7 +257,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 			background,
 			now: () => world.now,
 			clientRepository,
-			fetch: createOutboundFetch({ source: "registration" }),
+			fetch: createOutboundFetch({ config: {}, source: "registration" }),
 			issuer: options.issuer ?? "https://auth.test",
 			...(sink === undefined ? {} : { auditSink: sink }),
 			rateLimiter:

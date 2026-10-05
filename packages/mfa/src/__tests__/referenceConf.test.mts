@@ -52,6 +52,7 @@ const readSettings = (config: unknown, options: Partial<MfaSettingsOptions> = {}
 import { MFA_RATE_LIMIT_PREFIX, mfaModule } from "#/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
+import { oauthTokenSettingsFor } from "./moduleHarness.mjs";
 
 const require = createRequire(import.meta.url);
 const CORE_REFERENCE = require.resolve("@o3co/auth-provider-core/reference.conf");
@@ -284,7 +285,7 @@ describe("the package's reference.conf", () => {
 			/** Boots the factor's module over this file resolved under `env`. */
 			const boot = (env: Record<string, string>) =>
 				createApp({
-					modules: [mfaTotpFactorModule],
+					modules: [mfaTotpFactorModule, oauthTokenSettingsFor()],
 					bootstrapComponents: {
 						config: resolve(env),
 						pathResolver: (p: string) => p,

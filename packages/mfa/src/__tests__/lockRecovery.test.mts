@@ -38,6 +38,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMfaFactorSet, createMfaSubjectLeases } from "#/factorSet.mjs";
 import { createMfaLockRecovery } from "#/lockRecovery.mjs";
 import { createMfaEnrollmentWitness } from "#/witness.mjs";
+import { addRecord, suiteSealing } from "./routesHarness.mjs";
 
 const SUBJECT = "u-alice";
 const SID = "sid-alice";
@@ -104,6 +105,7 @@ function setup(
 		factorStore,
 		witness: createMfaEnrollmentWitness(undefined),
 		leases: createMfaSubjectLeases({ store, storeTimeoutMs: 1_000 }),
+		sealing: suiteSealing(),
 	});
 	const recovery = createMfaLockRecovery({
 		store,
@@ -125,10 +127,16 @@ async function failAt(store: MfaTransactionStore, atMs: number): Promise<void> {
 	await store.settleSubjectAttempt(SUBJECT, reserved.reservation, "failure");
 }
 
+/** When {@link latch} fixes the hard hold: its tenth failure. */
+const LATCHED_AT = T + 10_000;
+
+/** From when a rebind counts once {@link latch} fixed the hard hold. */
+const REBIND_AFTER = new Date(LATCHED_AT + DEFAULT_CLOCK_SKEW_MS);
+
 /** The subject's run brought to the hard limit from `T`: the hard hold fixed at the tenth. */
 async function latch(store: MfaTransactionStore): Promise<void> {
 	for (let n = 0; n < 9; n++) await failAt(store, T + n);
-	await failAt(store, T + 10_000);
+	await failAt(store, LATCHED_AT);
 	const after = await store.reserveSubjectAttempt(SUBJECT, T + 20_000, POLICY);
 	expect(after).toMatchObject({ ok: false, hold: "hard" });
 }
@@ -205,6 +213,7 @@ describe("the entry's configuration", () => {
 			factorStore: createMemoryMfaFactorStore(),
 			witness: createMfaEnrollmentWitness(undefined),
 			leases: createMfaSubjectLeases({ store, storeTimeoutMs: 1_000 }),
+			sealing: suiteSealing(),
 		});
 		const options = { store, factorSet, factors: FACTORS };
 		expect(() =>
@@ -269,6 +278,35 @@ describe("a release", () => {
 		expect(await recovery.release(SUBJECT, SID)).toEqual({
 			outcome: "refused",
 			reason: "no_revocation_boundary",
+			rebindAfter: null,
+		});
+	});
+
+	it("with no sessions boundary wired, refused no_revocation_boundary while the hard hold stands says from when a rebind counts", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await addRecord(factorStore, recordOf("totp-old", "totp", T - 1_000));
+		const { store, recovery } = setup({ factorStore });
+		await latch(store);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+
+		expect(await recovery.release(SUBJECT, SID)).toEqual({
+			outcome: "refused",
+			reason: "no_revocation_boundary",
+			rebindAfter: REBIND_AFTER,
+		});
+	});
+
+	it("refused exempt_proof_required while the hard hold stands says nothing of when a rebind counts", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await addRecord(factorStore, recordOf("totp-old", "totp", T - 1_000));
+		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
+		await latch(store);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+
+		expect(await recovery.release(SUBJECT, SID)).toEqual({
+			outcome: "refused",
+			reason: "exempt_proof_required",
 		});
 	});
 
@@ -283,6 +321,25 @@ describe("a release", () => {
 		expect(await recovery.release(SUBJECT, SID)).toEqual({
 			outcome: "refused",
 			reason: "not_revoked_since",
+			rebindAfter: null,
+		});
+	});
+
+	it("refused not_revoked_since while the hard hold stands says from when a rebind counts", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await addRecord(factorStore, recordOf("totp-old", "totp", T - 1_000));
+		const { store, recovery } = setup({
+			boundary: async () => new Date(T + DEFAULT_CLOCK_SKEW_MS),
+			factorStore,
+		});
+		await latch(store);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+
+		expect(await recovery.release(SUBJECT, SID)).toEqual({
+			outcome: "refused",
+			reason: "not_revoked_since",
+			rebindAfter: REBIND_AFTER,
 		});
 	});
 
@@ -328,7 +385,7 @@ describe("a release", () => {
 
 	it("while the hard hold stands and no guessable factor was bound since, answers it held: the week given back, the hold kept", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("totp-old", "totp", T - 1_000));
+		await addRecord(factorStore, recordOf("totp-old", "totp", T - 1_000));
 		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
 		await latch(store);
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
@@ -340,6 +397,7 @@ describe("a release", () => {
 			applied: true,
 			generation: 1,
 			cleared: { week: true, run: false, hard: false },
+			rebindAfter: REBIND_AFTER,
 		});
 		expect(await store.reserveSubjectAttempt(SUBJECT, clock, POLICY)).toMatchObject({
 			ok: false,
@@ -347,11 +405,48 @@ describe("a release", () => {
 		});
 	});
 
+	it("answers again that the hard hold stands, with the same rebind bound, for an authorization applied while it stood", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await addRecord(factorStore, recordOf("totp-old", "totp", T - 1_000));
+		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
+		await latch(store);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+		await recovery.release(SUBJECT, SID);
+
+		expect(await recovery.release(SUBJECT, SID)).toEqual({
+			outcome: "held",
+			hold: "hard",
+			applied: false,
+			generation: 1,
+			rebindAfter: REBIND_AFTER,
+		});
+	});
+
+	it("keeps the hard hold for a guessable record created at the rebind bound, and lifts it for one a millisecond after", async () => {
+		for (const [createdAtMs, outcome] of [
+			[REBIND_AFTER.getTime(), "held"],
+			[REBIND_AFTER.getTime() + 1, "released"],
+		] as const) {
+			const factorStore = createMemoryMfaFactorStore();
+			await addRecord(factorStore, recordOf("totp-new", "totp", createdAtMs));
+			const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
+			await latch(store);
+			clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+			await recovery.authorize(SUBJECT, SID, "key", clock);
+
+			expect(await recovery.release(SUBJECT, SID)).toMatchObject({ outcome });
+		}
+	});
+
 	it("lifts the hard hold once every guessable record was bound after it, with no sessions boundary asked", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const { store, recovery } = setup({ factorStore });
 		await latch(store);
-		await factorStore.create(recordOf("totp-new", "totp", T + 10_000 + DEFAULT_CLOCK_SKEW_MS + 1));
+		await addRecord(
+			factorStore,
+			recordOf("totp-new", "totp", T + 10_000 + DEFAULT_CLOCK_SKEW_MS + 1),
+		);
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
 		await recovery.authorize(SUBJECT, SID, "key", clock);
 
@@ -365,10 +460,10 @@ describe("a release", () => {
 
 	it("reads, as the guessable records' earliest time, every record of a kind that is not exempt — one whose data does not open, and one of a kind not installed, included — and leaves out an exempt kind", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("exempt", "key", T - 9_000));
-		await factorStore.create(recordOf("uninstalled", "gone", T - 8_000));
-		await factorStore.create(recordOf("totp-b", "totp", T - 2_000));
-		await factorStore.create(recordOf("totp-a", "totp", T - 3_000));
+		await addRecord(factorStore, recordOf("exempt", "key", T - 9_000));
+		await addRecord(factorStore, recordOf("uninstalled", "gone", T - 8_000));
+		await addRecord(factorStore, recordOf("totp-b", "totp", T - 2_000));
+		await addRecord(factorStore, recordOf("totp-a", "totp", T - 3_000));
 		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
 		const apply = vi.spyOn(store, "applySubjectRecovery");
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
@@ -390,7 +485,7 @@ describe("a release", () => {
 
 	it("keeps the hard hold while a record of a kind not installed stands from before it: an uninstalled kind could be installed again", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("uninstalled", "gone", T - 1_000));
+		await addRecord(factorStore, recordOf("uninstalled", "gone", T - 1_000));
 		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
 		await latch(store);
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
@@ -451,7 +546,7 @@ describe("a release", () => {
 
 	it("hands null as the guessable records' earliest time when only exempt records remain", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("exempt", "key", T - 8_000));
+		await addRecord(factorStore, recordOf("exempt", "key", T - 8_000));
 		const { store, recovery } = setup({ boundary: async () => null, factorStore });
 		const apply = vi.spyOn(store, "applySubjectRecovery");
 		await recovery.authorize(SUBJECT, SID, "key", clock);
@@ -506,6 +601,52 @@ describe("a release", () => {
 			const { store, recovery } = setup({ boundary: async () => null });
 			await recovery.authorize(SUBJECT, SID, "key", clock);
 			vi.spyOn(store, "applySubjectRecovery").mockReturnValue(answer as never);
+
+			expect(await recovery.release(SUBJECT, SID)).toMatchObject({
+				outcome: "unavailable",
+				store: "mfa_transaction",
+				step: "applySubjectRecovery",
+			});
+		}
+	});
+
+	it("reads a rebind bound as a date, up to the last instant a date holds", async () => {
+		const LAST = 8_640_000_000_000_000;
+		const applied = {
+			outcome: "applied",
+			recoveryId: "r-1",
+			generation: 1,
+			cleared: { week: true, run: false, hard: false },
+			hard: true,
+			rebindAfterMs: LAST,
+		};
+		const { store, recovery } = setup({ boundary: async () => null });
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+		vi.spyOn(store, "applySubjectRecovery").mockResolvedValue(applied as never);
+
+		expect(await recovery.release(SUBJECT, SID)).toMatchObject({
+			outcome: "held",
+			rebindAfter: new Date(LAST),
+		});
+	});
+
+	it("answers the transaction store's outage for a rebind bound no date can hold, whatever the outcome", async () => {
+		const beyond = { hard: true, rebindAfterMs: 8_640_000_000_000_001 };
+		for (const answer of [
+			{
+				outcome: "applied",
+				recoveryId: "r-1",
+				generation: 1,
+				cleared: { week: true, run: false, hard: false },
+				...beyond,
+			},
+			{ outcome: "already_applied", recoveryId: "r-1", generation: 1, ...beyond },
+			{ outcome: "refused", reason: "not_revoked_since", ...beyond },
+			{ outcome: "refused", reason: "unauthorized", ...beyond },
+		]) {
+			const { store, recovery } = setup({ boundary: async () => null });
+			await recovery.authorize(SUBJECT, SID, "key", clock);
+			vi.spyOn(store, "applySubjectRecovery").mockResolvedValue(answer as never);
 
 			expect(await recovery.release(SUBJECT, SID)).toMatchObject({
 				outcome: "unavailable",

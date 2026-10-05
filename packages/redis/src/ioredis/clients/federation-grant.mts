@@ -29,12 +29,14 @@ import {
 	FG_NAME_INTENT,
 	FG_NOTE_FAILURE,
 	FG_PRUNE,
+	FG_REFUND_ROTATION,
 	FG_REPLACE,
 	FG_REQUIRE_REAUTH,
 	FG_RESERVE,
 	FG_RETIRE_INTENT,
 	FG_REVOKE,
 	FG_SNAPSHOT,
+	FG_TAKE_ROTATION,
 	FG_TOUCH,
 	FG_UNLOCK,
 } from "../scripts/federation-grant.mjs";
@@ -200,6 +202,33 @@ export function makeIoredisFederationGrantStoreClient(
 						input.upstreamCode === undefined ? "0" : "1",
 						input.upstreamCode ?? "",
 					],
+				),
+			);
+		},
+
+		async takeRotation(grantKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_TAKE_ROTATION,
+					[grantKey],
+					[
+						fgNumber(input.nowMs),
+						fgNumber(input.expectedVersion),
+						fgNumber(input.limit),
+						fgNumber(input.windowMs),
+					],
+				),
+			);
+		},
+
+		async refundRotation(grantKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_REFUND_ROTATION,
+					[grantKey],
+					[fgNumber(input.nowMs), fgNumber(input.expectedVersion), fgNumber(input.sinceMs)],
 				),
 			);
 		},

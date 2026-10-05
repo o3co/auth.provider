@@ -107,13 +107,15 @@ async function boot(options: Parameters<typeof compose>[0] = {}): Promise<Compos
 const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-core":
 		"jwksModule, the memory stores, the refresh-token family rotation and revocation",
-	"@o3co/auth-provider-federation-google": "googleFederationModule",
+	"@o3co/auth-provider-federation-google": "googleFederationTypeModule, the google type",
 	"@o3co/auth-provider-federation-grants": "federationGrantsModules",
-	"@o3co/auth-provider-federation-oidc": "oidcFederationModule, one per `oidc` section",
+	"@o3co/auth-provider-federation-oidc": "oidcFederationTypeModule, the oidc type",
 	"@o3co/auth-provider-foundation":
-		"the HTTP user repository adapter (its MFA factor store module is composed by tools/composition)",
+		"the HTTP user repository adapter; foundationMfaFactorStoreModule under MFA_MODE with adapters.mfaFactorStore = store (tools/composition boots it)",
+	"@o3co/auth-provider-mfa":
+		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule) and mfaResetModule, under MFA_MODE (mfa-switch.test.mts)",
 	"@o3co/auth-provider-oauth":
-		"oauthModule, oauthSessionModule, oauthAuthorizationModule, subjectRevocationServiceModule",
+		"oauthModule, oauthSessionGrantModule, oauthAuthorizationModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
 	"@o3co/auth-provider-session": "sessionModule, sessionStoreModuleFor",
 	"@o3co/auth-provider-standard":
@@ -131,10 +133,8 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-device-grant": "deviceGrantModule",
 	"@o3co/auth-provider-dpop": "dpopModule",
-	"@o3co/auth-provider-federation-apple": "appleFederationModule",
-	"@o3co/auth-provider-federation-github": "githubFederationModule",
-	"@o3co/auth-provider-mfa":
-		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule); private until the MFA ADR's build-order step 20 wires it",
+	"@o3co/auth-provider-federation-apple": "appleFederationTypeModule",
+	"@o3co/auth-provider-federation-github": "githubFederationTypeModule",
 	"@o3co/auth-provider-mtls": "mtlsModule",
 	"@o3co/auth-provider-oauth-token-exchange": "tokenExchangeModule",
 	"@o3co/auth-provider-test-kit": "no module: contract suites and fakes, for tests",
@@ -184,10 +184,8 @@ const ALL_ON_MODULES = [
 	"oauth-authorization",
 	"jwks",
 	"session",
-	"federation-google",
-	"google-federation-config",
-	"oidc-federation-config",
-	"federation-oidc-oidc",
+	"federation-google-type",
+	"federation-oidc",
 	"logging",
 	"http",
 	"key-store",
@@ -237,11 +235,12 @@ describe("every module the template can turn on boots together", () => {
 		);
 	});
 
-	it("registers every federation and every grant a module contributes", async () => {
+	it("registers a federation for every enabled entry of a type a module contributes, and every grant", async () => {
 		const { modules, handle, app } = await boot();
-		const federations = modules.flatMap((m) => contributionNames(m, "federations")).sort();
-		expect(federations).toEqual(["google", "oidc"]);
-		expect([...(handle.components.federationProviders?.keys() ?? [])].sort()).toEqual(federations);
+		const types = modules.flatMap((m) => contributionNames(m, "federationTypes")).sort();
+		expect(types).toEqual(["google", "oidc"]);
+		// The shipped entries are named after their types.
+		expect([...(handle.components.federationProviders?.keys() ?? [])].sort()).toEqual(types);
 
 		const grants = modules.flatMap((m) => contributionNames(m, "grants")).sort();
 		expect(grants).toEqual(ENABLED_GRANTS);

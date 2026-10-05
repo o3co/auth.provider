@@ -40,8 +40,9 @@
  *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
  *   on one is recorded for its session alone, standing
  *   `mfa.manage.maxAgeSeconds`. The step-up of a subject holding one opens,
- *   or uses, a `step_up` transaction, opened only when the session store can
- *   record it.
+ *   or uses, a `step_up` transaction, opened only where admission's view says
+ *   a second factor can be recorded on the session
+ *   (`MfaCeremonySession.secondFactorRecordable`).
  * - A verification reserves its attempt before the proof is checked, consumes
  *   the transaction before the factor moves on, and on a lost compare-and-set
  *   reads the factor again and checks the proof again: a code used twice at
@@ -52,7 +53,17 @@
  *   ends: `success` once the factor was written, `void` for a right proof
  *   that completed nothing, and a failure otherwise — a refusal, an outage
  *   or a factor that throws before a verdict. An exempt proof records its
- *   success once the factor was written.
+ *   success once the factor was written. A right proof whose factor answers
+ *   data that cannot be sealed (`copyFactorValue`), the data it was handed
+ *   included, is `void` too — the factor's bug never counts against the
+ *   subject — and is answered `503` before anything is consumed: the
+ *   transaction kept and still usable, its attempt counted at the
+ *   reservation, the factor's data as it was.
+ * - A recovery code's verification reads the subject's recovery-set floor
+ *   before its attempt is reserved, and again once the code is spent: a set
+ *   the recovery-code rule refuses (`recoverySetRefusal`) — below the floor —
+ *   is an invalid code, refused unchecked before, its transaction spent
+ *   after; a digest whose key left the ring is unreadable, naming the key.
  * - A store that cannot answer, a factor whose data does not open, and a
  *   factor that throws are outages: never a wrong code, never "no factor".
  * - `factor_id: "account-email"` names the account-email proof (`proof.mts`)
@@ -91,6 +102,17 @@
  * - A refusal carries the factor id the factor named only when it is one of
  *   the subject's factors of the kind verified: nothing else reaches the audit.
  *   Another is dropped and flagged, never quoted.
+ * - A factor's answer — a challenge's, a verification's — is read once, field
+ *   by field, however the factor holds it (a getter, a class's instance), and
+ *   only what was read is used. The state and data in it are taken as their
+ *   plain copy (`copyFactorValue`) where the answer is read, and that one copy
+ *   is what `amrFor`, the recovery-code rules and the seal act on; data or
+ *   state that is not plain JSON-shaped is the factor's failure (`503`), the
+ *   stored data left as it was. A challenge's `response` must be a plain
+ *   object: it is answered as the factor built it.
+ * - A factor's `identity` is read as a non-empty string or none; one that
+ *   throws is none — the record a duplicate of none — and is said through
+ *   `identityFailed`.
  */
 
 import {
@@ -140,7 +162,13 @@ import {
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
 import type { MfaFactorSet } from "./factorSet.mjs";
-import { holdsUsableRecord, isOffered, readFactorRecord } from "./factorState.mjs";
+import {
+	holdsCountingFactor,
+	holdsUsableIn,
+	isOffered,
+	type MfaSubjectRecords,
+	readFactorRecord,
+} from "./factorState.mjs";
 import type { RequireEmailProof } from "./firstBinding.mjs";
 import {
 	distrustedByFirstBinding,
@@ -150,10 +178,10 @@ import {
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
-import { recoveryCodesLeft } from "./recovery/factor.mjs";
+import { isRecoveryCodeFactor, recoveryCodesLeft, recoverySetRefusal } from "./recovery/factor.mjs";
 import { createLoginReopen } from "./reopen.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
-import type { MfaSealing } from "./sealing.mjs";
+import { copyFactorValue, type MfaSealing } from "./sealing.mjs";
 import { createMfaStepUp } from "./stepUp.mjs";
 import { openEnrollTransaction, openLoginBinding, openStepUpTransaction } from "./transactions.mjs";
 import { type MfaEnrollmentWitness, reconciles, reconcilesSession } from "./witness.mjs";
@@ -215,7 +243,7 @@ export interface MfaCoordinator {
 
 export interface MfaCoordinatorOptions {
 	readonly factors: MfaFactorResolver;
-	readonly factorStore: MfaFactorStore;
+	readonly factorStore: Pick<MfaFactorStore, "update">;
 	readonly transactions: MfaTransactionStore;
 	readonly sealing: MfaSealing;
 	/** `mfa.maxAttemptsPerTransaction`. */
@@ -242,10 +270,10 @@ export interface MfaCoordinatorOptions {
 	readonly firstBindingMarkMs: number;
 	/** The subjects' sessions boundary a login's transaction is held to; none wired, none is read. */
 	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
-	/** Whether the session store can record a second factor verified in a session (`supportsSecondFactorUpdate`). */
-	readonly stepUpRecordable: boolean;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
+	/** Where a factor's `identity` that threw is said; the record is judged a duplicate of none. */
+	readonly identityFailed?: (kind: string, cause: unknown) => void;
 }
 
 /** Whether `value` is an object `res.json` answers as the factor built it: a plain object. */
@@ -274,7 +302,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		sessionProofSeconds,
 		firstBindingMarkMs,
 		subjectRevocation,
-		stepUpRecordable,
+		identityFailed,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
@@ -372,23 +400,50 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return record === undefined || factor === undefined ? undefined : { record, factor };
 	};
 
-	/** Whether `subject` holds a usable record (`factorState.mts`) — one that counts, when `options.counting` asks it. */
-	const holdsUsable = (
+	/** Whether the subject `read` holds a usable record (`factorState.mts`) — one that counts, when `options.counting` asks it. */
+	const holdsUsable = (read: MfaSubjectRecords): boolean => holdsUsableIn(read);
+
+	/** `subject`'s records read for a judgment over them (`factorSet.readSubject`); an outage is never "none". */
+	const readSubject = async (subject: string): Promise<MfaSubjectRecords | MfaStoreOutage> => {
+		try {
+			return await factorSet.readSubject(subject);
+		} catch (cause) {
+			return outage("mfa_factor", "list", cause);
+		}
+	};
+
+	/**
+	 * `subject`'s recovery-set floor, for a verification of `factor` that is a
+	 * recovery-code factor — read fail-closed: one that cannot be read is the
+	 * verification's outage; `undefined` for any other factor, which reads none.
+	 */
+	const floorForVerification = async (
 		subject: string,
-		records: readonly MfaFactorRecord[],
-		options: { readonly counting: boolean },
-	): boolean => holdsUsableRecord({ factors, sealing }, subject, records, options);
+		factor: MfaFactor,
+	): Promise<number | undefined | MfaStoreOutage> => {
+		if (!isRecoveryCodeFactor(factor)) return undefined;
+		try {
+			return await factorSet.recoverySetFloor(subject);
+		} catch (cause) {
+			return outage("mfa_transaction", "recoverySetFloor", cause);
+		}
+	};
 
 	/**
 	 * The named record and every record of its kind, opened for `subject`: the
-	 * named one must open; another that does not is left out.
+	 * named one must open, and pass the recovery-code rule (`recoverySetRefusal`)
+	 * under `floor`, the subject's recovery-set floor when one was read — a
+	 * set below it is `retired`, a digest whose key left the ring unreadable
+	 * naming that key; another that does not open is left out.
 	 */
 	const openKind = (
 		subject: string,
 		record: MfaFactorRecord,
 		records: readonly MfaFactorRecord[],
+		floor: number | undefined = undefined,
 	):
 		| { readonly named: MfaEnrolledFactor; readonly all: readonly MfaEnrolledFactor[] }
+		| { readonly outcome: "retired" }
 		| MfaFactorUnreadable => {
 		const open = (candidate: MfaFactorRecord) =>
 			sealing.openFactorData({ subject, id: candidate.id, kind: candidate.kind }, candidate.data);
@@ -407,6 +462,21 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				factorId: record.id,
 				state: opened.state,
 				...(opened.state === "key_unavailable" ? { keyId: opened.keyId } : {}),
+			};
+		}
+		const factor = factors.get(record.kind);
+		const refusal =
+			factor === undefined || floor === undefined
+				? undefined
+				: recoverySetRefusal(factor, opened.value, { floor, holdsKey: sealing.holdsKey });
+		if (refusal?.reason === "retired") return { outcome: "retired" };
+		if (refusal?.reason === "key_unavailable") {
+			return {
+				outcome: "unreadable",
+				kind: record.kind,
+				factorId: record.id,
+				state: "key_unavailable",
+				keyId: refusal.keyId,
 			};
 		}
 		const self = enrolled(record, opened.value);
@@ -599,8 +669,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "create", cause);
 			}
 		},
-		stepUpRecordable,
 		holdsUsable,
+		readSubject,
 		openLoginBinding: async (binding, continuation, shape) => {
 			try {
 				return await openLoginBinding(transactions, {
@@ -713,6 +783,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return undefined;
 			}
 		},
+		identityOf: (factor, data) => {
+			try {
+				const identity: unknown = factor.identity?.(data);
+				return typeof identity === "string" && identity !== "" ? identity : undefined;
+			} catch (cause) {
+				identityFailed?.(factor.kind, cause);
+				return undefined;
+			}
+		},
 	};
 	const enrollment = createMfaEnrollment(kit);
 	const proof = createAccountEmailProof(kit);
@@ -726,10 +805,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
 			// An enroll transaction verifies the account-email proof alone: it lists no factor.
-			const records = tx.purpose === "enroll" ? [] : await recordsOf(tx.subject);
-			if ("outcome" in records) return records;
-			const listed = records.flatMap((record) => {
-				const read = readFactorRecord({ factors, sealing }, tx.subject, record);
+			// A retired recovery set is not offered (`readSubjectRecords`).
+			const reading = tx.purpose === "enroll" ? undefined : await readSubject(tx.subject);
+			if (reading !== undefined && "outcome" in reading) return reading;
+			const listed = (reading?.records ?? []).flatMap((record) => {
+				if (reading === undefined) return [];
+				const read = readFactorRecord(reading.context, tx.subject, record);
 				if (!isOffered(read)) return [];
 				let hint: unknown;
 				if (read.state === "usable") {
@@ -781,16 +862,22 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const { record, factor } = found;
 			if (factor.challenge === undefined) return { outcome: "none" };
 			const opened = openKind(tx.subject, record, records);
-			if ("outcome" in opened) return opened;
+			// No floor is read here: no set is retired.
+			if ("outcome" in opened) return opened.outcome === "retired" ? UNKNOWN_FACTOR : opened;
 			const failed = (cause: unknown): MfaChallengeOutcome => ({
 				outcome: "challenge_failed",
 				kind: record.kind,
 				factorId: record.id,
 				cause,
 			});
-			let issued: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>;
+			type Issued = Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>;
+			let issued: {
+				readonly state: Issued["state"] | undefined;
+				readonly response: Issued["response"];
+				readonly mail: Issued["mail"] | undefined;
+			};
 			try {
-				issued = await factor.challenge({
+				const answer = await factor.challenge({
 					subject: tx.subject,
 					transactionId: tx.id,
 					nowMs,
@@ -799,7 +886,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					factor: opened.named,
 					factors: opened.all,
 				});
-				if (!isPlainObject(issued?.response)) {
+				// The factor's answer, each field read once, however it holds them; its
+				// state as the plain copy that is sealed (`copyFactorValue`).
+				const state = answer?.state;
+				issued = {
+					state: state === undefined ? undefined : copyFactorValue(state),
+					response: answer?.response,
+					mail: answer?.mail,
+				};
+				if (!isPlainObject(issued.response)) {
 					throw new TypeError("the factor's challenge answered a response that is not an object");
 				}
 			} catch (cause) {
@@ -943,10 +1038,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				cause,
 			});
 
-			// The factor must open before an attempt is spent on it: an outage
-			// spends nothing.
-			let opened = openKind(tx.subject, record, records);
-			if ("outcome" in opened) return opened;
+			// The factor must open, and a recovery-code set pass its rule under the
+			// subject's recovery-set floor, before an attempt is spent on it: an
+			// outage spends nothing, and a retired set is refused unchecked.
+			const floor = await floorForVerification(tx.subject, factor);
+			if (typeof floor === "object") return floor;
+			const retired = () =>
+				refused("invalid", Math.max(0, maxAttemptsPerTransaction - tx.attempts));
+			let opened = openKind(tx.subject, record, records, floor);
+			if ("outcome" in opened) return opened.outcome === "retired" ? retired() : opened;
 
 			/**
 			 * F3: under `required`, a login's factor that does not count completes
@@ -958,7 +1058,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				mode === "required" &&
 				tx.purpose === "login" &&
 				!factor.counting &&
-				!holdsUsable(tx.subject, current, { counting: true })
+				!holdsCountingFactor({ factors, sealing }, tx.subject, current)
 					? reopen.plan(tx, current)
 					: undefined;
 			let reopening = await planOver(records);
@@ -994,6 +1094,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			}
 			// How the subject's attempt settles: a failure until the proof verifies.
 			let settled: "failure" | "void" | "success" = "failure";
+			// Whether a right proof's factor answered data that cannot be sealed: its
+			// bug, never the subject's, so the attempt settles `void`.
+			let dataRefused = false;
 			try {
 				const pending = await challengeState(tx, factor, record, nowMs);
 				if ("outcome" in pending) return pending;
@@ -1012,11 +1115,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					| ({ readonly reason: MfaRefusalReason } & RefusalConcerns)
 					| MfaFactorUnreadable
 				> => {
-					if ("outcome" in opened) return opened;
+					if ("outcome" in opened) {
+						return opened.outcome === "retired" ? { reason: "invalid" } : opened;
+					}
 					const { named: self, all } = opened;
-					let result: MfaVerification;
+					let result:
+						| { readonly ok: true; readonly factorId: string; readonly next: unknown }
+						| Extract<MfaVerification, { readonly ok: false }>;
 					try {
-						result = await factor.verify({
+						const answer = await factor.verify({
 							subject: tx.subject,
 							transactionId: tx.id,
 							nowMs,
@@ -1030,23 +1137,41 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 								: { addressDigest: pending.addressDigest }),
 							proof: call.proof,
 						});
+						// The factor's answer, each field read once, however it holds them: a
+						// read that throws is the factor's failure, as a throw of its own.
+						if (answer.ok) {
+							result = { ok: true, factorId: answer.factorId, next: answer.next };
+						} else {
+							result = { ok: false, reason: answer.reason, factorId: answer.factorId };
+						}
 					} catch (cause) {
 						return unreadable(cause);
 					}
 					if (!result.ok) {
-						if (result.factorId === undefined) return { reason: result.reason };
-						const concerned = all.find((candidate) => candidate.id === result.factorId);
+						const { reason, factorId } = result;
+						if (factorId === undefined) return { reason };
+						const concerned = all.find((candidate) => candidate.id === factorId);
 						return concerned === undefined
-							? { reason: result.reason, factorIdDropped: true }
-							: { reason: result.reason, factorId: concerned.id };
+							? { reason, factorIdDropped: true }
+							: { reason, factorId: concerned.id };
 					}
-					const verified = all.find((candidate) => candidate.id === result.factorId);
+					const { factorId } = result;
+					const verified = all.find((candidate) => candidate.id === factorId);
 					if (verified === undefined) {
 						return unreadable(
 							new TypeError("the factor verified a factor id the subject does not hold"),
 						);
 					}
-					const next = result.next ?? verified.data;
+					// The data after this use as the plain copy that is sealed
+					// (`copyFactorValue`), and that everything after acts on: the answered
+					// `next`, or — none answered — the data the factor was handed, taken once.
+					let next: MfaEnrolledFactor["data"];
+					try {
+						next = copyFactorValue(result.next === undefined ? verified.data : result.next);
+					} catch (cause) {
+						dataRefused = true;
+						return unreadable(cause);
+					}
 					let amr: unknown;
 					try {
 						amr = factor.amrFor(next);
@@ -1062,7 +1187,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				};
 
 				let checked = await check();
-				if ("outcome" in checked) return checked;
+				if ("outcome" in checked) {
+					// Right, and the factor's data refused: the transaction kept, the attempt
+					// counted at its reservation, the subject's attempt void.
+					if (dataRefused) settled = "void";
+					return checked;
+				}
 				if ("reason" in checked) {
 					const { reason, ...concerns } = checked;
 					return refused(reason, attemptsRemaining, concerns);
@@ -1126,8 +1256,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					const again = records.find((candidate) => candidate.id === record.id);
 					if (again === undefined) return refused("invalid", 0);
 					record = again;
-					opened = openKind(tx.subject, record, records);
-					if ("outcome" in opened) return opened;
+					opened = openKind(tx.subject, record, records, floor);
+					// A set retired since is refused as the proof would be: the transaction is spent.
+					if ("outcome" in opened) {
+						return opened.outcome === "retired" ? refused("invalid", 0) : opened;
+					}
 					checked = await check();
 					if ("outcome" in checked) return checked;
 					if ("reason" in checked) {
@@ -1138,6 +1271,24 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					reopening = await planOver(records);
 					if (reopening !== undefined && "outcome" in reopening) {
 						return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
+					}
+				}
+
+				// The floor read again once the spend is written: a regeneration that
+				// raised it meanwhile has retired this set, and its answer may be out.
+				if (floor !== undefined) {
+					const again = await floorForVerification(tx.subject, factor);
+					if (typeof again === "object") {
+						settled = "void";
+						return again;
+					}
+					const retiredSince = recoverySetRefusal(factor, checked.next, {
+						floor: again ?? floor,
+						holdsKey: sealing.holdsKey,
+					});
+					if (retiredSince?.reason === "retired") {
+						settled = "void";
+						return refused("invalid", 0);
 					}
 				}
 

@@ -30,11 +30,12 @@ export type {
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
-	FederationFactory,
-	// One configured federation as its type's factory receives it, and
-	// what a federation package declares it handles, keyed by type.
+	// One configured federation as its type's factories receive it, what a
+	// federation package declares it handles, keyed by type, and the redirect
+	// policy such a declaration builds.
 	FederationInstance,
 	FederationProvider,
+	FederationRedirectPolicyContribution,
 	FederationTypeContribution,
 	GrantFactory,
 	GrantHandler,
@@ -50,6 +51,8 @@ export type {
 	RateLimitBudgetFactory,
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
+	// What a verifier's claim of a rate-limit prefix declares.
+	VerifierLimitDeclaration,
 } from "./contributes-map.mjs";
 export {
 	defineFederationType,

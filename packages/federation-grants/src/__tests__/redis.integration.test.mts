@@ -153,7 +153,7 @@ const deployment = (
 			limits: resolveFederationGrantRetrievalLimits({}),
 			background,
 			clientRepository,
-			fetch: createOutboundFetch({ source: "registration" }),
+			fetch: createOutboundFetch({ config: {}, source: "registration" }),
 			issuer: "https://auth.test",
 			auditSink: sink,
 			rateLimiter: createMemoryRateLimiter({

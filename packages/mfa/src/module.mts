@@ -49,8 +49,9 @@
  * with the requirement core issues `mfa.step_up` to and the enrollment
  * witness, for the same boot's routes (`mfaBootState`). It warns once each:
  * when the development sample key is in use; when the user-session store
- * cannot record a step-up (`mfa_step_up_unsupported`), the requirement then
- * sending the session to log in instead; when `when-mail` meets no
+ * cannot record a step-up (`mfa_step_up_unsupported`), admission's view then
+ * saying no second factor can be recorded on any session, so the requirement
+ * sends it to log in instead; when `when-mail` meets no
  * `mailSender`, so a first binding asks no proof
  * (`mfa_first_binding_without_email_proof`); and when the directory cannot
  * write the witness (`mfa_enrollment_witness_unwritable`).
@@ -109,10 +110,17 @@ import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
-import { createMfaFactorSet, createMfaSubjectLeases, type MfaSubjectLeases } from "./factorSet.mjs";
+import {
+	boundedRecoverySetFloor,
+	createMfaFactorSet,
+	createMfaSubjectLeases,
+	leaseMsFor,
+	type MfaSubjectLeases,
+} from "./factorSet.mjs";
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { createMfaLockRecovery } from "./lockRecovery.mjs";
+import { mailFailureOf } from "./mail.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
 import { createMfaRouter } from "./routes.mjs";
@@ -429,10 +437,9 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							"mfa_development_sample_key_in_use",
 						);
 					}
-					// A session store that cannot record a step-up is warned about once; the
-					// requirement then sends a session to log in where it would step it up.
-					const stepUpRecordable = supportsSecondFactorUpdate(deps.userSessionStore);
-					if (!stepUpRecordable) {
+					// A session store that cannot record a step-up is warned about once; admission's
+					// view then says so of every session, and the requirement sends it to log in.
+					if (!supportsSecondFactorUpdate(deps.userSessionStore)) {
 						logger.warn(
 							{ store: "userSessionStore", kind: deps.userSessionStore.kind },
 							"mfa_step_up_unsupported",
@@ -469,7 +476,6 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							ttlSeconds: settings.transactionTtlSeconds,
 						}),
 						stepUpPage,
-						stepUpRecordable,
 						recentMfaMaxAgeSeconds: settings.manage.maxAgeSeconds,
 						logger,
 						auditSink: deps.auditSink,
@@ -480,6 +486,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 						firstBindingAt: (subject, nowMs) =>
 							deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+						recoverySetFloor: boundedRecoverySetFloor(
+							deps.mfaTransactionStore,
+							settings.storeTimeoutMs,
+						),
 						sealing,
 					});
 					bootStates.set(deps.mfaFactorResolver, {
@@ -504,6 +514,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						factors: deps.mfaFactorResolver,
 						factorStore: deps.mfaFactorStore,
 						witness,
+						sealing,
+						logger,
 						leases: createMfaSubjectLeases({
 							store: deps.mfaTransactionStore,
 							storeTimeoutMs: settings.storeTimeoutMs,
@@ -531,7 +543,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 					if (stepUp === undefined) {
 						throw new Error("core issued the mfa requirement no mfa.step_up remediation");
 					}
-					// The session store's step-up capability, read once: what records an escalation, and whether a step-up opens.
+					// The session store's step-up capability, read once: what records an escalation.
 					const secondFactorStore = supportsSecondFactorUpdate(deps.userSessionStore)
 						? deps.userSessionStore
 						: undefined;
@@ -567,11 +579,17 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								firstBindingMarkMs: firstBindingMarkLifetimeMs({
 									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
 									transactionTtlSeconds: settings.transactionTtlSeconds,
+									leaseMs: leaseMsFor(settings.storeTimeoutMs),
 								}),
 								...(deps.subjectRevocation === undefined
 									? {}
 									: { subjectRevocation: deps.subjectRevocation }),
-								stepUpRecordable: secondFactorStore !== undefined,
+								// The record is judged a duplicate of none; the factor's failure by its name and code alone.
+								identityFailed: (kind, cause) =>
+									logger.warn(
+										{ kind, err: mailFailureOf(cause) },
+										"mfa_factor_identity_unavailable",
+									),
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,
@@ -602,6 +620,17 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								mode,
 							},
 							lockRecovery,
+							recoveryCodes: {
+								maxFactorsPerSubject: settings.maxFactorsPerSubject,
+								firstBindingAt: (subject, nowMs) =>
+									deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+								firstBindingMarkMs: firstBindingMarkLifetimeMs({
+									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
+									transactionTtlSeconds: settings.transactionTtlSeconds,
+									leaseMs: leaseMsFor(settings.storeTimeoutMs),
+								}),
+								leaseMs: leaseMsFor(settings.storeTimeoutMs),
+							},
 						}),
 					};
 				},

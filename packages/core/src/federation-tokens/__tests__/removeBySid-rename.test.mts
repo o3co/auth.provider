@@ -28,6 +28,7 @@ describe("FederationTokenStore.removeBySid (in-memory store, no deleteBySession)
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
+			obtainedAt: undefined,
 		};
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);

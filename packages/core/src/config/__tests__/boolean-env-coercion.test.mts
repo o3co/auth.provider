@@ -70,7 +70,10 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 		key: "core.federations.<name>.enabled",
 		envVar: "CORE_FEDERATIONS_GOOGLE_ENABLED",
 		set: (config: Record<string, unknown>, value: unknown) => {
-			config.core = { ...(config.core as object), federations: { google: { enabled: value } } };
+			config.core = {
+				...(config.core as object),
+				federations: { google: { enabled: value, type: "google" } },
+			};
 		},
 		read: (parsed: Record<string, unknown>) => federationOf(parsed).enabled,
 	},
@@ -85,7 +88,7 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 		set: (config: Record<string, unknown>, value: unknown) => {
 			config.core = {
 				...(config.core as object),
-				federations: { google: { enabled: true, trustUpstreamAmr: value } },
+				federations: { google: { enabled: true, type: "google", trustUpstreamAmr: value } },
 			};
 		},
 		read: (parsed: Record<string, unknown>) => federationOf(parsed).trustUpstreamAmr,

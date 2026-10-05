@@ -1,8 +1,8 @@
 # Contributing
 
-General contribution guidelines (PR process, code style, release policy) are
-not written down yet. For now this file documents the extension points where
-getting it wrong is expensive and the compiler will not stop you.
+General contribution guidelines (code style, review process) are not written
+down yet. For now this file documents the branch flow, and the extension
+points where getting it wrong is expensive and the compiler will not stop you.
 
 Repository-wide rules that apply to every change live in [AGENTS.md](AGENTS.md)
 — notably: English-only source and commit messages, and TDD (write the failing
@@ -10,8 +10,26 @@ test first).
 
 ## Contents
 
+- [Branches](#branches)
 - [Writing a new token-binding mechanism](#writing-a-new-token-binding-mechanism)
 - [Writing an adapter builder that opens a connection](#writing-an-adapter-builder-that-opens-a-connection)
+
+---
+
+## Branches
+
+- **Feature and fix pull requests target `develop`.** Their required check is
+  `build-and-test`; the umbrella E2E does not run on them.
+- **`main` takes only the `develop` → `main` pull request** that precedes a
+  release. Its required checks are `build-and-test` and `umbrella-e2e` (see
+  [AGENTS.md](AGENTS.md#umbrella-e2e)).
+- **The `develop` → `main` pull request never has `develop` as its head**:
+  every merge into `develop` moves its head and restarts the required checks,
+  so they never settle. It runs from a fixed `release-train/<YYYY-MM-DD>`
+  branch cut at a chosen `develop` commit, merged with a merge commit and then
+  deleted ([runbook, Step 4](docs/release-runbook.md)).
+- **Release tags are cut from `main`**, after that pull request merges with
+  both checks green ([release runbook](docs/release-runbook.md)).
 
 ---
 

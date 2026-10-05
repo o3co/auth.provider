@@ -16,14 +16,24 @@
 
 /**
  * Who the callback's user is: the authorization code exchanged with the
- * upstream IdP for its profile, and the local account that profile's
- * identity resolves to, if any. Runs only on a state the callback retired.
+ * upstream IdP for its profile, the local account that profile's identity
+ * resolves to, if any, and the lifetime its access token is recorded with.
+ * Runs only on a state the callback retired.
+ *
+ * The lifetime is read once, through core's reading at a floor of 0 with no
+ * cap. Finite with `expiresIn` stated: `obtainedAt` is the instant before the
+ * exchange and `expiresAt` the reading's end. Otherwise: the adapter's
+ * `expiresAt` and `obtainedAt` undefined. A lifetime that cannot be read, or an
+ * `expiresAt` that is neither absent, `null` nor an instant, is a failed
+ * exchange (502).
  */
 
 import {
 	type FederationProvider,
+	type FederationTokens,
 	type Logger,
 	loggableError,
+	readUpstreamTokenLifetime,
 	sanitizeErrorText,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
@@ -32,12 +42,49 @@ import { USER_DIRECTORY_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import { logMisconfigured, logStoreUnavailable } from "./FederationLog.mjs";
 
-/** The upstream's profile, the identity token it names, and the local account it resolves to (`null` for none). */
+/** The lifetime fields a link-time `FederationTokens` record carries. */
+export type LinkedTokenLifetime = Pick<FederationTokens, "expiresAt" | "obtainedAt">;
+
+/**
+ * The upstream's profile, the identity token it names, the local account it
+ * resolves to (`null` for none), and the lifetime its access token is
+ * recorded with.
+ */
 export interface FederatedIdentity {
 	readonly profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
 	readonly identityToken: string;
 	readonly user: Awaited<ReturnType<UserRepository["authenticateByToken"]>>;
+	readonly lifetime: LinkedTokenLifetime;
 }
+
+/**
+ * The lifetime a code exchange's answer gives the record, through core's
+ * reading with a floor of 0 and no cap. Finite with `expiresIn` stated: the
+ * reading's end, and `obtainedAt` = `calledAt`. Any other reading (an end
+ * stated only as an instant, which is on the upstream's clock; none;
+ * malformed; contradictory; spent): the adapter's `expiresAt` as stated,
+ * `null` included, and `obtainedAt` undefined, which fails closed. Throws where
+ * reading the answer's fields throws, and for an `expiresAt` that is neither
+ * absent, `null` nor an instant: no store keeps it as an end.
+ */
+const readLinkedLifetime = (
+	profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>,
+	calledAt: number,
+): LinkedTokenLifetime => {
+	const { expiresIn, expiresAt } = profile;
+	const clock = { calledAt, now: Date.now(), floorMs: 0 };
+	const reading = readUpstreamTokenLifetime({ expiresIn, expiresAt }, clock);
+	// The end alone, through the same reading: `malformed` is an end that names no instant.
+	if (
+		readUpstreamTokenLifetime({ expiresIn: undefined, expiresAt }, clock).verdict === "malformed"
+	) {
+		throw new TypeError("the exchange answered an expiresAt that names no instant");
+	}
+	if (reading.verdict === "finite" && reading.stated !== "expiresAt") {
+		return { expiresAt: reading.expiresAt, obtainedAt: reading.obtainedAt };
+	}
+	return { expiresAt, obtainedAt: undefined };
+};
 
 /**
  * Exchange the callback's code and resolve the identity. Answers and returns
@@ -87,6 +134,9 @@ export const identifyFederatedUser = async (
 	const { code: _code, state: _state, ...adapterCallbackParams } = params;
 
 	let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
+	let lifetime: LinkedTokenLifetime;
+	// An `expiresIn` counts from before the exchange: time the upstream took is not life left.
+	const calledAt = Date.now();
 	try {
 		profile = await provider.exchangeCode({
 			code: codeParam,
@@ -101,10 +151,12 @@ export const identifyFederatedUser = async (
 			// what it may affect) or RFC 9207's `iss`.
 			callbackParams: adapterCallbackParams,
 		});
+		// An answer whose lifetime cannot be read is a failed exchange.
+		lifetime = readLinkedLifetime(profile, calledAt);
 	} catch (err) {
-		// The upstream's verdict or outage, not this server's: a warn. The
-		// error's cause chain can hold the refused token response, so only its
-		// projection is logged.
+		// The upstream's verdict or outage, or an answer that cannot be read,
+		// not this server's: a warn. The error's cause chain can hold the
+		// refused token response, so only its projection is logged.
 		log.warn({ err: loggableError(err) }, "federation_callback_exchange_failed");
 		res.status(502).json({
 			error: "exchange_failed",
@@ -137,5 +189,5 @@ export const identifyFederatedUser = async (
 		return null;
 	}
 
-	return { profile, identityToken, user };
+	return { profile, identityToken, user, lifetime };
 };

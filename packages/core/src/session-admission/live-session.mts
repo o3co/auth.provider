@@ -17,13 +17,17 @@
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
  * read, the subject, the renewal nonce and the revocation boundary, then the
- * store's step-up capability over the live record. The session store and the
- * boundary are read here and nowhere else in admission; an outage, or a
- * store that throws when its capability is read, is answered through
- * admission's `unavailable`, which logs it.
+ * store's step-up capability over the live record. The session store, the
+ * boundary and the audit sink are read here and nowhere else in admission,
+ * each off `deps` once; an outage, a read of either store off `deps` that
+ * throws, or a store that throws when its capability is read, is answered
+ * through admission's `unavailable`, which logs it. The sink is read only
+ * to audit a subject mismatch, and a read of it that throws fails as that
+ * audit: the answer stands.
  */
 
 import { emitAuditEvent } from "../audit/factory.mjs";
+import type { AuditSink } from "../audit/types.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
@@ -70,7 +74,7 @@ export async function readLiveSession(
 	checked: CheckedRequest,
 	unavailable: (store: string, err: unknown) => Admission,
 ): Promise<LiveSession> {
-	const { claim: presented, userSessionStore, subjectRevocation, now, logger } = checked;
+	const { claim: presented, now, logger } = checked;
 	const label = checked.action.name;
 
 	// Step 1: the claim.
@@ -82,17 +86,22 @@ export async function readLiveSession(
 		return { answer: { outcome: "not_live", reason: "no_subject" } };
 	}
 
-	// Step 2: the live read.
+	// Step 2: the live read. The store is read off `deps` once, in the same
+	// guarded section as the record: a read that throws is its outage.
+	let userSessionStore: UserSessionStore | undefined;
+	let record: UserSession | null | undefined;
+	try {
+		userSessionStore = checked.readUserSessionStore();
+		if (userSessionStore !== undefined && presented.sid !== undefined) {
+			record = await readRecord(userSessionStore, presented.sid);
+		}
+	} catch (err) {
+		return { answer: unavailable("user_session" satisfies AdmissionInfrastructureStore, err) };
+	}
 	let session: UserSession | null = null;
 	if (userSessionStore !== undefined && presented.sid === undefined) {
 		if (presented.carrier !== "token") return { answer: { outcome: "not_live", reason: "no_sid" } };
-	} else if (userSessionStore !== undefined && presented.sid !== undefined) {
-		let record: UserSession | null | undefined;
-		try {
-			record = await readRecord(userSessionStore, presented.sid);
-		} catch (err) {
-			return { answer: unavailable("user_session" satisfies AdmissionInfrastructureStore, err) };
-		}
+	} else if (userSessionStore !== undefined) {
 		// `== null`: the port answers `null`, and a store of the deployment's own
 		// that answers `undefined` for a missing session is still no session.
 		if (
@@ -110,7 +119,15 @@ export async function readLiveSession(
 	// Step 3: the subject.
 	if (session !== null && presented.subject !== undefined && presented.subject !== session.sub) {
 		logger?.warn({ action: label }, "session_admission_subject_mismatch");
-		void emitAuditEvent(checked.auditSink, {
+		// The sink is read off `deps` here alone, as part of the audit: a read
+		// that throws fails as a sink that throws does, and the answer stands.
+		let auditSink: AuditSink | undefined;
+		try {
+			auditSink = checked.readAuditSink();
+		} catch {
+			auditSink = undefined;
+		}
+		void emitAuditEvent(auditSink, {
 			timestamp: now,
 			type: "session.admission.subject_mismatch",
 			subject: session.sub,
@@ -140,10 +157,13 @@ export async function readLiveSession(
 	}
 
 	// Step 4: the revocation boundary, against a live record; a token's is
-	// verifyJwt's, so the two readings do not double up.
-	if (session !== null && subjectRevocation !== undefined && presented.carrier !== "token") {
+	// verifyJwt's, so the two readings do not double up. The boundary is read
+	// off `deps` once, in the same guarded section as its answer.
+	if (session !== null && presented.carrier !== "token") {
 		try {
-			const boundary = await subjectRevocation.revokedBefore(session.sub);
+			const subjectRevocation = checked.readSubjectRevocation();
+			const boundary =
+				subjectRevocation === undefined ? null : await subjectRevocation.revokedBefore(session.sub);
 			if (boundary !== null && !isValidDate(boundary)) {
 				throw new TypeError("the sessions boundary is neither a date nor null");
 			}

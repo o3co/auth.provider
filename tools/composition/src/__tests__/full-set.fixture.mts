@@ -19,18 +19,21 @@
  * `all-modules-composition.fixture.mts`, imported whole) with every workspace
  * package the template does not depend on added the way a deployment adds
  * them to that manifest — the device grant, DPoP, mTLS, token exchange,
- * WebAuthn, the MFA package (`mfaModules` over the MFA stores, `mfa.mode =
- * "optional"`, a key of the deployment's own), and the Apple and GitHub
- * federations. What the template's fixture substitutes, this one inherits.
+ * WebAuthn and the Apple and GitHub federations — and MFA switched on as a
+ * deployment switches it on, through the template's `MFA_MODE` (`optional`,
+ * a key of the deployment's own, the MFA stores through `adapters`). What the template's fixture substitutes, this one inherits.
  * What it adds:
  *
  * - The settings with no default laid over the configuration. The added
  *   packages' `reference.conf` files are layered because their modules
  *   declare them (`section.reference`), as `app.mts` does.
- * - The small modules each package's README has a deployment write: the
- *   WebAuthn, Apple and GitHub config bridges and a `grantPolicy` (WebAuthn
- *   refuses to boot without one, and no package ships one). The federation
- *   bridges point each adapter's `fetch` at a fake upstream.
+ * - The small module each package's README has a deployment write: a
+ *   `grantPolicy` (WebAuthn refuses to boot without one, and no package
+ *   ships one). WebAuthn's relying party is its section, which its module
+ *   provides as the `webauthnConfig` slot itself.
+ * - The Apple and GitHub federations as `core.federations` entries of their
+ *   types, handled by each package's type module, whose `fetch` option points
+ *   it at a fake upstream.
  * - A mail sender, core's recording one, handed to the tests
  *   (`FullSet.mail`). It fills the slot as a composition root's override of
  *   the template's SMTP sender's module: the module stays installed and its
@@ -39,9 +42,9 @@
  * - mTLS in-process on its `header` source from a loopback peer — the shape
  *   a TLS-terminating proxy gives it — with the mTLS package's test
  *   certificate.
- * - With `mfaFactorStoreAt`, the Store keeps the MFA factors: foundation's
- *   `foundationMfaFactorStoreModule` over those endpoints, handed the user
- *   repository's HTTP settings as a composition root hands them.
+ * - With `mfaFactorStoreAt`, the Store keeps the MFA factors: the template's
+ *   `store` selection, foundation's factor store over those endpoints, handed
+ *   the user repository's HTTP settings as phase one reads them.
  * - With `userRepositoryAt`, the Store keeps the users: foundation's `"http"`
  *   user adapter over those endpoints, built from the `repositories.user.http`
  *   block foundation's testing entry makes of them and the configuration
@@ -67,16 +70,14 @@ import {
 	createRepositoryFactories,
 	defaultChallengeCeremonyModule,
 	defineModule,
-	federationsOf,
 	type GrantPolicyHook,
 	type InterruptionAnswer,
 	loggableError,
+	type MfaFactorRecord,
 	type MfaFactorStore,
 	type Module,
 	memoryChallengeStoreModule,
 	memoryDeviceCodeStoreModule,
-	memoryMfaFactorStoreModule,
-	memoryMfaTransactionStoreModule,
 	memoryWebAuthnCredentialStoreModule,
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
@@ -93,56 +94,38 @@ import {
 	type RecordingMailSender,
 	withUserRepositoryHttp,
 } from "@o3co/auth-provider-core/testing";
-import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
-import { dpopModule } from "@o3co/auth-provider-dpop";
-import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
-import { githubFederationModule } from "@o3co/auth-provider-federation-github";
 import {
-	foundationMfaFactorStoreModule,
-	registerBuiltinAdapters,
-} from "@o3co/auth-provider-foundation";
+	DEVICE_CODE_GRANT_TYPE,
+	deviceAuthorizationGrantModule,
+} from "@o3co/auth-provider-device-grant";
+import { dpopModule } from "@o3co/auth-provider-dpop";
+import { appleFederationTypeModule } from "@o3co/auth-provider-federation-apple";
+import { githubFederationTypeModule } from "@o3co/auth-provider-federation-github";
+import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import {
 	type FoundationUserRepositoryUrls,
 	foundationMfaFactorStoreConfig,
 	foundationUserRepositoryHttpConfig,
 } from "@o3co/auth-provider-foundation/testing";
-import { mfaModules } from "@o3co/auth-provider-mfa";
 import { seedTotpFactor } from "@o3co/auth-provider-mfa/testing";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
 import {
 	TOKEN_EXCHANGE_GRANT_TYPE,
 	tokenExchangeModule,
 } from "@o3co/auth-provider-oauth-token-exchange";
-import {
-	redisChallengeStoreModule,
-	redisDeviceCodeStoreModule,
-	redisMfaFactorStoreModule,
-	redisMfaTransactionStoreModule,
-} from "@o3co/auth-provider-redis";
-import {
-	answerInterruption,
-	establishSession,
-	loginCompletionModule,
-} from "@o3co/auth-provider-session";
+import { redisChallengeStoreModule, redisDeviceCodeStoreModule } from "@o3co/auth-provider-redis";
+import { answerInterruption, establishSession } from "@o3co/auth-provider-session";
 import {
 	type ComposeOptions,
 	type Composition,
 	compose,
 	ISSUER,
-	ownFiles,
 	resettable,
 	SINGLE_ENV,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import {
-	readOwnLayers,
-	resolveLayers,
-	type Switches,
-} from "@o3co/auth-provider-standalone/src/configPath.mts";
-import { templateReference } from "@o3co/auth-provider-standalone/src/modules.mts";
-import { repositoriesSectionSchema } from "@o3co/auth-provider-standalone/src/sections.mts";
+import type { Switches } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import type { FakeStoreUrls } from "@o3co/auth-provider-test-kit";
 import {
-	webauthnConfigSchema,
 	webauthnMfaFactorModule,
 	webauthnModule,
 	webauthnSessionSubjectModule,
@@ -181,9 +164,9 @@ export interface Features {
 	readonly apple: boolean;
 	readonly github: boolean;
 	/**
-	 * The MFA package: installed is on (ADR 2026-09-28-session-admission), so
-	 * its switch is its modules' presence — with `mfa.mode = "optional"` and
-	 * `mfa` declared — or their absence with `mfa.mode = "off"`.
+	 * The MFA package, through the template's switch: `MFA_MODE=optional`,
+	 * which installs its modules and declares `mfa`, or `off`, which installs
+	 * none of them.
 	 */
 	readonly mfa: boolean;
 }
@@ -202,7 +185,7 @@ export const ALL_ON: Features = {
 /**
  * The deployment's own MFA key (canonical base64 of 32 bytes), one per test
  * file, so every replica a file boots shares it — never the development
- * sample key: the full set boots as `production` does.
+ * sample key, which a deployment's own key replaces.
  */
 export const MFA_KEY = randomBytes(32).toString("base64");
 
@@ -220,6 +203,46 @@ export async function seedTotp(
 	if (factorStore === undefined) throw new Error("the composition holds no MFA factor store");
 	const { record, secret } = await seedTotpFactor({ config, factorStore, subject });
 	return { factorId: record.id, secret };
+}
+
+/**
+ * Writes `record` into its subject's factor set at the generation the set
+ * stands at, as the MFA package's writer does: the store's conditional
+ * create, never an unconditional one. Throws on a conflict: the set moved in
+ * between, or the id is already stored.
+ */
+export async function addFactorRecord(
+	factorStore: MfaFactorStore,
+	record: MfaFactorRecord,
+): Promise<void> {
+	const { generation } = await factorStore.listVersioned(record.subject);
+	const answer = await factorStore.createIf(record, generation);
+	if (answer.outcome !== "created") {
+		throw new Error(
+			`createIf answered ${answer.outcome}: the set moved, or the id is already stored`,
+		);
+	}
+}
+
+/**
+ * Removes every record of `subject`'s factor set, each at the generation the
+ * previous removal left, and answers the records removed. Throws when the
+ * set moved in between.
+ */
+export async function removeFactorRecords(
+	factorStore: MfaFactorStore,
+	subject: string,
+): Promise<readonly MfaFactorRecord[]> {
+	const { items, generation } = await factorStore.listVersioned(subject);
+	let at = generation;
+	for (const record of items) {
+		const answer = at === null ? undefined : await factorStore.removeIf(subject, record.id, at);
+		if (answer?.outcome !== "removed") {
+			throw new Error(`the factor set moved while a test removed from it: ${answer?.outcome}`);
+		}
+		at = answer.generation;
+	}
+	return items;
 }
 
 /**
@@ -351,16 +374,6 @@ function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 // ---------------------------------------------------------------------------
 // The modules a deployment writes
 // ---------------------------------------------------------------------------
-
-/** The README's WebAuthn bootstrap: the `webauthn` section, through the package's schema. */
-const webauthnConfigModule = defineModule({
-	name: "deployment:webauthn-config",
-	requires: ["config"] as const,
-	provides: {
-		webauthnConfig: ({ config }) =>
-			webauthnConfigSchema.parse((config as unknown as { webauthn: unknown }).webauthn),
-	},
-});
 
 /**
  * The deployment's grant policy. WebAuthn's grant refuses to boot without one
@@ -676,29 +689,11 @@ const GITHUB_ID = 12345;
 /** The handle the GitHub federation's callback resolves through `authenticateByToken`. */
 export const GITHUB_HANDLE = `github:${GITHUB_ID}`;
 
-/** A federation's fields in `core.federations`, as the bridges read them (they check nothing else). */
-const section = (config: AppConfig, name: string): Record<string, string> =>
-	(federationsOf(config)[name] as Record<string, string> | undefined) ?? {};
-
-function federationBridges(config: AppConfig, features: Features, f: Fakes): Module[] {
-	const bridge = (name: "apple" | "github", fetch: typeof globalThis.fetch) => {
-		const { clientId, clientSecret, callbackURL, clientUrl } = section(config, name);
-		return defineModule({
-			name: `deployment:${name}-federation-config`,
-			provides: {
-				[`${name}FederationConfig`]: () => ({
-					clientId,
-					clientSecret,
-					callbackURL,
-					clientUrl,
-					fetch,
-				}),
-			},
-		});
-	};
+/** The Apple and GitHub type modules, each sending its upstream requests to its fake. */
+function federationTypeModules(features: Features, f: Fakes): Module[] {
 	return [
-		...(features.apple ? [appleFederationModule, bridge("apple", f.apple.fetch)] : []),
-		...(features.github ? [githubFederationModule, bridge("github", f.github.fetch)] : []),
+		...(features.apple ? [appleFederationTypeModule({ fetch: f.apple.fetch })] : []),
+		...(features.github ? [githubFederationTypeModule({ fetch: f.github.fetch })] : []),
 	];
 }
 
@@ -707,22 +702,6 @@ interface AddedStores {
 	readonly deviceCode: Stores;
 	readonly challenge: Stores;
 	readonly credential: Module;
-	readonly mfa: Stores;
-	/** The Store's MFA factor endpoints, when the Store keeps the factors. */
-	readonly mfaFactorStoreAt: FakeStoreUrls | undefined;
-	/** The user repository's HTTP settings, which the Store-backed factor store is handed as its transport. */
-	readonly storeTransport: unknown;
-}
-
-/**
- * The user repository's HTTP settings as the template's `repositories` module
- * reads them under `env`, from the template's own layers over its reference:
- * what a composition root hands the Store-backed factor store.
- */
-function storeTransportUnder(env: Readonly<Record<string, string>>): Record<string, unknown> {
-	const own = readOwnLayers(ownFiles(), { env });
-	return repositoriesSectionSchema.parse(resolveLayers(own, [templateReference()]).repositories)
-		.user.http;
 }
 
 /**
@@ -740,26 +719,8 @@ function httpUserRepository(http: Readonly<Record<string, unknown>>): Promise<Us
 	return userFactory.create({ ...http, type: "http" });
 }
 
-/** The two MFA stores' modules: the factor store the Store's when `stores` says so. */
-function mfaStoreModules(stores: AddedStores): Module[] {
-	const transactions =
-		stores.mfa === "redis" ? redisMfaTransactionStoreModule : memoryMfaTransactionStoreModule;
-	if (stores.mfaFactorStoreAt !== undefined) {
-		// As a composition root hands the user repository its settings.
-		return [
-			foundationMfaFactorStoreModule({ storeTransport: stores.storeTransport }),
-			transactions,
-		];
-	}
-	return [
-		stores.mfa === "redis" ? redisMfaFactorStoreModule : memoryMfaFactorStoreModule,
-		transactions,
-	];
-}
-
 /** Every module the template does not compose, as a deployment adds them to its manifest. */
 function addedModules(
-	config: AppConfig,
 	features: Features,
 	stores: AddedStores,
 	f: Fakes,
@@ -768,7 +729,7 @@ function addedModules(
 	outage: { once: FixtureCeremony["requirement"] | undefined },
 ): Module[] {
 	return [
-		deviceGrantModule({ config }),
+		deviceAuthorizationGrantModule,
 		stores.deviceCode === "redis" ? redisDeviceCodeStoreModule : memoryDeviceCodeStoreModule,
 		dpopModule,
 		mtlsModule,
@@ -776,33 +737,19 @@ function addedModules(
 		...(features.webauthn
 			? [
 					webauthnModule,
-					webauthnConfigModule,
 					webauthnSubjectModule,
 					stores.credential,
 					stores.challenge === "redis" ? redisChallengeStoreModule : memoryChallengeStoreModule,
 					defaultChallengeCeremonyModule,
 				]
 			: []),
-		// The MFA package: the TOTP factor, on by its reference.conf, the
-		// recovery-code factor's module, and the MFA module, which registers
-		// the requirement named mfa, over the two MFA stores. The environment
-		// is the one the template composes as. The MFA routes finish a login
-		// through the session package's login completion, which a
-		// composition that completes a login loads beside the session module.
-		...(features.mfa
-			? [
-					...mfaModules({ environment: "production" }),
-					loginCompletionModule,
-					...mfaStoreModules(stores),
-				]
-			: []),
-		// The WebAuthn second factor, over the relying party the WebAuthn
-		// bootstrap provides: off by its reference.conf, on through
+		// The WebAuthn second factor, over the relying party webauthnModule
+		// provides from its section: off by its reference.conf, on through
 		// WEBAUTHN_MFA_FACTOR_ENABLED.
 		...(features.webauthn && features.mfa ? [webauthnMfaFactorModule] : []),
 		grantPolicyModule,
 		...requirementModules(interrupt, ceremonies, outage),
-		...federationBridges(config, features, f),
+		...federationTypeModules(features, f),
 	];
 }
 
@@ -933,10 +880,6 @@ export async function fullSetOptions(
 	const added: AddedStores = {
 		deviceCode: options.deviceCodeStore ?? stores,
 		challenge: options.challengeStore ?? stores,
-		mfa: options.mfaStores ?? stores,
-		mfaFactorStoreAt: options.mfaFactorStoreAt,
-		storeTransport:
-			options.mfaFactorStoreAt === undefined ? undefined : (userHttp ?? storeTransportUnder(env)),
 		credential:
 			options.credentialStore ??
 			(stores === "redis" ? deploymentCredentialStoreModule : memoryWebAuthnCredentialStoreModule),
@@ -960,20 +903,40 @@ export async function fullSetOptions(
 	const interrupt = new Set(interruptLogins ?? []);
 	const opened = ceremonies ?? [];
 	const outage = { once: failAskOnce };
+	// MFA as a deployment turns it on: the template's switch, and the two MFA
+	// stores its adapters select — the Store's factor endpoints when given.
+	const mfaStores = options.mfaStores ?? stores;
+	const mfaEnv: Readonly<Record<string, string>> = features.mfa
+		? {
+				MFA_MODE: "optional",
+				ADAPTERS_MFA_FACTOR_STORE: options.mfaFactorStoreAt === undefined ? mfaStores : "store",
+				ADAPTERS_MFA_TRANSACTION_STORE: mfaStores,
+			}
+		: {};
 	return {
 		...compose,
+		// Under the name test: the template lets the MFA stores in memory in
+		// only where every environment name says development or test.
+		environment: compose.environment ?? "test",
+		env: { ...env, ...mfaEnv },
 		config: (resolved) => {
 			const adjusted = options.config ? options.config(resolved) : resolved;
 			const featured = withFeatures(adjusted, features);
 			const stored =
-				added.mfaFactorStoreAt === undefined
+				options.mfaFactorStoreAt === undefined
 					? featured
-					: { ...featured, ...foundationMfaFactorStoreConfig(added.mfaFactorStoreAt) };
+					: { ...featured, ...foundationMfaFactorStoreConfig(options.mfaFactorStoreAt) };
 			const users = userHttp === undefined ? stored : withUserRepositoryHttp(stored, userHttp);
 			return options.adjust ? options.adjust(users) : users;
 		},
-		extraModules: (config) => [
-			...addedModules(config, features, added, f, interrupt, opened, outage),
+		// The Store-backed factor store is handed the user repository's
+		// settings as phase one reads them; the Store's own, when it keeps the
+		// users.
+		...(userHttp === undefined
+			? {}
+			: { switches: (switches: Switches) => ({ ...switches, storeTransport: userHttp }) }),
+		extraModules: () => [
+			...addedModules(features, added, f, interrupt, opened, outage),
 			...(ownModules ?? []),
 		],
 		// The caller's own overrides win, its own mail sender included.

@@ -61,6 +61,7 @@ describe("FederationGrant — the shapes the union admits", () => {
 			lastUsedAt: undefined,
 			ineligible: undefined,
 			refreshFailure: undefined,
+			rotations: undefined,
 			status: "revoked",
 			revocation: { by: "client", at },
 		};

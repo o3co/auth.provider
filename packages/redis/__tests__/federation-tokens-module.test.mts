@@ -30,6 +30,17 @@ const fakeClient = () => ({
 	sScanIterator: () => [],
 	scanIterator: () => [],
 	compareAndDelete: async () => false,
+	readVersioned: async () => null,
+	attachRecord: async () => "attached" as const,
+	replaceIfGeneration: async () => "missing" as const,
+	removeIfGeneration: async () => "missing" as const,
+	pExpireGT: async () => {},
+	durability: async () => ({
+		maxmemoryPolicy: "noeviction",
+		appendOnly: true,
+		snapshots: undefined,
+		refusal: undefined,
+	}),
 });
 
 /** Runs a module's `federationTokenStore` provider against a plaintext config, with the mode core fills. */
@@ -90,15 +101,15 @@ describe("the module hands the guard the selected environment and the deployment
 		).toThrow(/core\.deployment\.mode is "multi"/);
 	});
 
-	it("warns and builds the store in development with the deployment mode unset or single", () => {
-		const store = provideFrom(
+	it("warns and builds the store in development with the deployment mode unset or single", async () => {
+		const store = (await provideFrom(
 			redisFederationTokenStoreModuleFor({ environment: "development" }),
 			"single",
-		) as { kind: string };
+		)) as { kind: string };
 		expect(store.kind).toBe("redis");
-		expect((provideFrom(redisFederationTokenStoreModuleFor({})) as { kind: string }).kind).toBe(
-			"redis",
-		);
+		expect(
+			((await provideFrom(redisFederationTokenStoreModuleFor({}))) as { kind: string }).kind,
+		).toBe("redis");
 		expect(warnSpy).toHaveBeenCalledWith(
 			{ store: "federation-tokens", mode: "allow-plaintext" },
 			"federation_store_plaintext",
@@ -151,6 +162,17 @@ describe("redisFederationTokenStoreBuilder", () => {
 			sScanIterator: () => [],
 			scanIterator: () => [],
 			compareAndDelete: async () => false,
+			readVersioned: async () => null,
+			attachRecord: async () => "attached" as const,
+			replaceIfGeneration: async () => "missing" as const,
+			removeIfGeneration: async () => "missing" as const,
+			pExpireGT: async () => {},
+			durability: async () => ({
+				maxmemoryPolicy: "noeviction",
+				appendOnly: true,
+				snapshots: undefined,
+				refusal: undefined,
+			}),
 		};
 		expect(() =>
 			redisFederationTokenStoreBuilder(
@@ -175,6 +197,17 @@ describe("redisFederationTokenStoreBuilder", () => {
 			sScanIterator: () => [],
 			scanIterator: () => [],
 			compareAndDelete: async () => false,
+			readVersioned: async () => null,
+			attachRecord: async () => "attached" as const,
+			replaceIfGeneration: async () => "missing" as const,
+			removeIfGeneration: async () => "missing" as const,
+			pExpireGT: async () => {},
+			durability: async () => ({
+				maxmemoryPolicy: "noeviction",
+				appendOnly: true,
+				snapshots: undefined,
+				refusal: undefined,
+			}),
 		};
 		// No throw expected
 		const store = redisFederationTokenStoreBuilder(

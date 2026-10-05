@@ -305,7 +305,7 @@ describe("broadcastBackchannelLogout — core's outbound fetch", () => {
 	const broadcast = (
 		rps: { clientId: string; backchannelLogoutUri: string }[],
 		logger: ReturnType<typeof createMockLogger>,
-		fetchImpl: typeof fetch = createOutboundFetch({ source: "registration" }),
+		fetchImpl: typeof fetch = createOutboundFetch({ config: {}, source: "registration" }),
 	) =>
 		broadcastBackchannelLogout({
 			rps,
@@ -353,7 +353,7 @@ describe("broadcastBackchannelLogout — core's outbound fetch", () => {
 				{ clientId: "reached", backchannelLogoutUri: "https://rp.example/bc" },
 			],
 			logger,
-			createOutboundFetchForTesting({ source: "registration", lookup, transport }),
+			createOutboundFetchForTesting({ config: {}, source: "registration", lookup, transport }),
 		);
 		expectBestEffortWarn(
 			logger,
@@ -374,7 +374,7 @@ describe("broadcastBackchannelLogout — core's outbound fetch", () => {
 		await broadcast(
 			[{ clientId: "rp1", backchannelLogoutUri: "http://rp.example/bc" }],
 			logger,
-			createOutboundFetchForTesting({ source: "registration", lookup, transport }),
+			createOutboundFetchForTesting({ config: {}, source: "registration", lookup, transport }),
 		);
 		expectBestEffortWarn(
 			logger,
@@ -410,6 +410,7 @@ describe("broadcastBackchannelLogout — core's outbound fetch", () => {
 			[{ clientId: "rp1", backchannelLogoutUri: "https://rp.example/bc" }],
 			logger,
 			createOutboundFetchForTesting({
+				config: {},
 				source: "registration",
 				lookup: async () => ["93.184.216.34"],
 				transport,
@@ -450,6 +451,7 @@ describe("broadcastBackchannelLogout — core's outbound fetch", () => {
 			[{ clientId: "rp1", backchannelLogoutUri: "https://rp.example/bc" }],
 			logger,
 			createOutboundFetchForTesting({
+				config: {},
 				source: "registration",
 				lookup: async () => {
 					throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });

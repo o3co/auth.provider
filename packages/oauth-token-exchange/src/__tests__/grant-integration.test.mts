@@ -39,7 +39,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { tokenExchangeModule } from "#/module.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import { ISSUER, keyStore, secretKey, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import {
+	ISSUER,
+	keyStore,
+	secretKey,
+	signSelfIssuedAccessToken,
+	tokenSettings,
+} from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -85,15 +91,7 @@ function buildHandler(store: RefreshTokenFamilyRevocation) {
 		[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
 	]);
 	return createTokenExchangeGrant({
-		config: {
-			oauth: {
-				jwt: { issuer: ISSUER },
-				accessToken: { expiresIn: 300 },
-				refreshToken: { expiresIn: 86400 },
-				grants: {},
-			},
-			// biome-ignore lint/suspicious/noExplicitAny: test scaffold config
-		} as any,
+		oauthTokenSettings: tokenSettings,
 		keyStore,
 		refreshTokenFamilyRevocation: store,
 		tokenExchangeValidatorResolver: validators,
@@ -212,7 +210,12 @@ describe("token_exchange — integration", () => {
 
 		const handle = await createTestApp({
 			modules: [tokenExchangeModule, clientRepositoryModule, keyStoreModule],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: {
+				config,
+				pathResolver: (s) => s,
+				// What the oauth module provides; a composition without it fills the slot.
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+			},
 		});
 
 		expect(handle.inspect.grants.has(TOKEN_EXCHANGE_GRANT_TYPE)).toBe(true);
@@ -221,38 +224,11 @@ describe("token_exchange — integration", () => {
 		await handle.dispose();
 	});
 
-	it("declares a configSchema for boot-time config validation", async () => {
+	it("declares no configSchema: it reads its own section and the slots it declares", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
-		expect(tokenExchangeModule.configSchema).toBeDefined();
-	});
-
-	it("fails boot with config-validation-failed when oauth.jwt.issuer is missing", async () => {
-		const { BootError, defineModule } = await import("@o3co/auth-provider-core");
-		const { createTestApp, makeValidAppConfig } = await import("@o3co/auth-provider-core/testing");
-		const { tokenExchangeModule } = await import("#/module.mjs");
-
-		const clientRepositoryModule = defineModule({
-			name: "test:client-repository",
-			provides: { clientRepository: () => clientRepository },
-		});
-		const keyStoreModule = defineModule({
-			name: "test:key-store",
-			provides: { keyStore: () => keyStore },
-		});
-
-		// The fixture carries an issuer, which is required, so strip it here to
-		// reach the state this test is about.
-		const config = makeValidAppConfig();
-		delete (config.oauth.jwt as { issuer?: unknown }).issuer;
-		await expect(
-			createTestApp({
-				modules: [tokenExchangeModule, clientRepositoryModule, keyStoreModule],
-				bootstrapComponents: { config, pathResolver: (s) => s },
-			}),
-		).rejects.toMatchObject({
-			name: "BootError",
-			reason: "config-validation-failed",
-		} satisfies Partial<InstanceType<typeof BootError>>);
+		expect(tokenExchangeModule.configSchema).toBeUndefined();
+		expect(tokenExchangeModule.requires).not.toContain("config");
+		expect(tokenExchangeModule.optional ?? []).not.toContain("config");
 	});
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
@@ -276,6 +252,118 @@ describe("token_exchange — integration", () => {
 	it("declares grantPolicy in optional so the grant-policy gate reaches token-exchange", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
 		expect(tokenExchangeModule.optional).toContain("grantPolicy");
+	});
+});
+
+// The module reads its own section and the slots it declares, never the
+// whole configuration: the issuer and the lifetimes are the
+// `oauthTokenSettings` slot's, which a composition without the oauth module
+// fills itself.
+describe("tokenExchangeModule booted without the oauth module", () => {
+	let handle: AppHandle | undefined;
+	afterEach(async () => {
+		await handle?.dispose();
+		handle = undefined;
+	});
+
+	/**
+	 * The fixture configuration, whose issuer is not the slot's, with `oauth {}`
+	 * laid over it.
+	 */
+	const configWith = (oauth: Record<string, unknown> = {}) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://configuration.example" },
+				revocation: { accessToken: "unsupported" as const, subject: "unsupported" as const },
+				...oauth,
+			},
+		};
+	};
+
+	const boot = (bootstrap: Record<string, unknown>) =>
+		createApp({
+			modules: [
+				tokenExchangeModule,
+				defineModule({
+					name: "test:client-repository",
+					provides: { clientRepository: () => clientRepository },
+				}),
+				defineModule({ name: "test:key-store", provides: { keyStore: () => keyStore } }),
+			],
+			bootstrapComponents: { pathResolver: (s: string) => s, ...bootstrap } as never,
+		});
+
+	it("boots from the slot a host fills, holding a subject token to its issuer and minting its lifetime, not the configuration's", async () => {
+		handle = await boot({
+			config: configWith(),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				issuer: ISSUER,
+				accessTokenLifetime: { defaultExpiresIn: 120, maxExpiresIn: 120 },
+			}),
+		});
+		const grant = handle.components.grantHandlerResolver?.get(TOKEN_EXCHANGE_GRANT_TYPE);
+		if (!grant) throw new Error("the boot did not register the token-exchange grant");
+
+		const { result } = await grant.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) return;
+		expect(result.tokens.expires_in).toBe(120);
+	});
+
+	it("is refused at boot when nothing fills oauthTokenSettings, naming the slot", async () => {
+		await expect(boot({ config: configWith() })).rejects.toMatchObject({
+			name: "BootError",
+			reason: "missing-required-component",
+			details: { missingKey: "oauthTokenSettings", rootModule: "oauth-token-exchange" },
+		});
+	});
+
+	it("refuses the section's old path, oauth.tokenExchange, naming oauth-token-exchange", async () => {
+		await expect(
+			boot({
+				config: configWith({ tokenExchange: { maxActorChainDepth: 1 } }),
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "config-path-relocated",
+			details: {
+				relocated: [
+					{
+						module: "oauth-token-exchange",
+						from: "oauth.tokenExchange.maxActorChainDepth",
+						to: "oauth-token-exchange.maxActorChainDepth",
+					},
+				],
+			},
+		});
+	});
+
+	it("refuses a key its section does not declare, naming its path", async () => {
+		await expect(
+			boot({
+				config: {
+					...configWith(),
+					"oauth-token-exchange": { maxActorChainDepth: 2, maxActorChainDept: 1 },
+				},
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "config-validation-failed",
+			message: expect.stringMatching(/oauth-token-exchange[\s\S]*maxActorChainDept\b/),
+		});
 	});
 });
 
@@ -317,6 +405,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 	async function boot(
 		modules: readonly Module[],
 		revocation: RevocationDeclaration = { accessToken: "unsupported", subject: "unsupported" },
+		repository: ClientRepository = confidentialClientRepository,
 	) {
 		const base = makeValidAppConfig();
 		handle = await createApp({
@@ -325,7 +414,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				...modules,
 				defineModule({
 					name: "test:client-repository",
-					provides: { clientRepository: () => confidentialClientRepository },
+					provides: { clientRepository: () => repository },
 				}),
 				defineModule({ name: "test:key-store", provides: { keyStore: () => keyStore } }),
 			],
@@ -339,6 +428,8 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					},
 				},
 				pathResolver: (s: string) => s,
+				// What the oauth module provides; a composition without it fills the slot.
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
 			},
 		});
 		const grant: GrantHandler | undefined =
@@ -377,6 +468,40 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		if (!revocation) throw new Error("the boot did not provide refreshTokenFamilyRevocation");
 		await revocation.revokeFamily(familyId);
 	}
+
+	// The slot holds core's client-record boundary, so the standalone wiring's
+	// own client authentication reads through it: a record it refuses rejects
+	// the lookup, answered as the repository's outage.
+	it("answers 503 when the standalone client authentication reads a record core's boundary refuses", async () => {
+		const refused = {
+			...client,
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientUri: "javascript:alert(1)",
+		} as PublicClient;
+		const { grant } = await boot([], undefined, {
+			findById: async () => null,
+			authenticate: async (id) => (id === client.clientId ? refused : null),
+		});
+
+		const answered = await grant.handle({
+			body: {
+				client_id: client.clientId,
+				client_secret: "secret",
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			},
+			session: {},
+			issuer: ISSUER,
+			metadata: {},
+			authenticatedClient: null,
+		});
+
+		expect(answered.result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "client repository unavailable",
+		});
+	});
 
 	it("answers invalid_request / family_revoked for a subject_token whose family was revoked", async () => {
 		const { grant, components } = await boot([
@@ -619,6 +744,129 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			expect(result.status).toBe(200);
 			if (!("tokens" in result)) return;
 			expect(decodeJwt(result.tokens.access_token)).not.toHaveProperty("family_id");
+		});
+
+		// A family or a session this provider's stores key by string: any other
+		// value would be checked against nothing and minted into a claim that
+		// introspection and the session rule read as absent.
+		describe("a validator that reports a family or a session as something other than a string", () => {
+			const REPORTING_TOKEN_TYPE = "urn:example:params:oauth:token-type:reporting";
+			const reporting = (answer: Record<string, unknown>) =>
+				defineModule({
+					name: "test:reporting-validator",
+					contributes: {
+						tokenExchangeValidators: {
+							[REPORTING_TOKEN_TYPE]: () => ({
+								validate: async () =>
+									({ sub: "user-1", claims: { sub: "user-1" }, ...answer }) as never,
+							}),
+						},
+					},
+				});
+			const malformed: ReadonlyArray<[string, Record<string, unknown>]> = [
+				["a numeric familyId", { familyId: 42 }],
+				["a null familyId", { familyId: null }],
+				["an object familyId", { familyId: { id: "fam-1" } }],
+				["a numeric sid", { sid: 42 }],
+				["a null sid", { sid: null }],
+				["a boolean sid", { sid: true }],
+			];
+
+			it.each(malformed)(
+				"refuses %s on the subject_token as a failed validation, and mints nothing",
+				async (_label, answer) => {
+					const { grant } = await boot([reporting(answer)]);
+					const { result } = await exchange(grant, {
+						subject_token: "opaque-subject-token",
+						subject_token_type: REPORTING_TOKEN_TYPE,
+					});
+					expect(result).toEqual({
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "subject_token validation failed",
+					});
+				},
+			);
+
+			it.each(malformed)(
+				"refuses %s on the actor_token as a failed validation, and mints nothing",
+				async (_label, answer) => {
+					const { grant } = await boot([reporting(answer)]);
+					const { result } = await exchange(grant, {
+						subject_token: await signSelfIssuedAccessToken({}),
+						subject_token_type: ACCESS_TOKEN_TYPE,
+						actor_token: "opaque-actor-token",
+						actor_token_type: REPORTING_TOKEN_TYPE,
+					});
+					expect(result).toEqual({
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "actor_token validation failed",
+					});
+				},
+			);
+
+			it.each(["subject", "actor"] as const)(
+				"reads the %s's familyId and sid once each, for the check and the issued token alike",
+				async (role) => {
+					const reads = { familyId: 0, sid: 0 };
+					const answer = { sub: "user-1", claims: { sub: "user-1" } };
+					for (const field of ["familyId", "sid"] as const) {
+						Object.defineProperty(answer, field, {
+							enumerable: true,
+							get: () => {
+								reads[field] += 1;
+								return field === "familyId" ? "fam-1" : "sid-1";
+							},
+						});
+					}
+					const counting = defineModule({
+						name: "test:counting-validator",
+						contributes: {
+							tokenExchangeValidators: {
+								[REPORTING_TOKEN_TYPE]: () => ({ validate: async () => answer as never }),
+							},
+						},
+					});
+					const { grant, components } = await boot([
+						memoryRefreshTokenFamilyStoreModule,
+						defaultRefreshTokenFamilyRevocationModule,
+						counting,
+					]);
+					await liveFamily(components, "fam-1");
+					const { result } = await exchange(
+						grant,
+						role === "subject"
+							? { subject_token: "opaque-subject-token", subject_token_type: REPORTING_TOKEN_TYPE }
+							: {
+									subject_token: await signSelfIssuedAccessToken({}),
+									subject_token_type: ACCESS_TOKEN_TYPE,
+									actor_token: "opaque-actor-token",
+									actor_token_type: REPORTING_TOKEN_TYPE,
+								},
+					);
+					expect(result.status).toBe(200);
+					expect(reads).toEqual({ familyId: 1, sid: 1 });
+					if (role === "subject" && "tokens" in result) {
+						const claims = decodeJwt(result.tokens.access_token);
+						expect(claims.family_id).toBe("fam-1");
+						expect(claims.liveness_sid).toBe("sid-1");
+					}
+				},
+			);
+
+			it("still reads an empty string as unset, and a non-empty one as the value", async () => {
+				const { grant } = await boot([reporting({ familyId: "", sid: "" })]);
+				const { result } = await exchange(grant, {
+					subject_token: "opaque-subject-token",
+					subject_token_type: REPORTING_TOKEN_TYPE,
+				});
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) return;
+				const claims = decodeJwt(result.tokens.access_token);
+				expect(claims).not.toHaveProperty("family_id");
+				expect(claims).not.toHaveProperty("liveness_sid");
+			});
 		});
 	});
 
@@ -1137,11 +1385,10 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 	});
 
-	// A policy deny is `400` with the policy's own `error`, as on every grant
-	// (RFC 6749 §5.2). §5.2 makes `error` 1*NQSCHAR (printable ASCII without
-	// `"` and `\`), so a code outside that set — or none — is answered
-	// `invalid_request`, §2.2.2's code for a request refused by policy, and the
-	// policy's code is logged, sanitised, for the operator who wrote it.
+	// A policy deny is `400` with the policy's own `error` when RFC 6749 §5.2
+	// defines it for the token endpoint. Any other code — or none — is answered
+	// `invalid_request`, RFC 8693 §2.2.2's code for a request refused by policy,
+	// and the policy's code is logged, sanitised, for the operator who wrote it.
 	describe("a policy deny", () => {
 		const denyingPolicy = (
 			error: string,
@@ -1194,9 +1441,18 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					status: 400,
 					error: "invalid_request",
 					errorDescription: "denied by the test policy",
+					policyDenial: { error: logged },
 				});
-				expect(log.of("token_exchange_policy_deny_error_malformed")).toEqual([
-					[{ error: logged }, "token_exchange_policy_deny_error_malformed"],
+				expect(log.of("grant_policy_refusal_rewritten")).toEqual([
+					[
+						{
+							grantType: TOKEN_EXCHANGE_GRANT_TYPE,
+							policy: "test",
+							error: logged,
+							answered: "invalid_request",
+						},
+						"grant_policy_refusal_rewritten",
+					],
 				]);
 			},
 		);
@@ -1205,17 +1461,25 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			const log = warnings();
 			const { grant } = await boot([denying(`"${"x".repeat(300)}`), log.module]);
 			await exchange(grant, await body());
-			expect(log.of("token_exchange_policy_deny_error_malformed")).toEqual([
-				[{ error: `?${"x".repeat(196)}...` }, "token_exchange_policy_deny_error_malformed"],
+			expect(log.of("grant_policy_refusal_rewritten")).toEqual([
+				[
+					{
+						grantType: TOKEN_EXCHANGE_GRANT_TYPE,
+						policy: "test",
+						error: `?${"x".repeat(196)}...`,
+						answered: "invalid_request",
+					},
+					"grant_policy_refusal_rewritten",
+				],
 			]);
 		});
 
 		// A JavaScript policy can return anything as its description; one that
 		// is not a non-empty string is not sent, and nothing is sent in its place.
 		it.each([
-			["a number", { outcome: "deny", error: "access_denied", errorDescription: 42 }],
-			["the empty string", { outcome: "deny", error: "access_denied", errorDescription: "" }],
-			["absent", { outcome: "deny", error: "access_denied" }],
+			["a number", { outcome: "deny", error: "invalid_scope", errorDescription: 42 }],
+			["the empty string", { outcome: "deny", error: "invalid_scope", errorDescription: "" }],
+			["absent", { outcome: "deny", error: "invalid_scope" }],
 		])("answers a deny whose description is %s with no description", async (_label, decision) => {
 			const { grant } = await boot([
 				defineModule({
@@ -1229,11 +1493,41 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				}),
 			]);
 			const { result } = await exchange(grant, await body());
-			expect(result).toStrictEqual({ status: 400, error: "access_denied" });
+			expect(result).toStrictEqual({
+				status: 400,
+				error: "invalid_scope",
+				policyDenial: { error: "invalid_scope" },
+			});
+		});
+
+		it.each(["access_denied", "authorization_pending", "slow_down"])(
+			"answers a deny carrying %s, a code RFC 6749 §5.2 does not define for the token endpoint, invalid_request",
+			async (code) => {
+				const log = warnings();
+				const { grant } = await boot([denying(code), log.module]);
+				const { result } = await exchange(grant, await body());
+				expect(result).toEqual({
+					status: 400,
+					error: "invalid_request",
+					errorDescription: "denied by the test policy",
+					policyDenial: { error: code },
+				});
+				expect(log.of("grant_policy_refusal_rewritten")).toHaveLength(1);
+			},
+		);
+
+		it("repairs a deny's description to RFC 6749 §5.2's characters, as /oauth/token does", async () => {
+			const { grant } = await boot([denying("invalid_scope", 'say "no"')]);
+			const { result } = await exchange(grant, await body());
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: "say ?no?",
+			});
 		});
 
 		// The other grants answer a deny through core's `evaluateGrantPolicy`.
-		it.each(["access_denied", "invalid_request", "invalid_scope"])(
+		it.each(["invalid_request", "invalid_scope", "unauthorized_client", "invalid_target"])(
 			"answers a deny carrying %s as core's policy evaluation does: 400, the policy's code and description",
 			async (code) => {
 				const { grant } = await boot([denying(code)]);
@@ -1242,6 +1536,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					status: 400,
 					error: code,
 					errorDescription: "denied by the test policy",
+					policyDenial: { error: code },
 				});
 				const otherGrants = await evaluateGrantPolicy(
 					denyingPolicy(code),
@@ -1599,11 +1894,11 @@ describe("absence policy", () => {
 	});
 });
 
-describe("tokenExchangeModule's contributions read oauthTokenSettings over the configuration", () => {
+describe("tokenExchangeModule's contributions read oauthTokenSettings, never the configuration", () => {
 	// Beside oauthModule the slot is derived from the same `oauth {}` the
 	// configuration carries, and nothing substitutes it, so the two cannot
 	// disagree there. Which one a contribution reads shows only here, where
-	// the deps hand it a slot that disagrees with the configuration — as a
+	// the deps hand it a configuration that disagrees with the slot — as a
 	// composition without oauthModule, which fills the slot itself, may.
 	const SLOT_ISSUER = "https://slot.example";
 	const configWith = (jwt: Record<string, unknown> = {}) => {
@@ -1662,7 +1957,6 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 	it("accepts a subject token with no typ when the slot's legacyTypAccept is on and the configuration's off", async () => {
 		const token = await untypedToken();
 		const config = configWith({ legacyTypAccept: false });
-		expect(await validatorFor({ config }).validate(token, { role: "subject" })).toBeNull();
 		expect(
 			await validatorFor({
 				config,
@@ -1676,7 +1970,6 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 		// to the configuration's `true`.
 		const token = await untypedToken();
 		const config = configWith({ legacyTypAccept: true });
-		expect(await validatorFor({ config }).validate(token, { role: "subject" })).not.toBeNull();
 		expect(
 			await validatorFor({
 				config,
@@ -1685,7 +1978,7 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 		).toBeNull();
 	});
 
-	it("reads a slot whole: one without legacyTypAccept is refused, naming the member, not read beside the configuration's", async () => {
+	it("reads a slot whole: one without legacyTypAccept is refused, naming the member, not read from the configuration", async () => {
 		// Read member by member, the configuration's `true` would stand in for
 		// the member the slot lacks, and accept an untyped token on a slot
 		// nobody meant to say so.

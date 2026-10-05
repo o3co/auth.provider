@@ -49,6 +49,7 @@ import {
 	beginFirstBinding,
 	beginLogin,
 	completeEnrollment,
+	dropRecord,
 	enrollFromAccount,
 	freezeClock,
 	readTransaction,
@@ -76,7 +77,8 @@ const MFA_UNAVAILABLE = {
 };
 
 /** How long the mark stands under the package's defaults: max(300 s, 2 × 600 s) and twice the skew. */
-const LIFETIME_MS = 1_200_000 + 2 * DEFAULT_CLOCK_SKEW_MS;
+// max(300, 2 × 600) s, twice the skew, and one factor-set lease (16 × the default 5000 ms Store timeout).
+const LIFETIME_MS = 1_200_000 + 2 * DEFAULT_CLOCK_SKEW_MS + 80_000;
 
 /** Boots `mode` with no mail sender, so no first binding asks the account-email proof; alice's witness as `enrolled` says. */
 async function composed(mode: "optional" | "required", enrolled?: true) {
@@ -103,7 +105,7 @@ async function composed(mode: "optional" | "required", enrolled?: true) {
 
 /** The factor store loses every record of alice's. */
 async function loseFactors(store: MfaFactorStore): Promise<void> {
-	for (const record of await store.list(ALICE.id)) await store.remove(ALICE.id, record.id);
+	for (const record of await store.list(ALICE.id)) await dropRecord(store, ALICE.id, record.id);
 }
 
 /** The Store's witness cleared as well: a Store that keeps none says nothing of the binding. */
@@ -174,7 +176,7 @@ describe("a first binding in a session after the subject's first binding elsewhe
 			const records = await list(subject);
 			if (reads++ === 0) {
 				for (const record of records) {
-					if (record.kind === "totp") await factorStore.remove(subject, record.id);
+					if (record.kind === "totp") await dropRecord(factorStore, subject, record.id);
 				}
 			}
 			return records;
@@ -332,7 +334,7 @@ describe("a first binding at a login after the subject's first binding elsewhere
 				).status,
 			).toBe(200);
 			for (const record of await factorStore.list(ALICE.id)) {
-				if (record.kind === "totp") await factorStore.remove(ALICE.id, record.id);
+				if (record.kind === "totp") await dropRecord(factorStore, ALICE.id, record.id);
 			}
 			freezeClock(T0 + 60_000);
 			if (failure) {
@@ -384,7 +386,7 @@ describe("a first binding at a login after the subject's first binding elsewhere
 		expect(bound.status, JSON.stringify(bound.body)).toBe(200);
 		// The counting factor is lost; the recovery sets, which do not count, stay.
 		for (const record of await factorStore.list(ALICE.id)) {
-			if (record.kind === "totp") await factorStore.remove(ALICE.id, record.id);
+			if (record.kind === "totp") await dropRecord(factorStore, ALICE.id, record.id);
 		}
 		freezeClock(T0 + 60_000);
 
@@ -453,11 +455,11 @@ describe("a first binding at a login after the subject's first binding elsewhere
 });
 
 describe("noting the mark", () => {
-	it("notes it at a first binding, before the factor is written, standing max(mfa.manage.maxAgeSeconds, 2 × mfa.transactionTtlSeconds) and twice the clock skew", async () => {
+	it("notes it at a first binding, before the factor is written, standing max(mfa.manage.maxAgeSeconds, 2 × mfa.transactionTtlSeconds), twice the clock skew and a factor-set lease", async () => {
 		for (const mode of ["optional", "required"] as const) {
 			const { app, factorStore, transactionStore, userSessionStore } = await composed(mode);
 			const note = vi.spyOn(transactionStore, "noteFirstBinding");
-			const create = vi.spyOn(factorStore, "create");
+			const create = vi.spyOn(factorStore, "createIf");
 			let res: Awaited<ReturnType<typeof completeEnrollment>>;
 			if (mode === "optional") {
 				res = await bindFromAccount((await signIn(app, userSessionStore)).agent);

@@ -18,16 +18,15 @@
  * RFC 6749 Appendix A.7 / A.8 on the session router, booted through core's
  * `createApp` with `sessionModule`: the error text `/session/*` sends stays
  * inside `1*NQSCHAR` (printable ASCII without `"` and `\`) — its own text,
- * a configured federation's name, and what a limiter adapter or a
- * contributed redirect policy hands it.
+ * a configured federation's name, and what a contributed redirect policy
+ * hands it.
  */
 
 import type {
 	AppConfig,
+	AttemptCounter,
 	FederationProvider,
 	FederationTokenStore,
-	RateLimitDecision,
-	RateLimiter,
 	SessionFederationIndex,
 	UserRepository,
 	UserSessionStore,
@@ -36,6 +35,7 @@ import { defineModule } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
 	createTestApp,
+	federationTypeForTests,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -73,7 +73,6 @@ const stores = [
 		async get() {
 			return null;
 		},
-		async update() {},
 		async removeBySid() {},
 		async delete() {},
 	} as unknown as FederationTokenStore),
@@ -94,25 +93,20 @@ const stores = [
 	}),
 ];
 
-/** A query-mode federation named `stub`, and the redirect policy paired with it. */
+/** The federation type `stub`: a query-mode provider for the entry `stub`, and `policy` beside it. */
 const federationModule = (policy: FederationRedirectPolicy) =>
-	defineModule({
-		name: "test:stub-federation",
-		contributes: {
-			federations: {
-				stub: (): FederationProvider => ({
-					name: "stub",
-					scope: ["openid"],
-					buildAuthorizationUrl: () => new URL("https://idp.example/authorize"),
-					exchangeCode: async () => ({
-						issuer: "https://idp.example",
-						sub: "user-1",
-						expiresAt: null,
-					}),
-				}),
-			},
-			federationRedirectPolicies: { stub: () => policy },
-		},
+	federationTypeForTests("stub", {
+		provider: (): FederationProvider => ({
+			name: "stub",
+			scope: ["openid"],
+			buildAuthorizationUrl: () => new URL("https://idp.example/authorize"),
+			exchangeCode: async () => ({
+				issuer: "https://idp.example",
+				sub: "user-1",
+				expiresAt: null,
+			}),
+		}),
+		redirectPolicy: () => policy,
 	});
 
 const permissivePolicy: FederationRedirectPolicy = {
@@ -120,9 +114,13 @@ const permissivePolicy: FederationRedirectPolicy = {
 	resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
 };
 
-const limiterAnswering = (decision: Partial<RateLimitDecision>): RateLimiter => ({
-	kind: "custom",
-	check: async () => ({ allowed: true, ...decision }) as RateLimitDecision,
+/** A counter answering every attempt `allowed`, or refusing it with the window ending in a minute. */
+const counterAnswering = (allowed: boolean): AttemptCounter => ({
+	consume: async (_key, spec) => ({
+		allowed,
+		remaining: allowed ? spec.limit - 1 : 0,
+		resetAt: new Date(Date.now() + 60_000),
+	}),
 });
 
 const config = (): AppConfig => {
@@ -137,6 +135,7 @@ const config = (): AppConfig => {
 			federations: {
 				stub: {
 					enabled: true,
+					type: "stub",
 					clientId: "id",
 					clientSecret: "secret",
 					callbackURL: "https://as.example/session/oauth/federation/stub/callback",
@@ -153,7 +152,7 @@ afterEach(async () => {
 });
 
 const boot = async (
-	options: { limiter?: RateLimiter; policy?: FederationRedirectPolicy } = {},
+	options: { counter?: AttemptCounter; policy?: FederationRedirectPolicy } = {},
 ): Promise<express.Express> => {
 	const cfg = config();
 	const handle = await createTestApp({
@@ -162,7 +161,11 @@ const boot = async (
 			sessionStoreModuleFor(cfg),
 			...stores,
 			federationModule(options.policy ?? permissivePolicy),
-			providing("test:rate-limiter", "rateLimiter", options.limiter ?? limiterAnswering({})),
+			providing(
+				"test:attempt-counter",
+				"attemptCounter",
+				options.counter ?? counterAnswering(true),
+			),
 		],
 		bootstrapComponents: { config: cfg, pathResolver: (s: string) => s },
 	});
@@ -184,11 +187,11 @@ const login = async (app: express.Express, body: Record<string, unknown>) => {
 };
 
 describe("POST /session/login", () => {
-	it("sends a limiter adapter's refusal reason inside RFC 6749's set", async () => {
-		const app = await boot({ limiter: limiterAnswering({ allowed: false, reason: HOSTILE }) });
+	it("answers a refused attempt with its own text, inside RFC 6749's set", async () => {
+		const app = await boot({ counter: counterAnswering(false) });
 		const res = await login(app, {});
 		expect(res.status).toBe(429);
-		expect(res.body).toEqual({ error: "rate_limited", error_description: HOSTILE_ON_THE_WIRE });
+		expect(res.body).toEqual({ error: "rate_limited", error_description: "Rate limit exceeded" });
 	});
 
 	it.each([

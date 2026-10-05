@@ -15,7 +15,7 @@
  */
 
 import { guardedRead, isError, thrownText } from "../logging/loggableError.mjs";
-import { readFederationUpstreamOutage } from "./upstreamOutage.mjs";
+import { readFederationUpstreamDelivery, readFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 /**
  * What an upstream federation refresh failed with.
@@ -114,6 +114,12 @@ export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
 	"login_required",
 	"consent_required",
 	"account_selection_required",
+]);
+
+/** RFC 6749 §4.1.2.1's names for an outage: not refusals, whatever status they came with. */
+export const FEDERATION_UPSTREAM_OUTAGE_CODES: ReadonlySet<string> = new Set([
+	"server_error",
+	"temporarily_unavailable",
 ]);
 
 /** A day: beyond it a `Retry-After` is not advice a worker can use. */
@@ -225,3 +231,23 @@ export function classifyFederationRefreshError(
 	}
 	return { reason: "unknown", structured: false, ...extras };
 }
+
+/**
+ * Whether a failed refresh provably left the refresh token unused, so that
+ * a rotation counted for it may be given back. Anything that may have been
+ * acted on is not: the budget counts rotations that may have happened.
+ *
+ * Read by `readFederationUpstreamDelivery` over the whole chain. The
+ * upstream's own code (`.error`), at any Error level, proves it only when it
+ * is one this provider knows and not an outage's
+ * ({@link FEDERATION_UPSTREAM_OUTAGE_CODES}, which a retrieval stamps as "may
+ * have been processed"); any other code there doubts. Never throws.
+ */
+export function isDefiniteFederationRefreshFailure(error: unknown): boolean {
+	return readFederationUpstreamDelivery(error, judgeUpstreamErrorCode) === "unprocessed";
+}
+
+const judgeUpstreamErrorCode = (code: unknown): "unprocessed" | "unknown" =>
+	isKnownFederationRefreshErrorCode(code) && !FEDERATION_UPSTREAM_OUTAGE_CODES.has(code)
+		? "unprocessed"
+		: "unknown";

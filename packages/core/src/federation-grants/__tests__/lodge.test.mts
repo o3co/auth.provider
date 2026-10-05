@@ -187,11 +187,12 @@ describe("lodging a first-time intent", () => {
 		expect(intents.size).toBe(0);
 	});
 
-	it("reads the client's registration as a list or as nothing: a repository answering a string is not a substring match", async () => {
-		// A deployment's own `ClientRepository` validates nothing this code can
-		// see. Read with a bare `.includes`, a comma-joined string would let
-		// "okta-calendar-prod" permit "okta-calendar" — the rule the token
-		// route already applies, applied at lodging too.
+	it("reads the client's registration as a list or as nothing: a record carrying a string is not a substring match", async () => {
+		// Lodging is exported and takes the record from its caller, which need
+		// not have read it through the client-record boundary. Read with a bare
+		// `.includes`, a comma-joined string would let "okta-calendar-prod"
+		// permit "okta-calendar" — the rule the token route already applies,
+		// applied at lodging too.
 		const asString = (value: string) => value as unknown as readonly string[];
 		expect(
 			await lodgeFederationGrantIntent(
@@ -271,7 +272,7 @@ describe("lodging a first-time intent", () => {
 	});
 
 	it("refuses a registered redirect URI that registration itself would have refused", async () => {
-		// A repository that validates nothing can hand one back; the flow would
+		// A record handed to lodging directly can carry one; the flow would
 		// otherwise fail only at its end, after the grant was activated.
 		const client = { ...CLIENT, federationGrantRedirectUris: ["not a uri"] };
 		expect(
@@ -756,6 +757,17 @@ describe("lodging a reauthorization", () => {
 			version: before.version,
 			ineligible: { reason: "scope_exceeded" },
 		});
+	});
+
+	it("admits a grant whose upstream no longer grants a scope its held token carries: a renewal is how it is asked for again", async () => {
+		await establish();
+		await starved("scope_not_granted");
+		expect(await lodgeFederationGrantReauthorization(deps(), renewal())).toMatchObject({
+			ok: true,
+			grantId: "g-est",
+			status: "upstream_token_ineligible",
+		});
+		expect(intents.size).toBe(1);
 	});
 
 	it("refuses a grant starved by no finite lifetime, an unsupported token type or a malformed token response before an intent is lodged: a consent mends none of them", async () => {
@@ -1367,6 +1379,53 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 				store: "revocation_boundary",
 				step: "read",
 				error: expect.any(TypeError),
+			});
+		});
+
+		/** `inspect`, answering the grant's consent date as an ISO string from its `from`-th call on. */
+		const consentAsStringFrom =
+			(from: number): FederationGrantStore["inspect"] =>
+			async (grantId, at) => {
+				const inspection = await grants.inspect(grantId, at);
+				from -= 1;
+				if (from > 0 || inspection === null || !("consent" in inspection.grant)) return inspection;
+				const { grant } = inspection;
+				const consent = { ...grant.consent, at: "2026-09-18T00:00:00.000Z" as unknown as Date };
+				return { ...inspection, grant: { ...grant, consent } as typeof grant };
+			};
+
+		it("names the grant store's read when the grant it answered holds a date that is not one", async () => {
+			await establish();
+			const result = await lodgeFederationGrantReauthorization(
+				deps({ grantStore: { ...grants, inspect: consentAsStringFrom(1) } }),
+				renewal(),
+			);
+			expect(result).toEqual({ ok: false, reason: "storage" });
+			expect(failureOf(result)).toMatchObject({
+				store: "federation_grant",
+				step: "inspect",
+				error: expect.any(RangeError),
+			});
+			expect(intents.size).toBe(0);
+		});
+
+		it("names it on the re-read after a pointer write that lost, too", async () => {
+			await establish();
+			const result = await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: {
+						...grants,
+						inspect: consentAsStringFrom(2),
+						nameIntent: async () => ({ ok: false }) as never,
+					},
+				}),
+				renewal(),
+			);
+			expect(result).toEqual({ ok: false, reason: "storage" });
+			expect(failureOf(result)).toMatchObject({
+				store: "federation_grant",
+				step: "inspect",
+				error: expect.any(RangeError),
 			});
 		});
 

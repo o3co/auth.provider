@@ -31,7 +31,6 @@ import {
 	type FederationGrantBrowserBinding,
 	type FederationGrantConnectTransaction,
 	type FederationGrantIntent,
-	federationGrantAllowlist,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 	type SessionClaim,
@@ -175,13 +174,10 @@ export async function judge(
 			return { ok: false, status: 400, reason: "stale" };
 		}
 		asking = { store: "client", step: "find" };
+		// The slot answers the boundary's validated copy: the allowlist is a list
+		// of strings, and a record holding anything else rejects the lookup.
 		const client = await options.clientRepository.findById(intent.clientId);
-		// Read as a list or as nothing (`federationGrantAllowlist`): a repository
-		// answering a string would otherwise match by substring.
-		const allowed = federationGrantAllowlist(
-			(client as { allowedFederationGrantConnections?: unknown } | null)
-				?.allowedFederationGrantConnections,
-		);
+		const allowed = client?.allowedFederationGrantConnections ?? [];
 		if (client === null || !allowed.includes(intent.connection)) {
 			return { ok: false, status: 403, reason: "connection_not_permitted" };
 		}

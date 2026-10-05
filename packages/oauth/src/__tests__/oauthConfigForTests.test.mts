@@ -36,6 +36,6 @@ describe("oauthConfigForTests", () => {
 		expect(fragment.oauth.authorize).toEqual({ acrValues: table });
 		expect(fragment.oauth.authorize?.acrValues["urn:o3co:acr:phr"]).not.toBe(alternatives);
 		const config = { ...makeValidAppConfig(), ...fragment };
-		expect(Object.keys(resolveOAuthOptions(config).acrValues)).toEqual(Object.keys(table));
+		expect(Object.keys(resolveOAuthOptions(config.oauth).acrValues)).toEqual(Object.keys(table));
 	});
 });

@@ -48,9 +48,9 @@ import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { installGracefulShutdown } from "../shutdown.mjs";
 import {
-	adaptersOf,
 	capturedRenames,
 	libraryLayers,
+	rootSectionsOf,
 	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
@@ -109,8 +109,9 @@ vi.mock("ioredis", () => {
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
-/** A single-replica deployment with every shared store on memory, grants off. */
+/** A single-replica deployment with every shared store on memory, grants off, MFA off. */
 const BASE_ENV: Readonly<Record<string, string>> = {
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: "federation-grants-composition.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
@@ -139,6 +140,7 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	ADAPTERS_USER_SESSION_STORES: "redis",
 	ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_ATTEMPT_COUNTER: "redis",
 	ADAPTERS_CODE_REPOSITORY: "redis",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
 	ADAPTERS_REPLAY_SEEN_SET: "redis",
@@ -164,7 +166,7 @@ function resolveConfig(env: Record<string, string>): Switches {
 	const config = {
 		...sectionsCoreDoesNotDeclare(layers),
 		...validate(layers, AppConfigSchema),
-		adapters: adaptersOf(layers, env),
+		...rootSectionsOf(layers, env),
 	};
 	// The key ring has no environment form (a list of { id, key } is HOCON's);
 	// the Redis grant store refuses to construct without one under "required".

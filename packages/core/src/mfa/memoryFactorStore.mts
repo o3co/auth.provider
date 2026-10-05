@@ -19,12 +19,49 @@
  * Records fork per replica and vanish on restart, after which every subject
  * reads as having nothing enrolled; the enrollment witness catches that loss.
  *
- * Each operation is one synchronous `Map` step, so atomic. Records are copied
- * in and out: changing a returned or written record changes nothing kept here.
+ * Each operation is one synchronous `Map` step, so atomic: no `await` falls
+ * between a check and its write, and the reset is serialised with the
+ * conditional writes. So its write lifetime W (docs/adapter-surface.md,
+ * "Conditional writes", rule 6) is 0. Records are copied in and out: changing
+ * a returned or written record changes nothing kept here.
+ *
+ * A subject's set is an entry holding its records and its store generation,
+ * minted with `newStoreGeneration` at every membership write. The first
+ * membership write makes it. A set emptied by any membership write (its last
+ * removal or a reset) is left as the set's tombstone, which expires on the
+ * store's clock `BUNDLED_STORE_WRITE_LIFETIME_MS` after that write; a write
+ * that leaves it holding a record takes the expiry off. An expired tombstone
+ * reads as absent, and is deleted when next read or written, or by the sweep,
+ * paced as the replay seen-set's (`single-use/sweep.mts`) on membership
+ * writes. Every entry holds a generation from the write that made it, so no
+ * set here is ever without one and `listVersioned` has nothing to mint. One
+ * process is one instance, so a second instance on the same backend is this
+ * one.
  */
 
+import {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	type ConditionalCreateAnswer,
+	type ConditionalSetRemoveAnswer,
+	isStoreGeneration,
+	newStoreGeneration,
+	type StoreGeneration,
+	type VersionedSet,
+} from "../adapters/conditionalWrite.mjs";
+import { createAmortizedSweep } from "../single-use/sweep.mjs";
 import type { MfaFactorRecord, MfaFactorRecordUpdate, MfaFactorStore } from "./factorStore.mjs";
 import { checkMfaVersionAdvances } from "./version.mjs";
+
+export interface MemoryMfaFactorStoreOptions {
+	/** The clock a tombstone expires by, in epoch milliseconds. Default `Date.now`. */
+	readonly now?: () => number;
+}
+
+/** Membership writes between two sweeps of expired tombstones. */
+const SWEEP_INTERVAL = 1_000;
+
+/** The least time between two sweeps, in milliseconds. */
+const MIN_SWEEP_INTERVAL_MS = 10_000;
 
 /** The record as plain data, every field named, its dates copied. */
 const copyOf = (record: MfaFactorRecord): MfaFactorRecord => ({
@@ -39,23 +76,110 @@ const copyOf = (record: MfaFactorRecord): MfaFactorRecord => ({
 	data: record.data,
 });
 
-export function createMemoryMfaFactorStore(): MfaFactorStore {
-	const bySubject = new Map<string, Map<string, MfaFactorRecord>>();
+/**
+ * A subject's set: its records by id, the generation its last membership
+ * write issued, and, while it is an emptied set's tombstone, when that
+ * expires.
+ */
+interface FactorSet {
+	readonly records: Map<string, MfaFactorRecord>;
+	generation: StoreGeneration;
+	expiresAtMs: number | undefined;
+}
+
+export function createMemoryMfaFactorStore(
+	options: MemoryMfaFactorStoreOptions = {},
+): MfaFactorStore {
+	const now = options.now ?? Date.now;
+	const schedule = createAmortizedSweep(
+		{},
+		{ sweepInterval: SWEEP_INTERVAL, minSweepIntervalMs: MIN_SWEEP_INTERVAL_MS },
+		"memory MfaFactorStore",
+	);
+	const bySubject = new Map<string, FactorSet>();
+
+	const expired = (set: FactorSet, nowMs: number): boolean =>
+		set.expiresAtMs !== undefined && set.expiresAtMs <= nowMs;
+
+	/** `subject`'s set, unless it is none or a tombstone past its expiry, which it deletes. */
+	const live = (subject: string): FactorSet | undefined => {
+		const set = bySubject.get(subject);
+		if (set === undefined || !expired(set, now())) return set;
+		bySubject.delete(subject);
+		return undefined;
+	};
+
+	/**
+	 * `change` applied to `subject`'s set, made when it has none, at a new
+	 * generation, and with a tombstone's expiry when it is left empty: every
+	 * membership write's one step.
+	 */
+	const written = (
+		subject: string,
+		change: (records: Map<string, MfaFactorRecord>) => void,
+	): FactorSet => {
+		const nowMs = now();
+		const set = live(subject) ?? {
+			records: new Map<string, MfaFactorRecord>(),
+			generation: newStoreGeneration(),
+			expiresAtMs: undefined,
+		};
+		change(set.records);
+		set.generation = newStoreGeneration();
+		set.expiresAtMs = set.records.size === 0 ? nowMs + BUNDLED_STORE_WRITE_LIFETIME_MS : undefined;
+		bySubject.set(subject, set);
+		if (schedule.wrote()) {
+			for (const [other, held] of bySubject) {
+				if (expired(held, nowMs)) bySubject.delete(other);
+			}
+		}
+		return set;
+	};
 
 	return {
 		kind: "memory",
 
 		async list(subject: string): Promise<readonly MfaFactorRecord[]> {
-			return [...(bySubject.get(subject)?.values() ?? [])].map(copyOf);
+			return [...(live(subject)?.records.values() ?? [])].map(copyOf);
 		},
 
-		async create(record: MfaFactorRecord): Promise<void> {
-			const records = bySubject.get(record.subject) ?? new Map<string, MfaFactorRecord>();
-			if (records.has(record.id)) {
-				throw new Error("an MFA factor record with this id already exists for the subject");
+		async listVersioned(subject: string): Promise<VersionedSet<MfaFactorRecord>> {
+			const set = live(subject);
+			return set === undefined
+				? { generation: null, items: [] }
+				: { generation: set.generation, items: [...set.records.values()].map(copyOf) };
+		},
+
+		async createIf(
+			record: MfaFactorRecord,
+			expected: StoreGeneration | null,
+		): Promise<ConditionalCreateAnswer> {
+			if (expected !== null && !isStoreGeneration(expected)) {
+				throw new RangeError("MfaFactorStore.createIf: expected is not a store generation");
 			}
-			records.set(record.id, copyOf(record));
-			bySubject.set(record.subject, records);
+			const set = live(record.subject);
+			const atExpected = expected === null ? set === undefined : set?.generation === expected;
+			if (!atExpected || set?.records.has(record.id) === true) return { outcome: "conflict" };
+			const { generation } = written(record.subject, (records) =>
+				records.set(record.id, copyOf(record)),
+			);
+			return { outcome: "created", generation };
+		},
+
+		async removeIf(
+			subject: string,
+			id: string,
+			expected: StoreGeneration,
+		): Promise<ConditionalSetRemoveAnswer> {
+			if (!isStoreGeneration(expected)) {
+				throw new RangeError("MfaFactorStore.removeIf: expected is not a store generation");
+			}
+			const set = live(subject);
+			if (set === undefined) return { outcome: "missing" };
+			if (set.generation !== expected) return { outcome: "conflict" };
+			if (!set.records.has(id)) return { outcome: "missing" };
+			const { generation } = written(subject, (records) => records.delete(id));
+			return { outcome: "removed", generation };
 		},
 
 		async update(
@@ -65,31 +189,24 @@ export function createMemoryMfaFactorStore(): MfaFactorStore {
 			next: MfaFactorRecordUpdate,
 		): Promise<MfaFactorRecord | null> {
 			checkMfaVersionAdvances(expectedVersion, "MfaFactorStore.update");
-			const records = bySubject.get(subject);
+			const records = live(subject)?.records;
 			const current = records?.get(id);
 			if (records === undefined || current === undefined || current.version !== expectedVersion) {
 				return null;
 			}
-			const written = copyOf({
+			const updated = copyOf({
 				...current,
 				data: next.data,
 				label: next.label,
 				lastUsedAt: next.lastUsedAt,
 				version: current.version + 1,
 			});
-			records.set(id, written);
-			return copyOf(written);
-		},
-
-		async remove(subject: string, id: string): Promise<void> {
-			const records = bySubject.get(subject);
-			if (records === undefined) return;
-			records.delete(id);
-			if (records.size === 0) bySubject.delete(subject);
+			records.set(id, updated);
+			return copyOf(updated);
 		},
 
 		async removeAllForSubject(subject: string): Promise<void> {
-			bySubject.delete(subject);
+			written(subject, (records) => records.clear());
 		},
 	};
 }

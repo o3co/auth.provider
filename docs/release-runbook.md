@@ -12,7 +12,7 @@ This runbook captures patterns established through `v0.7.0` (manual bootstrap re
 1. **Run cumulative final audit** (multi-agent + FCoT) on the cut diff BEFORE pushing the tag — not after.
 2. **For each new monorepo package, pre-flight `npm view`**. If 404, pre-bootstrap with a 0.0.1 dummy publish from local BEFORE pushing the tag.
 3. **Run R6 label audit** per [release-policy.md §R6](release-policy.md#r6-release-cut-audit-pass-mandatory-checklist-before-tagging).
-4. **Tag + push** → `release.yml` does the rest (`pnpm -r exec pnpm version` from the tag).
+4. **Merge `develop` → `main`, then tag `main` + push**: the pull request needs `build-and-test` and `umbrella-e2e` green; then `release.yml` does the rest (`pnpm -r exec pnpm version` from the tag).
 5. **Verify** all packages on npm + GitHub Release page.
 
 ---
@@ -44,9 +44,12 @@ cp profiles/google.env.example profiles/google.env   # the IdP client; git-ignor
 Run multi-agent review + FCoT on the **full release diff** before tagging:
 
 ```bash
-# From the develop branch at the commit that will be tagged
-LAST_TAG=$(git describe --tags --abbrev=0)
-git diff "$LAST_TAG"..HEAD --stat
+# Audit one fixed develop commit: the one the release train will be cut from.
+# Tags are cut from main, so look the last one up there.
+git fetch origin
+RELEASE_SHA=$(git rev-parse origin/develop)
+LAST_TAG=$(git describe --tags --abbrev=0 origin/main)
+git diff "$LAST_TAG".."$RELEASE_SHA" --stat
 # Then run /multi-agent-review on the diff range
 ```
 
@@ -120,9 +123,60 @@ For each scoped package that returns **404 / E404**: it has never been published
 - **Pre-bootstrap (recommended)** — see [Pattern A](#pattern-a-pre-bootstrap-recommended) below
 - **Tag-first manual recovery** — see [Pattern B](#pattern-b-tag-first-manual-recovery)
 
-### Step 4. Tag + push
+### Step 4. Merge `develop` → `main`, then tag + push
+
+Don't open the pull request with `develop` as its head: every merge into
+`develop` moves the head and restarts the required checks, so they never
+settle. Run it from a fixed `release-train/<YYYY-MM-DD>` branch instead.
+
+1. Create the train branch at `$RELEASE_SHA`, the commit Step 1 audited and
+   the release notes cover (for the daily train with no release, any chosen
+   `develop` commit will do):
+
+   ```bash
+   DATE=$(date +%F)
+   gh api repos/o3co/auth.provider/git/refs \
+     -f ref="refs/heads/release-train/$DATE" -f sha="$RELEASE_SHA"
+   # equivalent: git push origin "$RELEASE_SHA:refs/heads/release-train/$DATE"
+   ```
+
+2. Open a pull request from it to `main`:
+
+   ```bash
+   gh pr create --base main --head "release-train/$DATE" \
+     --title "release-train/$DATE" --body "Release train $DATE."
+   ```
+
+3. Wait until `build-and-test` and `umbrella-e2e` (the umbrella's suite with
+   the pull request's code as `PROVIDER_REV`; see
+   [AGENTS.md](../AGENTS.md#umbrella-e2e)) are green on its head. A failure
+   caused by infrastructure (for example a registry pull reset) is rerun, not
+   treated as a code finding:
+
+   ```bash
+   gh pr checks <n> --watch
+   gh run rerun <run-id> --failed
+   ```
+
+4. Merge it with a merge commit, never a squash or a rebase, so `main` keeps
+   `develop`'s commits and the next cut's `git log <lastTag>..HEAD` on
+   `develop` lists only what is new:
+
+   ```bash
+   gh pr merge <n> --merge
+   ```
+
+5. Delete the train branch:
+
+   ```bash
+   git push origin --delete "release-train/$DATE"
+   ```
+
+For a release, tag the commit that merge left on `main`:
 
 ```bash
+git fetch origin
+RELEASE_COMMIT=$(git rev-parse origin/main)
 git tag -a "vX.Y.Z" -m "Release vX.Y.Z" "$RELEASE_COMMIT"
 git push origin "vX.Y.Z"
 ```
@@ -171,7 +225,7 @@ cd packages/<new-pkg>
 npm version 0.0.1 --no-git-tag-version
 pnpm publish --access public --no-git-checks
 
-# 3. Revert the local version bump (keep develop clean for the tag)
+# 3. Revert the local version bump (keep the working tree clean for the tag)
 cd ../..
 git checkout packages/<new-pkg>/package.json
 

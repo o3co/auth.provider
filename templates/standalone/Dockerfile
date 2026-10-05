@@ -115,7 +115,7 @@ COPY --chown=node:node tests/ ./tests/
 # on files that were never a test's business. `.dockerignore` lets them into
 # the context for the same reason; nothing copies them into `runtime`.
 COPY --chown=node:node Dockerfile .dockerignore .env.example .gitignore README.md README.ja.md \
-  docker-compose.yml docker-compose.production.yml ./
+  docker-compose.yml docker-compose.production.yml docker-compose.mailpit.yml ./
 
 CMD ["pnpm", "run", "test", "--", "--passWithNoTests"]
 

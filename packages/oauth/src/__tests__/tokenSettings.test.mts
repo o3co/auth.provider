@@ -50,7 +50,7 @@ import {
 	oauthTokenSettingsContract,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import { oauthModule } from "#/module.mjs";
+import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthTokenSettingsFrom } from "#/tokenSettings.mjs";
 import { withOauthCaptures } from "./_helpers/sections.mjs";
 
@@ -83,7 +83,7 @@ describe.each([
 	["the fixture configuration", fixture],
 	["a configuration with every switch on", everySwitchOn],
 ] as const)("oauthTokenSettingsFrom keeps core's contract: %s", (_what, config) => {
-	it.each(oauthTokenSettingsContract({ build: () => oauthTokenSettingsFrom(config()) }))(
+	it.each(oauthTokenSettingsContract({ build: () => oauthTokenSettingsFrom(config().oauth) }))(
 		"$name",
 		async ({ run }) => {
 			await run();
@@ -94,7 +94,7 @@ describe.each([
 describe("oauthTokenSettingsFrom answers what the readers resolve for themselves today", () => {
 	it("over the fixture configuration: its issuer, the deprecated expiresIn as default and max, every switch off", () => {
 		const config = fixture();
-		expect(oauthTokenSettingsFrom(config)).toEqual({
+		expect(oauthTokenSettingsFrom(config.oauth)).toEqual({
 			issuer: config.oauth.jwt.issuer,
 			legacyTypAccept: false,
 			accessTokenLifetime: resolveAccessTokenLifetime(config),
@@ -105,7 +105,7 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 	});
 
 	it("over a configuration with every switch on", () => {
-		expect(oauthTokenSettingsFrom(everySwitchOn())).toEqual({
+		expect(oauthTokenSettingsFrom(everySwitchOn().oauth)).toEqual({
 			issuer: "https://auth.test",
 			legacyTypAccept: true,
 			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 900 },
@@ -118,7 +118,10 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 	it("carries no token-binding setting, whatever the configuration says: they are core's", () => {
 		// The strict policy and the confidential-client binding are configured,
 		// and nothing of either is provided.
-		const settings = oauthTokenSettingsFrom(everySwitchOn()) as unknown as Record<string, unknown>;
+		const settings = oauthTokenSettingsFrom(everySwitchOn().oauth) as unknown as Record<
+			string,
+			unknown
+		>;
 		for (const member of [
 			"tokenBinding",
 			"dispatchPolicy",
@@ -139,7 +142,7 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 			} as AppConfig;
 		};
 		for (const config of [fixture(), everySwitchOn(), alias()]) {
-			const settings = oauthTokenSettingsFrom(config);
+			const settings = oauthTokenSettingsFrom(config.oauth);
 			expect(checkOAuthTokenSettings(settings, config)).toEqual(settings);
 		}
 	});
@@ -151,7 +154,9 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 				...base,
 				oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer } },
 			} as unknown as AppConfig;
-			expect(() => oauthTokenSettingsFrom(config), String(issuer)).toThrow(/oauth\.jwt\.issuer/);
+			expect(() => oauthTokenSettingsFrom(config.oauth), String(issuer)).toThrow(
+				/oauth\.jwt\.issuer/,
+			);
 		}
 	});
 });
@@ -194,12 +199,12 @@ describe("the oauth module provides oauthTokenSettings", () => {
 	it("fills the slot whenever it is installed, with no module requiring it, resolved from the configuration", async () => {
 		const config = everySwitchOn();
 		const handle = await createTestApp({
-			modules: [oauthModule({ config }), ...stubs],
+			modules: [oauthEndpointsModule, ...stubs],
 			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s: string) => s },
 		});
 		try {
 			const provided = handle.components.oauthTokenSettings;
-			expect(provided).toEqual(oauthTokenSettingsFrom(config));
+			expect(provided).toEqual(oauthTokenSettingsFrom(config.oauth));
 			expect(Object.isFrozen(provided)).toBe(true);
 			expect(Object.isFrozen(provided?.accessTokenLifetime)).toBe(true);
 		} finally {
@@ -232,7 +237,7 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 		});
 
 	it("declares it", () => {
-		expect(oauthModule({ config: fixture() }).authoritative).toEqual(["oauthTokenSettings"]);
+		expect(oauthEndpointsModule.authoritative).toEqual(["oauthTokenSettings"]);
 	});
 
 	it("refuses an override of the slot while the module is loaded, naming the module and the key", async () => {
@@ -240,7 +245,7 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 		// while every reader of the slot would follow the override.
 		const config = fixture();
 		const caught = await createApp({
-			modules: [oauthModule({ config }), ...stubs, reader({})],
+			modules: [oauthEndpointsModule, ...stubs, reader({})],
 			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s: string) => s },
 			overrideComponents: { oauthTokenSettings: SECOND },
 		}).then(
@@ -268,7 +273,7 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 			overrideComponents: { oauthTokenSettings: SECOND },
 		});
 		try {
-			expect(seen.settings).toBe(SECOND);
+			expect(seen.settings).toEqual(SECOND);
 		} finally {
 			await handle.dispose();
 		}

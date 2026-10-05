@@ -18,7 +18,11 @@
  * What admission accepts as a request, checked before anything is read: a
  * claim one of the builders branded here (a module-private `WeakSet`), the
  * action by its registration or its issued identity, and well-formed asks.
- * A caller's fault is a `RangeError`; every input is read once and copied.
+ * A caller's fault is a `RangeError`; every input is read once and copied,
+ * except the session store, the revocation boundary and the audit sink,
+ * which `readLiveSession` reads off `deps` in the step that uses it, once
+ * each however often that step runs: a store's read that throws is its
+ * outage, the sink's a failed audit.
  */
 
 import type { AuditSink } from "../audit/types.mjs";
@@ -55,21 +59,41 @@ const isStringList = (value: unknown): value is readonly string[] =>
 
 /**
  * What `checkRequest` answers: every untrusted input (claim, action, `asks`,
- * each dependency off `deps`) read once and copied, so a getter answering
- * one thing to the check and another to the steps changes nothing, and a
- * requirement cannot reach the caller's objects.
+ * each other dependency off `deps`) read once and copied, so a getter
+ * answering one thing to the check and another to the steps changes
+ * nothing, and a requirement cannot reach the caller's objects. The session
+ * store, the revocation boundary and the audit sink are not read here:
+ * `readLiveSession` calls each reader in the guarded step that uses it, so
+ * a read that throws never escapes admission — a store's is `unavailable`,
+ * the sink's fails as the audit it was read for. Each reader reads `deps`
+ * once and answers that reading to every later call. `now` is the clock's
+ * reading at the check; `clock` is the same clock, read once off `deps`,
+ * for a later reading.
  */
 export interface CheckedRequest {
 	readonly claim: SessionClaim;
 	readonly action: AdmissionAction;
 	readonly asks: AdmissionAsks | undefined;
 	readonly requirements: SessionRequirementResolver;
-	readonly userSessionStore: UserSessionStore | undefined;
-	readonly subjectRevocation: SubjectRevocation | undefined;
+	readonly readUserSessionStore: () => UserSessionStore | undefined;
+	readonly readSubjectRevocation: () => SubjectRevocation | undefined;
 	readonly acrTable: AcrTable;
 	readonly logger: Logger | undefined;
-	readonly auditSink: AuditSink | undefined;
+	readonly readAuditSink: () => AuditSink | undefined;
 	readonly now: Date;
+	readonly clock: () => Date;
+}
+
+/**
+ * A reader that reads `read` on its first call and answers that reading to
+ * every later one. A read that throws is not kept.
+ */
+function readOnce<T>(read: () => T): () => T {
+	let held: { readonly value: T } | undefined;
+	return () => {
+		if (held === undefined) held = { value: read() };
+		return held.value;
+	};
 }
 
 /**
@@ -95,18 +119,16 @@ function checkedAction(asked: unknown, requirements: SessionRequirementResolver)
 	);
 }
 
-/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once. */
+/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once, and the readers of the two stores and the audit sink. */
 export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
 	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
 	const requirements = checkResolver(deps.requirements);
 	const acrTable = deps.acrTable;
 	if (!isObject(acrTable)) throw new RangeError("admitSession: acrTable must be an object");
-	const userSessionStore = deps.userSessionStore;
-	const subjectRevocation = deps.subjectRevocation;
 	const logger = deps.logger;
-	const auditSink = deps.auditSink;
-	const clock = deps.now;
-	const now = clock === undefined ? new Date() : clock();
+	const configured = deps.now;
+	const clock = configured === undefined ? () => new Date() : configured;
+	const now = clock();
 	if (!isObject(request)) throw new RangeError("admitSession: the request must be an object");
 	const presented = request.claim;
 	if (!isObject(presented) || !knownClaims.has(presented)) {
@@ -146,11 +168,12 @@ export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): Ch
 		action,
 		asks,
 		requirements,
-		userSessionStore,
-		subjectRevocation,
+		readUserSessionStore: readOnce(() => deps.userSessionStore),
+		readSubjectRevocation: readOnce(() => deps.subjectRevocation),
 		acrTable,
 		logger,
-		auditSink,
+		readAuditSink: readOnce(() => deps.auditSink),
 		now,
+		clock,
 	};
 }

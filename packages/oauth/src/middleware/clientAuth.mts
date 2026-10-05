@@ -26,6 +26,7 @@ import {
 	type TokenEndpointAuthMethod,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Response } from "express";
+import { behindClientBoundary } from "../clients/clientBoundary.mjs";
 import { createClientAssertionVerifier, hasClientAssertion } from "./clientAssertion.mjs";
 
 // Exposes `req.oauthClient` to consumers composing this middleware onto their
@@ -141,16 +142,24 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  *   cannot be pinned in the header and another in the body.
  * - `WWW-Authenticate: Basic` is sent only when the failed attempt was Basic
  *   or no credentials were sent, never to steer other callers to Basic.
- * - A repository that throws is an outage, `503 temporarily_unavailable`, not
- *   `invalid_client` (which a client reads as a bad secret). A malformed
- *   `client_id` (control characters, over-long) is refused as unknown before
- *   the repository is asked, so a client cannot provoke that outage.
+ * - Clients are read through core's client-record boundary over
+ *   `clientRepository` (a boundary, or the router's document fallback, is read
+ *   as it is):
+ *   a record the boundary refuses rejects the lookup, answered as below.
+ * - A repository lookup that rejects is an outage, `503
+ *   temporarily_unavailable`, not `invalid_client` (which a client reads as
+ *   a bad secret). A malformed `client_id` (control characters, over-long)
+ *   is refused as unknown before the repository is asked, so it cannot
+ *   provoke that answer. A registered id whose record the boundary refuses
+ *   can: anyone who knows it gets `503`, with no credentials, until the
+ *   record is fixed.
  */
 export function createClientAuthMiddleware(
 	clientRepository: ClientRepository,
 	opts: ClientAuthMiddlewareOptions,
 ): RequestHandler {
 	const logger: Logger = opts.logger ?? consoleLogger;
+	const clients = behindClientBoundary(clientRepository, logger);
 	// `resolveRealm` sanitises the issuer. Shared with the sender-constrained
 	// reject path in `routes/token.mts` so the two emission sites cannot drift.
 	const wwwAuth = `Basic realm="${resolveRealm(opts.issuer)}"`;
@@ -236,7 +245,7 @@ export function createClientAuthMiddleware(
 				);
 				return;
 			}
-			const outcome = await assertionVerifier.verify(body, (id) => clientRepository.findById(id));
+			const outcome = await assertionVerifier.verify(body, (id) => clients.findById(id));
 			if (outcome.kind === "ok") {
 				req.oauthClient = outcome.client;
 				next();
@@ -299,7 +308,7 @@ export function createClientAuthMiddleware(
 		// credential check. For a `none` client it is the final answer.
 		let client: PublicClient | null;
 		try {
-			client = await clientRepository.findById(clientId);
+			client = await clients.findById(clientId);
 		} catch (err) {
 			// Fail-closed: repository unavailability must not grant access — and
 			// is not the client's fault either.
@@ -368,7 +377,7 @@ export function createClientAuthMiddleware(
 
 		let authenticated: PublicClient | null;
 		try {
-			authenticated = await clientRepository.authenticate(clientId, secret);
+			authenticated = await clients.authenticate(clientId, secret);
 		} catch (err) {
 			repositoryUnavailable(res, "authenticate", clientId, err);
 			return;

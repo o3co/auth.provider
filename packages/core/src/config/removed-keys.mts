@@ -39,7 +39,7 @@
  *
  * `z.preprocess` compiles to a pipe the `@o3co/ts.hocon` zod bridge does not
  * descend into, so every field under a wrapped section must coerce on its own
- * (`coerceBooleanFromEnv`, `z.coerce.number()`).
+ * (`coerceBooleanFromEnv`, `wholeNumberFromEnv`).
  *
  * Not for a value removed from a live enum (Zod's error names the accepted
  * values) or a key reshaped in place (`LEGACY_JWT_FIELDS`, whose message is a
@@ -333,6 +333,17 @@ export function findRenamedVariables<V extends RenamedVariable>(
 		if (rename.to === null) return [{ ...rename, state: "removed" }];
 		return [{ ...rename, state: current === null ? "unset" : "different" }];
 	});
+}
+
+/**
+ * Every name `config`'s `renamed-variables` section captures set — a string,
+ * the empty one included — in capture order; none when it has no such
+ * section. Names alone: a variable may carry a secret.
+ */
+export function setCaptures(config: unknown): readonly string[] {
+	const section = readOwn(config, [RENAMED_VARIABLES_SECTION]);
+	if (!isPlainObject(section)) return [];
+	return Object.keys(section).filter((name) => typeof capturedIn(section, name) === "string");
 }
 
 /** `config` without the reserved `renamed-variables` section; `config` itself when it has none. */

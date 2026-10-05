@@ -199,7 +199,9 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 			issuer: ISSUER,
 			actions: TEST_ACTIONS,
 		}).get(AUTHORITY);
-		expect(mergeAdmission(decision, session, registered as never)).toMatchObject({
+		expect(
+			mergeAdmission(decision, session, registered as never, recordingStoreOf(session)),
+		).toMatchObject({
 			outcome: "step_up",
 			requirement: AUTHORITY,
 			page: { url: "/verifier", params: {}, href: `${ISSUER}/verifier` },
@@ -220,30 +222,40 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 				],
 				{ issuer: ISSUER, actions: TEST_ACTIONS },
 			).get(name);
-			expect(() => mergeAdmission(decision, session, plain as never), name).toThrow(
-				/does not declare the second-factor authority/,
-			);
 			expect(
-				() => mergeAdmission({ outcome: "met", acr: undefined }, session, plain as never),
+				() => mergeAdmission(decision, session, plain as never, recordingStoreOf(session)),
+				name,
+			).toThrow(/does not declare the second-factor authority/);
+			expect(
+				() =>
+					mergeAdmission(
+						{ outcome: "met", acr: undefined },
+						session,
+						plain as never,
+						recordingStoreOf(session),
+					),
 				name,
 			).toThrow(/does not declare the second-factor authority/);
 		}
 	});
 
 	it("maps a row that names no requirement with no authority given — what a composition without one registers — and throws for one that names it", () => {
-		expect(mergeAdmission({ outcome: "met", acr: MFA }, session, undefined)).toEqual({
+		const store = recordingStoreOf(session);
+		expect(mergeAdmission({ outcome: "met", acr: MFA }, session, undefined, store)).toEqual({
 			outcome: "admitted",
 			session,
 			view: viewOf(session, true),
 			acr: MFA,
 		});
-		expect(mergeAdmission({ outcome: "unmet", requirement: "acr" }, session, undefined)).toEqual({
+		expect(
+			mergeAdmission({ outcome: "unmet", requirement: "acr" }, session, undefined, store),
+		).toEqual({
 			outcome: "unmet",
 			requirement: "acr",
 			session,
 		});
 		expect(
-			mergeAdmission({ outcome: "reauthenticate", requirement: "acr" }, session, undefined),
+			mergeAdmission({ outcome: "reauthenticate", requirement: "acr" }, session, undefined, store),
 		).toEqual({ outcome: "reauthenticate", requirement: "acr", session });
 		for (const named of [
 			decision,
@@ -251,7 +263,7 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 			{ outcome: "unmet", requirement: "baseline" } as const,
 			{ outcome: "reauthenticate", requirement: "baseline" } as const,
 		]) {
-			expect(() => mergeAdmission(named, session, undefined), JSON.stringify(named)).toThrow(
+			expect(() => mergeAdmission(named, session, undefined, store), JSON.stringify(named)).toThrow(
 				/names the second-factor authority, and none is given/,
 			);
 		}
@@ -268,14 +280,14 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 			],
 			{ issuer: ISSUER, allowAnyReach: true, actions: TEST_ACTIONS },
 		).get(AUTHORITY);
-		expect(() => mergeAdmission(decision, session, pageless as never)).toThrow(
-			/registered no step-up page/,
-		);
+		expect(() =>
+			mergeAdmission(decision, session, pageless as never, recordingStoreOf(session)),
+		).toThrow(/registered no step-up page/);
 		const registered = resolverForTests([authority("required", MERGE_REACH.installed)], {
 			issuer: ISSUER,
 			actions: TEST_ACTIONS,
 		}).get(AUTHORITY);
-		expect(() => mergeAdmission(decision, null, registered as never)).toThrow(
+		expect(() => mergeAdmission(decision, null, registered as never, undefined)).toThrow(
 			/a step-up needs a session/,
 		);
 	});
@@ -298,16 +310,19 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 		).toMatchObject({ outcome: "admitted", view: { secondFactorRecordable: true } });
 	});
 
-	it("without a store, builds the view over the store of the row that holds the session", () => {
+	it("handed no store, builds the view over none: the field is false, whatever row holds the session", () => {
 		const row = MERGE_ROW_GROUPS.flatMap((group) => group.rows).find(
 			(candidate) =>
 				candidate.session !== null &&
-				candidate.storeRecords === false &&
+				candidate.storeRecords === undefined &&
 				candidate.expected.outcome === "met",
 		);
-		if (row === undefined)
-			throw new Error("the merge rows hold no met row over a store that cannot record");
-		expect(mergeAdmission(row.expected, row.session, undefined)).toMatchObject({
+		if (row?.session == null)
+			throw new Error("the merge rows hold no met row over a recording store");
+		expect(
+			mergeAdmission(row.expected, row.session, undefined, mergeSessionStore(row)),
+		).toMatchObject({ outcome: "admitted", view: { secondFactorRecordable: true } });
+		expect(mergeAdmission(row.expected, row.session, undefined, undefined)).toMatchObject({
 			outcome: "admitted",
 			view: { secondFactorRecordable: false },
 		});
@@ -319,9 +334,9 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 			secondFactorAuthority: true,
 			stepUpPage: { ...PAGE, href: `${ISSUER}/verifier` },
 		};
-		expect(() => mergeAdmission(decision, session, copy as never)).toThrow(
-			/not a registered requirement/,
-		);
+		expect(() =>
+			mergeAdmission(decision, session, copy as never, recordingStoreOf(session)),
+		).toThrow(/not a registered requirement/);
 	});
 });
 
@@ -620,7 +635,7 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 		});
 	});
 
-	it("reads the store's capability once, as admission reads the record into its view, and never without a record", async () => {
+	it("reads the store's capability once per reading of a live record — the view's from the first — and never without a record", async () => {
 		let reads = 0;
 		const counting = (record: UserSession): UserSessionStore =>
 			Object.defineProperty(storeOf(record), "recordSecondFactor", {
@@ -636,7 +651,8 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 			expect(admission, JSON.stringify(acrValues)).toMatchObject({
 				view: { secondFactorRecordable: true },
 			});
-			expect(reads, JSON.stringify(acrValues)).toBe(1);
+			// The requirement was asked, so the record is read a second time.
+			expect(reads, JSON.stringify(acrValues)).toBe(2);
 		}
 		reads = 0;
 		const gone = await admitSession(

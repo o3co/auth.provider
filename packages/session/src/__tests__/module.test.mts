@@ -31,7 +31,9 @@ import {
 	coreConfigForTests,
 	createTestApp,
 	createTestCsrfTokenSigner,
+	createTestFederationSettings,
 	createTestSessionCookiePolicy,
+	federationTypeForTests,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -79,7 +81,6 @@ function makeFederationTokenStore(): FederationTokenStore {
 		async get() {
 			return null;
 		},
-		async update() {},
 		async removeBySid() {},
 		async delete() {},
 	} as unknown as FederationTokenStore;
@@ -141,10 +142,10 @@ const refreshTokenFamilyRevocationModule = defineModule({
 });
 
 /**
- * Stub federation module — contributes `federations.stub` + the paired
- * `federationRedirectPolicies.stub`. Needed for any test that exercises the
- * boot path with at least one enabled federation in config (otherwise the
- * planner's pairing invariant would fail to satisfy from config alone).
+ * The provider of the enabled `stub` entry. The federation type `stub`
+ * registers it, with a redirect policy beside it, for any test that boots
+ * with at least one enabled federation in config (an enabled entry is handled
+ * by the module that registers its type).
  */
 const stubFederationProvider: FederationProvider = {
 	name: "stub",
@@ -153,19 +154,8 @@ const stubFederationProvider: FederationProvider = {
 	exchangeCode: async () => ({ issuer: "https://example.com", sub: "user-1", expiresAt: null }),
 };
 
-const stubFederationModule = defineModule({
-	name: "test:stub-federation",
-	contributes: {
-		federations: {
-			stub: () => stubFederationProvider,
-		},
-		federationRedirectPolicies: {
-			stub: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	},
+const stubFederationModule = federationTypeForTests("stub", {
+	provider: () => stubFederationProvider,
 });
 
 const baseTestModules = [
@@ -193,10 +183,17 @@ describe("sessionModule (static manifest)", () => {
 		expect(sessionModule.name).toBe("session");
 	});
 
+	it("reads its own section and core's federationSettings, never the whole configuration", () => {
+		expect(sessionModule.requires).toContain("federationSettings");
+		expect(sessionModule.requires).not.toContain("config");
+		expect(sessionModule.optional ?? []).not.toContain("config");
+		expect(sessionModule.configSchema).toBeUndefined();
+	});
+
 	it("declares its dep set in `requires`, without the oauth package's sessionRPRegistry, sessionFamilyIndex or refreshTokenFamilyRevocation", () => {
 		expect(sessionModule.requires).toEqual(
 			expect.arrayContaining([
-				"config",
+				"federationSettings",
 				"userRepository",
 				"userSessionStore",
 				"federationTokenStore",
@@ -243,15 +240,16 @@ describe("sessionModule (boot integration)", () => {
 		await handle.dispose();
 	});
 
-	it("registers a federation provider contributed via per-federation module", async () => {
+	it("registers the provider of an enabled federation through the module of its type", async () => {
 		const base = makeValidAppConfig();
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					stub: {
 						enabled: true,
+						type: "stub",
 						clientId: "id",
 						clientSecret: "secret",
 						callbackURL: "https://example.com/cb",
@@ -272,10 +270,11 @@ describe("sessionModule (boot integration)", () => {
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					stub: {
 						enabled: true,
+						type: "stub",
 						clientId: "id",
 						clientSecret: "secret",
 						// callbackURL intentionally absent
@@ -299,10 +298,11 @@ describe("sessionModule (boot integration)", () => {
 		const config: AppConfig = {
 			...base,
 			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
+				declaredAbsent: ["auditSink", "rateLimiter"],
 				federations: {
 					disabledFed: {
 						enabled: false,
+						type: "stub",
 						// no callbackURL — must NOT throw because disabled
 					} as never,
 				},
@@ -368,20 +368,6 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		requirements?: readonly SessionRequirement[];
 	}): Promise<request.Response> {
 		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
-				federations: {
-					stub: {
-						enabled: true,
-						clientId: "id",
-						clientSecret: "secret",
-						callbackURL: "https://example.com/session/oauth/federation/stub/callback",
-					},
-				},
-			}),
-		} as unknown as AppConfig;
 		const record = {
 			sid: "s-1",
 			sub: "user-1",
@@ -397,7 +383,12 @@ describe("sessionModule — the link routes are a consumer of session admission"
 			handler: express.RequestHandler;
 		};
 		const contribution = factory({
-			config,
+			federationSettings: createTestFederationSettings({
+				stub: {
+					type: "stub",
+					callbackURL: "https://example.com/session/oauth/federation/stub/callback",
+				},
+			}),
 			section: base.session,
 			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			federationProviders: new Map([["stub", stubFederationProvider]]),
@@ -488,13 +479,11 @@ describe("sessionModule — the password login is a consumer of session admissio
 	 */
 	async function passwordLogin(requirements: readonly SessionRequirement[]) {
 		const base = makeValidAppConfig();
-		const config = { ...base } as unknown as AppConfig;
 		const factory = sessionModule.contributes?.routes?.[0] as unknown as (deps: unknown) => {
 			id: string;
 			handler: express.RequestHandler;
 		};
 		const contribution = factory({
-			config,
 			section: base.session,
 			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			deploymentMode: "single",
@@ -557,12 +546,12 @@ describe("sessionModule — the password login is a consumer of session admissio
 });
 
 // ---------------------------------------------------------------------------
-// The login throttle's per-process fallback is decided by core's
-// `deploymentMode` slot, which core fills from `core.deployment.mode`: the module
-// reads nothing of `deployment` itself.
+// The login's per-process attempt counting, with no attemptCounter wired, is
+// decided by core's `deploymentMode` slot, which core fills from
+// `core.deployment.mode`: the module reads nothing of `deployment` itself.
 // ---------------------------------------------------------------------------
 
-describe("sessionModule — the login throttle reads the deploymentMode slot", () => {
+describe("sessionModule — the login's attempt limit reads the deploymentMode slot", () => {
 	const spyLogger = () => {
 		const warn = vi.fn();
 		const logger = {
@@ -606,26 +595,54 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 		expect(sessionModule.requires).toContain("deploymentMode");
 	});
 
-	it('refuses the per-process fallback when the slot says "multi", whatever the configuration\'s deployment says', () => {
+	it('refuses per-process counting when the slot says "multi", whatever the configuration\'s deployment says', () => {
 		expect(() => sessionRoutes("multi", { mode: "single" }, spyLogger().logger)).toThrow(
-			expect.objectContaining({
-				name: "BootError",
-				reason: "replica-unsafe-adapter",
-				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
-			}),
+			/core\.deployment\.mode is "multi" but no shared attemptCounter is wired for "login"/,
 		);
 	});
 
 	it('is silent when the slot says "single" and warns when it says "unset", whatever the configuration\'s deployment says', () => {
 		const single = spyLogger();
 		expect(sessionRoutes("single", { mode: "multi" }, single.logger).id).toBe("session-routes");
-		expect(single.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"login_rate_limiter_not_shared",
-		);
+		expect(single.warn).not.toHaveBeenCalledWith(expect.anything(), "attempt_counter_not_shared");
 		const unset = spyLogger();
 		sessionRoutes("unset", { mode: "multi" }, unset.logger);
-		expect(unset.warn).toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
+		expect(unset.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ tag: "login" }),
+			"attempt_counter_not_shared",
+		);
+	});
+
+	it("through createApp, boots under core.deployment.mode = multi on the attemptCounter slot's counter, without a warning", async () => {
+		const { logger, warn } = spyLogger();
+		const base = makeValidAppConfig();
+		const consume = vi.fn(async () => ({
+			allowed: true,
+			remaining: 1,
+			resetAt: new Date(Date.now() + 60_000),
+		}));
+		const handle = await createTestApp({
+			modules: [
+				...baseTestModules,
+				defineModule({
+					name: "test:attempt-counter",
+					provides: { attemptCounter: () => ({ consume }) },
+				}),
+			],
+			bootstrapComponents: {
+				config: withSessionCaptures({
+					...base,
+					core: { ...base.core, deployment: { mode: "multi" } },
+				}),
+				pathResolver: (s: string) => s,
+				logger,
+			} as never,
+		});
+		try {
+			expect(warn).not.toHaveBeenCalledWith(expect.anything(), "attempt_counter_not_shared");
+		} finally {
+			await handle.dispose();
+		}
 	});
 
 	it.each([
@@ -634,7 +651,7 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 		["mounted with the warning", "an empty deployment section", {}],
 		["mounted with the warning", "no deployment section", undefined],
 	] as const)(
-		"through createApp, the per-process login limiter is %s under %s",
+		"through createApp, per-process login counting is %s under %s",
 		async (outcome, _what, deployment) => {
 			const { logger, warn } = spyLogger();
 			const base = makeValidAppConfig();
@@ -652,15 +669,15 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 			if (outcome === "refused at boot") {
 				await expect(boot).rejects.toMatchObject({
 					reason: "contribute-factory-failed",
-					cause: { reason: "replica-unsafe-adapter", details: { modules: ["session"] } },
+					cause: {
+						message: expect.stringContaining('no shared attemptCounter is wired for "login"'),
+					},
 				});
 				return;
 			}
 			const handle = await boot;
 			try {
-				const warned = warn.mock.calls.some(
-					([, event]) => event === "login_rate_limiter_not_shared",
-				);
+				const warned = warn.mock.calls.some(([, event]) => event === "attempt_counter_not_shared");
 				expect(warned).toBe(outcome === "mounted with the warning");
 			} finally {
 				await handle.dispose();

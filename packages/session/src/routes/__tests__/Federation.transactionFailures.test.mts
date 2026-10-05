@@ -31,7 +31,7 @@
 
 import type { FederationProvider, Logger } from "@o3co/auth-provider-core";
 import { codeChallenge } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -97,11 +97,11 @@ type Knobs = {
 	malformedSessionStore?: boolean;
 	/** Make one store method fail. */
 	failOn?: "get" | "set" | "destroy" | ReadonlyArray<"get" | "set" | "destroy">;
+	/** Make the store's `destroy` throw this value, whatever it is, instead of answering. */
+	destroyThrows?: { readonly reason: unknown };
 	/** Register this callback URL instead of a well-formed one. */
 	callbackUrl?: string | null;
-	/** Passed straight through as the router's `config`. */
-	config?: unknown;
-	/** Passed straight through; omit to let the router derive it from `config`. */
+	/** Passed straight through; absent is the harness's name. */
 	cookieName?: string;
 	/** Make the session's own `save` fail, for the query-mode branch. */
 	failSessionSave?: boolean;
@@ -170,6 +170,7 @@ function buildApp(knobs: Knobs = {}) {
 			backing.set(sid, record, cb);
 		},
 		destroy(sid: string, cb?: (err?: unknown) => void) {
+			if (knobs.destroyThrows) throw knobs.destroyThrows.reason;
 			if (fails("destroy")) return cb?.(new Error("store down"));
 			backing.destroy(sid, cb);
 		},
@@ -197,8 +198,9 @@ function buildApp(knobs: Knobs = {}) {
 		next();
 	});
 
+	const apple = makeApple();
 	const providers = new Map<string, FederationProvider>([
-		["apple", makeApple()],
+		["apple", apple],
 		["query-idp", makeQueryProvider()],
 	]);
 	const callbackUrls = new Map<string, string>([["query-idp", QUERY_CALLBACK_URL]]);
@@ -207,11 +209,7 @@ function buildApp(knobs: Knobs = {}) {
 	app.use(
 		createRouter(express, {
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
-			// `in` rather than `??`, so a test can pass `null` as the config and
-			// still reach the router's own fallback.
-			config: ("config" in knobs
-				? knobs.config
-				: { "session-store": { name: "harness.session" } }) as never,
+			federationSettings: createTestFederationSettings(),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map([["apple", makePermissivePolicy()]]) as never,
 			providerCallbackUrls: callbackUrls,
@@ -219,14 +217,12 @@ function buildApp(knobs: Knobs = {}) {
 			userSessionStore: makeUserSessionStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			federationTokenStore: makeFederationTokenStore(),
-			...(knobs.cookieName === undefined
-				? {}
-				: { federationTransactionCookieName: knobs.cookieName }),
+			federationTransactionCookieName: knobs.cookieName ?? DEFAULT_COOKIE_NAME,
 			...(knobs.logger === undefined ? {} : { logger: knobs.logger }),
 		}),
 	);
 
-	return { app, records };
+	return { app, records, apple };
 }
 
 /** Start a flow and return the transaction cookie to replay. */
@@ -415,6 +411,50 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 		});
 	});
 
+	it.each([
+		["undefined", undefined],
+		["null", null],
+		["0", 0],
+		["an empty string", ""],
+	])(
+		"503s rather than exchanging the code when the delete rejects with %s",
+		async (_name, reason) => {
+			// `Promise.reject()` with no argument rejects with `undefined`: a
+			// falsy reason is still a failed delete, and the transaction is still
+			// replayable.
+			const { app, records } = buildApp();
+			const flow = await start(app, records);
+
+			const logger = spyLogger();
+			const {
+				app: undeletable,
+				records: sharedRecords,
+				apple,
+			} = buildApp({ destroyThrows: { reason }, logger });
+			sharedRecords.set(
+				`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`,
+				records.get(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`),
+			);
+			const exchangeCode = vi.spyOn(apple, "exchangeCode");
+
+			const res = await request(undeletable)
+				.post("/oauth/federation/apple/callback")
+				.set("Cookie", flow.cookie)
+				.type("form")
+				.send({ state: flow.state, code: "c" });
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual(STORE_UNAVAILABLE);
+			expect(exchangeCode).not.toHaveBeenCalled();
+			expectOneErrorLine(
+				logger,
+				"federation_callback_store_unavailable",
+				{ store: "federation_transaction", step: "delete" },
+				false,
+			);
+		},
+	);
+
 	it("still refuses cleanly when the provider has no callback URL to scope the cleared cookie to", async () => {
 		const { app } = buildApp({ callbackUrl: null });
 		const res = await request(app)
@@ -427,33 +467,13 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 	});
 });
 
-describe("the transaction cookie's name follows the deployment's session cookie", () => {
-	const cookieNameFrom = async (config: unknown): Promise<string> => {
-		const { app } = buildApp({ config });
+describe("the transaction cookie is named what the router is given", () => {
+	it("issues it under federationTransactionCookieName, the session module's name for it", async () => {
+		const { app } = buildApp({ cookieName: "__Secure-acme.sid.federation" });
 		const res = await request(app).get("/oauth/federation/apple");
 		const header = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
 			c.includes(".federation="),
 		);
-		return header?.split("=")[0] ?? "";
-	};
-
-	it("derives it from the configuration's session-store.name, dropping a __Host- prefix it could not satisfy", async () => {
-		expect(await cookieNameFrom({ "session-store": { name: "__Host-acme.sid" } })).toBe(
-			"__Secure-acme.sid.federation",
-		);
-	});
-
-	it("falls back to the reference default when the config carries no session name", async () => {
-		// Only reachable through a hand-built AppConfig; the module wiring always
-		// passes the real name.
-		for (const config of [
-			{},
-			{ "session-store": {} },
-			{ "session-store": { name: "" } },
-			null,
-			"nonsense",
-		]) {
-			expect(await cookieNameFrom(config)).toBe("__Secure-auth.session.federation");
-		}
+		expect(header?.split("=")[0]).toBe("__Secure-acme.sid.federation");
 	});
 });

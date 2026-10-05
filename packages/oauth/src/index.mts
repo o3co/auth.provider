@@ -19,13 +19,11 @@
 export { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 // Client ID Metadata Documents — a client whose client_id is the https
 // URL of its own registration (draft-ietf-oauth-client-id-metadata-document).
+// The fallback that resolves them is the router's own, installed from
+// `oauth.clientIdMetadataDocuments`; only the predicates are exported.
 export {
-	type ClientIdMetadataDocumentOptions,
-	type ClientIdMetadataDocumentResolver,
-	createClientIdMetadataDocumentResolver,
 	isClientIdMetadataDocumentClient,
 	isClientIdMetadataDocumentUrl,
-	withClientIdMetadataDocuments,
 } from "./clients/clientIdMetadataDocument.mjs";
 export {
 	type BroadcastBackchannelLogoutOptions,
@@ -60,14 +58,17 @@ export {
 } from "./middleware/clientAssertion.mjs";
 export type { ClientAuthMiddlewareOptions } from "./middleware/clientAuth.mjs";
 export { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
-export { oauthModule } from "./module.mjs";
+export { oauthEndpointsModule, oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
-export { oauthSessionModule } from "./oauthSession.mjs";
+export { oauthSessionGrantModule, oauthSessionModule } from "./oauthSession.mjs";
 export { createOAuthRouter } from "./routes.mjs";
+// `oauth {}` as the oauth module's schema parses it: what `createOAuthRouter`
+// takes as its `section`.
+export type { OAuthSection } from "./section.mjs";
 // The oauthTokenSettings slot's value, which oauthModule provides;
 // exported so a composition that provides the slot without the module
 // resolves it the same way.
-export { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
+export { type OAuthTokenSection, oauthTokenSettingsFrom } from "./tokenSettings.mjs";
 export {
 	extractConfirmation,
 	type IntrospectResponse,

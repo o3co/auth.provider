@@ -26,10 +26,10 @@
  * without the registry are a boot refusal.
  *
  * `federation-grants.enabled = false` in the package's `reference.conf`:
- * installing the package does not turn on offline delegation. A disabled
- * deployment answers a 404 that names no feature and reads none of the
- * feature's configuration or components (README, "A disabled deployment names
- * no feature and runs nothing").
+ * installing the package does not turn on offline delegation. The key is the
+ * routes module's switch (`section.isEnabled`): off, the module registers
+ * nothing — no route, admission action or rate-limit prefix — and reads none
+ * of the feature's configuration or components.
  */
 
 import {
@@ -50,6 +50,7 @@ import {
 	type SupportsSessionsOnlyRevocation,
 	supportsDelegatedAuthorization,
 	type UserSessionStore,
+	wholeNumberFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import {
@@ -60,18 +61,13 @@ import {
 import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { createFederationGrantBackground, federationGrantsCleanupTailMs } from "./background.mjs";
 import {
-	createDisabledFederationGrantBrowserRouter,
 	createFederationGrantBrowserRouter,
 	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
 	FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
 	type FederationGrantDelegatedAuthorizer,
 } from "./browserRoutes.mjs";
 import { resolveFederationGrantConnections } from "./connections.mjs";
-import {
-	createDisabledFederationGrantRouter,
-	createFederationGrantRouter,
-	FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
-} from "./routes.mjs";
+import { createFederationGrantRouter, FEDERATION_GRANTS_RATE_LIMIT_PREFIX } from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 
 /** A duration in whole units, read strictly from a number or a variable's decimal string. */
@@ -119,6 +115,10 @@ export const federationGrantsConfigSchema = z
 		refreshLockTtlMs: duration(z.number().int().positive()),
 		lockWaitMs: duration(z.number().int().nonnegative()),
 		persistRetryBudgetMs: duration(z.number().int().positive()),
+		// The rotation budget: upstream refresh-token rotations a grant may
+		// take in a window, and the window in seconds.
+		rotationBudget: wholeNumberFromEnv(z.number().int().positive()).optional(),
+		rotationWindow: duration(z.number().int().positive()),
 		// Whether a subject-wide revocation may be asked to leave this subject's
 		// established grants standing: an allowance the caller must use.
 		allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),
@@ -196,17 +196,18 @@ const issuerOf = (deps: FederationGrantsModuleDeps): string =>
 		? deps.config.oauth.jwt.issuer
 		: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).issuer;
 
-const isEnabled = (deps: FederationGrantsModuleDeps): boolean => deps.section?.enabled === true;
-
 /**
  * An enabled deployment with nowhere to keep grants would
  * authenticate a client and then answer 503 to everything, having accepted
- * `enabled = true` as if it meant something.
+ * `enabled = true` as if it meant something. A store without the rotation
+ * budget's members (one written against an earlier port, or in plain
+ * JavaScript) would answer 503 to every refresh instead.
  */
 const requireStore = (
 	deps: FederationGrantsModuleDeps,
 ): NonNullable<FederationGrantsModuleDeps["federationGrantStore"]> => {
-	if (deps.federationGrantStore === undefined) {
+	const store = deps.federationGrantStore;
+	if (store === undefined) {
 		throw new Error(
 			"federationGrantsModule: federation-grants.enabled = true requires a " +
 				"federationGrantStore component. A grant is a user's standing consent that " +
@@ -216,28 +217,26 @@ const requireStore = (
 				"redisFederationGrantStoreModule.",
 		);
 	}
-	return deps.federationGrantStore;
+	const members: Partial<typeof store> = store;
+	if (typeof members.takeRotation !== "function" || typeof members.refundRotation !== "function") {
+		throw new Error(
+			"federationGrantsModule: the federationGrantStore component does not implement " +
+				"takeRotation and refundRotation, which the FederationGrantStore port requires. " +
+				"They keep the per-grant rotation budget that bounds upstream refresh-token " +
+				"rotations; implement both, or install the bundled memory store (single replica " +
+				"only) or redisFederationGrantStoreModule.",
+		);
+	}
+	return store;
 };
 
 /**
- * Both routes are throttled before client authentication, so
- * that repeated unauthenticated hits are bounded before they reach a
- * repository lookup — and what happens when the limiter backend is down is the
- * limiter's own policy (`RateLimiter.failMode`), not this module's to choose.
+ * The deployment's limiter, when it wires one: both routers throttle on it,
+ * and without one they let requests through. Its absence is declared under
+ * core's policy for the slot, not refused here.
  */
-const requireLimiter = (
-	deps: FederationGrantsModuleDeps,
-): NonNullable<FederationGrantsModuleDeps["rateLimiter"]> => {
-	if (deps.rateLimiter === undefined) {
-		throw new Error(
-			"federationGrantsModule: federation-grants.enabled = true requires a rateLimiter " +
-				"component. These routes take an opaque grant id in the path and answer the " +
-				"same 404 for an unknown one, for another client's and for another subject's " +
-				"— which is only a defence while the number of guesses is bounded.",
-		);
-	}
-	return deps.rateLimiter;
-};
+const limiterOf = (deps: FederationGrantsModuleDeps) =>
+	deps.rateLimiter === undefined ? {} : { rateLimiter: deps.rateLimiter };
 
 /**
  * Can this deployment act on each connection for a user who is not present?
@@ -295,11 +294,8 @@ const requireDelegatedCapability = (
 /**
  * The audit sink is optional to wire, not optional to decide — here for the
  * events an operator needs most: every disclosure of a credential that works
- * while nobody is watching. Checked here rather than through
- * `absencePolicies`, which the boot planner applies whether or not the
- * feature is on: with `enabled = false` a deployment must owe nothing, not
- * even a configuration declaration. The message is built from the shared
- * policy so it cannot drift from every other module's for the same slot.
+ * while nobody is watching. The message is built from the shared policy so it
+ * cannot drift from every other module's for the same slot.
  */
 const requireAuditDecision = (deps: FederationGrantsModuleDeps): void => {
 	if (deps.auditSink !== undefined) return;
@@ -461,6 +457,7 @@ export const federationGrantsModule = defineModule<
 			"federationGrants.consent.url": "consent.url",
 			"federationGrants.connections": unbound("connections"),
 		},
+		isEnabled: (section) => section?.enabled === true,
 	},
 	requires: REQUIRES,
 	optional: OPTIONAL,
@@ -468,23 +465,13 @@ export const federationGrantsModule = defineModule<
 		// What the browser half admits.
 		admissionActions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
 		// The prefixes both routers limit under, claimed with no budget of their
-		// own, whether or not the feature is enabled.
+		// own.
 		rateLimitBudgets: {
 			[FEDERATION_GRANTS_RATE_LIMIT_PREFIX]: () => null,
 			[FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX]: () => null,
 		},
 		routes: [
 			(deps: FederationGrantsModuleDeps) => {
-				if (!isEnabled(deps)) {
-					// Nothing below this line is read: not a component, not a
-					// connection, not the rest of the configuration. That is the
-					// whole of what `enabled = false` promises.
-					return {
-						id: "federation-grants",
-						mountPath: FEDERATION_GRANTS_MOUNT_PATH,
-						handler: createDisabledFederationGrantRouter(),
-					};
-				}
 				// In this order, so that the most fundamental omission is the one
 				// an operator is told about: a deployment with no store has not
 				// half-configured the feature, it has not configured it.
@@ -499,7 +486,6 @@ export const federationGrantsModule = defineModule<
 					subjectRevocation: deps.subjectRevocation,
 					federationGrantStore: store,
 				});
-				const rateLimiter = requireLimiter(deps);
 				const limits = resolveFederationGrantRetrievalLimits(deps.section);
 				const connections = resolveFederationGrantConnections(deps.section, deps.config);
 				requireDelegatedCapability(deps, connections);
@@ -546,7 +532,7 @@ export const federationGrantsModule = defineModule<
 						},
 						clientRepository: deps.clientRepository,
 						issuer: issuerOf(deps),
-						rateLimiter,
+						...limiterOf(deps),
 						...(deps.replaySeenSet === undefined ? {} : { replaySeenSet: deps.replaySeenSet }),
 						fetch: createOutboundFetch({ config: deps.config, source: "registration" }),
 						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
@@ -561,13 +547,6 @@ export const federationGrantsModule = defineModule<
 			// and sends a signed-in user to the login page. `after` makes a
 			// composition without the middleware a boot error instead.
 			(deps: FederationGrantsModuleDeps) => {
-				if (!isEnabled(deps)) {
-					return {
-						id: "federation-grants-browser",
-						mountPath: FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
-						handler: createDisabledFederationGrantBrowserRouter(),
-					};
-				}
 				// The JSON contribution has already refused everything shared —
 				// no store, no boundary, no consent page, no intent store — in the
 				// order an operator should hear it; this only asks what the
@@ -608,7 +587,7 @@ export const federationGrantsModule = defineModule<
 						login: acquisition.login,
 						csrfGuard: requireCsrfGuard(deps),
 						issuer: issuerOf(deps),
-						rateLimiter: requireLimiter(deps),
+						...limiterOf(deps),
 						background: deps.federationGrantBackground,
 						// The GRANTS boundary, for the callback's backstop and re-read.
 						grantsBoundary: boundaryFor(revocation),

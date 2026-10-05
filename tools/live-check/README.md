@@ -1,6 +1,6 @@
 # live-check — a real IdP login against this checkout
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03
 
 A hand-run check: boot the standalone template from the working tree with its
 **default** configuration, sign in at a real identity provider in a browser,
@@ -131,6 +131,7 @@ browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalo
   a check needs that has no environment form), written at `start`, removed at
   `stop`, and git-ignored by the template as `config/*.local.conf`. Everything
   else goes in through the environment switches the template documents.
+- It runs with MFA off (`MFA_MODE=off`): the check is about federation.
 - The Store accepts every identity of the federation as a user, so the check
   never fails for want of a local account. **That is what makes this rig unfit
   for anything but a loopback check** — never expose either port. The front

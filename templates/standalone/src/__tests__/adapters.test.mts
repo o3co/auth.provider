@@ -32,13 +32,7 @@ import { defineModule } from "@o3co/auth-provider-core";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildModules } from "#/buildModules.mjs";
-import {
-	expectedSessionRequirements,
-	readOwnLayers,
-	readSwitches,
-	resolveConfigPaths,
-	resolveForBoot,
-} from "#/configPath.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "#/configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -58,6 +52,9 @@ function ownFiles(hocon?: string): string[] {
 	writeFileSync(file, hocon);
 	return [file, envConfPath, applicationConfPath];
 }
+
+/** MFA, on by default, switched off where modules are built: these are about the other adapters. */
+const MFA_OFF: Readonly<Record<string, string>> = { MFA_MODE: "off" };
 
 /** Phase one's reading of `adapters`, under `env` and an operator's `hocon`. */
 const adaptersFrom = (env: Record<string, string> = {}, hocon?: string) =>
@@ -144,13 +141,14 @@ describe("the shipped selections", () => {
 	it("reads every selection from the template's reference.conf, at the values the template ships", () => {
 		expect(adaptersFrom()).toEqual({
 			rateLimiter: "memory",
+			attemptCounter: "memory",
 			userSessionStores: "memory",
 			accessTokenDenylist: "redis",
 			replaySeenSet: "redis",
 			consentStore: "none",
 			federationTokenStore: "memory",
-			federationGrantStore: "redis",
-			federationGrantIntentStore: "redis",
+			federationGrantStore: "none",
+			federationGrantIntentStore: "none",
 			mfaFactorStore: "memory",
 			mfaTransactionStore: "memory",
 			codeRepository: "redis",
@@ -166,6 +164,13 @@ describe("the shipped selections", () => {
 			expect(adaptersFrom({ [`ADAPTERS_${name}`]: value })[key]).toBe(value);
 		},
 	);
+
+	it("reads adapters.attemptCounter from ADAPTERS_ATTEMPT_COUNTER", () => {
+		expect(adaptersFrom({ ADAPTERS_ATTEMPT_COUNTER: "redis" }).attemptCounter).toBe("redis");
+		expect(refusal({ ADAPTERS_ATTEMPT_COUNTER: "memcached" }).message).toMatch(
+			/adapters\.attemptCounter/,
+		);
+	});
 
 	it("reads a selection an operator writes in HOCON", () => {
 		expect(adaptersFrom({}, 'adapters.rateLimiter = "redis"\n').rateLimiter).toBe("redis");
@@ -249,7 +254,7 @@ describe("a variable renamed with a selection", () => {
 
 describe("the modules phase one chooses by the selections", () => {
 	const names = (env: Record<string, string>) =>
-		buildModules(readSwitches(readOwnLayers(ownFiles(), { env })), {
+		buildModules(readSwitches(readOwnLayers(ownFiles(), { env: { ...MFA_OFF, ...env } })), {
 			environment: "production",
 		}).map((module) => module.name);
 
@@ -280,16 +285,66 @@ describe("the modules phase one chooses by the selections", () => {
 		expect(modules).toContain(installed);
 		expect(modules).not.toContain(absent);
 	});
+
+	it("ADAPTERS_ATTEMPT_COUNTER=redis installs redis-attempt-counter over the shared Redis socket; memory installs no counter", () => {
+		const onRedis = names({ ADAPTERS_ATTEMPT_COUNTER: "redis" });
+		expect(onRedis).toContain("redis-attempt-counter");
+		expect(onRedis).toContain("redis-clients");
+		expect(names({ ADAPTERS_ATTEMPT_COUNTER: "memory" })).not.toContain("redis-attempt-counter");
+	});
+});
+
+describe("the federation-grant stores", () => {
+	const namesWith = (env: Record<string, string>) =>
+		buildModules(
+			readSwitches(
+				readOwnLayers(ownFiles(), {
+					env: { ...MFA_OFF, FEDERATION_GRANTS_ENABLED: "true", ...env },
+				}),
+			),
+			{ environment: "production" },
+		).map((module) => module.name);
+	const STORES = [
+		"core-federation-grant-store-memory",
+		"redis-federation-grant-store",
+		"core-federation-grant-intent-store-memory",
+		"redis-federation-grant-intent-store",
+	];
+
+	it("default to none: with the feature on, neither store is installed until one is selected", () => {
+		expect(namesWith({}).filter((name) => STORES.includes(name))).toEqual([]);
+	});
+
+	it("read none from ADAPTERS_FEDERATION_GRANT_STORE and ADAPTERS_FEDERATION_GRANT_INTENT_STORE", () => {
+		expect(
+			adaptersFrom({
+				ADAPTERS_FEDERATION_GRANT_STORE: "none",
+				ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "none",
+			}),
+		).toMatchObject({ federationGrantStore: "none", federationGrantIntentStore: "none" });
+	});
+
+	it.each([
+		["memory", "core-federation-grant-store-memory", "core-federation-grant-intent-store-memory"],
+		["redis", "redis-federation-grant-store", "redis-federation-grant-intent-store"],
+	])("install the %s stores once selected", (value, grants, intents) => {
+		const names = namesWith({
+			ADAPTERS_FEDERATION_GRANT_STORE: value,
+			ADAPTERS_FEDERATION_GRANT_INTENT_STORE: value,
+		});
+		expect(names).toContain(grants);
+		expect(names).toContain(intents);
+	});
 });
 
 describe("boot and the section", () => {
 	it("hands boot no adapters section: the composition root consumed it", () => {
-		const own = readOwnLayers(ownFiles(), { env: {} });
+		const own = readOwnLayers(ownFiles(), { env: MFA_OFF });
 		const switches = readSwitches(own);
 		const resolved = resolveForBoot(
 			own,
 			buildModules(switches, { environment: "production" }),
-			expectedSessionRequirements(switches),
+			switches,
 		);
 		expect(resolved).not.toHaveProperty("adapters");
 	});
@@ -298,7 +353,7 @@ describe("boot and the section", () => {
 		["named adapters", "adapters", undefined],
 		["with its section at adapters.custom", "custom-thing", "adapters.custom"],
 	] as const)("refuses a module %s: its section would never reach boot", (_label, name, at) => {
-		const own = readOwnLayers(ownFiles(), { env: {} });
+		const own = readOwnLayers(ownFiles(), { env: MFA_OFF });
 		const switches = readSwitches(own);
 		const mine = defineModule({
 			name,
@@ -311,7 +366,7 @@ describe("boot and the section", () => {
 			resolveForBoot(
 				own,
 				[...buildModules(switches, { environment: "production" }), mine],
-				expectedSessionRequirements(switches),
+				switches,
 			),
 		).toThrow(new RegExp(`"${name}".*adapters`));
 	});

@@ -31,9 +31,9 @@
  * - the refresh-token family store under `core.deployment.mode = "single"`: memory,
  *   not the shipped Redis, so the single-replica boot opens no sockets;
  * - upstream identity providers: core's fake OpenID Provider, through the
- *   `fetch` option the Google and OIDC adapters take; the config bridges'
- *   values are read as shipped (`googleFederationConfigModule`, the OIDC
- *   package's reader), with only `fetch` added;
+ *   `fetch` option the Google and OIDC federation type modules take: each is
+ *   the module `buildModules` lists, built with that option, and the entries
+ *   it handles are read as shipped;
  * - configuration with no environment form (grant connections, a key ring, a
  *   landing URL): one more HOCON layer above the shipped ones.
  *
@@ -62,23 +62,22 @@ import {
 	terminalErrorHandler,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
+import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import express from "express";
 import helmet from "helmet";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import {
-	expectedSessionRequirements,
+	configDefaultsFor,
 	type OwnLayers,
-	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
 	type Switches,
 } from "#/configPath.mjs";
-import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
-import { requireMfaSecondFactorAuthority } from "#/secondFactorAuthority.mjs";
 
 export const ISSUER = "https://auth.test";
 const OIDC_ISSUER = "https://idp.test";
@@ -96,9 +95,11 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
  * One replica, every store in memory, every feature the template can switch
  * on switched on: the four token grants, the consent step with Client ID
  * Metadata Documents, federation grants, the Google federation and the
- * shipped generic OIDC one.
+ * shipped generic OIDC one. MFA, on by default, is switched off: the suites
+ * about MFA turn it on with `MFA_MODE`.
  */
 export const SINGLE_ENV: Readonly<Record<string, string>> = {
+	MFA_MODE: "off",
 	OAUTH_JWT_ISSUER: ISSUER,
 	// The shipped default algorithm (EdDSA), with the key pair inline.
 	KEY_STORE_LOCAL_PRIVATE_KEY: signingKey.privateKey,
@@ -110,6 +111,7 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_STORAGE_TYPE: "memory",
 	ADAPTERS_USER_SESSION_STORES: "memory",
 	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_ATTEMPT_COUNTER: "memory",
 	ADAPTERS_CODE_REPOSITORY: "memory",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
 	ADAPTERS_REPLAY_SEEN_SET: "memory",
@@ -151,6 +153,8 @@ export const MULTI_ENV: Readonly<Record<string, string>> = {
 	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	ADAPTERS_USER_SESSION_STORES: "redis",
 	ADAPTERS_RATE_LIMITER: "redis",
+	// The login's attempt counter, shared: per process, `multi` refuses the login.
+	ADAPTERS_ATTEMPT_COUNTER: "redis",
 	ADAPTERS_CODE_REPOSITORY: "redis",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
 	ADAPTERS_REPLAY_SEEN_SET: "redis",
@@ -213,8 +217,8 @@ export function ownFiles(): string[] {
  * the modules by — and `reads`, what a module added to the composition reads
  * when it is built — from the composition's own files under `env` over core's
  * `reference.conf`. What the composition expects of session admission is
- * derived from it (`expectedSessionRequirements`), after `config` adjusts it
- * as an operator's layer would.
+ * derived from it (`resolveForBoot`), after `config` adjusts it as an
+ * operator's layer would.
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
@@ -346,14 +350,40 @@ let upstreams: Promise<{ fakes: Upstreams; reset: () => void }> | undefined;
  * run if one did.
  */
 export async function sharedUpstreams(): Promise<Upstreams> {
+	const { fakes, reset } = await madeUpstreams();
+	reset();
+	return fakes;
+}
+
+/** The two fake upstreams, made on first use and never reset here. */
+function madeUpstreams(): Promise<{ fakes: Upstreams; reset: () => void }> {
 	upstreams ??= createUpstreams().then((fakes) => ({
 		fakes,
 		reset: resettable(fakes.oidc, fakes.google),
 	}));
-	const { fakes, reset } = await upstreams;
-	reset();
-	return fakes;
+	return upstreams;
 }
+
+/** A `fetch` that reaches the shared fake upstream `name`. */
+const upstreamFetch =
+	(name: keyof Upstreams): typeof fetch =>
+	async (input, init) =>
+		(await madeUpstreams()).fakes[name].fetch(input, init);
+
+/**
+ * The federation type modules `buildModules` lists, by name, each built as
+ * the template builds it but with a `fetch` that reaches its fake upstream.
+ */
+const UPSTREAM_TYPE_MODULES: ReadonlyMap<string, () => Module> = new Map([
+	[
+		googleFederationTypeModule().name,
+		() => googleFederationTypeModule({ fetch: upstreamFetch("google") }),
+	],
+	[
+		oidcFederationTypeModule().name,
+		() => oidcFederationTypeModule({ fetch: upstreamFetch("oidc") }),
+	],
+]);
 
 /**
  * Snapshots each fake's settings (every property that is not a function) and
@@ -431,52 +461,6 @@ async function createUpstreams(): Promise<Upstreams> {
 			sub: GOOGLE_SUB,
 		}),
 	};
-}
-
-/**
- * What one of the template's config bridges provides for `config`. Read
- * through a record, not the typed slot: a program that loads this file without
- * a federation package's ComponentMap augmentation (`tools/composition` does)
- * has no key to name.
- */
-const bridged = <T,>(module: Module, slot: string, config: AppConfig): T => {
-	const provider = (module.provides as Record<string, unknown> | undefined)?.[slot];
-	if (typeof provider !== "function") throw new Error(`${module.name} provides no ${slot}`);
-	return (provider as (deps: { config: AppConfig }) => T)({ config });
-};
-
-/**
- * The two federation config slots, read by the template's own bridges
- * (`oidcFederationConfigModule`, `googleFederationConfigModule`), with each
- * adapter's `fetch` pointed at its fake upstream. Only for the federations the
- * config enables — which is when `buildModules` lists the bridges.
- */
-async function federationOverrides(
-	config: Switches,
-	upstreams: Upstreams,
-): Promise<Record<string, unknown>> {
-	const overrides: Record<string, unknown> = {};
-	const modules = buildModules(config).map((m) => m.name);
-	if (modules.includes(oidcFederationConfigModule.name)) {
-		const oidc = bridged<Record<string, object>>(
-			oidcFederationConfigModule,
-			"oidcFederationConfigs",
-			config,
-		);
-		overrides.oidcFederationConfigs = Object.fromEntries(
-			Object.entries(oidc).map(([name, entry]) => [
-				name,
-				{ ...entry, fetch: upstreams.oidc.fetch },
-			]),
-		);
-	}
-	if (modules.includes(googleFederationConfigModule.name)) {
-		overrides.googleFederationConfig = {
-			...bridged<object>(googleFederationConfigModule, "googleFederationConfig", config),
-			fetch: upstreams.google.fetch,
-		};
-	}
-	return overrides;
 }
 
 // ---------------------------------------------------------------------------
@@ -594,9 +578,11 @@ export interface ComposeOptions {
 	 * `extraModules` adds reads when it is built (`readSwitches`'s `reads`).
 	 */
 	readonly reads?: readonly string[];
+	/** The deployment's own mail sender modules, handed to `buildModules` as `mailSenderModules`. */
+	readonly mailSenderModules?: readonly Module[];
 	/** Modules added after the template's own, before the order and the outage apply. */
 	readonly extraModules?: (config: Switches) => readonly Module[];
-	/** Components laid over the boot's, beside the federation config slots. */
+	/** Components laid over the boot's (`overrideComponents`). */
 	readonly extraOverrides?: (config: Switches) => Record<string, unknown>;
 	/** Client registrations beside the fixture's own, as `ClientEntrySchema` input. */
 	readonly extraClients?: Readonly<Record<string, Record<string, unknown>>>;
@@ -608,6 +594,11 @@ export interface ComposeOptions {
 	 * handed, as resolved.
 	 */
 	readonly config?: (config: Switches) => Switches;
+	/**
+	 * Adjust phase one's switches alone, after `config`: what only phase one
+	 * reads, such as the Store transport settings a hand-built root passes.
+	 */
+	readonly switches?: (switches: Switches) => Switches;
 	readonly order?: ModuleOrder;
 	readonly outage?: { readonly slot: string; readonly outage: Outage };
 	/** Keep the shipped Redis refresh-token family store (the `multi` boot). */
@@ -627,10 +618,13 @@ export function composedModules(config: Switches, options: ComposeOptions = {}):
 		...buildModules(config, {
 			environment: options.environment ?? "production",
 			repositoriesModule: testRepositoriesModule(options.extraClients, options.extraUsers),
+			...(options.mailSenderModules === undefined
+				? {}
+				: { mailSenderModules: options.mailSenderModules }),
 			...(options.shippedRefreshTokenFamilyStore
 				? {}
 				: { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),
-		}),
+		}).map((module) => UPSTREAM_TYPE_MODULES.get(module.name)?.() ?? module),
 		...(options.extraModules?.(config) ?? []),
 	];
 	if (options.outage) modules = withOutage(modules, options.outage.slot, options.outage.outage);
@@ -669,29 +663,23 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 		{ env },
 	);
 	const switches = resolveConfig(env, options.reads, own);
-	const config = adjust(switches);
-	// `mfa.mode`, read once, as `app.mts` reads it.
-	const mfaMode = readMfaMode(config);
+	const config = options.switches ? options.switches(adjust(switches)) : adjust(switches);
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
-	// reference.conf, which createApp parses once.
-	const resolved = adjust(resolveForBoot(own, modules, expectedSessionRequirements(config)));
+	// reference.conf, which createApp parses once, and its defaults.
+	const resolved = adjust(resolveForBoot(own, modules, config));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
 			config: resolved,
+			configDefaults: configDefaultsFor(modules),
 			pathResolver: (s) => s,
 			logger,
 		},
-		overrideComponents: {
-			...(await federationOverrides(config, fakes)),
-			...options.extraOverrides?.(config),
-		} as never,
+		overrideComponents: { ...options.extraOverrides?.(config) } as never,
 	});
-	// As app.mts does, before anything listens.
-	await requireMfaSecondFactorAuthority(mfaMode, handle);
 	const parsed = handle.components.config;
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
 	const httpSettings = handle.components.httpSettings;

@@ -17,7 +17,8 @@
 /**
  * The stage-1 check registry: two ordered registries, pre-config and
  * post-config, split by the config-parse stage that produces the value the
- * post-config guards read. Adding a guard is appending a row.
+ * post-config guards read and the sections that switch a module off. Adding a
+ * guard is appending a row.
  *
  * This suite pins the registry's own shape. validate-manifests.test.mts and
  * the per-guard suites assert each check's semantics and first-violation
@@ -43,10 +44,16 @@ describe("stage-1 check registries", () => {
 		}
 	});
 
-	it("keeps the documented order — the spec steps run in spec order, guards after config parse", () => {
+	it("keeps the documented order — what the parse relies on before it, every manifest and wiring row after it, over the modules switched on", () => {
 		expect(STAGE_ONE_PRE_CONFIG_CHECKS.map((c) => c.id)).toEqual([
 			"module-entries-are-manifests",
 			"unique-module-names",
+			"federation-kind-guard",
+			"module-section-paths",
+			"relocated-config-paths",
+			"renamed-environment-variables",
+		]);
+		expect(STAGE_ONE_POST_CONFIG_CHECKS.map((c) => c.id)).toEqual([
 			"provides-closure",
 			"authoritative-closure",
 			"reserved-host-keys",
@@ -59,19 +66,14 @@ describe("stage-1 check registries", () => {
 			"contribution-shapes",
 			"per-kind-contribute-duplicates",
 			"route-collisions",
-			"federation-redirect-policy-pairing",
 			"override-targets",
 			"override-duplicates",
 			"same-module-contribute-override",
 			"list-shaped-overrides",
 			"lifecycle-closure",
-			"module-section-paths",
-			"relocated-config-paths",
-			"renamed-environment-variables",
-		]);
-		expect(STAGE_ONE_POST_CONFIG_CHECKS.map((c) => c.id)).toEqual([
 			"grant-policy-issuer",
 			"federation-stores-wiring",
+			"federation-entries-handled",
 			"declared-absence",
 			"replica-safety",
 			"host-token-settings-lifetimes",

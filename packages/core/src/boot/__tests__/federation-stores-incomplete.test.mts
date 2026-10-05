@@ -29,6 +29,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
+import { federationTypeForTests } from "../../testing/fixtures/federationType.mjs";
 import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
@@ -39,7 +40,13 @@ function makeBootWithFederationEnabled() {
 			...makeValidAppConfig(),
 			...coreConfigForTests({
 				declaredAbsent: ["auditSink"],
-				federations: { google: { enabled: true } },
+				federations: {
+					google: {
+						enabled: true,
+						type: "google",
+						callbackURL: "https://auth.example/session/federation/google/callback",
+					},
+				},
 			}),
 		},
 		pathResolver: (p: string) => p,
@@ -53,6 +60,9 @@ function makeBootWithNoFederations() {
 		pathResolver: (p: string) => p,
 	} as never;
 }
+
+/** The module that handles the enabled federation: it registers its type, `google`. */
+const googleFederationModule = federationTypeForTests("google");
 
 /** A module that provides all 6 required session/federation/refresh-family stores. */
 const allStoresModule = defineModule({
@@ -109,7 +119,7 @@ describe("checkFederationStoresWiring", () => {
 	it("does not throw when federation is enabled and all 6 stores are wired", async () => {
 		await expect(
 			createApp({
-				modules: [allStoresModule],
+				modules: [allStoresModule, googleFederationModule],
 				bootstrapComponents: makeBootWithFederationEnabled(),
 			}),
 		).resolves.toBeDefined();
@@ -131,7 +141,7 @@ describe("checkFederationStoresWiring", () => {
 		} as never;
 		await expect(
 			createApp({
-				modules: [],
+				modules: [googleFederationModule],
 				bootstrapComponents: bootstrapWithStores,
 			}),
 		).resolves.toBeDefined();
@@ -140,7 +150,7 @@ describe("checkFederationStoresWiring", () => {
 	it("does not throw when stores come via overrideComponents", async () => {
 		await expect(
 			createApp({
-				modules: [],
+				modules: [googleFederationModule],
 				bootstrapComponents: makeBootWithFederationEnabled(),
 				overrideComponents: {
 					userSessionStore: { kind: "stub" },

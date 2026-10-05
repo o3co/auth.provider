@@ -22,8 +22,10 @@
  *
  * Its copy (`readPlainFields`) is the by-name plain-data copy a login's
  * user and claims go through: session admission reads the claims envelope
- * a login records through it too. Core-internal: not exported from the
- * package.
+ * a login records through it too, and core's client-record boundary
+ * (`clientRepositoryBoundary.mts`) each client record. `readUserSnapshot`
+ * is public: a route reads the subject and the claims from its snapshot,
+ * never from the `User` again. `readPlainFields` is core-internal.
  */
 
 import type { User } from "./types.mjs";
@@ -55,7 +57,10 @@ void everyDeclaredFieldRead;
 
 /** What `readUserSnapshot` answers: the snapshot, or why the `User` is refused. */
 export type UserSnapshotReading =
-	| { readonly ok: true; readonly snapshot: Readonly<Record<string, unknown>> }
+	| {
+			readonly ok: true;
+			readonly snapshot: Readonly<Record<string, unknown>> & { readonly id: string };
+	  }
 	| { readonly ok: false; readonly refused: "not_an_object" | "id" }
 	| {
 			readonly ok: false;
@@ -89,8 +94,9 @@ const hasPlainPrototype = (value: object): boolean => {
  *
  * - a string, a boolean, `null`, or a finite number, as it is;
  * - an array (`Array.isArray`, whatever its prototype — an ORM's list type
- *   included), its `length` and each of its own indices read once, copied
- *   as a plain array; one with a hole or an `undefined` is not plain data;
+ *   included), its `length` and each of its own indices read once, in
+ *   index order, copied as a plain array; one with a hole or an `undefined`
+ *   is not plain data;
  * - an object whose prototype is `Object.prototype` or `null`, each own
  *   enumerable string key read once, one read as `undefined` left out.
  *
@@ -132,11 +138,18 @@ function copyByName(value: unknown, copies: Map<object, unknown>): unknown {
 
 function copyArray(source: readonly unknown[], copies: Map<object, unknown>): readonly unknown[] {
 	const length = source.length;
-	const indices = Object.getOwnPropertyNames(source).filter(isArrayIndex);
-	if (indices.length !== length) throw new NotPlainData();
+	// In index order, whatever order the keys are listed in (a Proxy chooses
+	// its own): exactly 0 to length - 1, or the list has a hole.
+	const indices = Object.getOwnPropertyNames(source)
+		.filter(isArrayIndex)
+		.map(Number)
+		.sort((a, b) => a - b);
+	if (indices.length !== length || indices.some((index, at) => index !== at)) {
+		throw new NotPlainData();
+	}
 	const copy: unknown[] = [];
 	for (const index of indices) {
-		const element = source[Number(index)];
+		const element = source[index];
 		if (element === undefined) throw new NotPlainData();
 		copy.push(copyByName(element, copies));
 	}
@@ -225,5 +238,5 @@ export function readUserSnapshot(user: unknown): UserSnapshotReading {
 	if (typeof snapshot.id !== "string" || snapshot.id.length === 0) {
 		return { ok: false, refused: "id" };
 	}
-	return { ok: true, snapshot };
+	return { ok: true, snapshot: snapshot as typeof snapshot & { readonly id: string } };
 }

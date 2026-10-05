@@ -175,7 +175,7 @@ describe("the MFA settings this package reads", () => {
 		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
 	});
 
-	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, recent MFA's window, the first binding's proof and a subject's factor limit — no factor's", () => {
+	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, the routes' budget, recent MFA's window, the first binding's proof and a subject's factor limit — no factor's", () => {
 		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
 			"encryptionKeys",
 			"enrollment",
@@ -185,6 +185,7 @@ describe("the MFA settings this package reads", () => {
 			"maxFactorsPerSubject",
 			"mode",
 			"page",
+			"rateLimit",
 			"storeTimeoutMs",
 			"transactionTtlSeconds",
 		]);
@@ -641,11 +642,13 @@ describe("the TOTP factor's section, mfa-totp-factor", () => {
 		expect(message).toContain("@o3co/auth-provider-mfa/reference.conf");
 	});
 
-	it("is not read by readMfaSettings: the MFA module's settings read the mfa section alone, whatever a factors key there holds", () => {
-		for (const factors of [{ totp: { digits: 9 } }, { totp: { enabled: "yes" } }, { totp: {} }]) {
-			const settings = readSettings(valid({ factors }));
-			expect(settings, JSON.stringify(factors)).not.toHaveProperty("totp");
-			expect(settings.encryptionKeys).toHaveLength(1);
+	it("is not read by readMfaSettings: the MFA module's settings read the mfa section alone, refusing a factors key there as one it does not know", () => {
+		expect(readSettings(valid())).not.toHaveProperty("totp");
+		for (const factors of [{ totp: { digits: 9 } }, { totp: {} }]) {
+			expect(
+				refusal(() => readSettings(valid({ factors }))),
+				JSON.stringify(factors),
+			).toBe("mfa has a key it does not know: factors");
 		}
 	});
 });
@@ -657,7 +660,9 @@ describe("the transaction's life and attempts, and the lock", () => {
 				value,
 			);
 		}
-		for (const value of [59, 1801, 0, -600, 600.5, "600", null, undefined]) {
+		// What an environment variable carries: its decimal digits, read as their number.
+		expect(readSettings(valid({ transactionTtlSeconds: " 600 " })).transactionTtlSeconds).toBe(600);
+		for (const value of [59, 1801, 0, -600, 600.5, "6e2", "600.0", "", null, undefined]) {
 			const message = refusal(() => readSettings(valid({ transactionTtlSeconds: value })));
 			expect(message, String(value)).toContain("mfa.transactionTtlSeconds");
 			expect(message, String(value)).toContain("60 to 1800 seconds");
@@ -670,6 +675,9 @@ describe("the transaction's life and attempts, and the lock", () => {
 				readSettings(valid({ maxAttemptsPerTransaction: value })).maxAttemptsPerTransaction,
 			).toBe(value);
 		}
+		expect(readSettings(valid({ maxAttemptsPerTransaction: "5" })).maxAttemptsPerTransaction).toBe(
+			5,
+		);
 		for (const value of [
 			0,
 			1,
@@ -677,7 +685,8 @@ describe("the transaction's life and attempts, and the lock", () => {
 			100,
 			-1,
 			1.5,
-			"5",
+			"5.0",
+			"0x5",
 			null,
 			undefined,
 			Number.MAX_SAFE_INTEGER + 1,
@@ -692,7 +701,8 @@ describe("the transaction's life and attempts, and the lock", () => {
 		for (const [lockout, field] of [
 			[{ ...LOCKOUT, threshold: 0 }, "mfa.lockout.threshold"],
 			[{ ...LOCKOUT, weeklyBudget: 2.5 }, "mfa.lockout.weeklyBudget"],
-			[{ ...LOCKOUT, baseSeconds: "900" }, "mfa.lockout.baseSeconds"],
+			[{ ...LOCKOUT, baseSeconds: "9e2" }, "mfa.lockout.baseSeconds"],
+			[{ ...LOCKOUT, baseSeconds: "-900" }, "mfa.lockout.baseSeconds"],
 			[{ ...LOCKOUT, hardLimit: 101 }, "mfa.lockout.hardLimit"],
 			[{ ...LOCKOUT, threshold: 6, hardLimit: 5 }, "mfa.lockout.threshold"],
 			[{ ...LOCKOUT, maxSeconds: 899 }, "mfa.lockout.maxSeconds"],
@@ -704,6 +714,13 @@ describe("the transaction's life and attempts, and the lock", () => {
 				JSON.stringify(lockout),
 			).toContain(field);
 		}
+	});
+
+	it("reads each of mfa.lockout's fields from the decimal digits an environment variable carries", () => {
+		const written = Object.fromEntries(
+			Object.entries(LOCKOUT).map(([field, value]) => [field, String(value)]),
+		);
+		expect(readSettings(valid({ lockout: written })).lockout).toEqual(LOCKOUT);
 	});
 
 	it("holds mfa.lockout.hardLimit to at least 10 and above threshold: core's checkConfiguredMfaLockoutPolicy", () => {
@@ -741,7 +758,8 @@ describe("the transaction's life and attempts, and the lock", () => {
 		for (const value of [2, 10, 100]) {
 			expect(readSettings(valid({ maxFactorsPerSubject: value })).maxFactorsPerSubject).toBe(value);
 		}
-		for (const value of [1, 101, 0, 10.5, "10", null, undefined]) {
+		expect(readSettings(valid({ maxFactorsPerSubject: "10" })).maxFactorsPerSubject).toBe(10);
+		for (const value of [1, 101, 0, 10.5, "1e1", null, undefined]) {
 			const message = refusal(() => readSettings(valid({ maxFactorsPerSubject: value })));
 			expect(message, String(value)).toContain("mfa.maxFactorsPerSubject");
 			expect(message, String(value)).toContain("2 to 100");
@@ -768,7 +786,10 @@ describe("the transaction's life and attempts, and the lock", () => {
 				maxAgeSeconds: value,
 			});
 		}
-		for (const value of [59, 3601, 0, 300.5, "300", null, undefined]) {
+		expect(readSettings(valid({ manage: { maxAgeSeconds: "300" } })).manage).toEqual({
+			maxAgeSeconds: 300,
+		});
+		for (const value of [59, 3601, 0, 300.5, "3e2", null, undefined]) {
 			const message = refusal(() => readSettings(valid({ manage: { maxAgeSeconds: value } })));
 			expect(message, String(value)).toContain("mfa.manage.maxAgeSeconds");
 			expect(message, String(value)).toContain("60 to 3600 seconds");

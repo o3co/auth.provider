@@ -16,27 +16,37 @@
 
 /**
  * The device authorization endpoint fetches a `private_key_jwt` client's
- * `jwksUri` through core's outbound fetch, built from the composition's
- * `core.outbound` when the route is.
+ * `jwksUri` through core's outbound fetch, built from the `outboundPolicy`
+ * slot core fills from the composition's `core.outbound`.
  */
 
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
-	type AppConfig,
+	type BootstrapMap,
 	type ClientRepository,
+	createApp,
+	createInMemoryUserSessionStore,
 	createMemoryDeviceCodeStore,
-	createMemoryRateLimiter,
 	createMemoryReplaySeenSet,
+	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
-import { type OutboundSectionForTests, withOutbound } from "@o3co/auth-provider-core/testing";
+import {
+	coreConfigForTests,
+	createTestCsrfGuard,
+	createTestOAuthTokenSettings,
+	makeValidCoreConfig,
+	type OutboundSectionForTests,
+	withOutbound,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { deviceGrantConfigSchema, deviceGrantModule } from "#/module.mjs";
+import { deviceAuthorizationGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
+import { shippedDeviceGrantSection } from "./shippedSection.mjs";
 
 const ISSUER = "https://as.example.test";
 const CLIENT_ID = "assertion-app";
@@ -49,6 +59,7 @@ let publicJwk: JWK;
 let peer: Server;
 let jwksUri: string;
 const hits: string[] = [];
+const disposals: (() => Promise<void>)[] = [];
 
 beforeAll(async () => {
 	const pair = await generateKeyPair("ES256");
@@ -68,27 +79,12 @@ afterAll(async () => {
 	await new Promise<void>((resolve) => peer.close(() => resolve()));
 });
 
-afterEach(() => {
+afterEach(async () => {
 	hits.length = 0;
 	reasons.length = 0;
 	vi.unstubAllEnvs();
+	for (const dispose of disposals.splice(0)) await dispose();
 });
-
-const baseConfig = {
-	oauth: {
-		jwt: { issuer: ISSUER },
-		accessToken: { expiresIn: 300 },
-		refreshToken: { expiresIn: 86_400 },
-	},
-	"device-grant": {
-		enabled: true,
-		verificationUri: "https://example.test/device",
-		verificationUriComplete: false,
-		codeLifetimeSeconds: 600,
-		pollingIntervalSeconds: 5,
-		rateLimit: { limit: 5, windowSeconds: 300 },
-	},
-};
 
 const registered = (clientId: string, keys: object) => ({
 	clientId,
@@ -123,25 +119,40 @@ const logger = {
 	child: () => logger,
 };
 
-/** The mounted device authorization route, built as boot builds it. */
-const mount = (outbound?: OutboundSectionForTests): express.Express => {
-	const config = outbound === undefined ? baseConfig : withOutbound(baseConfig, outbound);
-	const route = deviceGrantModule({ config: config as unknown as AppConfig }).contributes
-		?.routes?.[0] as (d: unknown) => { mountPath: string; handler: express.RequestHandler };
-	const built = route({
-		config,
-		section: deviceGrantConfigSchema.parse(config["device-grant"]),
+/** A composition with the grant on and `core.outbound` as `outbound` states it (absent: unwritten). */
+const bootstrap = (outbound?: OutboundSectionForTests): BootstrapMap => {
+	const core = makeValidCoreConfig();
+	const config = {
+		...core,
+		...coreConfigForTests({ declaredAbsent: ["auditSink", "rateLimiter"] }),
+		"device-grant": shippedDeviceGrantSection({
+			enabled: true,
+			verificationUri: "https://example.test/device",
+		}),
+	};
+	return {
+		config: outbound === undefined ? config : withOutbound(config, outbound),
+		pathResolver: (s: string) => s,
+		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
 		clientRepository,
+		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 		deviceCodeStore: createMemoryDeviceCodeStore(),
+		userSessionStore: createInMemoryUserSessionStore(),
+		csrfGuard: createTestCsrfGuard(),
 		replaySeenSet: createMemoryReplaySeenSet(),
 		logger,
-		rateLimiter: createMemoryRateLimiter({
-			limits: { device_verification: { limit: 50, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		}),
+	} as unknown as BootstrapMap;
+};
+
+/** The device authorization route, mounted as boot mounts it. */
+const mount = async (outbound?: OutboundSectionForTests): Promise<express.Express> => {
+	const handle = await createApp({
+		modules: [deviceAuthorizationGrantModule],
+		bootstrapComponents: bootstrap(outbound),
 	});
+	disposals.push(() => handle.dispose());
 	const app = express();
-	app.use(built.mountPath, built.handler);
+	app.use(handle.router);
 	return app;
 };
 
@@ -177,13 +188,13 @@ const shown = (res: request.Response) => ({
 
 describe("device authorization — a client's jwksUri and core.outbound", () => {
 	it("authenticates against a key set at a loopback host core.outbound.internalHosts lists", async () => {
-		const res = await authorize(mount({ internalHosts: ["127.0.0.1"] }));
+		const res = await authorize(await mount({ internalHosts: ["127.0.0.1"] }));
 		expect(res.status).toBe(200);
 		expect(hits).toEqual(["/jwks"]);
 	});
 
 	it("refuses the same key set without the listing with the bytes a bad signature gets, and never asks it", async () => {
-		const app = mount();
+		const app = await mount();
 		const refused = await authorize(app);
 		const badSignature = await authorize(app, INLINE_CLIENT, stranger);
 		expect(refused.status).toBe(401);
@@ -202,20 +213,22 @@ describe("device authorization — a client's jwksUri and core.outbound", () => 
 
 	it("lets core.outbound.deniedHosts win over internalHosts", async () => {
 		const res = await authorize(
-			mount({ internalHosts: ["127.0.0.1"], deniedHosts: ["127.0.0.1"] }),
+			await mount({ internalHosts: ["127.0.0.1"], deniedHosts: ["127.0.0.1"] }),
 		);
 		expect(res.status).toBe(401);
 		expect(reasons).toEqual(["jwks_uri_refused"]);
 		expect(hits).toEqual([]);
 	});
 
-	it("refuses to build the route over a malformed core.outbound", () => {
-		expect(() => mount({ allowedHosts: ["not a host"] })).toThrow(/core\.outbound\.allowedHosts/);
+	it("refuses to boot over a malformed core.outbound", async () => {
+		await expect(mount({ allowedHosts: ["not a host"] })).rejects.toThrow(
+			/core\.outbound\.allowedHosts/,
+		);
 	});
 
-	it("refuses to build the route over an egress proxy core.outbound does not state as direct", () => {
+	it("refuses to boot over an egress proxy core.outbound does not state as direct", async () => {
 		vi.stubEnv("HTTPS_PROXY", "http://proxy.example.test:3128");
-		expect(() => mount()).toThrow(/core\.outbound\.egress/);
-		expect(() => mount({ egress: "direct" })).not.toThrow();
+		await expect(mount()).rejects.toThrow(/core\.outbound\.egress/);
+		await expect(mount({ egress: "direct" })).resolves.toBeDefined();
 	});
 });

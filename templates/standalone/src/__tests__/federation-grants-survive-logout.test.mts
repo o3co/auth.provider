@@ -59,9 +59,9 @@ import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
-	adaptersOf,
 	capturedRenames,
 	libraryLayers,
+	rootSectionsOf,
 	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
@@ -89,6 +89,8 @@ const REFRESH_TOKEN = "SENTINEL-refresh-token";
 const ACCESS_TOKEN = "upstream-access-token";
 
 const ENV: Readonly<Record<string, string>> = {
+	// The logout here is a session without a second factor.
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: JWT_SECRET,
 	OAUTH_JWT_ISSUER: ISSUER,
@@ -129,7 +131,7 @@ function resolveConfig(): Switches {
 	const config = validate(layers, AppConfigSchema);
 	return {
 		...sectionsCoreDoesNotDeclare(layers),
-		adapters: adaptersOf(layers, ENV),
+		...rootSectionsOf(layers, ENV),
 		...config,
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
@@ -414,6 +416,7 @@ describe("a grant outlives the browser session at both logout endpoints", () => 
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
+			obtainedAt: undefined,
 		});
 		expect(await userSessionStore.get(sid)).not.toBeNull();
 		await expectGrantUntouched(app, federationGrantStore);
@@ -446,6 +449,7 @@ describe("a grant outlives the browser session at both logout endpoints", () => 
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
+			obtainedAt: undefined,
 		});
 		expect(await userSessionStore.get(sid)).not.toBeNull();
 		await expectGrantUntouched(app, federationGrantStore);

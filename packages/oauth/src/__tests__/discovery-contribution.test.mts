@@ -25,7 +25,7 @@
 import type { AppConfig, OidcDiscoveryContribution } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import { oauthModule } from "../module.mjs";
+import { oauthEndpointsModule } from "../module.mjs";
 
 /** Truthy stubs for the six session-store deps that gate logout advertisement. */
 const allLogoutStores = {
@@ -68,12 +68,15 @@ async function discoveryContribution(
 	deps: Record<string, unknown> = {},
 	config: AppConfig = configWithRevocation(),
 ): Promise<OidcDiscoveryContribution> {
-	const factory = oauthModule({ config }).contributes?.discoveryMetadata?.[0];
+	const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
 	// Awaited as the boot planner does: a contribution factory may answer with
 	// a promise.
 	return await factory({
 		config,
+		// The module's own section, as boot hands it: what the slice reads of
+		// `oauth {}`.
+		section: config.oauth,
 		// An authorization server that serves /authorize unless a test says
 		// otherwise.
 		grantHandlerResolver: grantResolver("authorization_code"),
@@ -160,10 +163,11 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 				grants: { authorization_code: { pkce: { supportedMethods: ["S256", "plain"] } } },
 			},
 		} as unknown as AppConfig;
-		const factory = oauthModule({ config }).contributes?.discoveryMetadata?.[0];
+		const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
 		if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
 		const meta = await factory({
 			config,
+			section: config.oauth,
 			grantHandlerResolver: grantResolver("authorization_code"),
 			sessionRequirementResolver: resolverForTests([]),
 		} as never);
@@ -430,7 +434,7 @@ describe("acr_values_supported", () => {
 			const config = withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] });
 			return {
 				...config,
-				core: { federations: { google: { enabled: true, trustUpstreamAmr } } },
+				core: { federations: { google: { type: "google", enabled: true, trustUpstreamAmr } } },
 			} as unknown as AppConfig;
 		};
 		const trusted = await discoveryContribution(
@@ -450,7 +454,7 @@ describe("acr_values_supported", () => {
 		// through it, so nothing it could assert can meet an entry.
 		const config = {
 			...withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
-			core: { federations: { google: { enabled: false, trustUpstreamAmr: true } } },
+			core: { federations: { google: { type: "google", enabled: false, trustUpstreamAmr: true } } },
 		} as unknown as AppConfig;
 		const meta = await discoveryContribution(
 			{ federationProviders: new Map([["google", {}]]) },
@@ -464,7 +468,7 @@ describe("acr_values_supported", () => {
 		// can write a session.
 		const config = {
 			...withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
-			core: { federations: { google: { enabled: false, trustUpstreamAmr: true } } },
+			core: { federations: { google: { type: "google", enabled: false, trustUpstreamAmr: true } } },
 		} as unknown as AppConfig;
 		const meta = await discoveryContribution({ federationProviders: new Map() }, config);
 		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
@@ -589,6 +593,7 @@ describe("a composition with no authorization_code grant", () => {
 		expect(meta.metadata).not.toHaveProperty("code_challenge_methods_supported");
 		expect(meta.metadata).not.toHaveProperty("request_uri_parameter_supported");
 		expect(meta.metadata).not.toHaveProperty("authorization_response_iss_parameter_supported");
+		expect(meta.metadata).not.toHaveProperty("response_modes_supported");
 	});
 
 	it("advertises no acr table: acr_values are asked for at /authorize", async () => {
@@ -618,5 +623,12 @@ describe("a composition with no authorization_code grant", () => {
 			grantHandlerResolver: grantResolver("authorization_code"),
 		});
 		expect(meta.metadata?.authorization_response_iss_parameter_supported).toBe(true);
+	});
+
+	it("with the grant, advertises the query response mode alone: /authorize answers in the query", async () => {
+		const meta = await discoveryContribution({
+			grantHandlerResolver: grantResolver("authorization_code"),
+		});
+		expect(meta.metadata?.response_modes_supported).toEqual(["query"]);
 	});
 });

@@ -67,6 +67,11 @@ export interface SoftwareAuthenticator {
 export function softwareAuthenticator(relyingParty: {
 	readonly rpId: string;
 	readonly origin: string;
+	/**
+	 * The user handle a discoverable credential returns with each assertion, base64url. Absent,
+	 * the credential returns none, as a non-discoverable one does.
+	 */
+	readonly userHandle?: string;
 }): SoftwareAuthenticator {
 	const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
 	const jwk = publicKey.export({ format: "jwk" });
@@ -149,6 +154,7 @@ export function softwareAuthenticator(relyingParty: {
 					clientDataJSON: encoded(clientData, options),
 					authenticatorData: authenticatorData.toString("base64url"),
 					signature: signature.toString("base64url"),
+					...(relyingParty.userHandle === undefined ? {} : { userHandle: relyingParty.userHandle }),
 				},
 				clientExtensionResults: {},
 			};

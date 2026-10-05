@@ -32,6 +32,7 @@ import type {
 	CodeRepository,
 	ComponentMap,
 	DeviceCodeStore,
+	GrantPolicyHook,
 	Logger,
 	SubjectRevocation,
 	SubjectRevocationService,
@@ -61,8 +62,9 @@ import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-sessio
 import express, { type RequestHandler } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { deviceGrantModule } from "#/module.mjs";
+import { deviceAuthorizationGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
+import { shippedDeviceGrantSection } from "./shippedSection.mjs";
 
 /** The fixture's issuer; discovery prefixes every endpoint with it. */
 const ISSUER = "https://auth.test";
@@ -126,7 +128,8 @@ const makeConfig = (deviceGrant: Record<string, unknown>): AppConfig => {
 		// supertest speaks plain HTTP, and express-session sets no `Secure`
 		// cookie on it — which also rules out the fixture's `__Host-` name.
 		"session-store": { ...base["session-store"], name: "auth.session", secure: false },
-		"device-grant": deviceGrant,
+		// The section as a composition layers the package's reference under it.
+		"device-grant": shippedDeviceGrantSection(deviceGrant),
 	} as AppConfig;
 };
 
@@ -284,15 +287,15 @@ const startDevice = async (app: express.Express): Promise<string> => {
 const orders = [
 	[
 		"oauthModule listed first",
-		(config: AppConfig) => [oauthModule({ config }), deviceGrantModule({ config })],
+		(config: AppConfig) => [oauthModule({ config }), deviceAuthorizationGrantModule],
 	],
 	[
-		"deviceGrantModule listed first",
-		(config: AppConfig) => [deviceGrantModule({ config }), oauthModule({ config })],
+		"the device-grant module listed first",
+		(config: AppConfig) => [deviceAuthorizationGrantModule, oauthModule({ config })],
 	],
 ] as const;
 
-describe("deviceGrantModule beside oauthModule — discovery (RFC 8628 §4)", () => {
+describe("the device-grant module beside oauthModule — discovery (RFC 8628 §4)", () => {
 	it.each(orders)(
 		"boots enabled and advertises device_authorization_endpoint under the issuer (%s)",
 		async (_label, ordered) => {
@@ -321,7 +324,7 @@ describe("deviceGrantModule beside oauthModule — discovery (RFC 8628 §4)", ()
 	);
 });
 
-describe("deviceGrantModule beside oauthModule — installed but disabled", () => {
+describe("the device-grant module beside oauthModule — installed but disabled", () => {
 	it.each(orders)(
 		"does not advertise the grant, and /oauth/token refuses it as unsupported (%s)",
 		async (_label, ordered) => {
@@ -353,7 +356,7 @@ describe("deviceGrantModule beside oauthModule — installed but disabled", () =
 	);
 });
 
-describe("deviceGrantModule beside oauthModule — POST /oauth/device/verification is JSON-only", () => {
+describe("the device-grant module beside oauthModule — POST /oauth/device/verification is JSON-only", () => {
 	// A form body is a CORS "simple" request: a browser sends it cross-site,
 	// with the victim's session cookie and no preflight. The refusal must hold
 	// in either list order. The CSRF token is valid here on purpose: the media
@@ -432,7 +435,7 @@ describe("deviceGrantModule beside oauthModule — POST /oauth/device/verificati
 	);
 });
 
-describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () => {
+describe("the device-grant module beside oauthModule — the 16 KiB body limit", () => {
 	// Both routes parse with a 16 KiB limit, and `body-parser` does not parse a
 	// body twice — so the bound holds only if no other parser (such as
 	// `oauthModule`'s 100 KiB ones) reads the body first. Declared or chunked,
@@ -575,7 +578,7 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 	);
 });
 
-describe("deviceGrantModule beside oauthModule — error text (RFC 6749 Appendix A.8)", () => {
+describe("the device-grant module beside oauthModule — error text (RFC 6749 Appendix A.8)", () => {
 	// `error_description` is 1*NQSCHAR: printable ASCII without `"` and `\`.
 	it("sends a refused scope the client asked for within that set", async () => {
 		// The refused values are the client's own. A scope is read strictly by
@@ -768,7 +771,7 @@ describe("a route of another module beneath the device routes' paths", () => {
 	);
 });
 
-describe("deviceGrantModule beside oauthModule — a device-code store outage is 503 temporarily_unavailable", () => {
+describe("the device-grant module beside oauthModule — a device-code store outage is 503 temporarily_unavailable", () => {
 	// The store can be down after the device asked for its codes: the human's
 	// lookup and decision and the device's poll then each reach a store that
 	// answers with a transport error. That is an outage, which the product
@@ -977,7 +980,7 @@ describe("deviceGrantModule beside oauthModule — a device-code store outage is
 	);
 });
 
-describe("deviceGrantModule beside oauthModule — an approval needs the live session behind the cookie", () => {
+describe("the device-grant module beside oauthModule — an approval needs the live session behind the cookie", () => {
 	// The cookie's `isAuthenticated` is the browser's claim; the `UserSession`
 	// its `sid` names is the fact. The device token an approval leads to
 	// carries no `sid` and no `family_id`, so the approval is the one place the
@@ -1289,6 +1292,72 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 				.send({ action: "approve", user_code: verified.userCode });
 			expect(approved.status).toBe(200);
 			expect(approved.body.status).toBe("approved");
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
+describe("the device-grant module beside oauthModule — the composition's grantPolicy decides at the poll", () => {
+	// Boot hands a module only the slots its manifest names: without the
+	// declaration the grant reads no policy and mints.
+	const policyModule = (evaluate: GrantPolicyHook["evaluate"]): Module =>
+		defineModule({
+			name: "test:grant-policy",
+			provides: { grantPolicy: (): GrantPolicyHook => ({ kind: "test", evaluate }) },
+		});
+
+	const approvedDeviceCode = async (app: express.Express): Promise<string> => {
+		const started = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send({ client_id: CLIENT_ID });
+		expect(started.status).toBe(200);
+		const agent = request.agent(app);
+		await signIn(agent);
+		const { header, token } = await csrfToken(agent);
+		const approved = await agent
+			.post("/oauth/device/verification")
+			.set(header, token)
+			.send({ action: "approve", user_code: started.body.user_code });
+		expect(approved.status).toBe(200);
+		return started.body.device_code as string;
+	};
+
+	const pollFor = (app: express.Express, deviceCode: string) =>
+		request(app).post("/oauth/token").type("form").send({
+			grant_type: DEVICE_CODE_GRANT_TYPE,
+			client_id: CLIENT_ID,
+			device_code: deviceCode,
+		});
+
+	it("refuses an approved poll the policy denies, passing RFC 8628's terminal access_denied", async () => {
+		const config = makeConfig(ENABLED);
+		const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({
+			outcome: "deny",
+			error: "access_denied",
+			errorDescription: "devices are closed",
+		}));
+		const { handle, app } = await bootWith(config, [
+			sessionStoreModuleFor(config),
+			oauthModule({ config }),
+			deviceAuthorizationGrantModule,
+			policyModule(evaluate),
+		]);
+		try {
+			const polled = await pollFor(app, await approvedDeviceCode(app));
+			expect(polled.status).toBe(400);
+			expect(polled.body).toEqual({
+				error: "access_denied",
+				error_description: "devices are closed",
+			});
+			expect(polled.body.access_token).toBeUndefined();
+			expect(evaluate).toHaveBeenCalledTimes(1);
+			expect(evaluate.mock.calls[0]?.[0]).toMatchObject({
+				grantType: DEVICE_CODE_GRANT_TYPE,
+				clientId: CLIENT_ID,
+				subject: "user-1",
+			});
 		} finally {
 			await handle.dispose();
 		}

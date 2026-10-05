@@ -32,6 +32,26 @@ export {
 	type LifecycleCleanupOptions,
 	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
+// The conditional-write convention every store's conditional members follow
+// (docs/adapter-surface.md, "Conditional writes").
+export {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	type ConditionalCreateAnswer,
+	type ConditionalRemoveAnswer,
+	type ConditionalReplaceAnswer,
+	type ConditionalSetRemoveAnswer,
+	isStoreGeneration,
+	newStoreGeneration,
+	readConditionalCreateAnswer,
+	readConditionalRemoveAnswer,
+	readConditionalReplaceAnswer,
+	readConditionalSetRemoveAnswer,
+	readVersioned,
+	readVersionedSet,
+	type StoreGeneration,
+	type Versioned,
+	type VersionedSet,
+} from "./adapters/conditionalWrite.mjs";
 export {
 	isStorableExpiry,
 	isStorableLifetime,
@@ -75,9 +95,6 @@ export {
 // A remote JSON Web Key Set, memoised per uri and tuning, with a fetch seam
 export {
 	createRemoteKeySetCache,
-	DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS,
-	DEFAULT_REMOTE_JWKS_COOLDOWN_MS,
-	DEFAULT_REMOTE_JWKS_TIMEOUT_MS,
 	type RemoteKeySet,
 	type RemoteKeySetCache,
 	type RemoteKeySetCacheOptions,
@@ -121,8 +138,8 @@ export type {
 	BootstrapComponentCollisionDetails,
 	BootstrapMap,
 	CircularDependencyDetails,
-	CleanupRecord,
 	CollectedRouteContribution,
+	ConfigDefaultsInvalidDetails,
 	ConfigPathRelocatedDetails,
 	ConfigValidationFailedDetails,
 	ContributeAndOverrideSameKeyDetails,
@@ -139,7 +156,7 @@ export type {
 	DuplicateProvidesDetails,
 	DuplicateSecondFactorAuthorityDetails,
 	EnvironmentVariableRenamedDetails,
-	FederationRedirectPolicyUnpairedDetails,
+	GrantCollector,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
 	ListCollector,
@@ -152,10 +169,12 @@ export type {
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
 	RegisteredFederationType,
+	ReservedBootstrapInputs,
 	ReservedComponentKeyDetails,
 	RouteCollector,
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
+	SecondFactorAuthorityNotDeclaredDetails,
 	SyntheticKeyCollisionDetails,
 	TokenSettingsLifetimeExceedsConfigurationDetails,
 	UnknownContributionKindDetails,
@@ -226,6 +245,9 @@ export {
 	// decimal digits a variable carries, for the packages outside core that
 	// declare a section's schema.
 	wholeNumberFromEnv,
+	// The same reader held to a range, refusing with one message that names
+	// the range and the form.
+	wholeNumberInRangeFromEnv,
 } from "./config/application.schema.mjs";
 // Transitional: the switches that choose a composition root's modules, read
 // before it knows them. `createApp` takes the resolved configuration itself,
@@ -234,6 +256,9 @@ export { readTransitionalConfig } from "./config/composed.mjs";
 // How a configured value is read where its owning schema did not run, and how
 // a refusal quotes it.
 export { configuredNumber, shownConfigValue } from "./config/configuredValue.mjs";
+// Core's own section, read from the resolved configuration before boot: what
+// a composition root reads of core's settings before it knows its modules.
+export { type CoreSection, readCoreSection } from "./config/core-section.mjs";
 export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // The reference.conf files a composition layers beneath its own
 // configuration — core's, and each loaded module's package's (`section.reference`).
@@ -273,7 +298,6 @@ export {
 	classifyFederationRefreshError,
 	type FederationRefreshErrorClassification,
 	type FederationRefreshErrorReason,
-	isKnownFederationRefreshErrorCode,
 } from "./federation-tokens/refresh-error.mjs";
 // FederationTokenStore. Backing client interface
 // (FederationTokenStoreClient) lives in @o3co/auth-provider-redis.
@@ -298,7 +322,7 @@ export { isFederationUpstreamOutage } from "./federation-tokens/upstreamOutage.m
 export { callbackUrlForExchange } from "./federations/callback-url.mjs";
 export type { FederationClientSecret } from "./federations/client-secret.mjs";
 export { resolveClientSecret } from "./federations/client-secret.mjs";
-export { federationsOf } from "./federations/configured.mjs";
+export { enabledFederationsOf, federationsOf } from "./federations/configured.mjs";
 export { codeChallenge } from "./federations/pkce.mjs";
 export type { FederationResponseMode } from "./federations/response-mode.mjs";
 export {
@@ -314,6 +338,10 @@ export {
 	readIssuedScope,
 	readSpaceDelimitedParameter,
 } from "./federations/scope.mjs";
+// The `federationSettings` slot: core's view of `core.federations`, which boot
+// fills for every composition, so a module reads the federations from its
+// dependencies rather than from `config`.
+export type { ConfiguredFederation, FederationSettings } from "./federations/settings.mjs";
 // The one reading of an upstream token's lifetime, and the age of one held.
 export type {
 	HeldUpstreamToken,
@@ -416,10 +444,13 @@ export {
 	type GrantPolicyReading,
 	logGrantPolicyUnavailable,
 	type PolicyAudienceOutcome,
+	type PolicyDeniedOptions,
 	type PolicyScopeCeiling,
+	policyDenied,
 	policyOutOfBounds,
 	policyUnavailable,
 	readGrantPolicyDecision,
+	type TokenEndpointRefusalCode,
 } from "./grants/grantPolicy.mjs";
 // id_token generation (OIDC Core §2)
 export {
@@ -481,18 +512,15 @@ export {
 } from "./issuer/canonical.mjs";
 // JWKS publishing — `jwksModule` mounts the route so every provider that signs
 // tokens exposes its verification keys for offline validation; `createJwksRouter`
-// is the underlying factory for direct composition. `DEFAULT_JWKS_PATH` /
-// `resolveJwksPath` are the single source of truth for the publishing path,
-// shared with oauth discovery's `jwks_uri` so the two never drift.
-export { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "./jwks/cache.mjs";
+// is the underlying factory for direct composition. `jwksModule` resolves the
+// publishing path and advertises it as discovery's `jwks_uri`, so the two
+// never drift.
 export { jwksModule } from "./jwks/module.mjs";
-export { DEFAULT_JWKS_PATH, resolveJwksPath } from "./jwks/path.mjs";
 export { createRouter as createJwksRouter, type JwksRouterOptions } from "./jwks/router.mjs";
 // A JWT's exp / iat / nbf, checked before anything computes an expiry from them.
 export type { NumericDateClaim } from "./jwt/numericDate.mjs";
 export {
 	isNumericDate,
-	MAX_NUMERIC_DATE_SECONDS,
 	malformedNumericDateClaim,
 } from "./jwt/numericDate.mjs";
 // JWT verifier — central verifyJwt with alg/iss/aud/typ pinning
@@ -506,6 +534,7 @@ export type {
 	VerifyRevocation,
 } from "./jwt/verify.mjs";
 export {
+	claimCoveredByRevocationBoundary,
 	isVerificationUnavailable,
 	JwtVerificationError,
 	REVOCATION_RETENTION_ALLOWANCE_MS,
@@ -568,8 +597,6 @@ export {
 	LOGGED_AGGREGATE_MAX_ERRORS,
 	LOGGED_MAX_PROJECTIONS,
 	LOGGED_PRINT_DEPTH,
-	LOGGED_STACK_MAX_FRAMES,
-	LOGGED_STACK_MAX_LENGTH,
 	LOGGED_STRING_MAX_LENGTH,
 	type LoggableError,
 	lineSafeText,
@@ -618,6 +645,7 @@ export {
 	type MfaFactorStore,
 	type MfaFactorStoreFactory,
 	type MfaFactorUpdateRequest,
+	readMfaFactorSet,
 } from "./mfa/factorStore.mjs";
 export {
 	createMfaFactorStoreFactory,
@@ -625,12 +653,13 @@ export {
 	registerBuiltinMfaFactorStores,
 	registerBuiltinMfaTransactionStores,
 } from "./mfa/factory.mjs";
-export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
+export {
+	createMemoryMfaFactorStore,
+	type MemoryMfaFactorStoreOptions,
+} from "./mfa/memoryFactorStore.mjs";
 export {
 	createMemoryMfaTransactionStore,
 	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,
-	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS,
-	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL,
 	type MemoryMfaTransactionStore,
 	type MemoryMfaTransactionStoreOptions,
 	MfaTransactionStoreFullError,
@@ -642,22 +671,29 @@ export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./m
 // and a Store's own implementation (or a fake of one)
 export {
 	fromMfaStoreFactor,
-	type MfaStoreCreateRequest,
+	type MfaStoreCreateIfAnswer,
+	type MfaStoreCreateIfRequest,
 	type MfaStoreDeleteRequest,
 	type MfaStoreFactor,
 	type MfaStoreFactorBinding,
 	type MfaStoreFactorChanges,
-	type MfaStoreListAnswer,
 	type MfaStoreListReading,
 	type MfaStoreListRequest,
 	type MfaStoreMarkEnrolledRequest,
-	type MfaStoreUpdateAnswer,
+	type MfaStoreRemoveIfAnswer,
+	type MfaStoreRemoveIfRequest,
 	type MfaStoreUpdateRequest,
+	type MfaStoreVersionedListAnswer,
+	readMfaStoreCreateIfAnswer,
 	readMfaStoreFactor,
 	readMfaStoreFactorChanges,
 	readMfaStoreListAnswer,
+	readMfaStoreRemoveIfAnswer,
+	readMfaStoreVersionedListAnswer,
+	toMfaStoreCreateIfRequest,
 	toMfaStoreFactor,
 	toMfaStoreFactorChanges,
+	toMfaStoreRemoveIfRequest,
 	toMfaStoreUpdateRequest,
 } from "./mfa/storeWire.mjs";
 export {
@@ -689,7 +725,6 @@ export {
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
-	MFA_TRANSACTION_PATCH_KEYS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaRecoverySetFloorAnswer,
@@ -764,11 +799,12 @@ export type {
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
-	FederationFactory,
-	// One configured federation as its type's factory receives it, and
-	// what a federation package declares it handles, keyed by type.
+	// One configured federation as its type's factories receive it, what a
+	// federation package declares it handles, keyed by type, and the redirect
+	// policy such a declaration builds.
 	FederationInstance,
 	FederationProvider,
+	FederationRedirectPolicyContribution,
 	FederationTypeContribution,
 	// GrantFactory, GrantHandler: excluded — names collide with
 	// ./grants/types.mjs exports at this boundary. Import from
@@ -810,6 +846,7 @@ export type {
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,
+	VerifierLimitDeclaration,
 } from "./modules/index.mjs";
 export {
 	// The way to author a federationTypes declaration, its entry tied to its schema.
@@ -846,15 +883,24 @@ export {
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
 // The one fetch for a URL a client registration or a request supplies,
-// under `core.outbound`'s destination policy.
+// under `core.outbound`'s destination policy, and the limits that section sets.
 export {
 	createOutboundFetch,
 	isOutboundRefusal,
 	type OutboundFetchOptions,
+	type OutboundLimits,
 	type OutboundUrlSource,
+	outboundLimitsOf,
 } from "./net/outbound-fetch.mjs";
-// The host-list grammar's public readers, for a list of the same form kept elsewhere.
-export { type HostPattern, matchesHostList, readHostEntry } from "./net/outbound-policy.mjs";
+// The host-list grammar's public readers, for a list of the same form kept
+// elsewhere, and the policy the `outboundPolicy` slot holds, which a module
+// builds its outbound fetch from rather than from `config`.
+export {
+	type HostPattern,
+	matchesHostList,
+	type OutboundPolicy,
+	readHostEntry,
+} from "./net/outbound-policy.mjs";
 // The registered-redirect-URI shape vocabulary, the query's parameter names
 // included — enforced by ClientEntrySchema at boot; exported so a custom
 // ClientRepository, which bypasses that schema by design, can hold its
@@ -902,6 +948,36 @@ export type {
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
+// A verifier's own attempt limits: the counter port, its reading, the
+// in-process counter, and the guard that owns the fallback, the outage and
+// the headers.
+export {
+	type AttemptCounterFailure,
+	type AttemptGuard,
+	type AttemptGuardOptions,
+	type AttemptPerIpOptions,
+	type AttemptVerdict,
+	attemptCounterUnavailableEnvelope,
+	createAttemptGuard,
+	DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS,
+} from "./ratelimit/attemptGuard.mjs";
+export {
+	ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
+	type AttemptCount,
+	type AttemptCounter,
+	type AttemptSpec,
+	isAttemptKey,
+	isAttemptSpec,
+	MAX_ATTEMPT_KEY_LENGTH,
+	MAX_ATTEMPT_WINDOW_SECONDS,
+	readAttemptCount,
+} from "./ratelimit/attempts.mjs";
+export {
+	ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS,
+	createMemoryAttemptCounter,
+	DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES,
+	type MemoryAttemptCounterOptions,
+} from "./ratelimit/attemptsMemory.mjs";
 // The one lookup every bundled limiter takes a key's budget from.
 export {
 	createRateLimitBudgetLookup,
@@ -929,26 +1005,28 @@ export {
 } from "./ratelimit/guard.mjs";
 export {
 	createMemoryRateLimiter,
-	DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
 	type MemoryRateLimiterOptions,
 } from "./ratelimit/memory.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
 // @o3co/auth-provider-redis.
-export type {
-	RateLimitContext,
-	RateLimitDecision,
-	RateLimiter,
-	RateLimiterFactory,
-	RateLimitFailMode,
-	RateLimitSpec,
+export {
+	RATE_LIMITER_ABSENCE_POLICY,
+	type RateLimitContext,
+	type RateLimitDecision,
+	type RateLimiter,
+	type RateLimiterFactory,
+	type RateLimitFailMode,
+	type RateLimitSpec,
 } from "./ratelimit/types.mjs";
 export {
 	assertUsableRateLimitSpecs,
 	isUsableRateLimitSpec,
-	readConfiguredRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "./ratelimit/usableSpec.mjs";
+// A limiter section's `limits` never names a prefix a verifier limits itself,
+// which the verifier's module declares by claiming it with `verifierLimitClaim`.
+export { refuseVerifierLimitEntries, verifierLimitClaim } from "./ratelimit/verifierLimits.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,
@@ -965,6 +1043,16 @@ export {
 	isWellFormedClientId,
 	MAX_CLIENT_ID_LENGTH,
 } from "./repositories/clientId.mjs";
+// Core's boundary over a ClientRepository, which boot installs in the
+// `clientRepository` slot: each record answered is read by name once and held
+// to the registration schema. A refused record makes `findById` and
+// `authenticate` reject with the branded refusal, recognised by
+// `isClientRecordRefused` and never by `instanceof`.
+export { isClientRecordRefused } from "./repositories/clientRecordRefused.mjs";
+export {
+	type ClientRepositoryBoundaryOptions,
+	validatedClientRepository,
+} from "./repositories/clientRepositoryBoundary.mjs";
 export {
 	type ClientRepositoryOutage,
 	logClientRepositoryUnavailable,
@@ -1005,6 +1093,12 @@ export {
 	readMfaEnrollmentWitness,
 	supportsMfaEnrollmentWitness,
 } from "./repositories/UserRepository.mjs";
+// A login's one read of the `User` a repository answers: the subject and the
+// claims are read from its snapshot, never from the `User` again.
+export {
+	readUserSnapshot,
+	type UserSnapshotReading,
+} from "./repositories/userSnapshot.mjs";
 export {
 	createRouter as createHealthcheckRouter,
 	type HealthcheckRouterOptions,
@@ -1018,7 +1112,6 @@ export {
 // actions and their grades, the requirement contract, and the acr vocabulary.
 export {
 	type AcrRequirement,
-	type AcrSelection,
 	type AcrTable,
 	type ProducibleAmr,
 	producibleAmr,
@@ -1085,7 +1178,6 @@ export {
 	type Admission,
 	type AdmissionAsks,
 	type AdmissionDeps,
-	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,
 	type CompletedRequirementDto,
@@ -1136,6 +1228,7 @@ export {
 	type RecordedAuthentication,
 	type RenewalNonces,
 	readRenewalNonces,
+	recordableAuthTime,
 	recordableSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,
@@ -1154,6 +1247,43 @@ export {
 	createSessionRPRegistryFactory,
 	createUserSessionStoreFactory,
 } from "./user-sessions/factory.mjs";
+// The session lifecycle port (active → closing → closed), its readers and
+// its in-process store. Nothing reads the slot yet.
+export {
+	createInMemorySessionLifecycleStore,
+	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_ENTRIES,
+	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS,
+	type InMemorySessionLifecycleStoreOptions,
+} from "./user-sessions/lifecycle/memory.mjs";
+export {
+	checkSessionCloseRequest,
+	checkSessionParticipant,
+	readSessionCloseAnswer,
+	readSessionJoinAnswer,
+	readSessionLifecycleListing,
+	readSessionOpenAnswer,
+	readVersionedSessionLifecycle,
+} from "./user-sessions/lifecycle/readers.mjs";
+export {
+	SESSION_CLOSE_CAUSES,
+	SESSION_LIFECYCLE_MAX_KEY_LENGTH,
+	SESSION_LIFECYCLE_MAX_LISTING,
+	SESSION_LIFECYCLE_STATES,
+	SESSION_PARTICIPANT_KINDS,
+	SESSION_PARTICIPANT_MAX_DATA_LENGTH,
+	type SessionClose,
+	type SessionCloseAnswer,
+	type SessionCloseCause,
+	type SessionCloseRequest,
+	type SessionJoinAnswer,
+	type SessionLifecycleRecord,
+	type SessionLifecycleState,
+	type SessionLifecycleStore,
+	type SessionOpenAnswer,
+	type SessionParticipant,
+	type SessionParticipantKind,
+	sessionCloseItemOf,
+} from "./user-sessions/lifecycle/types.mjs";
 export { createInMemorySessionFamilyIndex } from "./user-sessions/memory/sessionFamilyIndex.mjs";
 export { createInMemorySessionFederationIndex } from "./user-sessions/memory/sessionFederationIndex.mjs";
 export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";
@@ -1235,9 +1365,6 @@ export {
 export {
 	ChallengeStoreFullError,
 	createMemoryChallengeStore,
-	DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
-	DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
-	DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
 	type MemoryChallengeStore,
 	type MemoryChallengeStoreOptions,
 } from "./challenges/adapters/memory.mjs";
@@ -1266,9 +1393,6 @@ export type {
 } from "./challenges/types.mjs";
 export {
 	createMemoryReplaySeenSet,
-	DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES,
-	DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
-	DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
 	type MemoryReplaySeenSet,
 	type MemoryReplaySeenSetOptions,
 	ReplaySeenSetFullError,
@@ -1280,10 +1404,7 @@ export {
 } from "./replay-seen-set/factory.mjs";
 export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
-export {
-	DPOP_PROOF_REPLAY_SCOPE_PREFIX,
-	DPOP_PROOF_REPLAY_SHARE,
-} from "./replay-seen-set/scopes.mjs";
+export { DPOP_PROOF_REPLAY_SCOPE_PREFIX } from "./replay-seen-set/scopes.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
 // Canonical key helper, exported so integrators' own adapters keep
 // cross-adapter parity
@@ -1312,13 +1433,9 @@ export {
 	memoryRefreshTokenFamilyStoreModule,
 } from "./refresh-token-family/module.mjs";
 export { withReason } from "./refresh-token-family/reason.mjs";
-export {
-	resolveFamilyAccessTokenHorizonMs,
-	revokedFamilyExpiresAtMs,
-} from "./refresh-token-family/retention.mjs";
+export { resolveFamilyAccessTokenHorizonMs } from "./refresh-token-family/retention.mjs";
 export {
 	createRefreshTokenFamilyRevocation,
-	REVOKED_WITHOUT_RECORD_JTI,
 	type RefreshTokenFamilyRevocationDeps,
 } from "./refresh-token-family/revocation.mjs";
 export {
@@ -1348,10 +1465,7 @@ export type {
 	MemoryAccessTokenDenylist,
 	MemoryAccessTokenDenylistOptions,
 } from "./access-token-denylist/memory.mjs";
-export {
-	createMemoryAccessTokenDenylist,
-	DEFAULT_MEMORY_DENYLIST_SWEEP_INTERVAL,
-} from "./access-token-denylist/memory.mjs";
+export { createMemoryAccessTokenDenylist } from "./access-token-denylist/memory.mjs";
 export { memoryAccessTokenDenylistModule } from "./access-token-denylist/module.mjs";
 export type { AccessTokenDenylist } from "./access-token-denylist/types.mjs";
 // The declared-absence policy the denylist readers share: a boot refusal
@@ -1402,12 +1516,9 @@ export {
 	effectiveFederationGrantStatus,
 } from "./federation-grants/effective-status.mjs";
 export {
-	FEDERATION_GRANT_INTERACTION_CODES,
 	type FederationGrantIntentScopes,
-	type FederationGrantInteractionCode,
 	federationGrantIneligibilityRetry,
 	federationGrantIneligibilityStands,
-	federationGrantInteractionCode,
 	federationGrantRefreshFailureStands,
 	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
@@ -1429,7 +1540,6 @@ export {
 } from "./federation-grants/intentFactory.mjs";
 export {
 	createMemoryFederationGrantIntentStore,
-	MEMORY_FEDERATION_GRANT_INTENT_STORE_SWEEP_FLOOR,
 	type MemoryFederationGrantIntentStore,
 } from "./federation-grants/intentMemory.mjs";
 export {
@@ -1469,7 +1579,6 @@ export {
 	type FederationGrantLodgingStepFailure,
 	type FederationGrantReauthorizationRequest,
 	type FederationGrantReauthorizationResult,
-	federationGrantRedirectUriReservedParameter,
 	lodgeFederationGrantIntent,
 	lodgeFederationGrantReauthorization,
 } from "./federation-grants/lodge.mjs";
@@ -1485,7 +1594,6 @@ export {
 } from "./federation-grants/module.mjs";
 export {
 	assertFederationGrantRetrievalLimits,
-	FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS,
 	type FederationGrantAuditEvent,
 	type FederationGrantRefresher,
 	type FederationGrantRetrievalFailure,
@@ -1548,6 +1656,7 @@ export {
 	type FederationGrantRefreshFailureKind,
 	type FederationGrantRevocation,
 	type FederationGrantRevokedBy,
+	type FederationGrantRotations,
 	type FederationGrantTokenResult,
 	type FederationGrantUnavailableReason,
 	type FederationGrantUsage,
@@ -1555,6 +1664,14 @@ export {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 } from "./federation-grants/types.mjs";
+// The one rule from an upstream token answer to the access token a grant's
+// credential stores, or the reason it may not be: retrieval and the connect
+// callback both read their answer here.
+export {
+	type FederationGrantUpstreamAnswer,
+	type FederationGrantUpstreamAnswerContext,
+	readFederationGrantUpstreamAnswer,
+} from "./federation-grants/upstream-answer.mjs";
 // The two boundaries of a subject revocation, and how long each has to be
 // kept. The skews come from `jwt/verify.mts` so the grants comparison uses the
 // allowance the watermark comparison does.
@@ -1609,12 +1726,14 @@ export {
 } from "./device-authorization/errors.mjs";
 export {
 	createMemoryDeviceCodeStore,
-	DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES,
-	DEFAULT_MEMORY_DEVICE_CODE_STORE_SWEEP_INTERVAL,
 	type MemoryDeviceCodeStore,
 	type MemoryDeviceCodeStoreOptions,
 } from "./device-authorization/memory.mjs";
 export { memoryDeviceCodeStoreModule } from "./device-authorization/module.mjs";
+export {
+	type DeviceAuthorizationReading,
+	readDeviceAuthorization,
+} from "./device-authorization/reading.mjs";
 export {
 	type ApproveDeviceAuthorizationInput,
 	type CreateDeviceAuthorizationInput,

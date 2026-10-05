@@ -39,6 +39,7 @@ const grant: AuthorizedFederationGrant = {
 	lastUsedAt: undefined,
 	ineligible: undefined,
 	refreshFailure: undefined,
+	rotations: undefined,
 };
 
 describe("federationGrantAuditMetadata", () => {

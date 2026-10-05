@@ -18,6 +18,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
@@ -168,6 +169,20 @@ describe("createClientCredentialsGrant — token issuance", () => {
 	it("grants defaultScopes when scope is omitted and the client declares them", async () => {
 		const handler = createClientCredentialsGrant(baseDeps);
 		const client = makeClient({ allowedScopes: ["s1", "s2"], defaultScopes: ["s1"] });
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+		expect(payload.scope).toBe("s1");
+	});
+
+	it("filters the defaultScopes of a hand-built client by its allowlist", async () => {
+		// A caller reaching the handler through `grantHandlerResolver` may hand
+		// it a client that never passed core's client-record boundary.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const client = makeClient({ allowedScopes: ["s1"], defaultScopes: ["s1", "admin"] });
 
 		const { result } = await handler.handle(makeCtx(client));
 
@@ -586,5 +601,75 @@ describe("createClientCredentialsGrant — a grant policy that cannot answer is 
 			"grant_policy_unavailable",
 		);
 		expect(error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
+	});
+});
+
+describe("createClientCredentialsGrant — a wired grant policy is consulted whatever oauth.resourceIndicator.enabled", () => {
+	// `baseDeps` sets no `resourceIndicator`: the flag is off.
+	const withPolicy = (evaluate: GrantPolicyHook["evaluate"]): GrantDependencies => ({
+		...baseDeps,
+		grantPolicy: { kind: "stub", evaluate },
+	});
+
+	it("answers a deny 400 with the policy's own error, the flag off", async () => {
+		const handler = createClientCredentialsGrant(
+			withPolicy(async () => ({
+				outcome: "deny",
+				error: "unauthorized_client",
+				errorDescription: "machine access is closed",
+			})),
+		);
+		const { result } = await handler.handle(makeCtx(makeClient()));
+		expect(result).toEqual({
+			status: 400,
+			error: "unauthorized_client",
+			errorDescription: "machine access is closed",
+			policyDenial: { error: "unauthorized_client" },
+		});
+	});
+
+	it("answers a deny with the RFC 8628 code slow_down 400 invalid_request", async () => {
+		const handler = createClientCredentialsGrant(
+			withPolicy(async () => ({ outcome: "deny", error: "slow_down" })),
+		);
+		const { result } = await handler.handle(makeCtx(makeClient()));
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			policyDenial: { error: "slow_down" },
+		});
+	});
+
+	it("answers a policy that throws 503, the flag off", async () => {
+		const handler = createClientCredentialsGrant(
+			withPolicy(async () => {
+				throw new Error("decision service down");
+			}),
+		);
+		const { result } = await handler.handle(makeCtx(makeClient()));
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		if (!("error" in result)) expect.fail("expected a refusal");
+		expect(result.errorDescription ?? "").not.toContain("decision service down");
+	});
+
+	it("narrows the minted scope to the policy's grantedScope, the flag off", async () => {
+		const handler = createClientCredentialsGrant(
+			withPolicy(async () => ({ outcome: "allow", grantedScope: ["read:foo"] })),
+		);
+		const { result } = await handler.handle(
+			makeCtx(makeClient(), { grant_type: "client_credentials", scope: "read:foo write:foo" }),
+		);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		expect(decodeJwt(result.tokens.access_token).scope).toBe("read:foo");
+	});
+
+	it("hands the policy no resource, the flag off", async () => {
+		const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({ outcome: "allow" }));
+		const handler = createClientCredentialsGrant(withPolicy(evaluate));
+		await handler.handle(
+			makeCtx(makeClient(), { grant_type: "client_credentials", resource: "https://rs" }),
+		);
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(evaluate.mock.calls[0]?.[0].resource).toBeUndefined();
 	});
 });

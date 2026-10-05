@@ -111,7 +111,7 @@ const body = (assertion: string, extra: Record<string, unknown> = {}) => ({
 });
 
 /** Core's outbound fetch, as a composition hands the verifier. */
-const outboundFetch = createOutboundFetch({ source: "registration" });
+const outboundFetch = createOutboundFetch({ config: {}, source: "registration" });
 
 const build = (overrides: Partial<Parameters<typeof createClientAssertionVerifier>[0]> = {}) =>
 	createClientAssertionVerifier({
@@ -391,6 +391,7 @@ describe("createClientAssertionVerifier", () => {
 				await build({
 					logger,
 					fetch: createOutboundFetchForTesting({
+						config: {},
 						source: "registration",
 						lookup: async () => ["93.184.216.34"],
 						transport,
@@ -453,6 +454,7 @@ describe("createClientAssertionVerifier", () => {
 				await build({
 					logger,
 					fetch: createOutboundFetchForTesting({
+						config: {},
 						source: "registration",
 						lookup: async () => {
 							throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });

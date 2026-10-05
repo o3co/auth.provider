@@ -712,6 +712,26 @@ describe("step 2 — the live read", () => {
 		expect(JSON.stringify(lines[0]?.fields)).not.toContain("args");
 	});
 
+	it("answers unavailable (user_session) when reading the store off deps throws, logged once at error — never a rejection", async () => {
+		const { logger, lines } = recordingLogger();
+		const throwing = {
+			...deps({ logger }),
+			get userSessionStore(): UserSessionStore {
+				throw new Error("deps down");
+			},
+		};
+		expect(await admitSession(throwing, request())).toEqual({
+			outcome: "unavailable",
+			store: "user_session",
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({
+			level: "error",
+			message: "session_admission_unavailable",
+			fields: { store: "user_session", action: "test.use" },
+		});
+	});
+
 	it("reads no session without a store: the requirements decide what null means, and with none registered a cookie-only composition is admitted", async () => {
 		const seen: RequirementInput[] = [];
 		const watching = met("watch", {
@@ -804,6 +824,31 @@ describe("step 3 — the subject", () => {
 		expect(
 			await admitSession(deps(), request({ claim: cookie({ user: { id: "user-2" } }) })),
 		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
+	});
+
+	it("reads deps.auditSink only to audit a mismatch: a getter that throws fails as a sink that throws — the answer stands, never a rejection", async () => {
+		let reads = 0;
+		const { logger, lines } = recordingLogger();
+		const throwing = {
+			...deps({ logger }),
+			get auditSink(): AuditSink {
+				reads++;
+				throw new Error("sink unreadable");
+			},
+		};
+		expect(await admitSession(throwing, request())).toMatchObject({ outcome: "admitted" });
+		expect(reads).toBe(0);
+		expect(
+			await admitSession(throwing, request({ claim: cookie({ user: { id: "user-2" } }) })),
+		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
+		expect(reads).toBe(1);
+		expect(lines).toEqual([
+			{
+				level: "warn",
+				message: "session_admission_subject_mismatch",
+				fields: { action: "test.use" },
+			},
+		]);
 	});
 });
 
@@ -903,6 +948,26 @@ describe("step 4 — the revocation boundary", () => {
 				fields: { store: "revocation_boundary", action: "test.peek" },
 			});
 		}
+	});
+
+	it("answers unavailable (revocation_boundary) when reading the boundary off deps throws, logged once at error — never a rejection", async () => {
+		const { logger, lines } = recordingLogger();
+		const throwing = {
+			...deps({ logger }),
+			get subjectRevocation(): SubjectRevocation {
+				throw new Error("deps down");
+			},
+		};
+		expect(await admitSession(throwing, request())).toEqual({
+			outcome: "unavailable",
+			store: "revocation_boundary",
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({
+			level: "error",
+			message: "session_admission_unavailable",
+			fields: { store: "revocation_boundary", action: "test.use" },
+		});
 	});
 
 	it("does not read the boundary for a token carrier: verifyJwt reads it, so the two readings do not double up", async () => {
@@ -1446,6 +1511,50 @@ describe("step 5 — what a requirement answers is validated at the boundary", (
 		}
 	});
 
+	it("answers unavailable (the requirement's name), logged once at error, for an answer whose outcome or whenStillUnmet getter throws — never a rejection", async () => {
+		const throwing = (field: "outcome" | "whenStillUnmet") =>
+			field === "outcome"
+				? {
+						get outcome(): string {
+							throw new Error("outcome unreadable");
+						},
+					}
+				: {
+						outcome: "step_up",
+						get whenStillUnmet(): string {
+							throw new Error("whenStillUnmet unreadable");
+						},
+					};
+		for (const field of ["outcome", "whenStillUnmet"] as const) {
+			const { logger, lines } = recordingLogger();
+			let askedOther = 0;
+			const odd = met("odd", { admit: async () => throwing(field) as never });
+			const other = met("other", {
+				admit: async () => {
+					askedOther++;
+					return { outcome: "met" };
+				},
+			});
+			expect(
+				await admitSession(
+					deps({
+						requirements: resolverForTests([odd, other], { actions: TEST_ACTIONS }),
+						logger,
+					}),
+					request(),
+				),
+				field,
+			).toEqual({ outcome: "unavailable", store: "odd" });
+			expect(askedOther, field).toBe(0);
+			expect(lines, field).toHaveLength(1);
+			expect(lines[0], field).toMatchObject({
+				level: "error",
+				message: "session_admission_unavailable",
+				fields: { store: "odd", action: "test.use" },
+			});
+		}
+	});
+
 	it("hands the requirement the subject: the record's sub when one was read, else the claim's — undefined only on the code record's first read", async () => {
 		const seen: (string | undefined)[] = [];
 		const watching = met("watch", {
@@ -1549,6 +1658,41 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 			asked as never,
 		);
 		expect(seen).toBe("use");
+	});
+
+	it("the stores: deps.userSessionStore and deps.subjectRevocation are read once each, the record, the boundary and the step-up capability of both readings all off that one read", async () => {
+		let storeReads = 0;
+		let revocationReads = 0;
+		let boundaryAsked = 0;
+		let seen: RequirementInput | undefined;
+		const store = Object.assign(holding(session()), { recordSecondFactor: async () => null });
+		const revocation = revocationOf(async () => {
+			boundaryAsked++;
+			return null;
+		});
+		const watching = met("watch", {
+			admit: async (input) => {
+				seen = input;
+				return { outcome: "met" };
+			},
+		});
+		const counting = {
+			...deps({ requirements: resolverForTests([watching], { actions: TEST_ACTIONS }) }),
+			get userSessionStore(): UserSessionStore {
+				storeReads++;
+				return store;
+			},
+			get subjectRevocation(): SubjectRevocation {
+				revocationReads++;
+				return revocation;
+			},
+		};
+		expect(await admitSession(counting, request())).toMatchObject({ outcome: "admitted" });
+		// A requirement was asked: the boundary is read again after it answered.
+		expect(boundaryAsked).toBe(2);
+		expect(seen?.session?.secondFactorRecordable).toBe(true);
+		expect(storeReads).toBe(1);
+		expect(revocationReads).toBe(1);
 	});
 
 	it("a verdict: outcome and whenStillUnmet are copied before they are checked, so a getter cannot pass the check as unmet and read as met", async () => {

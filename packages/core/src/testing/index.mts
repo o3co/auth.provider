@@ -65,6 +65,12 @@ export {
 // Client registrations as a registration file writes them, for an
 // `InMemoryClientRepository`, which fills the schema's defaults.
 export { clientEntries } from "./fixtures/clientEntries.mjs";
+// A module that registers one federation type, so that boot handles the
+// `core.federations` entries of that type without the package that owns it.
+export {
+	type FederationTypeForTestsOptions,
+	federationTypeForTests,
+} from "./fixtures/federationType.mjs";
 export {
 	type FederationEntryForTests,
 	type FederationForTests,
@@ -77,7 +83,6 @@ export {
 	coreConfigForTests,
 	makeValidAppConfig,
 	makeValidCoreConfig,
-	makeValidFullSections,
 } from "./fixtures/valid-config.mjs";
 // The doubles a second factor's tests use: a factor with a trivial protocol,
 // its proofs, and the keyed digests a factor is handed. The factor's
@@ -95,7 +100,6 @@ export {
 	createOutboundFetchForTesting,
 	type OutboundAnswer,
 	type OutboundExchange,
-	OutboundFetchError,
 	type OutboundFetchForTestingOptions,
 	type OutboundSectionForTests,
 	type OutboundTransport,
@@ -117,6 +121,8 @@ export {
 	renamedVariableCaptures,
 	renamedVariableProblems,
 } from "./renamedVariables.mjs";
+// The check that each module refuses an unknown key at every level of its section.
+export { type SectionStrictnessOptions, sectionStrictnessProblems } from "./sectionStrictness.mjs";
 export {
 	type CsrfGuardContractInput,
 	createTestCsrfGuard,
@@ -132,6 +138,12 @@ export {
 	type DeploymentModeContractInput,
 	deploymentModeContract,
 } from "./slots/deploymentMode.mjs";
+export {
+	createTestFederationSettings,
+	type FederationSettingsContractInput,
+	federationSettingsContract,
+	type TestFederationEntry,
+} from "./slots/federationSettings.mjs";
 export {
 	createTestHttpSettings,
 	type HttpSettingsContractInput,
@@ -157,6 +169,11 @@ export {
 	type TestOAuthTokenSettingsOverrides,
 } from "./slots/oauthTokenSettings.mjs";
 export {
+	createTestOutboundPolicy,
+	type OutboundPolicyContractInput,
+	outboundPolicyContract,
+} from "./slots/outboundPolicy.mjs";
+export {
 	createTestRateLimiter,
 	type RateLimiterContractInput,
 	rateLimiterContract,
@@ -171,4 +188,9 @@ export {
 	type SessionCookiePolicyContractInput,
 	sessionCookiePolicyContract,
 } from "./slots/sessionCookiePolicy.mjs";
+export {
+	createTestTokenBindingSettings,
+	type TokenBindingSettingsContractInput,
+	tokenBindingSettingsContract,
+} from "./slots/tokenBindingSettings.mjs";
 export type { TestInspect } from "./test-inspect.mjs";

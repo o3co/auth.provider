@@ -30,6 +30,9 @@
 
 import { request as httpRequest } from "node:http";
 import {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	isStoreGeneration,
+	MAX_STORABLE_EXPIRY_MS,
 	type MfaFactorRecord,
 	type MfaStoreFactor,
 	toMfaStoreFactor,
@@ -96,6 +99,30 @@ async function post(url: string, body: unknown, headers: Record<string, string> 
 	return { status: response.status, headers: response.headers, body: json, text };
 }
 
+/** A deadline well ahead of the request clock. */
+const later = (): number => Date.now() + 60_000;
+
+/** A create of `factor` while the set is at `expected`, as the provider sends one. */
+const createIf = (
+	fake: FakeStore,
+	factor: MfaStoreFactor,
+	expected: string | null,
+	deadlineMs: unknown = later(),
+) => post(fake.urls.createUrl, { factor, expectedGeneration: expected, deadlineMs });
+
+/** A removal of one record while the set is at `expected`, as the provider sends one. */
+const removeIf = (
+	fake: FakeStore,
+	subject: string,
+	id: string,
+	expected: unknown,
+	deadlineMs: unknown = later(),
+) => post(fake.urls.deleteUrl, { subject, id, expectedGeneration: expected, deadlineMs });
+
+/** The set's generation a write answered. */
+const generationAnswered = (answer: { body: unknown }): string =>
+	(answer.body as { generation: string }).generation;
+
 describe("the fake Store's URLs", () => {
 	it("are loopback http URLs, one per endpoint", async () => {
 		const { urls } = await start();
@@ -123,17 +150,21 @@ describe("the fake Store's URLs", () => {
 
 describe("list", () => {
 	it("answers 200 with every record held for the subject, and an empty list for a subject with none", async () => {
-		const { urls } = await start();
+		const fake = await start();
+		const { urls } = fake;
 		expect(await post(urls.listUrl, { subject: "user-1" })).toMatchObject({
 			status: 200,
 			body: { factors: [] },
 		});
-		await post(urls.createUrl, { factor: WIRE });
+		await createIf(fake, WIRE, null);
 		expect(await post(urls.listUrl, { subject: "user-1" })).toMatchObject({
 			status: 200,
 			body: { factors: [WIRE] },
 		});
-		expect((await post(urls.listUrl, { subject: "user-2" })).body).toEqual({ factors: [] });
+		expect((await post(urls.listUrl, { subject: "user-2" })).body).toEqual({
+			factors: [],
+			generation: null,
+		});
 	});
 
 	it("answers back a record it holds whatever it is, one the provider cannot read included", async () => {
@@ -143,6 +174,7 @@ describe("list", () => {
 		fake.holdFactor("user-1", unreadable);
 		expect((await post(fake.urls.listUrl, { subject: "user-1" })).body).toEqual({
 			factors: [WIRE, unreadable],
+			generation: expect.any(String),
 		});
 		expect(fake.factors("user-1")).toEqual([WIRE, unreadable]);
 	});
@@ -156,7 +188,7 @@ describe("list", () => {
 });
 
 describe("create", () => {
-	it("answers 204 and holds the record as sent: data byte for byte, an absent field absent", async () => {
+	it("answers 200 created and holds the record as sent: data byte for byte, an absent field absent", async () => {
 		const fake = await start();
 		const bare = toMfaStoreFactor({
 			...RECORD,
@@ -166,32 +198,60 @@ describe("create", () => {
 			lastUsedAt: undefined,
 			data: '{"a":[],"b":{}} ü∆ 漢字 🙂',
 		});
-		expect((await post(fake.urls.createUrl, { factor: bare })).status).toBe(204);
+		expect(await createIf(fake, bare, null)).toMatchObject({
+			status: 200,
+			body: { outcome: "created" },
+		});
 		expect(fake.factors("user-1")).toStrictEqual([bare]);
 		const listed = await post(fake.urls.listUrl, { subject: "user-1" });
 		expect(listed.text).not.toContain("null");
 	});
 
-	it("answers 409 to a duplicate (subject, id), keeping the record held", async () => {
+	it("answers 409 conflict to a duplicate (subject, id), keeping the record held", async () => {
 		const fake = await start();
-		await post(fake.urls.createUrl, { factor: WIRE });
-		expect(
-			(await post(fake.urls.createUrl, { factor: { ...WIRE, data: "v2.other" } })).status,
-		).toBe(409);
-		expect(
-			(await post(fake.urls.createUrl, { factor: { ...WIRE, subject: "user-2" } })).status,
-		).toBe(204);
+		const g1 = generationAnswered(await createIf(fake, WIRE, null));
+		expect(await createIf(fake, { ...WIRE, data: "v2.other" }, g1)).toMatchObject({
+			status: 409,
+			body: { outcome: "conflict" },
+		});
+		expect((await createIf(fake, { ...WIRE, subject: "user-2" }, null)).status).toBe(200);
 		expect(fake.factors("user-1")).toStrictEqual([WIRE]);
+		// The refusal kept the generation: a create of another id at it still lands.
+		expect((await createIf(fake, { ...WIRE, id: ID_2 }, g1)).status).toBe(200);
 	});
 
 	it("answers 400 to a record that is not one, null for an optional field included, and holds nothing", async () => {
 		const fake = await start();
 		for (const factor of [{ ...WIRE, label: null }, { ...WIRE, createdAtMs: "x" }, {}, null]) {
-			expect((await post(fake.urls.createUrl, { factor })).status, JSON.stringify(factor)).toBe(
-				400,
-			);
+			expect(
+				(await createIf(fake, factor as MfaStoreFactor, null)).status,
+				JSON.stringify(factor),
+			).toBe(400);
 		}
 		expect(fake.factors("user-1")).toEqual([]);
+	});
+
+	it("answers 400 to a create without expectedGeneration, to an absent set or a present one, holding nothing; one at null on an absent set creates", async () => {
+		const fake = await start();
+		for (const body of [{ factor: WIRE }, { factor: WIRE, deadlineMs: later() }]) {
+			expect((await post(fake.urls.createUrl, body)).status, Object.keys(body).join()).toBe(400);
+		}
+		expect(fake.factors("user-1")).toEqual([]);
+		expect((await post(fake.urls.listUrl, { subject: "user-1" })).body).toStrictEqual({
+			factors: [],
+			generation: null,
+		});
+		const created = await createIf(fake, WIRE, null);
+		expect(created).toMatchObject({ status: 200, body: { outcome: "created" } });
+		const g1 = generationAnswered(created);
+		const another = { ...WIRE, id: ID_2 };
+		for (const body of [{ factor: another }, { factor: another, deadlineMs: later() }]) {
+			expect((await post(fake.urls.createUrl, body)).status, Object.keys(body).join()).toBe(400);
+		}
+		expect((await post(fake.urls.listUrl, { subject: "user-1" })).body).toStrictEqual({
+			factors: [WIRE],
+			generation: g1,
+		});
 	});
 });
 
@@ -285,25 +345,320 @@ describe("update", () => {
 });
 
 describe("delete", () => {
-	it("answers 204 for one record or every record of a subject, and 404 when it held none", async () => {
+	it("answers the reset of every record of a subject 204, and 404 when it held none, leaving other subjects' records", async () => {
 		const fake = await start();
 		fake.holdFactor("user-1", WIRE);
 		fake.holdFactor("user-1", { ...WIRE, id: ID_2 });
 		fake.holdFactor("user-2", WIRE);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: ID_1 })).status).toBe(204);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: ID_1 })).status).toBe(404);
-		expect(fake.factors("user-1")).toStrictEqual([{ ...WIRE, id: ID_2 }]);
 		expect((await post(fake.urls.deleteUrl, { subject: "user-1", all: true })).status).toBe(204);
 		expect((await post(fake.urls.deleteUrl, { subject: "user-1", all: true })).status).toBe(404);
 		expect(fake.factors("user-1")).toEqual([]);
 		expect(fake.factors("user-2")).toStrictEqual([WIRE]);
 	});
 
+	it("answers 400 to the removal of one record without expectedGeneration, removing nothing; the reset still empties the set", async () => {
+		const fake = await start();
+		const g1 = generationAnswered(await createIf(fake, WIRE, null));
+		for (const body of [
+			{ subject: "user-1", id: ID_1 },
+			{ subject: "user-1", id: ID_1, deadlineMs: later() },
+			{ subject: "user-1", id: ID_GONE },
+			{ subject: "user-2", id: ID_1 },
+		]) {
+			expect((await post(fake.urls.deleteUrl, body)).status, JSON.stringify(body)).toBe(400);
+		}
+		expect((await post(fake.urls.listUrl, { subject: "user-1" })).body).toStrictEqual({
+			factors: [WIRE],
+			generation: g1,
+		});
+		expect((await post(fake.urls.listUrl, { subject: "user-2" })).body).toStrictEqual({
+			factors: [],
+			generation: null,
+		});
+		expect((await post(fake.urls.deleteUrl, { subject: "user-1", all: true })).status).toBe(204);
+		expect(fake.factors("user-1")).toEqual([]);
+	});
+
 	it("answers 400 to a body that names neither one record nor all", async () => {
 		const { urls } = await start();
-		for (const body of [{ subject: "user-1" }, { subject: "user-1", all: "yes" }, { id: "x" }]) {
+		for (const body of [
+			{ subject: "user-1" },
+			{ subject: "user-1", all: "yes" },
+			{ id: "x" },
+			{ subject: "user-1", id: ID_1, all: true },
+			{ subject: "user-1", id: ID_1, all: true, expectedGeneration: "g" },
+		]) {
 			expect((await post(urls.deleteUrl, body)).status, JSON.stringify(body)).toBe(400);
 		}
+	});
+});
+
+describe("the factor set's generation", () => {
+	const RECORD_2: MfaStoreFactor = { ...WIRE, id: ID_2 };
+
+	/** The subject's set as the list endpoint answers it. */
+	async function listed(fake: FakeStore, subject = "user-1") {
+		const { status, body } = await post(fake.urls.listUrl, { subject });
+		expect(status).toBe(200);
+		return body as { factors: unknown[]; generation: string | null };
+	}
+
+	/** The generation `subject`'s set is at, which must be one. */
+	async function generationOf(fake: FakeStore, subject = "user-1"): Promise<string> {
+		const { generation } = await listed(fake, subject);
+		expect(isStoreGeneration(generation)).toBe(true);
+		return generation as string;
+	}
+
+	it("lists a set never written as no records and a null generation, and a written one with its generation, which a read leaves", async () => {
+		const fake = await start();
+		expect(await listed(fake)).toStrictEqual({ factors: [], generation: null });
+		await createIf(fake, WIRE, null);
+		const generation = await generationOf(fake);
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation });
+	});
+
+	it("answers a conditional create at the generation read with 200, created, and the set's new generation, holding the record", async () => {
+		const fake = await start();
+		const first = await createIf(fake, WIRE, null);
+		expect(first.status).toBe(200);
+		expect(first.body).toStrictEqual({ outcome: "created", generation: expect.any(String) });
+		const g1 = (first.body as { generation: string }).generation;
+		expect(isStoreGeneration(g1)).toBe(true);
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation: g1 });
+		const second = await createIf(fake, RECORD_2, g1);
+		expect(second).toMatchObject({ status: 200, body: { outcome: "created" } });
+		const g2 = (second.body as { generation: string }).generation;
+		expect(g2).not.toBe(g1);
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE, RECORD_2], generation: g2 });
+	});
+
+	it("answers a conditional create 409 conflict, writing nothing: null on a present set, a generation on an absent one, a stale one, a held id", async () => {
+		const fake = await start();
+		const conflict = { status: 409, body: { outcome: "conflict" } };
+		expect(await createIf(fake, WIRE, "never-issued")).toMatchObject(conflict);
+		expect(await listed(fake)).toStrictEqual({ factors: [], generation: null });
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		expect(await createIf(fake, RECORD_2, null)).toMatchObject(conflict);
+		const g2 = ((await createIf(fake, RECORD_2, g1)).body as { generation: string }).generation;
+		expect(await createIf(fake, { ...WIRE, id: ID_GONE }, g1), "a stale generation").toMatchObject(
+			conflict,
+		);
+		expect(await createIf(fake, { ...WIRE, data: "v2.other" }, g2), "a held id").toMatchObject(
+			conflict,
+		);
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE, RECORD_2], generation: g2 });
+	});
+
+	it("answers a conditional removal 200 removed with a new generation, 404 missing for no set or an id not held, 409 conflict at a stale generation, only the first writing", async () => {
+		const fake = await start();
+		expect(await removeIf(fake, "user-1", ID_1, "never-issued")).toMatchObject({
+			status: 404,
+			body: { outcome: "missing" },
+		});
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		const g2 = ((await createIf(fake, RECORD_2, g1)).body as { generation: string }).generation;
+		expect(await removeIf(fake, "user-1", ID_1, g1)).toMatchObject({
+			status: 409,
+			body: { outcome: "conflict" },
+		});
+		expect(await removeIf(fake, "user-1", ID_GONE, g2)).toMatchObject({
+			status: 404,
+			body: { outcome: "missing" },
+		});
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE, RECORD_2], generation: g2 });
+		const removed = await removeIf(fake, "user-1", ID_1, g2);
+		expect(removed).toMatchObject({ status: 200, body: { outcome: "removed" } });
+		const g3 = (removed.body as { generation: string }).generation;
+		expect(isStoreGeneration(g3) && g3 !== g2).toBe(true);
+		expect(await listed(fake)).toStrictEqual({ factors: [RECORD_2], generation: g3 });
+	});
+
+	it("keeps the set as its tombstone after its last removal and after a reset, a never-written subject's included: no records, a new generation, a create at null a conflict", async () => {
+		const fake = await start();
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		const removed = await removeIf(fake, "user-1", ID_1, g1);
+		const g2 = (removed.body as { generation: string }).generation;
+		expect(await listed(fake)).toStrictEqual({ factors: [], generation: g2 });
+		expect((await createIf(fake, WIRE, null)).status).toBe(409);
+
+		await createIf(fake, { ...WIRE, subject: "user-2" }, null);
+		const before = await generationOf(fake, "user-2");
+		expect((await post(fake.urls.deleteUrl, { subject: "user-2", all: true })).status).toBe(204);
+		const reset = await generationOf(fake, "user-2");
+		expect(reset).not.toBe(before);
+		expect((await listed(fake, "user-2")).factors).toEqual([]);
+		expect((await createIf(fake, { ...WIRE, subject: "user-2" }, before)).status).toBe(409);
+		expect((await post(fake.urls.deleteUrl, { subject: "user-2", all: true })).status).toBe(404);
+		expect(await generationOf(fake, "user-2"), "a reset of an emptied set").not.toBe(reset);
+
+		expect((await post(fake.urls.deleteUrl, { subject: "nobody", all: true })).status).toBe(404);
+		await generationOf(fake, "nobody");
+		expect((await createIf(fake, { ...WIRE, subject: "nobody" }, null)).status).toBe(409);
+	});
+
+	it("keeps the generation through an update", async () => {
+		const fake = await start();
+		const g1 = generationAnswered(await createIf(fake, WIRE, null));
+		const update = toMfaStoreUpdateRequest("user-1", ID_1, 1, {
+			data: "v2.re-sealed",
+			label: undefined,
+			lastUsedAt: undefined,
+		});
+		expect((await post(fake.urls.updateUrl, update)).status).toBe(200);
+		expect(await generationOf(fake)).toBe(g1);
+	});
+
+	it("reads a tombstone as absent once the write-lifetime bound has passed on its clock since the set's last membership write, and never a set holding a record", async () => {
+		let nowMs = Date.parse("2026-10-02T00:00:00.000Z");
+		const fake = await start({ users: USERS, now: () => nowMs });
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		await removeIf(fake, "user-1", ID_1, g1);
+		await post(fake.urls.deleteUrl, { subject: "user-2", all: true });
+		nowMs += BUNDLED_STORE_WRITE_LIFETIME_MS - 1;
+		await post(fake.urls.deleteUrl, { subject: "user-2", all: true });
+		expect((await listed(fake)).generation).not.toBeNull();
+		nowMs += 1;
+		expect(await listed(fake)).toStrictEqual({ factors: [], generation: null });
+		expect((await createIf(fake, WIRE, null)).status).toBe(200);
+		expect((await listed(fake, "user-2")).generation, "a reset restarts the bound").not.toBeNull();
+		nowMs += 10 * BUNDLED_STORE_WRITE_LIFETIME_MS;
+		expect((await listed(fake)).factors).toEqual([WIRE]);
+		expect(await listed(fake, "user-2")).toStrictEqual({ factors: [], generation: null });
+	});
+
+	it("answers a conditional write to a set held without a generation 409 conflict; the first list gives it one, which a write at it passes", async () => {
+		const fake = await start();
+		fake.holdFactor("user-1", WIRE);
+		for (const expected of [null, "never-issued"]) {
+			expect((await createIf(fake, RECORD_2, expected)).status, String(expected)).toBe(409);
+		}
+		expect((await removeIf(fake, "user-1", ID_1, "never-issued")).status).toBe(409);
+		const minted = await generationOf(fake);
+		expect(await generationOf(fake)).toBe(minted);
+		expect((await createIf(fake, RECORD_2, minted)).status).toBe(200);
+		expect(fake.factors("user-1")).toStrictEqual([WIRE, RECORD_2]);
+	});
+
+	it("drops a set's generation when it holds a record into it, as an older writer's whole rewrite would: the old generation meets conflict, and the next list mints another", async () => {
+		const fake = await start();
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		fake.holdFactor("user-1", RECORD_2);
+		expect((await createIf(fake, { ...WIRE, id: ID_GONE }, g1)).status).toBe(409);
+		expect((await removeIf(fake, "user-1", ID_1, g1)).status).toBe(409);
+		const minted = await generationOf(fake);
+		expect(minted).not.toBe(g1);
+		expect(fake.factors("user-1")).toStrictEqual([WIRE, RECORD_2]);
+	});
+
+	it("answers 400 to a conditional write whose expectedGeneration is not one, writing nothing", async () => {
+		const fake = await start();
+		for (const expected of [1, "", 'with"quote', "x".repeat(129), {}, []]) {
+			expect(
+				(await createIf(fake, WIRE, expected as string)).status,
+				JSON.stringify(expected),
+			).toBe(400);
+		}
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		for (const expected of [null, 1, "", 'with"quote']) {
+			expect(
+				(await removeIf(fake, "user-1", ID_1, expected)).status,
+				JSON.stringify(expected),
+			).toBe(400);
+		}
+		expect(
+			(
+				await post(fake.urls.deleteUrl, {
+					subject: "user-1",
+					all: true,
+					expectedGeneration: g1,
+					deadlineMs: later(),
+				})
+			).status,
+		).toBe(400);
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation: g1 });
+	});
+
+	it("answers 400 to a conditional write whose deadlineMs is absent or no whole instant above 0 within the Date range, writing nothing", async () => {
+		const fake = await start();
+		const deadlines = [
+			undefined,
+			null,
+			"9999999999999",
+			0,
+			-1,
+			1.5,
+			MAX_STORABLE_EXPIRY_MS + 1,
+			Number.NaN,
+		];
+		for (const deadlineMs of deadlines) {
+			const create = await post(fake.urls.createUrl, {
+				factor: WIRE,
+				expectedGeneration: null,
+				...(deadlineMs === undefined ? {} : { deadlineMs }),
+			});
+			expect(create.status, `create ${String(deadlineMs)}`).toBe(400);
+		}
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		for (const deadlineMs of deadlines) {
+			const remove = await post(fake.urls.deleteUrl, {
+				subject: "user-1",
+				id: ID_1,
+				expectedGeneration: g1,
+				...(deadlineMs === undefined ? {} : { deadlineMs }),
+			});
+			expect(remove.status, `remove ${String(deadlineMs)}`).toBe(400);
+		}
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation: g1 });
+	});
+
+	it("answers 408 to a conditional write whose deadlineMs is at or before its request clock, writing nothing, and applies one before it", async () => {
+		const requestMs = Date.parse("2026-10-02T12:00:00.000Z");
+		const fake = await start({ users: USERS, requestNow: () => requestMs });
+		for (const deadlineMs of [requestMs, requestMs - 1]) {
+			const late = await createIf(fake, WIRE, null, deadlineMs);
+			expect(late.status, String(deadlineMs)).toBe(408);
+			expect(late.body, String(deadlineMs)).toBeUndefined();
+		}
+		expect(await listed(fake)).toStrictEqual({ factors: [], generation: null });
+		const created = await createIf(fake, WIRE, null, requestMs + 1);
+		expect(created).toMatchObject({ status: 200, body: { outcome: "created" } });
+		const g1 = (created.body as { generation: string }).generation;
+		expect((await removeIf(fake, "user-1", ID_1, g1, requestMs)).status).toBe(408);
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation: g1 });
+		expect(await removeIf(fake, "user-1", ID_1, g1, requestMs + 1)).toMatchObject({
+			status: 200,
+			body: { outcome: "removed" },
+		});
+	});
+
+	it("checks a deadline on its request clock, never on the tombstone clock: moving that past the write-lifetime bound makes no write late", async () => {
+		let tombstoneMs = Date.now();
+		const fake = await start({ users: USERS, now: () => tombstoneMs });
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		const removed = await removeIf(fake, "user-1", ID_1, g1);
+		expect(removed.status).toBe(200);
+		tombstoneMs += 2 * BUNDLED_STORE_WRITE_LIFETIME_MS;
+		expect(await listed(fake)).toStrictEqual({ factors: [], generation: null });
+		expect((await createIf(fake, WIRE, null)).status).toBe(200);
+	});
+
+	it("lets exactly one of concurrent conditional writes at one generation through", async () => {
+		const fake = await start();
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		const ids = Array.from(
+			{ length: 10 },
+			(_, i) => `${String(i).padStart(2, "0")}${ID_GONE.slice(2)}`,
+		);
+		const answers = await Promise.all([
+			...ids.map((id) => createIf(fake, { ...WIRE, id }, g1)),
+			removeIf(fake, "user-1", ID_1, g1),
+		]);
+		const won = answers.filter((answer) => answer.status === 200);
+		expect(won).toHaveLength(1);
+		expect(answers.filter((answer) => answer.status === 409)).toHaveLength(10);
+		const created = (won[0]?.body as { outcome?: string } | undefined)?.outcome === "created";
+		expect(fake.factors("user-1")).toHaveLength(created ? 2 : 0);
 	});
 });
 

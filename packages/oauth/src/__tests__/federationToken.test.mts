@@ -18,6 +18,8 @@ import { createSecretKey } from "node:crypto";
 import {
 	type AuditSink,
 	type ClientRepository,
+	type ConditionalRemoveAnswer,
+	type ConditionalReplaceAnswer,
 	createSymmetricKeyStore,
 	type FederationProvider,
 	type FederationTokenStore,
@@ -26,6 +28,7 @@ import {
 	memoryFederationTokenStoreModule,
 	type RefreshTokenFamilyRevocation,
 	type SessionFederationIndex,
+	type StoreGeneration,
 	type SupportsLock,
 	type UserSession,
 	type UserSessionStore,
@@ -101,6 +104,7 @@ const baseFedTokens: FederationTokens = {
 	tokenType: "Bearer",
 	scope: "openid email",
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 // Client with allowedAzpForFederationToken: true
@@ -144,15 +148,42 @@ function makeFamilyRevocation(
 	};
 }
 
+/** The generation every read of the double answers, and so the one every write is conditional on. */
+const READ_GENERATION = "g-read" as StoreGeneration;
+
+/**
+ * A store whose versioned read answers what its `get` answers, at
+ * `READ_GENERATION`, so a case states the record it reads by overriding
+ * `get`. Its conditional writes land unless a case overrides them.
+ */
 function makeFedTokenStore(override?: Partial<FederationTokenStore>): FederationTokenStore {
-	return {
+	const store: FederationTokenStore = {
 		kind: "memory",
 		attach: vi.fn(),
 		get: vi.fn().mockResolvedValue(baseFedTokens),
-		update: vi.fn().mockResolvedValue(undefined),
+		getVersioned: vi.fn(async (sid: string, name: string) => {
+			const value = await store.get(sid, name);
+			return value === null ? null : { value, generation: READ_GENERATION };
+		}),
+		replaceIf: vi
+			.fn()
+			.mockResolvedValue({ outcome: "updated", generation: "g-written" as StoreGeneration }),
+		removeIf: vi.fn().mockResolvedValue({ outcome: "removed" }),
 		removeBySid: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn().mockResolvedValue(undefined),
 		...override,
+	};
+	return store;
+}
+
+/** `store` with a refresh lock this request always acquires: the record is then this refresh's to end. */
+function withLock(store: FederationTokenStore): FederationTokenStore & SupportsLock {
+	return {
+		...store,
+		acquireLock: vi.fn().mockResolvedValue({
+			acquired: true,
+			release: vi.fn().mockResolvedValue(undefined),
+		}),
 	};
 }
 
@@ -231,7 +262,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.scope).toBe("openid email");
 			expect(res.headers["cache-control"]).toBe("no-store");
 			// No provider needed — refresh should not be called
-			expect(fedTokenStore.update).not.toHaveBeenCalled();
+			expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 		});
 	});
 
@@ -276,9 +307,10 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.access_token).toBe("new-upstream-at");
 			expect(res.body.token_type).toBe("Bearer");
 			expect(refreshFn).toHaveBeenCalledWith("upstream-rt-xyz");
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				"sid-1",
 				"google",
+				READ_GENERATION,
 				expect.objectContaining({
 					accessToken: "new-upstream-at",
 					refreshToken: "new-upstream-rt",
@@ -590,7 +622,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("federationTokenStore.get returns null (dangling link)", () => {
-		it("returns 404 + calls sessionFederationIndex.removeFederation self-heal", async () => {
+		it("returns 404 and leaves the session's index alone", async () => {
 			const removeFederationSpy = vi.fn(async () => {});
 			const sessionFederationIndex = makeSessionFederationIndex({
 				listFederations: vi.fn(async () => ["google"]),
@@ -607,7 +639,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(404);
 			expect(res.body.error).toBe("federation_not_linked");
 			expect(res.body.error_description).toBe("federation 'google' tokens not found");
-			expect(removeFederationSpy).toHaveBeenCalledWith("sid-1", "google");
+			expect(removeFederationSpy).not.toHaveBeenCalled();
 		});
 	});
 
@@ -627,7 +659,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(404);
 			expect(res.body.error).toBe("federation_not_linked");
 			expect(res.body.error_description).toBe("federation 'google' tokens not found");
-			expect(sessionFederationIndex.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+			expect(fedTokenStore.removeIf).toHaveBeenCalledWith("sid-1", "google", READ_GENERATION);
+			expect(sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
 			expect(auditSink.record).not.toHaveBeenCalledWith(
 				expect.objectContaining({ type: "federation.token.success" }),
 			);
@@ -643,7 +676,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			await postFedToken(app, "google", await mintAccessToken());
 
 			expect(logger.warn).toHaveBeenCalledWith(
-				{ federation: "google" },
+				{ federation: "google", removal: "removed" },
 				"federation_token_record_unusable",
 			);
 			expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(baseFedTokens.refreshToken);
@@ -674,15 +707,15 @@ describe("POST /oauth/federation/:name/token", () => {
 				accessToken: "",
 				expiresAt: new Date(Date.now() + 3_600_000),
 			};
-			const sessionFederationIndex = makeSessionFederationIndex({
-				removeFederation: vi.fn(async () => {
-					await new Promise((resolve) => setImmediate(resolve));
-					order.push("removeFederation");
-				}),
-			});
+			const sessionFederationIndex = makeSessionFederationIndex();
 			const lockingStore = {
 				...makeFedTokenStore({
 					get: vi.fn().mockResolvedValueOnce(expiredTokens).mockResolvedValueOnce(unusable),
+					removeIf: vi.fn(async () => {
+						await new Promise((resolve) => setImmediate(resolve));
+						order.push("removeIf");
+						return { outcome: "removed" as const };
+					}),
 				}),
 				acquireLock: vi.fn().mockResolvedValue({
 					acquired: true,
@@ -706,7 +739,8 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(404);
 			expect(res.body.error).toBe("federation_not_linked");
-			expect(order).toEqual(["removeFederation", "release"]);
+			expect(order).toEqual(["removeIf", "release"]);
+			expect(sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
 		});
 
 		it("omits a stored scope that names no scope-token", async () => {
@@ -800,9 +834,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				listFederations: vi.fn(async () => ["google"]),
 				removeFederation: removeFederationSpy,
 			});
-			const fedTokenStore = makeFedTokenStore({
-				get: vi.fn().mockResolvedValue(expiredTokens),
-			});
+			const fedTokenStore = withLock(
+				makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expiredTokens),
+				}),
+			);
 			const failingProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<never>;
 			} = {
@@ -828,8 +864,9 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(410);
 			expect(res.body.error).toBe("re_authentication_required");
-			expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
-			expect(removeFederationSpy).toHaveBeenCalledWith("sid-1", "google");
+			expect(fedTokenStore.removeIf).toHaveBeenCalledWith("sid-1", "google", READ_GENERATION);
+			expect(fedTokenStore.delete).not.toHaveBeenCalled();
+			expect(removeFederationSpy).not.toHaveBeenCalled();
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "federation.token.reauthentication_required",
@@ -971,7 +1008,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({
 					get: vi.fn().mockResolvedValue(expired),
-					update: vi.fn().mockRejectedValue(storeWriteError()),
+					replaceIf: vi.fn().mockRejectedValue(storeWriteError()),
 				}),
 				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
 				logger,
@@ -1000,14 +1037,14 @@ describe("POST /oauth/federation/:name/token", () => {
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({
 					get: vi.fn().mockResolvedValue(expired),
-					update: vi.fn().mockRejectedValue(storeWriteError()),
+					replaceIf: vi.fn().mockRejectedValue(storeWriteError()),
 				}),
 				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
 				logger,
 			});
 			await postFedToken(app, "google", await mintAccessToken());
 			const failure = lines.find((line) => line.includes('"federation_token_keep_rotated_failed"'));
-			expect(failure).toContain('"step":"update"');
+			expect(failure).toContain('"step":"replace_if"');
 			expect(failure).toContain("ReplyError");
 			for (const line of lines) {
 				expect(line).not.toContain("at-must-never-reach-a-log");
@@ -1189,11 +1226,13 @@ describe("POST /oauth/federation/:name/token", () => {
 	describe("the refresh lock is released only once the write or the clean-up has settled", () => {
 		// Store calls are recorded when they settle, a macrotask after the call,
 		// so a release that does not wait for them lands first.
-		const settleLater = (order: string[], step: string) =>
-			vi.fn(async () => {
+		function settleLater<T = void>(order: string[], step: string, answer?: T) {
+			return vi.fn(async (): Promise<T> => {
 				await new Promise((resolve) => setImmediate(resolve));
 				order.push(step);
+				return answer as T;
 			});
+		}
 
 		const lockedRefresh = (
 			order: string[],
@@ -1203,8 +1242,13 @@ describe("POST /oauth/federation/:name/token", () => {
 			const lockingStore = {
 				...makeFedTokenStore({
 					get: vi.fn().mockResolvedValue(expiredTokens),
-					update: settleLater(order, "update"),
-					delete: settleLater(order, "delete"),
+					replaceIf: settleLater<ConditionalReplaceAnswer>(order, "replaceIf", {
+						outcome: "updated",
+						generation: "g-written" as StoreGeneration,
+					}),
+					removeIf: settleLater<ConditionalRemoveAnswer>(order, "removeIf", {
+						outcome: "removed",
+					}),
 				}),
 				acquireLock: vi.fn().mockResolvedValue({
 					acquired: true,
@@ -1237,7 +1281,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			const res = await postFedToken(app, "google", await mintAccessToken());
 
 			expect(res.status).toBe(200);
-			expect(order).toEqual(["update", "release"]);
+			expect(order).toEqual(["replaceIf", "release"]);
 		});
 
 		it("releases after the invalid_grant clean-up", async () => {
@@ -1255,8 +1299,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			const res = await postFedToken(app, "google", await mintAccessToken());
 
 			expect(res.status).toBe(410);
-			expect(order.at(-1)).toBe("release");
-			expect(order.slice(0, -1).sort()).toEqual(["delete", "removeFederation"]);
+			expect(order).toEqual(["removeIf", "release"]);
 		});
 	});
 
@@ -1294,9 +1337,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(500);
 			expect(res.body.error).toBe("refresh_failed");
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				expect.any(String),
 				"google",
+				READ_GENERATION,
 				expect.objectContaining({ refreshToken: "rotated-rt" }),
 			);
 		});
@@ -1325,14 +1369,14 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body.expires_in).toBeGreaterThan(3500);
-			const stored = (fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+			const stored = (fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3] as {
 				expiresAt: Date | null;
 			};
 			expect(stored.expiresAt).not.toBeNull();
 			expect((stored.expiresAt as Date).getTime()).toBeGreaterThan(Date.now());
 		});
 
-		it("stores no expiry and omits expires_in when the provider names neither", async () => {
+		it("stores an end for a refresh answer that names neither, and answers expires_in", async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{ accessToken: string }>;
@@ -1353,11 +1397,11 @@ describe("POST /oauth/federation/:name/token", () => {
 			const res = await postFedToken(app, "google", token);
 
 			expect(res.status).toBe(200);
-			expect("expires_in" in res.body).toBe(false);
-			const stored = (fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+			expect(res.body.expires_in).toBeGreaterThan(86_000);
+			const stored = (fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3] as {
 				expiresAt: Date | null;
 			};
-			expect(stored.expiresAt).toBeNull();
+			expect(stored.expiresAt).toBeInstanceOf(Date);
 		});
 
 		// -------------------------------------------------------------------------
@@ -1389,7 +1433,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			};
 			const storedExpiry = (fedTokenStore: ReturnType<typeof makeFedTokenStore>) =>
 				(
-					(fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+					(fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3] as {
 						expiresAt: Date | null;
 					}
 				).expiresAt;
@@ -1413,7 +1457,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 					expect(res.status).toBe(500);
 					expect(res.body.error).toBe("refresh_failed");
-					expect(fedTokenStore.update).not.toHaveBeenCalled();
+					expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 				},
 			);
 
@@ -1428,7 +1472,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 				expect(res.status).toBe(500);
 				expect(res.body.error).toBe("refresh_failed");
-				expect(fedTokenStore.update).not.toHaveBeenCalled();
+				expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 			});
 
 			it("refuses the refresh for an Invalid Date", async () => {
@@ -1439,7 +1483,7 @@ describe("POST /oauth/federation/:name/token", () => {
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
 				expect(res.status).toBe(500);
-				expect(fedTokenStore.update).not.toHaveBeenCalled();
+				expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 			});
 
 			it("salvages a rotated refresh token from a refusal over a broken lifetime", async () => {
@@ -1452,9 +1496,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
 				expect(res.status).toBe(500);
-				expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 					expect.any(String),
 					"google",
+					READ_GENERATION,
 					expect.objectContaining({ refreshToken: "rotated-rt" }),
 				);
 			});
@@ -1476,9 +1521,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 				expect(res.status).toBe(200);
 				expect(res.body.access_token).toBe("first-at");
-				expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 					expect.any(String),
 					"google",
+					READ_GENERATION,
 					expect.objectContaining({ accessToken: "first-at" }),
 				);
 			});
@@ -1501,7 +1547,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 					expect(res.status).toBe(500);
 					expect(res.body.error).toBe("refresh_failed");
-					expect(fedTokenStore.update).not.toHaveBeenCalled();
+					expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 				},
 			);
 
@@ -1541,7 +1587,7 @@ describe("POST /oauth/federation/:name/token", () => {
 				) => {
 					expect(res.status).toBe(500);
 					expect(res.body.error).toBe("refresh_failed");
-					expect(fedTokenStore.update).not.toHaveBeenCalled();
+					expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 					expect(auditSink.record).toHaveBeenCalledWith(
 						expect.objectContaining({
 							type: "federation.token.refresh_failed",
@@ -1561,6 +1607,70 @@ describe("POST /oauth/federation/:name/token", () => {
 
 					expectInvalidExpiry(res, fedTokenStore, auditSink);
 				});
+
+				it.each([
+					["malformed", () => ({ expiresIn: Number.NaN })],
+					["contradictory", () => ({ expiresIn: 3600, expiresAt: null })],
+					["spent", () => ({ expiresAt: new Date(Date.now() - 60_000) })],
+					[
+						"unreadable",
+						() =>
+							Object.defineProperty({}, "expiresIn", {
+								enumerable: true,
+								get: () => {
+									throw new Error("getter");
+								},
+							}),
+					],
+				])(
+					"refuses a %s lifetime, audits that verdict, and keeps only the rotated refresh token",
+					async (verdict, lifetime) => {
+						const obtainedAt = new Date(Date.now() - 3_600_000);
+						const expiresAt = new Date(Date.now() - 1000);
+						const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
+						const fedTokenStore = makeFedTokenStore({
+							get: vi.fn().mockResolvedValue({ ...baseFedTokens, obtainedAt, expiresAt }),
+						});
+						const answer = Object.assign(lifetime(), {
+							accessToken: "new-at",
+							refreshToken: "rotated-rt",
+						});
+						const refreshProvider = {
+							...federationBase("google"),
+							refreshToken: vi.fn().mockResolvedValue(answer),
+						} as unknown as FederationProvider;
+						const app = buildApp({
+							fedTokenStore,
+							auditSink,
+							getFederationProviders: () =>
+								new Map<string, FederationProvider>([["google", refreshProvider]]),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(500);
+						expect(res.body).toEqual({
+							error: "refresh_failed",
+							error_description: "federation token refresh failed",
+						});
+						expect(auditSink.record).toHaveBeenCalledTimes(1);
+						const event = (auditSink.record as ReturnType<typeof vi.fn>).mock.calls[0][0];
+						expect(event).toMatchObject({
+							type: "federation.token.refresh_failed",
+							details: { federation: "google", reason: "invalid_expiry", verdict },
+						});
+						for (const secret of ["new-at", "rotated-rt", "upstream-at-xyz", "upstream-rt"]) {
+							expect(JSON.stringify(res.body)).not.toContain(secret);
+							expect(JSON.stringify(event)).not.toContain(secret);
+						}
+						expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+						expect((fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3]).toEqual({
+							...baseFedTokens,
+							obtainedAt,
+							expiresAt,
+							refreshToken: "rotated-rt",
+						});
+					},
+				);
 
 				it("refuses an expiresAt equal to now", async () => {
 					await withFrozenDate(async () => {
@@ -1616,6 +1726,43 @@ describe("POST /oauth/federation/:name/token", () => {
 					});
 				});
 
+				it("never answers expires_in 0: a token that loses its last second before the answer is 503, and audits no success", async () => {
+					// Accepted with exactly the floor left when the answer is read;
+					// the store write then takes a millisecond.
+					await withFrozenDate(async () => {
+						const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
+						const fedTokenStore = makeFedTokenStore({
+							get: vi.fn().mockResolvedValue({
+								...baseFedTokens,
+								expiresAt: new Date(Date.now() - 1000),
+							}),
+							replaceIf: vi.fn(async () => {
+								vi.setSystemTime(Date.now() + 1);
+								return { outcome: "updated" as const, generation: "g-written" as StoreGeneration };
+							}),
+						});
+						const refreshProvider = {
+							...federationBase("google"),
+							refreshToken: vi.fn(async () => ({ accessToken: "new-at", expiresIn: 1 })),
+						} as unknown as FederationProvider;
+						const app = buildApp({
+							fedTokenStore,
+							auditSink,
+							getFederationProviders: () =>
+								new Map<string, FederationProvider>([["google", refreshProvider]]),
+						});
+
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+						expect(res.status).toBe(503);
+						expect(res.body.error).toBe("temporarily_unavailable");
+						expect(auditSink.record).not.toHaveBeenCalledWith(
+							expect.objectContaining({ type: "federation.token.success" }),
+						);
+					});
+				});
+
 				it("refuses a fractional expiresIn below one second", async () => {
 					const { app, fedTokenStore, auditSink } = auditedApp({
 						accessToken: "new-at",
@@ -1662,10 +1809,11 @@ describe("POST /oauth/federation/:name/token", () => {
 							details: expect.objectContaining({ reason: "invalid_expiry" }),
 						}),
 					);
-					expect(fedTokenStore.update).toHaveBeenCalledTimes(1);
-					expect(fedTokenStore.update).toHaveBeenCalledWith(
+					expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+					expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 						expect.any(String),
 						"google",
+						READ_GENERATION,
 						expect.objectContaining({ accessToken: "upstream-at-xyz", refreshToken: "rotated-rt" }),
 					);
 				});
@@ -1735,10 +1883,11 @@ describe("POST /oauth/federation/:name/token", () => {
 								details: expect.objectContaining({ reason: "invalid_expiry" }),
 							}),
 						);
-						expect(fedTokenStore.update).toHaveBeenCalledTimes(1);
-						expect(fedTokenStore.update).toHaveBeenCalledWith(
+						expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+						expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 							expect.any(String),
 							"google",
+							READ_GENERATION,
 							expect.objectContaining({
 								accessToken: "upstream-at-xyz",
 								refreshToken: "rotated-rt",
@@ -1796,6 +1945,39 @@ describe("POST /oauth/federation/:name/token", () => {
 						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + DAY_MS);
 					});
 				});
+
+				it.each([
+					["names neither field", {}],
+					["names `null` alone as expiresAt", { expiresAt: null }],
+					["names `null` alone as expiresIn", { expiresIn: null }],
+					["names `null` on both fields", { expiresIn: null, expiresAt: null }],
+				])(
+					"stores an answer that %s with the maximum as its end, obtained when the call began",
+					async (_label, lifetime) => {
+						await withFrozenDate(async () => {
+							const CALL_MS = 5000;
+							const calledAt = Date.now();
+							const { app, fedTokenStore } = cappedApp(() => {
+								vi.setSystemTime(Date.now() + CALL_MS);
+								return { accessToken: "new-at", refreshToken: "rotated-rt", ...lifetime };
+							});
+							const res = await postFedToken(app, "google", await mintAccessToken());
+
+							expect(res.status).toBe(200);
+							expect(res.body.expires_in).toBe(DAY_MS / 1000);
+							expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+							expect(
+								(fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3],
+							).toEqual({
+								...baseFedTokens,
+								accessToken: "new-at",
+								refreshToken: "rotated-rt",
+								expiresAt: new Date(calledAt + CALL_MS + DAY_MS),
+								obtainedAt: new Date(calledAt),
+							});
+						});
+					},
+				);
 
 				it("caps an absurd expiresIn at 24 hours by default", async () => {
 					await withFrozenDate(async () => {
@@ -1859,12 +2041,15 @@ describe("POST /oauth/federation/:name/token", () => {
 					expiresAt: new Date(Date.now() - 1000),
 					refreshToken: "original-rt",
 				};
-				const get = vi.fn().mockResolvedValueOnce(expiredTokens).mockResolvedValue(null);
 				const refreshProvider = {
 					...federationBase("google"),
 					refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
 				} as unknown as FederationProvider;
-				const fedTokenStore = makeFedTokenStore({ get });
+				// The store answers that the record is gone: no other write follows.
+				const fedTokenStore = makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expiredTokens),
+					replaceIf: vi.fn().mockResolvedValue({ outcome: "missing" }),
+				});
 				const app = buildApp({
 					fedTokenStore,
 					getFederationProviders: () =>
@@ -1873,8 +2058,9 @@ describe("POST /oauth/federation/:name/token", () => {
 
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
-				expect(res.status).toBe(500);
-				expect(fedTokenStore.update).not.toHaveBeenCalled();
+				expect(res.status).toBe(404);
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+				expect(fedTokenStore.attach).not.toHaveBeenCalled();
 			});
 
 			it("refuses rather than storing no-expiry when a lifetime getter throws", async () => {
@@ -1894,7 +2080,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 				expect(res.status).toBe(500);
 				expect(res.body.error).toBe("refresh_failed");
-				expect(fedTokenStore.update).not.toHaveBeenCalled();
+				expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 			});
 
 			it("does not overwrite a concurrent refresh when salvaging a rotated token", async () => {
@@ -1913,14 +2099,16 @@ describe("POST /oauth/federation/:name/token", () => {
 					expiresAt: new Date(Date.now() + 3_600_000),
 					refreshToken: "concurrent-rt",
 				};
-				// The first read is the route's own; the next is the salvage's
-				// re-read, by which point another request has rotated the chain.
-				const get = vi.fn().mockResolvedValueOnce(expiredTokens).mockResolvedValue(concurrent);
+				// Another request wrote the record after this one read it: the
+				// store answers `conflict`, and nothing is written over it.
 				const refreshProvider = {
 					...federationBase("google"),
 					refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
 				} as unknown as FederationProvider;
-				const fedTokenStore = makeFedTokenStore({ get });
+				const fedTokenStore = makeFedTokenStore({
+					get: vi.fn().mockResolvedValueOnce(expiredTokens).mockResolvedValue(concurrent),
+					replaceIf: vi.fn().mockResolvedValue({ outcome: "conflict" }),
+				});
 				const app = buildApp({
 					fedTokenStore,
 					getFederationProviders: () =>
@@ -1929,13 +2117,16 @@ describe("POST /oauth/federation/:name/token", () => {
 
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
-				expect(res.status).toBe(500);
-				expect(fedTokenStore.update).not.toHaveBeenCalled();
+				// Answered from the record that won, as stored: it is not due.
+				expect(res.status).toBe(200);
+				expect(res.body.access_token).toBe("concurrent-at");
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+				expect(fedTokenStore.attach).not.toHaveBeenCalled();
 			});
 
-			it("merges the rotated token onto the record as it stands now", async () => {
-				// No concurrent rotation, so the salvage still happens - but onto
-				// what the store holds at write time, not onto the pre-call snapshot.
+			it("keeps the rotated token on the record the refresh was made from", async () => {
+				// Written only at the generation that record was read at, so it can
+				// land on nothing written since.
 				const expiredTokens = {
 					...baseFedTokens,
 					expiresAt: new Date(Date.now() - 1000),
@@ -1958,9 +2149,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
 				expect(res.status).toBe(500);
-				expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 					expect.any(String),
 					"google",
+					READ_GENERATION,
 					expect.objectContaining({ refreshToken: "rotated-rt", idToken: "original-idt" }),
 				);
 			});
@@ -1988,9 +2180,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				expect(res.status).toBe(500);
 				expect(res.body.error).toBe("refresh_failed");
 				// The readable field survives the unreadable ones beside it.
-				expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 					expect.any(String),
 					"google",
+					READ_GENERATION,
 					expect.objectContaining({ refreshToken: "rotated-rt" }),
 				);
 			});
@@ -2013,22 +2206,6 @@ describe("POST /oauth/federation/:name/token", () => {
 				},
 			);
 
-			it("keeps `null` meaning the upstream named no lifetime", async () => {
-				// `null` is a statement and `undefined` is silence. Stated alone it
-				// is believed, and the token is stored with no finite expiry. Paired
-				// with a finite `expiresIn` it would be a contradiction, which is
-				// refused instead - see the cases above.
-				const { app, fedTokenStore } = refreshingApp({
-					accessToken: "new-at",
-					expiresAt: null,
-				});
-				const res = await postFedToken(app, "google", await mintAccessToken());
-
-				expect(res.status).toBe(200);
-				expect("expires_in" in res.body).toBe(false);
-				expect(storedExpiry(fedTokenStore)).toBeNull();
-			});
-
 			it("treats an empty access token as no access token", async () => {
 				// `access_token: ""` is not a credential, and answering 200 with one
 				// is a malformed RFC 6749 §5.1 response.
@@ -2050,9 +2227,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
 				expect(res.status).toBe(500);
-				expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 					expect.any(String),
 					"google",
+					READ_GENERATION,
 					expect.objectContaining({ refreshToken: "rotated-rt", idToken: "rotated-idt" }),
 				);
 			});
@@ -2065,9 +2243,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
 				expect(res.status).toBe(500);
-				expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 					expect.any(String),
 					"google",
+					READ_GENERATION,
 					expect.objectContaining({ idToken: "original-idt" }),
 				);
 			});
@@ -2087,7 +2266,7 @@ describe("POST /oauth/federation/:name/token", () => {
 				} as unknown as FederationProvider;
 				const fedTokenStore = makeFedTokenStore({
 					get: vi.fn().mockResolvedValue(expiredTokens),
-					update: vi.fn().mockRejectedValue(new Error("store down")),
+					replaceIf: vi.fn().mockRejectedValue(new Error("store down")),
 				});
 				const app = buildApp({
 					fedTokenStore,
@@ -2112,7 +2291,7 @@ describe("POST /oauth/federation/:name/token", () => {
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
 				expect(res.status).toBe(500);
-				expect(fedTokenStore.update).not.toHaveBeenCalled();
+				expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 			});
 		});
 
@@ -2160,9 +2339,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 				expect(res.status).toBe(200);
 				expect(res.body.scope).toBe("openid");
-				expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 					expect.any(String),
 					"google",
+					READ_GENERATION,
 					expect.objectContaining({ scope: "openid" }),
 				);
 			},
@@ -2231,7 +2411,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.scope).toBe("openid");
 			// `objectContaining({ grantedScope: undefined })` would also pass if the
 			// key were never written, so the whole record is read instead.
-			const written = (fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+			const written = (fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3] as {
 				grantedScope?: string;
 				scope?: string;
 			};
@@ -2359,9 +2539,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body.scope).toBe("openid email");
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				expect.any(String),
 				"google",
+				READ_GENERATION,
 				// The ceiling itself never moves.
 				expect.objectContaining({ scope: "openid email", grantedScope: "openid email" }),
 			);
@@ -2457,9 +2638,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body.scope).toBe("openid email");
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				expect.any(String),
 				"google",
+				READ_GENERATION,
 				expect.objectContaining({ scope: "openid email" }),
 			);
 		});
@@ -2490,9 +2672,10 @@ describe("POST /oauth/federation/:name/token", () => {
 			const res = await postFedToken(app, "google", await mintAccessToken());
 
 			expect(res.status).toBe(200);
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				expect.any(String),
 				"google",
+				READ_GENERATION,
 				expect.objectContaining({ refreshToken: "original-rt" }),
 			);
 		});
@@ -2525,9 +2708,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body.scope).toBe("openid email");
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				expect.any(String),
 				"google",
+				READ_GENERATION,
 				expect.objectContaining({ scope: "openid email" }),
 			);
 		});
@@ -2563,9 +2747,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body.scope).toBe("openid email");
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				expect.any(String),
 				"google",
+				READ_GENERATION,
 				expect.objectContaining({ scope: "openid email" }),
 			);
 		});
@@ -2656,10 +2841,11 @@ describe("POST /oauth/federation/:name/token", () => {
 			const res = await postFedToken(app, "google", token);
 
 			expect(res.status).toBe(200);
-			// Verify that update was called with the original refreshToken preserved
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			// The replace keeps the original refreshToken
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				"sid-1",
 				"google",
+				READ_GENERATION,
 				expect.objectContaining({
 					accessToken: "new-at",
 					refreshToken: "original-rt", // preserved from original
@@ -2936,9 +3122,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(200);
 			// Stored idToken must be preserved, not overwritten with undefined
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
+			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				"sid-1",
 				"google",
+				READ_GENERATION,
 				expect.objectContaining({
 					accessToken: "new-at",
 					idToken: storedIdToken,
@@ -3090,22 +3277,22 @@ describe("POST /oauth/federation/:name/token", () => {
 			});
 		});
 
-		it("the dangling link's self-heal", async () => {
+		it("the removal of a stored record holding no usable access token", async () => {
 			const logger = createMockLogger();
-			const fedTokenStore = makeFedTokenStore({ get: vi.fn().mockResolvedValue(null) });
-			const sessionFederationIndex = makeSessionFederationIndex({
-				removeFederation: vi.fn().mockRejectedValue(storeReplyError()),
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({ ...baseFedTokens, accessToken: "" }),
+				removeIf: vi.fn().mockRejectedValue(storeReplyError()),
 			});
 			const res = await postFedToken(
-				buildApp({ fedTokenStore, sessionFederationIndex, logger }),
+				buildApp({ fedTokenStore, logger }),
 				"google",
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(404);
-			expectBestEffortWarn(logger, "federation_token_index_self_heal_failed", {
+			expectBestEffortWarn(logger, "federation_token_cleanup_failed", {
 				federation: "google",
-				store: "session_federation_index",
-				step: "remove",
+				store: "federation_token",
+				step: "remove_if",
 			});
 		});
 
@@ -3163,7 +3350,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			const logger = createMockLogger();
 			const fedTokenStore = makeFedTokenStore({
 				get: vi.fn().mockResolvedValue(expired()),
-				update: vi.fn().mockRejectedValue(storeReplyError()),
+				replaceIf: vi.fn().mockRejectedValue(storeReplyError()),
 			});
 			const res = await postFedToken(
 				buildApp({
@@ -3184,7 +3371,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expectOutageLine(logger, "federation_token_store_unavailable", {
 				federation: "google",
 				store: "federation_token",
-				step: "update",
+				step: "replace_if",
 			});
 		});
 
@@ -3235,19 +3422,17 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		});
 
-		it("both cleanups after invalid_grant", async () => {
+		it("the clean-up after invalid_grant", async () => {
 			const logger = createMockLogger();
-			const fedTokenStore = makeFedTokenStore({
-				get: vi.fn().mockResolvedValue(expired()),
-				delete: vi.fn().mockRejectedValue(storeReplyError()),
-			});
-			const sessionFederationIndex = makeSessionFederationIndex({
-				removeFederation: vi.fn().mockRejectedValue(storeReplyError()),
-			});
+			const fedTokenStore = withLock(
+				makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expired()),
+					removeIf: vi.fn().mockRejectedValue(storeReplyError()),
+				}),
+			);
 			const res = await postFedToken(
 				buildApp({
 					fedTokenStore,
-					sessionFederationIndex,
 					logger,
 					getFederationProviders: refreshingGoogle(
 						vi.fn().mockRejectedValue(
@@ -3265,12 +3450,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expectBestEffortWarn(logger, "federation_token_cleanup_failed", {
 				federation: "google",
 				store: "federation_token",
-				step: "delete",
-			});
-			expectBestEffortWarn(logger, "federation_token_cleanup_failed", {
-				federation: "google",
-				store: "session_federation_index",
-				step: "remove",
+				step: "remove_if",
 			});
 		});
 
@@ -3699,12 +3879,14 @@ describe("POST /oauth/federation/:name/token", () => {
 		 * refresh rejects with `error`, plus the stores to look at afterwards.
 		 */
 		function refreshRejectingWith(error: unknown, logger?: Logger) {
-			const fedTokenStore = makeFedTokenStore({
-				get: vi.fn().mockResolvedValue({
-					...baseFedTokens,
-					expiresAt: new Date(Date.now() - 1000),
+			const fedTokenStore = withLock(
+				makeFedTokenStore({
+					get: vi.fn().mockResolvedValue({
+						...baseFedTokens,
+						expiresAt: new Date(Date.now() - 1000),
+					}),
 				}),
-			});
+			);
 			const sessionFederationIndex = makeSessionFederationIndex();
 			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
 			const provider = {
@@ -3726,6 +3908,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			sessionFederationIndex: SessionFederationIndex,
 			auditSink: AuditSink,
 		) => {
+			expect(fedTokenStore.removeIf).not.toHaveBeenCalled();
 			expect(fedTokenStore.delete).not.toHaveBeenCalled();
 			expect(sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
 			expect(auditSink.record).not.toHaveBeenCalledWith(
@@ -3858,8 +4041,8 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(410);
 			expect(res.body.error).toBe("re_authentication_required");
-			expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
-			expect(sessionFederationIndex.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+			expect(fedTokenStore.removeIf).toHaveBeenCalledWith("sid-1", "google", READ_GENERATION);
+			expect(sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({ type: "federation.token.reauthentication_required" }),
 			);
@@ -3904,7 +4087,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		};
 
 		const written = (fedTokenStore: FederationTokenStore) =>
-			(fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as Record<
+			(fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3] as Record<
 				string,
 				unknown
 			>;
@@ -4136,7 +4319,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(502);
 			expect(res.body.error).toBe("upstream_token_ineligible");
-			expect(fedTokenStore.update).not.toHaveBeenCalled();
+			expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 		});
 
 		it.each([
@@ -4166,7 +4349,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(500);
 			expect(res.body.error).toBe("refresh_failed");
-			expect(fedTokenStore.update).not.toHaveBeenCalled();
+			expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 		});
 
 		it.each([
@@ -4206,7 +4389,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(500);
 			expect(res.body.error).toBe("refresh_failed");
-			expect(fedTokenStore.update).not.toHaveBeenCalled();
+			expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 		});
 
 		it("refuses to hand on a refreshed token that is sender-constrained", async () => {
@@ -4224,7 +4407,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(502);
 			expect(res.body.error).toBe("upstream_token_ineligible");
 			expect(res.body.error_description).toBe("token_type_unsupported");
-			expect(fedTokenStore.update).not.toHaveBeenCalled();
+			expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "federation.token.upstream_ineligible",
@@ -4260,8 +4443,8 @@ describe("POST /oauth/federation/:name/token", () => {
 
 describe("POST /oauth/federation/:name/token — keeping a rotated refresh token is logged, structured", () => {
 	// A refresh that answers no usable access token but rotates the refresh
-	// token: the route answers 500 refresh_failed and, best effort, re-reads
-	// the record and keeps the rotated token. Whatever happens there is one
+	// token: the route answers 500 refresh_failed and, best effort, keeps the
+	// rotated token on the record it refreshed. Whatever happens there is one
 	// object-first warn: the route answers the refusal it would anyway, not a
 	// 503, so none of it is an error-level outage line.
 	const expiredTokens = (): FederationTokens => ({
@@ -4274,7 +4457,8 @@ describe("POST /oauth/federation/:name/token — keeping a rotated refresh token
 			...federationBase("google"),
 			refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
 		}) as unknown as FederationProvider;
-	const run = async (store: Partial<FederationTokenStore>) => {
+	/** `status`: the refusal's `500`, unless the record changed and the refresh was dropped. */
+	const run = async (store: Partial<FederationTokenStore>, status = 500) => {
 		const logger = createMockLogger();
 		const fedTokenStore = makeFedTokenStore(store);
 		const app = buildApp({
@@ -4284,39 +4468,55 @@ describe("POST /oauth/federation/:name/token — keeping a rotated refresh token
 			logger,
 		});
 		const res = await postFedToken(app, "google", await mintAccessToken());
-		expect(res.status).toBe(500);
-		expect(res.body.error).toBe("refresh_failed");
+		expect(res.status).toBe(status);
+		if (status === 500) expect(res.body.error).toBe("refresh_failed");
 		return { logger, fedTokenStore };
 	};
 
-	it("logs a failed re-read once, with the store, the step and the projection", async () => {
-		const { logger, fedTokenStore } = await run({
-			get: vi.fn().mockResolvedValueOnce(expiredTokens()).mockRejectedValue(storeReplyError()),
+	it("writes the rotated token at the generation it read, onto the record it read", async () => {
+		const { fedTokenStore } = await run({ get: vi.fn().mockResolvedValue(expiredTokens()) });
+		expect(fedTokenStore.get).toHaveBeenCalledTimes(1);
+		expect(fedTokenStore.replaceIf).toHaveBeenCalledWith("sid-1", "google", READ_GENERATION, {
+			...expiredTokens(),
+			expiresAt: expect.any(Date),
+			refreshToken: "rotated-rt",
 		});
-		expect(fedTokenStore.update).not.toHaveBeenCalled();
-		expectBestEffortWarn(logger, "federation_token_keep_rotated_failed", {
-			federation: "google",
-			store: "federation_token",
-			step: "get",
+	});
+
+	it("logs a write answered outside the store's contract as a failed write", async () => {
+		const { logger } = await run({
+			get: vi.fn().mockResolvedValue(expiredTokens()),
+			replaceIf: vi.fn().mockResolvedValue({ outcome: "rotated" }),
 		});
+		expectBestEffortWarn(
+			logger,
+			"federation_token_keep_rotated_failed",
+			{ federation: "google", store: "federation_token", step: "replace_if" },
+			"TypeError",
+		);
 	});
 
 	it("logs a failed write once, with the store, the step and the projection", async () => {
 		const { logger } = await run({
 			get: vi.fn().mockResolvedValue(expiredTokens()),
-			update: vi.fn().mockRejectedValue(storeReplyError()),
+			replaceIf: vi.fn().mockRejectedValue(storeReplyError()),
 		});
 		expectBestEffortWarn(logger, "federation_token_keep_rotated_failed", {
 			federation: "google",
 			store: "federation_token",
-			step: "update",
+			step: "replace_if",
 		});
 	});
 
 	it("says why it kept nothing when a concurrent logout removed the record", async () => {
-		const { logger } = await run({
-			get: vi.fn().mockResolvedValueOnce(expiredTokens()).mockResolvedValue(null),
-		});
+		// Answered as any refresh whose record is gone: 404.
+		const { logger } = await run(
+			{
+				get: vi.fn().mockResolvedValue(expiredTokens()),
+				replaceIf: vi.fn().mockResolvedValue({ outcome: "missing" }),
+			},
+			404,
+		);
 		expectBestEffortWarn(
 			logger,
 			"federation_token_keep_rotated_skipped",
@@ -4325,17 +4525,19 @@ describe("POST /oauth/federation/:name/token — keeping a rotated refresh token
 		);
 	});
 
-	it("says why it kept nothing when a concurrent refresh rotated the connection", async () => {
-		const { logger } = await run({
-			get: vi
-				.fn()
-				.mockResolvedValueOnce(expiredTokens())
-				.mockResolvedValue({ ...expiredTokens(), refreshToken: "concurrent-rt" }),
-		});
+	it("says why it kept nothing when the record was rewritten since it was read", async () => {
+		// Answered from the record that won, which here is itself due: 503.
+		const { logger } = await run(
+			{
+				get: vi.fn().mockResolvedValue(expiredTokens()),
+				replaceIf: vi.fn().mockResolvedValue({ outcome: "conflict" }),
+			},
+			503,
+		);
 		expectBestEffortWarn(
 			logger,
 			"federation_token_keep_rotated_skipped",
-			{ federation: "google", store: "federation_token", reason: "rotated_concurrently" },
+			{ federation: "google", store: "federation_token", reason: "replaced_concurrently" },
 			null,
 		);
 	});
@@ -4525,26 +4727,160 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 			vi.setSystemTime(Date.now() + 1000);
 			const second = await postFedToken(app, "google", await mintAccessToken());
 
-			expect(stored !== null && "obtainedAt" in stored).toBe(false);
+			expect(stored !== null && Object.hasOwn(stored, "obtainedAt")).toBe(true);
+			expect(stored?.obtainedAt).toBeUndefined();
 			expect(second.body.access_token).toBe("instant-at-2");
 			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
 		});
 	});
 
-	it("records no obtainedAt for a token with no finite expiry, and drops the replaced token's", async () => {
+	it("refreshes a record with no finite expiry that holds a refresh token (linked, or stored by an earlier refresh) on first use, and stores it capped", async () => {
+		await withFrozenDate(async () => {
+			const calledAt = Date.now();
+			const store = await seeded({
+				...baseFedTokens,
+				expiresAt: null,
+				obtainedAt: undefined,
+				refreshToken: "link-rt",
+			});
+			const DAY_MS = 86_400_000;
+			const CALL_MS = 5000;
+			const { app, provider } = appWith(store, async () => {
+				vi.setSystemTime(Date.now() + CALL_MS);
+				return { accessToken: "refreshed-at", expiresIn: (10 * DAY_MS) / 1000 };
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+
+			expect(provider.refreshToken).toHaveBeenCalledTimes(1);
+			expect(provider.refreshToken).toHaveBeenCalledWith("link-rt");
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("refreshed-at");
+			expect(res.body.expires_in).toBe(DAY_MS / 1000);
+			expect(stored?.expiresAt).toEqual(new Date(calledAt + CALL_MS + DAY_MS));
+			expect(stored?.obtainedAt).toEqual(new Date(calledAt));
+		});
+	});
+
+	it.each([
+		["malformed", { expiresIn: Number.NaN }],
+		["contradictory", { expiresIn: 3600, expiresAt: null }],
+	])(
+		"keeps a link-time record with no finite expiry serving its stored token when the refresh answers a %s lifetime, with the rotated refresh token",
+		async (verdict, lifetime) => {
+			const store = await seeded({
+				...baseFedTokens,
+				expiresAt: null,
+				obtainedAt: undefined,
+				refreshToken: "link-rt",
+			});
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
+			const provider = {
+				...federationBase("google"),
+				refreshToken: vi.fn(async () => ({
+					accessToken: "new-at",
+					refreshToken: "rotated-rt",
+					...lifetime,
+				})),
+			} as unknown as FederationProvider;
+			const app = buildApp({
+				fedTokenStore: store,
+				auditSink,
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("upstream-at-xyz");
+			expect("expires_in" in res.body).toBe(false);
+			expect(stored).toEqual({
+				...baseFedTokens,
+				expiresAt: null,
+				obtainedAt: undefined,
+				refreshToken: "rotated-rt",
+			});
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.token.refresh_failed",
+					details: { federation: "google", reason: "invalid_expiry", verdict },
+				}),
+			);
+		},
+	);
+
+	it("refuses a record with no finite expiry whose stored type may not be handed on, when the refresh answers a refused lifetime, and keeps the rotated refresh token", async () => {
 		const store = await seeded({
 			...baseFedTokens,
-			obtainedAt: new Date(Date.now() - 3_600_000),
-			expiresAt: new Date(Date.now() - 1000),
+			expiresAt: null,
+			obtainedAt: undefined,
+			refreshToken: "link-rt",
+			tokenType: "DPoP",
 		});
-		const { app } = appWith(store, async () => ({ accessToken: "new-at" }));
+		const { app } = appWith(store, async () => ({
+			accessToken: "new-at",
+			refreshToken: "rotated-rt",
+			expiresIn: Number.NaN,
+		}));
 
 		const res = await postFedToken(app, "google", await mintAccessToken());
 		const stored = await store.get("sid-1", "google");
 
+		expect(res.status).toBe(502);
+		expect(res.body.error).toBe("upstream_token_ineligible");
+		expect(res.body.access_token).toBeUndefined();
+		expect(stored?.refreshToken).toBe("rotated-rt");
+		expect(stored?.accessToken).toBe("upstream-at-xyz");
+	});
+
+	it("serves a link-time record with no finite expiry and no refresh token as stored, without refreshing", async () => {
+		const store = await seeded({
+			...baseFedTokens,
+			expiresAt: null,
+			obtainedAt: undefined,
+			refreshToken: undefined,
+		});
+		const { app, provider } = appWith(store, async () => ({ accessToken: "never" }));
+
+		const res = await postFedToken(app, "google", await mintAccessToken());
+
+		expect(provider.refreshToken).not.toHaveBeenCalled();
 		expect(res.status).toBe(200);
-		expect(stored?.expiresAt).toBeNull();
-		expect(stored !== null && "obtainedAt" in stored).toBe(false);
+		expect(res.body.access_token).toBe("upstream-at-xyz");
+		expect("expires_in" in res.body).toBe(false);
+	});
+
+	it("serves a refreshed token that named no lifetime until the buffer before its capped end, then refreshes it", async () => {
+		await withFrozenDate(async () => {
+			const DAY_MS = 86_400_000;
+			const BUFFER_MS = 30_000;
+			const calledAt = Date.now();
+			const store = await seeded({
+				...baseFedTokens,
+				obtainedAt: new Date(calledAt - 3_600_000),
+				expiresAt: new Date(calledAt - 1000),
+			});
+			let issued = 0;
+			const { app, provider } = appWith(store, async () => {
+				issued += 1;
+				return { accessToken: `silent-at-${issued}` };
+			});
+
+			await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+			vi.setSystemTime(calledAt + DAY_MS - BUFFER_MS - 1);
+			const beforeBuffer = await postFedToken(app, "google", await mintAccessToken());
+			vi.setSystemTime(calledAt + DAY_MS - BUFFER_MS + 1);
+			const withinBuffer = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(stored?.expiresAt).toEqual(new Date(calledAt + DAY_MS));
+			expect(stored?.obtainedAt).toEqual(new Date(calledAt));
+			expect(beforeBuffer.body.access_token).toBe("silent-at-1");
+			expect(withinBuffer.body.access_token).toBe("silent-at-2");
+			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
+		});
 	});
 
 	it.each([
@@ -4616,7 +4952,7 @@ describe("POST /oauth/federation/:name/token — a record removed while the refr
 		const lockingStore: FederationTokenStore & SupportsLock = {
 			...store,
 			attach: vi.fn(store.attach),
-			update: vi.fn(store.update),
+			replaceIf: vi.fn(store.replaceIf),
 			// The logout lands while this request waits for the lock.
 			acquireLock: async (opts) => {
 				await store.delete("sid-1", "google");
@@ -4646,9 +4982,9 @@ describe("POST /oauth/federation/:name/token — a record removed while the refr
 		expect(res.status).toBe(404);
 		expect(res.body.error).toBe("federation_not_linked");
 		expect(res.body.error_description).toBe("federation 'google' tokens not found");
-		expect(index.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+		expect(index.removeFederation).not.toHaveBeenCalled();
 		expect(refreshToken).not.toHaveBeenCalled();
-		expect(lockingStore.update).not.toHaveBeenCalled();
+		expect(lockingStore.replaceIf).not.toHaveBeenCalled();
 		expect(lockingStore.attach).not.toHaveBeenCalled();
 		expect(await store.get("sid-1", "google")).toBeNull();
 		expect(release).toHaveBeenCalledTimes(1);
