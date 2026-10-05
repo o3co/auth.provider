@@ -1235,6 +1235,8 @@ export {
 	type SessionLifecycle,
 	type SessionLifecycleOptions,
 	type SessionLiveness,
+	type SessionOpenOutcome,
+	type SessionOpenRequest,
 	type SessionResumeReport,
 } from "./session-lifecycle/service.mjs";
 // The token-exchange validator port. `ExchangeTokenValidator` is
