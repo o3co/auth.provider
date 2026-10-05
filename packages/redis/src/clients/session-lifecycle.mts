@@ -16,8 +16,10 @@
 
 /**
  * The session lifecycle store's client: one hash per session holding its
- * whole record, one atomic step per write on it, and the closing index the
- * store lists closing sessions from.
+ * whole record, and per shard a closing index on the same Cluster slot as the
+ * shard's records, so a write and its index change are one atomic step. Every
+ * member runs on the primary (a script), never a replica: an answer reflects
+ * every write acknowledged before it.
  *
  * A record is a hash with these fields, and no other:
  *
@@ -26,10 +28,12 @@
  *   epoch ms the key expires at, `PEXPIREAT`), `np` (how many participants it
  *   holds), and from the close on `cause`, `at` (the closing commit's time on
  *   the server's clock, epoch ms) and `nw` (how many work items are pending);
- * - `p:<kind>:<id>`, one per participant, its value the participant's `data`;
+ * - `p:<kind>:<id>`, one per participant, its value the participant's `data`
+ *   as a JSON string;
  * - `w:<item>`, one per pending work item, its value `1`.
  *
- * Every field lives and lapses with the one key. Integers are written in
+ * A shard's closing index is a sorted set of the sids of its closing records,
+ * every score 0, so it orders them by their bytes. Integers are written in
  * decimal.
  */
 
@@ -64,6 +68,7 @@ export interface SessionLifecycleOpenInput extends SessionLifecycleWriteDeadline
 export interface SessionLifecycleJoinInput extends SessionLifecycleWriteDeadline {
 	/** The participant's work item: its kind, a colon, its id. */
 	readonly item: string;
+	/** The participant's data, as a JSON string. */
 	readonly data: string;
 	readonly generation: string;
 	/** The most participants the record may hold; a join past it answers `full`. */
@@ -88,38 +93,19 @@ export interface SessionLifecycleCompleteInput extends SessionLifecycleWriteDead
 	readonly generation: string;
 }
 
-/**
- * `updated`: the item is done and others are pending. `closed`: it was the
- * last, the record is closed, and its key expires at `retainUntilMs`.
- * `not_pending`: the generation matched and the item is not pending; nothing
- * written. `late`: refused at or after the deadline; this copy wrote nothing.
- */
-export type SessionLifecycleCompleteReply =
-	| { readonly outcome: "updated" | "missing" | "conflict" | "not_pending" | "late" }
-	| { readonly outcome: "closed"; readonly retainUntilMs: number };
-
-/** The closing index's two keys, on one Cluster slot. */
-export interface SessionClosingIndexKeys {
-	/** A sorted set of sids, every score 0, so it orders them by their bytes. */
-	readonly sids: string;
-	/** A hash: sid → the latest deadline of a close that added it, epoch ms. */
-	readonly deadlines: string;
-}
-
-/** One page of the closing index, read in one step. */
-export interface SessionClosingPage {
-	/** The index server's clock when the page was read, epoch ms. */
-	readonly nowMs: number;
-	/** The sids after the cursor, in order, each with its stored deadline as written (`""` for none). */
-	readonly entries: readonly { readonly sid: string; readonly deadline: string }[];
+/** Where a session lives: its record's key, its shard's closing index on the same slot, and its sid. */
+export interface SessionLifecycleKeys {
+	readonly record: string;
+	readonly index: string;
+	readonly sid: string;
 }
 
 export interface SessionLifecycleStoreClient {
 	/**
-	 * Writes the record `active` at `key` (`PEXPIREAT input.retainUntilMs`)
-	 * when there is none and `expiresAtMs` is after the server's clock;
-	 * `opened` without a write for an active record of the same `sub` and
-	 * `exp` whose session has not ended; `refused` otherwise.
+	 * Writes the record `active` (`PEXPIREAT input.retainUntilMs`) when there
+	 * is none and `expiresAtMs` is after the server's clock; `opened` without
+	 * a write for an active record of the same `sub` and `exp`; `refused`
+	 * otherwise.
 	 */
 	openRecord(key: string, input: SessionLifecycleOpenInput): Promise<"opened" | "refused" | "late">;
 	/**
@@ -134,52 +120,37 @@ export interface SessionLifecycleStoreClient {
 	): Promise<"joined" | "closed" | "missing" | "full" | "late">;
 	/**
 	 * Moves an active record to `closing` (or `closed` when it makes no work
-	 * item), saving the work items, the cause and the server's time, and raises
-	 * the key's expiry to the later of `until` and that time plus `retainMs`.
-	 * A record already closing or closed is left as it is. Answers the record's
-	 * fields after the step, or `missing` for no record.
+	 * item), saving the work items, the cause and the server's time, raising
+	 * the key's expiry to the later of `until` and that time plus `retainMs`,
+	 * and adding the sid to its shard's index when it is closing, in one step.
+	 * A record already closing or closed is left as it is. Answers the
+	 * record's fields after the step, or `missing` for no record.
 	 */
 	beginCloseRecord(
-		key: string,
+		keys: SessionLifecycleKeys,
 		input: SessionLifecycleCloseInput,
 	): Promise<"missing" | "late" | Readonly<Record<string, string>>>;
-	/** Removes the pending item `w:<item>` only while the record's `gen` is `expected`. */
+	/**
+	 * Removes the pending item `w:<item>` only while the record's `gen` is
+	 * `expected`; with the last one, the record is `closed` and its sid leaves
+	 * the index, in the same step. `not_pending`: nothing written or kept.
+	 */
 	completeRecordItem(
-		key: string,
+		keys: SessionLifecycleKeys,
 		input: SessionLifecycleCompleteInput,
-	): Promise<SessionLifecycleCompleteReply>;
-	/** The record's fields in one step (`HGETALL`), or `null` for no key. */
+	): Promise<"updated" | "closed" | "missing" | "conflict" | "not_pending" | "late">;
+	/** The record's fields in one step, or `null` for no key. */
 	readRecord(key: string): Promise<Readonly<Record<string, string>> | null>;
-	/** The record's `state` field (`HGET`), or `null` for no key. */
-	recordState(key: string): Promise<string | null>;
+	/** Up to `count` sids of the index after `after` (`""`: the start), in order. */
+	closingPage(index: string, after: string, count: number): Promise<readonly string[]>;
 	/**
-	 * Adds `sid` to the closing index and raises its stored deadline to
-	 * `deadlineMs`, in one step refused (`late`) at or after `deadlineMs` on the
-	 * index server's clock.
+	 * Of `sessions` (all on `index`'s shard), the sids whose record is closing,
+	 * in the order given; every other one leaves the index, in the same step.
 	 */
-	addClosing(
-		index: SessionClosingIndexKeys,
-		sid: string,
-		deadlineMs: number,
-	): Promise<"added" | "late">;
-	/** Up to `count` sids after `after` (`""`: the start) and their stored deadlines, with the server's clock. */
-	closingPage(
-		index: SessionClosingIndexKeys,
-		after: string,
-		count: number,
-	): Promise<SessionClosingPage>;
-	/** Removes `sid` from the index only while its stored deadline is still `deadline`. */
-	pruneClosingIf(index: SessionClosingIndexKeys, sid: string, deadline: string): Promise<boolean>;
-	/**
-	 * Removes `sid` from the index only while its stored deadline plus
-	 * `clockSkewMs` is no later than `retainUntilMs`.
-	 */
-	pruneClosingOutlived(
-		index: SessionClosingIndexKeys,
-		sid: string,
-		retainUntilMs: number,
-		clockSkewMs: number,
-	): Promise<boolean>;
+	confirmClosing(
+		index: string,
+		sessions: readonly { readonly sid: string; readonly record: string }[],
+	): Promise<readonly string[]>;
 	/** What the server says about keeping what it is written, read once at boot for its eviction policy. */
 	durability(): Promise<RedisDurability>;
 }

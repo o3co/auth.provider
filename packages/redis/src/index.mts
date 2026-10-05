@@ -114,13 +114,11 @@ export type {
 	ReserveMfaSubjectAttemptReply,
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
-	SessionClosingIndexKeys,
-	SessionClosingPage,
 	SessionFamilyIndexClient,
 	SessionLifecycleCloseInput,
 	SessionLifecycleCompleteInput,
-	SessionLifecycleCompleteReply,
 	SessionLifecycleJoinInput,
+	SessionLifecycleKeys,
 	SessionLifecycleOpenInput,
 	SessionLifecycleStoreClient,
 	SessionLifecycleWriteDeadline,
@@ -254,7 +252,8 @@ export {
 	redisReplaySeenSetModule,
 } from "./replay-seen-set.mjs";
 // SessionLifecycleStore: a session's state, participants and close work in
-// one key per session, and a closing index. No module wires it yet.
+// one key per session, spread over fixed shards that each keep a closing
+// index on the records' slot. No module wires it yet.
 export {
 	createRedisSessionLifecycleStore,
 	DEFAULT_REDIS_SESSION_LIFECYCLE_KEY_PREFIX,

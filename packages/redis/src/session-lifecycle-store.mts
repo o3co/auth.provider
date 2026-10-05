@@ -16,12 +16,21 @@
 
 /**
  * Redis-backed `SessionLifecycleStore`. A session's whole record — its state,
- * participants and pending close work — is one hash, `${prefix}s:{<sid>}`
- * (the sid as base64url of its JSON, so no sid moves the hash tag), with one
- * expiry (`PEXPIREAT`): `expiresAt` plus `DEFAULT_CLOCK_SKEW_MS`, raised by
- * the closing commit to the later of that and the commit plus `retainMs`. The
- * record therefore lapses whole. Each member is one script on that key,
- * judged on the server's clock.
+ * participants and pending close work — is one hash with one expiry
+ * (`PEXPIREAT`): `expiresAt` plus `DEFAULT_CLOCK_SKEW_MS`, raised by the
+ * closing commit to the later of that and the commit plus `retainMs`. The
+ * record therefore lapses whole.
+ *
+ * Each record lives in one of {@link SESSION_LIFECYCLE_SHARDS} shards, chosen
+ * by {@link sessionLifecycleShardOf}, and each shard has a closing index (a
+ * sorted set of the sids of its closing records) under the same hash tag, so
+ * on Redis Cluster a record and its shard's index share one slot. A closing
+ * commit adds the sid to the index and the completion that closes the record
+ * removes it, in the script that writes the record, so the index never misses
+ * a closing record and judges nothing by a clock. `listClosing` merges the
+ * shards' indexes in byte order, and checks each sid's record in its shard's
+ * own step, removing any whose record is no longer closing (one that lapsed
+ * while closing, say).
  *
  * Every write is refused at or after a deadline the adapter stamps at issue
  * (`internal/write-deadline.mts`), so it commits within W of its issue or
@@ -31,27 +40,10 @@
  * nothing. A write answered `late`, or unanswered within the write timeout,
  * rejects with an unknown outcome. `beginClose` needs no replay key: a copy
  * that lands again finds the record closing or closed and writes nothing.
+ * Every member runs as a script, on the primary.
  *
- * `listClosing` reads a closing index, `${prefix}c:{closing}:sids` (a sorted
- * set of sids, every score 0, so it orders them by their bytes) and
- * `:deadlines` (each sid's latest close deadline), on a slot of its own, which
- * no script can write together with a record on Redis Cluster. So:
- *
- * - `beginClose` adds the sid, with the close's deadline, before its closing
- *   commit, which carries the same deadline. A close that cannot add it
- *   rejects before it commits, so every closing record has an entry.
- * - The listing re-reads each listed sid's state and names only closing ones.
- *   It removes an entry whose record is not closing only when the index's
- *   clock was past its deadline plus the clock skew before that read: no
- *   close that added it can commit afterwards, and a later close raises the
- *   deadline, which the removal checks.
- * - The step that closes a record removes its entry when the record outlives
- *   the entry's deadline plus the skew: every close that added it then finds
- *   the record closed.
- *
- * The store assumes the app's and the servers' clocks agree within the
- * declared skew, acknowledged writes are not rolled back, and `noeviction`
- * (the boot check in `internal/session-lifecycle-eviction.mts`).
+ * The store assumes acknowledged writes are not rolled back and
+ * `noeviction` (the boot check in `internal/session-lifecycle-eviction.mts`).
  */
 
 import {
@@ -71,7 +63,7 @@ import {
 	sessionCloseItemOf,
 	type Versioned,
 } from "@o3co/auth-provider-core";
-import type { SessionClosingIndexKeys, SessionLifecycleStoreClient } from "./clients.mjs";
+import type { SessionLifecycleKeys, SessionLifecycleStoreClient } from "./clients.mjs";
 import { replayKeyOf } from "./internal/replay-key.mjs";
 import {
 	checkCloseItem,
@@ -98,8 +90,30 @@ export interface RedisSessionLifecycleStoreOptions {
 	readonly maxParticipants?: number;
 }
 
-/** How many index entries one listing step reads. */
+/** How many index entries one listing step reads from one shard. */
 const INDEX_PAGE_SIZE = 100;
+
+/**
+ * How many shards the records and their closing indexes are spread over. A
+ * constant of the key layout, not a setting: changing it moves every record
+ * to another key. Sixteen spreads the store over up to sixteen Cluster
+ * primaries, keeps each shard's index to a sixteenth of the closing sessions,
+ * and keeps a listing to sixteen index reads per page.
+ */
+export const SESSION_LIFECYCLE_SHARDS = 16;
+
+/**
+ * The shard of `sid`: the 32-bit FNV-1a hash of its UTF-8 bytes, modulo
+ * {@link SESSION_LIFECYCLE_SHARDS}.
+ */
+export function sessionLifecycleShardOf(sid: string): number {
+	let hash = 0x811c9dc5;
+	for (const byte of Buffer.from(sid, "utf8")) {
+		hash ^= byte;
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash % SESSION_LIFECYCLE_SHARDS;
+}
 
 const OWNER = "SessionLifecycleStore (redis)";
 
@@ -134,15 +148,25 @@ const instantOf = (fields: Readonly<Record<string, string>>, name: string): Date
 	return new Date(Number(raw));
 };
 
+/** A participant's data, stored as a JSON string so that every string the port admits reads back as written. */
+const dataOf = (stored: string): string => {
+	let data: unknown;
+	try {
+		data = JSON.parse(stored);
+	} catch {
+		throw malformed("a participant's data");
+	}
+	if (typeof data !== "string") throw malformed("a participant's data");
+	return data;
+};
+
 const META_FIELDS = new Set(["sub", "state", "exp", "gen", "until", "np", "nw", "cause", "at"]);
 
 /**
  * The record a hash holds, with its generation; a field outside the layout
  * (`clients/session-lifecycle.mts`) or one it cannot read throws.
  */
-const recordOf = (
-	fields: Readonly<Record<string, string>>,
-): Versioned<SessionLifecycleRecord> & { readonly retainUntilMs: number } => {
+const recordOf = (fields: Readonly<Record<string, string>>): Versioned<SessionLifecycleRecord> => {
 	const participants: SessionParticipant[] = [];
 	const pending: string[] = [];
 	for (const [field, value] of Object.entries(fields)) {
@@ -153,7 +177,7 @@ const recordOf = (
 			participants.push({
 				kind: item.slice(0, colon) as SessionParticipant["kind"],
 				id: item.slice(colon + 1),
-				data: value,
+				data: dataOf(value),
 			});
 		} else if (field.startsWith("w:")) {
 			pending.push(field.slice(2));
@@ -171,11 +195,8 @@ const recordOf = (
 		participants,
 		close: cause === undefined ? undefined : { cause, closingAt: instantOf(fields, "at"), pending },
 	} as SessionLifecycleRecord;
-	return {
-		value,
-		generation: fields.gen as Versioned<SessionLifecycleRecord>["generation"],
-		retainUntilMs: instantOf(fields, "until").getTime(),
-	};
+	instantOf(fields, "until");
+	return { value, generation: fields.gen as Versioned<SessionLifecycleRecord>["generation"] };
 };
 
 export function createRedisSessionLifecycleStore(
@@ -196,26 +217,46 @@ export function createRedisSessionLifecycleStore(
 		);
 	}
 
-	const recordKey = (sid: string): string => `${prefix}s:{${keyPart(sid)}}`;
-	/** The replay key of the write `writeId` to `key`: never `null`, as no record key holds a stray brace. */
+	/** The hash tag a shard's records, replay keys and closing index share. */
+	const tagOf = (shard: number): string => `{lc:${shard}}`;
+	const recordIn = (shard: number, sid: string): string =>
+		`${prefix}${tagOf(shard)}:s:${keyPart(sid)}`;
+	const indexOf = (shard: number): string => `${prefix}${tagOf(shard)}:closing`;
+	const keysOf = (sid: string): SessionLifecycleKeys => {
+		const shard = sessionLifecycleShardOf(sid);
+		return { record: recordIn(shard, sid), index: indexOf(shard), sid };
+	};
+	/** The replay key of the write `writeId` to `key`, on its slot: `${prefix}w:{lc:<shard>}:<writeId>`. */
 	const replayKey = (key: string, writeId: string): string =>
 		replayKeyOf(key, prefix, writeId) as string;
-	const index: SessionClosingIndexKeys = {
-		sids: `${prefix}c:{closing}:sids`,
-		deadlines: `${prefix}c:{closing}:deadlines`,
-	};
 
 	/**
-	 * Removes a closed record's entry when the record outlives every close
-	 * that added it. Housekeeping only: a failure leaves the entry, which the
-	 * listing removes later.
+	 * The closing sids of one shard after `after`, in order, read a page at a
+	 * time as the merge asks for them.
 	 */
-	const forgetClosed = async (sid: string, retainUntilMs: number): Promise<void> => {
-		try {
-			await client.pruneClosingOutlived(index, sid, retainUntilMs, CLOCK_SKEW_MS);
-		} catch {
-			// The entry stays until a listing passes it.
-		}
+	const shardReader = (shard: number, after: string) => {
+		const buffer: string[] = [];
+		let cursor = after;
+		let done = false;
+		return {
+			head: (): string | undefined => buffer[0],
+			take: (): string | undefined => buffer.shift(),
+			async fill(): Promise<void> {
+				while (buffer.length === 0 && !done) {
+					const page = await client.closingPage(indexOf(shard), cursor, INDEX_PAGE_SIZE);
+					if (page.length < INDEX_PAGE_SIZE) done = true;
+					const last = page.at(-1);
+					if (last === undefined) return;
+					cursor = last;
+					buffer.push(
+						...(await client.confirmClosing(
+							indexOf(shard),
+							page.map((sid) => ({ sid, record: recordIn(shard, sid) })),
+						)),
+					);
+				}
+			},
+		};
 	};
 
 	return {
@@ -225,7 +266,7 @@ export function createRedisSessionLifecycleStore(
 			checkKey(sid, "sid");
 			checkKey(sub, "sub");
 			const expiresAtMs = checkExpiresAt(expiresAt);
-			const key = recordKey(sid);
+			const key = keysOf(sid).record;
 			const generation = newStoreGeneration();
 			const outcome = await withWriteDeadline(
 				(deadlineMs) =>
@@ -247,7 +288,7 @@ export function createRedisSessionLifecycleStore(
 		async join(sid, participant) {
 			checkKey(sid, "sid");
 			const joining = checkParticipant(participant);
-			const key = recordKey(sid);
+			const key = keysOf(sid).record;
 			const generation = newStoreGeneration();
 			const outcome = await withWriteDeadline(
 				(deadlineMs) =>
@@ -256,7 +297,7 @@ export function createRedisSessionLifecycleStore(
 						replayKey: replayKey(key, generation),
 						clockSkewMs: CLOCK_SKEW_MS,
 						item: sessionCloseItemOf(joining),
-						data: joining.data,
+						data: JSON.stringify(joining.data),
 						generation,
 						maxParticipants,
 					}),
@@ -274,31 +315,27 @@ export function createRedisSessionLifecycleStore(
 		async beginClose(sid, request) {
 			checkKey(sid, "sid");
 			const { cause, steps, perParticipant, retainMs } = checkCloseRequest(request);
-			const key = recordKey(sid);
 			const generation = newStoreGeneration();
-			// The index first, at the commit's own deadline: a close that cannot
-			// add its sid never commits, and none commits past that deadline.
-			const reply = await withWriteDeadline(async (deadlineMs) => {
-				if ((await client.addClosing(index, sid, deadlineMs)) === "late") return "late" as const;
-				return client.beginCloseRecord(key, {
-					deadlineMs,
-					generation,
-					cause,
-					steps,
-					perParticipant,
-					retainMs,
-				});
-			}, unanswered("beginClose"));
+			const reply = await withWriteDeadline(
+				(deadlineMs) =>
+					client.beginCloseRecord(keysOf(sid), {
+						deadlineMs,
+						generation,
+						cause,
+						steps,
+						perParticipant,
+						retainMs,
+					}),
+				unanswered("beginClose"),
+			);
 			if (reply === "late") throw late("beginClose");
 			if (reply === "missing") return readSessionCloseAnswer({ outcome: "missing" });
 			const read = recordOf(reply);
-			const answer = readSessionCloseAnswer({
+			return readSessionCloseAnswer({
 				outcome: read.value.state as "closing" | "closed",
 				generation: read.generation,
 				record: read.value,
 			});
-			if (answer.outcome === "closed") await forgetClosed(sid, read.retainUntilMs);
-			return answer;
 		},
 
 		async completeIf(sid, expected, item): Promise<ConditionalReplaceAnswer> {
@@ -309,13 +346,13 @@ export function createRedisSessionLifecycleStore(
 					`${OWNER}: expected is no well-formed generation; nothing was written`,
 				);
 			}
-			const key = recordKey(sid);
+			const keys = keysOf(sid);
 			const generation = newStoreGeneration();
 			const reply = await withWriteDeadline(
 				(deadlineMs) =>
-					client.completeRecordItem(key, {
+					client.completeRecordItem(keys, {
 						deadlineMs,
-						replayKey: replayKey(key, generation),
+						replayKey: replayKey(keys.record, generation),
 						clockSkewMs: CLOCK_SKEW_MS,
 						expected,
 						item,
@@ -323,17 +360,14 @@ export function createRedisSessionLifecycleStore(
 					}),
 				unanswered("completeIf"),
 			);
-			switch (reply.outcome) {
+			switch (reply) {
 				case "late":
 					throw late("completeIf");
 				case "not_pending":
 					throw new RangeError(`${OWNER}: ${item} is not pending; nothing was written`);
 				case "missing":
 				case "conflict":
-					return readConditionalReplaceAnswer({ outcome: reply.outcome });
-				case "closed":
-					await forgetClosed(sid, reply.retainUntilMs);
-					return readConditionalReplaceAnswer({ outcome: "updated", generation });
+					return readConditionalReplaceAnswer({ outcome: reply });
 				default:
 					return readConditionalReplaceAnswer({ outcome: "updated", generation });
 			}
@@ -341,7 +375,7 @@ export function createRedisSessionLifecycleStore(
 
 		async read(sid) {
 			checkKey(sid, "sid");
-			const fields = await client.readRecord(recordKey(sid));
+			const fields = await client.readRecord(keysOf(sid).record);
 			if (fields === null) return readVersionedSessionLifecycle(null);
 			const { value, generation } = recordOf(fields);
 			return readVersionedSessionLifecycle({ value, generation });
@@ -350,38 +384,23 @@ export function createRedisSessionLifecycleStore(
 		async listClosing(limit, after = "") {
 			checkListingLimit(limit);
 			checkListingCursor(after);
+			const shards = Array.from({ length: SESSION_LIFECYCLE_SHARDS }, (_, shard) =>
+				shardReader(shard, after),
+			);
+			await Promise.all(shards.map((shard) => shard.fill()));
 			const closing: string[] = [];
-			let cursor = after;
-			for (;;) {
-				const page = await client.closingPage(index, cursor, INDEX_PAGE_SIZE);
-				const states = await Promise.all(
-					page.entries.map(({ sid }) => client.recordState(recordKey(sid))),
-				);
-				const stale: { sid: string; deadline: string }[] = [];
-				for (const [i, entry] of page.entries.entries()) {
-					const state = states[i];
-					if (state === "closing") {
-						closing.push(entry.sid);
-						if (closing.length === limit) break;
-						continue;
-					}
-					if (state !== null && state !== "active" && state !== "closed") {
-						throw malformed("state");
-					}
-					// Its close's deadline had passed on the index's clock before the
-					// state was read: no close that added the entry can commit now.
-					const deadline = entry.deadline === "" ? 0 : Number(entry.deadline);
-					if (page.nowMs >= deadline + CLOCK_SKEW_MS) stale.push(entry);
+			while (closing.length < limit) {
+				let next: (typeof shards)[number] | undefined;
+				for (const shard of shards) {
+					const head = shard.head();
+					const best = next?.head();
+					if (head !== undefined && (best === undefined || byBytes(head, best) < 0)) next = shard;
 				}
-				await Promise.all(
-					stale.map(({ sid, deadline }) => client.pruneClosingIf(index, sid, deadline)),
-				);
-				const last = page.entries.at(-1);
-				if (closing.length === limit || page.entries.length < INDEX_PAGE_SIZE || !last) {
-					return readSessionLifecycleListing(closing, limit, after);
-				}
-				cursor = last.sid;
+				if (next === undefined) break;
+				closing.push(next.take() as string);
+				await next.fill();
 			}
+			return readSessionLifecycleListing(closing, limit, after);
 		},
 	};
 }

@@ -166,7 +166,7 @@ Each one implements a port core declares; the slot name is in parentheses.
 - `SessionLifecycleStore` (`sessionLifecycleStore`) — a session's state
   (`active` → `closing` → `closed`), its participants and its pending close
   work, in one key per session; see
-  [Session lifecycle](#session-lifecycle-one-key-per-session-and-a-closing-index).
+  [Session lifecycle](#session-lifecycle-one-key-per-session-in-fixed-shards).
   `createRedisSessionLifecycleStore` builds it over
   `makeIoredisClients(io).sessionLifecycleStoreClient`; no module provides the
   slot yet.
@@ -1292,70 +1292,64 @@ that cannot be reached, fails it. The transaction store runs the check
 because of the email-proof requirement (D12's step-3 amendment). `noeviction`
 is what both stores' key families are meant to run on.
 
-## Session lifecycle: one key per session, and a closing index
+## Session lifecycle: one key per session, in fixed shards
 
 `createRedisSessionLifecycleStore` ([`src/session-lifecycle-store.mts`](src/session-lifecycle-store.mts))
 implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
 
 - **One key per session.** A session's whole record — subject, state, end,
-  generation, participants and pending close work — is one hash,
-  `${keyPrefix}s:{<sid>}` (`ss:lc:` by default; `<sid>` is base64url of its
-  JSON, so no sid moves the hash tag). Its one expiry (`PEXPIREAT`) is the
-  session's `expiresAt` plus `DEFAULT_CLOCK_SKEW_MS`, raised by the closing
-  commit to the later of that and the commit plus the request's `retainMs`,
-  and kept through `closed`. So the record lapses whole: no participant, work
-  item or state outlives the rest. The hash's fields are listed in
-  [`src/clients/session-lifecycle.mts`](src/clients/session-lifecycle.mts).
+  generation, participants and pending close work — is one hash with one
+  expiry (`PEXPIREAT`): the session's `expiresAt` plus `DEFAULT_CLOCK_SKEW_MS`,
+  raised by the closing commit to the later of that and the commit plus the
+  request's `retainMs`, and kept through `closed`. So the record lapses
+  whole. The hash's fields are listed in
+  [`src/clients/session-lifecycle.mts`](src/clients/session-lifecycle.mts); a
+  participant's data is kept as a JSON string, so every string the port
+  admits reads back as written.
+- **Sixteen fixed shards.** A record lives at
+  `${keyPrefix}{lc:<shard>}:s:<sid>` (`ss:lc:` by default; `<sid>` is base64url
+  of its JSON), where `<shard>` is the 32-bit FNV-1a hash of the sid's UTF-8
+  bytes modulo 16 (`sessionLifecycleShardOf`). Each shard keeps a closing
+  index, `${keyPrefix}{lc:<shard>}:closing` — a sorted set of the sids of its
+  closing records, every score 0, so it orders them by their bytes — under
+  the same hash tag, so on Redis Cluster a record and its index share a slot.
+  The count is a constant of the key layout, not a setting: changing it would
+  move every record, a breaking change.
 - **One script per write, on the server's clock.** `open`, `join`,
-  `beginClose` and `completeIf` each run one script on the record's key,
-  refused at or after a deadline stamped at issue (the package's write
-  lifetime W). `open`, `join` and `completeIf` keep their answer under a
-  replay key, `${keyPrefix}w:{<sid>}:<writeId>`, on the record's slot, until
-  the clock skew past the deadline: a copy the driver sends again answers as
-  the first did and writes nothing — a join whose reply was lost still answers
-  `joined` after a close committed. `beginClose` needs none: a copy that lands
-  again finds the record closing and writes nothing. A write answered `late`,
-  or unanswered within the write timeout, rejects with an unknown outcome.
-  `read` is one `HGETALL`.
-- **The closing index.** `listClosing` reads `${keyPrefix}c:{closing}:sids` (a
-  sorted set of sids, every score 0, so `ZRANGEBYLEX` orders them by their
-  UTF-8 bytes) and `${keyPrefix}c:{closing}:deadlines` (each sid's latest close
-  deadline). On Redis Cluster no script can write it together with a record,
-  so it is kept correct by order instead:
-  - `beginClose` adds the sid, with its close's deadline, **before** the
-    closing commit, which carries the same deadline. A close that cannot add
-    it rejects without committing, so every closing record has an entry.
-  - The listing re-reads each entry's record state and names only closing
-    ones, reading the index a page at a time until it has `limit` of them, so
-    stale entries never hide a closing record. It removes an entry whose
-    record is not closing only when the index's clock was past the entry's
-    deadline plus the clock skew before that read: no close that added it can
-    commit afterwards, and a later close raises the deadline, which the
-    removal checks.
-  - The completion that closes a record, and a close that is `closed` at once,
-    remove the record's entry when the record outlives the entry's deadline
-    plus the skew, since every close that added it then finds the record
-    closed. Otherwise the entry waits for a listing.
-
-  The index has no TTL and one slot. It shrinks only as those steps remove
-  entries, so whatever resumes pending close work must page through
-  `listClosing`; an entry left by a close of an absent sid, or by a crash
-  between the add and the commit, waits for it.
-- **Assumptions.** The app's and the servers' clocks agree within the declared
-  skew (1 s); acknowledged writes are not rolled back; and the server runs
-  `maxmemory-policy` `noeviction`. An evicted record lets a closed session be
-  opened and joined again; an evicted replay key lets a resent write apply
-  again; an evicted index hides a closing record. The boot check for that,
+  `beginClose` and `completeIf` each run one script, refused at or after a
+  deadline stamped at issue (the package's write lifetime W). The closing
+  commit adds the sid to its shard's index, and the completion that closes
+  the record removes it, in the same script, so the index never misses a
+  closing record and judges nothing by a clock. `open`, `join` and
+  `completeIf` keep their answer under a replay key,
+  `${keyPrefix}w:{lc:<shard>}:<writeId>`, until the clock skew past the
+  deadline: a copy the driver sends again answers as the first did and writes
+  nothing — a join whose reply was lost still answers `joined` after a close
+  committed. `beginClose` needs none: a copy that lands again finds the
+  record closing and writes nothing. A write answered `late`, or unanswered
+  within the write timeout, rejects with an unknown outcome.
+- **Reads on the primary.** `read` and the listing are scripts too, so a
+  client that routes plain reads to replicas still answers every write
+  acknowledged before the call.
+- **`listClosing`** merges the sixteen indexes in byte order after the cursor,
+  reading each a page at a time, and checks each sid's record in its shard's
+  own step: an entry whose record is no longer closing (it lapsed while
+  closing, say) is dropped there. The cursor is a plain sid.
+- **Assumptions.** Acknowledged writes are not rolled back, and the server
+  runs `maxmemory-policy` `noeviction`. An evicted record lets a closed
+  session be opened and joined again; an evicted replay key lets a resent
+  write apply again; an evicted index hides a closing record. The boot check,
   `checkSessionLifecycleEviction` in
   [`src/internal/session-lifecycle-eviction.mts`](src/internal/session-lifecycle-eviction.mts),
   refuses every `volatile-*` and `allkeys-*` policy with a
   `RedisStoreEvictableError` (`session-lifecycle-store-evictable`); the module
   that provides the slot runs it.
-- **What it refuses.** A record or index key of another type, and a record
-  holding a field or a value this store did not write, reject every member
-  that touches it, never answering an outcome. A join past `maxParticipants`
-  (1000 by default) rejects and writes nothing. A `keyPrefix` holding a brace
-  is a `RangeError` when the store is built.
+- **What it refuses.** A key of another type, a record holding a field or a
+  value this store did not write, and a pending count that disagrees with
+  the pending items reject every member that touches them, never answering an
+  outcome, with nothing written. A join past `maxParticipants` (1000 by
+  default) rejects and writes nothing. A `keyPrefix` holding a brace is a
+  `RangeError` when the store is built.
 
 ## Contract tests
 

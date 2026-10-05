@@ -16,28 +16,23 @@
 
 /**
  * The session lifecycle store's client over one ioredis connection. Every
- * write and every index step is one script whose reply is held to its
- * declared answers; a reply of any other shape throws, as a script this
- * client did not run.
+ * member is one script, so it runs on the primary even where reads are
+ * routed to replicas, and its reply is held to its declared answers; a reply
+ * of any other shape throws, as a script this client did not run.
  */
 
 import type { Redis } from "ioredis";
-import type {
-	SessionClosingPage,
-	SessionLifecycleCompleteReply,
-	SessionLifecycleStoreClient,
-} from "../../clients.mjs";
+import type { SessionLifecycleStoreClient } from "../../clients.mjs";
 import { runScript } from "../commands.mjs";
 import { redisDurability } from "../durability.mjs";
 import {
 	LC_BEGIN_CLOSE,
 	LC_COMPLETE,
-	LC_INDEX_ADD,
+	LC_INDEX_CONFIRM,
 	LC_INDEX_PAGE,
-	LC_INDEX_PRUNE_IF,
-	LC_INDEX_PRUNE_OUTLIVED,
 	LC_JOIN,
 	LC_OPEN,
+	LC_READ,
 } from "../scripts/session-lifecycle.mjs";
 
 const unexpected = (operation: string): Error =>
@@ -65,38 +60,12 @@ const fieldsOf = (reply: unknown, operation: string): Record<string, string> => 
 	return fields;
 };
 
-const DECIMAL = /^(0|[1-9]\d*)$/;
-
-/** A completion's reply: `closed:<until>` read into its parts. */
-const completeReplyOf = (reply: unknown): SessionLifecycleCompleteReply => {
-	if (typeof reply === "string" && reply.startsWith("closed:")) {
-		const until = reply.slice("closed:".length);
-		if (!DECIMAL.test(until) || !Number.isSafeInteger(Number(until))) {
-			throw unexpected("completeRecordItem");
-		}
-		return { outcome: "closed", retainUntilMs: Number(until) };
+/** An array of strings; anything else throws. */
+const stringsOf = (reply: unknown, operation: string): string[] => {
+	if (!Array.isArray(reply) || !reply.every((item) => typeof item === "string")) {
+		throw unexpected(operation);
 	}
-	return {
-		outcome: answerOf(
-			reply,
-			["updated", "missing", "conflict", "not_pending", "late"] as const,
-			"completeRecordItem",
-		),
-	};
-};
-
-/** A page's reply: the clock, then sid and deadline pairs. */
-const pageOf = (reply: unknown): SessionClosingPage => {
-	if (!Array.isArray(reply) || reply.length % 2 !== 1) throw unexpected("closingPage");
-	const [now, ...rest] = reply as unknown[];
-	if (typeof now !== "string" || !DECIMAL.test(now)) throw unexpected("closingPage");
-	const entries: { sid: string; deadline: string }[] = [];
-	for (let i = 0; i < rest.length; i += 2) {
-		const [sid, deadline] = [rest[i], rest[i + 1]];
-		if (typeof sid !== "string" || typeof deadline !== "string") throw unexpected("closingPage");
-		entries.push({ sid, deadline });
-	}
-	return { nowMs: Number(now), entries };
+	return reply as string[];
 };
 
 export function makeIoredisSessionLifecycleStoreClient(io: Redis): SessionLifecycleStoreClient {
@@ -137,11 +106,11 @@ export function makeIoredisSessionLifecycleStoreClient(io: Redis): SessionLifecy
 				["joined", "closed", "missing", "full", "late"] as const,
 				"joinRecord",
 			),
-		beginCloseRecord: async (key, input) => {
+		beginCloseRecord: async (keys, input) => {
 			const reply = await runScript(
 				io,
 				LC_BEGIN_CLOSE,
-				[key],
+				[keys.record, keys.index],
 				[
 					String(input.deadlineMs),
 					input.generation,
@@ -149,56 +118,56 @@ export function makeIoredisSessionLifecycleStoreClient(io: Redis): SessionLifecy
 					String(input.retainMs),
 					input.steps.join(","),
 					input.perParticipant.join(","),
+					keys.sid,
 				],
 			);
 			if (reply === "missing" || reply === "late") return reply;
 			return fieldsOf(reply, "beginCloseRecord");
 		},
-		completeRecordItem: async (key, input) =>
-			completeReplyOf(
+		completeRecordItem: async (keys, input) =>
+			answerOf(
 				await runScript(
 					io,
 					LC_COMPLETE,
-					[key, input.replayKey],
+					[keys.record, input.replayKey, keys.index],
 					[
 						String(input.deadlineMs),
 						String(input.deadlineMs + input.clockSkewMs + 1),
 						input.expected,
 						input.item,
 						input.generation,
+						keys.sid,
 					],
 				),
+				["updated", "closed", "missing", "conflict", "not_pending", "late"] as const,
+				"completeRecordItem",
 			),
 		readRecord: async (key) => {
-			const fields = await io.hgetall(key);
+			const fields = fieldsOf(await runScript(io, LC_READ, [key], []), "readRecord");
 			return Object.keys(fields).length === 0 ? null : fields;
 		},
-		recordState: (key) => io.hget(key, "state"),
-		addClosing: async (index, sid, deadlineMs) =>
-			answerOf(
-				await runScript(io, LC_INDEX_ADD, [index.sids, index.deadlines], [sid, String(deadlineMs)]),
-				["added", "late"] as const,
-				"addClosing",
-			),
 		closingPage: async (index, after, count) =>
-			pageOf(
+			stringsOf(
 				await runScript(
 					io,
 					LC_INDEX_PAGE,
-					[index.sids, index.deadlines],
+					[index],
 					[after === "" ? "-" : `(${after}`, String(count)],
 				),
+				"closingPage",
 			),
-		pruneClosingIf: async (index, sid, deadline) =>
-			(await runScript(io, LC_INDEX_PRUNE_IF, [index.sids, index.deadlines], [sid, deadline])) ===
-			1,
-		pruneClosingOutlived: async (index, sid, retainUntilMs, clockSkewMs) =>
-			(await runScript(
-				io,
-				LC_INDEX_PRUNE_OUTLIVED,
-				[index.sids, index.deadlines],
-				[sid, String(retainUntilMs), String(clockSkewMs)],
-			)) === 1,
+		confirmClosing: async (index, sessions) => {
+			if (sessions.length === 0) return [];
+			return stringsOf(
+				await runScript(
+					io,
+					LC_INDEX_CONFIRM,
+					[index, ...sessions.map(({ record }) => record)],
+					sessions.map(({ sid }) => sid),
+				),
+				"confirmClosing",
+			);
+		},
 		durability: () => redisDurability(io),
 	};
 }
