@@ -391,6 +391,7 @@ export type {
 	DelegatedTokens,
 	EndSessionRequest,
 	EndSessionResult,
+	FederationAsk,
 	FederationProfile,
 	MappedClaims,
 	RefreshedTokens,
@@ -409,6 +410,7 @@ export {
 	supportsLogout,
 	supportsRefresh,
 } from "./federations/types.mjs";
+export { readUpstreamAuthTime } from "./federations/upstream-auth-time.mjs";
 // The authentication claims a token may carry
 export {
 	authTimeAt,
@@ -1251,6 +1253,7 @@ export {
 	checkSecondFactorEvent,
 	expectsRenewalNonce,
 	federatedSessionAuthentication,
+	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	type RecordedAuthentication,
