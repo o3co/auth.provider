@@ -25,9 +25,8 @@
  * request has already been written into somebody's grant.
  */
 
-import type { FederationGrantConnection } from "@o3co/auth-provider-core";
+import type { FederationGrantConnection, FederationSettings } from "@o3co/auth-provider-core";
 import {
-	federationsOf,
 	identityClaimsProblem,
 	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
 } from "@o3co/auth-provider-core";
@@ -41,12 +40,6 @@ const SCOPE_TOKEN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
 const refuse = (name: string, what: string): never => {
 	throw new Error(`federation-grants.connections.${name}: ${what}`);
 };
-
-interface FederationEntry {
-	readonly enabled?: unknown;
-	readonly issuer?: unknown;
-	readonly clientId?: unknown;
-}
 
 /**
  * The four spellings an environment variable may say a boolean in, as core's
@@ -196,7 +189,8 @@ const seconds = (value: unknown, name: string, key: string): number => {
 
 /**
  * Every connection `section` (`federation-grants {}`) configures, joined with
- * the federation it points at in `core.federations`.
+ * the federation it points at in `federations`, the `federationSettings` slot
+ * core fills from `core.federations`.
  *
  * An empty map is valid and so is an absent one: removing the last connection
  * has to remain an operable change, and a deployment with none still answers
@@ -204,9 +198,8 @@ const seconds = (value: unknown, name: string, key: string): number => {
  */
 export function resolveFederationGrantConnections(
 	section: { readonly connections?: Readonly<Record<string, unknown>> } | undefined,
-	config: unknown,
+	federations: FederationSettings,
 ): ReadonlyMap<string, FederationGrantConnection> {
-	const federations = federationsOf(config) as Readonly<Record<string, FederationEntry>>;
 	const entries = section?.connections ?? {};
 	const resolved = new Map<string, FederationGrantConnection>();
 
@@ -225,11 +218,12 @@ export function resolveFederationGrantConnections(
 		if (typeof federation !== "string" || federation === "") {
 			refuse(name, "federation must name a configured federation");
 		}
+		// The slot inherits nothing, so a name no entry has reads as absent.
 		const upstream = federations[federation as string];
 		if (upstream === undefined) {
 			refuse(name, `federation "${federation}" is not configured`);
 		}
-		if (boolean(upstream.enabled, name, `core.federations.${federation}.enabled`) !== true) {
+		if (!upstream.enabled) {
 			refuse(name, `federation "${federation}" is configured but disabled`);
 		}
 		// Configured, never discovered: this pair is persisted into the grant's

@@ -6,7 +6,7 @@ Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) �
 
 Optional. Nothing here is active until `federation-grants.enabled = true`.
 
-Its settings are the module's own section, `federation-grants {}`, strict, with their defaults in the package's [`config/reference.conf`](config/reference.conf), which the module declares and a composition root layers. The grant stores' settings — their retention, the Redis store's key ring and key prefix — are the stores' own sections (`core-federation-grant-store-memory`, `redis-federation-grant-store`, `redis-federation-grant-intent-store`). A key still written under `federationGrants`, the section's old path, refuses boot naming its new one.
+Its settings are the module's own section, `federation-grants {}`, strict, with their defaults in the package's [`config/reference.conf`](config/reference.conf), which the module declares and a composition root layers. It reads nothing else of the configuration: the issuer comes from the `oauthTokenSettings` slot and the federations from `federationSettings`. The grant stores' settings — their retention, the Redis store's key ring and key prefix — are the stores' own sections (`core-federation-grant-store-memory`, `redis-federation-grant-store`, `redis-federation-grant-intent-store`). A key still written under `federationGrants`, the section's old path, refuses boot naming its new one.
 
 The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — see its README's "Federation Grants" — and [`docs/offline-access.md`](docs/offline-access.md) says what each IdP needs before it will issue a refresh token.
 
@@ -27,7 +27,8 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 - the stores themselves — core's memory modules and `@o3co/auth-provider-redis`;
 - the upstream authorization and refresh calls — the federation adapter's delegated-authorization capability, which only `@o3co/auth-provider-federation-oidc` implements ([`docs/offline-access.md`](docs/offline-access.md));
 - the consent page — the deployment's;
-- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`; and the issuer every URL here is built on — the oauth module's, read through the `oauthTokenSettings` slot when a composition holds it and from `oauth.jwt.issuer` when not ([#728](https://github.com/o3co/auth.provider/issues/728));
+- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`; and the issuer every URL here is built on — the oauth module's, read through the `oauthTokenSettings` slot, which the module requires while the feature is on: a composition without `oauthModule` fills it itself ([#728](https://github.com/o3co/auth.provider/issues/728));
+- the federations a connection names — `core.federations`, read through the `federationSettings` slot core fills for every composition: whether each is configured and on, and the issuer and client id a grant's identity is pinned to;
 - the browser session, login and the CSRF policy — `@o3co/auth-provider-session` (the `session-middleware` route, the login page through the `loginEntry` slot its session module provides, and the policy the consent answer is held to through its `csrfGuard` slot);
 - whether the session behind the browser's cookie may go on — core's session admission (`admitSession`, [the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)): the durable session, the subject's sessions boundary and the registered session requirements. The browser half asks it at every step and keeps the flow's own checks ([below](#the-browser-half-connect-and-consent)).
 
@@ -66,6 +67,9 @@ const app = await createApp({
     // …and the session modules you already run: the browser half mounts after
     // `session-middleware`, admits the durable session behind the cookie, and
     // holds the consent answer to the session module's `csrfGuard`.
+    // And `oauthModule`, which provides the `oauthTokenSettings` slot the
+    // routes take their issuer from; a composition without it puts the slot
+    // in `bootstrapComponents`.
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve, clientRepository, keyStore },
 });
@@ -98,9 +102,10 @@ which audits only the backstop revocation it writes, and no denial — the
 `revokeAllForSubject`, the subject revocation service) the caller's own, or
 one generated for the call when the caller gives none, so that a pass over a
 subject's grants reads as one operation in the sink (#618). Recording and
-delivery are the deployment's: the module refuses to boot with the feature
-enabled and no `auditSink` unless `core.declaredAbsent = ["auditSink"]` declares the
-capability absent on purpose — the product-wide declaration, which opts the
+delivery are the deployment's: the module attaches core's audit-sink absence
+policy (`AUDIT_SINK_ABSENCE_POLICY`), so boot refuses the feature enabled with
+no `auditSink` (`component-absence-undeclared`) unless
+`core.declaredAbsent = ["auditSink"]` declares the capability absent on purpose — the product-wide declaration, which opts the
 whole provider out of audit and which the standalone does not offer. A Store
 that drives a revocation through the library without passing `audit` records
 nothing of it, by the same choice.
