@@ -606,6 +606,15 @@ modules fills them.
   (`DEVICE_GRANT_ADMISSION_ACTIONS`, `OAUTH_ROUTER_ADMISSION_ACTIONS`) (#793).
   A hand-written requirement that reaches or adds a second factor declares
   `secondFactorAuthority: true` (#781).
+  `admitSession` refuses, with a `RangeError` before anything is read, a
+  `remediation` action issued to a requirement its resolver does not hold
+  (another composition's, or another boot's), as it refuses a literal or a
+  copy; it no longer asks the requirements about it as `credential_change`,
+  and `session_admission_remediation_undeclared` is no longer logged. Pass a
+  route's own issued action to the resolver its requirement is registered
+  in, read in the boot that registered it: a requirement object registered
+  again (a second `createApp` with the same module instance) is issued new
+  actions, which the earlier boot's resolver refuses (#798).
 - **Slots one module owns.** An enabled device grant requires the
   `csrfGuard` slot, and enabled federation grants `csrfGuard` and
   `loginEntry` (#746, #784); `sessionModule` requires `csrfTokenSigner`, and
