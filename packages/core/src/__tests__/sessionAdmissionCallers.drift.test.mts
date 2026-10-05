@@ -381,7 +381,7 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 	{
 		file: "packages/core/src/jwt/verify.mts",
 		sites: { revokedBefore: 1 },
-		why: "permanent: the subject-revocation boundary applied to a token by verifyJwt (D9); a token carrier's admission skips the boundary because this reads it",
+		why: "permanent: the subject-revocation boundary applied to a token by verifyJwt (D9), and to a claim a grant compares before signing through subjectBoundaryCovers; a token carrier's admission skips the boundary because this reads it",
 	},
 ];
 
