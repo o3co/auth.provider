@@ -32,6 +32,7 @@ export function makeIoredisChallengeStoreClient(io: Redis): ChallengeStoreClient
 		set: (k, v, _mode, ttl, _cond) => io.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>,
 		pttl: (k) => io.pttl(k),
 		del: (k) => io.del(k),
+		get: (k) => io.get(k),
 	};
 	return challengeStoreClient;
 }
