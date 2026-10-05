@@ -66,13 +66,13 @@ const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
  * feed admission of the token's session; the resolver is required, and a
  * factory built without one is refused. The lifetimes, `legacyTypAccept` and
  * the resource-indicator switch come from the `oauthTokenSettings` slot, and
- * the refresh-token binding rule from core's `tokenBindingSettings`. Of the
- * whole configuration it reads `oauth.refreshToken.unknownFamilyPolicy`
- * alone, which no slot carries.
+ * the refresh-token binding rule from core's `tokenBindingSettings`. It
+ * reads nothing of the configuration: `unknownFamilyPolicy` is the module's
+ * `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, handed over
+ * as the section parsed it.
  */
 export type RefreshTokenGrantDeps = Pick<
 	GrantDependencies,
-	| "config"
 	| "keyStore"
 	| "logger"
 	| "grantPolicy"
@@ -84,7 +84,14 @@ export type RefreshTokenGrantDeps = Pick<
 	ProviderDeps<
 		"sessionRequirementResolver" | "oauthTokenSettings" | "tokenBindingSettings",
 		"auditSink" | "sessionLifecycleStore"
-	>;
+	> & {
+		/**
+		 * What a refresh token whose family no record holds gets: issued only
+		 * under `"accept"`, a migration window's setting; anything else, absent
+		 * included, refuses it.
+		 */
+		readonly unknownFamilyPolicy?: "accept" | "reject";
+	};
 
 /**
  * The token endpoint's answer to an admission that does not refresh, or
@@ -123,7 +130,10 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 };
 
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
-	const { config, keyStore, logger, subjectRevocation } = deps;
+	const { keyStore, logger, subjectRevocation } = deps;
+	// Read once, here. Only `"accept"` issues for an unknown family: any other
+	// value a hand-built deps carries refuses, as absent does.
+	const acceptUnknownFamily = deps.unknownFamilyPolicy === "accept";
 	// What admission reads for the token's session; no acr table, since a
 	// refresh asks for no acr.
 	const admissionDeps: AdmissionDeps = {
@@ -742,8 +752,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 								},
 							};
 						}
-						const policy = config.oauth.refreshToken.unknownFamilyPolicy ?? "reject";
-						if (policy === "reject") {
+						if (!acceptUnknownFamily) {
 							logger?.warn(
 								{
 									familyId: newFamilyId,

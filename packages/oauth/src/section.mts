@@ -24,7 +24,10 @@
  * an environment variable carries.
  *
  * Core's schema declares the same keys, with the same rules and messages,
- * until it stops declaring `oauth {}`; boot parses the section with core's
+ * until it stops declaring `oauth {}`, and two more it keeps optional:
+ * `oauth.refreshToken.unknownFamilyPolicy`, which moved to the
+ * oauth-authorization module's section, and `oauth.refreshToken.legacyRtPolicy`,
+ * which this module refuses as removed. Boot parses the section with core's
  * first. Core alone holds what it retired from the section: the keys it
  * refuses naming what became of them (`oauth.jwt`'s flat key fields,
  * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`),
@@ -154,14 +157,6 @@ const refreshTokenSchema = z
 		// Positive and bounded: the rule `resolveRefreshTokenLifetime` holds a
 		// hand-built configuration to.
 		expiresIn: lifetimeSecondsSchema,
-		// Policy for a refresh token whose `family_id` matches no family record.
-		// `"reject"` is the safe choice; `"accept"` is only for a time-bounded
-		// migration window.
-		unknownFamilyPolicy: z.enum(["accept", "reject"]),
-		// A refresh token lacking `jti` or `family_id` while family rotation is
-		// wired is rejected. `"reject"` is the only value, so a stale
-		// `accept-with-warning` refuses boot on this field.
-		legacyRtPolicy: z.enum(["reject"]),
 	})
 	.strict();
 

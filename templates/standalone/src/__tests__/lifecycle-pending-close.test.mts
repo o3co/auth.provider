@@ -28,7 +28,15 @@ import {
 } from "@o3co/auth-provider-core";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { basic, compose, login, WEB } from "./all-modules-composition.fixture.mjs";
+import {
+	authorize,
+	basic,
+	codeFrom,
+	compose,
+	login,
+	redeem,
+	WEB,
+} from "./all-modules-composition.fixture.mjs";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -109,6 +117,97 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 			const afterUserinfo = await userinfo();
 			expect(afterUserinfo.status).toBe(401);
 			expect(afterUserinfo.body.error_description).toBe("session_invalid");
+
+			const again = await sessionGrant();
+			expect(again.status).toBe(400);
+			expect(again.body).toMatchObject({
+				error: "invalid_grant",
+				error_description: "session_invalid",
+			});
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("an RP-initiated logout whose notice fails answers success, and its session is refused by introspection, userinfo and the session grant", async () => {
+		const { app, handle } = await compose({
+			extraModules: () => [sessionLifecycleModule],
+			extraClients: {
+				"rp-down": {
+					tokenEndpointAuthMethod: "client_secret_basic",
+					clientSecret: "rp-down-secret-long-enough",
+					allowedRedirectUris: ["https://rp-down.test/cb"],
+					allowedScopes: ["openid"],
+					allowedGrantTypes: ["authorization_code"],
+					backchannelLogoutUri: "https://rp-down.test/logout",
+				},
+			},
+		});
+		try {
+			const components = handle.components as Record<string, unknown>;
+			const lifecycle = components.sessionLifecycle as SessionLifecycle;
+			const sessions = components.userSessionStore as UserSessionStore;
+			const { cookies } = await login(app);
+			// The code exchange joins the session; its id_token is the logout's hint.
+			const exchanged = await redeem(app, codeFrom(await authorize(app, cookies)));
+			expect(exchanged.status).toBe(200);
+			const idToken = exchanged.body.id_token as string;
+			const sid = String(claimsOf(idToken).sid);
+			const sessionGrant = () =>
+				request(app)
+					.post("/oauth/token")
+					.set("Authorization", basic(WEB))
+					.set("Cookie", cookies)
+					.type("form")
+					.send({ grant_type: "session", scope: "openid profile" });
+			const issued = await sessionGrant();
+			expect(issued.status).toBe(200);
+			// A session-grant token carries the session and no family.
+			const accessToken = issued.body.access_token as string;
+			expect(claimsOf(accessToken)).toMatchObject({ sid });
+			expect(claimsOf(accessToken).family_id).toBeUndefined();
+
+			// A relying party whose back-channel endpoint is down joins the session.
+			expect(
+				await lifecycle.join(sid, {
+					rp: {
+						clientId: "rp-down",
+						backchannelLogoutUri: "https://rp-down.test/logout",
+						backchannelLogoutSessionRequired: true,
+						frontchannelLogoutUri: undefined,
+						frontchannelLogoutSessionRequired: undefined,
+						registeredAt: new Date(),
+					},
+				}),
+			).toEqual({ outcome: "joined" });
+			const posted = vi
+				.spyOn(globalThis, "fetch")
+				.mockImplementation(async () => new Response(null, { status: 503 }));
+
+			const logout = await request(app)
+				.post("/oauth/logout")
+				.type("form")
+				.send({ id_token_hint: idToken });
+
+			// The close committed with the notice pending: the logout succeeded.
+			expect(logout.status).toBe(200);
+			expect(logout.body).toEqual({ logged_out: true });
+			expect(posted).toHaveBeenCalled();
+			expect(await sessions.get(sid)).not.toBeNull();
+
+			const introspected = await request(app)
+				.post("/oauth/introspect")
+				.set("Authorization", basic(WEB))
+				.type("form")
+				.send({ token: accessToken });
+			expect(introspected.status).toBe(200);
+			expect(introspected.body).toEqual({ active: false });
+
+			const userinfo = await request(app)
+				.get("/oauth/userinfo")
+				.set("Authorization", `Bearer ${accessToken}`);
+			expect(userinfo.status).toBe(401);
+			expect(userinfo.body.error_description).toBe("session_invalid");
 
 			const again = await sessionGrant();
 			expect(again.status).toBe(400);

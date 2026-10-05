@@ -796,6 +796,25 @@ describe("the step-up's finish", () => {
 		expect((await postAs(app, renewed, "/enrollment", { kind: "totp" })).status).toBe(403);
 	});
 
+	it("steps up at the next try a session never escalated whose first record failed after the renewal: the finish expects the record's nonce, not the cookie's", async () => {
+		const { agent, sid, userSessionStore, record, totp, verified } = await opened();
+		record.mockRejectedValueOnce(new Error("session store down"));
+		expect((await verified()).status).toBe(503);
+		// The cookie now holds the renewal's nonce; the record holds none.
+		expect((await stored(userSessionStore, sid)).renewalNonce).toBeUndefined();
+
+		vi.setSystemTime(Date.now() + 60_000);
+		const again = await openedStepUp(agent);
+		const res = await verify(agent, again, totp.record.id, totpCode(totp.secret));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(record).toHaveBeenLastCalledWith(
+			sid,
+			expect.not.objectContaining({ expectedRenewalNonce: expect.anything() }),
+		);
+		expect((await stored(userSessionStore, sid)).amr).toEqual(expect.arrayContaining(["mfa"]));
+	});
+
 	it("answers 503 to a session store that answers something that is no session", async () => {
 		const { record, verified } = await opened();
 		record.mockResolvedValueOnce(true as unknown as UserSession);
