@@ -26,9 +26,10 @@
  * A close commits first and then runs its work. Every item is safe to run
  * more than once and is recorded at the generation read, so two closes of one
  * session and the sweep may overlap. Items run in phases, each only once the
- * earlier ones are recorded, and the user session is deleted last; the items
- * of a phase run together, a close's notices and family revocations at most
- * `CLOSE_CONCURRENCY` at once, and a failed item keeps the record closing.
+ * earlier ones are recorded, the user session and then the subject's index
+ * entry last; the items of a phase run together, a close's notices and
+ * family revocations at most `CLOSE_CONCURRENCY` at once, and a failed item
+ * keeps the record closing.
  */
 
 import {
@@ -217,19 +218,22 @@ const CLOSE_POLICY: Readonly<Record<SessionCloseCause, { readonly tellsRelyingPa
  * phase is pending in the record, so a later phase never runs over work an
  * earlier one has not durably done: revocations and removals first, then
  * the relying parties (and an item this code does not know), then the
- * per-session indexes the bridge steps read, and the user session last.
+ * per-session indexes the bridge steps read, then the user session, and the
+ * subject's index entry last: a close still pending keeps the sid where a
+ * subject-wide revocation enumerates it, so a retry of that revocation finds
+ * the close and resumes it.
  */
 const phaseOf = (item: string): number => {
 	if (
 		item.startsWith(FAMILY_ITEM) ||
 		item === REVOKE_BRIDGED_FAMILIES ||
-		item === REMOVE_FEDERATION_TOKENS ||
-		item === REMOVE_SUBJECT_SESSION
+		item === REMOVE_FEDERATION_TOKENS
 	) {
 		return 0;
 	}
 	if (item === REMOVE_SESSION_INDEXES) return 2;
 	if (item === DELETE_USER_SESSION) return 3;
+	if (item === REMOVE_SUBJECT_SESSION) return 4;
 	return 1;
 };
 
