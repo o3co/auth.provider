@@ -94,7 +94,12 @@ export interface RefreshTokenFamilyStore {
 	 */
 	registerFamily(family: RefreshTokenFamily): Promise<void>;
 
-	/** Non-mutating lookup; `null` when no record exists or it has expired. */
+	/**
+	 * Non-mutating lookup; `null` when no record exists or it has expired.
+	 * `expiresAtMs` is the one committed, never a later value rebuilt from what
+	 * remains of it, so no read moves a family's cap; `updateFamily` hands its
+	 * updater, and reports, the same.
+	 */
 	findFamily(familyId: string): Promise<RefreshTokenFamily | null>;
 
 	/**
@@ -132,10 +137,8 @@ export interface RefreshTokenFamilyStore {
  *
  * - `rotated`: `previousJti` was active and the CAS committed `newJti`.
  *   `cappedExpiresAtMs` is the committed family ceiling (the family TTL is set
- *   once and never extended). It is read back after the commit, and the Redis
- *   adapter reconstructs it after the round trip, so it may drift a few ms
- *   past the stored TTL: fine for detecting the cap, but a JWT `exp` derived
- *   from it needs a safety margin (see the Redis adapter's `updateFamily`).
+ *   once and never extended), read back from the commit: the expiry stored,
+ *   never later.
  * - `replayed`: `previousJti` was not the active jti. The caller must reject
  *   and treat it as a replay-attack signal. `familyRevoked: true` means the
  *   implementation already revoked the family in the same atomic operation

@@ -106,8 +106,7 @@ export function createRefreshTokenFamilyRotation(
 				// Absolute expiry cap (OAuth 2.1 BCP §4.14.1): the family TTL is set
 				// once at creation and rotation never extends it; a smaller caller
 				// value (e.g. a session-bound RT) is honoured. The outcome's
-				// `cappedExpiresAtMs` reads the committed record, which for the
-				// Redis adapter may drift a few ms past this value; consumers read
+				// `cappedExpiresAtMs` reads the committed record; consumers read
 				// the outcome's field.
 				const cappedExpiresAtMs = Math.min(expiresAtMs, current.expiresAtMs);
 				return {

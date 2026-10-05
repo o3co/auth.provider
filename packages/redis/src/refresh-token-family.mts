@@ -109,6 +109,11 @@ const deserialize = (raw: string): RefreshTokenFamily => {
  * `RefreshTokenFamilyClient` narrow) with a `PX` TTL; see `storedExpiry`.
  *
  * - `registerFamily` is `SET key value PX ttlMs NX`: atomic insert-only.
+ * - A family's `expiresAtMs` is the one stored in its record, never rebuilt
+ *   from the key's remaining life: a reply's latency cannot move it, so the
+ *   cap the rotation wrapper commits stays where it was registered. A record
+ *   whose stored expiry has passed reads as gone, as in the memory adapter,
+ *   even while its key (which lives from when Redis received the write) does.
  * - `updateFamily` is single-key `WATCH`/`GET`/`MULTI`/`SET`/`EXEC`: the
  *   updater's decision is applied to exactly the state it read, or `EXEC`
  *   answers `null` and the loop re-reads and re-decides. So a caller can fuse
@@ -159,9 +164,7 @@ export function createRedisRefreshTokenFamilyStore(
 			const pttl = await client.pttl(key);
 			if (pttl <= 0) return null; // -2 nonexistent, -1 no-TTL (defensive), 0 expired
 			const fam = deserialize(raw);
-			// Reconstruct expiresAtMs from PTTL to match the drift contract
-			// (epoch-ms eliminates the Date mutation surface).
-			return Object.freeze({ ...fam, expiresAtMs: Date.now() + pttl });
+			return fam.expiresAtMs <= Date.now() ? null : fam;
 		},
 
 		async updateFamily(familyId, updater): Promise<RefreshTokenFamilyUpdateResult> {
@@ -186,10 +189,12 @@ export function createRedisRefreshTokenFamilyStore(
 					return { outcome: "not-found" };
 				}
 
-				const current = Object.freeze({
-					...deserialize(raw),
-					expiresAtMs: Date.now() + pttl,
-				});
+				const current = deserialize(raw);
+				if (current.expiresAtMs <= Date.now()) {
+					await conn.unwatch();
+					return { outcome: "not-found" };
+				}
+
 				const decision = updater(current);
 
 				if (decision.action === "abort") {
@@ -226,15 +231,8 @@ export function createRedisRefreshTokenFamilyStore(
 					continue;
 				}
 
-				// Taken after EXEC, this runs up to one round-trip later than what
-				// `findFamily` reconstructs from PTTL for the same write. Benign:
-				// the TTL never exceeds what the updater asked for, and JWT
-				// validators tolerate far more skew; reading PTTL here would add a
-				// round-trip for nothing.
-				const committed = Object.freeze({
-					...next,
-					expiresAtMs: Date.now() + newTtlMs,
-				});
+				// The expiry as stored, which `findFamily` answers for the same write.
+				const committed = Object.freeze(next);
 				// The reason of the decision that won the CAS; earlier attempts'
 				// reasons go with their failed commits, which is why the reason
 				// rides on the decision rather than in a caller's closure.
