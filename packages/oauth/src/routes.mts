@@ -50,6 +50,7 @@ import {
 	readAccessTokenRevocationMode,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SessionRPRegistry,
@@ -168,6 +169,7 @@ const createIntrospectHandler = ({
 	subjectRevocation,
 	refreshTokenFamilyRevocation,
 	userSessionStore,
+	sessionLifecycle,
 	auditSink,
 	logger,
 }: {
@@ -178,6 +180,8 @@ const createIntrospectHandler = ({
 	readonly subjectRevocation: SubjectRevocation | undefined;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation | undefined;
 	readonly userSessionStore: UserSessionStore | undefined;
+	/** Where installed, what answers whether the token's session is live, in place of `userSessionStore`. */
+	readonly sessionLifecycle: SessionLifecycle | undefined;
 	readonly auditSink: AuditSink | undefined;
 	readonly logger: Logger;
 }): RequestHandler => {
@@ -266,8 +270,30 @@ const createIntrospectHandler = ({
 			// result, its `liveness_sid` (core's `livenessSidOf`): a derived
 			// token ends with the session it came from, as its subject token
 			// does.
+			//
+			// Where core's session lifecycle is installed, it answers: a session
+			// whose close has committed is not live, while its user session is
+			// still there.
 			const sid = livenessSidOf(payload as Record<string, unknown>);
-			if (sid !== null && userSessionStore) {
+			if (sid !== null && sessionLifecycle) {
+				const liveness = await sessionLifecycle.liveness(sid);
+				if (liveness.outcome === "unavailable") {
+					return answerStoreUnavailable(req, res, {
+						store: "session_lifecycle",
+						details: { sid },
+					});
+				}
+				if (liveness.outcome === "not_live") {
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "introspect.session_invalid",
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { sid },
+					});
+					return res.status(200).json({ active: false });
+				}
+			} else if (sid !== null && userSessionStore) {
 				let userSession: Awaited<ReturnType<UserSessionStore["get"]>>;
 				try {
 					userSession = await userSessionStore.get(sid);
@@ -385,6 +411,7 @@ export const createOAuthRouter = async (
 		sessionFamilyIndex,
 		sessionFederationIndex,
 		federationTokenStore,
+		sessionLifecycle,
 		replaySeenSet,
 		consentStore,
 		pendingConsentStore,
@@ -449,6 +476,12 @@ export const createOAuthRouter = async (
 		sessionFamilyIndex?: SessionFamilyIndex;
 		sessionFederationIndex?: SessionFederationIndex;
 		federationTokenStore?: FederationTokenStore;
+		/**
+		 * Core's session lifecycle. Where installed, introspection, userinfo
+		 * and the federation-token route ask it whether a token's session is
+		 * live.
+		 */
+		sessionLifecycle?: SessionLifecycle;
 		/**
 		 * The `jti` single-use record for `private_key_jwt` client
 		 * assertions, consulted by every client-authenticated endpoint here.
@@ -694,6 +727,7 @@ export const createOAuthRouter = async (
 				subjectRevocation,
 				refreshTokenFamilyRevocation,
 				userSessionStore,
+				sessionLifecycle,
 				auditSink,
 				logger,
 			}),
@@ -718,6 +752,7 @@ export const createOAuthRouter = async (
 		userinfo.createRouter(express, {
 			keyStore,
 			userSessionStore,
+			...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
 			subjectRevocation,
@@ -777,6 +812,7 @@ export const createOAuthRouter = async (
 				logger,
 				issuer: canonicalIssuer,
 				legacyTypAccept: legacyTypAcceptOpt,
+				...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 			}),
 		);
 	}

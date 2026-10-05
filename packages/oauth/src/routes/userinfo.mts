@@ -24,7 +24,9 @@ import {
 	loggableError,
 	type RefreshTokenFamilyRevocation,
 	readIssuedScope,
+	type SessionLifecycle,
 	type SubjectRevocation,
+	type UserSession,
 	type UserSessionStore,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
@@ -41,6 +43,12 @@ type ExpressLike = {
 export interface UserinfoRouterOptions {
 	keyStore: KeyStore;
 	userSessionStore?: UserSessionStore;
+	/**
+	 * Core's session lifecycle. Where installed, it answers whether the
+	 * token's session is live, and with its user session, in place of
+	 * `userSessionStore`: a session whose close has committed is not live.
+	 */
+	sessionLifecycle?: SessionLifecycle;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	/** RFC 7009: when wired, verifyJwt consults the denylist so revoked ATs respond 401. */
 	accessTokenDenylist?: AccessTokenDenylist;
@@ -176,26 +184,40 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 				.json({ error: "invalid_token", error_description: "missing sub claim" });
 		}
 
+		const { sessionLifecycle, userSessionStore } = opts;
 		// Without a session store, return only sub (no durable claim source)
-		if (!opts.userSessionStore || livenessSid === null) {
+		if ((!sessionLifecycle && !userSessionStore) || livenessSid === null) {
 			return res.status(200).json({ sub });
 		}
 
-		// Validate session liveness. Fail-closed on store throw (symmetric with
+		// Validate session liveness. Fail-closed on an outage (symmetric with
 		// the family check above): a backend outage must not leak claims, and it
 		// is answered as the outage it is, not as an invalid token.
-		let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
-		try {
-			session = await opts.userSessionStore.get(livenessSid);
-		} catch (err) {
-			opts.logger?.error(
-				{ store: "user_session", err: loggableError(err) },
-				"userinfo_store_unavailable",
-			);
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "session store unavailable",
-			});
+		let session: UserSession | null = null;
+		if (sessionLifecycle) {
+			// The lifecycle logs its own error; this line carries none.
+			const liveness = await sessionLifecycle.liveness(livenessSid);
+			if (liveness.outcome === "unavailable") {
+				opts.logger?.error({ store: "session_lifecycle" }, "userinfo_store_unavailable");
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "session store unavailable",
+				});
+			}
+			session = liveness.outcome === "live" ? liveness.session : null;
+		} else if (userSessionStore) {
+			try {
+				session = await userSessionStore.get(livenessSid);
+			} catch (err) {
+				opts.logger?.error(
+					{ store: "user_session", err: loggableError(err) },
+					"userinfo_store_unavailable",
+				);
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "session store unavailable",
+				});
+			}
 		}
 		if (!session) {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');

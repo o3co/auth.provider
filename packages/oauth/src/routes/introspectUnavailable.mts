@@ -68,19 +68,27 @@ export const createIntrospectUnavailableAnswers = ({
 	 * error's projection — never the error, which can carry what the store
 	 * was sent — and audited as `introspect.store_unavailable`, whose `cause`
 	 * is core's `auditedError` (the error's name and code, never its message);
-	 * the log line carries the rest.
+	 * the log line carries the rest. Core's session lifecycle answers its
+	 * outage with no error, which it logs itself: that line and event carry
+	 * none.
 	 */
 	const answerStoreUnavailable = (
 		req: Request,
 		res: Response,
-		outage: {
-			readonly store: "refresh_token_family" | "user_session";
-			readonly details: Readonly<Record<string, string>>;
-			readonly cause: unknown;
-		},
+		outage:
+			| {
+					readonly store: "refresh_token_family" | "user_session";
+					readonly details: Readonly<Record<string, string>>;
+					readonly cause: unknown;
+			  }
+			| {
+					readonly store: "session_lifecycle";
+					readonly details: Readonly<Record<string, string>>;
+			  },
 	): Response => {
+		const cause = "cause" in outage ? { cause: outage.cause } : undefined;
 		logger.error(
-			{ store: outage.store, err: loggableError(outage.cause) },
+			{ store: outage.store, ...(cause ? { err: loggableError(cause.cause) } : {}) },
 			"introspect_store_unavailable",
 		);
 		emitAuditEvent(auditSink, {
@@ -88,14 +96,14 @@ export const createIntrospectUnavailableAnswers = ({
 			type: "introspect.store_unavailable",
 			ip: req.ip,
 			userAgent: req.get("user-agent"),
-			details: { ...outage.details, cause: auditedError(outage.cause) },
+			details: { ...outage.details, ...(cause ? { cause: auditedError(cause.cause) } : {}) },
 		});
 		return res.status(503).json({
 			error: "temporarily_unavailable",
 			error_description:
-				outage.store === "user_session"
-					? "session store unavailable"
-					: "refresh token store unavailable",
+				outage.store === "refresh_token_family"
+					? "refresh token store unavailable"
+					: "session store unavailable",
 		});
 	};
 
