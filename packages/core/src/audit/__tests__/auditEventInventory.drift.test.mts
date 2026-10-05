@@ -36,15 +36,11 @@ import { BUILT_IN_AUDIT_EVENT_TYPES } from "#/audit/types.mjs";
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../../..");
 
 /**
- * Events listed before anything emits them, each with the change that is to:
- * `logout.close_pending`, which the logout route emits once it closes
- * sessions through the session lifecycle. An entry is listed and not
- * emitted; the change that emits it deletes it here.
+ * Events listed before anything emits them, each with the change that is to.
+ * An entry is listed and not emitted; the change that emits it deletes it
+ * here.
  */
-const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {
-	"logout.close_pending":
-		"#1030's logout switch: `/oauth/logout` answers a session whose close is pending",
-};
+const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {};
 
 /** Shipped sources: packages/*\/src and the standalone template, tests excluded. */
 function listShippedSources(): string[] {

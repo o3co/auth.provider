@@ -58,7 +58,7 @@ const grantWith = (evaluate: GrantPolicyHook["evaluate"]) =>
 			oauth: {
 				jwt: { secret: SECRET },
 				accessToken: { expiresIn: 3600 },
-				refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject" },
+				refreshToken: { expiresIn: 86400 },
 				resourceIndicator: { enabled: true },
 			},
 		} as unknown as GrantDependencies["config"],

@@ -134,7 +134,7 @@ function makeRefreshDeps(
 			oauth: {
 				jwt: { secret: SECRET },
 				accessToken: { expiresIn: 3600 },
-				refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject" },
+				refreshToken: { expiresIn: 86400 },
 				grants: {
 					authorization_code: { enabled: true },
 					refresh_token: { enabled: true },

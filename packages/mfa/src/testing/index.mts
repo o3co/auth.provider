@@ -50,9 +50,6 @@ export interface MfaConfigForTestsOptions {
 	readonly transactionTtlSeconds?: number;
 	readonly maxAttemptsPerTransaction?: number;
 	readonly lockout?: Partial<MfaLockoutPolicy>;
-	readonly rateLimit?: {
-		readonly routes?: { readonly limit: number; readonly windowSeconds: number };
-	};
 	readonly manage?: { readonly maxAgeSeconds: number };
 	readonly enrollment?: { readonly requireEmailProof: "when-mail" | "always" | "never" };
 	readonly maxFactorsPerSubject?: number;
@@ -72,7 +69,6 @@ export function mfaConfigForTests(options: MfaConfigForTestsOptions) {
 			page: { url: "/mfa" },
 			transactionTtlSeconds: 600,
 			maxAttemptsPerTransaction: 5,
-			rateLimit: { routes: { limit: 60, windowSeconds: 300 } },
 			manage: { maxAgeSeconds: 300 },
 			enrollment: { requireEmailProof: "when-mail" as "when-mail" | "always" | "never" },
 			maxFactorsPerSubject: 10,

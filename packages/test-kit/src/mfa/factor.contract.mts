@@ -66,6 +66,7 @@
 
 import assert from "node:assert/strict";
 import {
+	copyPlainJson,
 	FEDERATED_AMR,
 	isHintToken,
 	MFA_AMR,
@@ -150,78 +151,16 @@ const SECOND_FACTOR_ID = "contract-factor-2";
 const DEFAULT_MALFORMED: readonly unknown[] = [undefined, null, 1234, {}];
 
 /**
- * Where `value` is not a value the coordinator takes as its plain copy — the
- * rule it seals state and data and answers a response by — as a path, or
- * `undefined`: `null`, booleans, strings, finite numbers other than `-0`
- * (JSON writes it as `0`); arrays of prototype `Array.prototype` whose own
- * keys are exactly their indices, with no `undefined` entry; and objects of
- * prototype `Object.prototype` or none, whose `undefined` members JSON drops.
- * Every own key must be an enumerable string, so a symbol's field or a hidden
- * one (a hidden `toJSON` among them) is refused; an own getter is read once,
- * as the copy reads it. Anything else — a Date, a Map, a class instance, a
- * function, BigInt, NaN, a cycle, a read that throws — is refused.
- */
-function notJsonAt(
-	value: unknown,
-	path: string,
-	ancestors: Set<object> = new Set(),
-): string | undefined {
-	if (value === null || typeof value === "string" || typeof value === "boolean") return undefined;
-	if (typeof value === "number") {
-		return Number.isFinite(value) && !Object.is(value, -0) ? undefined : path;
-	}
-	if (typeof value !== "object" || ancestors.has(value)) return path;
-	const prototype = Object.getPrototypeOf(value);
-	const list = Array.isArray(value);
-	if (list ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) {
-		return path;
-	}
-	const keys: string[] = [];
-	for (const key of Reflect.ownKeys(value)) {
-		if (list && key === "length") continue;
-		if (typeof key !== "string" || !Object.prototype.propertyIsEnumerable.call(value, key)) {
-			return path;
-		}
-		keys.push(key);
-	}
-	if (list) {
-		const { length } = value as readonly unknown[];
-		if (keys.length !== length || keys.some((key, index) => key !== String(index))) return path;
-	}
-	ancestors.add(value);
-	try {
-		for (const key of keys) {
-			const at = list ? `${path}[${key}]` : `${path}.${key}`;
-			const member = (value as Readonly<Record<string, unknown>>)[key];
-			if (member === undefined) {
-				if (list) return at;
-				continue;
-			}
-			const found = notJsonAt(member, at, ancestors);
-			if (found !== undefined) return found;
-		}
-		return undefined;
-	} finally {
-		ancestors.delete(value);
-	}
-}
-
-/**
  * Refuses `value` unless it is a plain object the coordinator takes as its
- * plain copy ({@link notJsonAt}): a factor's state, data and response alike.
+ * plain copy (core's `copyPlainJson`): a factor's state, data and response alike.
  */
 function plainJsonObject(value: unknown, what: string): void {
 	assert.ok(
 		typeof value === "object" && value !== null && !Array.isArray(value),
 		`${what} is not an object`,
 	);
-	let at: string | undefined;
-	try {
-		at = notJsonAt(value, what);
-	} catch {
-		at = what;
-	}
-	assert.ok(at === undefined, `${at} is not a value JSON gives back as it is`);
+	const taken = copyPlainJson(value);
+	assert.ok(taken.ok, `${what}${taken.ok ? "" : taken.at} is not a value JSON gives back as it is`);
 }
 
 /** The reasons an enrollment's completion may refuse with: the coordinator answers any other as the factor's failure. */

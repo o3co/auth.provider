@@ -20,8 +20,9 @@
  * Core's `reference.conf` still sets most of the same paths, to the same values
  * and with the same variables, until core stops declaring `oauth {}`: every
  * path it sets is held equal here, so the order a composition layers them in
- * decides nothing. Core's alone keeps the tombstone of a key it retired, and
- * this package's alone sets the refresh-token family policy keys.
+ * decides nothing. Core's alone keeps the tombstone of a key it retired.
+ * Neither sets a refresh-token family policy key under `oauth {}`: the
+ * unknown-family policy is the oauth-authorization module's.
  */
 
 import { readFileSync } from "node:fs";
@@ -96,7 +97,6 @@ describe("the package's reference binds every variable of oauth {} at its path",
 		["OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN", "oauth.accessToken.maxExpiresIn"],
 		["OAUTH_ACCESS_TOKEN_EXPIRES_IN", "oauth.accessToken.expiresIn"],
 		["OAUTH_REFRESH_TOKEN_EXPIRES_IN", "oauth.refreshToken.expiresIn"],
-		["OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY", "oauth.refreshToken.unknownFamilyPolicy"],
 		["OAUTH_OIDC_MODE", "oauth.oidcMode"],
 		["OAUTH_REVOCATION_ACCESS_TOKEN", "oauth.revocation.accessToken"],
 		["OAUTH_REVOCATION_SUBJECT", "oauth.revocation.subject"],
@@ -108,6 +108,12 @@ describe("the package's reference binds every variable of oauth {} at its path",
 		expect(
 			oauthBindings(REFERENCE).filter((binding) => binding.startsWith(`${variable} `)),
 		).toEqual([`${variable} at ${path}`]);
+	});
+
+	it("binds no variable under oauth.refreshToken but its lifetime's", () => {
+		expect(
+			oauthBindings(REFERENCE).filter((binding) => binding.includes(" at oauth.refreshToken.")),
+		).toEqual(["OAUTH_REFRESH_TOKEN_EXPIRES_IN at oauth.refreshToken.expiresIn"]);
 	});
 
 	it("binds every variable core's reference binds under oauth {}, at the same path, but core's tombstone", () => {
@@ -162,7 +168,7 @@ describe("the reference, read by the module's schema", () => {
 		expect(load()).toEqual({
 			jwt: { issuer: "https://auth.test", legacyTypAccept: false },
 			accessToken: { expiresIn: 3600 },
-			refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 			requireEmailVerified: false,
 			requireGrantTypeAllowlist: false,
@@ -184,7 +190,6 @@ describe("the reference, read by the module's schema", () => {
 			load({
 				OAUTH_JWT_LEGACY_TYP_ACCEPT: "true",
 				OAUTH_REFRESH_TOKEN_EXPIRES_IN: "7200",
-				OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
 				OAUTH_OIDC_MODE: "dual",
 				OAUTH_REVOCATION_ACCESS_TOKEN: "unsupported",
 				OAUTH_REVOCATION_SUBJECT: "watermark",
@@ -195,7 +200,7 @@ describe("the reference, read by the module's schema", () => {
 			}),
 		).toMatchObject({
 			jwt: { legacyTypAccept: true },
-			refreshToken: { expiresIn: 7200, unknownFamilyPolicy: "accept" },
+			refreshToken: { expiresIn: 7200 },
 			oidcMode: "dual",
 			revocation: { accessToken: "unsupported", subject: "watermark" },
 			requireEmailVerified: true,

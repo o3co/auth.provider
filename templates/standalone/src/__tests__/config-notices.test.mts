@@ -93,6 +93,22 @@ describe("a section the template's reference.conf sets for a module the composit
 	});
 });
 
+describe("the limiter sections the template's application.conf writes for both limiters", () => {
+	it.each(["memory", "redis"] as const)(
+		"are named by nothing with the %s limiter wired",
+		async (rateLimiter) => {
+			const { logger, modules } = await boot({
+				env: { ...SINGLE_ENV, ADAPTERS_RATE_LIMITER: rateLimiter },
+			});
+			expect(modules.map((m) => m.name)).toContain(
+				rateLimiter === "redis" ? "redis-rate-limiter" : "core-rate-limiter-memory",
+			);
+			expect(named(logger, "config_sections_not_loaded")).toEqual([]);
+			expect(named(logger, "config_sections_ignored")).toEqual([]);
+		},
+	);
+});
+
 describe("a section no loaded package's reference.conf sets", () => {
 	it("is config_sections_ignored: a misspelt section name", async () => {
 		const { logger } = await boot({

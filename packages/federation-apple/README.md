@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-apple
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 Sign in with Apple federation provider for `auth.provider` — Apple's **web**
 flow, in a browser, back to this server.
@@ -32,7 +32,7 @@ name read from the first authorization's POST body; and the schema of an
 
 **Does not own:** the contract (core); the `core.federations` map, the keys
 core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
-`callbackURL`) and the dispatch of an entry by its type (core's boot); the
+`callbackMeetsFreshness`, `callbackURL`) and the dispatch of an entry by its type (core's boot); the
 routes, the `form_post` callback, the federation transaction and its cookie,
 `state` / PKCE verifier / `nonce` generation, the redirect-allowlist rules and
 claim precedence — all [`@o3co/auth-provider-session`](../session/README.md),
@@ -120,7 +120,8 @@ under, and the prefix of the identity handed to the Store (`<name>:<sub>`).
 Two entries of type `apple` — two Services IDs — are two federations.
 
 An entry is flat, and its schema is strict: the keys core owns (`enabled`,
-`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+`type`, `trustUpstreamAmr`, `callbackMeetsFreshness`, `callbackURL`) and the keys
+below, nothing else.
 The schema is `appleEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
 does not name — a typo, or a nested `apple { ... }` section — refuses boot with `config-validation-failed` at `core.federations.<name>`,
 naming the key; a missing or malformed key is refused at
@@ -271,7 +272,10 @@ refused. None is required: Apple's discovery document does not advertise
 Apple publishes no `userinfo_endpoint`, so the verified id_token (RS256, keys
 at `https://appleid.apple.com/auth/keys`) is the only source of identity.
 `nonce` is required, not optional: `buildAuthorizationUrl` and `exchangeCode`
-both fail closed without one.
+both fail closed without one. A freshness ask (`prompt=login`, `max_age`) is
+**not forwarded**: Apple's authorization request ("Request an authorization to
+the Sign in with Apple server") documents `client_id`, `nonce`,
+`redirect_uri`, `response_mode`, `response_type`, `scope` and `state` only.
 
 - **`email_verified` may arrive as the string `"true"`.** It is normalised to a
   boolean. This matters more than it looks: `Boolean("false")` is `true`, so a
@@ -318,6 +322,7 @@ What `exchangeCode` returns:
 | `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when Apple sent no `expires_in`** (Apple documents it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
 | `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when Apple sent none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
+| `authTime` | the verified id_token's `auth_time` as a `Date`, when Apple sends one; absent otherwise. A fraction is floored to its second; one that is not a non-negative number, or lies further ahead than the clock skew tolerated between hosts, fails the exchange |
 
 `mapClaims` maps `email`, `emailVerified`, `name` and `isPrivateEmail`.
 

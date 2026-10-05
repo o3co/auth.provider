@@ -17,18 +17,20 @@
 /**
  * The session lifecycle service, the one writer of `SessionLifecycleStore`
  * (session admission reads a record's state):
- * joins a session, closes it and runs the close work, says whether it is
- * live, and resumes closes left pending. Its callers see `joined` /
- * `refused`, `done` / `pending`, `live` / `not_live` and `unavailable`;
+ * opens a session's record as it is established, joins a session, closes it
+ * and runs the close work, says whether it is live, and resumes closes left
+ * pending. Its callers see `opened` / `joined` / `refused`, `done` /
+ * `pending`, `live` / `not_live` and `unavailable`;
  * generations, states, work items, the cause policy and the bridge to the
  * per-session stores stay here.
  *
  * A close commits first and then runs its work. Every item is safe to run
  * more than once and is recorded at the generation read, so two closes of one
  * session and the sweep may overlap. Items run in phases, each only once the
- * earlier ones are recorded, and the user session is deleted last; the items
- * of a phase run together, a close's notices and family revocations at most
- * `CLOSE_CONCURRENCY` at once, and a failed item keeps the record closing.
+ * earlier ones are recorded, the user session and then the subject's index
+ * entry last; the items of a phase run together, a close's notices and
+ * family revocations at most `CLOSE_CONCURRENCY` at once, and a failed item
+ * keeps the record closing.
  */
 
 import {
@@ -44,6 +46,7 @@ import { loggableError } from "../logging/loggableError.mjs";
 import type { RefreshTokenFamilyRevocation } from "../refresh-token-family/types.mjs";
 import { readRecord } from "../session-admission/live-session.mjs";
 import {
+	checkSessionExpiresAt,
 	checkSessionLifecycleKey,
 	checkSessionParticipant,
 	isSessionLifecycleKey,
@@ -74,6 +77,25 @@ import type {
 } from "../user-sessions/types.mjs";
 import { type BridgedClose, createSessionStoresBridge } from "./bridge.mjs";
 import type { SessionCloseNotifier } from "./notifier.mjs";
+
+/** The session a record is opened for: its subject and its own end. */
+export interface SessionOpenRequest {
+	readonly sub: string;
+	/** The end the user session will carry. */
+	readonly expiresAt: Date;
+}
+
+/**
+ * `opened`: the session's record is active for that subject and end, written
+ * now or already. `refused`: the sid holds another session's record (another
+ * subject or end, or one closing or closed), or the end has passed; nothing
+ * was written, and nothing is established on that sid. `unavailable`: the
+ * store could not answer; nothing is established on it.
+ */
+export type SessionOpenOutcome =
+	| { readonly outcome: "opened" }
+	| { readonly outcome: "refused" }
+	| { readonly outcome: "unavailable" };
 
 /** What a join adds to a session. At least one is named. */
 export interface SessionJoinRequest {
@@ -142,6 +164,8 @@ export interface SessionResumeReport {
 
 /** The session lifecycle, filled in the `sessionLifecycle` slot. */
 export interface SessionLifecycle {
+	/** Opens the lifecycle of the session `sid` as it is established. Idempotent for the same subject and end. */
+	open(sid: string, request: SessionOpenRequest): Promise<SessionOpenOutcome>;
 	/** Adds what `request` names to the live session `sid`, only while it is not closing. */
 	join(sid: string, request: SessionJoinRequest): Promise<SessionJoinOutcome>;
 	/** Closes `sid` for `cause` (the first close's cause is kept), and runs or resumes its close work. */
@@ -198,9 +222,10 @@ const RP_ITEM = sessionCloseItemOf({ kind: "rp", id: "" });
 
 /**
  * What each cause runs beyond the work every close runs (revoke the
- * families, remove the federation tokens, the subject's entry and the
- * per-session indexes, delete the user session): whether it tells the
- * relying parties, those of the record and those of the per-session stores.
+ * families, remove the federation tokens and the per-session indexes,
+ * delete the user session, and remove the subject's entry last): whether it
+ * tells the relying parties, those of the record and those of the
+ * per-session stores.
  */
 const CLOSE_POLICY: Readonly<Record<SessionCloseCause, { readonly tellsRelyingParties: boolean }>> =
 	Object.freeze({
@@ -217,19 +242,23 @@ const CLOSE_POLICY: Readonly<Record<SessionCloseCause, { readonly tellsRelyingPa
  * phase is pending in the record, so a later phase never runs over work an
  * earlier one has not durably done: revocations and removals first, then
  * the relying parties (and an item this code does not know), then the
- * per-session indexes the bridge steps read, and the user session last.
+ * per-session indexes the bridge steps read, then the user session, and the
+ * subject's index entry last: a close still pending keeps the sid where a
+ * subject-wide revocation enumerates it, so where subject revocation closes
+ * through the lifecycle a retry of that revocation finds the sid and
+ * resumes its close.
  */
 const phaseOf = (item: string): number => {
 	if (
 		item.startsWith(FAMILY_ITEM) ||
 		item === REVOKE_BRIDGED_FAMILIES ||
-		item === REMOVE_FEDERATION_TOKENS ||
-		item === REMOVE_SUBJECT_SESSION
+		item === REMOVE_FEDERATION_TOKENS
 	) {
 		return 0;
 	}
 	if (item === REMOVE_SESSION_INDEXES) return 2;
 	if (item === DELETE_USER_SESSION) return 3;
+	if (item === REMOVE_SUBJECT_SESSION) return 4;
 	return 1;
 };
 
@@ -337,10 +366,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			steps: [
 				REVOKE_BRIDGED_FAMILIES,
 				REMOVE_FEDERATION_TOKENS,
-				...(subjectSessionIndex === undefined ? [] : [REMOVE_SUBJECT_SESSION]),
 				...(tells ? [NOTIFY_BRIDGED_RPS] : []),
 				REMOVE_SESSION_INDEXES,
 				DELETE_USER_SESSION,
+				...(subjectSessionIndex === undefined ? [] : [REMOVE_SUBJECT_SESSION]),
 			],
 			perParticipant: tells ? ["family", "rp"] : ["family"],
 			retainMs,
@@ -576,6 +605,18 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	};
 
 	return {
+		async open(sid, { sub, expiresAt }) {
+			checkSessionLifecycleKey(sid, "sid");
+			checkSessionLifecycleKey(sub, "sub");
+			const end = checkSessionExpiresAt(expiresAt);
+			try {
+				return readSessionOpenAnswer(await store.open(sid, sub, end));
+			} catch (error) {
+				unavailable("open", sid, error);
+				return { outcome: "unavailable" };
+			}
+		},
+
 		async join(sid, request) {
 			checkSessionLifecycleKey(sid, "sid");
 			const participants = participantsOf(request);
