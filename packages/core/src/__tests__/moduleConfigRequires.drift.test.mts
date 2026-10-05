@@ -18,8 +18,8 @@
  * No manifest outside core requires `config`. A module reads its own section
  * (`deps.section`) and what another module owns through a slot whose contract
  * is core's; the whole configuration is core's to parse. The manifests that
- * still list `config` are in {@link CONFIG_REQUIRERS}, and the list may only
- * shrink: a manifest that lists it and is not listed fails, and so does a
+ * still list `config` are in {@link CONFIG_REQUIRERS}, which is empty and may
+ * only shrink: a manifest that lists it and is not listed fails, and so does a
  * listed one that no longer does.
  *
  * Read with TypeScript's parser and binder, in the product code of every
@@ -58,13 +58,10 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../..");
 
 /**
  * The manifests outside core that require `config`, keyed
- * `<workspace> -> <module name>`. The list may only shrink: each entry leaves
- * as its module reads its own section and the slots it needs instead.
+ * `<workspace> -> <module name>`. Empty, and it stays so: a module reads its
+ * own section and the slots it needs instead.
  */
-const CONFIG_REQUIRERS: readonly string[] = [
-	// The standalone template's deprecated `stores` bundle.
-	"templates/standalone -> stores",
-];
+const CONFIG_REQUIRERS: readonly string[] = [];
 
 /** Whether `dir` under `root` holds a package.json. */
 const isPackage = (root: string, dir: string): boolean => {

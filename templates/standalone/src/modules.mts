@@ -402,28 +402,6 @@ export function auditSinkModuleFor(sink: string): Module {
 }
 
 /**
- * @deprecated Split into `inMemorySessionStoresModule` and
- * `inMemoryFederationTokenStoreModule`; use those. Kept for consumers that
- * imported `storesModule` from this file.
- */
-export const storesModule: Module = defineModule({
-	name: "stores",
-	// Everything this bundle provides lives in process memory, so a
-	// composition still on it is refused under `core.deployment.mode = "multi"`
-	// like the split modules it stands in for.
-	replicaSafety: {
-		unsafe: true,
-		reason:
-			"user sessions, RP registrations, family indexes, the subject-level revocation pair and upstream federation tokens fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others",
-	},
-	requires: ["config"] as const,
-	provides: {
-		...inMemorySessionStoresModule.provides,
-		...inMemoryFederationTokenStoreModule.provides,
-	},
-});
-
-/**
  * Shared ioredis clients module: opens ONE long-lived ioredis connection per
  * replica and derives every per-purpose client from it (`makeIoredisClients`,
  * plus the two federation-grant store clients from their own factories),
