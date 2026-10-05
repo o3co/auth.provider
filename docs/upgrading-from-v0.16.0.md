@@ -985,7 +985,8 @@ modules fills them.
   it answers `oauthEndpointsModule` whatever it is handed, and never read its
   parameter. The module reads every `oauth.*` setting from its own parsed
   section; `createOAuthRouter` takes that section as `section` (typed
-  `OAuthSection`), which it requires (below).
+  `OAuthSection`), which it requires (under "Slots, admission and wiring",
+  above).
 - **Signatures.** `renderFrontchannelLogoutHtml` takes
   `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
   requires a `grantPolicy` key, `undefined` for none (#1169); the federation

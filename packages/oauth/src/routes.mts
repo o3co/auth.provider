@@ -509,8 +509,16 @@ export const createOAuthRouter = async (
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
 	checkResolver(requirements, "createOAuthRouter");
-	if (!section) throw new TypeError("createOAuthRouter requires section, oauth {} as parsed");
-	if (!federationSettings) throw new TypeError("createOAuthRouter requires federationSettings");
+	if (!section) {
+		throw new RangeError(
+			"createOAuthRouter: section is required — oauth {} as the oauth module's schema parsed it (the module passes its own)",
+		);
+	}
+	if (!federationSettings) {
+		throw new RangeError(
+			"createOAuthRouter: federationSettings is required — core's view of core.federations (the module passes the slot), or createTestFederationSettings from @o3co/auth-provider-core/testing in a test",
+		);
+	}
 	// `/authorize` issues the codes the authorization_code grant redeems, so it
 	// is mounted exactly when that grant is registered — the registry
 	// `/oauth/token` dispatches against — and needs the code repository then.
@@ -521,12 +529,10 @@ export const createOAuthRouter = async (
 		);
 	}
 	const router = express.Router();
-	// Every `oauth.*` setting below is read from here, and from nowhere else.
-	const oauth: unknown = section;
-
+	// Every `oauth.*` setting below is read from `section`, and from nowhere else.
 	const { options, acrTable, canonicalIssuer, authorizationResponse, clientRepository } =
 		resolveRouterSettings({
-			section: oauth,
+			section,
 			federationSettings,
 			authorizationEndpoint,
 			requirements,
@@ -593,7 +599,7 @@ export const createOAuthRouter = async (
 					// default lives in the package's reference.conf; a hand-built section
 					// without the key falls back the same way.
 					consentUrl: () =>
-						(oauth as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
+						(section as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
 						"/consent",
 					consentStore,
 					pendingConsentStore,
@@ -804,7 +810,7 @@ export const createOAuthRouter = async (
 			keyStore,
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
-			accessTokenRevocation: readAccessTokenRevocationMode({ oauth }),
+			accessTokenRevocation: readAccessTokenRevocationMode({ oauth: section }),
 			logger,
 			issuer: canonicalIssuer,
 			// private_key_jwt at /oauth/revoke, verified as at /oauth/token.

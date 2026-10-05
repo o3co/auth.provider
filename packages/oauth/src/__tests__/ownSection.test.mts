@@ -204,21 +204,15 @@ describe("what the module derives, it derives from its section", () => {
 		const federationSettings = createTestFederationSettings();
 		// No section: refused, naming it — there is no configuration to fall back on.
 		await expect(build({ federationSettings })).rejects.toThrow(
-			/createOAuthRouter requires section/,
+			/^createOAuthRouter: section is required — /,
 		);
-		// A configuration handed beside the section is not read.
-		await expect(
-			build({
-				section: sectionOf({ revocation: { accessToken: "unsupported" } }),
-				federationSettings,
-				config: misleadingConfig(),
-			} as never),
-		).resolves.toHaveProperty("router");
+		await expect(build({ federationSettings })).rejects.toBeInstanceOf(RangeError);
 		// "denylist" with no denylist wired refuses the build: read from the
-		// section.
-		await expect(build({ section: sectionOf(), federationSettings })).rejects.toThrow(
-			/accessTokenRevocation is "denylist"/,
-		);
+		// section, while a configuration handed beside it that says
+		// "unsupported" is not read.
+		await expect(
+			build({ section: sectionOf(), federationSettings, config: misleadingConfig() } as never),
+		).rejects.toThrow(/accessTokenRevocation is "denylist"/);
 		await expect(
 			build({
 				section: sectionOf({ revocation: { accessToken: "unsupported" } }),
@@ -236,7 +230,7 @@ describe("what the module derives, it derives from its section", () => {
 				clientRepository: new InMemoryClientRepository(new Map()),
 				keyStore: createSymmetricKeyStore("oauth-own-section-test.at-least-32-bytes"),
 			} as never),
-		).rejects.toThrow(/createOAuthRouter requires federationSettings/);
+		).rejects.toThrow(/^createOAuthRouter: federationSettings is required — /);
 	});
 });
 

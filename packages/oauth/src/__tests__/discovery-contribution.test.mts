@@ -448,10 +448,11 @@ describe("acr_values_supported", () => {
 		expect(untrusted.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
-	it("does not count an installed federation whose entry is disabled as trusted", async () => {
-		// Installed, but its entry switched off: nothing signs a user in
-		// through it, so nothing it could assert can meet an entry. Core's
-		// view answers no trust for a disabled entry.
+	it("takes trust from trustsUpstreamAmr alone, which core's view answers false for a disabled entry", async () => {
+		// Whether a disabled entry is trusted is core's decision, made when it
+		// fills the slot (`trustsUpstreamAmr` is true only beside `enabled`);
+		// the module reads the member and nothing else of the entry. The
+		// boot-level case in `module.test.mts` holds the decision end to end.
 		const meta = await discoveryContribution(
 			{
 				federationProviders: new Map([["google", {}]]),

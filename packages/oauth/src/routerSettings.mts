@@ -18,9 +18,10 @@
  * What the `/oauth` router resolves once, when it is built, and hands its
  * endpoints: the `oauth.*` options, read from the section `oauth` alone; the
  * acr table `/authorize` answers from, which also reads core's view of the
- * federations (`federationSettings`); the canonical issuer (one that is not canonical refuses the build) and the
- * one client repository every endpoint looks a client up in, which reads
- * registered clients through core's client-record boundary.
+ * federations (`federationSettings`); the canonical issuer (one that is not
+ * canonical refuses the build); and the one client repository every endpoint
+ * looks a client up in, which reads registered clients through core's
+ * client-record boundary.
  */
 
 import {
