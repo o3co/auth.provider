@@ -42,8 +42,8 @@ const issuanceOf = (value: string | null): number | undefined => {
 	if (value === null || !value.startsWith(ISSUED_PREFIX)) return undefined;
 	const text = value.slice(ISSUED_PREFIX.length);
 	const issuedAtMs = Number(text);
-	// Only what `issue` writes: a finite number in its own shortest form.
-	return Number.isFinite(issuedAtMs) && String(issuedAtMs) === text ? issuedAtMs : undefined;
+	// Only what `issue` writes: a storable instant in its own shortest form.
+	return isStorableExpiry(issuedAtMs) && String(issuedAtMs) === text ? issuedAtMs : undefined;
 };
 
 /**
@@ -55,8 +55,8 @@ const issuanceOf = (value: string | null): number | undefined => {
  *              contract refuses, is refused before Redis is asked.
  *   - find:    PTTL <prefix><key>                   → -2 absent, -1 no-TTL, ≥0 ms;
  *              the expiry is the instant find asked plus that remaining life.
- *              Then GET <prefix><key> for the issuance, when the client has
- *              `get`; without it, or for a value without one, none.
+ *              Then GET <prefix><key> for the issuance; a value without one
+ *              answers none.
  *   - consume: DEL <prefix><key>                    → count deleted
  *
  * No Lua, no MULTI/EXEC: the contract is split into primitives so that no
@@ -113,7 +113,6 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
 				return null;
 			}
 			const expiresAtMs = askedAtMs + pttl;
-			if (client.get === undefined) return { expiresAtMs };
 			const stored = await client.get(key);
 			if (stored === null) return null;
 			const issuedAtMs = issuanceOf(stored);

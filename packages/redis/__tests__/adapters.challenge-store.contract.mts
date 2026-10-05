@@ -158,7 +158,7 @@ export function runChallengeStoreContract(
 				expect(issued).not.toBeNull();
 				expect(issued?.issuedAtMs).toBe(issuedAtMs);
 				expect(plain).not.toBeNull();
-				expect(plain?.issuedAtMs).toBeUndefined();
+				expect(Object.hasOwn(plain ?? {}, "issuedAtMs")).toBe(false);
 			});
 		});
 

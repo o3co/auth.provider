@@ -60,6 +60,7 @@ describe("redis challenge store — the expiry find reports", () => {
 		const slowReplies: ChallengeStoreClient = {
 			set: (...args) => (client as unknown as ChallengeStoreClient).set(...args),
 			del: (key) => client.del(key),
+			get: (key) => client.get(key),
 			pttl: async (key) => {
 				const remaining = await client.pttl(key);
 				await sleep(REPLY_DELAY_MS);
@@ -105,6 +106,9 @@ describe("redis challenge store — the issuance it records", () => {
 		["an issuance that is not finite", "i:Infinity"],
 		["an empty issuance", "i:"],
 		["an issuance in a form the store never writes", "i:0x10"],
+		["an issuance past the Date range", "i:1e+21"],
+		["an issuance before the Date range", "i:-1e+21"],
+		["an issuance just past the Date range", "i:8640000000000001"],
 	] as const) {
 		it(`answers no issuance for a live key holding ${label}`, async () => {
 			const { store, keyPrefix } = freshStore();
@@ -113,24 +117,32 @@ describe("redis challenge store — the issuance it records", () => {
 			const found = await store.find(SCOPE, "v");
 
 			expect(found).not.toBeNull();
-			expect(found?.issuedAtMs).toBeUndefined();
+			expect(Object.hasOwn(found ?? {}, "issuedAtMs")).toBe(false);
 		});
 	}
 
-	it("answers no issuance through a client without `get`, and still answers the challenge", async () => {
-		const { get: _get, ...withoutGet } = ioredis() as ChallengeStoreClient & { get?: unknown };
-		keyCounter += 1;
-		const store = createRedisChallengeStore({
-			client: withoutGet as ChallengeStoreClient,
-			keyPrefix: `chal:no-get-${keyCounter}:`,
-		});
-		const issuedAtMs = Date.now();
+	it("answers the issuance it was given, through the client a deployment runs", async () => {
+		const { store } = freshStore();
+		const issuedAtMs = Date.now() - 250.5;
 		await store.issue(SCOPE, "v", issuedAtMs + 60_000, issuedAtMs);
 
 		const found = await store.find(SCOPE, "v");
 
-		expect(found).not.toBeNull();
-		expect(found?.issuedAtMs).toBeUndefined();
+		expect(found?.issuedAtMs).toBe(issuedAtMs);
+	});
+
+	it("answers null for a key gone between its remaining life and its value", async () => {
+		const store = createRedisChallengeStore({
+			client: {
+				set: vi.fn(async () => "OK" as const),
+				del: vi.fn(async () => 0),
+				pttl: vi.fn(async () => 1_000),
+				get: vi.fn(async () => null),
+			},
+			keyPrefix: "chal:gone:",
+		});
+
+		expect(await store.find(SCOPE, "v")).toBeNull();
 	});
 
 	it("refuses a bad issuance before asking Redis anything", async () => {
