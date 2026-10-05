@@ -20,9 +20,10 @@
  *
  * `mfaFactorContract(input)` holds a factor to what the coordinator relies on
  * whatever the kind: a kind a hint can carry; `amrValues` it can vouch for and
- * `amrFor` within them, never empty; boolean flags; state and data that
- * survive the JSON round trip sealing puts them through, which the suite also
- * hands the factor back after; a code asked to be mailed only for the call's
+ * `amrFor` within them, never empty; boolean flags; state, data and a
+ * response that are each a plain object surviving the JSON round trip sealing
+ * puts them through, which the suite also hands the factor back after; `ok`
+ * the literal `true` or `false`, a refusal with a reason its type names; a code asked to be mailed only for the call's
  * purpose, with an expiry after now when one is given, another at each
  * challenge, a login code with the keyed digest of the account's address, and
  * in no form in the page's response; the address digest it records exactly
@@ -71,6 +72,7 @@ import {
 	type MfaCeremonyContext,
 	type MfaDigests,
 	type MfaEnrolledFactor,
+	type MfaEnrollmentCompletion,
 	type MfaFactor,
 	type MfaFactorData,
 	type MfaFactorMailPurpose,
@@ -148,12 +150,16 @@ const SECOND_FACTOR_ID = "contract-factor-2";
 const DEFAULT_MALFORMED: readonly unknown[] = [undefined, null, 1234, {}];
 
 /**
- * Where `value` is not a JSON value JSON gives back as it is — the rule the
- * coordinator seals state and data by — as a path, or `undefined`: `null`,
- * booleans, finite numbers, strings, real arrays with no hole or `undefined`
- * entry, and objects whose prototype is `Object.prototype` or none, with no
- * accessor, whose `undefined` members JSON drops. Anything else — a Date, a
- * Map, a class instance, a function, BigInt, NaN, a cycle — is refused.
+ * Where `value` is not a value the coordinator takes as its plain copy — the
+ * rule it seals state and data and answers a response by — as a path, or
+ * `undefined`: `null`, booleans, strings, finite numbers other than `-0`
+ * (JSON writes it as `0`); arrays of prototype `Array.prototype` whose own
+ * keys are exactly their indices, with no `undefined` entry; and objects of
+ * prototype `Object.prototype` or none, whose `undefined` members JSON drops.
+ * Every own key must be an enumerable string, so a symbol's field or a hidden
+ * one (a hidden `toJSON` among them) is refused; an own getter is read once,
+ * as the copy reads it. Anything else — a Date, a Map, a class instance, a
+ * function, BigInt, NaN, a cycle, a read that throws — is refused.
  */
 function notJsonAt(
 	value: unknown,
@@ -161,29 +167,37 @@ function notJsonAt(
 	ancestors: Set<object> = new Set(),
 ): string | undefined {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return undefined;
-	if (typeof value === "number") return Number.isFinite(value) ? undefined : path;
+	if (typeof value === "number") {
+		return Number.isFinite(value) && !Object.is(value, -0) ? undefined : path;
+	}
 	if (typeof value !== "object" || ancestors.has(value)) return path;
-	const hasAccessor = Reflect.ownKeys(value).some((key) => {
-		const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
-		return descriptor !== undefined && !("value" in descriptor);
-	});
-	if (hasAccessor) return path;
 	const prototype = Object.getPrototypeOf(value);
+	const list = Array.isArray(value);
+	if (list ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) {
+		return path;
+	}
+	const keys: string[] = [];
+	for (const key of Reflect.ownKeys(value)) {
+		if (list && key === "length") continue;
+		if (typeof key !== "string" || !Object.prototype.propertyIsEnumerable.call(value, key)) {
+			return path;
+		}
+		keys.push(key);
+	}
+	if (list) {
+		const { length } = value as readonly unknown[];
+		if (keys.length !== length || keys.some((key, index) => key !== String(index))) return path;
+	}
 	ancestors.add(value);
 	try {
-		if (Array.isArray(value)) {
-			if (prototype !== Array.prototype) return path;
-			for (let index = 0; index < value.length; index++) {
-				if (!Object.hasOwn(value, index) || value[index] === undefined) return `${path}[${index}]`;
-				const found = notJsonAt(value[index], `${path}[${index}]`, ancestors);
-				if (found !== undefined) return found;
+		for (const key of keys) {
+			const at = list ? `${path}[${key}]` : `${path}.${key}`;
+			const member = (value as Readonly<Record<string, unknown>>)[key];
+			if (member === undefined) {
+				if (list) return at;
+				continue;
 			}
-			return undefined;
-		}
-		if (prototype !== Object.prototype && prototype !== null) return path;
-		for (const [key, member] of Object.entries(value)) {
-			if (member === undefined) continue;
-			const found = notJsonAt(member, `${path}.${key}`, ancestors);
+			const found = notJsonAt(member, at, ancestors);
 			if (found !== undefined) return found;
 		}
 		return undefined;
@@ -192,20 +206,28 @@ function notJsonAt(
 	}
 }
 
-/** Refuses `value` unless JSON gives it back as it is, as the coordinator keeps it. */
-function survivesJson(value: unknown, what: string): void {
-	const at = notJsonAt(value, what);
-	assert.ok(at === undefined, `${at} is not a value JSON gives back as it is`);
-}
-
-/** Refuses a page's response unless it is a plain object JSON gives back as it is, as the coordinator answers it. */
-function plainResponse(value: unknown, what: string): void {
+/**
+ * Refuses `value` unless it is a plain object the coordinator takes as its
+ * plain copy ({@link notJsonAt}): a factor's state, data and response alike.
+ */
+function plainJsonObject(value: unknown, what: string): void {
 	assert.ok(
 		typeof value === "object" && value !== null && !Array.isArray(value),
 		`${what} is not an object`,
 	);
-	survivesJson(value, what);
+	let at: string | undefined;
+	try {
+		at = notJsonAt(value, what);
+	} catch {
+		at = what;
+	}
+	assert.ok(at === undefined, `${at} is not a value JSON gives back as it is`);
 }
+
+/** The reasons an enrollment's completion may refuse with: the coordinator answers any other as the factor's failure. */
+const COMPLETION_REFUSALS: ReadonlySet<string> = new Set<
+	Extract<MfaEnrollmentCompletion, { readonly ok: false }>["reason"]
+>(["invalid", "expired", "malformed", "duplicate"]);
 
 /** `value` as the coordinator hands it back after keeping it: through JSON. */
 const reopened = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -596,8 +618,8 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			run: async () => {
 				const factor = input.build();
 				const { start } = await begin(factor);
-				survivesJson(start.state, "the pending enrollment's state");
-				plainResponse(start.response, "the enrollment's response");
+				plainJsonObject(start.state, "the pending enrollment's state");
+				plainJsonObject(start.response, "the enrollment's response");
 			},
 		},
 		{
@@ -638,7 +660,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					true,
 					`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 				);
-				survivesJson(done.data, "the enrolled factor's data");
+				plainJsonObject(done.data, "the enrolled factor's data");
 				assert.ok(
 					done.label === undefined || typeof done.label === "string",
 					"the label is not a string",
@@ -672,8 +694,8 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 				const factor = input.build();
 				if (factor.challenge === undefined) return;
 				const { sent } = await challenge(factor, await enroll(factor));
-				if (sent?.state !== undefined) survivesJson(sent.state, "the challenge's state");
-				plainResponse(sent?.response, "the challenge's response");
+				if (sent?.state !== undefined) plainJsonObject(sent.state, "the challenge's state");
+				plainJsonObject(sent?.response, "the challenge's response");
 			},
 		},
 		{
@@ -760,6 +782,10 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					done.ok,
 					false,
 					"a completion after a mailed code, handed no address digest, completed: what it recorded is no address a code went to",
+				);
+				assert.ok(
+					typeof done.reason === "string" && COMPLETION_REFUSALS.has(done.reason),
+					`a completion refused with ${JSON.stringify(done.reason)}, a reason its type does not name`,
 				);
 			},
 		},
@@ -1007,7 +1033,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					enrolled.id,
 					"the verification names a factor the subject does not hold",
 				);
-				if (verdict.next !== undefined) survivesJson(verdict.next, "the factor's next data");
+				if (verdict.next !== undefined) plainJsonObject(verdict.next, "the factor's next data");
 			},
 		},
 		{

@@ -266,7 +266,15 @@ describe("mfaFactorContract", () => {
 					},
 				})),
 			),
-		).toContain(RULES.complete);
+		).toEqual([
+			// Every case that enrolls through the completion fails with it.
+			RULES.complete,
+			RULES.describe,
+			RULES.noAddress,
+			RULES.quietErrors,
+			RULES.verifyMalformed,
+			RULES.verify,
+		]);
 		expect(
 			await failing(
 				inputFor({}, (factor) => ({
@@ -277,7 +285,90 @@ describe("mfaFactorContract", () => {
 					},
 				})),
 			),
-		).toContain(RULES.verify);
+		).toEqual([RULES.verify]);
+	});
+
+	it("fails state that the coordinator's plain copy refuses: -0, a symbol's or a hidden field, a list with a field beside its indices", async () => {
+		const withHidden = (state: object) =>
+			Object.defineProperty({ ...state }, "kept", { value: 1, enumerable: false });
+		for (const [label, reshape] of [
+			["-0", (state: object) => ({ ...state, n: -0 })],
+			["a symbol's field", (state: object) => ({ ...state, [Symbol("s")]: 1 })],
+			["a hidden field", withHidden],
+			[
+				"a list with a field",
+				(state: object) => ({ ...state, list: Object.assign(["a"], { x: 1 }) }),
+			],
+		] as const) {
+			expect(
+				await failing(
+					inputFor({}, (factor) => ({
+						...factor,
+						beginEnrollment: async (ctx) => {
+							const start = await factor.beginEnrollment(ctx);
+							return { ...start, state: reshape(start.state) as never };
+						},
+					})),
+				),
+				label,
+			).toEqual([RULES.begin]);
+		}
+	});
+
+	it("fails state with a hidden toJSON, which JSON would call", async () => {
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({
+					...factor,
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						const state = Object.defineProperty({ ...start.state }, "toJSON", {
+							value: () => start.state,
+							enumerable: false,
+						});
+						return { ...start, state };
+					},
+				})),
+			),
+		).toEqual([RULES.begin]);
+	});
+
+	it("fails state that is not an object", async () => {
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({
+					...factor,
+					beginEnrollment: async (ctx) => ({
+						...(await factor.beginEnrollment(ctx)),
+						state: "s" as never,
+					}),
+				})),
+			),
+		).toContain(RULES.begin);
+	});
+
+	it("passes state and a response that hold an own getter, read as the coordinator's copy reads it", async () => {
+		const withGetter = (value: object, key: string) => {
+			const fields: Record<string, unknown> = { ...value };
+			const held = fields[key];
+			delete fields[key];
+			return Object.defineProperty(fields, key, { get: () => held, enumerable: true });
+		};
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({
+					...factor,
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						return {
+							...start,
+							state: withGetter(start.state, "secret"),
+							response: withGetter(start.response as object, "secret"),
+						};
+					},
+				})),
+			),
+		).toEqual([]);
 	});
 
 	it("fails a completion whose data amrFor answers nothing for", async () => {
@@ -906,6 +997,15 @@ describe("mfaFactorContract", () => {
 				}),
 		});
 		expect(await failing(inputFor({ mail: true }, fallingBack))).toEqual([RULES.unhanded]);
+		// A refusal with a reason its type does not name.
+		const unnamedReason = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			completeEnrollment: async (ctx) =>
+				ctx.addressDigest === undefined
+					? ({ ok: false, reason: "locked_out" } as never)
+					: factor.completeEnrollment(ctx),
+		});
+		expect(await failing(inputFor({ mail: true }, unnamedReason))).toEqual([RULES.unhanded]);
 		// A refusal whose ok is falsy but not false.
 		const looselyRefusing = (factor: MfaFactor): MfaFactor => ({
 			...factor,
