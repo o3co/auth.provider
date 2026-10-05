@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-oidc
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 Generic OpenID Connect federation provider for `auth.provider`: any
 OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
@@ -147,7 +147,7 @@ the schema fills in no default.
 | `endpoints` | no | `authorizationEndpoint`, `tokenEndpoint`, `jwksUri`, `userinfoEndpoint`, `endSessionEndpoint`. Applied over the discovered metadata; the first three are mandatory when `discovery = false`. |
 | `idTokenSignedResponseAlg` | no | Pin the id_token JWS algorithm. Otherwise the issuer's advertised `id_token_signing_alg_values_supported` is trusted. With `discovery = false` nothing is advertised, and `openid-client` then accepts `RS256` only — so an IdP that signs with ES256 or EdDSA needs this set, or every login fails. `none` and symmetric algorithms are never accepted against a JWKS. |
 | `userInfo` | no | Default: call UserInfo when the issuer publishes an endpoint. `false` builds the profile from the id_token alone; `true` refuses boot if there is no endpoint. |
-| `clockToleranceSeconds` | no | Skew tolerated on `exp` / `nbf`. Passed to `openid-client` only when set; its own default is 30. When wider than core's skew (five minutes), it also widens how far ahead an id_token's `auth_time` may be. |
+| `clockToleranceSeconds` | no | Skew tolerated on `exp` / `nbf`. Passed to `openid-client` only when set; its own default is 30. When wider than core's skew (five minutes), it also widens how far ahead this adapter accepts an id_token's `auth_time`; the session still records one only within core's skew. |
 | `clientUrl` | in practice | Where the browser lands after a login whose start carried no `redirect_to`. Without it such a login ends in `500 misconfiguration` after the session has been saved — so it is needed unless every start carries a `redirect_to` and `authCallbackUrl` is set. |
 | `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package README](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
 
@@ -206,7 +206,11 @@ front of the operator.
    An `auth_time` that is not a non-negative number, or lies further ahead
    than the clock skew tolerated between hosts — or than
    `clockToleranceSeconds` when that is wider — is refused; a fraction is
-   floored to its second (core's `readUpstreamAuthTime`). The adapter does
+   floored to its second (core's `readUpstreamAuthTime`). The session routes
+   then record such an instant only within `DEFAULT_CLOCK_SKEW_MS` of their
+   clock and refuse one further ahead as a failed exchange (`502
+   exchange_failed`), so a wider `clockToleranceSeconds` governs only this
+   adapter's own refusal. The adapter does
    not pass `max_age` to the library's own check: whether a session meets an
    ask is core's judgement (#1084; wired by a later PR).
 4. **UserInfo** — when enabled, fetched with the access token and bound to the
