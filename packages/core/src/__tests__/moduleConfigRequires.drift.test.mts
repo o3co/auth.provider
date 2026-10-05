@@ -18,9 +18,8 @@
  * No manifest outside core requires `config`. A module reads its own section
  * (`deps.section`) and what another module owns through a slot whose contract
  * is core's; the whole configuration is core's to parse. The manifests that
- * still list `config` are in {@link CONFIG_REQUIRERS}, which is empty and may
- * only shrink: a manifest that lists it and is not listed fails, and so does a
- * listed one that no longer does.
+ * list `config` would be in {@link CONFIG_REQUIRERS}, which is empty: a
+ * manifest that lists it fails.
  *
  * Read with TypeScript's parser and binder, in the product code of every
  * workspace but core (a source under `src/` outside `__tests__/` that is not

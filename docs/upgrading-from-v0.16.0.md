@@ -1185,8 +1185,9 @@ modules fills them.
   `inMemorySessionStoresModule` and `inMemoryFederationTokenStoreModule`
   (`templates/standalone/src/modules.mts`), which `buildModules` already
   selects through `adapters.userSessionStores` and
-  `adapters.federationTokenStore`; a test that passed the override sets
-  those adapters instead.
+  `adapters.federationTokenStore`; a test that passed the bundle sets
+  those adapters instead. `BuildModulesOverrides` has no seam for a session
+  store of your own any more: compose it in your own module list.
 - **Signatures.** `renderFrontchannelLogoutHtml` takes
   `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
   requires a `grantPolicy` key, `undefined` for none (#1169); the federation
