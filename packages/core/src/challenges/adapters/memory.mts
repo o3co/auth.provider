@@ -15,6 +15,7 @@
  */
 
 import { isStorableExpiry } from "../../adapters/expiry.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
 import { canonicalKey } from "../../single-use/canonical-key.mjs";
 import { ChallengeStorageError } from "../../single-use/errors.mjs";
 import { usableMaxEntries } from "../../single-use/max-entries.mjs";
@@ -181,15 +182,19 @@ export function createMemoryChallengeStore(
 					`ChallengeStore.issue: expiresAtMs must be a finite instant within the Date range (got ${String(expiresAtMs)})`,
 				);
 			}
+			const nowMs = Date.now();
 			if (
 				issuedAtMs !== undefined &&
-				!(isStorableExpiry(issuedAtMs) && issuedAtMs <= expiresAtMs)
+				!(
+					isStorableExpiry(issuedAtMs) &&
+					issuedAtMs <= expiresAtMs &&
+					issuedAtMs <= nowMs + DEFAULT_CLOCK_SKEW_MS
+				)
 			) {
 				throw new RangeError(
-					`ChallengeStore.issue: issuedAtMs must be a finite instant within the Date range, not after expiresAtMs (got ${String(issuedAtMs)})`,
+					`ChallengeStore.issue: issuedAtMs must be a finite instant within the Date range, not after expiresAtMs (${String(expiresAtMs)}) nor further ahead of the store's clock than DEFAULT_CLOCK_SKEW_MS (got ${String(issuedAtMs)})`,
 				);
 			}
-			const nowMs = Date.now();
 			if (expiresAtMs <= nowMs) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
 			}

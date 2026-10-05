@@ -81,6 +81,32 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 		expect(Object.hasOwn(withoutIssuance, "issuedAtMs")).toBe(false);
 	});
 
+	for (const [label, answered] of [
+		["null", null],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a string", "1791168982932"],
+	] as const) {
+		it(`'consumed' carries no issuance when find answered ${label} for it`, async () => {
+			const expiresAtMs = future();
+			const store: ChallengeStore = {
+				kind: "stub",
+				issue: vi.fn(async () => undefined),
+				find: vi.fn(async () => ({ expiresAtMs, issuedAtMs: answered as unknown as number })),
+				consume: vi.fn(async () => true),
+			};
+			const ceremony = createChallengeCeremony({
+				challengeStore: store,
+				replaySeenSet: createMemoryReplaySeenSet(),
+			});
+
+			const result = await ceremony.consume("scope-A", "v");
+
+			expect(result).toEqual({ outcome: "consumed", expiresAtMs });
+			expect(Object.hasOwn(result, "issuedAtMs")).toBe(false);
+		});
+	}
+
 	it("'replayed' and 'unknown' carry no expiry", async () => {
 		const { store, ceremony } = makeCeremonyWithMemoryBackends();
 		const unknown = await ceremony.consume("scope-A", "never-existed");

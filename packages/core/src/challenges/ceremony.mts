@@ -66,7 +66,10 @@ export function createChallengeCeremony(deps: ChallengeCeremonyDeps): ChallengeC
 				return Object.freeze({
 					outcome: "consumed",
 					expiresAtMs: challenge.expiresAtMs,
-					...(challenge.issuedAtMs === undefined ? {} : { issuedAtMs: challenge.issuedAtMs }),
+					// Anything but a finite number from an adapter reads as no issuance.
+					...(typeof challenge.issuedAtMs === "number" && Number.isFinite(challenge.issuedAtMs)
+						? { issuedAtMs: challenge.issuedAtMs }
+						: {}),
 				} as const);
 			}
 

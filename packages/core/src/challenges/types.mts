@@ -62,11 +62,12 @@ export interface ChallengeStore {
 	 *   recorded. A fractional expiresAtMs is valid; the challenge lives at
 	 *   least until it.
 	 * @throws RangeError, recording nothing, for an `issuedAtMs` that is not a
-	 *   finite instant within the Date range, or is after `expiresAtMs`.
+	 *   finite instant within the Date range, is after `expiresAtMs`, or is
+	 *   further ahead of the store's clock than `DEFAULT_CLOCK_SKEW_MS`.
 	 *
 	 * `issuedAtMs`, optional, is when the caller issued the challenge; an
 	 * adapter that records it answers it on `find` exactly, and one that does
-	 * not answers none.
+	 * not answers none. An adapter that wraps another forwards it.
 	 */
 	issue(scope: string, value: string, expiresAtMs: number, issuedAtMs?: number): Promise<void>;
 
