@@ -46,21 +46,45 @@
  * What {@link copyPlainJson} answers: the frozen copy, or where the value is
  * not one JSON gives back as it is — a path from the value itself, `""` for
  * the value, `.name` for an object's field and `[index]` for a list's entry
- * (`.a[0].b`).
+ * (`.a[0].b`). The keys are written as they are, not escaped, so a key
+ * holding `.` or `[` reads as more than one step; the path is for a reader,
+ * never parsed. It is as long as the nesting it names: a value nested
+ * thousands deep is refused at a path thousands of steps long.
  */
 export type PlainJsonCopy =
 	| { readonly ok: true; readonly copy: unknown }
 	| { readonly ok: false; readonly at: string };
 
 /** Where a refusal was met: thrown from inside the copy, caught once at its top. */
-class Refused {
-	constructor(readonly at: string) {}
+interface Refusal {
+	readonly at: string;
 }
+
+/**
+ * The refusals the copy threw. A thrown value is told apart by membership
+ * alone, so nothing of it runs — a Proxy's traps included — while it is.
+ */
+const refusals = new WeakSet<object>();
+
+/** A refusal at `at`, to be thrown. */
+const refused = (at: string): Refusal => {
+	const refusal = Object.freeze({ at });
+	refusals.add(refusal);
+	return refusal;
+};
+
+/** Whether `thrown` is one of the copy's refusals, asked without running any of its code. */
+const isRefusal = (thrown: unknown): thrown is Refusal =>
+	typeof thrown === "object" && thrown !== null && refusals.has(thrown);
 
 /** What `copies` holds for an object while it is copied: met again inside itself, it is a cycle. */
 const COPYING: unique symbol = Symbol("being copied");
 
-/** `value` as its plain JSON copy (see this file's header), or where it is not one. Never throws. */
+/**
+ * `value` as its plain JSON copy (see this file's header), or where it is not
+ * one. Never throws: whatever a read throws, a Proxy's trap included, is a
+ * refusal there, and nothing of the thrown value is run to tell.
+ */
 export function copyPlainJson(value: unknown): PlainJsonCopy {
 	try {
 		const copy = copyAt(value, "", new Map());
@@ -69,7 +93,7 @@ export function copyPlainJson(value: unknown): PlainJsonCopy {
 		JSON.stringify(copy);
 		return { ok: true, copy };
 	} catch (thrown) {
-		return { ok: false, at: thrown instanceof Refused ? thrown.at : "" };
+		return { ok: false, at: isRefusal(thrown) ? thrown.at : "" };
 	}
 }
 
@@ -78,7 +102,7 @@ function copyAt(value: unknown, at: string, copies: Map<object, unknown>): unkno
 	try {
 		return copyPlain(value, at, copies);
 	} catch (thrown) {
-		throw thrown instanceof Refused ? thrown : new Refused(at);
+		throw isRefusal(thrown) ? thrown : refused(at);
 	}
 }
 
@@ -86,17 +110,17 @@ function copyPlain(value: unknown, at: string, copies: Map<object, unknown>): un
 	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
 	if (typeof value === "number") {
 		if (Number.isFinite(value) && !Object.is(value, -0)) return value;
-		throw new Refused(at);
+		throw refused(at);
 	}
-	if (typeof value !== "object") throw new Refused(at);
+	if (typeof value !== "object") throw refused(at);
 	const known = copies.get(value);
-	if (known === COPYING) throw new Refused(at);
+	if (known === COPYING) throw refused(at);
 	if (known !== undefined) return known;
 	copies.set(value, COPYING);
 	const prototype = Object.getPrototypeOf(value);
 	const list = Array.isArray(value);
 	if (list ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) {
-		throw new Refused(at);
+		throw refused(at);
 	}
 	const copy = list
 		? copyList(value as readonly unknown[], at, copies)
@@ -116,7 +140,7 @@ function fieldsOf(value: object, list: boolean, at: string): string[] {
 	for (const key of Reflect.ownKeys(value)) {
 		if (list && key === "length") continue;
 		if (typeof key !== "string" || !Object.prototype.propertyIsEnumerable.call(value, key)) {
-			throw new Refused(at);
+			throw refused(at);
 		}
 		fields.push(key);
 	}
@@ -131,7 +155,7 @@ function copyList(
 	const length = list.length;
 	const keys = fieldsOf(list, true, at);
 	if (keys.length !== length || keys.some((key, index) => key !== String(index))) {
-		throw new Refused(at);
+		throw refused(at);
 	}
 	const copy: unknown[] = [];
 	for (let index = 0; index < length; index++) {
@@ -140,9 +164,9 @@ function copyList(
 		try {
 			entry = list[index];
 		} catch {
-			throw new Refused(entryAt);
+			throw refused(entryAt);
 		}
-		if (entry === undefined) throw new Refused(entryAt);
+		if (entry === undefined) throw refused(entryAt);
 		copy.push(copyAt(entry, entryAt, copies));
 	}
 	return Object.freeze(copy);
@@ -161,7 +185,7 @@ function copyFields(
 		try {
 			field = source[key];
 		} catch {
-			throw new Refused(fieldAt);
+			throw refused(fieldAt);
 		}
 		if (field === undefined) continue;
 		// Defined, not assigned: an own `__proto__` stays the field it is.

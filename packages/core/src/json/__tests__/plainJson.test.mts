@@ -166,6 +166,49 @@ describe("copyPlainJson", () => {
 		expect((taken.copy as { polluted?: unknown }).polluted).toBeUndefined();
 	});
 
+	it("never throws, even for a Proxy that throws a value whose own traps throw it — at the top and nested", () => {
+		/** A Proxy whose `getPrototypeOf` throws the Proxy itself: inspecting it as a thrown value throws again. */
+		const selfThrowing = (): object => {
+			const thrown: object = new Proxy(
+				{},
+				{
+					getPrototypeOf: () => {
+						throw thrown;
+					},
+				},
+			);
+			return thrown;
+		};
+		const hostile: readonly (readonly [string, unknown])[] = [
+			[
+				"ownKeys",
+				new Proxy(
+					{},
+					{
+						ownKeys: () => {
+							throw selfThrowing();
+						},
+					},
+				),
+			],
+			["getPrototypeOf", selfThrowing()],
+			[
+				"an array's length",
+				new Proxy([], {
+					get: (target, key, receiver) => {
+						if (key === "length") throw selfThrowing();
+						return Reflect.get(target, key, receiver);
+					},
+				}),
+			],
+		];
+		for (const [trap, value] of hostile) {
+			expect(() => copyPlainJson(value), trap).not.toThrow();
+			expect(copyPlainJson(value), trap).toEqual({ ok: false, at: "" });
+			expect(copyPlainJson({ a: [value] }), trap).toEqual({ ok: false, at: ".a[0]" });
+		}
+	});
+
 	it("never throws, whatever a Proxy's traps do", () => {
 		const throwing = new Proxy(
 			{},
