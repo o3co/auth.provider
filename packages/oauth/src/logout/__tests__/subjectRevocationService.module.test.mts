@@ -407,6 +407,21 @@ describe("subjectRevocationServiceModule", () => {
 			expect(await userSessionStore.get("sid-1")).toBeNull();
 		});
 
+		it("counts a listed sid with neither a lifecycle record nor a user session revoked, running no work", async () => {
+			const { lifecycle, index, userSessionStore, revoked } = await lifecycleOverMemory();
+			await index.addSid("u-1", "sid-gone", new Date(Date.now() + HOUR));
+			const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });
+			await userSessionStore.delete("sid-1");
+			await index.removeSid("u-1", "sid-1");
+
+			const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(result.sessionsRevoked).toEqual(["sid-gone"]);
+			expect(result.complete).toBe(true);
+			expect(await index.listSids("u-1")).toEqual([]);
+			expect(revoked).toEqual([]);
+		});
+
 		it("tells the session's relying parties and revokes its families through the close", async () => {
 			const { lifecycle, index, userSessionStore, revoked, notices } = await lifecycleOverMemory();
 			const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });

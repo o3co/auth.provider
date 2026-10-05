@@ -247,8 +247,14 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				// revokes the session's families, a code exchanged after its
 				// closing commit included, and tells the relying parties. Only
 				// `done` counts the session revoked; a `pending` close has work
-				// left, and the sid stays in the index for a retry, since the
-				// close removes the subject's index entry last.
+				// left, and the sid stays in the index for a retry, which resumes
+				// or restarts its close, since the close removes the subject's
+				// index entry last. A close that finds neither a lifecycle record
+				// nor a user session runs no work and answers `done`; the subject
+				// boundary covers that sid's tokens, and its per-session entries
+				// lapse. The revocation waits on each session's back-channel
+				// notices, sessions in sequence, so unreachable relying parties
+				// slow it and leave it `complete: false` until a retry.
 				//
 				// Otherwise `cascadeLogout`, with no `expiresAt`: this path reads
 				// no session, so the cascade lists the families and writes no
