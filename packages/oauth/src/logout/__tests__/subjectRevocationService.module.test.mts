@@ -18,8 +18,9 @@
  * `subjectRevocationServiceModule`: the wiring, and what it refuses to wire.
  * The service itself is core's and is tested there. Here is what only this
  * module can get wrong: the cascade closure over `cascadeLogout`, the horizon
- * and the allowance read off configuration, and the compositions that would
- * let a subject-wide revocation report success over grants it could not reach.
+ * and the allowance read off the `oauthTokenSettings`, `sessionCookiePolicy`
+ * and `federationGrantPolicy` slots, and the compositions that would let a
+ * subject-wide revocation report success over grants it could not reach.
  */
 
 import {
@@ -37,19 +38,22 @@ import {
 import {
 	CORE_RELOCATIONS,
 	coreConfigForTests,
+	createTestFederationGrantPolicy,
 	createTestOAuthTokenSettings,
 	createTestSessionCookiePolicy,
 	makeValidCoreConfig,
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
+import { oauthTokenSettingsFrom } from "#/tokenSettings.mjs";
 import { subjectRevocationServiceModule } from "../subjectRevocationService.mjs";
 
 const HOUR = 3_600_000;
 
-const config = (over: Record<string, unknown> = {}) => ({
-	oauth: { accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 86_400 } },
-	...over,
+/** The oauth module's slot: access tokens live five minutes, refresh tokens a day. */
+const oauthTokenSettings = createTestOAuthTokenSettings({
+	accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
+	refreshTokenExpiresIn: 86_400,
 });
 
 /** The session store's slot: a session lives a day. */
@@ -73,7 +77,7 @@ const build = (over: Record<string, unknown> = {}): SubjectRevocationService => 
 		subjectRevocationService: (deps: unknown) => SubjectRevocationService;
 	};
 	return provides.subjectRevocationService({
-		config: config(),
+		oauthTokenSettings,
 		sessionCookiePolicy,
 		...cascadeStores(),
 		subjectSessionIndex: createInMemorySubjectSessionIndex(),
@@ -82,6 +86,20 @@ const build = (over: Record<string, unknown> = {}): SubjectRevocationService => 
 	});
 };
 
+/** What core's boot needs of a composition, beside the slots each test hands. */
+const bootConfig = () => ({
+	config: {
+		...makeValidCoreConfig(),
+		...coreConfigForTests({ declaredAbsent: ["auditSink"] }),
+		"renamed-variables": renamedVariableCaptures({
+			modules: [subjectRevocationServiceModule],
+			core: CORE_RELOCATIONS,
+			env: {},
+		}),
+	},
+	pathResolver: (s: string) => s,
+});
+
 /** An adapter with only the single-boundary surface, which a grants deployment may not use. */
 const olderAdapter = (): SubjectRevocation => ({
 	kind: "redis",
@@ -89,8 +107,13 @@ const olderAdapter = (): SubjectRevocation => ({
 	revokedBefore: async () => null,
 });
 
-const enabled = (over: Record<string, unknown> = {}) =>
-	config({ "federation-grants": { enabled: true, ...over } });
+/** The federation-grants module's slot, as it provides it while the feature is on. */
+const grantsOn = (allowKeepOnSubjectRevocation = false) => ({
+	federationGrantPolicy: createTestFederationGrantPolicy({
+		enabled: true,
+		allowKeepOnSubjectRevocation,
+	}),
+});
 
 describe("subjectRevocationServiceModule", () => {
 	it("declares the whole cascade, because it cannot run without it", () => {
@@ -126,7 +149,7 @@ describe("subjectRevocationServiceModule", () => {
 		// The call answers, says what it could not do, and `complete` is false:
 		// what a deployment that declared the capability absent lives with.
 		const { subjectRevocation: _absent, ...withoutBoundary } = {
-			config: config(),
+			oauthTokenSettings,
 			sessionCookiePolicy,
 			...cascadeStores(),
 			subjectSessionIndex: createInMemorySubjectSessionIndex(),
@@ -146,7 +169,8 @@ describe("subjectRevocationServiceModule", () => {
 
 	it("refuses a deployment with grants on and no boundary at all", () => {
 		const { subjectRevocation: _absent, ...withoutBoundary } = {
-			config: enabled(),
+			oauthTokenSettings,
+			...grantsOn(),
 			sessionCookiePolicy,
 			...cascadeStores(),
 			subjectSessionIndex: createInMemorySubjectSessionIndex(),
@@ -238,17 +262,17 @@ describe("subjectRevocationServiceModule", () => {
 
 	describe("what it refuses when grants are on", () => {
 		it("refuses a deployment with nowhere to read the grants from", () => {
-			expect(() => build({ config: enabled() })).toThrow(
+			expect(() => build(grantsOn())).toThrow(
 				/federation-grants\.enabled = true requires a federationGrantStore/,
 			);
 			// The refusal states the rule it enforces, with no design label.
-			expect(() => build({ config: enabled() })).not.toThrow(/\bD\d+\b/);
+			expect(() => build(grantsOn())).not.toThrow(/\bD\d+\b/);
 		});
 
 		it("refuses an adapter that cannot carry the grants boundary", () => {
 			expect(() =>
 				build({
-					config: enabled(),
+					...grantsOn(),
 					federationGrantStore: createMemoryFederationGrantStore(),
 					subjectRevocation: olderAdapter(),
 				}),
@@ -260,7 +284,7 @@ describe("subjectRevocationServiceModule", () => {
 				...createMemoryFederationGrantStore(),
 				kind: "redis",
 			} as FederationGrantStore;
-			expect(() => build({ config: enabled(), federationGrantStore: durable })).toThrow(
+			expect(() => build({ ...grantsOn(), federationGrantStore: durable })).toThrow(
 				/outlive the process/,
 			);
 		});
@@ -271,12 +295,12 @@ describe("subjectRevocationServiceModule", () => {
 			expect(() => build({ subjectRevocation: olderAdapter() })).not.toThrow();
 		});
 
-		it("decides by federation-grants.enabled: a grant store wired with the feature off is not read", () => {
-			// Whether grants are on is the flag's to say; a store alone does not
+		it("decides by federationGrantPolicy.enabled: a grant store wired with the feature off is not read", () => {
+			// Whether grants are on is the slot's to say; a store alone does not
 			// turn the grants' checks on.
 			expect(() =>
 				build({
-					config: config({ "federation-grants": { enabled: false } }),
+					federationGrantPolicy: createTestFederationGrantPolicy({ enabled: false }),
 					federationGrantStore: createMemoryFederationGrantStore(),
 					subjectRevocation: olderAdapter(),
 				}),
@@ -288,7 +312,7 @@ describe("subjectRevocationServiceModule", () => {
 		it("lets a caller keep the grants when the operator turned it on", async () => {
 			const revocation = createInMemorySubjectRevocation();
 			const service = build({
-				config: enabled({ allowKeepOnSubjectRevocation: true }),
+				...grantsOn(true),
 				federationGrantStore: createMemoryFederationGrantStore(),
 				subjectRevocation: revocation,
 			});
@@ -304,7 +328,7 @@ describe("subjectRevocationServiceModule", () => {
 
 		it("revokes when the operator did not", async () => {
 			const service = build({
-				config: enabled(),
+				...grantsOn(),
 				federationGrantStore: createMemoryFederationGrantStore(),
 			});
 
@@ -320,17 +344,64 @@ describe("subjectRevocationServiceModule", () => {
 			});
 		});
 
-		it("ignores an allowance written for a feature that is off", () => {
-			// Otherwise the service would refuse the adapter of a deployment
-			// that has no grants to keep, over a flag about nothing.
+		it("refuses a federationGrantPolicy its contract refuses, naming the member", () => {
+			// An allowance beside a feature that is off is an allowance over
+			// nothing, and a switch that is not a boolean is not read as off.
 			expect(() =>
 				build({
-					config: config({
-						"federation-grants": { enabled: false, allowKeepOnSubjectRevocation: true },
-					}),
+					federationGrantPolicy: { enabled: false, allowKeepOnSubjectRevocation: true },
 					subjectRevocation: olderAdapter(),
 				}),
-			).not.toThrow();
+			).toThrow(/federationGrantPolicy\.allowKeepOnSubjectRevocation must be false/);
+			expect(() =>
+				build({
+					federationGrantPolicy: { enabled: "true", allowKeepOnSubjectRevocation: false },
+					federationGrantStore: createMemoryFederationGrantStore(),
+				}),
+			).toThrow(/federationGrantPolicy\.enabled must be true or false/);
+		});
+	});
+
+	describe("what it refuses when it cannot tell whether grants are on", () => {
+		it("refuses a grant store wired with no federationGrantPolicy, naming both and the fix", () => {
+			// Without the slot grants read as off, and a subject-wide revocation
+			// would leave every grant in that store standing while reporting
+			// itself complete. Failing closed is the only safe reading.
+			const attempt = () => build({ federationGrantStore: createMemoryFederationGrantStore() });
+			expect(attempt).toThrow(/federationGrantStore/);
+			expect(attempt).toThrow(/no federationGrantPolicy/);
+			expect(attempt).toThrow(/federationGrantsModule/);
+			expect(attempt).toThrow(/fill federationGrantPolicy/);
+		});
+
+		it("refuses it at boot, from createApp, naming the module", async () => {
+			const err = await createApp({
+				modules: [subjectRevocationServiceModule],
+				bootstrapComponents: {
+					...bootConfig(),
+					...cascadeStores(),
+					oauthTokenSettings,
+					sessionCookiePolicy,
+					subjectRevocation: createInMemorySubjectRevocation(),
+					subjectSessionIndex: createInMemorySubjectSessionIndex(),
+					federationGrantStore: createMemoryFederationGrantStore(),
+				} as never,
+			}).then(
+				async (handle) => {
+					await handle.dispose();
+					return expect.fail("boot should have been refused");
+				},
+				(caught: unknown) => caught as BootError,
+			);
+
+			expect(err).toBeInstanceOf(BootError);
+			expect(err.reason).toBe("provides-factory-failed");
+			expect(err.message).toContain("subject-revocation-service");
+			expect(err.message).toContain("no federationGrantPolicy");
+		});
+
+		it("treats no grant store and no federationGrantPolicy as grants off", () => {
+			expect(() => build({ subjectRevocation: olderAdapter() })).not.toThrow();
 		});
 	});
 
@@ -351,12 +422,86 @@ describe("subjectRevocationServiceModule", () => {
 			return { kept, revocation };
 		};
 
-		it("sizes it from the configuration's token lifetimes when the composition holds no oauthTokenSettings", async () => {
+		it("sizes it from what the configuration said before, for every configuration: the oauth module's slot carries the same lifetimes", async () => {
+			// Before, a composition without the slot sized the boundary from the
+			// configuration. The oauth module fills the slot from that same
+			// section with the same resolvers, so the boundary must last exactly
+			// as long as it did.
+			const issuer = { jwt: { issuer: "https://issuer.example" } };
+			const sections = [
+				{ accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 86_400 } },
+				{
+					accessToken: { defaultExpiresIn: 60, maxExpiresIn: 30 * 86_400 },
+					refreshToken: { expiresIn: 86_400 },
+				},
+				{
+					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7_200 },
+					refreshToken: { expiresIn: 40 * 86_400 },
+				},
+				{ accessToken: { expiresIn: 900 }, refreshToken: { expiresIn: 3_600 } },
+				{ accessToken: { defaultExpiresIn: 1, maxExpiresIn: 1 }, refreshToken: { expiresIn: 1 } },
+			];
+			const sessions = [
+				sessionCookiePolicy,
+				createTestSessionCookiePolicy({ maxAgeMs: 1 }),
+				createTestSessionCookiePolicy({ maxAgeMs: 90 * 24 * HOUR }),
+			];
+			for (const section of sections) {
+				for (const sessionCookie of sessions) {
+					const oauth = { ...issuer, ...section };
+					const { kept, revocation } = recording();
+					await build({
+						subjectRevocation: revocation,
+						sessionCookiePolicy: sessionCookie,
+						oauthTokenSettings: oauthTokenSettingsFrom(oauth),
+					}).revokeAllForSubject({ subject: "u-1" });
+					expect(kept, JSON.stringify({ section, maxAgeMs: sessionCookie.maxAgeMs })).toEqual([
+						resolveSubjectRevocationHorizonMs({ oauth }, { sessionCookie }),
+					]);
+				}
+			}
+		});
+
+		it("never reads the configuration", async () => {
 			const { kept, revocation } = recording();
-			await build({ subjectRevocation: revocation }).revokeAllForSubject({ subject: "u-1" });
-			expect(kept).toEqual([
-				resolveSubjectRevocationHorizonMs(config(), { sessionCookie: sessionCookiePolicy }),
-			]);
+			const untouchable = new Proxy(
+				{},
+				{
+					get: () => {
+						throw new Error("the configuration was read");
+					},
+				},
+			);
+			await build({ config: untouchable, subjectRevocation: revocation }).revokeAllForSubject({
+				subject: "u-1",
+			});
+			expect(kept).toHaveLength(1);
+		});
+
+		it("refuses to be built when it is handed no oauthTokenSettings, naming the slot", () => {
+			expect(() => build({ oauthTokenSettings: undefined })).toThrow(/oauthTokenSettings/);
+		});
+
+		it("refuses a composition that holds no oauthTokenSettings at planning, naming the module and the slot", async () => {
+			const err = await createApp({
+				modules: [subjectRevocationServiceModule],
+				bootstrapComponents: {
+					...bootConfig(),
+					...cascadeStores(),
+					sessionCookiePolicy,
+				} as never,
+			}).then(
+				async (handle) => {
+					await handle.dispose();
+					return expect.fail("boot should have been refused");
+				},
+				(caught: unknown) => caught as BootError,
+			);
+
+			expect(err).toBeInstanceOf(BootError);
+			expect(err.reason).toBe("missing-required-component");
+			expect(err.message).toContain("oauthTokenSettings");
+			expect(err.message).toContain("subject-revocation-service");
 		});
 
 		it("refuses to be built when it is handed no sessionCookiePolicy, naming the slot", () => {
@@ -369,17 +514,9 @@ describe("subjectRevocationServiceModule", () => {
 			const err = await createApp({
 				modules: [subjectRevocationServiceModule],
 				bootstrapComponents: {
-					config: {
-						...makeValidCoreConfig(),
-						...coreConfigForTests({ declaredAbsent: ["auditSink"] }),
-						"renamed-variables": renamedVariableCaptures({
-							modules: [subjectRevocationServiceModule],
-							core: CORE_RELOCATIONS,
-							env: {},
-						}),
-					},
-					pathResolver: (s: string) => s,
+					...bootConfig(),
 					...cascadeStores(),
+					oauthTokenSettings,
 				} as never,
 			}).then(
 				async (handle) => {
@@ -405,12 +542,15 @@ describe("subjectRevocationServiceModule", () => {
 				subject: "u-1",
 			});
 			expect(kept).toEqual([
-				resolveSubjectRevocationHorizonMs(config(), { sessionCookie: longer }),
+				resolveSubjectRevocationHorizonMs(undefined, {
+					tokenSettings: oauthTokenSettings,
+					sessionCookie: longer,
+				}),
 			]);
 			expect(kept[0]).toBeGreaterThan(10 * 24 * HOUR);
 		});
 
-		it("sizes it from the token lifetimes of the oauthTokenSettings the composition holds, over the configuration's", async () => {
+		it("sizes it from the refresh-token lifetime of the oauthTokenSettings the composition holds", async () => {
 			const { kept, revocation } = recording();
 			await build({
 				subjectRevocation: revocation,
@@ -419,14 +559,8 @@ describe("subjectRevocationServiceModule", () => {
 					refreshTokenExpiresIn: 20 * 86_400,
 				}),
 			}).revokeAllForSubject({ subject: "u-1" });
-			expect(kept).toEqual([
-				resolveSubjectRevocationHorizonMs(
-					config({
-						oauth: { accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 20 * 86_400 } },
-					}),
-					{ sessionCookie: sessionCookiePolicy },
-				),
-			]);
+			expect(kept[0]).toBeGreaterThan(20 * 86_400_000);
+			expect(kept[0]).toBeLessThan(21 * 86_400_000);
 		});
 
 		it("sizes it from the access-token maximum of the oauthTokenSettings the composition holds, not its default", async () => {
@@ -440,24 +574,16 @@ describe("subjectRevocationServiceModule", () => {
 					refreshTokenExpiresIn: 86_400,
 				}),
 			}).revokeAllForSubject({ subject: "u-1" });
-			expect(kept).toEqual([
-				resolveSubjectRevocationHorizonMs(
-					config({
-						oauth: {
-							accessToken: { defaultExpiresIn: 60, maxExpiresIn: 30 * 86_400 },
-							refreshToken: { expiresIn: 86_400 },
-						},
-					}),
-					{ sessionCookie: sessionCookiePolicy },
-				),
-			]);
 			expect(kept[0]).toBeGreaterThan(30 * 86_400_000);
+			expect(kept[0]).toBeLessThan(31 * 86_400_000);
 		});
 
-		it("requires the session store's slot, and lists the oauth module's as optional", () => {
+		it("requires the session store's slot and the oauth module's, and not the configuration", () => {
 			expect(subjectRevocationServiceModule.requires).toContain("sessionCookiePolicy");
-			expect(subjectRevocationServiceModule.optional).toContain("oauthTokenSettings");
-			expect(subjectRevocationServiceModule.optional).not.toContain("sessionCookiePolicy");
+			expect(subjectRevocationServiceModule.requires).toContain("oauthTokenSettings");
+			expect(subjectRevocationServiceModule.requires).not.toContain("config");
+			expect(subjectRevocationServiceModule.optional).not.toContain("config");
+			expect(subjectRevocationServiceModule.optional).toContain("federationGrantPolicy");
 		});
 	});
 
@@ -477,7 +603,7 @@ describe("subjectRevocationServiceModule", () => {
 			now,
 		});
 		const service = build({
-			config: enabled(),
+			...grantsOn(),
 			federationGrantStore: store,
 			auditSink: { record: () => new Promise<void>(() => undefined) },
 		});
@@ -501,7 +627,7 @@ describe("subjectRevocationServiceModule", () => {
 		});
 		const logged: string[] = [];
 		const service = build({
-			config: enabled(),
+			...grantsOn(),
 			federationGrantStore: store,
 			auditSink: {
 				record: () => {
@@ -518,30 +644,30 @@ describe("subjectRevocationServiceModule", () => {
 		expect(logged).toContain("federation_grant_audit_failed");
 	});
 
-	it("refuses a lifetime the resolvers refuse when it is built — at boot, never on a revocation", () => {
+	it("refuses a lifetime the slot's contract refuses when it is built — at boot, never on a revocation", () => {
 		// The horizon is resolved once, in this eager provider, so a
-		// hand-built configuration the lifetime resolvers refuse stops the
+		// hand-filled slot whose lifetimes are not lifetimes stops the
 		// composition. Nothing on the revocation path reads a lifetime again, so
 		// such a value can never surface as a 500 mid-revocation.
-		for (const oauth of [
-			{ accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 1.5 } },
-			{ accessToken: { expiresIn: 300 }, refreshToken: {} },
-			{ accessToken: { expiresIn: 0 }, refreshToken: { expiresIn: 86_400 } },
+		for (const broken of [
+			{ ...oauthTokenSettings, refreshTokenExpiresIn: 1.5 },
+			{ ...oauthTokenSettings, refreshTokenExpiresIn: undefined },
+			{ ...oauthTokenSettings, accessTokenLifetime: { defaultExpiresIn: 0, maxExpiresIn: 0 } },
 		]) {
-			expect(() => build({ config: config({ oauth }) }), JSON.stringify(oauth)).toThrow(RangeError);
+			expect(() => build({ oauthTokenSettings: broken }), JSON.stringify(broken)).toThrow(
+				/oauthTokenSettings\./,
+			);
 		}
 	});
 
 	it("sizes the boundary from the lifetimes this deployment is configured with", async () => {
 		// The service takes the number and cannot derive it: a boundary that
 		// expires before the credentials it covers is not a backstop, and what
-		// those credentials live for is configuration only a module can read.
+		// those credentials live for is in slots only a module is handed.
 		const revocation = createInMemorySubjectRevocation();
 		const stamp = vi.spyOn(revocation, "revokeBefore");
-		const deployment = config();
 		const session = createTestSessionCookiePolicy({ maxAgeMs: 40 * 24 * HOUR });
 		const service = build({
-			config: deployment,
 			sessionCookiePolicy: session,
 			subjectRevocation: revocation,
 		});
@@ -554,7 +680,12 @@ describe("subjectRevocationServiceModule", () => {
 		// the function it calls and would pass whatever that function said.
 		// The second is the property itself: the boundary outlasts the
 		// longest-lived thing this deployment is configured to accept.
-		expect(ttl).toBe(resolveSubjectRevocationHorizonMs(deployment, { sessionCookie: session }));
+		expect(ttl).toBe(
+			resolveSubjectRevocationHorizonMs(undefined, {
+				tokenSettings: oauthTokenSettings,
+				sessionCookie: session,
+			}),
+		);
 		expect(ttl).toBeGreaterThan(40 * 24 * HOUR);
 	});
 
@@ -571,7 +702,7 @@ describe("subjectRevocationServiceModule", () => {
 		});
 		const record = vi.fn(async () => undefined);
 		const service = build({
-			config: enabled(),
+			...grantsOn(),
 			federationGrantStore: store,
 			auditSink: { record },
 		});
@@ -611,7 +742,7 @@ describe("subjectRevocationServiceModule", () => {
 		});
 		const record = vi.fn(async () => undefined);
 		const service = build({
-			config: enabled(),
+			...grantsOn(),
 			federationGrantStore: store,
 			auditSink: { record },
 		});
