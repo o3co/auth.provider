@@ -96,9 +96,10 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 	});
 
 	it("does not refuse a section a package's reference completes, unless it reads it", () => {
-		// Before the modules are known, the oauth package's reference is not
-		// layered: its `nonce.maxLength` is missing, and boot, which layers it,
-		// accepts what the operator wrote.
+		// Before the modules are known, the packages' references are not
+		// layered: an operator's `oauth.nonce` written without `maxLength`,
+		// which those references default, is accepted here, and boot, which
+		// layers them, completes it.
 		const base = makeValidCoreConfig();
 		const partial = resolved({ oauth: { ...base.oauth, nonce: {} } });
 		expect(TransitionalConfigSchema.safeParse(partial).success).toBe(false);

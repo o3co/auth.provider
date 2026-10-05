@@ -173,11 +173,7 @@ import {
 	readFactorRecord,
 } from "./factorState.mjs";
 import type { RequireEmailProof } from "./firstBinding.mjs";
-import {
-	distrustedByFirstBinding,
-	firstBindingRetryAfterMs,
-	readFirstBindingMark,
-} from "./firstBindingMark.mjs";
+import { type FirstBindingMark, readFirstBindingMark } from "./firstBindingMark.mjs";
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
 import {
 	copyAskedMail,
@@ -295,8 +291,8 @@ export interface MfaCoordinatorOptions {
 	readonly requireEmailProof: RequireEmailProof;
 	/** `mfa.manage.maxAgeSeconds`: how long the account-email proof given in a session stands. */
 	readonly sessionProofSeconds: number;
-	/** How long a subject's first-binding mark stands, in milliseconds (`firstBindingMarkLifetimeMs`). */
-	readonly firstBindingMarkMs: number;
+	/** The first-binding mark as every reader judges it (`createFirstBindingMark`). */
+	readonly firstBindingMark: FirstBindingMark;
 	/** The subjects' sessions boundary a login's transaction is held to; none wired, none is read. */
 	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
@@ -322,7 +318,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		maxFactorsPerSubject,
 		requireEmailProof,
 		sessionProofSeconds,
-		firstBindingMarkMs,
+		firstBindingMark,
 		subjectRevocation,
 		identityFailed,
 	} = options;
@@ -645,7 +641,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	const noteFirstBinding = async (subject: string): Promise<MfaStoreOutage | undefined> => {
 		const atMs = now();
 		try {
-			await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMarkMs);
+			await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMark.lifetimeMs);
 			return undefined;
 		} catch (cause) {
 			return outage("mfa_transaction", "noteFirstBinding", cause);
@@ -749,11 +745,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			} catch (cause) {
 				return outage("mfa_transaction", "firstBindingAt", cause);
 			}
-			return mark !== null && distrustedByFirstBinding(authTimeMs, mark)
+			return mark !== null && firstBindingMark.distrusts(authTimeMs, mark)
 				? ({
 						outcome: "first_binding_distrusted",
 						subject,
-						retryAfterMs: firstBindingRetryAfterMs(mark, nowMs),
+						retryAfterMs: firstBindingMark.retryAfterMs(mark, nowMs),
 					} satisfies MfaFirstBindingDistrusted)
 				: undefined;
 		},

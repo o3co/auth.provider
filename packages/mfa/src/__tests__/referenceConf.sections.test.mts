@@ -123,9 +123,12 @@ describe("the package's config/reference.conf", () => {
 		);
 	});
 
-	it("declares on the MFA module's manifest the page's old path, endpoints.mfa.url, and its variable, ENDPOINTS_MFA_URL; binds MFA_PAGE_URL at mfa.page.url and the old name in its capture alone", () => {
+	it("declares on the MFA module's manifest the page's old path, endpoints.mfa.url, and its variable, ENDPOINTS_MFA_URL, and the removed mfa.rateLimit; binds MFA_PAGE_URL at mfa.page.url and the old name in its capture alone", () => {
 		const section = mfaModule().section;
-		expect(section?.relocatedFrom).toEqual({ "endpoints.mfa.url": "page.url" });
+		expect(section?.relocatedFrom).toEqual({
+			"endpoints.mfa.url": "page.url",
+			"mfa.rateLimit": null,
+		});
 		expect(section?.renamedVariables).toEqual({ ENDPOINTS_MFA_URL: "endpoints.mfa.url" });
 		expect(bindings().filter((binding) => binding.startsWith("MFA_PAGE_URL "))).toEqual([
 			"MFA_PAGE_URL at mfa.page.url",
