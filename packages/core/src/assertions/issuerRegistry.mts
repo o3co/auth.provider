@@ -24,7 +24,9 @@ import {
 } from "../security/identifier.mjs";
 import {
 	describeInvalidAssertionClockTolerance,
+	describeInvalidAssertionMaxLifetime,
 	isValidAssertionClockTolerance,
+	isValidAssertionMaxLifetime,
 } from "./lifetime.mjs";
 
 /**
@@ -133,6 +135,16 @@ export interface AssertionIssuerEntryInput {
 	 * a token to inherit, so the jwt-bearer grant refuses it.
 	 */
 	readonly clockToleranceSeconds?: number | undefined;
+	/**
+	 * How long an assertion from this issuer may live, `exp − iat`, in
+	 * seconds. Default `DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS` (an hour); a
+	 * whole number from 1 to `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS` (a day),
+	 * so a subject's revocation boundary outlives every assertion it covers.
+	 * Checked by {@link checkAssertionIssuerEntry} and again when the verifier
+	 * reads a stored entry. An assertion without `iat` has no lifetime to
+	 * measure. An ID-JAG entry is held to the profile's own hour instead.
+	 */
+	readonly maxLifetimeSeconds?: number | undefined;
 }
 
 /**
@@ -144,8 +156,9 @@ export interface AssertionIssuerEntryInput {
  * presenter (an unauthenticated one too, unless the entry is ID-JAG, whose
  * presenter must authenticate); `expiresAt` gone trusts the issuer forever;
  * `profile: "id-jag"` gone falls back to plain RFC 7523 and drops the `jti`
- * replay, `typ` and exact-`aud` checks. (`clockToleranceSeconds` gone restores
- * the default, looser or stricter than configured.) So a store-backed registry,
+ * replay, `typ` and exact-`aud` checks. (`clockToleranceSeconds` or
+ * `maxLifetimeSeconds` gone restores the default, looser or stricter than
+ * configured.) So a store-backed registry,
  * this port's documented way to survive a restart, reads each row back as an
  * object literal of THIS type naming every field: a forgotten key then fails
  * to compile instead of dropping the ceiling.
@@ -170,6 +183,7 @@ export interface AssertionIssuerEntry {
 	readonly expiresAt: Date | undefined;
 	readonly profile: "rfc7523" | "id-jag" | undefined;
 	readonly clockToleranceSeconds: number | undefined;
+	readonly maxLifetimeSeconds: number | undefined;
 }
 
 /**
@@ -266,6 +280,14 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntryInput): voi
 			`AssertionIssuerEntry(${entry.issuer}): ${describeInvalidAssertionClockTolerance(entry.clockToleranceSeconds)}.`,
 		);
 	}
+	if (
+		entry.maxLifetimeSeconds !== undefined &&
+		!isValidAssertionMaxLifetime(entry.maxLifetimeSeconds)
+	) {
+		throw new Error(
+			`AssertionIssuerEntry(${entry.issuer}): ${describeInvalidAssertionMaxLifetime(entry.maxLifetimeSeconds)}.`,
+		);
+	}
 	if (entry.keys.type === "jwks_uri") {
 		let url: URL;
 		try {
@@ -304,6 +326,7 @@ export function toAssertionIssuerEntry(input: AssertionIssuerEntryInput): Assert
 		expiresAt: input.expiresAt,
 		profile: input.profile,
 		clockToleranceSeconds: input.clockToleranceSeconds,
+		maxLifetimeSeconds: input.maxLifetimeSeconds,
 	};
 }
 

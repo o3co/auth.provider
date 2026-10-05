@@ -41,6 +41,7 @@ const noopChallengeClient: ChallengeStoreClient = {
 	set: async () => "OK",
 	pttl: async () => -2,
 	del: async () => 0,
+	get: async () => null,
 };
 
 const noopReplayClient: ReplaySeenSetClient = {

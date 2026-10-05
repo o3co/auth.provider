@@ -87,9 +87,16 @@ export function createAuthenticationOptionsHandler(
 
 		// A fixed, non-user-scoped namespace: the authenticator identifies the user, not the
 		// request.
-		const expiresAtMs = Date.now() + deps.config.challengeTtlMs;
+		// Recorded with the challenge: the passkey grant stamps `auth_time` from it.
+		const issuedAtMs = Date.now();
+		const expiresAtMs = issuedAtMs + deps.config.challengeTtlMs;
 		try {
-			await deps.challengeStore.issue("webauthn:authentication", options.challenge, expiresAtMs);
+			await deps.challengeStore.issue(
+				"webauthn:authentication",
+				options.challenge,
+				expiresAtMs,
+				issuedAtMs,
+			);
 		} catch (err) {
 			refuseCeremonyStoreUnavailable(
 				res,

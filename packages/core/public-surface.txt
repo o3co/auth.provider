@@ -1,5 +1,6 @@
 . ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY value
 . ADMISSION_GRADES value
+. ASSERTION_MAX_LIFETIME_LIMIT_SECONDS value
 . ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS value
 . ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS value
 . AUDIT_SINK_ABSENCE_POLICY value
@@ -138,6 +139,7 @@
 . CsrfGuard type
 . CsrfTokenSigner type
 . CsrfVerdict type
+. DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS value
 . DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS value
 . DEFAULT_CLOCK_SKEW_MS value
 . DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS value
@@ -621,6 +623,11 @@
 . SessionClose type
 . SessionCloseAnswer type
 . SessionCloseCause type
+. SessionCloseNotice type
+. SessionCloseNotifier type
+. SessionCloseNotifierFactory type
+. SessionCloseNotifierResolver type
+. SessionCloseOutcome type
 . SessionCloseRequest type
 . SessionCookiePolicy type
 . SessionData type
@@ -631,9 +638,14 @@
 . SessionFederationIndex type
 . SessionFederationIndexFactory type
 . SessionJoinAnswer type
+. SessionJoinOutcome type
+. SessionJoinRequest type
+. SessionLifecycle type
+. SessionLifecycleOptions type
 . SessionLifecycleRecord type
 . SessionLifecycleState type
 . SessionLifecycleStore type
+. SessionLiveness type
 . SessionMutation type
 . SessionOpenAnswer type
 . SessionParticipant type
@@ -647,6 +659,7 @@
 . SessionRequirement type
 . SessionRequirementFactory type
 . SessionRequirementResolver type
+. SessionResumeReport type
 . SessionView type
 . SignJwtOptions type
 . StepUpPage type
@@ -741,6 +754,7 @@
 . canonicalChallengeKey value
 . canonicalScope value
 . canonicalTokenType value
+. checkAcrValueName value
 . checkAssertionIssuerEntry value
 . checkCanonicalIssuer value
 . checkConfiguredMfaLockoutPolicy value
@@ -850,6 +864,7 @@
 . createRepositoryFactories value
 . createSessionFamilyIndexFactory value
 . createSessionFederationIndexFactory value
+. createSessionLifecycle value
 . createSessionRPRegistryFactory value
 . createSubjectRevocationService value
 . createSymmetricKeyStore value
@@ -868,6 +883,7 @@
 . describeAbsenceDeclaration value
 . describeAdmissionOutage value
 . describeInvalidAssertionClockTolerance value
+. describeInvalidAssertionMaxLifetime value
 . describeIssuerRejection value
 . describeRedirectUriRejection value
 . describeSerializedOriginRejection value
@@ -952,6 +968,7 @@
 . isUsableMaxUpstreamAccessTokenLifetime value
 . isUsableRateLimitSpec value
 . isValidAssertionClockTolerance value
+. isValidAssertionMaxLifetime value
 . isVerificationUnavailable value
 . isWellFormedClientId value
 . isWellFormedErrorCode value
@@ -1110,6 +1127,7 @@
 . sessionAuthentication value
 . sessionCloseItemOf value
 . sessionEmailProofAnswer value
+. sessionLifecycleModule value
 . shownConfigValue value
 . stepUpReach value
 . subjectBoundaryCovers value
@@ -1189,6 +1207,8 @@
 ./modules/manifest SYNTHETIC_COMPONENT_KEYS value
 ./modules/manifest SectionDeps type
 ./modules/manifest SectionSchema type
+./modules/manifest SessionCloseNotifierFactory type
+./modules/manifest SessionCloseNotifierResolver type
 ./modules/manifest SessionRequirementFactory type
 ./modules/manifest TokenBindingMechanismFactory type
 ./modules/manifest TokenExchangeValidatorResolver type

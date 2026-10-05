@@ -117,8 +117,8 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 /**
  * Whether `components` holds `key` as `undefined`. A slot so filled — a host
  * map entry given as `undefined`, or a provider resolving to it — is
- * unfilled. A provider no active module reads is not run, and its slot stays
- * unset rather than holding `undefined`.
+ * unfilled. A provider no active module reads is not run unless seeded, and
+ * its slot stays unset rather than holding `undefined`.
  * @internal
  */
 function holdsUndefined(components: Record<string, unknown>, key: ComponentKey): boolean {

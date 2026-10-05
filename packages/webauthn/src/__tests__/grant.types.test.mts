@@ -19,6 +19,7 @@ import type {
 	GrantPolicyHook,
 	ProviderDeps,
 	RefreshTokenFamilyRotation,
+	SubjectRevocation,
 	TokenBindingSettings,
 	WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
@@ -56,6 +57,8 @@ const OPTIONAL = [
 	"auditSink",
 	"logger",
 	"refreshTokenFamilyRotation",
+	// The subject's revocation boundary, which the grant reads before minting.
+	"subjectRevocation",
 ] as const;
 type ModuleDeps = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
@@ -66,10 +69,9 @@ describe("the webauthn grant declares the slots it reads", () => {
 	});
 
 	it("reads only slots the module declares", () => {
-		// `extends GrantDependencies` admitted every shared grant slot, among
-		// them four session stores, `subjectRevocation` and
-		// `refreshTokenFamilyRevocation`, none of which webauthnModule declares:
-		// a read of one would have compiled and seen `undefined` forever.
+		// A shared grant slot the module does not declare, such as the four
+		// session stores or `refreshTokenFamilyRevocation`, would compile and
+		// be `undefined` forever if the grant read it.
 		// `webauthnConfig` is the module's own section, which it hands over
 		// in its place (the fields it reads are pinned below).
 		expectTypeOf<Exclude<keyof WebAuthnGrantDeps, "webauthnConfig">>().toMatchTypeOf<
@@ -83,7 +85,6 @@ describe("the webauthn grant declares the slots it reads", () => {
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("sessionRPRegistry");
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("sessionFamilyIndex");
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("sessionFederationIndex");
-		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("subjectRevocation");
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("refreshTokenFamilyRevocation");
 		// The binding rule comes from core's `tokenBindingSettings` slot, the lifetimes from
 		// `oauthTokenSettings`: nothing is read from the whole configuration.
@@ -120,6 +121,9 @@ describe("the webauthn grant declares the slots it reads", () => {
 		expectTypeOf<WebAuthnGrantDeps["grantPolicy"]>().toEqualTypeOf<GrantPolicyHook | undefined>();
 		expectTypeOf<WebAuthnGrantDeps["refreshTokenFamilyRotation"]>().toEqualTypeOf<
 			RefreshTokenFamilyRotation | undefined
+		>();
+		expectTypeOf<WebAuthnGrantDeps["subjectRevocation"]>().toEqualTypeOf<
+			SubjectRevocation | undefined
 		>();
 		expect(true).toBe(true);
 	});

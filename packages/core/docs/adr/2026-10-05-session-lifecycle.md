@@ -8,6 +8,10 @@ store and the callers' switch follow in the order below
 ([#1030](https://github.com/o3co/auth.provider/issues/1030)).
 
 - Written against: `develop` at `72ba648aa`.
+- Amended 2026-10-05: the service, its answers, the close work, resumption,
+  the cause policy, the relying-party notifier, the bridge and where the
+  service lives (D8–D15); and how the notifier is wired (D16).
+  Written against `develop` at `5871ff698`.
 
 ## Context
 
@@ -152,3 +156,160 @@ then closing with no entry, never listed again. Fencing each entry with a
 token on the record avoids the clock but adds a protocol with its own edge
 (a lapsed sid opened again). Fixed shards trade one slot per sid for an
 index kept in the same atomic step as the record.
+
+## Amendment 2026-10-05 — the service
+
+**D8. The service and its answers.** `SessionLifecycle`
+(`src/session-lifecycle/service.mts`) fills the `sessionLifecycle`
+slot through `sessionLifecycleModule`, which nothing installs until the
+callers switch. `join(sid, { rp?, familyId?, federation? })` answers
+`joined`, `refused` or `unavailable`; on `refused` the service revokes the
+family and deletes that federation's tokens it was handed, and the caller
+hands out nothing. `close(sid, cause)` answers `done`, `pending` or
+`unavailable`, with the snapshot's relying parties and federations.
+`liveness(sid)` answers `live` with the user session, or `not_live`, or
+`unavailable`. `resumePending()` runs the close work of every closing
+record. A participant's `data` is `""`: its kind and id are all it holds
+(D7).
+
+**D9. A close whose commit landed answers `pending`, never `unavailable`.**
+From the closing commit on, liveness answers `not_live` and nothing joins,
+so a close with work still outstanding has ended the session; it answers
+`pending`, distinct from `done`. `unavailable` means the commit did not land,
+or whether it did could not be read. How a route answers `pending` (the
+logout's 200 and a `logout.close_pending` audit event) is decided when that
+route switches.
+
+**D10. The close work, in phases.** An item runs only once no item of an
+earlier phase is pending in the record, so no phase runs over work an
+earlier one has not durably done:
+1. one item per family (`revokeFamily`), `revoke_bridged_families` (D14),
+   `remove_federation_tokens` (`federationTokenStore.removeBySid`) and
+   `remove_subject_session` (`subjectSessionIndex.removeSid`, where a subject
+   index is wired);
+2. one item per relying party and `notify_bridged_rps` (D14), through
+   `SessionCloseNotifier`; an item this code does not know waits here;
+3. `remove_session_indexes` (the per-session stores the bridge steps read);
+4. `delete_user_session`, last.
+
+Each item that ran is recorded with `completeIf` at the generation read; a
+conflict re-reads the record and goes on with what is still pending, so two
+closes of one session and the sweep may overlap. A failed item, or one whose
+completion could not be recorded, stays pending and the record stays
+`closing`; the other items of its phase still run.
+
+**D11. Resumption.** A later close of the same sid resumes the saved work,
+whatever its cause (the first cause is kept). A sweep owned by core,
+`resumePending`, pages `listClosing` by its `after` cursor every
+`core.sessionLifecycle.sweepIntervalSeconds` — whole seconds, read through
+`configuredNumber`, refused at boot naming the key otherwise — one sweep at a
+time, stopped on dispose. Unwritten, there is no sweep: a deployment without
+relying parties leaves it so.
+
+**D12. The cause policy.** Every cause runs the work of D10. `rp_logout`,
+`session_logout`, `subject_revocation` and `operator_reset` also tell the
+relying parties; `expiry` tells none, as natural expiry never has. Without a
+notifier no relying-party item is saved.
+
+**D13. The relying-party notifier.** `SessionCloseNotifier`
+(`src/session-lifecycle/notifier.mts`; how it is wired is D16) is core's
+contract; the module that issues to relying parties
+implements it. `notify` resolves once a notice is settled — delivered, or
+given up by its own policy — and rejects only to be tried again; it may be
+called more than once for one notice. With `sessionLifecycleModule`
+installed, boot refuses a composition where the `clientRepository` slot is
+filled and no notifier is (D16). Boot
+orders modules, not components, so the closing record's `retainMs` —
+`oauth.refreshToken.expiresIn` plus `DEFAULT_CLOCK_SKEW_MS`, within the
+port's year, and 0 without a refresh-token lifetime — is read from the
+configuration, not from the oauth module's slot. That read is a known
+coupling to the oauth module's section; it moves to a core slot when oauth
+exposes token lifetimes through one that the lifecycle module can read
+without a cycle. The module is eager: installed, it is built at boot whether
+or not anything requires the slot, so the refusal and the sweep do not wait
+for a consumer. The session grant joins nothing: it mints access tokens
+only, which die with liveness.
+
+**D14. The bridge to the per-session stores, and adoption.** While
+`SessionRPRegistry`, `SessionFamilyIndex` (with its end mark) and
+`SessionFederationIndex` are still read elsewhere, the service writes them
+too (`src/session-lifecycle/bridge.mts`). A join writes the relying
+party, then the family through `addFamilyIdUnlessEnded`, then the
+federation, before the lifecycle join; an `ended` refuses the join. A close
+writes the end mark (`endSession`) before its commit, so nothing joins
+through them after. What joined through them is not imported into the
+record, since an import would be a join and could be refused (by capacity,
+or by the session's end passing): two steps read them when they run instead.
+`revoke_bridged_families` revokes every family the index lists that is not
+the record's own, and `notify_bridged_rps` tells every relying party the
+registry lists that is not the record's own. The close that commits also
+answers the relying parties and federations they listed after the mark. A session with no lifecycle record is adopted — opened
+from its user session's subject and end: by a close always, since closing is
+never unsafe; by a join only where no end mark can be present — its family
+passed `addFamilyIdUnlessEnded`, or the family index keeps no mark. A join
+with no family, on an index that keeps the mark, cannot read it and is
+refused with nothing written: the conservative reading of "only when no old
+mark is present". Liveness of a session with no record reads its user
+session alone. The bridge and adoption go with the old stores; an absent
+record then reads as closed.
+
+Two known limitations of the bridge are accepted as interim. It exists only
+between this amendment and the removal of the bridge and adoption, which
+lands in the same release
+([#1030](https://github.com/o3co/auth.provider/issues/1030)), so neither
+reaches a released version, and closing either would change a store
+contract for a component that is removed:
+- **Bridged targets lapse with the old stores.** The bridge steps read the
+  per-session stores when they run, and those lapse at the session's
+  `expiresAt`, before the closing record does. A bridge step that fails
+  until then finds nothing left and is recorded done: those families are
+  not revoked by it (refresh needs a live session, which they no longer
+  have), and those relying parties are not told.
+- **A join without a family is not fenced by the old end mark.** The mark is
+  read only through `addFamilyIdUnlessEnded`, so on a record that already
+  exists such a join (a federation link) lands while a close begun through
+  the old stores is under way; tokens attached for it are then outside that
+  close's cleanup.
+
+**D15. Where the service lives.** The service, its module, the bridge, the
+notifier contract and the sweep are in `src/session-lifecycle/`, apart from
+the port in `src/user-sessions/lifecycle/`. The service reads a session
+record only through `session-admission/`'s `readRecord`, the one read of a
+record admission makes, so no new site reads a session outside admission;
+and since `session-admission/` imports values from `user-sessions/`, the
+service inside `user-sessions/` would close a value cycle between the two.
+`session-lifecycle/` imports `session-admission/` and `user-sessions/`, and
+neither of those imports it. So admission's own `not_live` read, when it
+learns the lifecycle state, reads the port in `user-sessions/`, never the
+service. The token-side liveness reads move to `liveness` as their callers
+switch.
+
+**D16. The notifier is a contribution, read when a close runs.** The module
+that tells relying parties (the oauth module) is also the one that, once its
+logout route switches, requires `sessionLifecycle`. Boot orders modules by
+what they `require` and take `optional`, so a notifier filled in a slot the
+lifecycle module reads at construction would order the notifier's module
+before the lifecycle's, and that module could read nothing of a module
+requiring the lifecycle — the issuer in `oauthTokenSettings` among it —
+without a cycle. So the notifier is contributed under the
+`sessionCloseNotifiers` contribution kind, at most one per composition,
+and the service reads it through the synthetic `sessionCloseNotifierResolver`
+when a close runs, never while modules are built, as other contributions are
+read through their resolvers. A contribution kind rather than a getter handed
+to the service: core has no lazily readable channel but a synthetic resolver
+over contributions, so a getter would need the same plumbing. The notifier is
+its contributor's, switched off only by not installing its module: a factory
+answering anything but a notifier fails its contribution (never `null`), and
+at stage 1 a container that is no record is refused
+(`contribution-malformed`), any override of the kind is refused
+(`contribution-kind-guarded`, channel `overrides`), and so is a second
+notifier under any name (`duplicate-contribute`); a host may not supply the
+collector (`contribution-kind-guarded`). The rule that a composition serving
+relying parties needs a notifier is judged at the end of the contributions,
+once the notifier would have registered, and only where
+`sessionLifecycleModule` built the `sessionLifecycle` slot — a value the host
+filled it with is the host's. It is refused as before, as that module's
+provider failing (`provides-factory-failed`, naming
+`core-session-lifecycle`), its remedy now naming the contribution: install a
+module that contributes a `sessionCloseNotifiers` entry, as `oauthModule`
+does.

@@ -30,6 +30,7 @@ import {
 import express from "express";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
+import { createSessionCloseNotifier } from "./logout/sessionCloseNotifier.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
 import { createOAuthRouter } from "./routes.mjs";
@@ -180,6 +181,18 @@ export const oauthEndpointsModule: Module = defineModule<
 	contributes: {
 		// What the router's /authorize and consent step admit.
 		admissionActions: OAUTH_ROUTER_ADMISSION_ACTIONS,
+		// How core's session lifecycle tells the relying parties of a closed
+		// session. A contribution, read when a close runs: this module is free
+		// to require the lifecycle without a cycle.
+		sessionCloseNotifiers: {
+			oauth: (deps) =>
+				createSessionCloseNotifier({
+					clientRepository: deps.clientRepository,
+					keyStore: deps.keyStore,
+					issuer: oauthTokenSettingsFrom(deps.section).issuer,
+					logger: deps.logger ?? consoleLogger,
+				}),
+		},
 		// The prefixes the endpoints limit under, claimed with no budget of
 		// their own: the limiter's `limits` entry or its default applies.
 		rateLimitBudgets: Object.fromEntries(

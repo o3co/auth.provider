@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import { ChallengeStorageError } from "#/single-use/errors.mjs";
 import type { ChallengeStore } from "../types.mjs";
 
@@ -145,6 +146,63 @@ export function runChallengeStoreContract(
 					reason: "duplicate",
 				});
 				expect(await store.consume("scope-A", "v-frac")).toBe(true);
+			});
+		});
+
+		it("find answers the issuance issue was given exactly, and none for a challenge issued without one", async () => {
+			await withStore(async (store) => {
+				const issuedAtMs = Date.now() - 250;
+				await store.issue("scope-A", "v-issued", issuedAtMs + 60_000, issuedAtMs);
+				await store.issue("scope-A", "v-plain", future());
+				const issued = await store.find("scope-A", "v-issued");
+				const plain = await store.find("scope-A", "v-plain");
+				expect(issued).not.toBeNull();
+				expect(issued?.issuedAtMs).toBe(issuedAtMs);
+				expect(plain).not.toBeNull();
+				expect(Object.hasOwn(plain ?? {}, "issuedAtMs")).toBe(false);
+			});
+		});
+
+		it("issue accepts an issuance equal to the expiry, and a fractional one", async () => {
+			await withStore(async (store) => {
+				const expiresAtMs = future();
+				await store.issue("scope-A", "v-equal", expiresAtMs, expiresAtMs);
+				await store.issue("scope-A", "v-frac", expiresAtMs, expiresAtMs - 30_000.5);
+				expect((await store.find("scope-A", "v-equal"))?.issuedAtMs).toBe(expiresAtMs);
+				expect((await store.find("scope-A", "v-frac"))?.issuedAtMs).toBe(expiresAtMs - 30_000.5);
+			});
+		});
+
+		it("issue refuses an issuance that is not a finite instant within the Date range, is after the expiry, or is further ahead than the clock-skew allowance, and records nothing", async () => {
+			await withStore(async (store) => {
+				const expiresAtMs = future();
+				const farExpiryMs = Date.now() + 2 * DEFAULT_CLOCK_SKEW_MS;
+				const refused: ReadonlyArray<readonly [number, number]> = [
+					...UNSTORABLE_EXPIRIES.map((bad) => [bad, expiresAtMs] as const),
+					[expiresAtMs + 1, expiresAtMs],
+					// Within the expiry, but ahead of the store's clock by more than the allowance.
+					[farExpiryMs, farExpiryMs],
+				];
+				for (const [bad, expiry] of refused) {
+					await expect(store.issue("scope-A", "v-bad-issued", expiry, bad)).rejects.toThrow(
+						RangeError,
+					);
+					expect(await store.find("scope-A", "v-bad-issued")).toBeNull();
+				}
+				// Nothing was recorded, so this is not a duplicate.
+				await store.issue("scope-A", "v-bad-issued", expiresAtMs, expiresAtMs - 60_000);
+				expect(await store.consume("scope-A", "v-bad-issued")).toBe(true);
+			});
+		});
+
+		it("issue refuses a bad issuance for a challenge already live as a RangeError, not a duplicate, and leaves the live one as it was", async () => {
+			await withStore(async (store) => {
+				const issuedAtMs = Date.now();
+				await store.issue("scope-A", "v-live", issuedAtMs + 60_000, issuedAtMs);
+				await expect(
+					store.issue("scope-A", "v-live", issuedAtMs + 60_000, Number.NaN),
+				).rejects.toThrow(RangeError);
+				expect((await store.find("scope-A", "v-live"))?.issuedAtMs).toBe(issuedAtMs);
 			});
 		});
 

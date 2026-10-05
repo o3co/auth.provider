@@ -16,12 +16,13 @@
 import { expect, test } from "vitest";
 import { SYNTHETIC_COMPONENT_KEYS } from "../synthetic-keys.mjs";
 
-test("SYNTHETIC_COMPONENT_KEYS has 13 members", () => {
+test("SYNTHETIC_COMPONENT_KEYS has 14 members", () => {
 	// 4 federation and grant keys + lifecycleRegistrar + readinessRegistrar +
 	// mfaFactorResolver (the MFA ADR's D3) + sessionRequirementResolver (the
 	// session-admission ADR's D3) + rateLimitBudgetResolver + deploymentMode +
-	// tokenBindingSettings + federationSettings + outboundPolicy = 13.
-	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(13);
+	// tokenBindingSettings + federationSettings + outboundPolicy +
+	// sessionCloseNotifierResolver = 14.
+	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(14);
 });
 
 test("SYNTHETIC_COMPONENT_KEYS includes outboundPolicy", () => {

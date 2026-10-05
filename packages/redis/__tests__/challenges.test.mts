@@ -4,10 +4,12 @@
  */
 
 import { setTimeout as sleep } from "node:timers/promises";
+import { canonicalChallengeKey } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createRedisChallengeStore } from "#/challenges.mjs";
 import type { ChallengeStoreClient } from "#/clients.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 import { runChallengeStoreContract } from "./adapters.challenge-store.contract.mjs";
 import { keysExpire, testRedis } from "./support/redis.mjs";
 
@@ -58,6 +60,7 @@ describe("redis challenge store — the expiry find reports", () => {
 		const slowReplies: ChallengeStoreClient = {
 			set: (...args) => (client as unknown as ChallengeStoreClient).set(...args),
 			del: (key) => client.del(key),
+			get: (key) => client.get(key),
 			pttl: async (key) => {
 				const remaining = await client.pttl(key);
 				await sleep(REPLY_DELAY_MS);
@@ -80,5 +83,76 @@ describe("redis challenge store — the expiry find reports", () => {
 		expect(found?.expiresAtMs).toBeGreaterThanOrEqual(
 			issuedExpiryMs - REPLY_DELAY_MS - writeLatencyMs - 100,
 		);
+	});
+});
+
+describe("redis challenge store — the issuance it records", () => {
+	const SCOPE = "webauthn:authentication";
+	// The client a deployment runs.
+	const ioredis = (): ChallengeStoreClient => makeIoredisClients(client).challengeStoreClient;
+
+	function freshStore(over: Partial<ChallengeStoreClient> = {}) {
+		keyCounter += 1;
+		const keyPrefix = `chal:issued-${keyCounter}:`;
+		return {
+			keyPrefix,
+			store: createRedisChallengeStore({ client: { ...ioredis(), ...over }, keyPrefix }),
+		};
+	}
+
+	for (const [label, stored] of [
+		["the value written before the upgrade", "1"],
+		["a value in no form the store writes", "i:not-a-number"],
+		["an issuance that is not finite", "i:Infinity"],
+		["an empty issuance", "i:"],
+		["an issuance in a form the store never writes", "i:0x10"],
+		["an issuance past the Date range", "i:1e+21"],
+		["an issuance before the Date range", "i:-1e+21"],
+		["an issuance just past the Date range", "i:8640000000000001"],
+	] as const) {
+		it(`answers no issuance for a live key holding ${label}`, async () => {
+			const { store, keyPrefix } = freshStore();
+			await client.set(`${keyPrefix}${canonicalChallengeKey(SCOPE, "v")}`, stored, "PX", 60_000);
+
+			const found = await store.find(SCOPE, "v");
+
+			expect(found).not.toBeNull();
+			expect(Object.hasOwn(found ?? {}, "issuedAtMs")).toBe(false);
+		});
+	}
+
+	it("answers the issuance it was given, through the client a deployment runs", async () => {
+		const { store } = freshStore();
+		const issuedAtMs = Date.now() - 250.5;
+		await store.issue(SCOPE, "v", issuedAtMs + 60_000, issuedAtMs);
+
+		const found = await store.find(SCOPE, "v");
+
+		expect(found?.issuedAtMs).toBe(issuedAtMs);
+	});
+
+	it("answers null for a key gone between its remaining life and its value", async () => {
+		const store = createRedisChallengeStore({
+			client: {
+				set: vi.fn(async () => "OK" as const),
+				del: vi.fn(async () => 0),
+				pttl: vi.fn(async () => 1_000),
+				get: vi.fn(async () => null),
+			},
+			keyPrefix: "chal:gone:",
+		});
+
+		expect(await store.find(SCOPE, "v")).toBeNull();
+	});
+
+	it("refuses a bad issuance before asking Redis anything", async () => {
+		const set = vi.fn(ioredis().set);
+		const { store } = freshStore({ set });
+
+		await expect(store.issue(SCOPE, "v", Date.now() + 60_000, Number.NaN)).rejects.toThrow(
+			RangeError,
+		);
+
+		expect(set).not.toHaveBeenCalled();
 	});
 });

@@ -29,6 +29,8 @@ export interface ChallengeStoreClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	pttl(key: string): Promise<number>;
 	del(key: string): Promise<number>;
+	/** Reads a challenge's value, which carries when it was issued. */
+	get(key: string): Promise<string | null>;
 }
 
 // --- AccessTokenDenylistClient ---------------------------------------------
