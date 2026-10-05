@@ -416,7 +416,7 @@ describe("webauthnModule boot integration", () => {
  * resolves with these variables set: literals keep their types, every `${?VAR}`
  * arrives as a string, and the origin list is one comma-separated string.
  * Core's `reference-conf-drift.test.mts` pins that shape against the real
- * HOCON resolution; this package has no HOCON library.
+ * HOCON resolution, and section.test.mts resolves the shipped reference.conf.
  */
 describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIGIN)", () => {
 	const ANDROID = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
