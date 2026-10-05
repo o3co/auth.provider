@@ -165,6 +165,31 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 			"authentication.mfaAtMs a string",
 			{ ...validEnvelope, authentication: { primary: "pwd", mfaAtMs: "1" } },
 		],
+		// `upstreamAuthTimeMs` is absent, null (the upstream showed no time) or
+		// a timestamp. Anything else is corrupt, never read as either.
+		[
+			"authentication.upstreamAuthTimeMs a string",
+			{ ...validEnvelope, authentication: { primary: "fed", upstreamAuthTimeMs: "1" } },
+		],
+		[
+			"authentication.upstreamAuthTimeMs negative",
+			{ ...validEnvelope, authentication: { primary: "fed", upstreamAuthTimeMs: -1 } },
+		],
+		[
+			"authentication.upstreamAuthTimeMs fractional",
+			{ ...validEnvelope, authentication: { primary: "fed", upstreamAuthTimeMs: 1.5 } },
+		],
+		[
+			"authentication.upstreamAuthTimeMs past the Date range",
+			{
+				...validEnvelope,
+				authentication: { primary: "fed", upstreamAuthTimeMs: 8_640_000_000_000_001 },
+			},
+		],
+		[
+			"authentication.upstreamAuthTimeMs a boolean",
+			{ ...validEnvelope, authentication: { primary: "fed", upstreamAuthTimeMs: false } },
+		],
 		// `enrollmentFacts` is absent (none recorded, or written before the
 		// key) or what the type admits. Anything else is not read as absent:
 		// a session whose facts cannot be read is refused, never taken for one
@@ -253,6 +278,36 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 			upstreamAmr: undefined,
 			mfaAt: new Date(mfaAtMs),
 		});
+	});
+
+	it("reads upstreamAuthTimeMs as a Date, null as null, and an envelope without it as a session that records none", async () => {
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		const upstreamAuthTimeMs = Date.now() - 600_000;
+		const fed = { primary: "fed", federation: "google" };
+		const seed = (sid: string, authentication: Record<string, unknown>) =>
+			client.seed(
+				`${keyPrefix}${sid}`,
+				JSON.stringify({ ...validEnvelope, sid, amr: ["fed"], authentication }),
+			);
+		seed("sid-date", { ...fed, upstreamAuthTimeMs });
+		seed("sid-null", { ...fed, upstreamAuthTimeMs: null });
+		seed("sid-none", fed);
+		const named = {
+			primary: "fed",
+			federation: "google",
+			upstreamAmr: undefined,
+			mfaAt: undefined,
+		};
+		expect((await store.get("sid-date"))?.authentication).toStrictEqual({
+			...named,
+			upstreamAuthTime: new Date(upstreamAuthTimeMs),
+		});
+		expect((await store.get("sid-null"))?.authentication).toStrictEqual({
+			...named,
+			upstreamAuthTime: null,
+		});
+		expect((await store.get("sid-none"))?.authentication).toStrictEqual(named);
 	});
 
 	it("reads enrollmentFacts from the envelope, and an envelope without them as a session that has none", async () => {
@@ -441,6 +496,29 @@ describe("RedisUserSessionStore — what the store needs from its client, and wh
 		const stored = JSON.parse(client.read(`${keyPrefix}sid-1`) as string);
 		expect(stored.renewalNonce).toBe(overtaking);
 		expect(stored.amr).toEqual(["pwd", "hwk", "mfa"]);
+	});
+
+	it("writes upstreamAuthTimeMs back, a timestamp or null, when it records a second factor", async () => {
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		const upstreamAuthTimeMs = Date.now() - 600_000;
+		for (const [sid, value] of [
+			["sid-date", upstreamAuthTimeMs],
+			["sid-null", null],
+		] as const) {
+			client.seed(
+				`${keyPrefix}${sid}`,
+				JSON.stringify({
+					...validEnvelope,
+					sid,
+					amr: ["fed"],
+					authentication: { primary: "fed", federation: "google", upstreamAuthTimeMs: value },
+				}),
+			);
+			await store.recordSecondFactor(sid, { amr: ["otp", "mfa"], at: new Date() });
+			const written = JSON.parse(client.read(`${keyPrefix}${sid}`) as string);
+			expect(written.authentication.upstreamAuthTimeMs).toBe(value);
+		}
 	});
 
 	it("keeps what a newer release added to the envelope — beside the session and inside authentication — when it records a second factor", async () => {
