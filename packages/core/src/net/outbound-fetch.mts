@@ -327,6 +327,38 @@ const errorCode = (err: unknown): string | undefined => {
 	return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : undefined;
 };
 
+/** Whether `value` is a list of host patterns, as the reader answers one. */
+const isPatternList = (value: unknown): boolean =>
+	Array.isArray(value) &&
+	value.every((pattern: unknown) => {
+		const { host, suffix } = (pattern ?? {}) as { host?: unknown; suffix?: unknown };
+		return typeof host === "string" && host.length > 0 && typeof suffix === "boolean";
+	});
+
+/**
+ * The member of `policy` that breaks the shape `outboundPolicyOf` answers,
+ * or `undefined` when none does: a broken limit would lift the deadline or
+ * the body cap rather than apply it.
+ */
+function brokenPolicyMember(policy: Readonly<Record<string, unknown>>): string | undefined {
+	for (const list of ["allowedHosts", "deniedHosts", "internalHosts"]) {
+		if (!isPatternList(policy[list])) return list;
+	}
+	const { timeoutMs, maxResponseBytes, egress } = policy;
+	if (
+		!Number.isSafeInteger(timeoutMs) ||
+		(timeoutMs as number) < 1 ||
+		(timeoutMs as number) > MAX_TIMEOUT_MS
+	) {
+		return "timeoutMs";
+	}
+	if (!Number.isSafeInteger(maxResponseBytes) || (maxResponseBytes as number) < 1) {
+		return "maxResponseBytes";
+	}
+	if (egress !== undefined && egress !== "direct") return "egress";
+	return undefined;
+}
+
 /** The policy `options` gives, by exactly one of `config` and `policy`; a `TypeError` otherwise. */
 function policyFrom(options: OutboundFetchOptions): OutboundPolicy {
 	const { config, policy } = options as { config?: unknown; policy?: unknown };
@@ -336,6 +368,12 @@ function policyFrom(options: OutboundFetchOptions): OutboundPolicy {
 	if (policy === undefined) return outboundPolicyOf(config);
 	if (typeof policy !== "object" || policy === null) {
 		throw new TypeError("createOutboundFetch: policy must be an OutboundPolicy");
+	}
+	const broken = brokenPolicyMember(policy as Readonly<Record<string, unknown>>);
+	if (broken !== undefined) {
+		throw new TypeError(
+			`createOutboundFetch: policy.${broken} is not as outboundPolicyOf answers it`,
+		);
 	}
 	return policy as OutboundPolicy;
 }

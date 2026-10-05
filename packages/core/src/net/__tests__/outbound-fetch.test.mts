@@ -968,6 +968,33 @@ describe("a policy in place of the configuration", () => {
 		);
 	});
 
+	it("refuses a policy that does not keep the reader's shape with a TypeError, so no limit is lifted", () => {
+		const base = outboundPolicyOf({});
+		for (const broken of [
+			{ maxResponseBytes: Number.NaN },
+			{ maxResponseBytes: 0 },
+			{ maxResponseBytes: 1.5 },
+			{ maxResponseBytes: undefined },
+			{ timeoutMs: Number.NaN },
+			{ timeoutMs: 0 },
+			{ timeoutMs: 2_147_483_648 },
+			{ allowedHosts: undefined },
+			{ deniedHosts: ["bad.example"] },
+			{ internalHosts: [{ host: "", suffix: false }] },
+			{ egress: "proxy" },
+		]) {
+			expect(
+				() =>
+					createOutboundFetch({
+						policy: { ...base, ...broken } as never,
+						source: "registration",
+						maxResponseBytes: 4,
+					}),
+				JSON.stringify(broken),
+			).toThrow(TypeError);
+		}
+	});
+
 	it("refuses a policy that is not an object with a TypeError", () => {
 		for (const policy of [null, "core.outbound", 5]) {
 			expect(() =>
