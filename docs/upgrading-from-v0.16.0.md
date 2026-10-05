@@ -200,6 +200,16 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   slashless `iss`, which is what discovery already advertised.
 - **Unknown keys.** A key under `oauth.clientIdMetadataDocuments` that the
   oauth package's `reference.conf` does not list refuses the boot (#1151).
+- **BREAKING: an `oauth.authorize.acrValues` key is one value an
+  `acr_values` request can name (#728).** `/authorize` reads `acr_values` as
+  space-delimited RFC 6749 §3.3 scope-tokens, so a key is one or more
+  printable ASCII characters other than the space, `"` and `\`. A key with
+  any other character — whitespace, a quote, a backslash, a non-ASCII
+  letter — was advertised in `acr_values_supported` and could never be
+  requested; it now refuses the boot (`config-validation-failed` at
+  `oauth.authorize.acrValues.<key>`), naming the key, every such key in one
+  boot. Rename the entry to a value a client can send, such as a URN
+  (`urn:example:acr:mfa`), and tell the relying parties that asked for it.
 - **BREAKING: `oauth {}` refuses a key it does not declare, at every level
   (#728).** Wherever the oauth module is installed (the standalone template
   installs it), a key under `oauth` that its schema does not declare — a
@@ -227,8 +237,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
   too (#1329): an empty `mfa.factors` block an older configuration leaves
   behind (the TOTP factor's old path, its variables unset) is such a key —
-  delete it. So does `webauthn`, at every level (#1336), and so does
-  `federation-grants`, at every level: the keys under
+  delete it. So do `webauthn`, at every level (#1336), `session`, at every
+  level (#728), and `federation-grants`, at every level: the keys under
   `federation-grants.connections` are the connections you name, and a
   connection's `authorizationParams` the upstream's parameters, so those stay
   open. The keys under `audit-sink` are the
@@ -564,6 +574,17 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **BREAKING: `sessionModule` reads the federations from the
+  `federationSettings` slot, not `config` (#728).** It requires core's
+  `federationSettings`, which core fills from `core.federations` in every
+  composition, and no longer requires `config` or declares a `configSchema`:
+  a composition booted with `createApp` sees no change. The federation routes
+  take each enabled federation's callback URL, and whether an installed one's
+  upstream `amr` counts, from the slot, and the origins an account link may
+  be started from out of the module's own section
+  (`session.csrf.trustedOrigins`). A deps object handed to the module's
+  factories by hand carries `federationSettings` (in a test,
+  `createTestFederationSettings()`) instead of `config`.
 - **BREAKING: an enabled TOTP factor requires the `oauthTokenSettings`
   slot (#1329).** `mfaTotpFactorModule` takes the deployment's issuer, which
   an unset `mfa-totp-factor.issuer` defaults to the host of, from the slot
@@ -572,6 +593,12 @@ modules fills them.
   is on provides the slot itself, or the boot is refused
   (`missing-required-component`, naming `oauthTokenSettings`). A factor
   switched off by `mfa-totp-factor.enabled = false` requires nothing.
+- **BREAKING: an enabled `authorization_code` grant with `subjectRevocation`
+  wired requires `userSessionStore`.** Without one the boot is refused
+  (`contribute-factory-failed`, naming both slots): wire a
+  `userSessionStore` (core's `memorySessionStoresModule` or
+  `redisSessionStoresModule`, which fill both), or remove
+  `subjectRevocation`. The standalone template wires both.
 - **The federation projections.** A name-keyed contribution factory (a
   `grants` or `mfaFactors` entry, say) that reads `federationProviders` or
   `federationRedirectPolicyResolver` while it runs refuses the boot
@@ -615,6 +642,17 @@ modules fills them.
   deps object for their factories carries. `createDeviceVerificationHandler`'s
   `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
   `revokedBefore` (#717).
+- **A switched-off grant or second factor is no override target (#728).** A
+  `grants` or `mfaFactors` factory may answer `null` — switched off by its
+  module's settings while the module is on; the entry stays claimed, and an
+  `overrides.grants` or `overrides.mfaFactors` entry for it refuses the boot
+  before the overriding module's factories run (`override-target-missing`, naming the kind, the
+  name and the overriding module; the message says the entry is switched
+  off), so an override never switches on what its owner switched off. Switch
+  the entry on at its owner's setting and keep the override, or drop the
+  override. A module that is itself off contributes nothing, so an override
+  of its entries is refused as a missing target. An override may still
+  answer `null`, switching off the entry it replaces.
 - **BREAKING: an enabled `dpopModule` requires `oauthTokenSettings`, and
   no longer reads the configuration (#728).** It takes the issuer every
   proof's `htu` is checked against from the slot alone, and no longer falls
@@ -705,6 +743,26 @@ modules fills them.
   false }` alone, without the package's `reference.conf`, is refused; delete
   the section or layer the reference. Parsed directly, an absent section is
   `undefined`.
+- **BREAKING: the session grant is one module, `oauthSessionGrantModule`,
+  switched by its own section (#728).** List it as it is: it reads
+  `oauth-session.enabled` from the configuration boot parses, and an absent
+  section or key is off. `oauthSessionModule({ config })` is deprecated: it
+  ignores its argument and returns that module, so a composition calling it
+  still boots. The refusal of a module built from a configuration that
+  disagrees with the booted one about `oauth-session.enabled` is gone. The
+  section is strict and its schema, `oauthSessionConfigSchema`, fills no
+  default: the package's `config/reference.conf` ships `enabled = false`.
+- **BREAKING: an enabled session grant requires `oauthTokenSettings`, and no
+  longer reads the configuration (#728).** It takes the access-token
+  lifetime it mints and `requireEmailVerified` from the slot alone, and no
+  longer reads `oauth.accessToken` or `oauth.requireEmailVerified` from
+  `config`. With `oauthModule` installed nothing changes. A composition with
+  the grant enabled and without `oauthModule` puts an `oauthTokenSettings`
+  value in `bootstrapComponents`, or the boot is refused for the missing
+  component. In code: `createSessionGrant` requires `oauthTokenSettings` and
+  throws a `RangeError` naming it when it is missing or breaks the slot's
+  contract; `SessionGrantDeps` no longer has `config` (in a test,
+  `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
 - **BREAKING: enabled federation grants require `oauthTokenSettings`, and
   `federationGrantsModule` no longer reads the configuration (#728).** It
   takes the issuer every route, `connect_uri` and callback check is built on
@@ -745,6 +803,29 @@ modules fills them.
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
+- **A manifest's `replicaSafety` may be a function of the module's section**
+  (#1371, #728). A declaration written as `{ unsafe: true, reason }` is read
+  as before. Code that reads the field off a `Module` (`module.replicaSafety.reason`)
+  no longer compiles, since the field may now be a function, and the exported
+  `ReplicaSafetyModuleRef.replicaSafety` widened the same way: ask
+  `replicaUnsafeReason(module, section)` instead, which answers both forms
+  and throws for a declaration made from the section when no section is
+  given. A composition root that runs `checkReplicaSafety` itself hands it
+  the parsed sections (`sections`) once any module declares from its section.
+- **The session package's `sessionStoreModule` declares its replica safety
+  from its own section** (#1381, #728): replica-unsafe when
+  `session-store.storage.type = "memory"`, nothing for any other type. So the
+  replica-safety guard refuses it by name under `core.deployment.mode = "multi"`,
+  warns when the mode is unset, and says nothing under `"single"` — what
+  `sessionStoreModuleFor(config)` declared from `config`. List
+  `sessionStoreModule` in place of `sessionStoreModuleFor(config)`; boot
+  answers it for the section it parses. `replicaUnsafeReason(sessionStoreModule)`
+  with no section, and `checkReplicaSafety` without its `sections`, now throw
+  a `TypeError` naming `session-store`: pass the parsed section. A
+  composition that already listed `sessionStoreModule` (which declared
+  nothing) now sees memory storage under `multi` refused while manifests are
+  validated, as `replica-unsafe-adapter`, where the route factory used to
+  refuse it (`contribute-factory-failed`); and an unset mode now warns.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name

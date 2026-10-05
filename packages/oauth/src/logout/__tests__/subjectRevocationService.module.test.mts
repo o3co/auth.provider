@@ -340,8 +340,11 @@ describe("subjectRevocationServiceModule", () => {
 			const kept: number[] = [];
 			const revocation: SubjectRevocation = {
 				kind: "memory",
+				// Each distinct lifetime once: a revocation stamps the boundary
+				// twice, and both stamps must last the same horizon.
 				revokeBefore: async (_subject, before, expiresAt) => {
-					kept.push(expiresAt.getTime() - before.getTime());
+					const ttl = expiresAt.getTime() - before.getTime();
+					if (!kept.includes(ttl)) kept.push(ttl);
 				},
 				revokedBefore: async () => null,
 			};

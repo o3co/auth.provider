@@ -57,7 +57,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
-import { oauthSessionModule } from "#/oauthSession.mjs";
+import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
@@ -1213,6 +1213,27 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 	});
 });
 
+describe("oauthModule — the session-close notifier", () => {
+	it("contributes one notifier, built over its client registry, key store and issuer", async () => {
+		const factories = oauthEndpointsModule.contributes?.sessionCloseNotifiers;
+		expect(Object.keys(factories ?? {})).toEqual(["oauth"]);
+		const notifier = await factories?.oauth?.({
+			keyStore: createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx"),
+			clientRepository: { findById: async () => null },
+			section: {
+				jwt: { issuer: "https://auth.test" },
+				accessToken: { defaultExpiresIn: 3600, maxExpiresIn: 3600 },
+				refreshToken: { expiresIn: 86_400 },
+			},
+		} as never);
+		expect(typeof notifier?.notify).toBe("function");
+		// An unregistered client is settled, nothing sent.
+		await expect(
+			notifier?.notify({ sid: "s", sub: "u", clientId: "gone", cause: "rp_logout" }),
+		).resolves.toBeUndefined();
+	});
+});
+
 describe("oauthModule — a consumer of session admission", () => {
 	it("requires sessionRequirementResolver, the synthetic key every consumer of admission takes", () => {
 		const module = oauthEndpointsModule;
@@ -1255,7 +1276,7 @@ describe("oauthModule — a consumer of session admission", () => {
 			"oauth.code_exchange": { grade: "use" },
 			"oauth.refresh": { grade: "use" },
 		});
-		expect(oauthSessionModule({ config }).contributes?.admissionActions).toEqual({
+		expect(oauthSessionGrantModule.contributes?.admissionActions).toEqual({
 			"oauth.session_grant": { grade: "use" },
 		});
 	});
@@ -1265,7 +1286,8 @@ describe("oauthModule — a consumer of session admission", () => {
 		expect(oauthAuthorizationModule({ config }).contributes?.admissionActions).toEqual({
 			"oauth.code_exchange": { grade: "use" },
 		});
-		expect(oauthSessionModule({ config }).contributes?.admissionActions).toBeUndefined();
+		// The session grant's module registers nothing at all while its section is off.
+		expect(oauthSessionGrantModule.section?.isEnabled?.(config["oauth-session"])).toBe(false);
 	});
 });
 

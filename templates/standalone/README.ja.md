@@ -310,7 +310,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED` | `false` | client credentials グラントタイプを有効化 |
 | `OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED` | `false` | jwt-bearer グラントタイプ（RFC 7523）を有効化 |
 
-スイッチはそれぞれモジュールのキー — `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — で、テンプレートはモジュールを選ぶために boot の前に自分のファイルと環境変数からこれを読む。旧名の `OAUTH_GRANTS_<GRANT>_ENABLED` は、単独で、または新名と違う値で設定されていると boot を拒否し、同じ値なら boot する。
+スイッチはそれぞれモジュールのキー — `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — である。session グラントのモジュールは常に読み込まれ、自分のスイッチを boot で読む。ほかのスイッチは、テンプレートがモジュールを選ぶために boot の前に自分のファイルと環境変数から読む。旧名の `OAUTH_GRANTS_<GRANT>_ENABLED` は、単独で、または新名と違う値で設定されていると boot を拒否し、同じ値なら boot する。
 
 ### Session
 
@@ -627,7 +627,7 @@ worker:
 
 どのモジュールをどの順序で合成するかについては、[`src/buildModules.mts`](src/buildModules.mts) が唯一の信頼できる情報源である — そのコピーではなく、それ自体を読むこと。boot planner は `requires` / `provides` をトポロジカルに解決するが、ルートとミドルウェアは、モジュールが `before` / `after` を宣言しない限りリストの順にマウントする — したがって、何かをマウントするモジュールでは位置が意味を持つ。リストを編集するときに守るべきルールは次のとおり:
 
-1. **`sessionStoreModuleFor(config)` は先頭のままにする。** これは `express-session` の middleware をマウントし、`before` / `after` を宣言しないため、`req.session` を読むすべてのルートより前に来るのは、リスト内の位置のおかげである。`config` から組み立てるのは、`session-store.storage.type = "memory"` が自らを replica-unsafe と宣言するようにするためである。
+1. **`sessionStoreModule` は先頭のままにする。** これは `express-session` の middleware をマウントし、`before` / `after` を宣言しないため、`req.session` を読むすべてのルートより前に来るのは、リスト内の位置のおかげである。replica safety は自分のセクションから宣言するので、`session-store.storage.type = "memory"` は replica-unsafe となり、`core.deployment.mode = "multi"` で拒否される。
 2. **`/oauth` の下では順序は関係しない。** `federationGrantsModules`（フェデレーショングラントが有効な間）、`oauthModule`、独自のモジュールは、いずれも `/oauth` の下にルートをマウントしうる。`oauthModule` のルーターが body をパースするのは自身のルートだけなので、各モジュールへのリクエストは、リストの順に関係なくそのモジュール自身の parser に届く — ただし、`/oauth` 配下のどのモジュールも自分の body を自分でパースし、その parser を自分のパスちょうどに限定している場合に限る（同梱のモジュールはそうしている）。限定はルートとして行う（`router.all(path, parser)` か、ルート自身のハンドラ列）。`router.use(path, parser)` は `path` の下のすべてのパスにもマッチする。フェデレーショングラントのブラウザ側の半分は、自身の `after` によってセッション middleware の後ろに自らを並べる。
 3. **ストアスロット 1 つにつきモジュール 1 つ。** 各アダプタースイッチ — `adapters.federationTokenStore`、`adapters.userSessionStores`、`adapters.rateLimiter`、`adapters.codeRepository`、`adapters.accessTokenDenylist`、`adapters.replaySeenSet`、`adapters.consentStore`、フェデレーショングラントの 2 つのストアスイッチ、MFA の 2 つのストアスイッチ — は、memory / Redis の組（MFA の要素については Store も）から 1 つを選ぶ。両者は同じスロットを提供するため、両方を配線すると起動時のスロット衝突になる。`adapters.consentStore = "none"` はどちらも配線せず、フェデレーショングラントのストアは機能が有効な間だけ、MFA のストアは `MFA_MODE` が MFA を組み込む間だけ配線される。
 4. **共有 Redis 接続は、最初の Redis バックエンドのモジュールとともに加わる。** `standaloneRedisClientsModule` は、ここにあるすべての Redis アダプターが使う 1 本の ioredis 接続を自身のセクション（`redis-clients`）から開き、合成されたモジュールがそれを必要とするときには必ず追加される。同梱の合成では refresh token family ストアが Redis 上にあるため、デプロイには常にこれがある。in-memory の family ストアはテスト用の override（`overrides.refreshTokenFamilyModules`）である。
@@ -777,7 +777,7 @@ probe は接続を開いた builder が登録するため、リストはこの�
 +import { myCustomModule } from "./my-custom-module.mjs";
  …
  	return [
- 		sessionStoreModuleFor(config),
+ 		sessionStoreModule,
  		…
  		...(federationGrantsEnabled || mfaInstalled ? [subjectRevocationServiceModule] : []),
 +		myCustomModule,

@@ -273,6 +273,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+readAcrTable\b/,
 	},
 	{
+		concept:
+			"an oauth.authorize.acrValues key an acr_values request can name, and the one wording of its refusal",
+		home: "packages/core/src/config/acr-values.mts",
+		definition: /(?:function|const)\s+checkAcrValueName\b/,
+	},
+	{
 		concept: "D15's selection of an acr over what a session vouches for",
 		home: "packages/core/src/session-admission/acr.mts",
 		definition: /(?:function|const)\s+selectAcr\b/,

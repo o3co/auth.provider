@@ -22,6 +22,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { replicaUnsafeReason } from "#/boot/replica-safety.mjs";
 import { memoryFederationGrantStoreModule } from "#/federation-grants/module.mjs";
 
 /** The module's own section, `core-federation-grant-store-memory`, parsed with its schema. */
@@ -33,8 +34,8 @@ const parse = (section: unknown): { tombstoneRetention?: number } | undefined =>
 
 describe("memoryFederationGrantStoreModule", () => {
 	it("declares itself unsafe to run on more than one replica, and says what forks", () => {
-		expect(memoryFederationGrantStoreModule.replicaSafety?.unsafe).toBe(true);
-		expect(memoryFederationGrantStoreModule.replicaSafety?.reason).toMatch(/fork per replica/);
+		expect(memoryFederationGrantStoreModule.replicaSafety).toMatchObject({ unsafe: true });
+		expect(replicaUnsafeReason(memoryFederationGrantStoreModule)).toMatch(/fork per replica/);
 	});
 
 	it("reads the retention an operator wrote at its own section, in seconds", () => {

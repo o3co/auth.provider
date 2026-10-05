@@ -32,6 +32,7 @@ import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
 	RateLimitBudgetResolver,
+	SessionCloseNotifierResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
@@ -46,6 +47,11 @@ import {
 	sealRegisteredReach,
 	secondFactorAuthorities,
 } from "../session-admission/requirement.mjs";
+import {
+	SESSION_LIFECYCLE_MODULE,
+	SESSION_LIFECYCLE_NOTIFIER_MISSING,
+} from "../session-lifecycle/module.mjs";
+import type { SessionCloseNotifier } from "../session-lifecycle/notifier.mjs";
 import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { buildDispatchedFederation } from "./federation-entries.mjs";
@@ -235,8 +241,9 @@ function makeFederationRedirectPolicyResolver(
  * Instantiate a stable read-side `MfaFactorResolver` over the `mfaFactors`
  * collector. A kind whose factory answered `null` — the factor switched off
  * by its configuration — is registered in the collector, so a second
- * contribution of it is still a duplicate, and is absent from what the
- * resolver answers. Reads through at call time, like the other resolvers.
+ * contribution of it is still a duplicate and an override of it is refused,
+ * and is absent from what the resolver answers. Reads through at call time,
+ * like the other resolvers.
  * @internal
  */
 function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>): MfaFactorResolver {
@@ -247,6 +254,20 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
 				if (factor !== null) yield [kind, factor] as const;
 			}
 		},
+	};
+}
+
+/**
+ * The read side of the `sessionCloseNotifiers` collector: the one notifier
+ * registered, read through at call time. At most one is: a second refuses
+ * boot at stage 1 (`one-session-close-notifier`).
+ * @internal
+ */
+function makeSessionCloseNotifierResolver(
+	collector: NameKeyedCollector<SessionCloseNotifier>,
+): SessionCloseNotifierResolver {
+	return {
+		get: () => collector.entries().next().value?.[1],
 	};
 }
 
@@ -386,6 +407,7 @@ export function prepareSyntheticProjections(
 		sessionRequirements,
 		rateLimitBudgets,
 		admissionActions,
+		sessionCloseNotifiers,
 	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () => makeGrantHandlerResolver(grants));
@@ -417,6 +439,11 @@ export function prepareSyntheticProjections(
 	}
 	if (rateLimitBudgets !== undefined) {
 		inject("rateLimitBudgetResolver", () => makeRateLimitBudgetResolver(rateLimitBudgets));
+	}
+	if (sessionCloseNotifiers !== undefined) {
+		inject("sessionCloseNotifierResolver", () =>
+			makeSessionCloseNotifierResolver(sessionCloseNotifiers),
+		);
 	}
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
@@ -529,6 +556,19 @@ function checkNameKeyedValue(
 		});
 		return value;
 	}
+	if (kind === "sessionCloseNotifiers") {
+		// Never `null`: a notifier is switched off by not installing its module.
+		const notify =
+			typeof value === "object" && value !== null
+				? (value as { notify?: unknown }).notify
+				: undefined;
+		if (typeof notify !== "function") {
+			throw new RangeError(
+				`sessionCloseNotifiers "${name}": the factory must answer a notifier, an object whose notify is a function`,
+			);
+		}
+		return value;
+	}
 	if (kind === "rateLimitBudgets") {
 		// The prefix itself was held at stage 1 (`contribution-shapes`).
 		if (value === null) return value;
@@ -564,6 +604,20 @@ function checkNameKeyedValue(
 	}
 	return value;
 }
+
+/**
+ * The name-keyed kinds whose `null` switches an entry off, each with what the
+ * refusal of an override of a switched-off entry says: the pre-scan refuses
+ * one as `override-target-missing`, so an override never switches on what its
+ * owner's settings switched off. `rateLimitBudgets` takes `null` too and is
+ * not here: stage 1 refuses every override of a prefix
+ * (`contribution-kind-guarded`), so none reaches the pre-scan.
+ * @internal
+ */
+const SWITCHED_OFF_OVERRIDE_TARGETS: ReadonlyMap<string, string> = new Map([
+	["grants", "the grant is switched off, so there is no handler to override"],
+	["mfaFactors", "the factor is switched off, so there is no factor to override"],
+]);
 
 /** The wired limiter's kind and the outage policy the guard applies for it. */
 function limiterInForce(
@@ -1039,6 +1093,46 @@ async function checkSessionRequirements(
  * via `declare module` augmentation) are handled too.
  * @internal
  */
+/**
+ * The rule that a composition serving relying parties (the `clientRepository`
+ * slot filled) contributes a session-close notifier, judged once every
+ * name-keyed contribution has registered, and only where core's session
+ * lifecycle module built the `sessionLifecycle` slot: a value the host filled
+ * it with is the host's. Refused as that module's provider failing, with its
+ * text. At most one notifier is stage 1's rule (`one-session-close-notifier`).
+ * @internal
+ */
+async function checkSessionCloseNotifier(
+	material: ComponentWorld,
+	components: Record<string, unknown>,
+	collector: NameKeyedCollector<SessionCloseNotifier> | undefined,
+): Promise<void> {
+	const built =
+		!material.externalKeys.has("sessionLifecycle") &&
+		material.plan.providerActivations.some(
+			(activation) =>
+				activation.module === SESSION_LIFECYCLE_MODULE &&
+				activation.componentKey === "sessionLifecycle",
+		);
+	const contributed = collector !== undefined && !collector.entries().next().done;
+	if (!built || contributed || components.clientRepository === undefined) return;
+	const thrownValue = new Error(SESSION_LIFECYCLE_NOTIFIER_MISSING);
+	const cleanupErrors = await runCleanupsReverse(material.cleanups);
+	throw new BootError({
+		message: `Module "${SESSION_LIFECYCLE_MODULE}" provider factory for "sessionLifecycle" failed: ${failureSummary(thrownValue)}`,
+		reason: "provides-factory-failed",
+		stage: "applyContributions",
+		details: {
+			reason: "provides-factory-failed",
+			module: SESSION_LIFECYCLE_MODULE,
+			componentKey: "sessionLifecycle",
+			originalError: thrownValue,
+			...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+		},
+		cause: thrownValue,
+	});
+}
+
 function collectorFor(
 	contributionKinds: ContributionCollectorMap,
 	kind: string,
@@ -1219,24 +1313,15 @@ export async function applyContributions(
 			if (collector === undefined) continue;
 			const name = entry.key as string;
 			const target = collector.get(name);
-			if (target === undefined) {
+			// A switched-off entry has nothing to replace: an override of it would
+			// switch on what its owner's settings switched off.
+			const switchedOff =
+				target === null ? SWITCHED_OFF_OVERRIDE_TARGETS.get(entry.kind) : undefined;
+			if (target === undefined || switchedOff !== undefined) {
 				throw new BootError({
-					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".`,
-					reason: "override-target-missing",
-					stage: "applyContributions",
-					details: {
-						reason: "override-target-missing",
-						kind: entry.kind,
-						name,
-						overridingModule: moduleName,
-					},
-				});
-			}
-			// A switched-off grant has no handler to replace: an override of it
-			// would switch on what its owner's settings switched off.
-			if (entry.kind === "grants" && target === null) {
-				throw new BootError({
-					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}". Its contributor answered null: the grant is switched off, so there is no handler to override.`,
+					message:
+						`Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".` +
+						(switchedOff === undefined ? "" : ` Its contributor answered null: ${switchedOff}.`),
 					reason: "override-target-missing",
 					stage: "applyContributions",
 					details: {
@@ -1354,9 +1439,10 @@ export async function applyContributions(
 	openFederationProjections(components);
 
 	// ---------------------------------------------------------------------------
-	// Step 2b: the session-requirement checks and the boot line, once every
-	// name-keyed contribution has registered and before a list-shaped factory
-	// reads a requirement's reach.
+	// Step 2b: the session-requirement checks (`checkSessionRequirements`), the
+	// session-close notifier's rule (`checkSessionCloseNotifier`) and the boot
+	// lines, once every name-keyed contribution has registered and before a
+	// list-shaped factory reads a requirement's reach.
 	// ---------------------------------------------------------------------------
 
 	await checkSessionRequirements(
@@ -1365,6 +1451,7 @@ export async function applyContributions(
 		contributionKinds.sessionRequirements,
 		contributionKinds.admissionActions,
 	);
+	await checkSessionCloseNotifier(material, components, contributionKinds.sessionCloseNotifiers);
 	logRateLimitBudgets(material, components, contributionKinds.rateLimitBudgets);
 	logAdmissionActions(material, components, contributionKinds.admissionActions);
 

@@ -26,14 +26,21 @@ import type {
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { codeChallenge } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { codeChallenge, type FederationSettings } from "@o3co/auth-provider-core";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createFederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
+import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
+
+/** The settings of a composition whose `core.federations` declares none. */
+const NO_FEDERATIONS = createTestFederationSettings();
+
+/** The `form_post` transaction cookie these routers issue, named after the package's default session cookie. */
+const TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookieName("auth.session");
 
 // ---------------------------------------------------------------------------
 // Session shim helpers
@@ -281,7 +288,8 @@ function buildStatelessApp({
 	);
 	app.use(
 		createRouter(express, {
-			config: {} as never,
+			federationSettings: NO_FEDERATIONS,
+			federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
@@ -321,7 +329,8 @@ function buildCallbackApp({
 	saveInterceptor,
 	sessionSeed,
 	auditSink,
-	config,
+	federationSettings,
+	linkTrustedOrigins,
 	logger,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
@@ -338,8 +347,10 @@ function buildCallbackApp({
 	/** Extra session fields planted next to `federation`, such as an authenticated `sid`. */
 	sessionSeed?: Record<string, unknown>;
 	auditSink?: AuditSink;
-	/** A partial `AppConfig`; absent is `{}`, as most tests need none. */
-	config?: Record<string, unknown>;
+	/** Core's view of `core.federations`; absent declares none, as most tests need. */
+	federationSettings?: FederationSettings;
+	/** `session.csrf.trustedOrigins`; absent trusts no other origin. */
+	linkTrustedOrigins?: readonly string[];
 	logger?: Logger;
 }): { app: express.Express; store: SessionStore } {
 	const store: SessionStore = new Map();
@@ -356,7 +367,9 @@ function buildCallbackApp({
 	);
 	app.use(
 		createRouter(express, {
-			config: (config ?? {}) as never,
+			federationSettings: federationSettings ?? NO_FEDERATIONS,
+			...(linkTrustedOrigins ? { linkTrustedOrigins } : {}),
+			federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
@@ -668,7 +681,7 @@ describe("account linking across federations", () => {
 					sessionSeed: seed,
 					userRepository: linkableRepo(),
 					userSessionStore: liveStore(),
-					...(trustedOrigins ? { config: { session: { csrf: { trustedOrigins } } } } : {}),
+					...(trustedOrigins ? { linkTrustedOrigins: trustedOrigins } : {}),
 				}).app;
 			const start = async (
 				app: express.Express,
@@ -1759,7 +1772,8 @@ describe("Federation routes", () => {
 		it("throws if userSessionStore is missing", () => {
 			expect(() =>
 				createRouter(express, {
-					config: {} as never,
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1775,7 +1789,8 @@ describe("Federation routes", () => {
 		it("throws if sessionFederationIndex is missing", () => {
 			expect(() =>
 				createRouter(express, {
-					config: {} as never,
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1791,7 +1806,8 @@ describe("Federation routes", () => {
 		it("throws if federationTokenStore is missing", () => {
 			expect(() =>
 				createRouter(express, {
-					config: {} as never,
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1807,7 +1823,8 @@ describe("Federation routes", () => {
 		it("throws if userRepository is missing", () => {
 			expect(() =>
 				createRouter(express, {
-					config: {} as never,
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1823,7 +1840,8 @@ describe("Federation routes", () => {
 		it("throws if requirements is missing", () => {
 			expect(() =>
 				createRouter(express, {
-					config: {} as never,
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 					requirements: undefined as never,
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1840,7 +1858,8 @@ describe("Federation routes", () => {
 			const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
 			expect(() =>
 				createRouter(express, {
-					config: {} as never,
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 					requirements: forged as never,
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1858,7 +1877,8 @@ describe("Federation routes", () => {
 		it("throws if an action the link flow admits is not registered on the resolver, naming it: a build error, never a 500 per link", () => {
 			expect(() =>
 				createRouter(express, {
-					config: {} as never,
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 					requirements: resolverForTests([], {
 						actions: { "session.link": { grade: "credential_change" } },
 					}),
@@ -1876,7 +1896,8 @@ describe("Federation routes", () => {
 		it("throws if providerCallbackUrls is missing", () => {
 			expect(() =>
 				createRouter(express, {
-					config: {} as never,
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
@@ -1887,6 +1908,30 @@ describe("Federation routes", () => {
 					providerCallbackUrls: undefined as never,
 				}),
 			).toThrow("federation routes require providerCallbackUrls");
+		});
+
+		it.each([
+			["federationSettings", "federation routes require federationSettings"],
+			[
+				"federationTransactionCookieName",
+				"federation routes require federationTransactionCookieName",
+			],
+		])("throws if %s is missing", (missing, message) => {
+			expect(() =>
+				createRouter(express, {
+					federationSettings: NO_FEDERATIONS,
+					federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
+					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
+					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
+					userRepository: makeUserRepository(),
+					userSessionStore: makeUserSessionStore(),
+					sessionFederationIndex: makeSessionFederationIndex(),
+					federationTokenStore: makeFederationTokenStore(),
+					providerCallbackUrls: new Map(),
+					[missing]: undefined,
+				} as never),
+			).toThrow(message);
 		});
 	});
 
@@ -3251,7 +3296,7 @@ describe("amr on federated sessions", () => {
 	/** One federated login through the callback: what it handed `UserSessionStore.create`. */
 	const loginWith = async (
 		upstream: readonly string[] | undefined,
-		config: Record<string, unknown> = {},
+		federationSettings: FederationSettings = NO_FEDERATIONS,
 	): Promise<{ amr?: unknown; authentication?: unknown }> => {
 		const provider = makeFakeProvider({
 			exchangeCode: vi.fn(async () => ({
@@ -3268,7 +3313,7 @@ describe("amr on federated sessions", () => {
 			federation: { name: "test", state: "s1", codeVerifier: "v1" },
 			userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
 			userSessionStore: uss,
-			config,
+			federationSettings,
 		});
 		const res = await (await plantAndGetAgent(app)).get(
 			"/oauth/federation/test/callback?state=s1&code=c1",
@@ -3291,10 +3336,11 @@ describe("amr on federated sessions", () => {
 		});
 	});
 
-	it("records a trusted IdP's amr beside fed, where it counts (core.federations.<name>.trustUpstreamAmr)", async () => {
-		const created = await loginWith(["hwk", "mfa"], {
-			core: { federations: { test: { enabled: true, type: "test", trustUpstreamAmr: true } } },
-		});
+	it("records a trusted IdP's amr beside fed, where it counts (federationSettings' trustsUpstreamAmr)", async () => {
+		const created = await loginWith(
+			["hwk", "mfa"],
+			createTestFederationSettings({ test: { type: "test", trustsUpstreamAmr: true } }),
+		);
 		expect(created.amr).toEqual(["hwk", "mfa", "fed"]);
 		expect(created.authentication).toStrictEqual({
 			primary: "fed",
@@ -3305,10 +3351,11 @@ describe("amr on federated sessions", () => {
 	});
 
 	it("records fed alone when the IdP asserted nothing, trusted or not", async () => {
-		for (const trustUpstreamAmr of [true, false]) {
-			const created = await loginWith(undefined, {
-				core: { federations: { test: { enabled: true, type: "test", trustUpstreamAmr } } },
-			});
+		for (const trustsUpstreamAmr of [true, false]) {
+			const created = await loginWith(
+				undefined,
+				createTestFederationSettings({ test: { type: "test", trustsUpstreamAmr } }),
+			);
 			expect(created.amr).toEqual(["fed"]);
 			expect(created.authentication).toStrictEqual({
 				primary: "fed",
@@ -3346,14 +3393,10 @@ describe("amr on federated sessions", () => {
 				federation: { name, state: "s1", codeVerifier: "v1" },
 				userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
 				userSessionStore: uss,
-				config: {
-					core: {
-						federations: {
-							trusted: { enabled: true, type: "test", trustUpstreamAmr: true },
-							untrusted: { enabled: true, type: "test" },
-						},
-					},
-				},
+				federationSettings: createTestFederationSettings({
+					trusted: { type: "test", trustsUpstreamAmr: true },
+					untrusted: { type: "test" },
+				}),
 			});
 			const res = await (await plantAndGetAgent(app)).get(
 				`/oauth/federation/${name}/callback?state=s1&code=c1`,
@@ -3374,31 +3417,22 @@ describe("amr on federated sessions", () => {
 		expect(untrusted.authentication?.upstreamAmr).toEqual(["hwk", "mfa"]);
 	});
 
-	it("keeps an IdP's amr apart for a federation whose section is not enabled, as the acr drop reads it", async () => {
-		// One reading for the split and the drop: a disabled section's switch
-		// trusts nothing, whichever of the two asks.
-		const created = await loginWith(["hwk", "mfa"], {
-			core: { federations: { test: { enabled: false, type: "test", trustUpstreamAmr: true } } },
-		});
-		expect(created.amr).toEqual(["fed"]);
-		expect(created.authentication).toStrictEqual({
-			primary: "fed",
-			federation: "test",
-			upstreamAmr: ["hwk", "mfa"],
-			mfaAt: undefined,
-		});
-	});
-
-	it("refuses to build the routes when a federation's trustUpstreamAmr is given but unusable", () => {
-		expect(() =>
-			buildCallbackApp({
-				providers: new Map([["test", makeFakeProvider()]]),
-				federation: { name: "test", state: "s1", codeVerifier: "v1" },
-				config: {
-					core: { federations: { test: { enabled: true, type: "test", trustUpstreamAmr: "yes" } } },
-				},
-			}),
-		).toThrow(new RangeError("core.federations.test.trustUpstreamAmr must be true or false"));
+	it("keeps an IdP's amr apart for a federation whose settings do not say it counts", async () => {
+		// Core's reading decides it: a disabled entry's switch counts for
+		// nothing, so its settings say false, and so does a name they do not hold.
+		for (const settings of [
+			createTestFederationSettings({ test: { type: "test", enabled: false } }),
+			createTestFederationSettings({ other: { type: "test", trustsUpstreamAmr: true } }),
+		]) {
+			const created = await loginWith(["hwk", "mfa"], settings);
+			expect(created.amr).toEqual(["fed"]);
+			expect(created.authentication).toStrictEqual({
+				primary: "fed",
+				federation: "test",
+				upstreamAmr: ["hwk", "mfa"],
+				mfaAt: undefined,
+			});
+		}
 	});
 });
 
@@ -3578,7 +3612,8 @@ describe("the federation login callback answers a store that cannot answer as an
 		});
 		app.use(
 			createRouter(express, {
-				config: {} as never,
+				federationSettings: NO_FEDERATIONS,
+				federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]),
@@ -3609,7 +3644,8 @@ describe("a federation route's composition fault is a 500, logged once at error"
 		const app = makeSessionApp(new Map());
 		app.use(
 			createRouter(express, {
-				config: {} as never,
+				federationSettings: NO_FEDERATIONS,
+				federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver:
@@ -3758,7 +3794,8 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 		const app = makeSessionApp(store);
 		app.use(
 			createRouter(express, {
-				config: {} as never,
+				federationSettings: NO_FEDERATIONS,
+				federationTransactionCookieName: TRANSACTION_COOKIE_NAME,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver: new Map([

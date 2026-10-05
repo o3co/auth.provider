@@ -31,7 +31,7 @@
  */
 
 import type { FederationProvider, Logger } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -167,7 +167,8 @@ function buildApp({
 	app.use(
 		createRouter(express, {
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
-			config: { "session-store": { name: "harness.session" } } as never,
+			federationSettings: createTestFederationSettings(),
+			federationTransactionCookieName: COOKIE_NAME,
 			federationProviders: new Map<string, FederationProvider>([
 				["apple", makeFormPostProvider(exchangeCode)],
 				["query-idp", makeQueryProvider()],

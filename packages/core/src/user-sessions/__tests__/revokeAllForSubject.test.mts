@@ -71,7 +71,9 @@ describe("revokeAllForSubject", () => {
 				return { ok: true };
 			},
 		});
-		expect(order).toEqual(["watermark", "cascade:s1"]);
+		// Stamped twice, the second once the first took effect; both before
+		// any cascade.
+		expect(order).toEqual(["watermark", "watermark", "cascade:s1"]);
 	});
 
 	it("removes a session from the index only once its cascade succeeded", async () => {

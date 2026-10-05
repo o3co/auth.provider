@@ -43,7 +43,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
 import { sessionModule } from "#/module.mjs";
-import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 /** Every character a contributed text might carry that RFC 6749 does not allow. */
@@ -158,7 +158,7 @@ const boot = async (
 	const handle = await createTestApp({
 		modules: [
 			sessionModule,
-			sessionStoreModuleFor(cfg),
+			sessionStoreModule,
 			...stores,
 			federationModule(options.policy ?? permissivePolicy),
 			providing(

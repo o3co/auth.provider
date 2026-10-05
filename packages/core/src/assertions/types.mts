@@ -48,6 +48,14 @@ export interface AssertionVerificationResult {
 	 */
 	readonly audience?: readonly string[];
 	/**
+	 * When the verified assertion was issued (its `iat`), in epoch seconds, as
+	 * the assertion claims it. Present, it is a finite number.
+	 *
+	 * Absent: the grant refuses the assertion while the subject has a
+	 * revocation boundary in force. Report it from custom verifiers.
+	 */
+	readonly issuedAt?: number;
+	/**
 	 * When the verified assertion expires (its `exp`), in epoch seconds.
 	 *
 	 * A ceiling on the issued token's lifetime: the jwt-bearer grant mints

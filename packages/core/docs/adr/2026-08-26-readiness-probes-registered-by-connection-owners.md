@@ -22,7 +22,7 @@ The obvious shape — let the composition root ping the clients it wired — doe
 not work in this codebase, for two independent reasons:
 
 1. **The typed clients have no `ping`.** `makeIoredisClients()` derives nine
-   narrow per-purpose surfaces from one connection: `{ set, pttl, del }`,
+   narrow per-purpose surfaces from one connection: `{ set, pttl, del, get }`,
    `{ zadd, zrange, zrem }`, and so on. Narrowness is the point — it keeps the
    Redis command surface each adapter may use explicit and reviewable — and a
    liveness command belongs to none of them.

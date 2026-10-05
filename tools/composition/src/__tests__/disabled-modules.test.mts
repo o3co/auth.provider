@@ -45,7 +45,7 @@ import {
 	mfaTotpFactorConfigForTests,
 } from "@o3co/auth-provider-mfa/testing";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
-import { oauthSessionModule } from "@o3co/auth-provider-oauth";
+import { oauthSessionGrantModule } from "@o3co/auth-provider-oauth";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 
@@ -75,11 +75,7 @@ const CASES: readonly Case[] = [
 		() => shipped(deviceAuthorizationGrantModule),
 		() => deviceAuthorizationGrantModule,
 	],
-	[
-		"oauth-session",
-		() => shipped(oauthSessionModule({ config: makeValidCoreConfig() as never })),
-		(config) => oauthSessionModule({ config: config as never }),
-	],
+	["oauth-session", () => shipped(oauthSessionGrantModule), () => oauthSessionGrantModule],
 	["federation-grants", () => shipped(federationGrantsModule), () => federationGrantsModule],
 	[
 		"mfa-totp-factor",

@@ -17,6 +17,7 @@
 import { consoleLogger } from "../../logging/consoleLogger.mjs";
 import type { Logger } from "../../logging/Logger.mjs";
 import { defineModule } from "../../modules/manifest/define-module.mjs";
+import { createInMemorySessionLifecycleStore } from "../lifecycle/memory.mjs";
 import { createInMemorySessionFamilyIndex } from "../memory/sessionFamilyIndex.mjs";
 import { createInMemorySessionFederationIndex } from "../memory/sessionFederationIndex.mjs";
 import { createInMemorySessionRPRegistry } from "../memory/sessionRPRegistry.mjs";
@@ -52,5 +53,8 @@ export const memorySessionStoresModule = defineModule({
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
 		subjectRevocation: (deps: { readonly logger?: Logger }) =>
 			createInMemorySubjectRevocation({ logger: deps.logger ?? consoleLogger }),
+		// Read only by the session lifecycle module, which nothing installs by
+		// default.
+		sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 	} as never,
 });

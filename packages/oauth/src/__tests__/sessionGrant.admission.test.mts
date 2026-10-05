@@ -42,7 +42,11 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
@@ -106,6 +110,8 @@ const storeWith = (session: UserSession | null) =>
 
 const fixture = (
 	verdict: () => RequirementVerdict,
+	/** Runs before the verdict is answered, as a slow requirement's own reads would. */
+	answering: () => Promise<void> = async () => {},
 ): SessionRequirement & { readonly inputs: RequirementInput[] } => {
 	const inputs: RequirementInput[] = [];
 	return {
@@ -117,6 +123,7 @@ const fixture = (
 		inputs,
 		async admit(input) {
 			inputs.push(input);
+			await answering();
 			return verdict();
 		},
 	};
@@ -130,7 +137,7 @@ const grant = (opts: {
 	grantPolicy?: GrantPolicyHook;
 }) =>
 	createSessionGrant({
-		config,
+		oauthTokenSettings: createTestOAuthTokenSettings(),
 		keyStore,
 		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
 			issuer: "https://issuer.test",
@@ -365,6 +372,60 @@ describe("the session grant — admission is read again after the policy", () =>
 	});
 });
 
+describe("the session grant — a boundary stamped while a requirement answers", () => {
+	/** A requirement that stamps the subject's boundary before answering `met` on its `stampOn`th call. */
+	const stamping = (revocation: SubjectRevocation, stampOn: number) => {
+		let calls = 0;
+		return fixture(
+			() => ({ outcome: "met" }),
+			async () => {
+				calls += 1;
+				if (calls === stampOn) {
+					await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
+				}
+			},
+		);
+	};
+	const allow: GrantPolicyHook = { kind: "allow", evaluate: async () => ({ outcome: "allow" }) };
+
+	it("mints nothing: 400 invalid_grant", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const requirement = stamping(revocation, 1);
+		const result = await refused(
+			grant({
+				userSessionStore: storeWith(record()),
+				subjectRevocation: revocation,
+				requirements: [requirement],
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(requirement.inputs).toHaveLength(1);
+	});
+
+	it("on the admission read again after the policy, mints nothing: 400 invalid_grant", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const requirement = stamping(revocation, 2);
+		const result = await refused(
+			grant({
+				userSessionStore: storeWith(record()),
+				subjectRevocation: revocation,
+				requirements: [requirement],
+				grantPolicy: allow,
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(requirement.inputs).toHaveLength(2);
+	});
+});
+
 describe("the session grant — the auth_time it stamps", () => {
 	/** A wall clock that steps back two seconds at every read, as one an operator or NTP moves back would. */
 	const steppingBack = () => {
@@ -528,7 +589,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 			"session",
 			grant ??
 				createSessionGrant({
-					config,
+					oauthTokenSettings: createTestOAuthTokenSettings(),
 					keyStore,
 					userSessionStore: store,
 					sessionRequirementResolver: resolverForTests(requirements, {

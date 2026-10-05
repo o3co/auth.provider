@@ -28,6 +28,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { createTestMfaFactor } from "../../testing/mfaFactor.mjs";
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -64,10 +65,13 @@ async function refusal(promise: Promise<unknown>): Promise<BootError> {
 describe("a module's section — delivered as deps.section", () => {
 	it("every factory of the module receives its section, parsed by its schema", async () => {
 		const seen: Record<string, unknown> = {};
-		// A module the sectioned one overrides, so the override position runs too.
+		// A module the sectioned one overrides, so the override position runs
+		// too. Its factor is switched on: a switched-off one is no override target.
 		const base = defineModule({
 			name: "section-base",
-			contributes: { mfaFactors: { "fixture-factor": () => null } },
+			contributes: {
+				mfaFactors: { "fixture-factor": () => createTestMfaFactor({ kind: "fixture-factor" }) },
+			},
 		});
 		const sectioned = defineModule({
 			name: "fixture-section",

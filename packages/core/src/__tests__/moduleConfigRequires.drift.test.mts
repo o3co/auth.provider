@@ -66,9 +66,7 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	// a key of another module's section beside it.
 	"packages/oauth -> oauth",
 	"packages/oauth -> oauth-authorization",
-	"packages/oauth -> oauth-session",
 	"packages/oauth -> subject-revocation-service",
-	"packages/session -> session",
 	// The standalone template's deprecated `stores` bundle.
 	"templates/standalone -> stores",
 ];

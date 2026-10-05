@@ -477,11 +477,12 @@ export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
  * change must invalidate outstanding tokens whose jtis are not enumerable, so
  * the watermark names the moment before which none count.
  *
- * Compared inclusively against `iat` (`iat <= watermark` is revoked): `iat`
- * is second-truncated and replica clocks differ, so a token minted just
- * before the reset often shares the watermark's second. Killing one minted
- * just after costs a retry; letting one from just before survive is the
- * vulnerability this closes.
+ * Compared inclusively against `iat`, and against `auth_time` when a token
+ * carries one (either at or before the watermark is revoked;
+ * `claimCoveredByRevocationBoundary`): `iat` is second-truncated and replica
+ * clocks differ, so a token minted just before the reset often shares the
+ * watermark's second. Killing one minted just after costs a retry; letting
+ * one from just before survive is the vulnerability this closes.
  *
  * `revokeBefore`'s `expiresAt` MUST reach at least as far as the
  * longest-lived credential the watermark must refuse, since it is the
@@ -513,7 +514,16 @@ export interface SubjectRevocation {
 	 * time (`checkSubjectRevocationInstant`).
 	 */
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
-	/** The sessions watermark, or `null` when this subject has none in force. */
+	/**
+	 * The sessions watermark, or `null` when this subject has none in force.
+	 *
+	 * A read sees every write of this store that has resolved: once
+	 * `revokeBefore` (or `revokeSessionsBefore`) resolves, every read
+	 * answers that boundary or a later one. An adapter does not answer from a
+	 * replica that may lag its writes: a revocation stamps its boundary again
+	 * once the first write resolves, and a read that misses either lets
+	 * through what they cover.
+	 */
 	revokedBefore(subject: string): Promise<Date | null>;
 }
 

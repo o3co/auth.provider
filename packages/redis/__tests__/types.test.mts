@@ -25,6 +25,7 @@ import type {
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,
 	SessionFamilyIndexClient,
+	SessionLifecycleStoreClient,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
@@ -46,6 +47,7 @@ describe("makeIoredisClients return shape", () => {
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionFamilyIndexClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionFederationIndexClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("federationTokenStoreClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionLifecycleStoreClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("rateLimiterClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("attemptCounterClient");
 	});
@@ -107,6 +109,12 @@ describe("makeIoredisClients return shape", () => {
 		expectTypeOf<
 			IoredisClientsReturn["federationTokenStoreClient"]
 		>().toMatchTypeOf<FederationTokenStoreClient>();
+	});
+
+	it("sessionLifecycleStoreClient satisfies SessionLifecycleStoreClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["sessionLifecycleStoreClient"]
+		>().toMatchTypeOf<SessionLifecycleStoreClient>();
 	});
 
 	// FederationTokenStoreClient declares atomic compare-and-delete used
@@ -197,6 +205,12 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 	it("federationTokenStoreClient slot is optional and of FederationTokenStoreClient type", () => {
 		expectTypeOf<ComponentMap["federationTokenStoreClient"]>().toEqualTypeOf<
 			FederationTokenStoreClient | undefined
+		>();
+	});
+
+	it("sessionLifecycleStoreClient slot is optional and of SessionLifecycleStoreClient type", () => {
+		expectTypeOf<ComponentMap["sessionLifecycleStoreClient"]>().toEqualTypeOf<
+			SessionLifecycleStoreClient | undefined
 		>();
 	});
 
