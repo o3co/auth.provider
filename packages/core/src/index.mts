@@ -892,8 +892,15 @@ export {
 	type OutboundUrlSource,
 	outboundLimitsOf,
 } from "./net/outbound-fetch.mjs";
-// The host-list grammar's public readers, for a list of the same form kept elsewhere.
-export { type HostPattern, matchesHostList, readHostEntry } from "./net/outbound-policy.mjs";
+// The host-list grammar's public readers, for a list of the same form kept
+// elsewhere, and the policy the `outboundPolicy` slot holds, which a module
+// builds its outbound fetch from rather than from `config`.
+export {
+	type HostPattern,
+	matchesHostList,
+	type OutboundPolicy,
+	readHostEntry,
+} from "./net/outbound-policy.mjs";
 // The registered-redirect-URI shape vocabulary, the query's parameter names
 // included — enforced by ClientEntrySchema at boot; exported so a custom
 // ClientRepository, which bypasses that schema by design, can hold its
