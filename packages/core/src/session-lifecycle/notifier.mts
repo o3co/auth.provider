@@ -34,9 +34,9 @@ export interface SessionCloseNotice {
 }
 
 /**
- * Tells relying parties that a session they joined has closed. Filled in the
- * `sessionCloseNotifier` slot; a composition with relying parties must fill
- * it.
+ * Tells relying parties that a session they joined has closed. Contributed
+ * under `sessionCloseNotifiers`, at most one per composition; a composition
+ * with relying parties must contribute it.
  */
 export interface SessionCloseNotifier {
 	/**
@@ -48,11 +48,4 @@ export interface SessionCloseNotifier {
 	 * It may be called more than once for one notice, concurrently too.
 	 */
 	notify(notice: SessionCloseNotice): Promise<void>;
-}
-
-// ComponentMap declaration-merge: an optional slot.
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		readonly sessionCloseNotifier?: SessionCloseNotifier;
-	}
 }

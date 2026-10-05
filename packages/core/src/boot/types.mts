@@ -49,6 +49,7 @@ import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
+import type { SessionCloseNotifier } from "../session-lifecycle/notifier.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap bootstrap slots
@@ -109,6 +110,7 @@ export type ContributionKind =
 	| "rateLimitBudgets"
 	| "federationTypes"
 	| "admissionActions"
+	| "sessionCloseNotifiers"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -488,6 +490,12 @@ export interface ContributionCollectorMap {
 	 * `rateLimitBudgetResolver` leaves out.
 	 */
 	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
+	/**
+	 * Collector for `sessionCloseNotifiers` contributions, by name: each
+	 * notifier, never `null`. `sessionCloseNotifierResolver` answers the one
+	 * registered; a second refuses boot at the end of stage 4.
+	 */
+	readonly sessionCloseNotifiers?: NameKeyedCollector<SessionCloseNotifier>;
 	/**
 	 * Collector for `federationTypes` contributions, by type: each
 	 * package's declaration, its factories bound to the module's deps, which
@@ -1343,6 +1351,7 @@ export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
 	readonly kind:
 		| "rateLimitBudgets"
+		| "sessionCloseNotifiers"
 		| "federationTypes"
 		| "admissionActions"
 		| "auditHooks"

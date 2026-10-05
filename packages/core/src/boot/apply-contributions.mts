@@ -32,6 +32,7 @@ import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
 	RateLimitBudgetResolver,
+	SessionCloseNotifierResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
@@ -46,6 +47,11 @@ import {
 	sealRegisteredReach,
 	secondFactorAuthorities,
 } from "../session-admission/requirement.mjs";
+import {
+	SESSION_LIFECYCLE_MODULE,
+	SESSION_LIFECYCLE_NOTIFIER_MISSING,
+} from "../session-lifecycle/module.mjs";
+import type { SessionCloseNotifier } from "../session-lifecycle/notifier.mjs";
 import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { buildDispatchedFederation } from "./federation-entries.mjs";
@@ -251,6 +257,20 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
 }
 
 /**
+ * The read side of the `sessionCloseNotifiers` collector: the one notifier
+ * registered, read through at call time. At most one is: a second refuses
+ * boot at the end of stage 4 (`checkSessionCloseNotifiers`).
+ * @internal
+ */
+function makeSessionCloseNotifierResolver(
+	collector: NameKeyedCollector<SessionCloseNotifier>,
+): SessionCloseNotifierResolver {
+	return {
+		get: () => collector.entries().next().value?.[1],
+	};
+}
+
+/**
  * Instantiate a stable read-side `RateLimitBudgetResolver` over the
  * `rateLimitBudgets` collector. A prefix whose factory answered
  * `null` — switched off by its module's settings — is registered in the
@@ -386,6 +406,7 @@ export function prepareSyntheticProjections(
 		sessionRequirements,
 		rateLimitBudgets,
 		admissionActions,
+		sessionCloseNotifiers,
 	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () => makeGrantHandlerResolver(grants));
@@ -417,6 +438,11 @@ export function prepareSyntheticProjections(
 	}
 	if (rateLimitBudgets !== undefined) {
 		inject("rateLimitBudgetResolver", () => makeRateLimitBudgetResolver(rateLimitBudgets));
+	}
+	if (sessionCloseNotifiers !== undefined) {
+		inject("sessionCloseNotifierResolver", () =>
+			makeSessionCloseNotifierResolver(sessionCloseNotifiers),
+		);
 	}
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
@@ -527,6 +553,19 @@ function checkNameKeyedValue(
 			amrValues: snapshot,
 			addsMfa: (value as { addsMfa?: unknown }).addsMfa === true,
 		});
+		return value;
+	}
+	if (kind === "sessionCloseNotifiers") {
+		// Never `null`: a notifier is switched off by not installing its module.
+		const notify =
+			typeof value === "object" && value !== null
+				? (value as { notify?: unknown }).notify
+				: undefined;
+		if (typeof notify !== "function") {
+			throw new RangeError(
+				`sessionCloseNotifiers "${name}": the factory must answer a notifier, an object whose notify is a function`,
+			);
+		}
 		return value;
 	}
 	if (kind === "rateLimitBudgets") {
@@ -1039,6 +1078,67 @@ async function checkSessionRequirements(
  * via `declare module` augmentation) are handled too.
  * @internal
  */
+/**
+ * The session-close notifier's rules, once every name-keyed contribution has
+ * registered: at most one notifier (`duplicate-contribute`), and, where the
+ * session lifecycle is built and relying parties are served (the
+ * `clientRepository` slot is filled), one notifier — refused as the
+ * lifecycle's provider failing, as it was refused before the notifier was
+ * read lazily.
+ * @internal
+ */
+async function checkSessionCloseNotifiers(
+	material: ComponentWorld,
+	components: Record<string, unknown>,
+	collector: NameKeyedCollector<SessionCloseNotifier> | undefined,
+): Promise<void> {
+	const names = collector === undefined ? [] : [...collector.entries()].map(([name]) => name);
+	if (names.length > 1) {
+		const contributors = material.plan.validated.modules
+			.filter((module) =>
+				module.normalised.contributesEntries.some(
+					(entry) => entry.kind === "sessionCloseNotifiers",
+				),
+			)
+			.map((module) => module.normalised.name);
+		// What was built is disposed; the refusal is the duplicate.
+		await runCleanupsReverse(material.cleanups);
+		throw new BootError({
+			message: `sessionCloseNotifiers holds ${names.length} notifiers (${names.join(", ")}); a composition tells relying parties through one.`,
+			reason: "duplicate-contribute",
+			stage: "applyContributions",
+			details: {
+				reason: "duplicate-contribute",
+				kind: "sessionCloseNotifiers",
+				identity: names.join(", "),
+				identityKind: "name",
+				modules: [contributors[0] ?? "", contributors[1] ?? contributors[0] ?? ""],
+			},
+		});
+	}
+	if (
+		names.length === 0 &&
+		components.sessionLifecycle !== undefined &&
+		components.clientRepository !== undefined
+	) {
+		const thrownValue = new Error(SESSION_LIFECYCLE_NOTIFIER_MISSING);
+		const cleanupErrors = await runCleanupsReverse(material.cleanups);
+		throw new BootError({
+			message: `Module "${SESSION_LIFECYCLE_MODULE}" provider factory for "sessionLifecycle" failed: ${failureSummary(thrownValue)}`,
+			reason: "provides-factory-failed",
+			stage: "applyContributions",
+			details: {
+				reason: "provides-factory-failed",
+				module: SESSION_LIFECYCLE_MODULE,
+				componentKey: "sessionLifecycle",
+				originalError: thrownValue,
+				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+			},
+			cause: thrownValue,
+		});
+	}
+}
+
 function collectorFor(
 	contributionKinds: ContributionCollectorMap,
 	kind: string,
@@ -1365,6 +1465,7 @@ export async function applyContributions(
 		contributionKinds.sessionRequirements,
 		contributionKinds.admissionActions,
 	);
+	await checkSessionCloseNotifiers(material, components, contributionKinds.sessionCloseNotifiers);
 	logRateLimitBudgets(material, components, contributionKinds.rateLimitBudgets);
 	logAdmissionActions(material, components, contributionKinds.admissionActions);
 

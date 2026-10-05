@@ -846,6 +846,8 @@ export type {
 	RouteHandler,
 	SectionDeps,
 	SectionSchema,
+	SessionCloseNotifierFactory,
+	SessionCloseNotifierResolver,
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,

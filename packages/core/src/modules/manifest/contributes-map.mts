@@ -26,6 +26,7 @@ import type { GrantPolicyHook } from "../../policy/types.mjs";
 import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { AdmissionActionDeclaration } from "../../session-admission/actions.mjs";
 import type { SessionRequirement as ConcreteSessionRequirement } from "../../session-admission/requirement.mjs";
+import type { SessionCloseNotifier } from "../../session-lifecycle/notifier.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
 import type { Contributed } from "./contributed.mjs";
 import type { ProviderDeps } from "./provider.mjs";
@@ -180,6 +181,11 @@ export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor | nul
  * pass, never at registration.
  */
 export type SessionRequirementFactory<Deps> = (deps: Deps) => Contributed<SessionRequirement>;
+/**
+ * A `sessionCloseNotifiers` entry: how a closed session's relying parties are
+ * told. Never `null`: a notifier is switched off by not installing its module.
+ */
+export type SessionCloseNotifierFactory<Deps> = (deps: Deps) => Contributed<SessionCloseNotifier>;
 export type AuditHookFactory<Deps> = (deps: Deps) => Contributed<AuditHook>;
 export type GrantPolicyHookFactory<Deps> = (deps: Deps) => Contributed<GrantPolicyHookContribution>;
 
@@ -311,6 +317,19 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 */
 	readonly admissionActions?: {
 		readonly [name: string]: AdmissionActionDeclaration;
+	};
+	/**
+	 * The session-close notifier, keyed by a name of its contributor's
+	 * choosing: at most one per composition, read by the session lifecycle
+	 * through the synthetic key `sessionCloseNotifierResolver` when a close
+	 * runs, never while modules are built, so the module contributing it may
+	 * read slots of modules that require the lifecycle. A second refuses boot
+	 * at the end of the contributions, a factory answering anything but a
+	 * notifier fails its contribution, and a host may not supply the
+	 * collector (`contribution-kind-guarded`).
+	 */
+	readonly sessionCloseNotifiers?: {
+		readonly [name: string]: SessionCloseNotifierFactory<Deps>;
 	};
 	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
 	readonly routes?: readonly RouteContributionEntry<Deps>[];

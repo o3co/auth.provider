@@ -314,6 +314,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"rateLimitBudgets",
 	"federationTypes",
 	"admissionActions",
+	"sessionCloseNotifiers",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -816,6 +817,7 @@ const FEDERATION_KINDS_REGISTERED =
  */
 const PLANNER_OWNED_KINDS = [
 	"rateLimitBudgets",
+	"sessionCloseNotifiers",
 	"federationTypes",
 	"admissionActions",
 	"auditHooks",
@@ -833,6 +835,8 @@ const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string
 		case "admissionActions":
 		case "rateLimitBudgets":
 			return "the modules that own its entries contribute them, and no module overrides one";
+		case "sessionCloseNotifiers":
+			return "the module that tells relying parties contributes its notifier, which the session lifecycle reads";
 		default:
 			return "the modules that own its entries contribute them, and a module may override one";
 	}

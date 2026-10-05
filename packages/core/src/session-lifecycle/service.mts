@@ -143,8 +143,11 @@ export interface SessionLifecycleOptions {
 	readonly federationTokenStore: FederationTokenStore;
 	/** Absent: a close removes no subject index entry. */
 	readonly subjectSessionIndex?: SubjectSessionIndex;
-	/** Absent: a close tells no relying party. */
-	readonly notifier?: SessionCloseNotifier;
+	/**
+	 * The notifier, or how to read it when a close runs. Absent, or read as
+	 * `undefined`: a close tells no relying party.
+	 */
+	readonly notifier?: SessionCloseNotifier | (() => SessionCloseNotifier | undefined);
 	/** The per-session stores written beside the lifecycle record. */
 	readonly sessionRPRegistry: SessionRPRegistry;
 	readonly sessionFamilyIndex: SessionFamilyIndex;
@@ -255,7 +258,6 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		refreshTokenFamilyRevocation,
 		federationTokenStore,
 		subjectSessionIndex,
-		notifier,
 		retainMs,
 	} = options;
 	if (!Number.isInteger(retainMs) || retainMs < 0 || retainMs > MAX_DURATION_MS) {
@@ -264,10 +266,14 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		);
 	}
 	const logger = options.logger ?? consoleLogger;
+	const configured = options.notifier;
+	/** The notifier as it is now: read when a close commits and when it tells. */
+	const notifierNow = (): SessionCloseNotifier | undefined =>
+		typeof configured === "function" ? configured() : configured;
 	const bridge = createSessionStoresBridge(options);
 
 	const requestFor = (cause: SessionCloseCause): SessionCloseRequest => {
-		const tells = CLOSE_POLICY[cause].tellsRelyingParties && notifier !== undefined;
+		const tells = CLOSE_POLICY[cause].tellsRelyingParties && notifierNow() !== undefined;
 		return {
 			cause,
 			steps: [
@@ -297,6 +303,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
 	/** Tells relying party `clientId` that the closing `record` closed. */
 	const tell = (sid: string, record: SessionLifecycleRecord, clientId: string): Promise<void> => {
+		const notifier = notifierNow();
 		if (notifier === undefined) throw new Error("no sessionCloseNotifier is wired");
 		const cause = record.close?.cause;
 		if (cause === undefined) throw new Error("the record holds no close");

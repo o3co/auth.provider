@@ -16,10 +16,10 @@ import {
 } from "../synthetic-keys.mjs";
 
 describe("SYNTHETIC_COMPONENT_KEYS", () => {
-	test("contains exactly the 13 synthetic keys", () => {
+	test("contains exactly the 14 synthetic keys", () => {
 		// mfaFactorResolver comes from the MFA ADR's D3, and
 		// sessionRequirementResolver from the session-admission ADR's D3.
-		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(13);
+		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(14);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("federationProviders")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("tokenExchangeValidatorResolver")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("grantHandlerResolver")).toBe(true);
@@ -33,6 +33,7 @@ describe("SYNTHETIC_COMPONENT_KEYS", () => {
 		expect(SYNTHETIC_COMPONENT_KEYS.has("tokenBindingSettings")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("federationSettings")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("outboundPolicy")).toBe(true);
+		expect(SYNTHETIC_COMPONENT_KEYS.has("sessionCloseNotifierResolver")).toBe(true);
 	});
 
 	test("is frozen via Object.freeze (own-property additions blocked)", () => {

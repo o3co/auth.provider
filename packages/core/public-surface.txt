@@ -623,6 +623,8 @@
 . SessionCloseCause type
 . SessionCloseNotice type
 . SessionCloseNotifier type
+. SessionCloseNotifierFactory type
+. SessionCloseNotifierResolver type
 . SessionCloseOutcome type
 . SessionCloseRequest type
 . SessionCookiePolicy type
@@ -1200,6 +1202,8 @@
 ./modules/manifest SYNTHETIC_COMPONENT_KEYS value
 ./modules/manifest SectionDeps type
 ./modules/manifest SectionSchema type
+./modules/manifest SessionCloseNotifierFactory type
+./modules/manifest SessionCloseNotifierResolver type
 ./modules/manifest SessionRequirementFactory type
 ./modules/manifest TokenBindingMechanismFactory type
 ./modules/manifest TokenExchangeValidatorResolver type
