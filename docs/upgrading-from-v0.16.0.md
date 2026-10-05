@@ -226,6 +226,20 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `oauth.authorize.acrValues.<key>`), naming the key, every such key in one
   boot. Rename the entry to a value a client can send, such as a URN
   (`urn:example:acr:mfa`), and tell the relying parties that asked for it.
+  Core's schema and the oauth module's (`oauthSectionSchema`) refuse the
+  same keys with the same message, so a section parsed with either alone —
+  a composition root's own check, a test — is refused as boot refuses it.
+- **BREAKING: an empty `oauth.consentPage.url` refuses the boot (#728).** An
+  `ENDPOINTS_CONSENT_URL` (now `OAUTH_CONSENT_PAGE_URL`) exported empty
+  (`ENDPOINTS_CONSENT_URL=` in a `.env`, a compose file or a ConfigMap) used
+  to boot, and every client that
+  is not first-party was then redirected to `?challenge=<id>` relative to
+  `/oauth/authorize` — a page that is not there. The old name is first
+  refused as renamed (`environment-variable-renamed`); renamed to
+  `OAUTH_CONSENT_PAGE_URL` and still exported empty or blank, it now refuses
+  the boot (`config-validation-failed` at `oauth.consentPage.url`), as an
+  empty `session.loginPage.url` already did. Unset the variable to keep the
+  default, `/consent`, or set it to your consent page.
 - **BREAKING: `oauth {}` refuses a key it does not declare, at every level
   (#728).** Wherever the oauth module is installed (the standalone template
   installs it), a key under `oauth` that its schema does not declare — a
@@ -313,6 +327,14 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   every request through, and core's policy for the slot applies instead: list
   `"rateLimiter"` in `core.declaredAbsent`. With a limiter wired, both are
   throttled as before.
+- **BREAKING: a first-time federation-grant lodging is also limited per client
+  (#628).** After client authentication, `POST /oauth/federation-grants` asks
+  the limiter again under `federation_grants:client:<client_id>`. One client
+  lodging for many subjects, behind several egress IPs for example, is now
+  capped at `limits.federation_grants` (else `defaultLimit`) across all of its
+  addresses, and refused `429 rate_limited` / `provider` beyond it. The
+  bundled limiters apply that one `limits.federation_grants` to the IP keys
+  and the client keys alike; raise it if such a client lodges faster.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
   refused (#807).** `core-rate-limiter-memory.limits` and
   `redis-rate-limiter.limits` may not name either prefix: each is a verifier's
@@ -1084,6 +1106,11 @@ with what a store of yours records and refuses. Per port:
 - **`RateLimiter`.** One that declares no `failMode` fails closed, whatever
   `redis-rate-limiter.failMode` says (formerly `rateLimit.failMode`, now a
   retired path that refuses the boot); a wrapper forwards `failMode` (#782).
+  It also meets a second key shape (#628): `federation_grants:client:<client_id>`,
+  with `ctx.clientId` set, on a first-time federation-grant lodging, beside
+  `federation_grants:ip:<ip>`. Its prefix is the same, so a limiter that
+  budgets by prefix applies one budget to both; one that wants a separate
+  per-client budget tells the `:client:` keys apart.
 - **Redis clients of your own.** `SubjectRevocationClient` implements
   `advanceRevocationBoundaries`, and `setRevocationBoundaries` is gone (#993):
   add the method on the current release first.

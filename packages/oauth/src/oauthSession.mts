@@ -71,6 +71,8 @@ const REQUIRES = [
 // nothing. `grantPolicy`: the grant consults it, when wired, before it mints.
 const OPTIONAL = [
 	"userSessionStore",
+	// The session lifecycle's record, read by admission after a live session.
+	"sessionLifecycleStore",
 	"subjectRevocation",
 	"auditSink",
 	"grantPolicy",
