@@ -20,10 +20,10 @@
  * variables the modules declare renamed.
  */
 
-import type { AppConfig, Module } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
+import type { Module } from "@o3co/auth-provider-core";
+import { renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { oauthEndpointsModule } from "#/module.mjs";
-import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 
 /**
@@ -48,11 +48,10 @@ export function capturing<C extends object>(config: C, modules: readonly Module[
  * loads any of them.
  */
 export function withOauthCaptures<C extends object>(config: C): C {
-	const built = makeValidAppConfig() as AppConfig;
 	return capturing(config, [
 		oauthEndpointsModule,
 		oauthSessionGrantModule,
-		oauthAuthorizationModule({ config: built }),
+		oauthAuthorizationGrantsModule,
 	]);
 }
 

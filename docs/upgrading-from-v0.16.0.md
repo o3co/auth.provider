@@ -227,7 +227,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
   too (#1329): an empty `mfa.factors` block an older configuration leaves
   behind (the TOTP factor's old path, its variables unset) is such a key —
-  delete it. So does `webauthn`, at every level (#1336). The keys under `audit-sink` are the
+  delete it. So does `webauthn`, at every level (#1336). So do `oauth-session`
+  and `oauth-authorization`, the latter at every level: `grants` holds the
+  four grants' blocks alone, and each block `enabled` alone (#728). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -721,6 +723,41 @@ modules fills them.
   throws a `RangeError` naming it when it is missing or breaks the slot's
   contract; `SessionGrantDeps` no longer has `config` (in a test,
   `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
+- **BREAKING: the authorization_code, refresh_token, client_credentials and
+  jwt-bearer grants are one module, `oauthAuthorizationGrantsModule`,
+  switched by its own section (#728).** List it as it is: it reads each
+  `oauth-authorization.grants.<grant>.enabled` from the configuration boot
+  parses, and an absent section or key is off. `oauthAuthorizationModule({
+  config })` is removed: list `oauthAuthorizationGrantsModule` in its place.
+  The refusal of a module built from a configuration that disagrees with the
+  booted one about a grant's switch is gone, and the standalone template no longer reads
+  `oauth-authorization.grants` before boot (its `SWITCHES` no longer lists
+  it). A grant switched off registers nothing; with every grant off the
+  module registers and requires nothing — no slot, and no `subjectRevocation`
+  or `auditSink` absence policy. While any grant is on, the module declares
+  both session-bound grants' actions (`oauth.code_exchange`,
+  `oauth.refresh`), whichever is on. Its schema,
+  `oauthAuthorizationConfigSchema`, fills no default: the package's
+  `config/reference.conf` ships every switch off.
+- **BREAKING: an enabled oauth-authorization grant requires
+  `oauthTokenSettings` and `tokenBindingSettings`, and reads its settings
+  from them, not from the configuration (#728).** The grants take the
+  issuer, the lifetimes they mint, `legacyTypAccept`, whether resource
+  indicators are enforced and `requireEmailVerified` from
+  `oauthTokenSettings`, and the refresh-token binding rule
+  (`bindConfidentialClientRefreshTokens`) from core's `tokenBindingSettings`,
+  which boot always fills. With `oauthModule` installed nothing changes. A
+  composition with a grant on and without `oauthModule` puts an
+  `oauthTokenSettings` value in `bootstrapComponents`, or the boot is refused
+  for the missing component. The id_token's `iss` is the slot's issuer, so
+  an id_token is issued whenever `openid` is granted and a session is read;
+  before, a configuration built by hand without `oauth.jwt.issuer` got none.
+  The refresh grant still reads `oauth.refreshToken.unknownFamilyPolicy` from
+  `config`, so the module still requires `config`. A deps object handed to
+  the module's grant factories carries `section`, `oauthTokenSettings` and
+  `tokenBindingSettings`; a factory refuses a missing or broken
+  `oauthTokenSettings` with a `RangeError` naming it, and a
+  `tokenBindingSettings` whose rule is not a boolean with a `TypeError`.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from

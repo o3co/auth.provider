@@ -53,6 +53,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
+	createTestOAuthTokenSettings,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -62,11 +63,12 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { cascadeLogout } from "#/logout/cascadeLogout.mjs";
-import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { createRouter as createLogoutRouter } from "#/routes/logout.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import { capturing, withGrants } from "./_helpers/sections.mjs";
 
@@ -224,7 +226,7 @@ async function world(opts: { readonly index?: SessionFamilyIndex } = {}) {
 	): Promise<GrantResult> => {
 		const grant: GrantHandler = createAuthorizationGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-			config,
+			...grantSettingsFrom(config),
 			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 			clientRepository: { findById: async () => null, authenticate: async () => null },
 			codeRepository: {
@@ -653,7 +655,7 @@ describe("the composition's family index", () => {
 		const logger = createMockLogger();
 		const handle = await createTestApp({
 			modules: [
-				oauthAuthorizationModule({ config: appConfig }),
+				oauthAuthorizationGrantsModule,
 				...sessionStores,
 				memoryRefreshTokenFamilyStoreModule,
 				defaultRefreshTokenFamilyRotationModule,
@@ -663,8 +665,9 @@ describe("the composition's family index", () => {
 				codeRepositoryModule,
 			],
 			bootstrapComponents: {
-				config: capturing(appConfig, [oauthAuthorizationModule({ config: appConfig })]),
+				config: capturing(appConfig, [oauthAuthorizationGrantsModule]),
 				pathResolver: (s: string) => s,
+				oauthTokenSettings: createTestOAuthTokenSettings(),
 				logger,
 			},
 			overrideComponents: overrideComponents as never,

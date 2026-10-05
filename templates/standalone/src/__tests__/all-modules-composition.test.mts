@@ -115,7 +115,7 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-mfa":
 		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule) and mfaResetModule, under MFA_MODE (mfa-switch.test.mts)",
 	"@o3co/auth-provider-oauth":
-		"oauthModule, oauthSessionGrantModule, oauthAuthorizationModule, subjectRevocationServiceModule",
+		"oauthModule, oauthSessionGrantModule, oauthAuthorizationGrantsModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
 	"@o3co/auth-provider-session": "sessionModule, sessionStoreModuleFor",
 	"@o3co/auth-provider-standard":
@@ -242,7 +242,11 @@ describe("every module the template can turn on boots together", () => {
 		// The shipped entries are named after their types.
 		expect([...(handle.components.federationProviders?.keys() ?? [])].sort()).toEqual(types);
 
-		const grants = modules.flatMap((m) => contributionNames(m, "grants")).sort();
+		// What boot registered: a module's grant switched off by its section
+		// answers `null` and registers nothing.
+		const grants = [...(handle.components.grantHandlerResolver?.entries() ?? [])]
+			.map(([grantType]) => grantType)
+			.sort();
 		expect(grants).toEqual(ENABLED_GRANTS);
 		const discovery = await request(app).get("/.well-known/openid-configuration");
 		expect([...discovery.body.grant_types_supported].sort()).toEqual(grants);

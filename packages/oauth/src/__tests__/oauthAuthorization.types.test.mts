@@ -18,10 +18,11 @@ import type {
 	AssertionVerifier,
 	CodeRepository,
 	GrantPolicyHook,
+	OAuthTokenSettings,
 	ProviderDeps,
+	TokenBindingSettings,
 	UserRepository,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import type { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
@@ -30,7 +31,7 @@ import type { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import type { createSessionGrant } from "#/grants/session.mjs";
 import {
 	type OAuthAuthorizationModuleDeps,
-	oauthAuthorizationModule,
+	oauthAuthorizationGrantsModule,
 } from "#/oauthAuthorization.mjs";
 
 // A module's contribution callbacks read only the slots it
@@ -40,7 +41,14 @@ import {
 // proves nothing about them. The `if (false as boolean)` blocks keep the
 // negative assertions from executing.
 
-const REQUIRES = ["config", "clientRepository", "keyStore", "sessionRequirementResolver"] as const;
+const REQUIRES = [
+	"config",
+	"clientRepository",
+	"keyStore",
+	"sessionRequirementResolver",
+	"oauthTokenSettings",
+	"tokenBindingSettings",
+] as const;
 const OPTIONAL = [
 	"codeRepository",
 	"auditSink",
@@ -58,13 +66,13 @@ const OPTIONAL = [
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("oauthAuthorizationModule's deps are the slots it declares", () => {
+describe("oauthAuthorizationGrantsModule's deps are the slots it declares", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		// `.branded` because ProviderDeps is an intersection of two mapped types.
 		expectTypeOf<OAuthAuthorizationModuleDeps>().branded.toEqualTypeOf<Declared>();
 		// The runtime declaration is the same list, so the pin above cannot
 		// drift from what the boot planner actually injects.
-		const module = oauthAuthorizationModule({ config: makeValidAppConfig() });
+		const module = oauthAuthorizationGrantsModule;
 		expect([...(module.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(module.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
 	});
@@ -129,6 +137,11 @@ describe("the grant factories declare the slots they read", () => {
 		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<SessionDeps>().not.toHaveProperty("codeRepository");
+		// No grant but the refresh grant reads the whole configuration: the
+		// others read their settings from slots.
+		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("config");
+		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("config");
+		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("config");
 		if (false as boolean) {
 			const deps = {} as ClientCredentialsDeps;
 			// @ts-expect-error — client_credentials reads no session store
@@ -159,6 +172,14 @@ describe("the grant factories declare the slots they read", () => {
 		expectTypeOf<ClientCredentialsDeps>().toHaveProperty("grantPolicy");
 		expectTypeOf<SessionDeps>().toHaveProperty("userSessionStore");
 		expectTypeOf<SessionDeps>().toHaveProperty("grantPolicy");
+		expectTypeOf<AuthorizationDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
+		expectTypeOf<RefreshDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
+		expectTypeOf<JwtBearerDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
+		expectTypeOf<ClientCredentialsDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
+		expectTypeOf<AuthorizationDeps["tokenBindingSettings"]>().toEqualTypeOf<TokenBindingSettings>();
+		expectTypeOf<RefreshDeps["tokenBindingSettings"]>().toEqualTypeOf<TokenBindingSettings>();
+		// The refresh grant reads `oauth.refreshToken.unknownFamilyPolicy`, which no slot carries.
+		expectTypeOf<RefreshDeps>().toHaveProperty("config");
 		expect(true).toBe(true);
 	});
 });
