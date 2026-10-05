@@ -176,12 +176,15 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   are limited by your `rateLimiter` alone, under the prefix `mfa`: configure
   `limits.mfa` on it instead (`redis-rate-limiter.limits.mfa` or
   `core-rate-limiter-memory.limits.mfa`), or its `defaultLimit` (60 per 60 s
-  on the bundled limiters) applies. To keep the old budget, set
-  `limits.mfa { limit = 60, windowSeconds = 300 }`. Without a `rateLimiter`
-  the MFA routes are no longer limited by a per-process fallback, and no
-  longer refuse the boot under `core.deployment.mode = "multi"`: they pass
-  every request through, as the OAuth endpoints do. The MFA lock (attempts
-  per transaction, backoff, weekly failures) is unchanged.
+  on the bundled limiters) applies. The standalone template's
+  `config/application.conf` sets `limits.mfa { limit = 60, windowSeconds = 300 }`
+  on both limiters, the old budget, so a scaffold keeps it; a composition of
+  your own sets it on its limiter to keep it. Without a `rateLimiter` —
+  declared in `core.declaredAbsent` — the MFA routes are no longer limited
+  by a per-process fallback, and no longer refuse the boot under
+  `core.deployment.mode = "multi"`: they pass every request through, as the
+  OAuth endpoints do. The MFA lock (attempts per transaction, backoff,
+  weekly failures) is unchanged.
 
 ### Values read more strictly
 
@@ -282,8 +285,7 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `core.declaredAbsent` lists it: `core.declaredAbsent = ["rateLimiter"]`,
   beside `"auditSink"` if you list that. Declared absent, a route that keys
   the limiter lets every request through unless its module falls back to a
-  per-process limiter (WebAuthn authentication options and the MFA routes
-  do), so request-volume limits on the others are then for what
+  per-process limiter (WebAuthn authentication options does), so request-volume limits on the others are then for what
   sits in front of the provider. The template wires a limiter
   (`adapters.rateLimiter`), so a scaffold needs nothing.
 - **Federation grants no longer require a rate limiter (#807).** With

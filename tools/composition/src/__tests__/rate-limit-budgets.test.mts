@@ -36,8 +36,9 @@
  *   not installed, or installed and switched off (the device grant), sets no
  *   budget.
  *
- * `token` has no owner, and `mfa`'s owner claims it with no budget: the
- * limiter's `defaultLimit`, or its own `limits` entry. `login` and
+ * `token` has no owner: the limiter's `defaultLimit`, or its own `limits`
+ * entry. `mfa`'s owner claims it with no budget: the limiter's own `limits`
+ * entry, which the template's application.conf ships. `login` and
  * `device_verification` are claimed with no budget: their
  * owners count attempts on the attempt counter, against
  * `session.rateLimit.login` and `device-grant.rateLimit`, so the limiter
@@ -108,11 +109,12 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		offConfigured: spec(60, 60),
 	},
 	mfa: {
-		shipped: spec(60, 60),
-		configured: spec(60, 60),
+		// The template's application.conf gives both limiters `limits.mfa`, 60 per 300 s.
+		shipped: spec(60, 300),
+		configured: spec(60, 300),
 		declared: spec(6, 75),
-		off: spec(60, 60),
-		offConfigured: spec(60, 60),
+		off: spec(60, 300),
+		offConfigured: spec(60, 300),
 	},
 	token: {
 		shipped: spec(60, 60),
