@@ -31,6 +31,7 @@ import {
 	type Logger,
 	loggableError,
 	readSpaceDelimitedParameter,
+	sessionFreshness,
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
@@ -354,7 +355,9 @@ export const readableAuthTime = (session: UserSession, nowMs: number): number | 
  * Whether a login was made since `instant` (an ask's, in milliseconds):
  * the session authenticated strictly after it — an authentication earlier
  * in the same second is not one made since — or `unreadable` when its
- * authentication time cannot be read (`readableAuthTime`).
+ * authentication time cannot be read (`readableAuthTime`). Reads when this
+ * provider established the session, which is what a trip's loop control
+ * needs; a freshness ask reads `freshSince`.
  */
 export const loginSince = (
 	session: UserSession,
@@ -366,14 +369,44 @@ export const loginSince = (
 };
 
 /**
+ * The instant the session's authentication is as fresh as (core's
+ * `sessionFreshness`: for a federated login, the earlier of its
+ * establishment and the upstream's authentication), in milliseconds and read
+ * as `readableAuthTime` reads `authTime`: `undefined` when there is none —
+ * the upstream showed no time — or the clock cannot read it.
+ */
+export const readableFreshness = (session: UserSession, nowMs: number): number | undefined => {
+	const fresh = sessionFreshness(session);
+	if (fresh === undefined || authTimeAt(fresh, nowMs) === undefined) return undefined;
+	const at = fresh.getTime();
+	return at > nowMs + ASK_REPLICA_SKEW_MS ? undefined : Math.min(at, nowMs);
+};
+
+/**
+ * `loginSince` over the session's freshness (`readableFreshness`): whether
+ * the authentication a freshness ask judges was made strictly after
+ * `instant`, or `unreadable`.
+ */
+export const freshSince = (
+	session: UserSession,
+	instant: number,
+	nowMs: number,
+): boolean | "unreadable" => {
+	const at = readableFreshness(session, nowMs);
+	return at === undefined ? "unreadable" : at > instant;
+};
+
+/**
  * `fresh_by_ask`: the session is fresh because of the login the presented
  * ask asked for, which the pass that mints then holds it to.
  */
 type ReauthOutcome = "proceed" | "fresh_by_ask" | "login" | "answered";
 
 /**
- * Whether the session's authentication is fresh enough. `prompt=login`, or a
- * `max_age` older than the session's `auth_time`, sends the browser to log in
+ * Whether the session's authentication is fresh enough, judged on its
+ * freshness (`readableFreshness`), not only on when this provider
+ * established it. `prompt=login`, or a `max_age` older than that freshness,
+ * sends the browser to log in
  * with the ask recorded (`login_required` under `prompt=none`). When the
  * presented ask records a login trip, a session authenticated after the ask
  * satisfies both; one that was not is refused with `login_required` rather
@@ -412,12 +445,15 @@ export const evaluateReauthentication = (
 		return "answered";
 	}
 	const now = Date.now();
-	const authSeconds = authTimeAt(session.authTime, now);
+	// The session's freshness against `max_age`, read as `auth_time` is
+	// (core's `authTimeAt`); undefined when the upstream showed no time.
+	const fresh = sessionFreshness(session);
+	const freshSeconds = fresh === undefined ? undefined : authTimeAt(fresh, now);
 	if (ask !== null && ask.loginAskedAt !== undefined) {
 		// Strictly after the ask, to the millisecond: an authentication made
 		// before it — even earlier in the same second — is not the one it
 		// asked for, and one that cannot be read is not shown to be.
-		if (loginSince(session, ask.loginAskedAt, now) === true) return "fresh_by_ask";
+		if (freshSince(session, ask.loginAskedAt, now) === true) return "fresh_by_ask";
 		redirectError(
 			ctx,
 			"login_required",
@@ -429,10 +465,10 @@ export const evaluateReauthentication = (
 	// is simply not an ask — and one that records a step-up trip alone asked
 	// for no login: evaluate the request on its merits, which asks again
 	// rather than proceeding. An authentication time that cannot be read is
-	// stale for any `max_age`.
+	// stale for any `max_age`, and so is a session whose upstream showed none.
 	const stale =
 		maxAge !== undefined &&
-		(authSeconds === undefined || Math.floor(now / 1000) - authSeconds > maxAge);
+		(freshSeconds === undefined || Math.floor(now / 1000) - freshSeconds > maxAge);
 	if (!prompt.login && !stale) return "proceed";
 	if (prompt.silent) {
 		redirectError(

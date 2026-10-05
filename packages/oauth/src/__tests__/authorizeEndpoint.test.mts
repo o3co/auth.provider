@@ -2002,6 +2002,127 @@ describe("/authorize — step-up and re-authentication", () => {
 		});
 	});
 
+	describe("a federated session's freshness is the earlier of its establishment and the upstream's authentication", () => {
+		/** A federated session established at `at().authTime`, whose upstream showed `at().upstream`. */
+		const federatedStore = (
+			at: () => { readonly authTime: Date; readonly upstream: Date | null | undefined },
+		): UserSessionStore =>
+			({
+				kind: "memory",
+				create: vi.fn(async () => {}),
+				get: vi.fn(async (sid: string): Promise<UserSession | null> => {
+					const { authTime, upstream } = at();
+					return sid === SID
+						? {
+								sid: SID,
+								sub: "user-1",
+								authTime,
+								createdAt: authTime,
+								expiresAt: new Date(Date.now() + 3_600_000),
+								claims: {},
+								amr: ["fed"],
+								authentication: {
+									primary: "fed",
+									federation: "google",
+									upstreamAmr: undefined,
+									mfaAt: undefined,
+									...(upstream === undefined ? {} : { upstreamAuthTime: upstream }),
+								},
+							}
+						: null;
+				}),
+				delete: vi.fn(async () => {}),
+			}) as unknown as UserSessionStore;
+
+		it("answers login_required, without a second trip, when the callback came back with an upstream authentication older than the ask", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(10), upstream: minutesAgo(10) as Date | null };
+			const harness = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			// The callback established the session anew; the upstream answered
+			// from its own older login.
+			state.authTime = await reauthenticatedNow();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("error")).toBe("login_required");
+			expect(createCode).not.toHaveBeenCalled();
+		});
+
+		it("is satisfied by an upstream authentication made after the ask", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(10), upstream: minutesAgo(10) as Date | null };
+			const harness = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			state.upstream = await reauthenticatedNow();
+			state.authTime = await reauthenticatedNow();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("sends a session whose upstream authentication is older than max_age on a login trip, and answers login_required under prompt=none", async () => {
+			const state = { authTime: minutesAgo(1), upstream: minutesAgo(120) as Date | null };
+			const harness = await makeApp({ session, userSessionStore: federatedStore(() => state) });
+			loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "600" }));
+			const silent = await authorize(harness.app, {
+				...baseQuery,
+				prompt: "none",
+				max_age: "600",
+			});
+			expect(redirectParams(silent).get("error")).toBe("login_required");
+		});
+
+		it("reads a session whose upstream showed no authentication time as stale for any max_age", async () => {
+			const state = { authTime: minutesAgo(1), upstream: null };
+			const harness = await makeApp({ session, userSessionStore: federatedStore(() => state) });
+			loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
+		});
+
+		it("reads a session whose upstream showed no time as never meeting a login ask", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(10), upstream: null };
+			const harness = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			state.authTime = await reauthenticatedNow();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("error")).toBe("login_required");
+		});
+
+		it("reads a federated session that records no upstream time as fresh as its establishment", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(1), upstream: undefined };
+			const { app } = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const res = await authorize(app, { ...baseQuery, max_age: "600" });
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("passes a federated session whose upstream authentication is within max_age", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(1), upstream: minutesAgo(5) as Date | null };
+			const { app } = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const res = await authorize(app, { ...baseQuery, max_age: "600" });
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+	});
+
 	describe("prompt=none stays silent", () => {
 		it("answers login_required for a stale session instead of a login redirect", async () => {
 			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(5)) });
