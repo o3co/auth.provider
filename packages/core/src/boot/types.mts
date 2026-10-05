@@ -1415,7 +1415,7 @@ export interface ContributionKindGuardedDetails {
  * normalisation read it — `name` then absent; a `rateLimitBudgets` prefix
  * that is empty or holds `:` — no limiter key carries it — or names an
  * `Object.prototype` member, a `federationTypes` declaration that is not an
- * object with a Zod `entrySchema` and a `factory`, or an `admissionActions`
+ * object with a Zod `entrySchema`, a `factory` and a `redirectPolicy`, or an `admissionActions`
  * entry whose name, declaration or grade registration refuses. `problem`
  * says which, and for a container what it was given.
  */

@@ -216,6 +216,11 @@ function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
 function containerAsRead(container: unknown): Pick<ContributionContainer, "shape" | "given"> {
 	if (Array.isArray(container)) return { shape: "list", given: "an array" };
 	if (isPlainConfigObject(container)) return { shape: "record", given: "a record" };
+	if (typeof container === "object" && container !== null) {
+		// A record is a plain object: an instance, a Map or an object with
+		// another prototype reads as one only through what it inherits.
+		return { shape: "other", given: `${describeValue(container)}, not a plain object` };
+	}
 	return { shape: "other", given: describeValue(container) };
 }
 
@@ -1282,7 +1287,8 @@ function containerTaken(
  * under Symbol keys no name-keyed check reads and no reader reaches, and a
  * record under a list-shaped kind holds no list to append. Read off the
  * containers normalisation read, once — the ones its entries came from. A
- * kind no shape is known for is left to the coverage check.
+ * kind no shape is known for has no container rule: the coverage check
+ * refuses its entries, if it has any.
  * @internal
  */
 function checkContributionContainers(

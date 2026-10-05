@@ -643,8 +643,13 @@ modules fills them.
   with a `TypeError`, and `null` or a function was ignored for most kinds.
   Each is now refused before any factory runs (`contribution-malformed`,
   naming the module, the kind, the channel and what the container was).
-  Write the kind's shape; a module typed against `ContributesMap` needs no
-  change.
+  A record is a plain object — a literal, or `Object.create(null)`; a class
+  instance, a `Map` or an object with another prototype is refused too,
+  though `ContributesMap`'s types accept it. Write the kind's shape as a
+  literal record or array. An array under `overrides.sessionCloseNotifiers`
+  is now refused for its container (`contribution-malformed`) before the
+  override guard (`contribution-kind-guarded`) that a record there still
+  meets.
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
   overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot

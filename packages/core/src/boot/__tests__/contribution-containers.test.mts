@@ -151,7 +151,7 @@ describe("a name-keyed kind takes a record", () => {
 		["null", null, "null"],
 		["a function", () => null, "a function"],
 		["a string", "grant", 'the string "grant"'],
-		["a Map", new Map([["urn:test:grant", () => null]]), "a Map"],
+		["a Map", new Map([["urn:test:grant", () => null]]), "a Map, not a plain object"],
 	])("refuses %s in a record's place, naming it", async (_label, container, given) => {
 		const err = await refusal(boot([declaring("contributes", "grants", container)]));
 		expectContainerRefusal(
