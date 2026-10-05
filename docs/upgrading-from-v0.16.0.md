@@ -166,6 +166,22 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   non-discoverable (non-resident) keys can no longer sign in through the
   passkey grant: re-enroll them with discoverable credentials.
   `POST /oauth/webauthn/authentication/options` no longer reads `userId`.
+- `webauthn.rateLimit.authenticationOptions`, and its variables
+  `WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT`,
+  `WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS` and their older
+  names `WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT` and
+  `WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS`, at any value, refuse
+  the boot wherever `webauthnModule` is installed. The authentication options
+  route is guarded by the deployment's `rateLimiter` alone, with no
+  per-process fallback: wire a limiter and set the route's limit as
+  `limits.webauthn-authentication-options` in its section
+  (`core-rate-limiter-memory` or `redis-rate-limiter`), else its
+  `defaultLimit` applies. Without a limiter the route is not throttled. The
+  effective limit changes: a deployment that never set the key moves from 30
+  per 60 s to the limiter's `defaultLimit`, 60 per 60 s in both bundled
+  `reference.conf` files. To keep the old bound, set
+  `limits.webauthn-authentication-options { limit = 30, windowSeconds = 60 }`
+  in the limiter's section.
 - `oauth.grants.authorization_code.pkce.*` and
   `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` refuse the boot; S256
   is mandatory regardless (#827).
@@ -321,8 +337,10 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   and the client keys alike; raise it if such a client lodges faster.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
   refused (#807).** `core-rate-limiter-memory.limits` and
-  `redis-rate-limiter.limits` may not name either prefix: each is a verifier's
-  own attempt limit, which no limiter module's configuration may loosen. A limiter built with
+  `redis-rate-limiter.limits` may not name either prefix while its owner, the
+  session or the device-grant module, is loaded: each declares its prefix a
+  verifier's own attempt limit, which no limiter module's configuration may
+  loosen. Core names neither prefix itself. A limiter built with
   `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` reads no
   contributed budget and keeps the `limits` it is given.
   The boot is refused (`config-validation-failed`, naming the key and the
@@ -590,6 +608,15 @@ modules fills them.
   (`DEVICE_GRANT_ADMISSION_ACTIONS`, `OAUTH_ROUTER_ADMISSION_ACTIONS`) (#793).
   A hand-written requirement that reaches or adds a second factor declares
   `secondFactorAuthority: true` (#781).
+  `admitSession` refuses, with a `RangeError` before anything is read, a
+  `remediation` action issued to a requirement its resolver does not hold
+  (another composition's, or another boot's), as it refuses a literal or a
+  copy; it no longer asks the requirements about it as `credential_change`,
+  and `session_admission_remediation_undeclared` is no longer logged. Pass a
+  route's own issued action to the resolver its requirement is registered
+  in, read in the boot that registered it: a requirement object registered
+  again (a second `createApp` with the same module instance) is issued new
+  actions, which the earlier boot's resolver refuses (#798).
 - **Slots one module owns.** An enabled device grant requires the
   `csrfGuard` slot, and enabled federation grants `csrfGuard` and
   `loginEntry` (#746, #784); `sessionModule` requires `csrfTokenSigner`, and

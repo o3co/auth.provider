@@ -570,9 +570,7 @@ export interface MfaCeremonyKit {
 	readonly consumeEmailProofRequirement: (
 		subject: string,
 	) => Promise<{ readonly failed: unknown } | undefined>;
-	/** Whether `value` is an object `res.json` answers as built: a plain object. */
-	readonly answerable: (value: unknown) => value is object;
-	/** `factor.amrFor(data)` when it names at least one value and only values the factor declares; else `undefined`. */
+	/** A copy of `factor.amrFor(data)`, taken once, when it names at least one value and only values the factor declares; else `undefined`. */
 	readonly declaredAmr: (factor: MfaFactor, data: MfaFactorData) => readonly string[] | undefined;
 	/**
 	 * `factor.identity(data)` when it answers a non-empty string; else
