@@ -110,7 +110,6 @@ describe("sessionStoreModule", () => {
 		}
 		const route = await factory({
 			section: baseConfig["session-store"] as never,
-			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		expect(route.id).toBe("session-middleware");
@@ -126,7 +125,6 @@ describe("sessionStoreModule", () => {
 		if (typeof factory !== "function") throw new Error("not a factory");
 		const route = await factory({
 			section: baseConfig["session-store"] as never,
-			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		// express middleware signature: (req, res, next) => void; verify it's a 3-arg function.
@@ -141,7 +139,6 @@ describe("sessionStoreModule", () => {
 		const reg = makeRegistrar();
 		const route = await factory({
 			section: baseConfig["session-store"] as never,
-			deploymentMode: "unset",
 			lifecycleRegistrar: reg,
 		} as never);
 		// Route is constructed successfully even with a registrar present; the
@@ -169,7 +166,6 @@ describe("sessionStoreModule", () => {
 				...baseConfig["session-store"],
 				storage: { type: "redis", redis: { url: "redis://localhost:6379" } },
 			} as never,
-			deploymentMode: "unset",
 			lifecycleRegistrar: makeRegistrar(),
 			readinessRegistrar: { register: (probe: (typeof probes)[number]) => probes.push(probe) },
 		} as never);
@@ -189,7 +185,6 @@ describe("sessionStoreModule", () => {
 				secure: false,
 				domain: null,
 			} as never,
-			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		const app = express();
@@ -218,7 +213,6 @@ describe("sessionStoreModule", () => {
 					secure: false,
 					domain: null,
 				} as never,
-				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toThrow(/__Host-/);
@@ -231,7 +225,6 @@ describe("sessionStoreModule", () => {
 					secure: true,
 					domain: "example.com",
 				} as never,
-				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toThrow(/__Host-/);
@@ -593,7 +586,6 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			await expect(
 				factoryOf(sessionStoreModule)({
 					section: storeOf(configWith(change)),
-					deploymentMode: "unset",
 					lifecycleRegistrar: undefined,
 				} as never),
 			).rejects.toThrow(message);
@@ -606,7 +598,6 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		await expect(
 			factoryOf(sessionStoreModule)({
 				section: storeOf(configWith({ name: "auth session", storage: redis })),
-				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toThrow(NOT_A_TOKEN);
@@ -614,7 +605,6 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 
 		await factoryOf(sessionStoreModule)({
 			section: storeOf(configWith({ storage: redis })),
-			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		expect(createClient).toHaveBeenCalledTimes(1);
@@ -683,7 +673,6 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 					maxAge: 60_000,
 				}),
 			),
-			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		const app = express();
@@ -712,7 +701,6 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 	it("sets a host-only cookie for an empty domain", async () => {
 		const route = await factoryOf(sessionStoreModule)({
 			section: storeOf(configWith({ name: "auth.session", secure: false, domain: "" })),
-			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		const app = express();
