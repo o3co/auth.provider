@@ -313,3 +313,15 @@ provider failing (`provides-factory-failed`, naming
 `core-session-lifecycle`), its remedy now naming the contribution: install a
 module that contributes a `sessionCloseNotifiers` entry, as `oauthModule`
 does.
+
+**D17. Join order, and the federations a logout reads first.** A record's
+participants are answered in the order each first joined; a repeat join
+replaces its `data` and does not move it — the order the per-session
+federation index has always kept, which a logout reads to pick the
+federation it ends upstream. `SessionLifecycle.federations(sid)` answers the
+record's federations in that order, then, while the bridge stands, the
+index's in its insertion order, each once — the union and order a close
+answers. A logout reads it before the close, since the close removes the
+federation tokens that carry the upstream `id_token_hint`. A logout whose
+close commits with work still pending is audited as `logout.close_pending`.
+

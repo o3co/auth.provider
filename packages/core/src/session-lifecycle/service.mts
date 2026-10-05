@@ -111,6 +111,16 @@ export type SessionCloseOutcome =
 	  }
 	| { readonly outcome: "unavailable" };
 
+/**
+ * `listed`: the federations a session joined, the record's in the order they
+ * joined, then, while the per-session stores are read elsewhere, those of
+ * their index in the order they were added, each once — the order and union a
+ * close answers. `unavailable`: a store could not answer.
+ */
+export type SessionFederations =
+	| { readonly outcome: "listed"; readonly federations: readonly string[] }
+	| { readonly outcome: "unavailable" };
+
 /** `live`, with the user session; `not_live` from the closing commit on, or once the user session is gone. */
 export type SessionLiveness =
 	| { readonly outcome: "live"; readonly session: UserSession }
@@ -132,6 +142,11 @@ export interface SessionLifecycle {
 	close(sid: string, cause: SessionCloseCause): Promise<SessionCloseOutcome>;
 	/** Whether `sid` is live. */
 	liveness(sid: string): Promise<SessionLiveness>;
+	/**
+	 * The federations `sid` joined, before it is closed: what a logout reads to
+	 * end the first one upstream with the tokens a close removes.
+	 */
+	federations(sid: string): Promise<SessionFederations>;
 	/** Runs the close work of every closing session. Rejects when the closing listing cannot be read. */
 	resumePending(): Promise<SessionResumeReport>;
 }
@@ -542,6 +557,21 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 				rps: union(idsOf(closing.value, "rp"), bridged.rps),
 				federations: union(idsOf(closing.value, "federation"), bridged.federations),
 			};
+		},
+
+		async federations(sid) {
+			checkSessionLifecycleKey(sid, "sid");
+			try {
+				const read = readVersionedSessionLifecycle(await store.read(sid));
+				const own = read === null ? [] : idsOf(read.value, "federation");
+				return {
+					outcome: "listed",
+					federations: [...new Set([...own, ...(await bridge.federations(sid))])],
+				};
+			} catch (error) {
+				unavailable("federations", sid, error);
+				return { outcome: "unavailable" };
+			}
 		},
 
 		async liveness(sid) {

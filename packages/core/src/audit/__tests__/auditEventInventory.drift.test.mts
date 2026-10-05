@@ -41,7 +41,10 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../../..");
  * build-order step named here. An entry is listed and not emitted; the step
  * that emits it deletes it here.
  */
-const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {};
+const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {
+	"logout.close_pending":
+		"#1030's logout switch: `/oauth/logout` answers a session whose close is pending",
+};
 
 /** Shipped sources: packages/*\/src and the standalone template, tests excluded. */
 function listShippedSources(): string[] {

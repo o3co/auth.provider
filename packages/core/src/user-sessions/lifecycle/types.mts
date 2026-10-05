@@ -86,7 +86,8 @@ export interface SessionClose {
 /**
  * A session's lifecycle record. Every field is a required key. From the
  * closing commit on, `participants` is the snapshot that commit took, and
- * nothing joins it again.
+ * nothing joins it again. `participants` is in the order each first joined:
+ * a repeat join replaces its `data` and does not move it.
  */
 export interface SessionLifecycleRecord {
 	readonly sub: string;

@@ -669,6 +669,69 @@ describe("the cause policy", () => {
 	});
 });
 
+describe("federations", () => {
+	it("lists the record's federations in the order they joined, then the per-session index's, once each", async () => {
+		const h = harness();
+		const expiresAt = await h.establish();
+		expect(await h.lifecycle.join(SID, { familyId: "f1", federation: "oidc" })).toEqual({
+			outcome: "joined",
+		});
+		expect(await h.lifecycle.join(SID, { familyId: "f2", federation: "apple" })).toEqual({
+			outcome: "joined",
+		});
+		await h.sessionFederationIndex.addFederation(SID, "github", expiresAt);
+		expect(await h.lifecycle.federations(SID)).toEqual({
+			outcome: "listed",
+			federations: ["oidc", "apple", "github"],
+		});
+	});
+
+	it("lists the per-session index's alone for a session with no record", async () => {
+		const h = harness();
+		const expiresAt = await h.establish(SID, { open: false });
+		await h.sessionFederationIndex.addFederation(SID, "google", expiresAt);
+		expect(await h.lifecycle.federations(SID)).toEqual({
+			outcome: "listed",
+			federations: ["google"],
+		});
+	});
+
+	it("lists what the close answers for the same session", async () => {
+		const h = harness();
+		await h.establish();
+		await joinAll(h);
+		const listed = await h.lifecycle.federations(SID);
+		const closed = await h.lifecycle.close(SID, "rp_logout");
+		expect(closed.outcome === "unavailable" ? undefined : closed.federations).toEqual(
+			listed.outcome === "listed" ? listed.federations : undefined,
+		);
+	});
+
+	it("is unavailable when the lifecycle store or the index cannot answer", async () => {
+		const h = harness({
+			store: (inner) => ({
+				...inner,
+				read: async () => {
+					throw new Error("lifecycle store down");
+				},
+			}),
+		});
+		await h.establish();
+		expect(await h.lifecycle.federations(SID)).toEqual({ outcome: "unavailable" });
+		const g = harness();
+		await g.establish();
+		g.sessionFederationIndex.listFederations = async () => {
+			throw new Error("index down");
+		};
+		expect(await g.lifecycle.federations(SID)).toEqual({ outcome: "unavailable" });
+	});
+
+	it("refuses a sid the port cannot hold with a RangeError", async () => {
+		const h = harness();
+		await expect(h.lifecycle.federations("")).rejects.toThrow(RangeError);
+	});
+});
+
 describe("liveness", () => {
 	it("is live, with the user session, while the record is active", async () => {
 		const h = harness();

@@ -1733,7 +1733,7 @@ check this page, so when the two disagree, the constant is right:
 `federation.token.upstream_ineligible`,
 `introspect.family_revoked`, `introspect.session_invalid`,
 `introspect.store_unavailable`,
-`logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
+`logout.cascade_failed`, `logout.close_pending`, `logout.family_revoked`, `logout.success`,
 `mfa.challenge.sent`, `mfa.email_address_mismatch`,
 `mfa.enrollment_state_inconsistent`,
 `mfa.factor.enrolled`, `mfa.factor.removed`, `mfa.first_binding_conflict`,
