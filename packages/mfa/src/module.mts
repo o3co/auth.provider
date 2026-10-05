@@ -362,7 +362,13 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "csrfGuard"
 		| "loginCompletion"
 		| "deploymentMode",
-		"rateLimiter" | "auditSink" | "subjectRevocation" | "logger" | "mailSender" | "userRepository",
+		| "rateLimiter"
+		| "auditSink"
+		| "subjectRevocation"
+		| "sessionLifecycleStore"
+		| "logger"
+		| "mailSender"
+		| "userRepository",
 		typeof mfaSectionSchema,
 		"mfaSubjectLeases"
 	>({
@@ -392,6 +398,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"rateLimiter",
 			"auditSink",
 			"subjectRevocation",
+			"sessionLifecycleStore",
 			"logger",
 			"mailSender",
 			"userRepository",
@@ -594,6 +601,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							admission: {
 								userSessionStore: deps.userSessionStore,
 								subjectRevocation: deps.subjectRevocation,
+								sessionLifecycleStore: deps.sessionLifecycleStore,
 								requirements,
 								acrTable: {},
 								logger,
