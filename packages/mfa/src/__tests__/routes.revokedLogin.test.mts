@@ -249,6 +249,27 @@ describe("the boundary's edge", () => {
 		}
 	});
 
+	it("compares in whole seconds, as token verification does: a login in the second the allowance covers is refused, one in the next completes", async () => {
+		const boundaryMs = T0 + 100;
+		for (const [authMs, status] of [
+			[T0 + 1_101, 401],
+			[T0 + 1_999, 401],
+			[T0 + 2_000, 200],
+		] as const) {
+			const revocation = createInMemorySubjectRevocation();
+			const { app, totp } = await composed({ revocation });
+			if (totp === undefined) throw new Error("nothing seeded");
+			await revocation.revokeBefore(ALICE.id, new Date(boundaryMs), new Date(T0 + 86_400_000));
+			freezeClock(authMs);
+			const { agent, transaction } = await beginLogin(app);
+
+			const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
+
+			expect(res.status, `${authMs - boundaryMs} ms: ${JSON.stringify(res.body)}`).toBe(status);
+			await disposeAll();
+		}
+	});
+
 	it("reads the boundary of the login's subject, never another's", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		const { app, totp } = await composed({ revocation });
