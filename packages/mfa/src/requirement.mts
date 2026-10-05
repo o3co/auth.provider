@@ -49,8 +49,11 @@
  * log in; a witness `enrolled` or malformed sends a password session to log
  * in, whose own read of the `User` records a real loss, and is recorded and
  * thrown for any other primary, a federated login having no such read —
- * then a recent primary (`authTime`; a second factor does not stand in for
- * it), then the subject's first-binding mark (`firstBindingMark.mts`): a
+ * then a recent primary (core's `authenticationFreshness`: `authTime`, or for
+ * a federated login the earlier of that and the upstream's recorded
+ * authentication, never recent when the upstream showed no time; a second
+ * factor does not stand in for it), then the subject's first-binding mark
+ * (`firstBindingMark.mts`), read against when the session was established: a
  * session it distrusts, whose recorded witness may predate the subject's
  * enrollment, is sent to log in — said at info — and a mark that cannot be
  * read throws;
