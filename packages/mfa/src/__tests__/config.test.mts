@@ -175,7 +175,7 @@ describe("the MFA settings this package reads", () => {
 		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
 	});
 
-	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, the routes' budget, recent MFA's window, the first binding's proof and a subject's factor limit — no factor's", () => {
+	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, recent MFA's window, the first binding's proof and a subject's factor limit — no factor's", () => {
 		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
 			"encryptionKeys",
 			"enrollment",
@@ -185,7 +185,6 @@ describe("the MFA settings this package reads", () => {
 			"maxFactorsPerSubject",
 			"mode",
 			"page",
-			"rateLimit",
 			"storeTimeoutMs",
 			"transactionTtlSeconds",
 		]);

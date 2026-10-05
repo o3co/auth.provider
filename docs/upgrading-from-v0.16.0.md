@@ -204,6 +204,26 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   refused. Delete the key.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
+- `mfa.rateLimit.routes` is removed, and any key under `mfa.rateLimit`
+  refuses the boot wherever `mfaModule` is installed (#807). The MFA routes
+  are limited by your `rateLimiter` alone, under the prefix `mfa`: configure
+  `limits.mfa` on it instead (`redis-rate-limiter.limits.mfa` or
+  `core-rate-limiter-memory.limits.mfa`), or its `defaultLimit` (60 per 60 s
+  on the bundled limiters) applies. The standalone template's
+  `config/application.conf` sets `limits.mfa { limit = 60, windowSeconds = 300 }`
+  on both limiters, the old budget, so a scaffold keeps it; a composition of
+  your own sets it on its limiter to keep it. Without a `rateLimiter` —
+  declared in `core.declaredAbsent` — the MFA routes are no longer limited
+  by a per-process fallback, and no longer refuse the boot under
+  `core.deployment.mode = "multi"`: they pass every request through, as the
+  OAuth endpoints do. Declaring the limiter absent is a choice with costs: an
+  MFA email challenge, or an account-email proof resent, is then bounded only
+  by the mail sender's own limit, and `@o3co/auth-provider-standard`'s SMTP
+  sender has none — wire a limiter, or a sender with a limit of its own; and
+  with the in-process MFA transaction store, one signed-in account can fill
+  the store's cap (`maxEntries`) by beginning enrollments, after which new
+  MFA transactions are refused until entries expire. The MFA lock (attempts
+  per transaction, backoff, weekly failures) is unchanged.
 
 ### Values read more strictly
 
@@ -333,10 +353,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   refused (`component-absence-undeclared`, naming `rateLimiter`) unless
   `core.declaredAbsent` lists it: `core.declaredAbsent = ["rateLimiter"]`,
   beside `"auditSink"` if you list that. Declared absent, a route that keys
-  the limiter lets every request through unless its module falls back to a
-  per-process limiter (WebAuthn authentication options and the MFA routes
-  do), so request-volume limits on the others are then for what
-  sits in front of the provider. The template wires a limiter
+  the limiter lets every request through — no module falls back to a
+  per-process limiter — so request-volume limits are then for what sits in
+  front of the provider. The template wires a limiter
   (`adapters.rateLimiter`), so a scaffold needs nothing.
 - **Federation grants no longer require a rate limiter (#807).** With
   `federation-grants.enabled = true` and no `rateLimiter` wired, the module
