@@ -627,6 +627,24 @@ modules fills them.
   federation's redirect policy through `federationRedirectPolicies` overrides
   the type instead (`overrides.federationTypes.<type>`, with its own
   `redirectPolicy`).
+- **BREAKING: a contribution kind's container is its kind's shape (#911).**
+  In `contributes` and in `overrides`, a name-keyed kind (`grants`,
+  `tokenExchangeValidators`, `mfaFactors`, `sessionRequirements`,
+  `rateLimitBudgets`, `federationTypes`, `admissionActions`,
+  `sessionCloseNotifiers`, and a kind of your own whose collector is
+  name-keyed) takes a record, and a list-shaped kind (`routes`,
+  `auditHooks`, `grantPolicyHooks`, `grantMiddleware`,
+  `tokenBindingMechanisms`, `discoveryMetadata`, and a list-shaped kind of
+  your own) takes an array. A manifest that bypasses `ContributesMap`'s
+  types — written in JavaScript, or cast — with an array under a name-keyed
+  kind used to boot with those contributions dropped, filed under keys no
+  reader reaches, or to fail with a plain `TypeError` when they were
+  overrides or a factory failed; a record under a list-shaped kind failed
+  with a `TypeError`, and `null` or a function was ignored for most kinds.
+  Each is now refused before any factory runs (`contribution-malformed`,
+  naming the module, the kind, the channel and what the container was).
+  Write the kind's shape; a module typed against `ContributesMap` needs no
+  change.
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
   overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot
