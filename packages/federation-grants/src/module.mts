@@ -300,8 +300,9 @@ const requireDelegatedCapability = (
 /**
  * The `federationGrantPolicy` this module provides, from its parsed section:
  * the switch, and the keep policy as core's `resolveFederationGrantKeepPolicy`
- * reads it, never allowed while the switch is off. Boot asks only a module
- * its section switches on, so the value says `enabled: true`. Held to core's
+ * reads it, never allowed while the switch is off. The value says what the
+ * switch says — `true` whenever boot asks, since boot asks only a module its
+ * section switches on. Held to core's
  * check, which answers it frozen.
  */
 const grantPolicyOf = (section: FederationGrantsModuleDeps["section"]): FederationGrantPolicy => {
