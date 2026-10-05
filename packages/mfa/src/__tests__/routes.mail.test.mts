@@ -168,6 +168,54 @@ describe("a factor's login code", () => {
 		expect(res.body).toEqual({ sent_to: "a***@example.com", expires_in: 600 });
 	});
 
+	it.each(["purpose", "code", "expiresAtMs", "addressDigest", "keyId", "digest"])(
+		"is answered 503 once, the challenge failed, when reading its mail's %s throws: nothing sent, nothing kept",
+		async (field) => {
+			const factorStore = createMemoryMfaFactorStore();
+			const record = await seedFactor(factorStore, KIND, {
+				addressDigest: recordedDigest(ALICE.email),
+			});
+			const double = createTestMfaFactor({ kind: KIND, mail: true });
+			const throwing = (fields: object, key: string) =>
+				Object.defineProperty({ ...fields }, key, {
+					get: () => {
+						throw new Error("the mail cannot be read");
+					},
+					enumerable: true,
+				});
+			const unreadable: MfaFactor = {
+				...double,
+				challenge: async (ctx) => {
+					const issued = await (double.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+					const mail = issued.mail as NonNullable<typeof issued.mail>;
+					const digest = mail.addressDigest as NonNullable<typeof mail.addressDigest>;
+					return {
+						...issued,
+						mail:
+							field === "keyId" || field === "digest"
+								? { ...mail, addressDigest: throwing(digest, field) as never }
+								: (throwing(mail, field) as never),
+					};
+				},
+			};
+			const sender = createRecordingMailSender();
+			const { app, logger, transactionStore } = await boot({
+				config: configFor("required"),
+				factorStore,
+				mailSender: sender,
+				extraModules: [contributing(unreadable)],
+			});
+			const { agent, transaction } = await beginLogin(app);
+
+			const res = await challenge(agent, transaction, record.id);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(503);
+			expect(events(logger, "error")).toEqual(["mfa_factor_challenge_unavailable"]);
+			expect(sender.sent).toEqual([]);
+			expect((await transactionStore.get(transaction))?.version).toBe(0);
+		},
+	);
+
 	it("answers a mailed enrollment start where the code went and how long it lives as the coordinator kept them, whatever the factor's own answer says", async () => {
 		const double = createTestMfaFactor({ kind: KIND, mail: true });
 		const claiming: MfaFactor = {

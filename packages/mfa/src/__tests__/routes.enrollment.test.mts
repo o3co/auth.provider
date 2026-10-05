@@ -1222,6 +1222,57 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 		);
 	});
 
+	it("refuses, 503 once and keeping nothing, an enrollment whose response cannot be read or is not a plain JSON-shaped object", async () => {
+		class Options {
+			readonly secret = "s";
+		}
+		const unreadable = Object.defineProperty({}, "secret", {
+			get: () => {
+				throw new Error("the response cannot be read");
+			},
+			enumerable: true,
+		});
+		for (const response of [unreadable, new Options(), { options: new Options() }]) {
+			const base = createTestMfaFactor({ kind: "strict" });
+			const { logger, transactionStore, agent, transaction } = await atFirstBinding({
+				...base,
+				beginEnrollment: async () => ({ state: { secret: "s" }, response }),
+			});
+
+			const res = await beginEnrollment(agent, transaction, "strict");
+
+			expect(res.status).toBe(503);
+			expect(events(logger, "error")).toEqual(["mfa_factor_enrollment_unavailable"]);
+			expect((await transactionStore.get(transaction))?.version).toBe(0);
+			await disposeAll();
+		}
+	});
+
+	it.each<[string, unknown]>([
+		["a truthy value that is not true", "yes"],
+		["a falsy value that is not false", 0],
+		["absent", undefined],
+	])(
+		"answers 503 once, the enrollment unreadable, nothing bound, when a completion's ok is %s",
+		async (_label, ok) => {
+			const base = createTestMfaFactor({ kind: "strict" });
+			const { logger, factorStore, agent, transaction } = await atFirstBinding({
+				...base,
+				completeEnrollment: async (ctx) =>
+					({ ...(await base.completeEnrollment(ctx)), ok }) as never,
+			});
+			const begun = await beginEnrollment(agent, transaction, "strict");
+
+			const done = await completeEnrollment(agent, transaction, begun.body.secret);
+
+			expect(done.status, JSON.stringify(done.body)).toBe(503);
+			expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+			expect(
+				(await factorStore.list(ALICE.id)).filter((record) => record.kind === "strict"),
+			).toEqual([]);
+		},
+	);
+
 	it("answers 503 once, the enrollment unreadable, when reading a completion's reason or label throws", async () => {
 		for (const throwing of ["reason", "label"] as const) {
 			const base = createTestMfaFactor({ kind: "strict" });

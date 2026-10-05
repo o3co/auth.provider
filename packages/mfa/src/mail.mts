@@ -97,6 +97,25 @@ const OUTSIDE_CONTRACT = new TypeError("the mail sender answered outside its por
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * The mail a factor's answer asks for, as a plain copy of the fields
+ * `sendMfaMail` reads — its address digest's too — each read once; anything
+ * that is not an object as it is. A read that throws is thrown: the caller
+ * reads the factor's answer inside the catch that makes it the factor's failure.
+ */
+export function copyAskedMail(value: unknown): unknown {
+	if (!isRecord(value)) return value;
+	const { purpose, code, expiresAtMs, addressDigest } = value;
+	return {
+		purpose,
+		code,
+		expiresAtMs,
+		addressDigest: isRecord(addressDigest)
+			? { keyId: addressDigest.keyId, digest: addressDigest.digest }
+			: addressDigest,
+	};
+}
+
 /** The mail as asked, read once, or `undefined` when it is not one of `purpose` with a code expiring after `nowMs`. */
 function readMail(
 	value: unknown,

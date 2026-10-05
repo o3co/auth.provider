@@ -450,7 +450,7 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 		return { reads, answer, plainWithGetter };
 	};
 
-	it("keeps a challenge whose answer is a class's instance behind getters, reading each field once and sealing the plain state it holds", async () => {
+	it("keeps a challenge whose answer is a class's instance behind getters, reading each field once, sealing the plain state it holds and answering the plain response it holds", async () => {
 		const { reads, answer, plainWithGetter } = counter();
 		const { app, record } = await withChallengedFactor(
 			challenged({
@@ -458,7 +458,7 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 					const nonce = randomBytes(8).toString("hex");
 					return answer("issued", {
 						state: plainWithGetter("state", "nonce", nonce),
-						response: { nonce },
+						response: plainWithGetter("response", "nonce", nonce),
 						mail: undefined,
 					});
 				},
@@ -476,6 +476,7 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 			"issued.response": 1,
 			"issued.mail": 1,
 			"state.nonce": 1,
+			"response.nonce": 1,
 		});
 
 		const verified = await verify(
@@ -533,6 +534,55 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 		expect(res.status).toBe(503);
 		expect(events(logger, "error")).toEqual(["mfa_factor_challenge_unavailable"]);
 		expect((await transactionStore.get(transaction))?.challenge).toBeUndefined();
+	});
+
+	it("answers 503 once, the challenge failed, when reading a field of its response throws, keeping nothing", async () => {
+		const { app, logger, transactionStore, record, audit } = await withChallengedFactor(
+			challenged({
+				challenge: async () => ({
+					state: { nonce: "n" },
+					response: Object.defineProperty({}, "nonce", {
+						get: () => {
+							throw new Error("the response cannot be read");
+						},
+						enumerable: true,
+					}),
+				}),
+			}),
+		);
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_challenge_unavailable"]);
+		expect((await transactionStore.get(transaction))?.challenge).toBeUndefined();
+		expect(audit.of("mfa.challenge.sent")).toEqual([]);
+	});
+
+	it("refuses a challenge whose response is a class's instance or holds one, 503 once, keeping nothing", async () => {
+		class Options {
+			readonly nonce = "n";
+		}
+		for (const response of [new Options(), { options: new Options() }]) {
+			const { app, logger, transactionStore, record } = await withChallengedFactor(
+				challenged({ challenge: async () => ({ state: { nonce: "n" }, response }) }),
+			);
+			const { agent, transaction } = await beginLogin(app);
+
+			const res = await mfaPost(agent, "/challenge", {
+				transaction_id: transaction,
+				factor_id: record.id,
+			});
+
+			expect(res.status).toBe(503);
+			expect(events(logger, "error")).toEqual(["mfa_factor_challenge_unavailable"]);
+			expect((await transactionStore.get(transaction))?.challenge).toBeUndefined();
+			await disposeAll();
+		}
 	});
 
 	/** Boots the double, re-verified by `verify`, with alice holding another factor of its kind ahead of hers. */
@@ -715,6 +765,33 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 		expect(res.status).toBe(503);
 		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
 	});
+
+	it.each<[string, unknown]>([
+		["a truthy value that is not true", "yes"],
+		["a falsy value that is not false", 0],
+		["absent", undefined],
+	])(
+		"answers 503 once, the factor unreadable, never a success or a refusal, when a verification's ok is %s",
+		async (_label, ok) => {
+			const base = challenged();
+			const { record, agent, transaction, challenge, logger } = await withVerifier({
+				verify: async (ctx) => {
+					const result = await base.verify(ctx);
+					return { ...result, ok } as never;
+				},
+			});
+
+			const res = await verify(
+				agent,
+				transaction,
+				record.id,
+				`s3cret:${(await challenge()).body.nonce as string}`,
+			);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(503);
+			expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+		},
+	);
 
 	it("answers 503 once, the factor unreadable, when reading its refusal's reason throws", async () => {
 		const { app, logger, record } = await withChallengedFactor(
