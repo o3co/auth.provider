@@ -715,6 +715,34 @@ describe("a phase's items run together, at most eight at a time", () => {
 		expect(h.notices).toHaveLength(8);
 	});
 
+	it("tells the old registry's other relying parties when one fails, keeps the step pending, and tells all three again later", async () => {
+		const h = harness();
+		const expiresAt = await h.establish();
+		for (const clientId of ["old0", "old1", "old2"]) {
+			await h.sessionRPRegistry.registerRP(SID, relyingParty(clientId), expiresAt);
+		}
+		h.failing.set("notify:old1", 1);
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+		expect(h.notices.map((n) => n.clientId).sort()).toEqual(["old0", "old2"]);
+		expect((await h.read())?.value.close?.pending).toContain("notify_bridged_rps");
+		h.notices.length = 0;
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		expect(h.notices.map((n) => n.clientId).sort()).toEqual(["old0", "old1", "old2"]);
+	});
+
+	it("hands a failed notice's place on: the ninth and tenth are told though the first eight fail", async () => {
+		const h = harness();
+		await h.establish();
+		for (let i = 0; i < 10; i++) await h.lifecycle.join(SID, { rp: relyingParty(`c${i}`) });
+		for (let i = 0; i < 8; i++) h.failing.set(`notify:c${i}`, 1);
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+		expect(h.notices.map((n) => n.clientId).sort()).toEqual(["c8", "c9"]);
+		const pending = (await h.read())?.value.close?.pending ?? [];
+		for (let i = 0; i < 8; i++) expect(pending).toContain(`rp:c${i}`);
+		expect(pending).not.toContain("rp:c8");
+		expect(pending).not.toContain("rp:c9");
+	});
+
 	it("starts a phase only once every item of the earlier ones is done, however long each takes", async () => {
 		const delays = new Map([
 			["revoke_family:f1", 30],

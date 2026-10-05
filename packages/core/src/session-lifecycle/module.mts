@@ -67,6 +67,8 @@ export function readSessionLifecycleSweepIntervalMs(config: unknown): number | u
 	const value = (
 		config as { core?: { sessionLifecycle?: { sweepIntervalSeconds?: unknown } } } | undefined
 	)?.core?.sessionLifecycle?.sweepIntervalSeconds;
+	// Core's reference.conf ships the default; a configuration not layered on
+	// it, such as a test's fixture, reads the same.
 	if (value === undefined) return DEFAULT_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS * 1000;
 	const seconds = configuredNumber(value);
 	if (

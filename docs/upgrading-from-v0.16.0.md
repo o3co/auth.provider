@@ -946,9 +946,8 @@ modules fills them.
 - **The session lifecycle sweeps unless told not to.** Installing
   `sessionLifecycleModule` starts a sweep that resumes the closes left
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
-  sets another interval, and `0` turns it off. Its timer never keeps the
-  process alive, and a composition whose `lifecycleRegistrar` slot is empty
-  stops it only with the process.
+  sets another interval, and `0` turns it off. It is stopped on dispose,
+  and its timer never keeps the process alive.
 
 ### Exports removed, and signatures changed
 
