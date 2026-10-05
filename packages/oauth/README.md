@@ -909,9 +909,23 @@ The access token's lifetime is `min(oauth.accessToken.defaultExpiresIn, exp − 
 
 ### A subject revocation reaches assertions issued before it
 
-With `subjectRevocation` wired, every assertion must carry `iat`. The grant refuses one whose verifier reports no usable `issuedAt` (logged as `jwt_bearer_assertion_issued_at_missing`), whether or not a boundary is in force. It also refuses one whose verifier reports no `expiresAt` (`jwt_bearer_assertion_expiry_missing`), or whose `expiresAt − issuedAt` is over a day (core's `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`; `jwt_bearer_assertion_lifetime_exceeded`), whichever verifier answered. A subject's boundary is kept that long, so a longer-lived assertion would outlive the boundary that covers it. These checks run before the Store is asked. The grant then reads the resolved subject's revocation boundary as its last read before signing, through core's `subjectBoundaryCovers`. It refuses an assertion whose `issuedAt` is at or before that boundary, using the rule and allowance `verifyJwt` applies to a token's `iat` (logged as `jwt_bearer_assertion_revoked`). Both refusals are the uniform `invalid_grant` / `assertion did not verify`. A boundary that cannot be read is `503 temporarily_unavailable` (`jwt_bearer_revocation_boundary_unavailable`). Without `subjectRevocation`, nothing changes.
+With `subjectRevocation` wired, every assertion must carry `iat` and `exp`, whether or not a boundary is in force and whichever verifier answered. Before the Store is asked, the grant refuses an assertion in any of these cases:
 
-- **A custom `AssertionVerifier` reports `issuedAt` and `expiresAt`.** With `subjectRevocation` wired, the grant refuses every assertion its verifier reports without either, or that lives longer than a day. `createRegistryAssertionVerifier` and `createJwtAssertionVerifier` report it whenever the assertion carries `iat`.
+- its verifier reports no usable `issuedAt` (`jwt_bearer_assertion_issued_at_unusable`);
+- its `issuedAt` is ahead of this server's clock by more than core's `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS` (300 s; `jwt_bearer_assertion_issued_at_ahead`);
+- it reports no usable `expiresAt` (`jwt_bearer_assertion_expiry_unusable`);
+- its `expiresAt` is not after `issuedAt` (`jwt_bearer_assertion_lifetime_empty`);
+- its `expiresAt − issuedAt` is over a day (core's `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`; `jwt_bearer_assertion_lifetime_exceeded`).
+
+A subject's boundary is kept a day, so a longer-lived assertion would outlive the boundary that covers it.
+
+The grant then reads the resolved subject's revocation boundary as its last read before signing, through core's `subjectBoundaryCovers`. It compares the assertion's `issuedAt`, taken as no later than the grant's own issuance second, using the rule and allowance `verifyJwt` applies to a token's `iat`. One at or before the boundary is refused (`jwt_bearer_assertion_revoked`). Every refusal above is the uniform `invalid_grant` / `assertion did not verify`.
+
+A boundary that cannot be read is `503 temporarily_unavailable` (`jwt_bearer_revocation_boundary_unavailable`). After the read, an assertion that expired during it is `invalid_grant` (`jwt_bearer_assertion_expired`). A token whose own lifetime the read used up is not signed; it is `503 temporarily_unavailable` (`jwt_bearer_issuance_outlasted_token_lifetime`), and a retry succeeds.
+
+The guarantee holds up to the issuer's clock skew, which the verifier's clock tolerance bounds: at most 300 s for the bundled verifiers. Without `subjectRevocation`, nothing changes.
+
+- **A custom `AssertionVerifier` reports `issuedAt` and `expiresAt`, and refuses an `iat` ahead of its clock by more than its clock tolerance.** With `subjectRevocation` wired, the grant refuses every assertion its verifier reports without either, or that lives longer than a day. `createRegistryAssertionVerifier` and `createJwtAssertionVerifier` report `issuedAt` whenever the assertion carries `iat`, and refuse one ahead of their clock beyond the entry's tolerance.
 - A subject revocation does not revoke the upstream issuer's credential. An assertion that issuer signs after the revocation is fresh authentication, and it is accepted.
 
 ## Tests

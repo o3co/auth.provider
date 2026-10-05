@@ -887,9 +887,23 @@ const assertionVerifier = createRegistryAssertionVerifier({
 
 ### サブジェクトの失効は、それより前に発行されたアサーションに及ぶ
 
-`subjectRevocation` が配線されていると、すべてのアサーションは `iat` を持たなければならない。境界が有効かどうかにかかわらず、検証器が使える `issuedAt` を報告しないアサーションは拒否する（`jwt_bearer_assertion_issued_at_missing` としてログに出す）。どの検証器が答えたかにかかわらず、`expiresAt` を報告しないもの（`jwt_bearer_assertion_expiry_missing`）と、`expiresAt − issuedAt` が 1 日（core の `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`）を超えるもの（`jwt_bearer_assertion_lifetime_exceeded`）も拒否する。サブジェクトの境界はその長さだけ保持されるので、それより長く生きるアサーションは、それを覆う境界より長く残ってしまうからである。これらの確認はストアに尋ねる前に行う。そのうえでグラントは、署名前の最後の読み取りとして、core の `subjectBoundaryCovers` を通じて解決したサブジェクトの失効境界を読む。アサーションの `issuedAt` がその境界以前なら、`verifyJwt` がトークンの `iat` に適用するのと同じ規則と許容幅で拒否する（`jwt_bearer_assertion_revoked` としてログに出す）。どちらの拒否も一律の `invalid_grant` / `assertion did not verify` である。境界を読めないときは `503 temporarily_unavailable`（`jwt_bearer_revocation_boundary_unavailable`）である。`subjectRevocation` が無ければ何も変わらない。
+`subjectRevocation` が配線されていると、境界が有効かどうか、どの検証器が答えたかにかかわらず、すべてのアサーションは `iat` と `exp` を持たなければならない。グラントはストアに尋ねる前に、次のいずれかに当たるアサーションを拒否する:
 
-- **独自の `AssertionVerifier` は `issuedAt` と `expiresAt` を報告する。** `subjectRevocation` が配線されていると、グラントはどちらかを報告しないアサーションと、1 日より長く生きるアサーションをすべて拒否する。`createRegistryAssertionVerifier` と `createJwtAssertionVerifier` は、アサーションが `iat` を持てば常にそれを報告する。
+- 検証器が使える `issuedAt` を報告しない（`jwt_bearer_assertion_issued_at_unusable`）
+- `issuedAt` がこのサーバーの時計より core の `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS`（300 秒）を超えて先にある（`jwt_bearer_assertion_issued_at_ahead`）
+- 使える `expiresAt` を報告しない（`jwt_bearer_assertion_expiry_unusable`）
+- `expiresAt` が `issuedAt` より後でない（`jwt_bearer_assertion_lifetime_empty`）
+- `expiresAt − issuedAt` が 1 日（core の `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`）を超える（`jwt_bearer_assertion_lifetime_exceeded`）
+
+サブジェクトの境界は 1 日保持されるので、それより長く生きるアサーションは、それを覆う境界より長く残ってしまう。
+
+そのうえでグラントは、署名前の最後の読み取りとして、core の `subjectBoundaryCovers` を通じて解決したサブジェクトの失効境界を読む。アサーションの `issuedAt` を、グラント自身の発行の秒より後にならない値として、`verifyJwt` がトークンの `iat` に適用するのと同じ規則と許容幅で比べる。境界以前のものは拒否する（`jwt_bearer_assertion_revoked`）。ここまでの拒否はすべて一律の `invalid_grant` / `assertion did not verify` である。
+
+境界を読めないときは `503 temporarily_unavailable`（`jwt_bearer_revocation_boundary_unavailable`）である。読み取りの後、その間に期限切れになったアサーションは `invalid_grant`（`jwt_bearer_assertion_expired`）である。読み取りがトークン自身の有効期間を使い切ったときは署名せず、`503 temporarily_unavailable`（`jwt_bearer_issuance_outlasted_token_lifetime`）を返す。再試行すれば成功する。
+
+この保証は発行者の時計のずれの範囲で成り立つ。そのずれは検証器の時計の許容幅で抑えられ、同梱の検証器では最大 300 秒である。`subjectRevocation` が無ければ何も変わらない。
+
+- **独自の `AssertionVerifier` は `issuedAt` と `expiresAt` を報告し、自分の時計より許容幅を超えて先にある `iat` を拒否する。** `subjectRevocation` が配線されていると、グラントはどちらかを報告しないアサーションと、1 日より長く生きるアサーションをすべて拒否する。`createRegistryAssertionVerifier` と `createJwtAssertionVerifier` は、アサーションが `iat` を持てば常に `issuedAt` を報告し、エントリーの許容幅を超えて時計より先にあるものを拒否する。
 - サブジェクトの失効は、上流の発行者の資格情報を失効させない。その発行者が失効の後に署名したアサーションは新しい認証であり、受け入れられる。
 
 ## テスト

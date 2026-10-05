@@ -29,6 +29,7 @@ import {
 	type GrantContext,
 	type GrantPolicyDecision,
 	type GrantPolicyHook,
+	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	type SubjectRevocation,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
@@ -151,7 +152,7 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 			expect(result).toEqual(refused);
 			expect(info).toHaveBeenCalledWith(
 				expect.objectContaining({ kind: "stub" }),
-				"jwt_bearer_assertion_issued_at_missing",
+				"jwt_bearer_assertion_issued_at_unusable",
 			);
 			expect(authenticateByToken).not.toHaveBeenCalled();
 			expect(subjectRevocation.calls).toEqual([]);
@@ -342,6 +343,105 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 				expect(result.status).toBe(200);
 			}
 		});
+
+		it("refuses an expiry that is not after the issue time", async () => {
+			const issuedAt = now() - 60;
+			for (const expiresAt of [issuedAt, issuedAt - 1]) {
+				const info = vi.fn();
+				const { result } = await build({
+					issuedAt,
+					expiresAt,
+					subjectRevocation: revocationAt(() => null),
+					logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
+				}).handle(ctx());
+				expect(result).toEqual(refused);
+				expect(info).toHaveBeenCalledWith(
+					expect.objectContaining({ kind: "stub" }),
+					"jwt_bearer_assertion_lifetime_empty",
+				);
+			}
+		});
+
+		it("logs an expiry it cannot use, a numeric string included", async () => {
+			for (const expiresAt of [null, "1790000000", Number.NaN, Number.POSITIVE_INFINITY]) {
+				const info = vi.fn();
+				const { result } = await build({
+					issuedAt: now() - 60,
+					expiresAt: expiresAt as number | null,
+					subjectRevocation: revocationAt(() => null),
+					logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
+				}).handle(ctx());
+				expect(result, String(expiresAt)).toEqual(refused);
+				expect(info).toHaveBeenCalledWith(
+					expect.objectContaining({ kind: "stub" }),
+					"jwt_bearer_assertion_expiry_unusable",
+				);
+			}
+		});
+
+		it("refuses a negative issue time", async () => {
+			const { result } = await build({
+				issuedAt: -1,
+				subjectRevocation: revocationAt(() => null),
+			}).handle(ctx());
+			expect(result).toEqual(refused);
+		});
+	});
+
+	describe("an issue time ahead of this server's clock", () => {
+		const now = () => Math.floor(Date.now() / 1000);
+
+		it("refuses one beyond the largest verifier clock tolerance, before asking the Store", async () => {
+			const info = vi.fn();
+			const authenticateByToken = vi.fn(async () => ({ id: "user-42" }));
+			const issuedAt = now() + MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS + 5;
+			const { result } = await build({
+				issuedAt,
+				expiresAt: issuedAt + 300,
+				subjectRevocation: revocationAt(() => null),
+				userRepository: { authenticate: async () => null, authenticateByToken } as never,
+				logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
+			}).handle(ctx());
+			expect(result).toEqual(refused);
+			expect(authenticateByToken).not.toHaveBeenCalled();
+			expect(info).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: "stub" }),
+				"jwt_bearer_assertion_issued_at_ahead",
+			);
+		});
+
+		it("compares one within the tolerance as issued at this grant's own instant, so a current boundary covers it", async () => {
+			// A boundary stamped now; the assertion claims to be issued 200 s
+			// from now. Compared as claimed it would clear the boundary.
+			const boundary = new Date(Date.now());
+			const issuedAt = now() + 200;
+			const { result } = await build({
+				issuedAt,
+				expiresAt: issuedAt + 300,
+				subjectRevocation: revocationAt(() => boundary),
+			}).handle(ctx());
+			expect(result).toEqual(refused);
+			// No boundary: accepted, the claim within the tolerance stands.
+			const clear = await build({
+				issuedAt,
+				expiresAt: issuedAt + 300,
+				subjectRevocation: revocationAt(() => null),
+			}).handle(ctx());
+			expect(clear.result.status).toBe(200);
+		});
+	});
+
+	it("compares a fractional issue time by its second: the boundary's second plus the allowance is covered, the next is not", async () => {
+		const covered = await build({
+			issuedAt: BOUNDARY_SECOND + 1.9,
+			subjectRevocation: revocationAt(() => BOUNDARY),
+		}).handle(ctx());
+		expect(covered.result).toEqual(refused);
+		const clear = await build({
+			issuedAt: BOUNDARY_SECOND + 2.1,
+			subjectRevocation: revocationAt(() => BOUNDARY),
+		}).handle(ctx());
+		expect(clear.result.status).toBe(200);
 	});
 
 	it("reads the boundary after the grant policy has answered", async () => {
