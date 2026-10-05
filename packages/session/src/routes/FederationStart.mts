@@ -111,8 +111,9 @@ export const createStartHandler =
 		const codeVerifier = generateCodeVerifier();
 		const nonce = randomBytes(16).toString("base64url");
 
-		// The authoritative callback URL map, from config. Read before any
-		// state is persisted: a form_post start scopes its cookie to this path.
+		// The authoritative callback URL map, from core's federationSettings.
+		// Read before any state is persisted: a form_post start scopes its
+		// cookie to this path.
 		const callbackUrl = providerCallbackUrls.get(provider.name);
 		if (!callbackUrl) {
 			logMisconfigured(logger, "no_callback_url", { provider: provider.name });

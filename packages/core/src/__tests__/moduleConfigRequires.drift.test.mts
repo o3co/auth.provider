@@ -67,10 +67,7 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	"packages/federation-grants -> federation-grants",
 	"packages/oauth -> oauth",
 	"packages/oauth -> oauth-authorization",
-	"packages/oauth -> oauth-session",
 	"packages/oauth -> subject-revocation-service",
-	"packages/session -> session",
-	"packages/webauthn -> webauthn",
 	// The standalone template's deprecated `stores` bundle.
 	"templates/standalone -> stores",
 ];

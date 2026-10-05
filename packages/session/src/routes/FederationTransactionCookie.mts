@@ -28,24 +28,6 @@ import {
 	type FederationTransactionStore,
 } from "../federations/transaction.mjs";
 
-/**
- * The session cookie name assumed when neither
- * `federationTransactionCookieName` nor the configuration's
- * `session-store.name` is given (a router built by hand; the session module
- * passes the name the `sessionCookiePolicy` slot carries): the package
- * default without `__Host-`.
- */
-const FALLBACK_SESSION_COOKIE_NAME = "auth.session";
-
-/** Read `session-store.name` without assuming the caller supplied a full configuration. */
-export const readSessionCookieName = (config: unknown): string => {
-	if (config == null || typeof config !== "object") return FALLBACK_SESSION_COOKIE_NAME;
-	const store = (config as { "session-store"?: unknown })["session-store"];
-	if (store == null || typeof store !== "object") return FALLBACK_SESSION_COOKIE_NAME;
-	const name = (store as { name?: unknown }).name;
-	return typeof name === "string" && name.length > 0 ? name : FALLBACK_SESSION_COOKIE_NAME;
-};
-
 /** Attributes shared by the `Set-Cookie` that issues the cookie and the one that clears it. */
 const transactionCookieAttributes = (path: string) =>
 	({

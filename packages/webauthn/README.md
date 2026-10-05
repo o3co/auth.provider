@@ -13,7 +13,7 @@ Passkey (WebAuthn) credential registration and an authentication grant for [`aut
 - the ceremonies: generating registration and authentication options, verifying the attestation and persisting the credential, verifying an assertion and its sign count, and minting tokens for it;
 - the bridge from an admitted browser session to `req.webauthnSubject`, `webauthnSessionSubjectModule` — [Registering from a browser session](#registering-from-a-browser-session);
 - the WebAuthn second factor, `webauthnMfaFactorModule`: its ceremonies, what it keeps of a credential, and its `amr` — [WebAuthn as a second factor](#webauthn-as-a-second-factor);
-- the WebAuthn configuration (`webauthnConfigSchema`, the `webauthnConfig` slot), the second factor's section (`webauthn-mfa-factor`), and their defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-webauthn/reference.conf`);
+- the WebAuthn configuration — `webauthn {}`, `webauthnModule`'s own section, parsed with `webauthnConfigSchema`, and the `webauthnConfig` slot the module provides from it — the second factor's section (`webauthn-mfa-factor`), and their defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-webauthn/reference.conf`);
 - the algorithm set offered and accepted (`WEBAUTHN_ALGORITHM_IDS`), and the rate limit on the unauthenticated `authentication/options` route;
 - the boundary with `@simplewebauthn/server`, the WebAuthn library the verification runs on.
 
@@ -42,7 +42,7 @@ resolves, and as a peer that is your composition's one copy.
 
 ## Bootstrap
 
-The WebAuthn settings live in your HOCON configuration under `webauthn`, beside everything else the composition root loads. Layer this package's [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's own `reference.conf`: it carries the package's defaults and the `WEBAUTHN_*` environment variables that override them. `webauthnModule` declares it as its section's reference, so core's `moduleReferences(modules)` names it among the files to layer (#728). Hand `createApp` what you resolved: boot parses it once, and keeps the `webauthn` section whole — core's schema still mirrors it, checking little more than its keys' types ([#496](https://github.com/o3co/auth.provider/issues/496)) — and a small module hands that section to `webauthnConfigSchema`, which owns the rules:
+The WebAuthn settings are `webauthnModule`'s own section, `webauthn`, in your HOCON configuration beside everything else the composition root loads. Layer this package's [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's own `reference.conf`: it carries the package's defaults and the `WEBAUTHN_*` environment variables that override them. `webauthnModule` declares it as its section's reference, so core's `moduleReferences(modules)` names it among the files to layer ([#728](https://github.com/o3co/auth.provider/issues/728)). Hand `createApp` what you resolved: boot parses the section once, with `webauthnConfigSchema`, before any factory runs — the relying party's id and origins are checked there ([Multi-origin](#multi-origin-one-rp-for-the-site-and-the-android-app)) — and refuses a key the schema does not declare, at every level (`webauthn`, `webauthn.rateLimit`, `webauthn.rateLimit.authenticationOptions`), naming its path (`config-validation-failed`). Only the relying party has no default:
 
 ```hocon
 # config/application.conf — what has no default
@@ -61,13 +61,12 @@ import { fileURLToPath } from "node:url";
 import {
     type AppConfig,
     createApp,
-    defineModule,
     memoryWebAuthnCredentialStoreModule,
     memoryChallengeStoreModule,
     defaultChallengeCeremonyModule,
     memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
-import { webauthnModule, webauthnConfigSchema } from "@o3co/auth-provider-webauthn";
+import { webauthnModule } from "@o3co/auth-provider-webauthn";
 import { parseFile } from "@o3co/ts.hocon";
 
 const shipped = (specifier: string) => parseFile(fileURLToPath(import.meta.resolve(specifier)));
@@ -78,30 +77,24 @@ const config = parseFile("config/application.conf")
     .withFallback(shipped("@o3co/auth-provider-core/reference.conf"))
     .toObject() as unknown as AppConfig;
 
-const webauthnBootstrap = defineModule({
-    name: "my-webauthn-config",
-    requires: ["config"] as const,
-    provides: {
-        webauthnConfig: ({ config }) => webauthnConfigSchema.parse(config.webauthn),
-    },
-});
-
 const app = await createApp({
     modules: [
         webauthnModule,
-        webauthnBootstrap,
         memoryWebAuthnCredentialStoreModule,   // dev only; wire a persistent WebAuthnCredentialStore in prod
         memoryChallengeStoreModule,
         defaultChallengeCeremonyModule,
         memoryReplaySeenSetModule,
         grantPolicyModule,                     // required — see SECURITY — scope authorization
-        // ... rest of your auth-provider stack (oauthAuthorizationModule, keyStore, etc.)
+        // ... rest of your auth-provider stack (the oauth module, which provides
+        // oauthTokenSettings; oauthAuthorizationModule, keyStore, etc.)
     ],
     bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
 ```
 
-A module that hard-codes the settings instead (`webauthnConfigSchema.parse({ rpId: …, … })`) works only if it supplies every required field, the ones `reference.conf` defaults included — the schema has no defaults of its own — and then none of the `WEBAUTHN_*` variables below reaches the schema. **With a shared `rateLimiter` wired, the authentication/options budget is not read from this slot.** The module contributes it to the limiter from the app config's `webauthn.rateLimit.authenticationOptions`, so a composition that hard-codes the slot must also set that key to the same values. Otherwise the route runs on the limiter's default (no key), or on the key's values (a different key). Boot warns `webauthn_authentication_options_budget_mismatch` with both values when they disagree (see [SECURITY — rate-limiting](#security--rate-limiting-authenticationoptions)). The warning compares only the app config key with the slot. An explicit `limits.webauthn-authentication-options` in the limiter's own section, which the limiter applies over both, is not compared.
+**The `webauthnConfig` slot is the section.** `webauthnModule` provides it from the section as boot parsed it, for the package's other readers (the [second factor](#webauthn-as-a-second-factor)), and names it `authoritative`: its own routes and grant read the section, so no second source may stand beside it. While the module is loaded, boot refuses a module of the deployment's that provides the slot (`duplicate-provides`), a `bootstrapComponents` entry for it (`bootstrap-component-collision`) and an `overrideComponents` entry (`authoritative-component-overridden`). A composition that wrote a bridge module filling the slot from `config.webauthn` removes it. A composition without `webauthnModule` — the second factor alone — fills the slot itself, with `webauthnConfigSchema.parse(…)`.
+
+**The token settings come from the `oauthTokenSettings` slot**, which the module requires: the access- and refresh-token lifetimes, and whether resource indicators are on ([SECURITY — refresh-token issuance](#security--refresh-token-issuance)). The oauth module provides it; a composition without that module fills the slot itself, with a value core's `checkOAuthTokenSettings` accepts. Without it, boot is refused (`missing-required-component`, naming `oauthTokenSettings`). Whether a confidential client's refresh token is bound comes from core's `tokenBindingSettings` slot, which the module also requires and core fills from `core.tokenBinding` in every composition. The module reads nothing of the whole configuration: it requires no `config`.
 
 ## Multi-origin: one RP for the site and the Android app
 
@@ -260,14 +253,14 @@ A `subjectFor` that throws, answers a subject whose fields throw when read, or a
 
 ## WebAuthn as a second factor
 
-`webauthnMfaFactorModule` ([`src/mfaFactor/module.mts`](src/mfaFactor/module.mts)) contributes the `webauthn` factor ([`src/mfaFactor/factor.mts`](src/mfaFactor/factor.mts)) under core's `mfaFactors` kind, where the MFA package's `mfa` requirement reads it. It reads its own section, and takes the `webauthnConfig` slot — the relying party the grant uses — when it is wired: with the factor off, the module boots without it; with the factor on and no relying party, the boot is refused (`contribute-factory-failed`, naming `webauthnConfig` and `webauthn.rpId`, `rpName`, `origin`). `webauthn-mfa-factor.enabled` is the module's switch (`section.isEnabled`): off, the module registers nothing. It is stateless.
+`webauthnMfaFactorModule` ([`src/mfaFactor/module.mts`](src/mfaFactor/module.mts)) contributes the `webauthn` factor ([`src/mfaFactor/factor.mts`](src/mfaFactor/factor.mts)) under core's `mfaFactors` kind, where the MFA package's `mfa` requirement reads it. It reads its own section, and takes the `webauthnConfig` slot — the relying party the grant uses, which `webauthnModule` provides from its section — when it is wired: with the factor off, the module boots without it; with the factor on and no relying party, the boot is refused (`contribute-factory-failed`, naming `webauthnConfig` and `webauthn.rpId`, `rpName`, `origin`). `webauthn-mfa-factor.enabled` is the module's switch (`section.isEnabled`): off, the module registers nothing. It is stateless.
 
 ```ts
 import { webauthnMfaFactorModule } from "@o3co/auth-provider-webauthn";
 
 modules: [
     ...mfaModules({ environment }),   // @o3co/auth-provider-mfa
-    webauthnBootstrap,                // the webauthnConfig slot, as above
+    webauthnModule,                   // provides the webauthnConfig slot from its section
     webauthnMfaFactorModule,
     // ...
 ]
@@ -341,7 +334,7 @@ The webauthn grant has **no library-side `allowedScopes` ceiling**. Client crede
 
 The requested `scope` is read strictly by RFC 6749 §3.3's grammar (core's `readSpaceDelimitedParameter`) before the policy sees it: a value that is not a space-delimited list of scope-tokens — a tab, a quote — is `400 invalid_scope`, so a malformed scope never reaches a token's `scope` claim as sent, whatever the policy allows. A value of spaces alone, or a JSON `null` (RFC 6749 §3.2), requests no scope; a tab alone is malformed, and a value that is not a string is `400 invalid_request`.
 
-`grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy). This mirrors the `refresh_token` grant pattern.
+`grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on resource indicators (the `oauthTokenSettings` slot's `resourceIndicatorEnabled`, `oauth.resourceIndicator.enabled` as the oauth module resolves it, controls only whether `body.resource` is forwarded to the policy). This mirrors the `refresh_token` grant pattern.
 
 **`grantPolicy` is REQUIRED at boot.** Wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "allow" }` — making the choice visible in the composition root.
 
@@ -373,11 +366,11 @@ A passkey is the primary login on a native app and the access token is short-liv
 
 **An authenticated client is what makes a refresh token possible.** `/oauth/token` as `oauthModule` mounts it authenticates the client before any grant runs — a public client by its `client_id` — so a request reaching this grant through it has one. The grant handler itself does not require a client (the passkey is the authentication event), which matters only to a composition that dispatches the grant from a route of its own without client authentication: there it has no `allowedGrantTypes` to consult, and the `refresh_token` grant refuses an unauthenticated caller and binds every refresh token to its issuing client via `azp` — so a token minted there could never be redeemed, and none is.
 
-**Its lifetimes are read when the grant is built.** `createWebAuthnGrant` reads them from the oauth module's `oauthTokenSettings` when the composition holds the slot ([#728](https://github.com/o3co/auth.provider/issues/728)) — as it does `resourceIndicator.enabled` — and otherwise reads `oauth.accessToken` and `oauth.refreshToken.expiresIn` through core's `resolveAccessTokenLifetime` and `resolveRefreshTokenLifetime` in its factory. A hand-built configuration they refuse — a missing refresh lifetime included, which used to sign a refresh token with no `exp` — throws a `RangeError` naming the key, so no request reaches the ceremony and no challenge is consumed. It requires `oauth.refreshToken.expiresIn` even in a deployment where no client can receive a refresh token — no registration names `refresh_token` in its `allowedGrantTypes`. That only matters for a configuration built by hand: the schema requires the key in every loaded configuration, and `reference.conf` ships a value. Both lifetimes are read once, so changing either on the configuration object after boot has no effect until the grant is built again.
+**Its lifetimes are read when the grant is built**, from the `oauthTokenSettings` slot alone ([#728](https://github.com/o3co/auth.provider/issues/728)) — as is `resourceIndicatorEnabled` — never from `config.oauth`. `createWebAuthnGrant` holds the slot to core's `checkOAuthTokenSettings` in its factory: a hand-built value it refuses — a missing refresh lifetime included, which would sign a refresh token with no `exp` — or no value throws a `RangeError` naming the slot's member, so no request reaches the ceremony and no challenge is consumed. That holds even in a deployment where no client can receive a refresh token — no registration names `refresh_token` in its `allowedGrantTypes`. Through `createApp` the slot is the snapshot boot checked, within the lifetimes the configuration resolves to. Both lifetimes are read once.
 
-**Rotation and replay detection are the shared ones.** The grant opens a refresh-token family through the `refreshTokenFamilyRotation` component, the same one the authorization-code grant registers its initial `rt+jwt` with: one active token per family, and a replayed token revokes the whole family (RFC 6819 §5.2.2.3). The lifetime comes from `oauth.refreshToken.expiresIn`. Registration is fail-closed and comes first: the refresh token's `jti` and the instant its lifetime is measured from are reserved, and the family registered under them with the expiry `issuedAt + oauth.refreshToken.expiresIn`, before either token is signed — core's `generateToken` then signs exactly that `jti` and `iat` (#449, as the refresh grant does). A family store that cannot be reached therefore answers `503 temporarily_unavailable`, logged as `webauthn_grant_store_unavailable` (see [Store outages](#store-outages)), with nothing signed and nothing served. The reverse case — signing fails after the family was registered, a KMS outage — leaves a family no token was served for: harmless, and gone at the expiry it was registered with. Both the access and the refresh token carry the `family_id` claim, so revoking the family reaches the access token too.
+**Rotation and replay detection are the shared ones.** The grant opens a refresh-token family through the `refreshTokenFamilyRotation` component, the same one the authorization-code grant registers its initial `rt+jwt` with: one active token per family, and a replayed token revokes the whole family (RFC 6819 §5.2.2.3). The lifetime comes from the slot's `refreshTokenExpiresIn` (`oauth.refreshToken.expiresIn`, as the oauth module resolves it). Registration is fail-closed and comes first: the refresh token's `jti` and the instant its lifetime is measured from are reserved, and the family registered under them with the expiry `issuedAt + refreshTokenExpiresIn`, before either token is signed — core's `generateToken` then signs exactly that `jti` and `iat` (#449, as the refresh grant does). A family store that cannot be reached therefore answers `503 temporarily_unavailable`, logged as `webauthn_grant_store_unavailable` (see [Store outages](#store-outages)), with nothing signed and nothing served. The reverse case — signing fails after the family was registered, a KMS outage — leaves a family no token was served for: harmless, and gone at the expiry it was registered with. Both the access and the refresh token carry the `family_id` claim, so revoking the family reaches the access token too.
 
-**Sender-bound requests produce sender-bound refresh tokens.** A DPoP or mTLS request has its RFC 7800 confirmation (`cnf.jkt` / `cnf.x5t#S256`) carried into the refresh token on the same gate the other grants apply: public clients always; confidential clients only when the deployment sets `core.tokenBinding.bindConfidentialClientRefreshTokens` ([#275](https://github.com/o3co/auth.provider/issues/275)), since their client secret is already the refresh-time authenticator. The setting is core's, read through core's `resolveTokenBindingSettings` as the oauth grants read it ([#728](https://github.com/o3co/auth.provider/issues/728)). The access token binds on its own, wider gate — see below.
+**Sender-bound requests produce sender-bound refresh tokens.** A DPoP or mTLS request has its RFC 7800 confirmation (`cnf.jkt` / `cnf.x5t#S256`) carried into the refresh token on the same gate the other grants apply: public clients always; confidential clients only when the deployment sets `core.tokenBinding.bindConfidentialClientRefreshTokens` ([#275](https://github.com/o3co/auth.provider/issues/275)), since their client secret is already the refresh-time authenticator. The setting is core's: the grant reads it from core's `tokenBindingSettings` slot, which core fills from `core.tokenBinding` with the same reader the oauth grants use, once, when the grant is built ([#728](https://github.com/o3co/auth.provider/issues/728)). `createWebAuthnGrant` requires the slot and throws when built without it: a grant built by hand is passed `resolveTokenBindingSettings(config)`, which core exports, and a test `createTestTokenBindingSettings()` from `@o3co/auth-provider-core/testing`. The access token binds on its own, wider gate — see below.
 
 ## SECURITY — `auth_time` is one challenge lifetime pessimistic
 
@@ -416,7 +409,7 @@ With `webauthnSessionSubjectModule`, registration is admitted as `webauthn.regis
 The endpoint is rate-limited by the module itself; it is not something a composition root has to remember to add. `webauthnModule` mounts core's shared `createRateLimitGuard` in front of the route:
 
 - **Keyed** `webauthn-authentication-options:ip:<ip>` — exported as `WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG`, which is also the prefix the module contributes its budget under and the `limits` key an operator overrides it by.
-- **Spec** from `webauthn.rateLimit.authenticationOptions` (`limit` / `windowSeconds`; reference default 30 per 60 s; the window at most one year). The module contributes that key as the tag's budget (a `rateLimitBudgets` contribution), which both bundled limiter modules, core's memory one and Redis's, read, so a shared limiter applies the configured budget rather than its own `defaultLimit`. An explicit `limits.webauthn-authentication-options` wins. If the key is given but no limiter can apply it, boot is refused with a `RangeError` naming `webauthn.rateLimit.authenticationOptions`; the budget is never replaced by the default. A custom limiter reads the contributed budget from the `rateLimitBudgetResolver` slot, or has to be given the spec itself. Only the per-process fallback below is built from the `webauthnConfig` slot, so a composition's bootstrap should read `webauthnConfig` from that same section. The RFC `RateLimit-*` headers show the budget the limiter actually applied, which both bundled adapters report. The slot backs them only for an adapter that reports no `limit` of its own. When a shared limiter is wired and the contributed budget for the tag (`rateLimitBudgetResolver`, which the module requires) is missing, or differs from the slot, boot logs `webauthn_authentication_options_budget_mismatch` (warn, once) with `key`, `contributed` and `webauthnConfig`. The contributed budget is the key's, numeric strings counting as their numbers; no other module may override it. An explicit `limits.webauthn-authentication-options`, which the limiter applies over both, is not compared.
+- **Spec** from `webauthn.rateLimit.authenticationOptions` (`limit` / `windowSeconds`; reference default 30 per 60 s; the window at most one year). The module contributes that key as the tag's budget (a `rateLimitBudgets` contribution), which both bundled limiter modules, core's memory one and Redis's, read, so a shared limiter applies the configured budget rather than its own `defaultLimit`. An explicit `limits.webauthn-authentication-options` wins. The key is required, and the section refuses one no limiter can apply (`config-validation-failed`, naming `webauthn.rateLimit.authenticationOptions`); the budget is never replaced by the default. A custom limiter reads the contributed budget from the `rateLimitBudgetResolver` slot, or has to be given the spec itself. The per-process fallback below is built from the same key. The RFC `RateLimit-*` headers show the budget the limiter actually applied, which both bundled adapters report; the key backs them only for an adapter that reports no `limit` of its own. When a shared limiter is wired and the contributed budget for the tag (`rateLimitBudgetResolver`, which the module requires) is missing, or differs from the key, boot logs `webauthn_authentication_options_budget_mismatch` (warn, once) with `key`, `contributed` and `webauthnConfig` (the key's values). The contributed budget is the key's, numeric strings counting as their numbers; no other module may override it. An explicit `limits.webauthn-authentication-options`, which the limiter applies over both, is not compared.
 - **Outage policy** is the limiter's own `failMode` — the Redis limiter's is `redis-rate-limiter.failMode` — the one `/oauth/token` and the MFA routes apply on the same limiter: a limiter outage must not shed load on one surface and wave everything through on another. An outage logs `rate_limiter_failed_open` / `rate_limiter_failed_closed` and emits a `rate_limit.unavailable` audit event when an `auditSink` is wired.
 
 Wire the `rateLimiter` ComponentMap slot (the Redis adapter in a scaled deployment) so the buckets are shared across replicas. **Without it the route is still guarded**, by a per-process memory limiter, and boot warns `webauthn_authentication_options_rate_limiter_not_shared` naming the spec in force — a per-process bucket is weak protection, not absent protection, and the warning says which one you have. That is the unset-`core.deployment.mode` behaviour: under `core.deployment.mode = "multi"` the fallback is refused at boot instead (a `replica-unsafe-adapter` BootError naming the route, wrapped in `contribute-factory-failed`), because a per-replica budget is the limit multiplied by the replica count; under `"single"` it is silent. The module reads the mode from core's `deploymentMode` slot, which it requires and core fills from `core.deployment.mode`; it reads nothing of `deployment` itself.
@@ -481,7 +474,7 @@ Implemented:
 - Primary-login passkeys
 - Registration + authentication ceremonies
 - Multi-origin support (`config.origin: string[]`), web and Android — see [Multi-origin](#multi-origin-one-rp-for-the-site-and-the-android-app)
-- RFC 8707 `resource` forwarded to `grantPolicy` when `oauth.resourceIndicator.enabled` is set, read by core's `extractResourceParam` exactly as the oauth grants read it: each value whole, the empty entries of a repeated parameter dropped (`resource=&resource=https://x` reaches the policy as `["https://x"]`), and an all-empty parameter as no resource
+- RFC 8707 `resource` forwarded to `grantPolicy` when the `oauthTokenSettings` slot's `resourceIndicatorEnabled` is set, read by core's `extractResourceParam` exactly as the oauth grants read it: each value whole, the empty entries of a repeated parameter dropped (`resource=&resource=https://x` reaches the policy as `["https://x"]`), and an all-empty parameter as no resource
 - Refresh-token issuance for allowed clients ([#480](https://github.com/o3co/auth.provider/issues/480))
 - WebAuthn as a second factor, contributed to the MFA package: asserted through its routes; enrolled through its enrollment, which the MFA package does not yet offer
 
@@ -500,7 +493,7 @@ Not implemented:
 - `src/internal/` — the SimpleWebAuthn boundary (options generation, response verification, a response's client data read as the library decodes it, and the mapping of library failures onto this package's error codes), and the one answer to a store outage the grant and the routes share.
 - [`src/sessionSubject.mts`](src/sessionSubject.mts) — `webauthnSessionSubjectModule`: the session bridge on core's admission.
 - `src/mfaFactor/` — the second factor: its module, the factor and its section's schema.
-- [`src/config.mts`](src/config.mts) — the config schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
+- [`src/config.mts`](src/config.mts) — the section's schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
 - [`src/testing/index.mts`](src/testing/index.mts) — the testing entry, `@o3co/auth-provider-webauthn/testing`: `createTestWebAuthnConfig`, the `webauthn` section a test builds, and `webauthnMfaFactorConfigForTests`, the `webauthn-mfa-factor` section.
 
 The ports these depend on (`WebAuthnCredentialStore`, `ChallengeCeremony`, `ChallengeStore`, and the second factor's `MfaFactor` contract) are core's.

@@ -46,9 +46,6 @@ import {
 	ownedConfirmation,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
-	resolveAccessTokenLifetime,
-	resolveRefreshTokenLifetime,
-	resolveTokenBindingSettings,
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -71,9 +68,12 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 // ---------------------------------------------------------------------------
 
 /**
- * What the WebAuthn grant reads: the shared grant slots (`config` and `keyStore` to mint,
- * `grantPolicy`, `refreshTokenFamilyRotation`, `logger`), the credential store and challenge
- * ceremony, the oauth token settings, and the RP fields of `webauthnConfig`.
+ * What the WebAuthn grant reads: the shared grant slots (`keyStore` to mint, `grantPolicy`,
+ * `refreshTokenFamilyRotation`, `logger`), the credential store and challenge ceremony, the
+ * `oauthTokenSettings` slot (the token lifetimes and the resource-indicator switch), core's
+ * `tokenBindingSettings` slot (whether a confidential client's refresh token is bound), and the
+ * RP fields of `webauthnConfig` — `webauthnModule` hands it its own section there. Nothing is
+ * read from the whole configuration.
  *
  * `webauthnModule` hands its deps over whole and checks with `satisfies` that every key here is a
  * slot it declares; `grant.types.test.mts` pins that the `webauthnConfig` fields exist on
@@ -83,9 +83,14 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 export interface WebAuthnGrantDeps
 	extends Pick<
 			GrantDependencies,
-			"config" | "keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "logger"
+			"keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "logger"
 		>,
-		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony", "oauthTokenSettings"> {
+		ProviderDeps<
+			| "webauthnCredentialStore"
+			| "challengeCeremony"
+			| "oauthTokenSettings"
+			| "tokenBindingSettings"
+		> {
 	readonly webauthnConfig: {
 		readonly rpId: string;
 		readonly origin: readonly string[];
@@ -119,24 +124,24 @@ export interface WebAuthnGrantDeps
  * @returns GrantHandler compatible with GrantRegistry.
  */
 export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
-	const { config, keyStore } = deps;
-	// Token lifetimes are read once, here, so a hand-built configuration the resolvers refuse
-	// fails at composition, before any challenge is consumed. They come from the oauth module's
-	// `oauthTokenSettings` slot when the composition holds it (checked whole first), otherwise
-	// from the configuration through core's resolvers.
-	const tokenSettings =
-		deps.oauthTokenSettings === undefined
-			? undefined
-			: checkOAuthTokenSettings(deps.oauthTokenSettings, config);
-	const accessTokenExpiresIn = (
-		tokenSettings === undefined
-			? resolveAccessTokenLifetime(config)
-			: tokenSettings.accessTokenLifetime
-	).defaultExpiresIn;
-	const refreshTokenExpiresIn =
-		tokenSettings === undefined
-			? resolveRefreshTokenLifetime(config)
-			: tokenSettings.refreshTokenExpiresIn;
+	const { keyStore } = deps;
+	// The token settings are read once, here, from the `oauthTokenSettings` slot alone, checked
+	// whole first: a hand-built value the check refuses, or none, fails at composition, naming
+	// the slot, before any challenge is consumed.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
+	const refreshTokenExpiresIn = tokenSettings.refreshTokenExpiresIn;
+	// The binding rule is read once, here, from core's `tokenBindingSettings` slot, which core
+	// fills frozen from `core.tokenBinding`: a deps built without it, or with a value whose
+	// rule is not a boolean, fails at composition too.
+	const bindConfidentialClients = (
+		deps.tokenBindingSettings as Partial<typeof deps.tokenBindingSettings> | null | undefined
+	)?.bindConfidentialClientRefreshTokens;
+	if (typeof bindConfidentialClients !== "boolean") {
+		throw new TypeError(
+			"webauthn grant: the tokenBindingSettings slot is not filled with a boolean bindConfidentialClientRefreshTokens",
+		);
+	}
 	// One logger for every line this grant writes. The module hands over the
 	// deployment's; a handler built without one still reports its outages.
 	const logger = deps.logger ?? consoleLogger;
@@ -327,17 +332,14 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// ------------------------------------------------------------------
 			// Step 7: grantPolicy gate
 			//
-			// Runs whenever `grantPolicy` is wired, as in the refresh grant;
-			// `oauth.resourceIndicator.enabled` gates only whether `resource` (RFC 8707) is
-			// forwarded. The policy is this grant's only scope bound, so gating the call on that
-			// flag (default false) would let any valid assertion mint any requested scope. A
-			// policy error fails closed. `webauthnModule` refuses to boot without a policy; the
+			// Runs whenever `grantPolicy` is wired, as in the refresh grant; the
+			// `oauthTokenSettings` slot's `resourceIndicatorEnabled` gates only whether
+			// `resource` (RFC 8707) is forwarded. The policy is this grant's only scope bound,
+			// so gating the call on that flag (default false) would let any valid assertion
+			// mint any requested scope. A policy error fails closed. `webauthnModule` refuses to boot without a policy; the
 			// check below serves handlers built directly, as in unit tests.
 			// ------------------------------------------------------------------
-			const resourceIndicatorEnabled =
-				tokenSettings === undefined
-					? config.oauth.resourceIndicator?.enabled === true
-					: tokenSettings.resourceIndicatorEnabled;
+			const resourceIndicatorEnabled = tokenSettings.resourceIndicatorEnabled;
 
 			let policyGrantedAudience: string | null = null;
 
@@ -474,8 +476,6 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				// on purpose: a confidential client re-authenticates at every refresh, so RFC 9449 §5
 				// leaves its RT unbound rather than pinned to one key for the RT's lifetime.
 				const isPublicClient = client.tokenEndpointAuthMethod === "none";
-				const bindConfidentialClients =
-					resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 				const bindRefreshToken =
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 

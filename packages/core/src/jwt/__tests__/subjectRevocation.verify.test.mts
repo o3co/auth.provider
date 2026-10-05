@@ -16,7 +16,12 @@
 
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { isVerificationUnavailable, JwtVerificationError, verifyJwt } from "#/jwt/verify.mjs";
+import {
+	claimCoveredByRevocationBoundary,
+	isVerificationUnavailable,
+	JwtVerificationError,
+	verifyJwt,
+} from "#/jwt/verify.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import type { SubjectRevocation } from "#/user-sessions/types.mjs";
@@ -25,10 +30,13 @@ const ISSUER = "https://issuer.example";
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 
 const mint = async (
-	opts: { sub?: string; iatSeconds?: number; omitIat?: boolean } = {},
+	opts: { sub?: string; iatSeconds?: number; omitIat?: boolean; authTime?: unknown } = {},
 ): Promise<string> => {
 	const iat = opts.iatSeconds ?? Math.floor(Date.now() / 1000);
-	let builder = new SignJWT({ ...(opts.sub === undefined ? {} : { sub: opts.sub }) })
+	let builder = new SignJWT({
+		...(opts.sub === undefined ? {} : { sub: opts.sub }),
+		...("authTime" in opts ? { auth_time: opts.authTime } : {}),
+	})
 		.setProtectedHeader({ alg: "HS256", typ: "at+jwt", kid: keyStore.getSigningKidFallback() })
 		.setIssuer(ISSUER)
 		.setExpirationTime(iat + 3600);
@@ -287,6 +295,216 @@ describe("verifyJwt — watermark clock skew", () => {
 		await expect(verify(token, store, { subjectRevocationSkewMs: 3_000 })).rejects.toMatchObject({
 			reason: "revoked",
 		});
+	});
+});
+
+/*
+ * The boundary covers a token's authentication instant as well as its
+ * issuance: a token minted after the boundary from an authentication made
+ * before it is revoked. `auth_time` is held to the same inclusive,
+ * second-truncated rule with the same allowance as `iat`.
+ */
+describe("verifyJwt — the watermark covers a token's auth_time", () => {
+	const withWatermark = async (watermarkSec: number) => {
+		const store = createInMemorySubjectRevocation();
+		await store.revokeBefore("u1", new Date(watermarkSec * 1000), new Date(Date.now() + 300_000));
+		return store;
+	};
+
+	it.each([
+		[0, "revoked"],
+		[1, "revoked"],
+	] as const)("refuses auth_time at the watermark + %ds by default", async (offset, reason) => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec, authTime: nowSec - 10 + offset });
+		await expect(verify(token, store)).rejects.toMatchObject({ reason });
+	});
+
+	it("accepts auth_time past the default allowance", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec, authTime: nowSec - 8 });
+		await expect(verify(token, store)).resolves.toBeDefined();
+	});
+
+	it("refuses a token issued after the watermark from an authentication before it", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec, authTime: nowSec - 60 });
+		await expect(verify(token, store)).rejects.toMatchObject({
+			reason: "revoked",
+			message: expect.stringContaining("auth_time"),
+		});
+	});
+
+	it("applies the allowance to auth_time as it does to iat", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec, authTime: nowSec - 9 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: 0 })).resolves.toBeDefined();
+		await expect(verify(token, store, { subjectRevocationSkewMs: 3_000 })).rejects.toMatchObject({
+			reason: "revoked",
+		});
+	});
+
+	it("still refuses by iat when auth_time is past the watermark", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 10, authTime: nowSec });
+		await expect(verify(token, store)).rejects.toMatchObject({ reason: "revoked" });
+	});
+
+	it("applies the iat rule alone to a token with no auth_time", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		await expect(
+			verify(await mint({ sub: "u1", iatSeconds: nowSec - 8 }), store),
+		).resolves.toBeDefined();
+		await expect(
+			verify(await mint({ sub: "u1", iatSeconds: nowSec - 9 }), store),
+		).rejects.toMatchObject({ reason: "revoked" });
+	});
+
+	it.each([
+		["a string", "1700000000"],
+		["negative", -1],
+		["a fraction", 1_700_000_000.5],
+		["null", null],
+		["a boolean", true],
+		["an object", {}],
+	] as const)(
+		"refuses an auth_time that is %s while a watermark is in force",
+		async (_label, authTime) => {
+			const nowSec = Math.floor(Date.now() / 1000);
+			const store = await withWatermark(nowSec - 10);
+			const token = await mint({ sub: "u1", iatSeconds: nowSec, authTime });
+			await expect(verify(token, store)).rejects.toMatchObject({
+				reason: "revoked",
+				message: expect.stringContaining("auth_time"),
+			});
+		},
+	);
+
+	it.each([
+		["a string", "1700000000"],
+		["negative", -1],
+		["null", null],
+	] as const)(
+		"accepts an auth_time that is %s when the subject has no watermark",
+		async (_label, authTime) => {
+			const token = await mint({ sub: "u1", authTime });
+			await expect(verify(token, createInMemorySubjectRevocation())).resolves.toBeDefined();
+			await expect(verify(token)).resolves.toBeDefined();
+		},
+	);
+
+	it("reports an outage as revocation_unavailable whatever auth_time says", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		for (const authTime of [nowSec - 60, "malformed"]) {
+			const token = await mint({ sub: "u1", authTime });
+			await expect(verify(token, outageStore())).rejects.toMatchObject({
+				reason: "revocation_unavailable",
+			});
+		}
+	});
+
+	it("reports a watermark that is no date as revocation_unavailable before judging the claims", async () => {
+		const invalid: SubjectRevocation = {
+			kind: "invalid",
+			async revokeBefore() {},
+			async revokedBefore() {
+				return new Date(Number.NaN);
+			},
+		};
+		for (const token of [
+			await mint({ sub: "u1", authTime: "malformed" }),
+			await mint({ sub: "u1", omitIat: true }),
+		]) {
+			await expect(verify(token, invalid)).rejects.toMatchObject({
+				reason: "revocation_unavailable",
+			});
+		}
+	});
+
+	it("truncates a fractional iat to its second before comparing", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = createInMemorySubjectRevocation();
+		await store.revokeBefore(
+			"u1",
+			new Date((nowSec - 10) * 1000 + 900),
+			new Date(Date.now() + 300_000),
+		);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 10 + 0.5 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: 0 })).rejects.toMatchObject({
+			reason: "revoked",
+		});
+	});
+
+	it("reports a watermark that is no date as revocation_unavailable, never accepting", async () => {
+		const token = await mint({ sub: "u1", authTime: Math.floor(Date.now() / 1000) - 60 });
+		const invalid: SubjectRevocation = {
+			kind: "invalid",
+			async revokeBefore() {},
+			async revokedBefore() {
+				return new Date(Number.NaN);
+			},
+		};
+		await expect(verify(token, invalid)).rejects.toMatchObject({
+			reason: "revocation_unavailable",
+		});
+	});
+});
+
+/*
+ * The seconds rule `verifyJwt` applies, for a caller that must not mint a
+ * token the verifier would refuse on arrival.
+ */
+describe("claimCoveredByRevocationBoundary", () => {
+	const at = (seconds: number) => new Date(seconds * 1000);
+
+	it("covers nothing when no boundary is in force", () => {
+		expect(claimCoveredByRevocationBoundary(0, null, 1_000)).toBe(false);
+	});
+
+	it("is inclusive to the boundary's second plus the allowance, in whole seconds", () => {
+		expect(claimCoveredByRevocationBoundary(100, at(100), 1_000)).toBe(true);
+		expect(claimCoveredByRevocationBoundary(101, at(100), 1_000)).toBe(true);
+		expect(claimCoveredByRevocationBoundary(102, at(100), 1_000)).toBe(false);
+		expect(claimCoveredByRevocationBoundary(101, at(100), 0)).toBe(false);
+	});
+
+	it("truncates a fractional claim to its second", () => {
+		expect(claimCoveredByRevocationBoundary(100.5, new Date(100_900), 0)).toBe(true);
+		expect(claimCoveredByRevocationBoundary(101.5, new Date(100_900), 0)).toBe(false);
+	});
+
+	it("truncates the boundary to its second", () => {
+		expect(claimCoveredByRevocationBoundary(101, new Date(100_900), 0)).toBe(false);
+		expect(claimCoveredByRevocationBoundary(100, new Date(100_900), 0)).toBe(true);
+	});
+
+	it("rounds the allowance up and clamps a negative one to none", () => {
+		expect(claimCoveredByRevocationBoundary(102, at(100), 1_500)).toBe(true);
+		expect(claimCoveredByRevocationBoundary(100, at(100), -60_000)).toBe(true);
+		expect(claimCoveredByRevocationBoundary(101, at(100), -60_000)).toBe(false);
+	});
+
+	it("throws a RangeError for what cannot be compared", () => {
+		expect(() => claimCoveredByRevocationBoundary(100, new Date(Number.NaN), 1_000)).toThrow(
+			RangeError,
+		);
+		expect(() =>
+			claimCoveredByRevocationBoundary(100, "2026-01-01" as unknown as Date, 1_000),
+		).toThrow(RangeError);
+		expect(() => claimCoveredByRevocationBoundary(Number.NaN, at(100), 1_000)).toThrow(RangeError);
+		expect(() =>
+			claimCoveredByRevocationBoundary(Number.POSITIVE_INFINITY, at(100), 1_000),
+		).toThrow(RangeError);
+		expect(() =>
+			claimCoveredByRevocationBoundary(Number.NEGATIVE_INFINITY, at(100), 1_000),
+		).toThrow(RangeError);
+		expect(() => claimCoveredByRevocationBoundary(100, at(100), Number.NaN)).toThrow(RangeError);
 	});
 });
 

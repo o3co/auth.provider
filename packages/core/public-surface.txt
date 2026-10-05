@@ -110,6 +110,7 @@
 . ConfigPathRelocatedDetails type
 . ConfigSchema type
 . ConfigValidationFailedDetails type
+. ConfiguredFederation type
 . Confirmation type
 . ConfirmationMatch type
 . ConfirmationMember type
@@ -268,6 +269,7 @@
 . FederationRefreshErrorClassification type
 . FederationRefreshErrorReason type
 . FederationResponseMode type
+. FederationSettings type
 . FederationTokenResponse type
 . FederationTokenSnapshot type
 . FederationTokenStore type
@@ -777,6 +779,7 @@
 . checkSubjectRevocationInstant value
 . checkTrustedProxyEntry value
 . checkWithFailMode value
+. claimCoveredByRevocationBoundary value
 . clampSubjectRevocationBoundary value
 . classifyFederationRefreshError value
 . codeChallenge value
@@ -1215,6 +1218,7 @@
 ./testing FakeIdpRequest type
 ./testing FederationEntryForTests type
 ./testing FederationForTests type
+./testing FederationSettingsContractInput type
 ./testing FederationTypeForTestsOptions type
 ./testing GrantRegistry value
 ./testing GrantRegistryError value
@@ -1249,6 +1253,7 @@
 ./testing SessionCookiePolicyContractInput type
 ./testing TestAppHandle type
 ./testing TestCsrfGuardOptions type
+./testing TestFederationEntry type
 ./testing TestHttpSettingsOverrides type
 ./testing TestInspect type
 ./testing TestMfaDigestsOptions type
@@ -1256,6 +1261,7 @@
 ./testing TestOAuthTokenSettingsOverrides type
 ./testing TestRateLimiter type
 ./testing TestRateLimiterOptions type
+./testing TokenBindingSettingsContractInput type
 ./testing auditHooksModule value
 ./testing clientEntries value
 ./testing coreConfigForTests value
@@ -1267,6 +1273,7 @@
 ./testing createTestApp value
 ./testing createTestCsrfGuard value
 ./testing createTestCsrfTokenSigner value
+./testing createTestFederationSettings value
 ./testing createTestHttpSettings value
 ./testing createTestLoginEntry value
 ./testing createTestMfaDigests value
@@ -1274,9 +1281,11 @@
 ./testing createTestOAuthTokenSettings value
 ./testing createTestRateLimiter value
 ./testing createTestSessionCookiePolicy value
+./testing createTestTokenBindingSettings value
 ./testing csrfGuardContract value
 ./testing csrfTokenSignerContract value
 ./testing deploymentModeContract value
+./testing federationSettingsContract value
 ./testing federationTypeForTests value
 ./testing httpSettingsContract value
 ./testing loginCompletionContract value
@@ -1296,6 +1305,7 @@
 ./testing sessionCookiePolicyContract value
 ./testing sessionRequirementContract value
 ./testing testMfaFactorProofs value
+./testing tokenBindingSettingsContract value
 ./testing unreadableModuleLeaves value
 ./testing userRepositoryHttpOf value
 ./testing withFederation value

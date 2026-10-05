@@ -222,12 +222,13 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   boot (`config-validation-failed`), naming the section or block that holds it
   and the key, where it used to be ignored. Before you upgrade, check every
   key you set against the module's README, and correct or delete the ones it
-  does not list. The sections that still accept an unknown key are `oauth`
-  (the section and its nested blocks), `webauthn` (the section and its
-  `rateLimit` blocks) and `session-store.storage`. `mfa`, at every level, and
-  `mfa-totp-factor` refuse one too (#1329): an empty `mfa.factors` block an
-  older configuration leaves behind (the TOTP factor's old path, its
-  variables unset) is such a key — delete it. The keys under `audit-sink` are the
+  does not list. `session-store.storage` holds `type` and the `redis` block
+  alone, so a block for another storage type (`memory {}`, say) is refused —
+  delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
+  too (#1329): an empty `mfa.factors` block an older configuration leaves
+  behind (the TOTP factor's old path, its variables unset) is such a key —
+  delete it. So does `webauthn`, at every level (#1336), and so does
+  `session`, at every level (#728). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -560,6 +561,17 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **BREAKING: `sessionModule` reads the federations from the
+  `federationSettings` slot, not `config` (#728).** It requires core's
+  `federationSettings`, which core fills from `core.federations` in every
+  composition, and no longer requires `config` or declares a `configSchema`:
+  a composition booted with `createApp` sees no change. The federation routes
+  take each enabled federation's callback URL, and whether an installed one's
+  upstream `amr` counts, from the slot, and the origins an account link may
+  be started from out of the module's own section
+  (`session.csrf.trustedOrigins`). A deps object handed to the module's
+  factories by hand carries `federationSettings` (in a test,
+  `createTestFederationSettings()`) instead of `config`.
 - **BREAKING: an enabled TOTP factor requires the `oauthTokenSettings`
   slot (#1329).** `mfaTotpFactorModule` takes the deployment's issuer, which
   an unset `mfa-totp-factor.issuer` defaults to the host of, from the slot
@@ -621,6 +633,38 @@ modules fills them.
   missing component. A deps object handed to the module's factories carries
   `oauthTokenSettings`; `config` is no longer read. Disabled, the module
   requires nothing.
+- **BREAKING: `webauthnModule` provides the `webauthnConfig` slot from its
+  own section, and requires `oauthTokenSettings` (#728).** Boot parses the
+  `webauthn` section with `webauthnConfigSchema` — the same rules for the
+  relying party's id and origins, now strict at every level — and the module
+  provides the result as the slot, naming it `authoritative`. Remove the
+  bridge module a composition wrote to fill the slot from `config.webauthn`:
+  beside `webauthnModule`, a module providing the slot refuses the boot
+  (`duplicate-provides`), as do a `bootstrapComponents` entry
+  (`bootstrap-component-collision`) and an `overrideComponents` entry
+  (`authoritative-component-overridden`). A composition that hard-coded the
+  slot writes those values in the `webauthn` section instead. Without
+  `webauthnModule` (the WebAuthn second factor alone), the composition still
+  fills the slot itself. The module's grant reads the token lifetimes and the
+  resource-indicator switch from the `oauthTokenSettings` slot alone and no
+  longer falls back to `oauth.accessToken`, `oauth.refreshToken.expiresIn`
+  or `oauth.resourceIndicator.enabled`: with `oauthModule` installed nothing
+  changes; a composition without it puts an `oauthTokenSettings` value in
+  `bootstrapComponents`, or the boot is refused for the missing component.
+  In code: `createWebAuthnGrant` requires `oauthTokenSettings` and throws a
+  `RangeError` naming it when it is missing; a deps object handed to the
+  module's factories carries the parsed section as `section` and
+  `oauthTokenSettings`, and no `webauthnConfig`; `webauthnConfigSchema`
+  refuses a key it does not declare, `allowCredentialsForKnownUser` included.
+- **BREAKING: the WebAuthn grant reads the binding rule from the
+  `tokenBindingSettings` slot, not `config` (#728).** `webauthnModule`
+  requires core's `tokenBindingSettings`, which core fills from
+  `core.tokenBinding` in every composition, and no longer requires `config`:
+  a composition booted with `createApp` sees no change. Deps built by hand
+  for `createWebAuthnGrant` or the module's grant factory carry
+  `tokenBindingSettings` (`resolveTokenBindingSettings(config)`; in a test,
+  `createTestTokenBindingSettings()`) instead of `config`; without it the
+  grant throws a `TypeError` naming the slot when it is built.
 - **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
   section's defaults live only in the package's `config/reference.conf`. A
   configuration that layers the modules' references (`moduleReferences`, as
@@ -669,6 +713,26 @@ modules fills them.
   false }` alone, without the package's `reference.conf`, is refused; delete
   the section or layer the reference. Parsed directly, an absent section is
   `undefined`.
+- **BREAKING: the session grant is one module, `oauthSessionGrantModule`,
+  switched by its own section (#728).** List it as it is: it reads
+  `oauth-session.enabled` from the configuration boot parses, and an absent
+  section or key is off. `oauthSessionModule({ config })` is deprecated: it
+  ignores its argument and returns that module, so a composition calling it
+  still boots. The refusal of a module built from a configuration that
+  disagrees with the booted one about `oauth-session.enabled` is gone. The
+  section is strict and its schema, `oauthSessionConfigSchema`, fills no
+  default: the package's `config/reference.conf` ships `enabled = false`.
+- **BREAKING: an enabled session grant requires `oauthTokenSettings`, and no
+  longer reads the configuration (#728).** It takes the access-token
+  lifetime it mints and `requireEmailVerified` from the slot alone, and no
+  longer reads `oauth.accessToken` or `oauth.requireEmailVerified` from
+  `config`. With `oauthModule` installed nothing changes. A composition with
+  the grant enabled and without `oauthModule` puts an `oauthTokenSettings`
+  value in `bootstrapComponents`, or the boot is refused for the missing
+  component. In code: `createSessionGrant` requires `oauthTokenSettings` and
+  throws a `RangeError` naming it when it is missing or breaks the slot's
+  contract; `SessionGrantDeps` no longer has `config` (in a test,
+  `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from

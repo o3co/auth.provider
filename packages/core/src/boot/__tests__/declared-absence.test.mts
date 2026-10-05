@@ -35,6 +35,7 @@ import {
 	RATE_LIMITER_ABSENCE_POLICY,
 } from "../../index.mjs";
 import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { auditHooksModule, createRecordingAuditSink } from "../../testing/index.mjs";
 import { BootError } from "../types.mjs";
 
 /** A module that reads `auditSink` and refuses to be silently sink-less. */
@@ -282,6 +283,163 @@ describe("checkDeclaredAbsence — the rateLimiter slot, whose policy core attac
 		}).catch((e: unknown) => e as BootError);
 		expect(err).toBeInstanceOf(BootError);
 		expect((err as BootError).message).toContain("disagree");
+	});
+});
+
+describe("checkDeclaredAbsence — a slot filled with undefined is unfilled", () => {
+	/** A module providing `key` whose factory resolves to undefined. */
+	const answeringUndefined = (key: "auditSink" | "rateLimiter") =>
+		defineModule({
+			name: `test:${key}-undefined-provider`,
+			provides: { [key]: async () => undefined } as never,
+		});
+
+	/**
+	 * A reader of `key` that boot activates (its contribution makes it a root),
+	 * so a provider of the slot runs; `handed` keeps what its deps held.
+	 */
+	const activeReader = (key: "auditSink" | "rateLimiter") => {
+		const handed: { value?: unknown } = {};
+		const module = defineModule({
+			name: `test:${key}-active-reader`,
+			optional: [key],
+			...(key === "auditSink" ? { absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY } } : {}),
+			contributes: {
+				grantMiddleware: [
+					(deps: Record<string, unknown>) => {
+						handed.value = deps[key];
+						return null;
+					},
+				],
+			},
+		} as never);
+		return { module, handed };
+	};
+
+	const cases = [
+		{ key: "auditSink", consumedBy: ["test:auditSink-active-reader"] },
+		{ key: "rateLimiter", consumedBy: ["test:rateLimiter-active-reader"] },
+	] as const;
+
+	for (const { key, consumedBy } of cases) {
+		const { module: reader, handed } = activeReader(key);
+		const refusal = {
+			reason: "component-absence-undeclared",
+			details: {
+				reason: "component-absence-undeclared",
+				componentKey: key,
+				consumedBy,
+				configKey: "core.declaredAbsent",
+				absentValue: key,
+			},
+		};
+
+		it(`refuses ${key} overridden with undefined when its absence is undeclared`, async () => {
+			const err = await createApp({
+				modules: [reader],
+				bootstrapComponents: boot(),
+				overrideComponents: { [key]: undefined } as never,
+			}).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(BootError);
+			expect(err).toMatchObject(refusal);
+			expect((err as BootError).message).toContain(`list "${key}" in core.declaredAbsent`);
+		});
+
+		it(`refuses ${key} handed in as undefined through bootstrapComponents`, async () => {
+			const bootstrap = { ...(boot() as Record<string, unknown>), [key]: undefined } as never;
+			await expect(
+				createApp({ modules: [reader], bootstrapComponents: bootstrap }),
+			).rejects.toMatchObject(refusal);
+		});
+
+		it(`refuses ${key} from a provider resolving undefined when its absence is undeclared`, async () => {
+			await expect(
+				createApp({ modules: [reader, answeringUndefined(key)], bootstrapComponents: boot() }),
+			).rejects.toMatchObject(refusal);
+		});
+
+		it(`refuses ${key} overridden with undefined over a module providing it`, async () => {
+			const providing =
+				key === "auditSink" ? auditProviderModule : (memoryRateLimiterModule as never);
+			await expect(
+				createApp({
+					modules: [reader, providing],
+					bootstrapComponents: boot(),
+					overrideComponents: { [key]: undefined } as never,
+				}),
+			).rejects.toMatchObject(refusal);
+		});
+
+		it(`boots ${key} overridden with undefined as absent when the absence is declared`, async () => {
+			const handle = await createApp({
+				modules: [reader],
+				bootstrapComponents: boot(declaring(key)),
+				overrideComponents: { [key]: undefined } as never,
+			});
+			expect(handle.components[key]).toBeUndefined();
+			expect(handed.value).toBeUndefined();
+			await handle.dispose();
+		});
+
+		it(`boots ${key} from a provider resolving undefined as absent when the absence is declared`, async () => {
+			const handle = await createApp({
+				modules: [reader, answeringUndefined(key)],
+				bootstrapComponents: boot(declaring(key)),
+			});
+			expect(handle.components[key]).toBeUndefined();
+			expect(handed.value).toBeUndefined();
+			await handle.dispose();
+		});
+	}
+
+	it("keeps a real component, overriding or provided, as it was", async () => {
+		const sink = { kind: "stub", record: async () => {} };
+		const overriding = activeReader("auditSink");
+		const handle = await createApp({
+			modules: [overriding.module],
+			bootstrapComponents: boot(),
+			overrideComponents: { auditSink: sink } as never,
+		});
+		expect(overriding.handed.value).toBe(sink);
+		await handle.dispose();
+
+		const provided = activeReader("rateLimiter");
+		const limited = await createApp({
+			modules: [provided.module, memoryRateLimiterModule],
+			bootstrapComponents: boot(),
+		});
+		expect(provided.handed.value).toBeDefined();
+		expect(limited.components.rateLimiter).toBe(provided.handed.value);
+		await limited.dispose();
+	});
+
+	it("leaves an auditSink overridden with undefined to the fan-out when audit hooks are contributed", async () => {
+		const reader = activeReader("auditSink");
+		const handle = await createApp({
+			modules: [reader.module, auditHooksModule("test", createRecordingAuditSink())],
+			bootstrapComponents: boot(),
+			overrideComponents: { auditSink: undefined } as never,
+		});
+		expect(reader.handed.value).toBeDefined();
+		await handle.dispose();
+	});
+
+	it("runs the cleanups of the components already materialised before refusing", async () => {
+		const cleaned: string[] = [];
+		const earlier = defineModule({
+			name: "test:earlier-provider",
+			provides: { mailSender: () => ({ send: async () => {} }) } as never,
+			lifecycle: {
+				mailSender: { eager: true, cleanup: () => void cleaned.push("mailSender") },
+			} as never,
+		});
+		await expect(
+			createApp({
+				modules: [earlier, activeReader("rateLimiter").module, answeringUndefined("rateLimiter")],
+				bootstrapComponents: boot(),
+			}),
+		).rejects.toMatchObject({ reason: "component-absence-undeclared" });
+		expect(cleaned).toEqual(["mailSender"]);
 	});
 });
 

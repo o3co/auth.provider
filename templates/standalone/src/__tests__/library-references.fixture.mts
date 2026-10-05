@@ -32,7 +32,7 @@ import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import {
 	oauthAuthorizationModule,
 	oauthModule,
-	oauthSessionModule,
+	oauthSessionGrantModule,
 } from "@o3co/auth-provider-oauth";
 import {
 	redisCodeRepositoryModule,
@@ -58,7 +58,7 @@ import type { Adapters, MfaSwitch } from "../sections.mjs";
 /** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
 const OAUTH_MODULES = [
 	oauthModule({ config: {} as never }),
-	oauthSessionModule({ config: {} as never }),
+	oauthSessionGrantModule,
 	oauthAuthorizationModule({ config: {} as never }),
 ];
 

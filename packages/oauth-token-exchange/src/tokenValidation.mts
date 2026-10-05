@@ -35,7 +35,7 @@ import {
 	type TokenExchangeValidatorResolver,
 	type ValidatedToken,
 } from "@o3co/auth-provider-core";
-import { invalidRequest } from "./answers.mjs";
+import { invalidRequest, isRefusal } from "./answers.mjs";
 import type { TokenRequest } from "./tokenRequest.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 
@@ -99,26 +99,9 @@ export async function validateSubject(
 	  }
 	| GrantHandlerResult
 > {
-	let subjectValidated: ValidatedToken | null;
-	try {
-		subjectValidated = await subjectValidator.validate(subjectToken, { role: "subject" });
-	} catch (err) {
-		// A validator throws only when it cannot reach an answer (a keystore or
-		// revocation store down; core's `ExchangeTokenValidator` contract): a logged 503,
-		// never a verdict on the token.
-		(deps.logger ?? consoleLogger).error(
-			{ role: "subject", err: loggableError(err) },
-			"token_exchange_validation_unavailable",
-		);
-		return {
-			result: {
-				status: 503,
-				error: "temporarily_unavailable",
-				errorDescription: "subject_token validation store unavailable",
-			},
-		};
-	}
-	if (!subjectValidated) return invalidRequest("subject_token validation failed");
+	const subjectAnswer = await askValidator(deps, "subject", subjectToken, subjectValidator);
+	if (isRefusal(subjectAnswer)) return subjectAnswer;
+	const subjectValidated = subjectAnswer.validated;
 	const subjectBindings = readBindings(subjectValidated);
 	if (subjectBindings === undefined) return invalidRequest("subject_token validation failed");
 
@@ -185,22 +168,9 @@ export async function validateActor(
 	let actorValidated: ValidatedToken | null = null;
 	let actorBindings: ReportedBindings | null = null;
 	if (actorToken !== null && actorValidator) {
-		try {
-			actorValidated = await actorValidator.validate(actorToken, { role: "actor" });
-		} catch (err) {
-			(deps.logger ?? consoleLogger).error(
-				{ role: "actor", err: loggableError(err) },
-				"token_exchange_validation_unavailable",
-			);
-			return {
-				result: {
-					status: 503,
-					error: "temporarily_unavailable",
-					errorDescription: "actor_token validation store unavailable",
-				},
-			};
-		}
-		if (!actorValidated) return invalidRequest("actor_token validation failed");
+		const answer = await askValidator(deps, "actor", actorToken, actorValidator);
+		if (isRefusal(answer)) return answer;
+		actorValidated = answer.validated;
 		const read = readBindings(actorValidated);
 		if (read === undefined) return invalidRequest("actor_token validation failed");
 		actorBindings = read;
@@ -236,6 +206,52 @@ export async function validateActor(
 		}
 	}
 	return { actorValidated, actorBindings };
+}
+
+/**
+ * The presented token's validator asked again, answered as the first asking
+ * was: `null` when it still accepts the token, else the same refusal or `503`.
+ * Its answer gates only; the bindings and claims read at the first asking stay
+ * the ones checked and minted.
+ */
+export async function revalidate(
+	deps: Pick<GrantDependencies, "logger">,
+	role: "subject" | "actor",
+	token: string,
+	validator: ExchangeTokenValidator,
+): Promise<GrantHandlerResult | null> {
+	const answer = await askValidator(deps, role, token, validator);
+	return isRefusal(answer) ? answer : null;
+}
+
+/**
+ * The validator's answer for a presented token, or the refusal: `null` is a
+ * failed validation, and a throw (a keystore or revocation store down; core's
+ * `ExchangeTokenValidator` contract) a logged `503`, never a verdict on the token.
+ */
+async function askValidator(
+	deps: Pick<GrantDependencies, "logger">,
+	role: "subject" | "actor",
+	token: string,
+	validator: ExchangeTokenValidator,
+): Promise<{ readonly validated: ValidatedToken } | GrantHandlerResult> {
+	let validated: ValidatedToken | null;
+	try {
+		validated = await validator.validate(token, { role });
+	} catch (err) {
+		(deps.logger ?? consoleLogger).error(
+			{ role, err: loggableError(err) },
+			"token_exchange_validation_unavailable",
+		);
+		return {
+			result: {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: `${role}_token validation store unavailable`,
+			},
+		};
+	}
+	return validated ? { validated } : invalidRequest(`${role}_token validation failed`);
 }
 
 /**

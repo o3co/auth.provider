@@ -661,7 +661,8 @@ export const CoreConfigSchema = z.object({
 			// The settings across every mechanism at core's token-binding
 			// extension point (DPoP, mTLS, ...), core's as the point is: read
 			// through `resolveTokenBindingSettings` alone, and carried by no
-			// slot. See
+			// module's slot — boot fills core's `tokenBindingSettings` with
+			// them. See
 			// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
 			// The slots this composition runs without on purpose, each a slot a
 			// module's absence policy names by its key here (`auditSink`): the

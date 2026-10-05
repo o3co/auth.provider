@@ -31,6 +31,7 @@ import {
 	coreConfigForTests,
 	createTestApp,
 	createTestCsrfTokenSigner,
+	createTestFederationSettings,
 	createTestSessionCookiePolicy,
 	federationTypeForTests,
 	makeValidAppConfig,
@@ -182,10 +183,17 @@ describe("sessionModule (static manifest)", () => {
 		expect(sessionModule.name).toBe("session");
 	});
 
+	it("reads its own section and core's federationSettings, never the whole configuration", () => {
+		expect(sessionModule.requires).toContain("federationSettings");
+		expect(sessionModule.requires).not.toContain("config");
+		expect(sessionModule.optional ?? []).not.toContain("config");
+		expect(sessionModule.configSchema).toBeUndefined();
+	});
+
 	it("declares its dep set in `requires`, without the oauth package's sessionRPRegistry, sessionFamilyIndex or refreshTokenFamilyRevocation", () => {
 		expect(sessionModule.requires).toEqual(
 			expect.arrayContaining([
-				"config",
+				"federationSettings",
 				"userRepository",
 				"userSessionStore",
 				"federationTokenStore",
@@ -360,21 +368,6 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		requirements?: readonly SessionRequirement[];
 	}): Promise<request.Response> {
 		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
-				federations: {
-					stub: {
-						enabled: true,
-						type: "stub",
-						clientId: "id",
-						clientSecret: "secret",
-						callbackURL: "https://example.com/session/oauth/federation/stub/callback",
-					},
-				},
-			}),
-		} as unknown as AppConfig;
 		const record = {
 			sid: "s-1",
 			sub: "user-1",
@@ -390,7 +383,12 @@ describe("sessionModule — the link routes are a consumer of session admission"
 			handler: express.RequestHandler;
 		};
 		const contribution = factory({
-			config,
+			federationSettings: createTestFederationSettings({
+				stub: {
+					type: "stub",
+					callbackURL: "https://example.com/session/oauth/federation/stub/callback",
+				},
+			}),
 			section: base.session,
 			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			federationProviders: new Map([["stub", stubFederationProvider]]),
@@ -481,13 +479,11 @@ describe("sessionModule — the password login is a consumer of session admissio
 	 */
 	async function passwordLogin(requirements: readonly SessionRequirement[]) {
 		const base = makeValidAppConfig();
-		const config = { ...base } as unknown as AppConfig;
 		const factory = sessionModule.contributes?.routes?.[0] as unknown as (deps: unknown) => {
 			id: string;
 			handler: express.RequestHandler;
 		};
 		const contribution = factory({
-			config,
 			section: base.session,
 			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			deploymentMode: "single",

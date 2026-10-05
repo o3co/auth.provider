@@ -35,10 +35,9 @@ import {
 	defineModule,
 	type RateLimiter,
 	type RateLimitSpec,
-	requireUsableConfiguredRateLimitSpec,
 } from "@o3co/auth-provider-core";
 import express from "express";
-import { z } from "zod";
+import { webauthnConfigSchema } from "./config.mjs";
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE, type WebAuthnGrantDeps } from "./grant.mjs";
 import {
 	createAuthenticationOptionsHandler,
@@ -48,60 +47,41 @@ import { createRegistrationOptionsHandler } from "./routes/registrationOptions.m
 import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs";
 
 /**
- * The `webauthn` section's declaration: the package's `config/reference.conf` (its defaults),
- * read at the module's name. The schema checks nothing: the module reads its settings from the `webauthnConfig`
- * slot, which the deployment fills (with `webauthnConfigSchema`, or hard-coded), and a check
- * here could refuse at boot what that slot accepts.
- */
-const WEBAUTHN_SECTION_SCHEMA = z.unknown();
-
-/**
- * `webauthn.rateLimit.authenticationOptions` as the options route's budget, `null` when not given;
- * read as `webauthnConfigSchema` coerces it, and a `RangeError` naming the key when no limiter can
- * apply it.
- */
-const authenticationOptionsBudget = (section: unknown): RateLimitSpec | null => {
-	const given = (section as { rateLimit?: { authenticationOptions?: unknown } } | null | undefined)
-		?.rateLimit?.authenticationOptions;
-	if (given === undefined) return null;
-	return requireUsableConfiguredRateLimitSpec("webauthn.rateLimit.authenticationOptions", given);
-};
-
-/**
  * Declarative manifest for the WebAuthn passkey module.
  *
- * Settings come from the `webauthnConfig` slot, which a bootstrap module fills from application
- * config; this module does not read them from AppConfig. Each route has its own id for collision
- * detection and ordering.
+ * Its settings are its own section, `webauthn {}`, which boot parses with `webauthnConfigSchema`
+ * (strict at every level; defaults from the package's `config/reference.conf`) before any factory
+ * runs. The routes and the grant read that section; the module provides it as the
+ * `webauthnConfig` slot, for the package's other readers (the WebAuthn second factor), and names
+ * the slot `authoritative`. The token lifetimes and the resource-indicator switch come from the
+ * `oauthTokenSettings` slot, and the refresh-token binding rule from core's `tokenBindingSettings`
+ * slot, both of which it requires; it reads nothing of the whole configuration. Each route has
+ * its own id for collision detection and ordering.
  *
  * `POST /oauth/webauthn/authentication/options` is rate-limited by the module itself: core's
  * `createRateLimitGuard` under the `webauthn-authentication-options` tag, on the wired
  * `rateLimiter` or else a per-process memory limiter, which the `deploymentMode` slot decides
  * about (refused under `multi`, a warning when `unset`). The module contributes
  * `webauthn.rateLimit.authenticationOptions` as the tag's budget, which a wired limiter applies;
- * the fallback limiter applies `webauthnConfig.rateLimit.authenticationOptions`. The outage
- * policy is the limiter's own `failMode`, as for the OAuth endpoints and `/session/login`.
+ * the fallback limiter applies the same key. The outage policy is the limiter's own `failMode`,
+ * as for the OAuth endpoints and the MFA routes.
  */
 export const webauthnModule = defineModule<
-	| "webauthnConfig"
 	| "webauthnCredentialStore"
 	| "challengeStore"
 	| "challengeCeremony"
-	| "config"
 	| "keyStore"
 	| "deploymentMode"
-	| "rateLimitBudgetResolver",
-	| "grantPolicy"
-	| "rateLimiter"
-	| "auditSink"
-	| "logger"
-	| "refreshTokenFamilyRotation"
-	| "oauthTokenSettings",
-	typeof WEBAUTHN_SECTION_SCHEMA
+	| "rateLimitBudgetResolver"
+	| "oauthTokenSettings"
+	| "tokenBindingSettings",
+	"grantPolicy" | "rateLimiter" | "auditSink" | "logger" | "refreshTokenFamilyRotation",
+	typeof webauthnConfigSchema,
+	"webauthnConfig"
 >({
 	name: "webauthn",
 	section: {
-		schema: WEBAUTHN_SECTION_SCHEMA,
+		schema: webauthnConfigSchema,
 		reference: new URL("../config/reference.conf", import.meta.url),
 		// Not a setting: authentication/options never lists a user's credentials, so no ceremony
 		// identifies the user and every assertion carries a user handle (WebAuthn §7.2 step 6).
@@ -117,17 +97,21 @@ export const webauthnModule = defineModule<
 		},
 	},
 	requires: [
-		"webauthnConfig",
 		"webauthnCredentialStore",
 		"challengeStore",
 		"challengeCeremony",
-		"config",
 		"keyStore",
 		// The replica count core fills: the authentication/options route's per-process fallback
 		// is refused under `multi`. Required, so a mode read as absent cannot lift that refusal.
 		"deploymentMode",
-		// The contributed budgets, which the mismatch warning compares with the slot.
+		// The contributed budgets, which the mismatch warning compares with the section's.
 		"rateLimitBudgetResolver",
+		// The token lifetimes and the resource-indicator switch, which the grant reads; the oauth
+		// module provides it, and a composition without that module fills it itself.
+		"oauthTokenSettings",
+		// Whether a confidential client's refresh token is bound, which the grant reads; core
+		// fills it from `core.tokenBinding` in every composition.
+		"tokenBindingSettings",
 	],
 	optional: [
 		// Required by the grant factory, which throws at boot without it; optional here only so
@@ -144,10 +128,18 @@ export const webauthnModule = defineModule<
 		// uses. Optional for compositions that issue no refresh tokens; when wired, a store
 		// outage fails closed.
 		"refreshTokenFamilyRotation",
-		// What the grant reads of `oauth {}`, provided by the oauth module; the configuration's
-		// values when no module provides it.
-		"oauthTokenSettings",
 	],
+	// The relying party and the rest of the section, for the package's other readers (the
+	// WebAuthn second factor): the section as boot parsed it, deeply frozen.
+	provides: {
+		webauthnConfig: ({ section }) => section,
+	},
+	// One source while this module is loaded: its routes and grant read the section, so a second
+	// source would split what the slot's readers see from what the module does. A deployment
+	// module providing the slot is refused as a duplicate provider, a `bootstrapComponents` entry
+	// as a collision, and an `overrideComponents` entry as overriding an authoritative slot. A
+	// composition without this module fills the slot itself.
+	authoritative: ["webauthnConfig"],
 	// `auditSink` is optional to wire, not to decide: an unfilled slot needs
 	// auditSink listed in core.declaredAbsent or boot refuses (the policy the oauth and session modules share).
 	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
@@ -155,8 +147,9 @@ export const webauthnModule = defineModule<
 		// The options route's budget, for every limiter to read; an operator's
 		// `limits.webauthn-authentication-options` on the limiter wins.
 		rateLimitBudgets: {
-			[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: (deps) =>
-				authenticationOptionsBudget(deps.section),
+			[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: ({ section }) => ({
+				...section.rateLimit.authenticationOptions,
+			}),
 		},
 		grants: {
 			[WEBAUTHN_GRANT_TYPE]: (deps) => {
@@ -180,10 +173,18 @@ export const webauthnModule = defineModule<
 					);
 				}
 				// Handed over whole, as the oauth module does for its grants, so no declared slot
-				// can be dropped on the way. The `satisfies` checks the other direction: every slot
-				// the grant reads is declared here, optional ones included (plain assignability
-				// would let an undeclared one through as a permanent `undefined`).
-				return createWebAuthnGrant(deps satisfies Pick<typeof deps, keyof WebAuthnGrantDeps>);
+				// can be dropped on the way, with the section as the grant's relying party. The
+				// `satisfies` checks the other direction: every slot the grant reads is declared
+				// here, optional ones included (plain assignability would let an undeclared one
+				// through as a permanent `undefined`).
+				const { section, ...slots } = deps;
+				return createWebAuthnGrant({
+					...(slots satisfies Pick<
+						typeof slots,
+						Exclude<keyof WebAuthnGrantDeps, "webauthnConfig">
+					>),
+					webauthnConfig: section,
+				});
 			},
 		},
 		routes: [
@@ -198,7 +199,7 @@ export const webauthnModule = defineModule<
 				router.post(
 					"/",
 					createRegistrationOptionsHandler({
-						config: deps.webauthnConfig,
+						config: deps.section,
 						challengeStore: deps.challengeStore,
 						credentialStore: deps.webauthnCredentialStore,
 						logger: deps.logger ?? consoleLogger,
@@ -218,7 +219,7 @@ export const webauthnModule = defineModule<
 				router.post(
 					"/",
 					createRegistrationVerifyHandler({
-						config: deps.webauthnConfig,
+						config: deps.section,
 						challengeCeremony: deps.challengeCeremony,
 						credentialStore: deps.webauthnCredentialStore,
 						logger: deps.logger ?? consoleLogger,
@@ -240,8 +241,8 @@ export const webauthnModule = defineModule<
 				const logger = deps.logger ?? consoleLogger;
 				const deploymentMode = checkDeploymentMode(deps.deploymentMode, "webauthn: deploymentMode");
 				const spec: RateLimitSpec = {
-					limit: deps.webauthnConfig.rateLimit.authenticationOptions.limit,
-					windowSeconds: deps.webauthnConfig.rateLimit.authenticationOptions.windowSeconds,
+					limit: deps.section.rateLimit.authenticationOptions.limit,
+					windowSeconds: deps.section.rateLimit.authenticationOptions.windowSeconds,
 				};
 				if (deps.rateLimiter === undefined) {
 					// The per-process fallback below is replica-unsafe state, built here where the
@@ -268,9 +269,10 @@ export const webauthnModule = defineModule<
 						);
 					}
 				} else {
-					// A shared limiter applies the contributed budget for the tag, not this
-					// slot; boot warns once when they differ. A limiter's own `limits` entry
-					// for the tag overrides both and is not visible here.
+					// A shared limiter applies the budget registered for the tag: the one this
+					// module contributes from its section, since boot refuses an override of
+					// it. Boot warns once if the two ever differ. A limiter's own `limits`
+					// entry for the tag overrides both and is not visible here.
 					const contributed = deps.rateLimitBudgetResolver.get(
 						WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
 					);
@@ -288,9 +290,9 @@ export const webauthnModule = defineModule<
 						);
 					}
 				}
-				// Fall back rather than leave the route unguarded, as `/session/login` does: this is
-				// the credential-store flood and enumeration surface, and a per-process bucket is
-				// weak protection, not none. The warning above states which one is in force.
+				// Fall back rather than leave the route unguarded: this is the credential-store flood
+				// and enumeration surface, and a per-process bucket is weak protection, not none.
+				// The warning above states which one is in force.
 				const limiter: RateLimiter =
 					deps.rateLimiter ??
 					createMemoryRateLimiter({
@@ -301,7 +303,7 @@ export const webauthnModule = defineModule<
 				router.post(
 					"/",
 					// The outage policy is the limiter's own `failMode`, the one the
-					// OAuth endpoints and `/session/login` apply on the same limiter:
+					// OAuth endpoints and the MFA routes apply on the same limiter:
 					// an outage must not mean "shed load" on one surface and "let
 					// everything through" on another.
 					createRateLimitGuard({
@@ -315,7 +317,7 @@ export const webauthnModule = defineModule<
 						headerFallback: spec,
 					}),
 					createAuthenticationOptionsHandler({
-						config: deps.webauthnConfig,
+						config: deps.section,
 						challengeStore: deps.challengeStore,
 						logger,
 					}),

@@ -60,7 +60,7 @@ export type { ClientAuthMiddlewareOptions } from "./middleware/clientAuth.mjs";
 export { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 export { oauthEndpointsModule, oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
-export { oauthSessionModule } from "./oauthSession.mjs";
+export { oauthSessionGrantModule, oauthSessionModule } from "./oauthSession.mjs";
 export { createOAuthRouter } from "./routes.mjs";
 // `oauth {}` as the oauth module's schema parses it: what `createOAuthRouter`
 // takes as its `section`.

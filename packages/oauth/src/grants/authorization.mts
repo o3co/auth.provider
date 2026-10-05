@@ -550,9 +550,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// §6.1). One this clock cannot read — further ahead than the skew
 			// allows — refuses the exchange before anything is signed.
 			// One issuance instant for the exchange: `authTime` is read against it
-			// and every token signed here carries it as `iat` (the id_token's own
-			// `auth_time` is read against the clock it signs with, never later than
-			// its `iat`), so a wall clock moved back before the signing cannot put
+			// and every token signed here, the id_token included, carries it as
+			// `iat`, so a wall clock moved back before the signing cannot put
 			// `auth_time` after `iat`.
 			const mintingNow = Date.now();
 			const issuedAt = Math.floor(mintingNow / 1000);
@@ -833,8 +832,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					sub: userSession.sub,
 					aud: authenticatedClientId,
 					azp: authenticatedClientId,
-					// The instant read above, so the three tokens agree.
+					// The instants read above, so the three tokens agree; `authTime`
+					// is never later than `issuedAt`, so the id_token reads it as is.
 					authTime: new Date(authTime * 1000),
+					issuedAt,
 					...(nonce ? { nonce } : {}),
 					sid,
 					...(amr ? { amr } : {}),

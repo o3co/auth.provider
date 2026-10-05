@@ -31,7 +31,7 @@
 
 import type { FederationProvider, Logger } from "@o3co/auth-provider-core";
 import { codeChallenge } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -101,9 +101,7 @@ type Knobs = {
 	destroyThrows?: { readonly reason: unknown };
 	/** Register this callback URL instead of a well-formed one. */
 	callbackUrl?: string | null;
-	/** Passed straight through as the router's `config`. */
-	config?: unknown;
-	/** Passed straight through; omit to let the router derive it from `config`. */
+	/** Passed straight through; absent is the harness's name. */
 	cookieName?: string;
 	/** Make the session's own `save` fail, for the query-mode branch. */
 	failSessionSave?: boolean;
@@ -211,11 +209,7 @@ function buildApp(knobs: Knobs = {}) {
 	app.use(
 		createRouter(express, {
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
-			// `in` rather than `??`, so a test can pass `null` as the config and
-			// still reach the router's own fallback.
-			config: ("config" in knobs
-				? knobs.config
-				: { "session-store": { name: "harness.session" } }) as never,
+			federationSettings: createTestFederationSettings(),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map([["apple", makePermissivePolicy()]]) as never,
 			providerCallbackUrls: callbackUrls,
@@ -223,9 +217,7 @@ function buildApp(knobs: Knobs = {}) {
 			userSessionStore: makeUserSessionStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			federationTokenStore: makeFederationTokenStore(),
-			...(knobs.cookieName === undefined
-				? {}
-				: { federationTransactionCookieName: knobs.cookieName }),
+			federationTransactionCookieName: knobs.cookieName ?? DEFAULT_COOKIE_NAME,
 			...(knobs.logger === undefined ? {} : { logger: knobs.logger }),
 		}),
 	);
@@ -475,33 +467,13 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 	});
 });
 
-describe("the transaction cookie's name follows the deployment's session cookie", () => {
-	const cookieNameFrom = async (config: unknown): Promise<string> => {
-		const { app } = buildApp({ config });
+describe("the transaction cookie is named what the router is given", () => {
+	it("issues it under federationTransactionCookieName, the session module's name for it", async () => {
+		const { app } = buildApp({ cookieName: "__Secure-acme.sid.federation" });
 		const res = await request(app).get("/oauth/federation/apple");
 		const header = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
 			c.includes(".federation="),
 		);
-		return header?.split("=")[0] ?? "";
-	};
-
-	it("derives it from the configuration's session-store.name, dropping a __Host- prefix it could not satisfy", async () => {
-		expect(await cookieNameFrom({ "session-store": { name: "__Host-acme.sid" } })).toBe(
-			"__Secure-acme.sid.federation",
-		);
-	});
-
-	it("falls back to the reference default when the config carries no session name", async () => {
-		// Only reachable through a hand-built AppConfig; the module wiring always
-		// passes the real name.
-		for (const config of [
-			{},
-			{ "session-store": {} },
-			{ "session-store": { name: "" } },
-			null,
-			"nonsense",
-		]) {
-			expect(await cookieNameFrom(config)).toBe("__Secure-auth.session.federation");
-		}
+		expect(header?.split("=")[0]).toBe("__Secure-acme.sid.federation");
 	});
 });
