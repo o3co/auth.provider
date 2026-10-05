@@ -184,6 +184,34 @@ test("section.isEnabled reads the section as its schema's output, answers a bool
 	});
 });
 
+test("replicaSafety may read the section as its schema's output, and leaves the manifest a Module", () => {
+	const Stored = z.object({ store: z.enum(["memory", "shared"]) });
+	const m = defineModule({
+		name: "stored",
+		section: { schema: Stored },
+		replicaSafety: (section) => {
+			expectTypeOf(section).toEqualTypeOf<z.output<typeof Stored>>();
+			return section.store === "memory" ? { unsafe: true, reason: "forks" } : undefined;
+		},
+	});
+	const modules: readonly Module[] = [m];
+	expectTypeOf(modules).toEqualTypeOf<readonly Module[]>();
+	// A static declaration stays as it was.
+	defineModule({ name: "stored-static", replicaSafety: { unsafe: true, reason: "forks" } });
+	defineModule({
+		name: "stored-wrong-key",
+		section: { schema: Stored },
+		// @ts-expect-error — the section has no `storage` key
+		replicaSafety: (section) => (section.storage === "memory" ? undefined : undefined),
+	});
+	defineModule({
+		name: "stored-wrong-answer",
+		section: { schema: Stored },
+		// @ts-expect-error — a declaration says `unsafe: true`
+		replicaSafety: () => ({ unsafe: false, reason: "forks" }),
+	});
+});
+
 test("every factory position of a sectioned manifest receives the section", () => {
 	type Spec = ModuleSpec<"config", never, typeof RetrySection>;
 	type Expected = z.output<typeof RetrySection>;

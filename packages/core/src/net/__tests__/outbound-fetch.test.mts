@@ -23,7 +23,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { outboundLimitsOf as publicOutboundLimitsOf } from "#/index.mjs";
 import { loggableError } from "#/logging/loggableError.mjs";
-import { createOutboundFetch, isOutboundRefusal, outboundLimitsOf } from "#/net/outbound-fetch.mjs";
+import {
+	createOutboundFetch,
+	isOutboundRefusal,
+	outboundLimitsOf,
+	outboundPolicyOf,
+} from "#/net/outbound-fetch.mjs";
 import type { OutboundExchange, OutboundTransport } from "#/net/outbound-transport.mjs";
 import {
 	createOutboundFetchForTesting,
@@ -122,7 +127,7 @@ const outboundFetch = (
 ) => {
 	const transport = options.transport ?? answering();
 	return createOutboundFetchForTesting({
-		...(options.outbound !== undefined ? { config: config(options.outbound) } : {}),
+		config: options.outbound !== undefined ? config(options.outbound) : {},
 		source: options.source ?? "registration",
 		lookup: (options.lookup ?? resolver()).lookup,
 		transport: typeof transport === "function" ? transport : transport.transport,
@@ -767,38 +772,40 @@ describe("building the fetch", () => {
 		).toThrow(/core\.outbound/);
 	});
 
-	it("reads an absent section, or no configuration at all, as the defaults", () => {
-		expect(() => createOutboundFetch({ source: "request" })).not.toThrow();
+	it("reads an absent section as the defaults", () => {
+		expect(() => createOutboundFetch({ config: {}, source: "request" })).not.toThrow();
 		expect(() => createOutboundFetch({ config: { core: {} }, source: "request" })).not.toThrow();
 	});
 
 	it("requires the URL's source", () => {
 		// @ts-expect-error: `source` is required
 		expect(() => createOutboundFetch({})).toThrow(TypeError);
-		expect(() => createOutboundFetch({ source: "client" as unknown as "request" })).toThrow(
-			TypeError,
-		);
+		expect(() =>
+			createOutboundFetch({ config: {}, source: "client" as unknown as "request" }),
+		).toThrow(TypeError);
 	});
 
 	it("refuses a per-use timeoutMs or maxResponseBytes that is not a positive whole number", () => {
-		expect(() => createOutboundFetch({ source: "request", timeoutMs: 2_147_483_648 })).toThrow(
-			TypeError,
-		);
 		expect(() =>
-			createOutboundFetch({ source: "request", timeoutMs: 2_147_483_647 }),
+			createOutboundFetch({ config: {}, source: "request", timeoutMs: 2_147_483_648 }),
+		).toThrow(TypeError);
+		expect(() =>
+			createOutboundFetch({ config: {}, source: "request", timeoutMs: 2_147_483_647 }),
 		).not.toThrow();
 		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
-			expect(() => createOutboundFetch({ source: "request", timeoutMs: bad })).toThrow(TypeError);
-			expect(() => createOutboundFetch({ source: "request", maxResponseBytes: bad })).toThrow(
+			expect(() => createOutboundFetch({ config: {}, source: "request", timeoutMs: bad })).toThrow(
 				TypeError,
 			);
+			expect(() =>
+				createOutboundFetch({ config: {}, source: "request", maxResponseBytes: bad }),
+			).toThrow(TypeError);
 		}
 	});
 
 	it('refuses to build while an environment proxy is configured, unless egress = "direct"', () => {
 		for (const variable of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]) {
 			vi.stubEnv(variable, "http://proxy.example:3128");
-			expect(() => createOutboundFetch({ source: "registration" }), variable).toThrow(
+			expect(() => createOutboundFetch({ config: {}, source: "registration" }), variable).toThrow(
 				/core\.outbound\.egress/,
 			);
 			expect(() =>
@@ -807,7 +814,7 @@ describe("building the fetch", () => {
 			vi.unstubAllEnvs();
 		}
 		vi.stubEnv("HTTPS_PROXY", "");
-		expect(() => createOutboundFetch({ source: "registration" })).not.toThrow();
+		expect(() => createOutboundFetch({ config: {}, source: "registration" })).not.toThrow();
 	});
 
 	it("does not consult the global fetch dispatcher, which it never connects through", () => {
@@ -816,9 +823,183 @@ describe("building the fetch", () => {
 		const before = holder[key];
 		holder[key] = { dispatch: () => false };
 		try {
-			expect(() => createOutboundFetch({ source: "registration" })).not.toThrow();
+			expect(() => createOutboundFetch({ config: {}, source: "registration" })).not.toThrow();
 		} finally {
 			holder[key] = before;
+		}
+	});
+});
+
+describe("a policy in place of the configuration", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	/** What one request through `fetch` comes to: the answer's status and what was dialled, or the error's reason. */
+	const outcome = async (
+		fetch: typeof globalThis.fetch,
+		recorder: Recorder,
+		url: string,
+	): Promise<unknown> => {
+		const before = recorder.exchanges.length;
+		try {
+			const response = await fetch(url);
+			const exchange = recorder.exchanges[before];
+			return {
+				status: response.status,
+				body: await response.text(),
+				addresses: exchange?.addresses,
+				servername: exchange?.servername,
+			};
+		} catch (err) {
+			return {
+				error: err instanceof OutboundFetchError ? err.reason : String(err),
+				dialled: recorder.exchanges.length > before,
+			};
+		}
+	};
+
+	const SECTIONS: readonly OutboundSectionForTests[] = [
+		{},
+		{ allowedHosts: [".partner.example", "localhost"], deniedHosts: ["bad.partner.example"] },
+		{ internalHosts: ["internal.example", "localhost"], maxResponseBytes: 4 },
+		{ deniedHosts: "rp.example", internalHosts: ".internal.example" },
+	];
+	const URLS = [
+		"https://rp.example/",
+		"https://api.partner.example/",
+		"https://bad.partner.example/",
+		"https://internal.example/",
+		"https://deep.internal.example/",
+		"http://localhost:8080/",
+		"https://127.0.0.1/",
+		"http://rp.example/",
+	];
+	const ANSWERS = {
+		"rp.example": [PUBLIC_V4],
+		"api.partner.example": [PUBLIC_V4],
+		"bad.partner.example": [PUBLIC_V4],
+		"internal.example": ["10.0.0.7"],
+		"deep.internal.example": ["192.168.1.2"],
+		localhost: ["127.0.0.1"],
+	};
+
+	it("fetches as the fetch built from the configuration that states the policy does", async () => {
+		for (const section of SECTIONS) {
+			for (const source of ["registration", "request"] as const) {
+				const fromConfig = answering({ chunks: ["hello"] });
+				const fromPolicy = answering({ chunks: ["hello"] });
+				const byConfig = createOutboundFetchForTesting({
+					config: config(section),
+					source,
+					lookup: resolver(ANSWERS).lookup,
+					transport: fromConfig.transport,
+				});
+				const byPolicy = createOutboundFetchForTesting({
+					policy: outboundPolicyOf(config(section)),
+					source,
+					lookup: resolver(ANSWERS).lookup,
+					transport: fromPolicy.transport,
+				});
+				for (const url of URLS) {
+					const expected = await outcome(byConfig, fromConfig, url);
+					expect(
+						await outcome(byPolicy, fromPolicy, url),
+						`${JSON.stringify(section)} ${source} ${url}`,
+					).toEqual(expected);
+				}
+			}
+		}
+	});
+
+	it("holds the deadline the policy states, and a per-use one only below it", async () => {
+		const policy = outboundPolicyOf(config({ timeoutMs: 30 }));
+		const started = Date.now();
+		await failure(
+			createOutboundFetchForTesting({
+				policy,
+				source: "registration",
+				timeoutMs: 60_000,
+				lookup: resolver().lookup,
+				transport: silent,
+			})("https://rp.example/"),
+			"timeout",
+		);
+		expect(Date.now() - started).toBeLessThan(5_000);
+	});
+
+	it("is built by the public factory from a policy", () => {
+		expect(() =>
+			createOutboundFetch({ policy: outboundPolicyOf({}), source: "registration" }),
+		).not.toThrow();
+	});
+
+	it('refuses to build while an environment proxy is configured, unless the policy says egress = "direct"', () => {
+		vi.stubEnv("HTTPS_PROXY", "http://proxy.example:3128");
+		expect(() =>
+			createOutboundFetch({ policy: outboundPolicyOf({}), source: "registration" }),
+		).toThrow(/core\.outbound\.egress/);
+		expect(() =>
+			createOutboundFetch({
+				policy: outboundPolicyOf(config({ egress: "direct" })),
+				source: "registration",
+			}),
+		).not.toThrow();
+	});
+
+	it("takes exactly one of config and policy: both, or neither, is a TypeError", () => {
+		const policy = outboundPolicyOf({});
+		expect(() =>
+			// @ts-expect-error: config and policy are alternatives
+			createOutboundFetch({ config: {}, policy, source: "registration" }),
+		).toThrow(TypeError);
+		expect(() =>
+			// @ts-expect-error: one of config and policy is required
+			createOutboundFetch({ source: "registration" }),
+		).toThrow(TypeError);
+		expect(() => createOutboundFetch({ config: undefined, source: "registration" })).toThrow(
+			TypeError,
+		);
+		expect(() =>
+			createOutboundFetchForTesting({ config: {}, policy, source: "registration" } as never),
+		).toThrow(TypeError);
+		expect(() => createOutboundFetchForTesting({ source: "registration" } as never)).toThrow(
+			TypeError,
+		);
+	});
+
+	it("refuses a policy that does not keep the reader's shape with a TypeError, so no limit is lifted", () => {
+		const base = outboundPolicyOf({});
+		for (const broken of [
+			{ maxResponseBytes: Number.NaN },
+			{ maxResponseBytes: 0 },
+			{ maxResponseBytes: 1.5 },
+			{ maxResponseBytes: undefined },
+			{ timeoutMs: Number.NaN },
+			{ timeoutMs: 0 },
+			{ timeoutMs: 2_147_483_648 },
+			{ allowedHosts: undefined },
+			{ deniedHosts: ["bad.example"] },
+			{ internalHosts: [{ host: "", suffix: false }] },
+			{ egress: "proxy" },
+		]) {
+			expect(
+				() =>
+					createOutboundFetch({
+						policy: { ...base, ...broken } as never,
+						source: "registration",
+						maxResponseBytes: 4,
+					}),
+				JSON.stringify(broken),
+			).toThrow(TypeError);
+		}
+	});
+
+	it("refuses a policy that is not an object with a TypeError", () => {
+		for (const policy of [null, "core.outbound", 5]) {
+			expect(() =>
+				createOutboundFetch({ policy: policy as never, source: "registration" }),
+			).toThrow(TypeError);
 		}
 	});
 });

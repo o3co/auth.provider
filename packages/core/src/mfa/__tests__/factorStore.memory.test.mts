@@ -19,6 +19,7 @@ import {
 	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	type StoreGeneration,
 } from "#/adapters/conditionalWrite.mjs";
+import { replicaUnsafeReason } from "#/boot/replica-safety.mjs";
 import { createApp, defineModule } from "#/index.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import type { MfaFactorRecord, MfaFactorStore } from "#/mfa/factorStore.mjs";
@@ -222,9 +223,9 @@ describe("the in-process store's tombstone", () => {
 describe("memoryMfaFactorStoreModule", () => {
 	it("declares itself replica-unsafe, saying what forks and what a restart loses", () => {
 		expect(memoryMfaFactorStoreModule.name).toBe("core-mfa-factor-store-memory");
-		expect(memoryMfaFactorStoreModule.replicaSafety?.unsafe).toBe(true);
-		expect(memoryMfaFactorStoreModule.replicaSafety?.reason).toMatch(/fork per replica/);
-		expect(memoryMfaFactorStoreModule.replicaSafety?.reason).toMatch(/restart/);
+		expect(memoryMfaFactorStoreModule.replicaSafety).toMatchObject({ unsafe: true });
+		expect(replicaUnsafeReason(memoryMfaFactorStoreModule)).toMatch(/fork per replica/);
+		expect(replicaUnsafeReason(memoryMfaFactorStoreModule)).toMatch(/restart/);
 	});
 
 	it("provides an in-process mfaFactorStore, and says once, at warn, that a restart empties it", async () => {

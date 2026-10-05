@@ -163,6 +163,14 @@ Each one implements a port core declares; the slot name is in parentheses.
   family could have minted stops being accepted (up to
   `oauth.accessToken.maxExpiresIn` plus about five minutes past the
   revocation), so revoked families' keys outlive their refresh tokens.
+- `SessionLifecycleStore` (`sessionLifecycleStore`) — a session's state
+  (`active` → `closing` → `closed`), its participants and its pending close
+  work, in one key per session; see
+  [Session lifecycle](#session-lifecycle-one-key-per-session-in-fixed-shards).
+  `redisSessionStoresModule` provides it, keyed under its section's
+  `keyPrefix` plus `lc:`; `createRedisSessionLifecycleStore` builds it over
+  `makeIoredisClients(io).sessionLifecycleStoreClient` directly. Nothing reads
+  the slot yet.
 - `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,
   `SessionFederationIndex`, `SubjectSessionIndex`, `SubjectRevocation` — the
   six user-session and subject-revocation stores, installed together by
@@ -461,7 +469,7 @@ Each adapter ships in up to two forms:
 | `redisReplaySeenSetModule` | `replaySeenSetClient` | `replaySeenSet` | `redis-replay-seen-set` | `redisReplaySeenSetBuilder` |
 | `redisAccessTokenDenylistModule` | `accessTokenDenylistClient` | `accessTokenDenylist` | `redis-access-token-denylist` | `redisAccessTokenDenylistBuilder` |
 | `redisRefreshTokenFamilyStoreModule` | `refreshTokenFamilyClient` | `refreshTokenFamilyStore` | `redis-refresh-token-family-store` | `redisRefreshTokenFamilyStoreBuilder` |
-| `redisSessionStoresModule` | the six session/subject clients | the six session/subject stores | `redis-session-stores` | per-store builders |
+| `redisSessionStoresModule` | the six session/subject clients, `sessionLifecycleStoreClient` | the six session/subject stores, `sessionLifecycleStore` | `redis-session-stores` | per-store builders |
 | `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redis-federation-token-store` | `redisFederationTokenStoreBuilder` |
 | `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redis-federation-grant-store` (`keyPrefix`, `listingAllowanceMs`, `tombstoneRetention`, `encryptionMode`, `encryptionKeys`) | — |
 | `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redis-federation-grant-intent-store` (`keyPrefix`, default `fg:`) | — |
@@ -476,8 +484,9 @@ Each adapter ships in up to two forms:
 Each store module but `redisCodeRepositoryModule` reads its own section, named after the module: strict, its defaults and its variables in the package's [`config/reference.conf`](config/reference.conf), which each module declares (`section.reference`) and a composition root layers when it loads any of them. The path a section moved from (`redisConsentStore`, `redisRateLimiter`, `rateLimit.failMode`, the grant store's `federationGrants` keys, …) refuses boot naming the new one, and so does a renamed variable's old name (`RATE_LIMIT_FAIL_MODE`, `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` and `_CAS_RETRY_LIMIT`, `FEDERATION_GRANTS_ENCRYPTION_MODE`) unless the new one carries the same value. `redisCodeRepositoryModule` still requires `config` and reads `redisCodeRepository`; the two sealing-store modules require `deploymentMode`. Every module whose stores log also reads
 the optional `logger` slot: the two sealing-store modules, for the plaintext
 guard's line; `redisSessionStoresModule` and `redisCodeRepositoryModule`, for a
-stored record they cannot read; the two MFA store modules, for their boot
-durability check's warning. The `*Client` column is the slot
+stored record they cannot read (and `redisSessionStoresModule` for the session
+lifecycle store's eviction check's warning); the two MFA store modules, for
+their boot durability check's warning. The `*Client` column is the slot
 `makeIoredisClients` fills, except the two federation-grant clients (see
 above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at
@@ -1285,6 +1294,65 @@ that cannot be reached, fails it. The transaction store runs the check
 because of the email-proof requirement (D12's step-3 amendment). `noeviction`
 is what both stores' key families are meant to run on.
 
+## Session lifecycle: one key per session, in fixed shards
+
+`createRedisSessionLifecycleStore` ([`src/session-lifecycle-store.mts`](src/session-lifecycle-store.mts))
+implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
+
+- **One key per session.** A session's whole record — subject, state, end,
+  generation, participants and pending close work — is one hash with one
+  expiry (`PEXPIREAT`): the session's `expiresAt` plus `DEFAULT_CLOCK_SKEW_MS`,
+  raised by the closing commit to the later of that and the commit plus the
+  request's `retainMs`, and kept through `closed`. So the record lapses
+  whole. The hash's fields are listed in
+  [`src/clients/session-lifecycle.mts`](src/clients/session-lifecycle.mts); a
+  participant's data is kept as a JSON string, so every string the port
+  admits reads back as written.
+- **Sixteen fixed shards.** A record lives at
+  `${keyPrefix}{lc:<shard>}:s:<sid>` (`ss:lc:` by default; `<sid>` is base64url
+  of its JSON), where `<shard>` is the 32-bit FNV-1a hash of the sid's UTF-8
+  bytes modulo 16 (`sessionLifecycleShardOf`). Each shard keeps a closing
+  index, `${keyPrefix}{lc:<shard>}:closing` — a sorted set of the sids of its
+  closing records, every score 0, so it orders them by their bytes — under
+  the same hash tag, so on Redis Cluster a record and its index share a slot.
+  The count is a constant of the key layout, not a setting: changing it would
+  move every record, a breaking change.
+- **One script per write, on the server's clock.** `open`, `join`,
+  `beginClose` and `completeIf` each run one script, refused at or after a
+  deadline stamped at issue (the package's write lifetime W). The closing
+  commit adds the sid to its shard's index, and the completion that closes
+  the record removes it, in the same script, so the index never misses a
+  closing record and judges nothing by a clock. `open`, `join` and
+  `completeIf` keep their answer under a replay key,
+  `${keyPrefix}w:{lc:<shard>}:<writeId>`, until the clock skew past the
+  deadline: a copy the driver sends again answers as the first did and writes
+  nothing — a join whose reply was lost still answers `joined` after a close
+  committed. `beginClose` needs none: a copy that lands again finds the
+  record closing and writes nothing. A write answered `late`, or unanswered
+  within the write timeout, rejects with an unknown outcome.
+- **Reads on the primary.** `read` and the listing are scripts too, so a
+  client that routes plain reads to replicas still answers every write
+  acknowledged before the call.
+- **`listClosing`** merges the sixteen indexes in byte order after the cursor,
+  reading each a page at a time, and checks each sid's record in its shard's
+  own step: an entry whose record is no longer closing (it lapsed while
+  closing, say) is dropped there. The cursor is a plain sid.
+- **Assumptions.** Acknowledged writes are not rolled back, and the server
+  runs `maxmemory-policy` `noeviction`. An evicted record lets a closed
+  session be opened and joined again; an evicted replay key lets a resent
+  write apply again; an evicted index hides a closing record. The boot check,
+  `checkSessionLifecycleEviction` in
+  [`src/internal/session-lifecycle-eviction.mts`](src/internal/session-lifecycle-eviction.mts),
+  refuses every `volatile-*` and `allkeys-*` policy with a
+  `RedisStoreEvictableError` (`session-lifecycle-store-evictable`);
+  `redisSessionStoresModule` runs it once it builds the store.
+- **What it refuses.** A key of another type, a record holding a field or a
+  value this store did not write, and a pending count that disagrees with
+  the pending items reject every member that touches them, never answering an
+  outcome, with nothing written. A join past `maxParticipants` (1000 by
+  default) rejects and writes nothing. A `keyPrefix` holding a brace is a
+  `RangeError` when the store is built.
+
 ## Contract tests
 
 Each adapter whose port has a core conformance suite is run through that
@@ -1307,6 +1375,13 @@ core original anywhere below its imports, and when no Redis test runs it.
 conditional-set suite and the factor set's own cases), which
 [`mfa-factor-store.test.mts`](__tests__/mfa-factor-store.test.mts) runs over
 two connections, with a tombstone's expiry brought forward by `PEXPIRE`.
+`SessionLifecycleStore`'s suite is the test kit's
+`sessionLifecycleStoreContract`, which
+[`session-lifecycle-store.contract.test.mts`](__tests__/session-lifecycle-store.contract.test.mts)
+runs over two connections; the store judges time on the server's clock, which
+a test cannot move, so its retention and lapse are held by
+[`session-lifecycle-store.test.mts`](__tests__/session-lifecycle-store.test.mts)
+instead.
 `AttemptCounter`'s suite is the test kit's `attemptCounterContract`, which
 [`attempt-counter.test.mts`](__tests__/attempt-counter.test.mts) runs over two
 connections, on a hand-moved clock and on the real one.
@@ -1324,7 +1399,7 @@ its port. Two directories hold what several of them share:
 
 - **`src/modules/`** — modules that bundle more than one store. Every other
   module is defined beside the one store it provides; `redisSessionStoresModule`
-  installs six, with one key scheme across them, so it has a file of its own.
+  installs seven, with one key scheme across them, so it has a file of its own.
 - **`src/internal/`** — helpers no consumer imports, and which the package's
   exports do not reach: the advisory lock (its options carry the federation
   token's `{ sid, federationName }`, so it is not a general-purpose lock), the

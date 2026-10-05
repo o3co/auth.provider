@@ -169,6 +169,11 @@ export {
 	type TestOAuthTokenSettingsOverrides,
 } from "./slots/oauthTokenSettings.mjs";
 export {
+	createTestOutboundPolicy,
+	type OutboundPolicyContractInput,
+	outboundPolicyContract,
+} from "./slots/outboundPolicy.mjs";
+export {
 	createTestRateLimiter,
 	type RateLimiterContractInput,
 	rateLimiterContract,

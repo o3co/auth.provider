@@ -580,6 +580,12 @@ modules fills them.
   is on provides the slot itself, or the boot is refused
   (`missing-required-component`, naming `oauthTokenSettings`). A factor
   switched off by `mfa-totp-factor.enabled = false` requires nothing.
+- **BREAKING: an enabled `authorization_code` grant with `subjectRevocation`
+  wired requires `userSessionStore`.** Without one the boot is refused
+  (`contribute-factory-failed`, naming both slots): wire a
+  `userSessionStore` (core's `memorySessionStoresModule` or
+  `redisSessionStoresModule`, which fill both), or remove
+  `subjectRevocation`. The standalone template wires both.
 - **The federation projections.** A name-keyed contribution factory (a
   `grants` or `mfaFactors` entry, say) that reads `federationProviders` or
   `federationRedirectPolicyResolver` while it runs refuses the boot
@@ -752,6 +758,15 @@ modules fills them.
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
+- **A manifest's `replicaSafety` may be a function of the module's section**
+  (#1371, #728). A declaration written as `{ unsafe: true, reason }` is read
+  as before. Code that reads the field off a `Module` (`module.replicaSafety.reason`)
+  no longer compiles, since the field may now be a function, and the exported
+  `ReplicaSafetyModuleRef.replicaSafety` widened the same way: ask
+  `replicaUnsafeReason(module, section)` instead, which answers both forms
+  and throws for a declaration made from the section when no section is
+  given. A composition root that runs `checkReplicaSafety` itself hands it
+  the parsed sections (`sections`) once any module declares from its section.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name

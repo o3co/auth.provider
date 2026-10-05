@@ -103,6 +103,15 @@ import type {
 	RefreshTokenFamilyMultiClient,
 } from "./clients/refresh-token-family.mjs";
 import type {
+	SessionLifecycleCloseInput,
+	SessionLifecycleCompleteInput,
+	SessionLifecycleJoinInput,
+	SessionLifecycleKeys,
+	SessionLifecycleOpenInput,
+	SessionLifecycleStoreClient,
+	SessionLifecycleWriteDeadline,
+} from "./clients/session-lifecycle.mjs";
+import type {
 	AccessTokenDenylistClient,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
@@ -192,6 +201,13 @@ export type {
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
 	SessionFamilyIndexClient,
+	SessionLifecycleCloseInput,
+	SessionLifecycleCompleteInput,
+	SessionLifecycleJoinInput,
+	SessionLifecycleKeys,
+	SessionLifecycleOpenInput,
+	SessionLifecycleStoreClient,
+	SessionLifecycleWriteDeadline,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
@@ -221,6 +237,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly subjectSessionIndexClient?: SubjectSessionIndexClient;
 		readonly subjectRevocationClient?: SubjectRevocationClient;
 		readonly federationTokenStoreClient?: FederationTokenStoreClient;
+		readonly sessionLifecycleStoreClient?: SessionLifecycleStoreClient;
 		readonly rateLimiterClient?: RateLimiterClient;
 		readonly attemptCounterClient?: AttemptCounterClient;
 		readonly codeRepositoryClient?: CodeRepositoryClient;

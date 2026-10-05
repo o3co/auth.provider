@@ -25,6 +25,7 @@ import type {
 	RefreshTokenFamilyClient,
 	ReplaySeenSetClient,
 	SessionFamilyIndexClient,
+	SessionLifecycleStoreClient,
 	SessionRPRegistryClient,
 	SessionSidSortedSetClient,
 	SubjectRevocationClient,
@@ -44,6 +45,7 @@ import {
 } from "./ioredis/clients/mfa.mjs";
 import { makeIoredisRateLimiterClient } from "./ioredis/clients/rate-limiter.mjs";
 import { makeIoredisRefreshTokenFamilyClient } from "./ioredis/clients/refresh-token-family.mjs";
+import { makeIoredisSessionLifecycleStoreClient } from "./ioredis/clients/session-lifecycle.mjs";
 import {
 	makeIoredisAccessTokenDenylistClient,
 	makeIoredisChallengeStoreClient,
@@ -107,6 +109,7 @@ export function makeIoredisClients(
 	subjectSessionIndexClient: SubjectSessionIndexClient;
 	subjectRevocationClient: SubjectRevocationClient;
 	federationTokenStoreClient: FederationTokenStoreClient;
+	sessionLifecycleStoreClient: SessionLifecycleStoreClient;
 	rateLimiterClient: RateLimiterClient;
 	attemptCounterClient: AttemptCounterClient;
 	codeRepositoryClient: CodeRepositoryClient;
@@ -147,6 +150,7 @@ export function makeIoredisClients(
 		subjectSessionIndexClient,
 		subjectRevocationClient,
 		federationTokenStoreClient,
+		sessionLifecycleStoreClient: makeIoredisSessionLifecycleStoreClient(io),
 		rateLimiterClient,
 		attemptCounterClient: makeIoredisAttemptCounterClient(io),
 		codeRepositoryClient,

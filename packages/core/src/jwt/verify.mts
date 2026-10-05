@@ -353,6 +353,17 @@ export function claimCoveredByRevocationBoundary(
 }
 
 /**
+ * The one read of a subject's sessions boundary on the token side: by
+ * `verifyJwt`, and by `subjectBoundaryCovers` for a caller that compares a
+ * claim before signing. Internal to core; callers outside it go through those
+ * two.
+ */
+export const readSubjectRevocationBoundary = (
+	subjectRevocation: Pick<SubjectRevocation, "revokedBefore">,
+	subject: string,
+): Promise<Date | null> => subjectRevocation.revokedBefore(subject);
+
+/**
  * The last whole second a boundary covers, the allowance included; a
  * `RangeError` for a boundary that is not a `Date` with a finite time, or an
  * allowance that is not finite.
@@ -729,7 +740,7 @@ export async function verifyJwt(
 		if (sub !== undefined) {
 			let watermark: Date | null;
 			try {
-				watermark = await subjectRevocation.revokedBefore(sub);
+				watermark = await readSubjectRevocationBoundary(subjectRevocation, sub);
 			} catch (cause) {
 				// Fail closed, reported as the outage it is: as `revoked` it would
 				// read as a finding, and the refresh grant's `invalid_grant` would
