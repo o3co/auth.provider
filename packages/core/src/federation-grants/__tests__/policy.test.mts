@@ -100,7 +100,11 @@ describe("the federationGrantPolicy slot", () => {
 		>().toEqualTypeOf<FederationGrantPolicy | undefined>();
 		expectTypeOf<FederationGrantPolicy["enabled"]>().toEqualTypeOf<boolean>();
 		expectTypeOf<FederationGrantPolicy["allowKeepOnSubjectRevocation"]>().toEqualTypeOf<boolean>();
-		expect(true).toBe(true);
+		// The two members are all the double answers, as the check carries.
+		expect(Object.keys(createTestFederationGrantPolicy()).sort()).toEqual([
+			"allowKeepOnSubjectRevocation",
+			"enabled",
+		]);
 	});
 
 	it("is filled by a module, and read by another", async () => {

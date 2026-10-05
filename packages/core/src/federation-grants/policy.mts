@@ -21,14 +21,15 @@
  *
  * `federation-grants {}` is that module's section: it parses it and provides
  * this, and a reader requires nothing of the section. A composition that
- * holds no slot has grants off: no module that reads them is installed, or
- * the module is switched off and so provides nothing. The value a switched-on
+ * holds no slot has grants off: a composition without the federation-grants
+ * module, or one where the module is switched off and so provides nothing. The value a switched-on
  * module provides therefore always says `enabled: true`; `enabled: false`
  * comes only from a value a host fills itself.
  *
- * Not oauth's `grantPolicy`, the extension point that decides the scope and
- * audience of an OAuth grant: this is the federation grants' switch and keep
- * policy, and "grant" here is a federation grant, never an OAuth grant type.
+ * Not core's `grantPolicy`, the gate token-minting paths consult (allow or
+ * deny, optionally narrowing the scope and audience): this is the federation
+ * grants' switch and keep policy, and "grant" here is a federation grant,
+ * never an OAuth grant type.
  *
  * Contract suite and test double: `federationGrantPolicyContract`,
  * `createTestFederationGrantPolicy` on `@o3co/auth-provider-core/testing`.
@@ -114,7 +115,7 @@ export function checkFederationGrantPolicy(value: unknown): FederationGrantPolic
 		throw new RangeError(
 			"federationGrantPolicy.allowKeepOnSubjectRevocation must be false while " +
 				"federationGrantPolicy.enabled is false, and the composition's slot carries true: an " +
-				"allowance to keep grants a deployment does not have is an allowance over nothing.",
+				`allowance to keep grants a deployment does not have is an allowance over nothing. ${WHY}`,
 		);
 	}
 	return Object.freeze({ enabled, allowKeepOnSubjectRevocation });
@@ -127,8 +128,9 @@ declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		/**
 		 * The federation grants' switch and keep policy, provided by the module
-		 * that owns `federation-grants {}`; absent, grants are off. Not oauth's
-		 * `grantPolicy`, the scope and audience extension point.
+		 * that owns `federation-grants {}`; absent, grants are off. Not core's
+		 * `grantPolicy`, the gate token-minting paths consult (allow or deny,
+		 * optionally narrowing the scope and audience).
 		 */
 		readonly federationGrantPolicy?: FederationGrantPolicy;
 	}
