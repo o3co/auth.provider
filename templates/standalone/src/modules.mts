@@ -20,6 +20,7 @@ import {
 	createFederationTokenStoreFactory,
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
 	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
@@ -313,7 +314,7 @@ export const inMemorySessionStoresModule: Module = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it",
+			"user sessions, RP registrations, family indexes, the session lifecycle record and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, a close begun on one replica fences nothing on another, and a credential change enumerates and watermarks only the replica that handled it",
 	},
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
@@ -328,6 +329,9 @@ export const inMemorySessionStoresModule: Module = defineModule({
 		// other store on this branch.
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
 		subjectRevocation: () => createInMemorySubjectRevocation(),
+		// The session lifecycle's record, as the Redis branch provides it; read
+		// only where core's session lifecycle module is installed.
+		sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 	},
 });
 

@@ -311,5 +311,5 @@ once the notifier would have registered, and only where
 filled it with is the host's. It is refused as before, as that module's
 provider failing (`provides-factory-failed`, naming
 `core-session-lifecycle`), its remedy now naming the contribution: install a
-module that contributes a `sessionCloseNotifiers` entry, as `oauthModule` is
-to.
+module that contributes a `sessionCloseNotifiers` entry, as `oauthModule`
+does.
