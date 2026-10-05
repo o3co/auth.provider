@@ -332,13 +332,6 @@ policy: `deviceCodeStore` is required by `deviceAuthorizationGrantModule` while
 the grant is on and read by nothing while it is off, so there is no absence to
 declare, and `device-grant.store` refuses boot as a removed key.
 
-A policy declared in source that no bundled module attaches is listed apart,
-with the config line it names, and checked the same way:
-
-| Policy | Names | Attached by |
-| --- | --- | --- |
-| `DEVICE_CODE_STORE_ABSENCE_POLICY` | `device-grant.store = "unsupported"` | No module. Core still exports it; the key it names is refused as removed. |
-
 **Replica safety.** In-process state stores are correct on one node and wrong on
 several. `core.deployment.mode = "multi"` with one wired refuses boot, naming each
 offender and what diverges per replica; `"single"` is silent; unset warns. The

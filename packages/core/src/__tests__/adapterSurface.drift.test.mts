@@ -189,8 +189,9 @@ function absencePoliciesInDoc(): AbsencePolicyInventory {
 }
 
 /**
- * The doc's second absence table: policies declared in source that no bundled
- * module attaches yet, `| \`POLICY\` | \`key = "value"\` | … |`. A constant
+ * The doc's table of policies declared in source that no bundled module
+ * attaches yet, `| \`POLICY\` | \`key = "value"\` | … |`, carried by the doc
+ * only while such a policy exists. A constant
  * nothing attaches still names the config line an operator will be told to
  * write, so it is documented — and held to the source — like the rest.
  */
