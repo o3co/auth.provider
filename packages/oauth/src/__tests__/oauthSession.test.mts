@@ -26,9 +26,13 @@ import {
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { oauthSessionGrantModule, oauthSessionModule } from "#/oauthSession.mjs";
 import { capturing, withGrants } from "./_helpers/sections.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 /** `config` with the captures of the renames the module declares, as a resolution under an empty environment makes them. */
 const captured = <C extends object>(config: C): C => capturing(config, [oauthSessionGrantModule]);
@@ -227,6 +231,8 @@ describe("oauthSessionGrantModule", () => {
 	});
 
 	it("mints with the lifetime the oauthTokenSettings slot holds, not one of the configuration's", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		// The configuration's access-token lifetime is 3600 s; the slot's is
 		// shorter, which boot accepts. The grant reads the slot alone.
 		const config = withGrants(makeValidAppConfig(), { session: true });

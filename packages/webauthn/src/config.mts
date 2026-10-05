@@ -32,7 +32,6 @@ import {
 	type ComponentMap as _ComponentMap,
 	checkSerializedOrigin,
 	describeSerializedOriginRejection,
-	MAX_DURATION_SECONDS,
 	normalizeAllowedOrigins,
 	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
@@ -186,19 +185,6 @@ export const webauthnConfigSchema = z.strictObject({
 	attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]),
 	/** UserVerificationRequirement (W3C WebAuthn §5.8.6). Default "preferred". */
 	userVerification: z.enum(["required", "preferred", "discouraged"]),
-	/** Rate limits for the module's own endpoints, one entry per endpoint. */
-	rateLimit: z.strictObject({
-		/**
-		 * `POST /oauth/webauthn/authentication/options`, which is unauthenticated and writes a
-		 * challenge per request: `limit` requests per `windowSeconds` per source IP. Defaults 30 per
-		 * 60 s. Feeds core as a `RateLimitSpec`; like core's `rateLimitSpecSchema`, the window is at
-		 * most one year, since no limiter can apply a window past the Date range.
-		 */
-		authenticationOptions: z.strictObject({
-			limit: wholeNumberInRangeFromEnv(1),
-			windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
-		}),
-	}),
 });
 
 export type WebAuthnConfig = z.infer<typeof webauthnConfigSchema>;
