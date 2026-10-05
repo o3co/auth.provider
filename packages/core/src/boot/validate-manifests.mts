@@ -1563,6 +1563,14 @@ const FEDERATION_REQUIRED_STORES = [
 ] as const;
 
 /**
+ * The stores an enabled federation needs: all six when any
+ * `core.federations` entry is enabled, else none.
+ */
+function federationStoreSlotsOf(config: AppConfig): readonly ComponentKey[] {
+	return enabledFederationsOf(config).length > 0 ? FEDERATION_REQUIRED_STORES : [];
+}
+
+/**
  * If any `core.federations.<name>.enabled === true`, all six session,
  * federation and refresh-token-family slots must be wired. A missing one
  * makes federation routes either fail at runtime with an opaque 503 (the
@@ -1570,7 +1578,8 @@ const FEDERATION_REQUIRED_STORES = [
  * unexpected 404s (refreshTokenFamilyRevocation, per the `logoutSupported` /
  * `federationTokenSupported` gates in `packages/oauth/src/routes.mts`).
  * Refusing at boot makes both visible. Stage 1 counts a planned slot as
- * wired; stage 3 refuses one that holds `undefined`.
+ * wired; stage 2 builds every provider of one (`federationStoreSlots`), read
+ * or not; stage 3 refuses one that holds `undefined`.
  */
 export function checkFederationStoresWiring(
 	config: AppConfig,
@@ -3726,5 +3735,6 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 			switchedOn,
 			parsedConfig,
 		),
+		federationStoreSlots: federationStoreSlotsOf(parsedConfig as AppConfig),
 	};
 }
