@@ -111,9 +111,11 @@ const deserialize = (raw: string): RefreshTokenFamily => {
  * - `registerFamily` is `SET key value PX ttlMs NX`: atomic insert-only.
  * - A family's `expiresAtMs` is the one stored in its record, never rebuilt
  *   from the key's remaining life: a reply's latency cannot move it, so the
- *   cap the rotation wrapper commits stays where it was registered. A record
- *   whose stored expiry has passed reads as gone, as in the memory adapter,
- *   even while its key (which lives from when Redis received the write) does.
+ *   cap the rotation wrapper commits stays where it was registered. Whether
+ *   the family exists is the key's: it lives from when Redis received the
+ *   write, so for that write's latency it can outlast the stored expiry, and
+ *   a record read then carries an expiry already past, which a revocation
+ *   still overwrites and a rotation cannot commit.
  * - `updateFamily` is single-key `WATCH`/`GET`/`MULTI`/`SET`/`EXEC`: the
  *   updater's decision is applied to exactly the state it read, or `EXEC`
  *   answers `null` and the loop re-reads and re-decides. So a caller can fuse
@@ -163,8 +165,7 @@ export function createRedisRefreshTokenFamilyStore(
 			if (raw === null) return null;
 			const pttl = await client.pttl(key);
 			if (pttl <= 0) return null; // -2 nonexistent, -1 no-TTL (defensive), 0 expired
-			const fam = deserialize(raw);
-			return fam.expiresAtMs <= Date.now() ? null : fam;
+			return deserialize(raw);
 		},
 
 		async updateFamily(familyId, updater): Promise<RefreshTokenFamilyUpdateResult> {
@@ -190,11 +191,6 @@ export function createRedisRefreshTokenFamilyStore(
 				}
 
 				const current = deserialize(raw);
-				if (current.expiresAtMs <= Date.now()) {
-					await conn.unwatch();
-					return { outcome: "not-found" };
-				}
-
 				const decision = updater(current);
 
 				if (decision.action === "abort") {

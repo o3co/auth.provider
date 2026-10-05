@@ -7,12 +7,13 @@
  * The family's absolute expiry, against a real Redis whose replies arrive
  * late: the store answers the expiry it stored, so no reply latency moves the
  * cap the rotation wrapper commits, however many rotations run; and a record
- * whose stored expiry has passed reads as gone, as in the memory adapter,
- * even while its key still lives.
+ * read after its stored expiry, while its key still lives, is still revoked
+ * and never re-extended.
  */
 
 import { setTimeout as sleep } from "node:timers/promises";
 import {
+	createRefreshTokenFamilyRevocation,
 	createRefreshTokenFamilyRotation,
 	type RefreshTokenFamilyStore,
 } from "@o3co/auth-provider-core";
@@ -116,27 +117,41 @@ describe("redis refresh-token family — the absolute expiry across slow replies
 		expect(Date.now() + pttl).toBeLessThanOrEqual(capMs + 50);
 	}, 30_000);
 
-	it("reads a record whose stored expiry has passed as gone, while its key still lives", async () => {
+	it("still revokes, and never re-extends, a family read after its stored expiry while its key lives", async () => {
 		const { store: familyStore, keyPrefix } = store();
-		await client.set(
-			`${keyPrefix}fam-past`,
-			JSON.stringify({
-				familyId: "fam-past",
-				activeJti: "jti",
-				revoked: false,
-				expiresAtMs: Date.now() - 1_000,
-			}),
-			"PX",
-			60_000,
-		);
+		const storedExpiryMs = Date.now() - 1_000;
+		const lingering = () =>
+			client.set(
+				`${keyPrefix}fam-past`,
+				JSON.stringify({
+					familyId: "fam-past",
+					activeJti: "jti",
+					revoked: false,
+					expiresAtMs: storedExpiryMs,
+				}),
+				"PX",
+				60_000,
+			);
+		await lingering();
 
-		expect(await familyStore.findFamily("fam-past")).toBeNull();
-		let invoked = false;
-		const result = await familyStore.updateFamily("fam-past", (current) => {
-			invoked = true;
-			return { action: "commit", family: current };
+		// Answered as stored, not rebuilt from the key's remaining life.
+		expect((await familyStore.findFamily("fam-past"))?.expiresAtMs).toBe(storedExpiryMs);
+
+		// A rotation cannot commit past the cap.
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: familyStore,
+			accessTokenHorizonMs: 3_600_000,
 		});
-		expect(result).toEqual({ outcome: "not-found" });
-		expect(invoked).toBe(false);
+		await expect(
+			rotation.rotate("jti", "jti-next", "fam-past", Date.now() + 600_000),
+		).rejects.toMatchObject({ reason: "expired-at-issue" });
+
+		// A revocation still lands.
+		const revocation = createRefreshTokenFamilyRevocation({
+			refreshTokenFamilyStore: familyStore,
+			accessTokenHorizonMs: 3_600_000,
+		});
+		await revocation.revokeFamily("fam-past");
+		expect(await revocation.isFamilyRevoked("fam-past")).toBe(true);
 	});
 });
