@@ -30,6 +30,9 @@
  *   the server's clock, epoch ms) and `nw` (how many work items are pending);
  * - `p:<kind>:<id>`, one per participant, its value the participant's `data`
  *   as a JSON string;
+ * - `o:<kind>:<id>`, one per participant, its join ordinal (1, 2, …), written
+ *   when it first joins and kept by a repeat join: the order participants are
+ *   answered in;
  * - `w:<item>`, one per pending work item, its value `1`.
  *
  * A shard's closing index is a sorted set of the sids of its closing records,
