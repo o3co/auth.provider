@@ -47,6 +47,7 @@ const OPTIONAL = [
 	"rateLimiter",
 	"auditSink",
 	"subjectRevocation",
+	"sessionLifecycleStore",
 	"replaySeenSet",
 	"logger",
 	"federationProviders",
