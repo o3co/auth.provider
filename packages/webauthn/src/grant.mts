@@ -26,7 +26,7 @@
  *
  * With `subjectRevocation` wired, the subject's revocation boundary is read after every slow step
  * and before anything is registered or signed, and an authentication it covers
- * (`claimCoveredByRevocationBoundary`, the rule `verifyJwt` applies) is `invalid_grant`; a
+ * (`subjectBoundaryCovers`, the rule `verifyJwt` applies) is `invalid_grant`; a
  * boundary that cannot be read or compared is 503. Both tokens carry one `iat`, fixed before that
  * read, so a revocation stamped after it covers them.
  */
@@ -38,9 +38,7 @@ import {
 	authTimeClaim,
 	boundPolicyAudience,
 	checkOAuthTokenSettings,
-	claimCoveredByRevocationBoundary,
 	consoleLogger,
-	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	evaluateGrantPolicy,
 	extractResourceParam,
 	type GrantContext,
@@ -54,6 +52,7 @@ import {
 	ownedConfirmation,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
+	subjectBoundaryCovers,
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -406,22 +405,18 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// ------------------------------------------------------------------
 			const issuedAt = Math.floor(Date.now() / 1000);
 			if (deps.subjectRevocation) {
-				let revoked: boolean;
-				try {
-					const boundary = await deps.subjectRevocation.revokedBefore(credential.userId);
-					const covered = (claimSeconds: number): boolean =>
-						claimCoveredByRevocationBoundary(
-							claimSeconds,
-							boundary,
-							DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
-						);
-					// Both claims `verifyJwt` compares: `auth_time` never follows `iat`, but the
-					// wall clock may step back between the redemption and this instant.
-					revoked = covered(issuedAt) || (authTime !== undefined && covered(authTime));
-				} catch (err) {
-					return storeUnavailable("revocation_boundary", "read", clientId, err);
+				// The earlier of the two claims `verifyJwt` compares: a boundary covering either
+				// covers it. `auth_time` never follows `iat`, but the wall clock may step back
+				// between the redemption and this instant.
+				const boundary = await subjectBoundaryCovers(
+					deps.subjectRevocation,
+					credential.userId,
+					authTime === undefined ? issuedAt : Math.min(authTime, issuedAt),
+				);
+				if (boundary.answer === "unavailable") {
+					return storeUnavailable("revocation_boundary", "read", clientId, boundary.cause);
 				}
-				if (revoked) {
+				if (boundary.answer === "covered") {
 					return {
 						result: {
 							status: 400,
