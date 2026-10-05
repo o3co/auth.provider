@@ -95,7 +95,6 @@ export interface BuildModulesOverrides {
 	readonly logger?: Logger;
 	readonly keyStoreModule?: Module;
 	readonly repositoriesModule?: Module;
-	readonly storesModule?: Module;
 	/**
 	 * Replaces the refresh-token family store modules (default
 	 * `[redisRefreshTokenFamilyStoreModule]`, on the shared ioredis socket).
@@ -232,9 +231,7 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 	const sessionStoresModules: Module[] =
 		adapters.userSessionStores === "redis"
 			? [redisSessionStoresModule]
-			: overrides.storesModule
-				? [overrides.storesModule]
-				: [inMemorySessionStoresModule];
+			: [inMemorySessionStoresModule];
 
 	const rateLimiterModules: Module[] =
 		adapters.rateLimiter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
