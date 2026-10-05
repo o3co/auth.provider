@@ -50,6 +50,7 @@ import {
 	readAccessTokenRevocationMode,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SessionRequirementResolver,
 	type SessionRPRegistry,
 	type SubjectRevocation,
@@ -383,6 +384,7 @@ export const createOAuthRouter = async (
 		sessionFamilyIndex,
 		sessionFederationIndex,
 		federationTokenStore,
+		sessionLifecycle,
 		replaySeenSet,
 		consentStore,
 		pendingConsentStore,
@@ -445,6 +447,11 @@ export const createOAuthRouter = async (
 		sessionFamilyIndex?: SessionFamilyIndex;
 		sessionFederationIndex?: SessionFederationIndex;
 		federationTokenStore?: FederationTokenStore;
+		/**
+		 * Core's session lifecycle. Where installed, `/oauth/logout` ends the
+		 * session through its `close` instead of its own cascade.
+		 */
+		sessionLifecycle?: SessionLifecycle;
 		/**
 		 * The `jti` single-use record for `private_key_jwt` client
 		 * assertions, consulted by every client-authenticated endpoint here.
@@ -747,6 +754,7 @@ export const createOAuthRouter = async (
 				auditSink,
 				logger,
 				legacyTypAccept: legacyTypAcceptOpt,
+				...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 			}),
 		);
 	}
