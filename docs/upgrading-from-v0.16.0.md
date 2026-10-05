@@ -176,7 +176,12 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   per-process fallback: wire a limiter and set the route's limit as
   `limits.webauthn-authentication-options` in its section
   (`core-rate-limiter-memory` or `redis-rate-limiter`), else its
-  `defaultLimit` applies. Without a limiter the route is not throttled.
+  `defaultLimit` applies. Without a limiter the route is not throttled. The
+  effective limit changes: a deployment that never set the key moves from 30
+  per 60 s to the limiter's `defaultLimit`, 60 per 60 s in both bundled
+  `reference.conf` files. To keep the old bound, set
+  `limits.webauthn-authentication-options { limit = 30, windowSeconds = 60 }`
+  in the limiter's section.
 - `oauth.grants.authorization_code.pkce.*` and
   `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` refuse the boot; S256
   is mandatory regardless (#827).
