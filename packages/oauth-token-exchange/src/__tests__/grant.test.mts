@@ -29,6 +29,9 @@ import {
 	type OAuthTokenSettings,
 	type PublicClient,
 	passwordSessionAuthentication,
+	type SessionLifecycle,
+	type SessionLiveness,
+	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
@@ -82,6 +85,7 @@ function buildGrant(
 		grantPolicy?: GrantPolicyHook;
 		logger?: Logger;
 		userSessionStore?: UserSessionStore;
+		sessionLifecycle?: SessionLifecycle;
 		/** The module's own section, `oauth-token-exchange {}`. */
 		section?: { maxActorChainDepth?: number };
 	} = {},
@@ -105,6 +109,7 @@ function buildGrant(
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 		...(overrides.logger ? { logger: overrides.logger } : {}),
 		...(overrides.userSessionStore ? { userSessionStore: overrides.userSessionStore } : {}),
+		...(overrides.sessionLifecycle ? { sessionLifecycle: overrides.sessionLifecycle } : {}),
 		...(overrides.section ? { section: overrides.section } : {}),
 	});
 }
@@ -2124,6 +2129,119 @@ describe("createTokenExchangeGrant — the session behind a sid-carrying token",
 			role: "subject",
 			err: expect.objectContaining({ name: "ReplyError" }),
 		});
+	});
+});
+
+describe("createTokenExchangeGrant — the session rule through the session lifecycle", () => {
+	const session = (sub: string): UserSession => ({
+		sid: "sid-live",
+		sub,
+		authTime: new Date(),
+		createdAt: new Date(),
+		expiresAt: new Date(Date.now() + 3_600_000),
+		claims: {},
+		...passwordSessionAuthentication(),
+	});
+	/** A lifecycle whose liveness answers `answer` for every sid, and records what it was asked. */
+	const lifecycleAnswering = (answer: () => Promise<SessionLiveness>) => {
+		const asked: string[] = [];
+		const lifecycle = {
+			liveness: async (sid: string) => {
+				asked.push(sid);
+				return answer();
+			},
+		} as unknown as SessionLifecycle;
+		return { lifecycle, asked };
+	};
+	it("refuses a subject token whose session the lifecycle answers not live — a closing one — and reads no session store", async () => {
+		const { lifecycle, asked } = lifecycleAnswering(async () => ({ outcome: "not_live" }));
+		const store = createInMemoryUserSessionStore();
+		const get = vi.spyOn(store, "get");
+		const { result } = await buildGrant({
+			sessionLifecycle: lifecycle,
+			userSessionStore: store,
+		}).handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "session_invalid",
+		});
+		expect(asked).toEqual(["sid-live"]);
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("exchanges a subject token whose session the lifecycle answers live for its subject, and refuses one live for another subject", async () => {
+		const own = lifecycleAnswering(async () => ({ outcome: "live", session: session("user-1") }));
+		const mine = await buildGrant({ sessionLifecycle: own.lifecycle }).handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+			}),
+		);
+		expect(mine.result.status).toBe(200);
+
+		const other = lifecycleAnswering(async () => ({ outcome: "live", session: session("user-2") }));
+		const theirs = await buildGrant({ sessionLifecycle: other.lifecycle }).handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+			}),
+		);
+		expect(theirs.result).toMatchObject({ status: 400, errorDescription: "session_invalid" });
+	});
+
+	it("answers a lifecycle that cannot answer, or throws, with 503, logged at error, and issues nothing", async () => {
+		for (const answer of [
+			async (): Promise<SessionLiveness> => ({ outcome: "unavailable" }),
+			async (): Promise<SessionLiveness> => {
+				throw new Error("lifecycle down");
+			},
+		]) {
+			const { lifecycle } = lifecycleAnswering(answer);
+			const logger = spyLogger();
+			const { result } = await buildGrant({ sessionLifecycle: lifecycle, logger }).handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+				}),
+			);
+			expect(result).toEqual({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "session store unavailable",
+			});
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({ store: "session_lifecycle", step: "liveness", role: "subject" }),
+				"token_exchange_session_store_unavailable",
+			);
+		}
+	});
+
+	it("reads no lifecycle for a subject token without a sid", async () => {
+		const { lifecycle, asked } = lifecycleAnswering(async () => ({ outcome: "not_live" }));
+		const { result } = await buildGrant({ sessionLifecycle: lifecycle }).handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				subject_token: await signSelfIssuedAccessToken({}),
+			}),
+		);
+		expect(result.status).toBe(200);
+		expect(asked).toEqual([]);
 	});
 });
 
