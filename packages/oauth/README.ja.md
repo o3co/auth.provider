@@ -222,7 +222,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant`。ステップアップで満たせるなら `step_up: "<要件>"` を添える;
 - 答えられないストアは `503 temporarily_unavailable`: セッションの読み取りはアドミッションが `session_admission_unavailable` として 1 度だけ、結び付けの書き込みは `authorization_grant_store_unavailable` としてログに出す。
 
-**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、グラントはファミリーとクライアントを上のセッションごとのストアではなく `sessionLifecycle.join` で結び付ける。ライフサイクルは自分のレコードと並べてそれらのストアにも書くので、それらを通したログアウトは今までどおりファミリーを列挙するか追加を拒否する。加えて、終了をコミットしたセッションと、ユーザーセッションが消えたセッションも拒否する。拒否は同じ `400 invalid_grant` / `session_invalidated` と warn の行で、ファミリーはライフサイクルが失効させ済みである。障害は `503 temporarily_unavailable` で、ライフサイクルが `session_lifecycle_unavailable` としてログに出す。
+**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、グラントはファミリーとクライアントを上のセッションごとのストアではなく `sessionLifecycle.join` で結び付ける。ライフサイクルは自分のレコードと並べてそれらのストアにも書くので、それらを通したログアウトは今までどおりファミリーを列挙するか追加を拒否する。加えて、終了をコミットしたセッションと、ユーザーセッションが消えたセッションも拒否する。拒否は同じ `400 invalid_grant` / `session_invalidated` と warn の行で、ファミリーはライフサイクルが失効させ済みか、その失敗が `session_join_withdraw_failed` としてログに出ている。障害は `503 temporarily_unavailable` で、ライフサイクルが `session_lifecycle_unavailable` として、グラントが `authorization_grant_store_unavailable`（`store: "session_lifecycle"`、`step: "join"`）としてログに出し、グラントは自分が登録したファミリーを失効させる。セッションごとのストアの場合も、結び付けの書き込みの障害では `503` の前にそのファミリーを失効させるようになった。
 
 `userSessionStore` が無ければ、サブジェクトはトークンリクエストに伴うブラウザーセッションのユーザーであり、id_token は発行されない。
 

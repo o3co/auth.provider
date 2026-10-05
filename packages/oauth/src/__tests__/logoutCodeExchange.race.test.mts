@@ -613,6 +613,8 @@ describe("the logout route and a code exchange: the relying parties it lists", (
 		expect((await w.grantStores.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual([
 			CLIENT_ID,
 		]);
+		// The family it registered is revoked: none is left live outside the index.
+		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 	});
 
 	it("an exchange that runs while the logout is held after its RP listing is refused as ended", async () => {
@@ -849,10 +851,31 @@ describe("a code exchange that joins through the session lifecycle", () => {
 		);
 		expect((await lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
 		expect(await w.userSessionStore.get(SID)).not.toBeNull();
+		w.answers.length = 0;
 
 		const result = await w.exchange();
 
 		expectSessionInvalidated(result);
+		// Refused by the record before the per-session stores are written.
+		expect(w.answers).toEqual([]);
+		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
+	});
+
+	it("a close through the lifecycle committed first, over an index that keeps no end mark: the record alone refuses the join", async () => {
+		const index = withoutSessionEnd(createInMemorySessionFamilyIndex());
+		const w = await world({ index, lifecycle: true });
+		const lifecycle = w.lifecycle as SessionLifecycle;
+		await lifecycle.join(SID, { familyId: "earlier-family" });
+		vi.mocked(w.logoutStores.federationTokenStore.removeBySid).mockRejectedValueOnce(
+			new Error("federation token store down"),
+		);
+		expect((await lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+		vi.mocked(index.addFamilyId).mockClear();
+
+		const result = await w.exchange();
+
+		expectSessionInvalidated(result);
+		expect(index.addFamilyId).not.toHaveBeenCalled();
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 	});
 
@@ -890,5 +913,42 @@ describe("a code exchange that joins through the session lifecycle", () => {
 			errorDescription: "session linking unavailable",
 		});
 		expect(result).not.toHaveProperty("tokens");
+		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
+	});
+
+	it("a lifecycle that cannot answer: one error line at the grant, beside the lifecycle's own", async () => {
+		const w = await world({ lifecycle: true });
+		const logger = createMockLogger();
+		await w.exchange(
+			{
+				...w.grantStores,
+				sessionLifecycle: {
+					...(w.lifecycle as SessionLifecycle),
+					join: async () => ({ outcome: "unavailable" }),
+				},
+			},
+			logger,
+		);
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ store: "session_lifecycle", step: "join", clientId: CLIENT_ID },
+			"authorization_grant_store_unavailable",
+		);
+	});
+
+	it("a lifecycle join that throws: the family is revoked before the throw leaves", async () => {
+		const w = await world({ lifecycle: true });
+		await expect(
+			w.exchange({
+				...w.grantStores,
+				sessionLifecycle: {
+					...(w.lifecycle as SessionLifecycle),
+					join: async () => {
+						throw new RangeError("session lifecycle: sid must be 1 to 512 characters");
+					},
+				},
+			}),
+		).rejects.toThrow(RangeError);
+		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 	});
 });

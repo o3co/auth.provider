@@ -73,6 +73,8 @@ export type AuthorizationGrantDeps = Pick<
 	| "sessionFamilyIndex"
 	| "sessionRPRegistry"
 > &
+	// `sessionLifecycle`, where core's session lifecycle module is installed, is
+	// what the family and the client join the session through.
 	// `sessionRequirementResolver` (the synthetic key, by its slot's name, so
 	// the module hands its deps over whole) is what the two reads of the
 	// code's session go through (ADR 2026-09-28-session-admission). Required:
@@ -137,13 +139,20 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			| "authorization_code"
 			| "refresh_token_family"
 			| "session_family_index"
-			| "session_rp_registry",
-		step: "consume" | "register" | "add",
+			| "session_rp_registry"
+			| "session_lifecycle",
+		step: "consume" | "register" | "add" | "join",
 		clientId: string,
-		err: unknown,
+		// Absent where the store's own line carries the error (the session lifecycle's).
+		err?: unknown,
 	): void => {
 		logger?.error(
-			{ store, step, clientId: auditErrorText(clientId), err: loggableError(err) },
+			{
+				store,
+				step,
+				clientId: auditErrorText(clientId),
+				...(err === undefined ? {} : { err: loggableError(err) }),
+			},
 			"authorization_grant_store_unavailable",
 		);
 	};
@@ -784,10 +793,13 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					if (deps.sessionLifecycle) {
 						// Core's session lifecycle joins the session: it refuses one
 						// closing, closed or gone, and on a refusal has already revoked
-						// the family it was handed.
+						// the family it was handed, or logged its failure as
+						// `session_join_withdraw_failed`.
 						const joined = await deps.sessionLifecycle.join(sid, { rp, familyId });
 						if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
 						if (joined.outcome === "unavailable") {
+							storeUnavailable("session_lifecycle", "join", authenticatedClientId);
+							await revokeRefusedFamily(familyId, at);
 							return {
 								result: {
 									status: 503,
@@ -816,6 +828,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						}
 						if (joined.outcome === "unavailable") {
 							storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
+							await revokeRefusedFamily(familyId, at);
 							return {
 								result: {
 									status: 503,
