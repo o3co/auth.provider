@@ -180,6 +180,42 @@ describe("createInMemorySessionLifecycleStore", () => {
 			expect(DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS).toBe(1_000);
 		});
 
+		/** `sid` opened, closed and its one work item completed, kept `retainMs` from now. */
+		const closed = async (store: SessionLifecycleStore, sid: string, retainMs: number) => {
+			await store.open(sid, "u", new Date(START + HOUR));
+			const answer = readSessionCloseAnswer(await store.beginClose(sid, { ...CLOSE, retainMs }));
+			if (answer.outcome !== "closing") throw new Error("not closing");
+			const done = readConditionalReplaceAnswer(
+				await store.completeIf(sid, answer.generation, "user_session"),
+			);
+			expect(done.outcome).toBe("updated");
+		};
+
+		it("full, evicts the closed record kept the shortest to open another", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 3 });
+			await closed(store, "closed-long", 10 * HOUR);
+			await closed(store, "closed-short", 5 * HOUR);
+			await store.open("active", "u", new Date(START + HOUR));
+			expect((await store.open("new", "u", new Date(START + HOUR))).outcome).toBe("opened");
+			expect(await read(store, "closed-short")).toBeNull();
+			expect((await read(store, "closed-long"))?.value.state).toBe("closed");
+			expect((await read(store, "active"))?.value.state).toBe("active");
+			expect((await read(store, "new"))?.value.state).toBe("active");
+		});
+
+		it("full of records not closed, rejects and evicts nothing: active and closing records are kept", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });
+			await store.open("active", "u", new Date(START + HOUR));
+			await store.open("closing", "u", new Date(START + HOUR));
+			await store.beginClose("closing", { ...CLOSE, retainMs: HOUR });
+			await expect(store.open("new", "u", new Date(START + HOUR))).rejects.toThrow(/full/);
+			expect(await read(store, "new")).toBeNull();
+			expect((await read(store, "active"))?.value.state).toBe("active");
+			expect((await read(store, "closing"))?.value.state).toBe("closing");
+		});
+
 		it("full, drops lapsed records to open another, and otherwise rejects, evicting nothing", async () => {
 			const time = clock();
 			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });

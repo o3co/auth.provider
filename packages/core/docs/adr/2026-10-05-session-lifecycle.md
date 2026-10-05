@@ -107,8 +107,11 @@ the work, so every work item is safe to run more than once.
 
 - The memory store (`createInMemorySessionLifecycleStore`) runs each member as
   one synchronous step, holds at most `maxEntries` records and
-  `maxParticipants` per record, and when full refuses rather than evicts: an
-  evicted record would let a closed session be joined again.
+  `maxParticipants` per record. Full, it evicts the `closed` record kept the
+  shortest — its work is done and its user session deleted, so the service
+  reads no live session for that sid either way — and refuses rather than
+  evict an active or closing record, which would let a closed session be
+  joined again or leave its work undone.
 - `sessionLifecycleStoreContract` in `@o3co/auth-provider-test-kit` holds a
   store to the rules a suite can observe; a Redis store runs it on two
   connections.

@@ -20,8 +20,12 @@
  * member checks and writes with no `await` between, so each is one step in
  * this process. A record lapses whole at its retention, judged on the
  * store's clock. It holds at most `maxEntries` records and `maxParticipants`
- * per record; full, it drops lapsed records and otherwise rejects, evicting
- * nothing, since an evicted record would let a closed session be joined.
+ * per record. Full, it drops lapsed records, then evicts the `closed` record
+ * kept the shortest, and rejects only when every record is active or
+ * closing. A closed record's work is done, its user session deleted among
+ * it, so the session lifecycle reads no live session for that sid whether
+ * the record is kept or not; an active or closing record is never evicted,
+ * since that would let a closed session be joined or leave its work undone.
  */
 
 import {
@@ -155,9 +159,21 @@ export function createInMemorySessionLifecycleStore(
 			}
 			if (records.size >= maxEntries) {
 				for (const [key, entry] of records) if (entry.retainUntilMs <= at) records.delete(key);
-				if (records.size >= maxEntries) {
-					throw new Error(`${owner}: full at ${maxEntries} records; nothing was written`);
+			}
+			if (records.size >= maxEntries) {
+				let evicted: [string, Stored] | undefined;
+				for (const entry of records) {
+					if (entry[1].state !== "closed") continue;
+					if (evicted === undefined || entry[1].retainUntilMs < evicted[1].retainUntilMs) {
+						evicted = entry;
+					}
 				}
+				if (evicted === undefined) {
+					throw new Error(
+						`${owner}: full at ${maxEntries} records, none of them closed; nothing was written`,
+					);
+				}
+				records.delete(evicted[0]);
 			}
 			records.set(sid, {
 				sub,
