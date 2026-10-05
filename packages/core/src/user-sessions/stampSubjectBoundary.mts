@@ -25,10 +25,13 @@ export type BoundaryWrite = (before: Date, expiresAt: Date) => Promise<void>;
 
 /** What {@link stampSubjectBoundary} did. */
 export interface BoundaryStamp {
-	/** Whether the first write took effect: a boundary is in force. */
+	/** Whether either write took effect: a boundary is in force. */
 	readonly written: boolean;
-	/** The write that threw, if one did; then the boundary may not cover the commit. */
-	readonly failure?: { readonly error: unknown };
+	/**
+	 * The write that threw, if one did, by its order (the second when both
+	 * did); then the boundary may not cover the in-flight issuance.
+	 */
+	readonly failure?: { readonly error: unknown; readonly stamp: 1 | 2 };
 }
 
 /**
@@ -39,8 +42,8 @@ export interface BoundaryStamp {
  * minted between that instant and the commit would postdate it. The second
  * stamp is read after the commit, so it reaches past it. A store keeps the
  * later of two boundaries (the port's rule), so the second never moves the
- * boundary back, even on a clock that stepped back. When the first write
- * throws, the second is not tried.
+ * boundary back, even on a clock that stepped back. The second is tried even
+ * when the first throws: a write can fail after it committed.
  */
 export async function stampSubjectBoundary(
 	write: BoundaryWrite,
@@ -51,15 +54,18 @@ export async function stampSubjectBoundary(
 		const at = now();
 		await write(new Date(at), new Date(at + ttlMs));
 	};
+	let firstError: { readonly error: unknown } | undefined;
 	try {
 		await stamp();
 	} catch (error) {
-		return { written: false, failure: { error } };
+		firstError = { error };
 	}
 	try {
 		await stamp();
 	} catch (error) {
-		return { written: true, failure: { error } };
+		return { written: firstError === undefined, failure: { error, stamp: 2 } };
 	}
-	return { written: true };
+	return firstError === undefined
+		? { written: true }
+		: { written: true, failure: { error: firstError.error, stamp: 1 } };
 }

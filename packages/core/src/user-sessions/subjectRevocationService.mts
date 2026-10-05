@@ -237,13 +237,17 @@ async function keep(
 	);
 	const tokensRevoked = stamped.written;
 	if (stamped.failure !== undefined) {
-		const { error } = stamped.failure;
+		const { error, stamp } = stamped.failure;
 		failures.push({
 			capability: "subjectRevocation",
 			operation: "revokeSessionsBefore",
+			stamp,
 			error,
 		});
-		deps.logger?.error({ err: loggableError(error), subject }, "revoke_all_watermark_failed");
+		deps.logger?.error(
+			{ err: loggableError(error), subject, stamp },
+			"revoke_all_watermark_failed",
+		);
 	}
 
 	let sessions: SubjectSessionCascade = { revoked: [], failed: [], failures: [] };
