@@ -1273,6 +1273,48 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 		},
 	);
 
+	it("answers 503 once, the enrollment unreadable, nothing bound, when a completion's refusal names a reason the contract does not", async () => {
+		const base = createTestMfaFactor({ kind: "strict" });
+		const { logger, factorStore, agent, transaction } = await atFirstBinding({
+			...base,
+			completeEnrollment: async () => ({ ok: false, reason: "locked_out" }) as never,
+		});
+		const begun = await beginEnrollment(agent, transaction, "strict");
+
+		const done = await completeEnrollment(agent, transaction, begun.body.secret);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+		expect((await factorStore.list(ALICE.id)).filter((record) => record.kind === "strict")).toEqual(
+			[],
+		);
+	});
+
+	it("takes amrFor's answer once, as a copy, and binds on that copy: a list that answers otherwise when read again adds nothing it did not declare", async () => {
+		let reads = 0;
+		const shifting = new Proxy(["otp"], {
+			get: (target, key, receiver) => {
+				if (key === "0") return reads++ === 0 ? "otp" : "smuggled";
+				return Reflect.get(target, key, receiver);
+			},
+		});
+		const base = createTestMfaFactor({ kind: "strict" });
+		const { agent, transaction, userSessionStore } = await atFirstBinding({
+			...base,
+			amrFor: () => shifting,
+		});
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const begun = await beginEnrollment(agent, transaction, "strict");
+
+		const done = await completeEnrollment(agent, transaction, begun.body.secret);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(reads).toBe(1);
+		const amr = create.mock.calls[0]?.[0].amr;
+		expect(amr).toContain("otp");
+		expect(amr).not.toContain("smuggled");
+	});
+
 	it("answers 503 once, the enrollment unreadable, when reading a completion's reason or label throws", async () => {
 		for (const throwing of ["reason", "label"] as const) {
 			const base = createTestMfaFactor({ kind: "strict" });

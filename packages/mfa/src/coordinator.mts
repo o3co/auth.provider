@@ -110,8 +110,9 @@
  *   act on; one that is not plain JSON-shaped is the factor's failure
  *   (`503`), the stored data left as it was. A mail it asks for is read there
  *   too (`copyAskedMail`). A verification is a success only when its `ok` is
- *   `true` and a refusal only when it is `false`: anything else is the
- *   factor's failure.
+ *   `true` and a refusal only when it is `false` with a reason its type
+ *   names: anything else is the factor's failure. What `amrFor` answers is
+ *   copied once, and only the copy is checked and used.
  * - A factor's `identity` is read as a non-empty string or none; one that
  *   throws is none — the record a duplicate of none — and is said through
  *   `identityFailed`.
@@ -212,11 +213,30 @@ const isWrittenAt = (written: unknown, tx: MfaTransaction): boolean => {
 	}
 };
 
-/** Whether `amr`, what a factor's `amrFor` answered, names at least one value, and only values the factor declares. */
-const declaresEach = (factor: MfaFactor, amr: unknown): amr is readonly string[] =>
-	Array.isArray(amr) &&
-	amr.length > 0 &&
-	amr.every((value) => typeof value === "string" && factor.amrValues.includes(value));
+/**
+ * What a factor's `amrFor` answered, copied once: the copy when it names at
+ * least one value and only values the factor declares, else `undefined`. Only
+ * the copy is checked and acted on; a read that throws is thrown.
+ */
+const declaredAmrOf = (factor: MfaFactor, amr: unknown): readonly string[] | undefined => {
+	if (!Array.isArray(amr)) return undefined;
+	const copy: unknown[] = [...amr];
+	return copy.length > 0 &&
+		copy.every((value) => typeof value === "string" && factor.amrValues.includes(value))
+		? (copy as string[])
+		: undefined;
+};
+
+/** The reasons a verification may refuse with: any other is the factor's failure. */
+const VERIFICATION_REFUSALS: Readonly<
+	Record<Extract<MfaVerification, { readonly ok: false }>["reason"], true>
+> = {
+	invalid: true,
+	expired: true,
+	replayed: true,
+	malformed: true,
+	sign_count_regression: true,
+};
 
 /** What a refusal says of the factor it concerns, as the `refused` outcome carries it. */
 type RefusalConcerns = Pick<
@@ -779,8 +799,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		},
 		declaredAmr: (factor, data) => {
 			try {
-				const amr: unknown = factor.amrFor(data);
-				return declaresEach(factor, amr) ? amr : undefined;
+				return declaredAmrOf(factor, factor.amrFor(data));
 			} catch {
 				return undefined;
 			}
@@ -1137,8 +1156,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 							proof: call.proof,
 						});
 						// The factor's answer, each field read once, however it holds them: a
-						// read that throws, or an `ok` neither `true` nor `false`, is the
-						// factor's failure, as a throw of its own.
+						// read that throws, an `ok` neither `true` nor `false`, or a refusal's
+						// reason outside the contract's, is the factor's failure, as a throw of
+						// its own.
 						const ok: unknown = answer.ok;
 						if (ok === true) {
 							const { factorId, next } = answer as Extract<MfaVerification, { readonly ok: true }>;
@@ -1148,6 +1168,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 								MfaVerification,
 								{ readonly ok: false }
 							>;
+							if (typeof reason !== "string" || !Object.hasOwn(VERIFICATION_REFUSALS, reason)) {
+								throw new TypeError("the factor's verification refused with a reason it may not");
+							}
 							result = { ok: false, reason, factorId };
 						} else {
 							throw new TypeError("the factor's verification answered an ok that is not a boolean");
@@ -1180,13 +1203,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						dataRefused = true;
 						return unreadable(cause);
 					}
-					let amr: unknown;
+					let amr: readonly string[] | undefined;
 					try {
-						amr = factor.amrFor(next);
+						amr = declaredAmrOf(factor, factor.amrFor(next));
 					} catch (cause) {
 						return unreadable(cause);
 					}
-					if (!declaresEach(factor, amr)) {
+					if (amr === undefined) {
 						return unreadable(
 							new TypeError("the factor's amrFor answered values it does not declare"),
 						);

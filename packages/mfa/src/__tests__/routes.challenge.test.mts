@@ -793,6 +793,46 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 		},
 	);
 
+	it("answers 503 once, the factor unreadable, when a refusal names a reason the contract does not", async () => {
+		const { record, agent, transaction, challenge, logger } = await withVerifier({
+			verify: async () => ({ ok: false, reason: "locked_out" }) as never,
+		});
+		await challenge();
+
+		const res = await verify(agent, transaction, record.id, "wrong:proof");
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+	});
+
+	it("takes amrFor's answer once, as a copy, and acts on that copy: a list that answers otherwise when read again adds nothing it did not declare", async () => {
+		// A list whose first element reads as a declared value once, then as another.
+		let reads = 0;
+		const shifting = new Proxy(["otp"], {
+			get: (target, key, receiver) => {
+				if (key === "0") return reads++ === 0 ? "otp" : "smuggled";
+				return Reflect.get(target, key, receiver);
+			},
+		});
+		const { record, agent, transaction, challenge, userSessionStore } = await withVerifier({
+			amrFor: () => shifting,
+		});
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+
+		const res = await verify(
+			agent,
+			transaction,
+			record.id,
+			`s3cret:${(await challenge()).body.nonce as string}`,
+		);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(reads).toBe(1);
+		const amr = create.mock.calls[0]?.[0].amr;
+		expect(amr).toContain("otp");
+		expect(amr).not.toContain("smuggled");
+	});
+
 	it("answers 503 once, the factor unreadable, when reading its refusal's reason throws", async () => {
 		const { app, logger, record } = await withChallengedFactor(
 			challenged({

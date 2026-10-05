@@ -107,7 +107,8 @@
  *   plain JSON-shaped is the factor's failure (`503`), nothing kept or bound.
  *   A mail the start asks for is read there too (`copyAskedMail`). A
  *   completion is a binding only when its `ok` is `true` and a refusal only
- *   when it is `false`: anything else is the factor's failure.
+ *   when it is `false` with a reason its type names: anything else is the
+ *   factor's failure.
  */
 
 import { randomBytes } from "node:crypto";
@@ -210,6 +211,16 @@ const signedInBy = (tx: MfaTransaction, call: MfaCeremonyCall): "password" | "fe
 /** The authentication a binding on `tx` rests on: the login's primary, or the sign-in of the session `call` was admitted in. */
 const authTimeOf = (tx: MfaTransaction, call: MfaCeremonyCall): number | undefined =>
 	tx.purpose === "login" ? tx.continuation?.primary.authTimeMs : call.session?.authTimeMs;
+
+/** The reasons an enrollment's completion may refuse with: any other is the factor's failure. */
+const ENROLLMENT_REFUSALS: Readonly<
+	Record<Extract<MfaEnrollmentCompletion, { readonly ok: false }>["reason"], true>
+> = {
+	invalid: true,
+	expired: true,
+	malformed: true,
+	duplicate: true,
+};
 
 /** An enrollment over the coordinator's `kit` (see this file's header). */
 export function createMfaEnrollment(kit: MfaCeremonyKit): {
@@ -630,13 +641,17 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				});
 				// The factor's answer, each field read once, however it holds them; its
 				// data as the plain copy that is sealed (`copyFactorValue`) and that
-				// `amrFor` is handed. An `ok` neither `true` nor `false` is the factor's failure.
+				// `amrFor` is handed. An `ok` neither `true` nor `false`, or a refusal's
+				// reason outside the contract's, is the factor's failure.
 				const ok: unknown = answer.ok;
 				if (ok === true) {
 					const { data, label } = answer as Extract<MfaEnrollmentCompletion, { readonly ok: true }>;
 					completion = { ok: true, data: copyFactorValue(data), label };
 				} else if (ok === false) {
 					const { reason } = answer as Extract<MfaEnrollmentCompletion, { readonly ok: false }>;
+					if (typeof reason !== "string" || !Object.hasOwn(ENROLLMENT_REFUSALS, reason)) {
+						throw new TypeError("the factor's enrollment refused with a reason it may not");
+					}
 					completion = { ok: false, reason };
 				} else {
 					throw new TypeError("the factor's enrollment answered an ok that is not a boolean");
