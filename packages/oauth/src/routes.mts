@@ -590,7 +590,8 @@ export const createOAuthRouter = async (
 					login: requireLoginEntry(loginEntry),
 					// The consent page, `oauth.consentPage.url`, read per request. The
 					// default lives in the package's reference.conf; a hand-built section
-					// without the key falls back the same way.
+					// without the key falls back the same way. An empty or blank url is
+					// the section schema's to refuse.
 					consentUrl: () =>
 						(oauth as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
 						"/consent",
