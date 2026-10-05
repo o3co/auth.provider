@@ -409,6 +409,38 @@ describe("verifyJwt — the watermark covers a token's auth_time", () => {
 		}
 	});
 
+	it("reports a watermark that is no date as revocation_unavailable before judging the claims", async () => {
+		const invalid: SubjectRevocation = {
+			kind: "invalid",
+			async revokeBefore() {},
+			async revokedBefore() {
+				return new Date(Number.NaN);
+			},
+		};
+		for (const token of [
+			await mint({ sub: "u1", authTime: "malformed" }),
+			await mint({ sub: "u1", omitIat: true }),
+		]) {
+			await expect(verify(token, invalid)).rejects.toMatchObject({
+				reason: "revocation_unavailable",
+			});
+		}
+	});
+
+	it("truncates a fractional iat to its second before comparing", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = createInMemorySubjectRevocation();
+		await store.revokeBefore(
+			"u1",
+			new Date((nowSec - 10) * 1000 + 900),
+			new Date(Date.now() + 300_000),
+		);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 10 + 0.5 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: 0 })).rejects.toMatchObject({
+			reason: "revoked",
+		});
+	});
+
 	it("reports a watermark that is no date as revocation_unavailable, never accepting", async () => {
 		const token = await mint({ sub: "u1", authTime: Math.floor(Date.now() / 1000) - 60 });
 		const invalid: SubjectRevocation = {
@@ -442,6 +474,11 @@ describe("claimCoveredByRevocationBoundary", () => {
 		expect(claimCoveredByRevocationBoundary(101, at(100), 0)).toBe(false);
 	});
 
+	it("truncates a fractional claim to its second", () => {
+		expect(claimCoveredByRevocationBoundary(100.5, new Date(100_900), 0)).toBe(true);
+		expect(claimCoveredByRevocationBoundary(101.5, new Date(100_900), 0)).toBe(false);
+	});
+
 	it("truncates the boundary to its second", () => {
 		expect(claimCoveredByRevocationBoundary(101, new Date(100_900), 0)).toBe(false);
 		expect(claimCoveredByRevocationBoundary(100, new Date(100_900), 0)).toBe(true);
@@ -461,6 +498,12 @@ describe("claimCoveredByRevocationBoundary", () => {
 			claimCoveredByRevocationBoundary(100, "2026-01-01" as unknown as Date, 1_000),
 		).toThrow(RangeError);
 		expect(() => claimCoveredByRevocationBoundary(Number.NaN, at(100), 1_000)).toThrow(RangeError);
+		expect(() =>
+			claimCoveredByRevocationBoundary(Number.POSITIVE_INFINITY, at(100), 1_000),
+		).toThrow(RangeError);
+		expect(() =>
+			claimCoveredByRevocationBoundary(Number.NEGATIVE_INFINITY, at(100), 1_000),
+		).toThrow(RangeError);
 		expect(() => claimCoveredByRevocationBoundary(100, at(100), Number.NaN)).toThrow(RangeError);
 	});
 });
