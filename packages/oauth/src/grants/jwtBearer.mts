@@ -339,33 +339,35 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			const nowSeconds = Date.now() / 1000;
 			const issuedAt = Math.floor(nowSeconds);
 			const { expiresAt } = verified;
+			// Present means a finite number. The port is typed, not checked:
+			// arithmetic would coerce a custom verifier's numeric string into an
+			// expiry and read Infinity as none, so anything else is NaN here and
+			// refused — a malformed expiry is neither an expiry nor its absence.
+			const remainingAt = (atSeconds: number): number =>
+				typeof expiresAt === "number" && Number.isFinite(expiresAt)
+					? Math.floor(expiresAt - atSeconds)
+					: Number.NaN;
+			// The uniform description, not "has expired": a distinct answer this
+			// far in would reveal that the handle resolves to a real account.
+			const lapsed = (): GrantHandlerResult => {
+				deps.logger?.info(
+					{ kind: assertionVerifier.kind, issuer: verified.issuer },
+					"jwt_bearer_assertion_expired",
+				);
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "assertion did not verify",
+					},
+				};
+			};
 			if (expiresAt !== undefined) {
-				// Present means a finite number. The port is typed, not checked:
-				// arithmetic would coerce a custom verifier's numeric string into
-				// an expiry and read Infinity as none, so anything else is refused
-				// below — a malformed expiry is neither an expiry nor its absence.
-				const remaining =
-					typeof expiresAt === "number" && Number.isFinite(expiresAt)
-						? Math.floor(expiresAt - nowSeconds)
-						: Number.NaN;
+				const remaining = remainingAt(nowSeconds);
 				// `<= 0`: already past `exp` (within a verifier's clock tolerance,
 				// or lapsed while the Store answered) or expiring this second — a
-				// token dead on arrival. `!(> 0)` also catches NaN. The uniform
-				// description, not "has expired": a distinct answer this far in
-				// would reveal that the handle resolves to a real account.
-				if (!(remaining > 0)) {
-					deps.logger?.info(
-						{ kind: assertionVerifier.kind, issuer: verified.issuer },
-						"jwt_bearer_assertion_expired",
-					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "assertion did not verify",
-						},
-					};
-				}
+				// token dead on arrival. `!(> 0)` also catches NaN.
+				if (!(remaining > 0)) return lapsed();
 				expiresIn = Math.min(expiresIn, remaining);
 			}
 			// No `expiresAt` leaves the configured lifetime standing: the
@@ -379,8 +381,11 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				let revoked: boolean;
 				try {
 					const boundary = await revocation.revokedBefore(subject);
-					if (boundary !== null && !(boundary instanceof Date)) {
-						throw new TypeError("the sessions boundary is neither a date nor null");
+					if (
+						boundary !== null &&
+						!(boundary instanceof Date && Number.isFinite(boundary.getTime()))
+					) {
+						throw new TypeError("the sessions boundary is neither a valid date nor null");
 					}
 					const { issuedAt: assertionIssuedAt } = verified;
 					revoked =
@@ -419,6 +424,9 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 						},
 					};
 				}
+				// The read awaited: an assertion that lapsed meanwhile is refused,
+				// as one that had lapsed before it.
+				if (expiresAt !== undefined && !(remainingAt(Date.now() / 1000) > 0)) return lapsed();
 			}
 
 			const accessToken = await generateToken(

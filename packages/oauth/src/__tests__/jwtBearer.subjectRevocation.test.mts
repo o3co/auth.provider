@@ -193,6 +193,39 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 		}
 	});
 
+	it("answers 503 for a boundary that is not a valid date, whether or not the assertion reports an issue time", async () => {
+		const { result } = await build({
+			subjectRevocation: revocationAt(() => new Date(Number.NaN)),
+		}).handle(ctx());
+		expect(result.status).toBe(503);
+	});
+
+	it("refuses an assertion that lapsed while the boundary was read", async () => {
+		const now = Date.now();
+		const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+		try {
+			const grant = createJwtBearerGrant({
+				config,
+				keyStore,
+				assertionVerifier: verifierFor({
+					issuedAt: BOUNDARY_SECOND + 60,
+					expiresAt: Math.floor(now / 1000) + 2,
+				}),
+				userRepository,
+				subjectRevocation: {
+					revokedBefore: async () => {
+						clock.mockReturnValue(now + 3_000);
+						return null;
+					},
+				},
+			} as never);
+			const { result } = await grant.handle(ctx());
+			expect(result).toEqual(refused);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	it("reads the boundary after the grant policy has answered", async () => {
 		// A revocation stamped while the policy is evaluated is seen.
 		let boundary: Date | null = null;
