@@ -1264,6 +1264,30 @@ describe("step 5 — the requirements", () => {
 		expect(lines).toEqual([]);
 	});
 
+	it("issues a requirement object registered again new actions, which the earlier boot's resolver refuses: the last registration wins", async () => {
+		const requirement = met("again", { remediations: ["again.step_up"] });
+		const firstBoot = resolverForTests([requirement], { actions: TEST_ACTIONS });
+		const first = issuedRemediationActions(requirement)?.step_up as IssuedRemediationAction;
+		const secondBoot = resolverForTests([requirement], { actions: TEST_ACTIONS });
+		const second = issuedRemediationActions(requirement)?.step_up as IssuedRemediationAction;
+		expect(second).not.toBe(first);
+
+		// Each boot admits the action it issued.
+		expect(
+			await admitSession(deps({ requirements: firstBoot }), request({ action: first })),
+		).toMatchObject({ outcome: "admitted" });
+		expect(
+			await admitSession(deps({ requirements: secondBoot }), request({ action: second })),
+		).toMatchObject({ outcome: "admitted" });
+		// And refuses the other's.
+		await expect(
+			admitSession(deps({ requirements: firstBoot }), request({ action: second })),
+		).rejects.toThrow(RangeError);
+		await expect(
+			admitSession(deps({ requirements: secondBoot }), request({ action: first })),
+		).rejects.toThrow(RangeError);
+	});
+
 	it("hands each requirement its own clock, so one that moves it moves no other's", async () => {
 		const seen: number[] = [];
 		const moving = met("first", {
