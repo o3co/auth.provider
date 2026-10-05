@@ -192,7 +192,11 @@ the store allows while the user session is still read — has no record to
 save the work in. The close runs that work at once, in its phases, over the
 record the commit would have saved (the read record's participants, or
 none), without `completeIf`, and answers `done`; an item that fails makes it
-answer `unavailable`, so a later close runs it all again. How a route
+answer `unavailable`, so a later close runs it all again — except once the
+user session is deleted: a close then finds neither a record nor a user
+session and answers `done`, and an entry the last phase left in the
+subject's index lapses at its retention or goes with a subject-wide
+revocation. How a route
 answers `pending` (the logout's 200 and a `logout.close_pending` audit
 event) is decided when that route switches.
 

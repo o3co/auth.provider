@@ -738,6 +738,37 @@ describe("close", () => {
 		expect(await h.read()).toBeNull();
 	});
 
+	it("answers done to two closes at once of a session that ended on the store's clock with no record", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
+		now = expiresAt.getTime() + 1;
+		const answers = await Promise.all([
+			h.lifecycle.close(SID, "rp_logout"),
+			h.lifecycle.close(SID, "session_logout"),
+		]);
+		expect(answers.map((a) => a.outcome)).toEqual(["done", "done"]);
+		expect(h.revoked.has("f-old")).toBe(true);
+		expect(await h.sessions.get(SID)).toBeNull();
+		expect(await h.read()).toBeNull();
+	});
+
+	it("refuses a join racing the close of a session that ended on the store's clock with no record, and withdraws its family", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		now = expiresAt.getTime() + 1;
+		const [closed, joined] = await Promise.all([
+			h.lifecycle.close(SID, "rp_logout"),
+			h.lifecycle.join(SID, { familyId: "f-late" }),
+		]);
+		expect(closed.outcome).toBe("done");
+		expect(joined).toEqual({ outcome: "refused" });
+		expect(h.revoked.has("f-late")).toBe(true);
+		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+	});
+
 	it("runs the close work of a record that lapses between its read and the closing commit", async () => {
 		let now = Date.now();
 		let expiresAtMs = 0;

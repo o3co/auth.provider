@@ -264,6 +264,19 @@ const phaseOf = (item: string): number => {
 	return 1;
 };
 
+/**
+ * The work items a close of `participants` saves for `request`: its steps,
+ * then one per participant of the kinds it names. What the store's closing
+ * commit saves, and what a close with no record to save it in runs.
+ */
+const closeItemsOf = (
+	request: SessionCloseRequest,
+	participants: readonly SessionParticipant[],
+): string[] => [
+	...request.steps,
+	...participants.filter((p) => request.perParticipant.includes(p.kind)).map(sessionCloseItemOf),
+];
+
 /** The items to run next: those of the earliest phase still pending, not given up on in this run. */
 const nextItems = (pending: readonly string[], skipped: ReadonlySet<string>): string[] => {
 	const earliest = Math.min(...pending.map(phaseOf));
@@ -542,7 +555,11 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	 * read — has no record to save the work in, so the work runs here, in its
 	 * phases, over the record the commit would have saved: the read record's
 	 * participants, or none. Any item that fails throws, and the close
-	 * answers `unavailable`; a later close runs it all again.
+	 * answers `unavailable`; a later close runs it all again, except once the
+	 * user session is deleted: a close then finds neither a record nor a user
+	 * session and answers `done`, and an entry the last phase left in the
+	 * subject's index lapses at its retention or goes with a subject-wide
+	 * revocation.
 	 */
 	const begin = async (
 		sid: string,
@@ -575,13 +592,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			participants,
 			close: {
 				cause,
+				// Read by nothing: no store holds this record, and the work reads
+				// only its cause.
 				closingAt: new Date(),
-				pending: [
-					...request.steps,
-					...participants
-						.filter((p) => request.perParticipant.includes(p.kind))
-						.map(sessionCloseItemOf),
-				],
+				pending: closeItemsOf(request, participants),
 			},
 		};
 		await runUnsaved(sid, unsaved);
@@ -591,7 +605,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	/**
 	 * Runs the work of `record`, which no store holds, in its phases: each
 	 * phase only once every item of the earlier ones has run. Throws when an
-	 * item fails, leaving the later phases unrun.
+	 * item fails, leaving the later phases unrun. Nothing records what ran, so
+	 * a retry runs it all again only while the user session, deleted in the
+	 * phase before the last, is still there.
 	 */
 	const runUnsaved = async (sid: string, record: SessionLifecycleRecord): Promise<void> => {
 		const limit = callLimit(CLOSE_CONCURRENCY);
