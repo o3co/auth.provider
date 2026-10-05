@@ -102,7 +102,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 			createOAuthRouter(express, {
 				loginEntry: createTestLoginEntry(),
 				registry: new GrantRegistry(),
-				config,
+				...routerInputsOf(config),
 				clientRepository,
 				codeRepository,
 				keyStore,
