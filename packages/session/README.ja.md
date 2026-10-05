@@ -186,7 +186,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 
 このプロバイダーにはログアウトのエンドポイントが **二つ** あり、無効化するものが同じではない。セッションが何を持っているかで選ぶ。
 
-`POST /session/logout` — ブラウザ自身のログアウトであり、BFF / `auth.proxy` の injection トポロジーが呼ぶもの。`200 {"message": "Logged out successfully"}` を返し、次を無効化する:
+`POST /session/logout` — ブラウザ自身のログアウトであり、BFF / `auth.proxy` の injection トポロジーが呼ぶもの。core のセッションライフサイクルがないとき、`200 {"message": "Logged out successfully"}` を返し、次を無効化する（ライフサイクルがあるときは下記）:
 
 | 対象 | 結果 |
 |------|--------|
@@ -196,18 +196,20 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | その `sid` の `federationTokenStore` と `sessionFederationIndex` のエントリー | 削除。上流 IdP のトークンが保存されたまま残らない |
 | **その `sid` に紐づくリフレッシュトークンファミリー** | **失効しない** |
 
-最後の行は二度読むこと。ここでログインしたあと `/authorize` → `authorization_code` フローを完了したブラウザはリフレッシュトークンを持っており、このエンドポイントはそのファミリーを **失効させない**。リフレッシュトークンは期限切れまで使える。そのセッションには `id_token_hint` 付きの `POST /oauth/logout` を使う — 完全なカスケード（リフレッシュファミリーの失効、RP レジストリ、フェデレーション、セッション削除）を実行し、ブラウザセッションも終わらせる。
+最後の行は二度読むこと — ライフサイクルがないときの話である。ここでログインしたあと `/authorize` → `authorization_code` フローを完了したブラウザはリフレッシュトークンを持っており、このエンドポイントはそのファミリーを **失効させない**。リフレッシュトークンは期限切れまで使える。そのセッションには `id_token_hint` 付きの `POST /oauth/logout` を使う — 完全なカスケード（リフレッシュファミリーの失効、RP レジストリ、フェデレーション、セッション削除）を実行し、ブラウザセッションも終わらせる。
 
 この境界は構造的なもの: カスケード（`packages/oauth/src/logout/cascadeLogout.mts`）は `refreshTokenFamilyRevocation`、`sessionFamilyIndex`、`sessionRPRegistry` を必要とし、このモジュールはそのどれも宣言しない。そして `@o3co/auth-provider-session` は `@o3co/auth-provider-oauth` を import しない — 両者は core の上の兄弟である。
 
 `session` グラントはリフレッシュトークンを発行しないので、トークンがすべてそのグラント由来のデプロイには失効させるファミリーが無く、`/session/logout` だけで足りる。
 
 **core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、ログアウトは上の表の代わりに `sessionLifecycle.close(sid, "session_logout")` でセッションを終了する。終了は `/oauth/logout` と同じ順で進む: セッションのリフレッシュトークンファミリーを失効させてフェデレーショントークンを削除し、次に relying party にバックチャネルで知らせ（`oauthModule` が寄与する通知器を通して）、次にセッションごとのインデックスを削除し、次に `UserSession` を削除し、最後に subject インデックスのエントリーを削除する。終了が保留のあいだ、sid は subject 単位の失効が見つける場所に残る。
-- コミットされた終了は、作業が `done` でも `pending` でも同じ `200` を返し、express session を破棄する。コミットの時点から、どの liveness の読み取りもそのセッションを live と答えず、残りは後の終了かライフサイクルの巡回が再開する。
-- コミットされなかった終了、または例外を投げたライフサイクルは `503 temporarily_unavailable` を返し、再試行のために express session を残す。`session_logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`、`sid`）として 1 回ログに出し、エラーの射影はライフサイクルが例外を投げたときだけ持つ。ライフサイクル自身はその障害を `session_lifecycle_unavailable` としてログに出す。
-- ライフサイクルが保持できない `sid` は、そのどのセッションも指さない: ログアウトは express session を破棄して `200` を返す。
+- コミットされた終了は、作業が `done` でも `pending` でも同じ `200` を返し、express session を破棄する。コミットの時点から、どの liveness の読み取りもそのセッションを live と答えず、残りは後の終了かライフサイクルの巡回が再開する。`pending` の終了は `/oauth/logout` と同じく `logout.close_pending`（`subject`、`sid`）として監査する。
+- `UserSession` が既に失効したログアウトには終了するものが無い: `done` を返して express session を破棄し、セッションの残りは `/oauth/logout` と同じく TTL で失効する。
+- コミットされなかった終了、または例外を投げたライフサイクルは `503 temporarily_unavailable` を返し、再試行のために express session を残す。コミットが live なレコードを見つけず（ストアの時計でセッションの終わりが過ぎていた）、保存するレコードなしにその場で走らせた作業が失敗した終了もこれに含まれ、再試行がそれを再び走らせる。`session_logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`、`sid`）として 1 回ログに出し、エラーの射影はライフサイクルが例外を投げたときだけ持つ。ライフサイクル自身はその障害を `session_lifecycle_unavailable` としてログに出す。
+- ライフサイクルが保持できない `sid` は、それ自身のどのセッションも指さない: ログアウトは express session を破棄して `200` を返し、warn で 1 回 `session_logout_sid_not_closable` と記録する。
+- 終了の作業の一つが失敗すると core の `session_close_item_failed`（warn、`item` 付き）となり、終了は保留のまま残る。下の `logout_user_session_delete_failed` に当たるものとして、`item: "delete_user_session"` にアラートを掛ける。
 
-**失敗時の振る舞い。** 上の表のレコードに対する各ステップはベストエフォートでログに出し、呼び出し側には伝えない: それらのストアの障害でログアウトが `5xx` になり、ユーザーが生きた cookie を持ったままになってはならない。`UserSession` の削除が **最初に**、express session の破棄とベストエフォートの後片付けより前に実行されるので、フェデレーション系ストアの障害が肝心の無効化を妨げることはない。失敗は `logout_user_session_delete_failed`、`logout_subject_session_index_remove_failed`、`logout_federation_token_remove_failed`、`logout_session_federation_index_remove_failed` としてログに出る — アラートは最初のものに掛ける。唯一の例外は express session そのものである: その破棄が失敗する — cookie ストアの障害 — とユーザーはログアウトできていないので、応答は `503 temporarily_unavailable` で、error レベルで 1 行、`session_logout_store_unavailable`（`store: "cookie_session"`、`step: "destroy"`、`sid`）としてログに出て、クライアントは再試行する。その時点でレコードは既に消えているので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには無効化するレコードが無く、express session だけが破棄される。
+**失敗時の振る舞い（core のセッションライフサイクルがないとき）。** 上の表のレコードに対する各ステップはベストエフォートでログに出し、呼び出し側には伝えない: それらのストアの障害でログアウトが `5xx` になり、ユーザーが生きた cookie を持ったままになってはならない。`UserSession` の削除が **最初に**、express session の破棄とベストエフォートの後片付けより前に実行されるので、フェデレーション系ストアの障害が肝心の無効化を妨げることはない。失敗は `logout_user_session_delete_failed`、`logout_subject_session_index_remove_failed`、`logout_federation_token_remove_failed`、`logout_session_federation_index_remove_failed` としてログに出る — アラートは最初のものに掛ける。唯一の例外は express session そのものである: その破棄が失敗する — cookie ストアの障害 — とユーザーはログアウトできていないので、応答は `503 temporarily_unavailable` で、error レベルで 1 行、`session_logout_store_unavailable`（`store: "cookie_session"`、`step: "destroy"`、`sid`）としてログに出て、クライアントは再試行する。その時点でレコードは既に消えているので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには無効化するレコードが無く、express session だけが破棄される。
 
 ### 状態変更ルートの CSRF 対策
 

@@ -22,6 +22,8 @@
  */
 
 import {
+	type AuditEvent,
+	type AuditSink,
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
@@ -36,6 +38,7 @@ import {
 	readVersionedSessionLifecycle,
 	type SessionCloseNotice,
 	type SessionLifecycle,
+	type SubjectSessionIndex,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -85,6 +88,43 @@ function mockLogger() {
 	} as unknown as Logger & { error: ReturnType<typeof vi.fn> };
 }
 
+function recordingSink() {
+	const events: AuditEvent[] = [];
+	const sink: AuditSink = {
+		kind: "memory",
+		record: async (event) => {
+			events.push(event);
+		},
+	};
+	return { sink, events };
+}
+
+/** A user session store holding the live session, its writes spied. */
+async function liveSessionStore(): Promise<UserSessionStore> {
+	const store = createInMemoryUserSessionStore();
+	await store.create({
+		sid: SID,
+		sub: "u-1",
+		authTime: new Date(),
+		expiresAt: new Date(Date.now() + HOUR),
+		claims: {},
+		amr: ["pwd"],
+		authentication: undefined,
+	});
+	vi.spyOn(store, "delete");
+	return store;
+}
+
+function spiedSubjectIndex(): SubjectSessionIndex {
+	return {
+		kind: "memory",
+		addSid: vi.fn(),
+		listSids: vi.fn(),
+		removeSid: vi.fn(async () => undefined),
+		removeBySubject: vi.fn(),
+	} as unknown as SubjectSessionIndex;
+}
+
 interface Bag extends Record<string, unknown> {
 	destroyed: boolean;
 }
@@ -92,9 +132,13 @@ interface Bag extends Record<string, unknown> {
 function buildApp(opts: {
 	readonly sessionLifecycle: SessionLifecycle;
 	readonly userSessionStore?: UserSessionStore;
+	readonly subjectSessionIndex?: SubjectSessionIndex;
 	readonly federationTokenStore?: FederationTokenStore;
+	readonly auditSink?: AuditSink;
 	readonly logger?: Logger;
 	readonly bag?: Record<string, unknown>;
+	/** The cookie store's destroy fails with it. */
+	readonly destroyError?: Error;
 }) {
 	const bag: Bag = {
 		isAuthenticated: true,
@@ -108,6 +152,10 @@ function buildApp(opts: {
 		(req as unknown as { session: Record<string, unknown> }).session = {
 			...bag,
 			destroy(cb: (err: Error | null) => void) {
+				if (opts.destroyError) {
+					cb(opts.destroyError);
+					return;
+				}
 				bag.destroyed = true;
 				cb(null);
 			},
@@ -126,6 +174,8 @@ function buildApp(opts: {
 			deploymentMode: "single",
 			...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 			...(opts.federationTokenStore ? { federationTokenStore: opts.federationTokenStore } : {}),
+			...(opts.subjectSessionIndex ? { subjectSessionIndex: opts.subjectSessionIndex } : {}),
+			...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 			sessionLifecycle: opts.sessionLifecycle,
 			logger: opts.logger ?? mockLogger(),
 			csrfTokenSigner: SIGNER,
@@ -148,14 +198,27 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 			kind: "memory",
 			removeBySid: vi.fn(async () => undefined),
 		} as unknown as FederationTokenStore;
-		const { app, bag } = buildApp({ sessionLifecycle, federationTokenStore });
+		const userSessionStore = await liveSessionStore();
+		const subjectSessionIndex = spiedSubjectIndex();
+		const { sink, events } = recordingSink();
+		const { app, bag } = buildApp({
+			sessionLifecycle,
+			federationTokenStore,
+			userSessionStore,
+			subjectSessionIndex,
+			auditSink: sink,
+		});
 
 		const res = await logout(app);
 
 		expect(res.status).toBe(200);
 		expect(res.body).toEqual({ message: "Logged out successfully" });
 		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith(SID, "session_logout");
+		// The close runs the work; the route's own deletes do not run.
 		expect(federationTokenStore.removeBySid).not.toHaveBeenCalled();
+		expect(userSessionStore.delete).not.toHaveBeenCalled();
+		expect(subjectSessionIndex.removeSid).not.toHaveBeenCalled();
+		expect(events).toEqual([]);
 		expect(bag.destroyed).toBe(true);
 	});
 
@@ -163,12 +226,19 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		const sessionLifecycle = fakeLifecycle({
 			close: async () => ({ outcome: "pending", rps: [], federations: [] }),
 		});
-		const { app, bag } = buildApp({ sessionLifecycle });
+		const { sink, events } = recordingSink();
+		const { app, bag } = buildApp({ sessionLifecycle, auditSink: sink });
 
 		const res = await logout(app);
 
 		expect(res.status).toBe(200);
 		expect(bag.destroyed).toBe(true);
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			type: "logout.close_pending",
+			subject: "u-1",
+			details: { sid: SID },
+		});
 	});
 
 	it("unavailable: 503, one error line, and the cookie kept for a retry", async () => {
@@ -215,19 +285,44 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		expect(bag.destroyed).toBe(false);
 	});
 
-	it("a sid the lifecycle cannot hold: nothing to close; the logout ends the cookie", async () => {
+	it("a sid the lifecycle cannot hold: nothing to close, said once at warn; the logout ends the cookie", async () => {
+		const logger = mockLogger();
 		const { app, bag } = buildApp({
 			sessionLifecycle: fakeLifecycle({
 				close: async () => {
 					throw new RangeError("session lifecycle: sid must be 1 to 512 characters");
 				},
 			}),
+			logger,
 		});
 
 		const res = await logout(app);
 
 		expect(res.status).toBe(200);
 		expect(bag.destroyed).toBe(true);
+		expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+			{ sid: SID, store: "session_lifecycle" },
+			"session_logout_sid_not_closable",
+		);
+	});
+
+	it("a cookie store that cannot destroy after a committed close: 503, the close not run again", async () => {
+		const sessionLifecycle = fakeLifecycle();
+		const logger = mockLogger();
+		const { app } = buildApp({
+			sessionLifecycle,
+			logger,
+			destroyError: new Error("cookie store down"),
+		});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(503);
+		expect(sessionLifecycle.close).toHaveBeenCalledOnce();
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ sid: SID, store: "cookie_session", step: "destroy" }),
+			"session_logout_store_unavailable",
+		);
 	});
 
 	it("a cookie with no sid closes nothing", async () => {

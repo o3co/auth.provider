@@ -41,6 +41,7 @@ import {
 	cookieRenewedAway,
 	createAttemptGuard,
 	type DeploymentMode,
+	emitAuditEvent,
 	type FederationTokenStore,
 	type Logger,
 	loggableError,
@@ -246,6 +247,9 @@ export const createRouter = (
 	 * bound to its `sid` stop introspecting `active` and answering at
 	 * `/userinfo`.
 	 *
+	 * Without core's session lifecycle only; with it, the logout closes the
+	 * session through `closeSession` instead.
+	 *
 	 * Narrower than `/oauth/logout`'s cascade by layering: `cascadeLogout`
 	 * lives in the oauth package, which this package must not depend on. This
 	 * deletes what the session module owns: the `UserSession` record (primary:
@@ -302,17 +306,30 @@ export const createRouter = (
 
 	/**
 	 * Closes `sid` through core's session lifecycle for a session logout:
-	 * `closed` once the closing commit has landed, or when the lifecycle
-	 * refuses the sid as one it cannot hold (no session of its carries it);
-	 * `unavailable` when the commit did not land, or the lifecycle threw,
-	 * logged once as `session_logout_store_unavailable`.
+	 * `closed` once the closing commit has landed — a commit with work still
+	 * pending audited as `logout.close_pending` — or when the lifecycle refuses
+	 * the sid as one it cannot hold (no session of its own carries it);
+	 * `unavailable` when the close did not complete its commit, or the
+	 * lifecycle threw, logged once as `session_logout_store_unavailable`.
 	 */
 	const closeSession = async (
 		lifecycle: SessionLifecycle,
 		sid: string,
+		sub: string | undefined,
+		req: Request,
 	): Promise<"closed" | "unavailable"> => {
 		try {
 			const answer = await lifecycle.close(sid, "session_logout");
+			if (answer.outcome === "pending") {
+				emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "logout.close_pending",
+					subject: sub,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { sid },
+				});
+			}
 			if (answer.outcome !== "unavailable") return "closed";
 			// The lifecycle logs its own error; this line carries none.
 			logger.error(
@@ -320,7 +337,12 @@ export const createRouter = (
 				"session_logout_store_unavailable",
 			);
 		} catch (err) {
-			if (err instanceof RangeError) return "closed";
+			// The lifecycle refuses a sid it cannot hold as a key with a
+			// RangeError, before it writes; nothing else it throws is one.
+			if (err instanceof RangeError) {
+				logger.warn({ sid, store: "session_lifecycle" }, "session_logout_sid_not_closable");
+				return "closed";
+			}
 			logger.error(
 				{ sid, store: "session_lifecycle", step: "close", err: loggableError(err) },
 				"session_logout_store_unavailable",
@@ -524,7 +546,7 @@ export const createRouter = (
 					// families, tells its relying parties and deletes its records.
 					// A close that committed is the logout's success, its work left
 					// pending or not; one that did not keeps the cookie for a retry.
-					const closed = await closeSession(sessionLifecycle, sid);
+					const closed = await closeSession(sessionLifecycle, sid, sub, req);
 					if (closed === "unavailable") return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				} else {
 					await invalidateSessionRecords(sid, sub);
