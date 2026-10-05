@@ -91,19 +91,30 @@ export interface FirstBindingMark {
 	retryAfterMs(markAtMs: number, nowMs: number): number;
 }
 
+/** The latest authentication a mark at `markAtMs` distrusts: the mark, the skew and the lease. */
+const distrustedUntil = (markAtMs: number, leaseMs: number): number =>
+	markAtMs + DEFAULT_CLOCK_SKEW_MS + leaseMs;
+
+/** Whether a mark at `markAtMs` distrusts an authentication at `authTimeMs` (`FirstBindingMark.distrusts`). */
+function distrustedByFirstBinding(
+	authTimeMs: number | undefined,
+	markAtMs: number | null,
+	leaseMs: number,
+): boolean {
+	if (markAtMs === null) return false;
+	return !(typeof authTimeMs === "number" && authTimeMs > distrustedUntil(markAtMs, leaseMs));
+}
+
 /** The mark over `settings` (see this file's header). */
 export function createFirstBindingMark(settings: FirstBindingMarkSettings): FirstBindingMark {
 	const lifetimeMs = firstBindingMarkLifetimeMs(settings);
 	const { leaseMs } = settings;
-	/** The latest authentication a mark at `markAtMs` distrusts. */
-	const distrustedUntil = (markAtMs: number): number => markAtMs + DEFAULT_CLOCK_SKEW_MS + leaseMs;
 	return Object.freeze({
 		lifetimeMs,
 		readCoversMs: lifetimeMs - DEFAULT_CLOCK_SKEW_MS - leaseMs,
 		distrusts: (authTimeMs: number | undefined, markAtMs: number | null): boolean =>
-			markAtMs !== null &&
-			!(typeof authTimeMs === "number" && authTimeMs > distrustedUntil(markAtMs)),
+			distrustedByFirstBinding(authTimeMs, markAtMs, leaseMs),
 		retryAfterMs: (markAtMs: number, nowMs: number): number =>
-			Math.max(0, distrustedUntil(markAtMs) + 1 - nowMs),
+			Math.max(0, distrustedUntil(markAtMs, leaseMs) + 1 - nowMs),
 	});
 }
