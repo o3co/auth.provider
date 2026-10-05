@@ -301,9 +301,10 @@ describe("replicaUnsafeReason — reads the manifest", () => {
 	it("returns the bundled module's own declaration", () => {
 		// The bundled modules carry their reason on themselves, so a
 		// composition root reusing the wording gets it from the manifest.
-		expect(replicaUnsafeReason(memorySessionStoresModule)).toBe(
-			memorySessionStoresModule.replicaSafety?.reason,
-		);
+		expect(memorySessionStoresModule.replicaSafety).toMatchObject({
+			unsafe: true,
+			reason: replicaUnsafeReason(memorySessionStoresModule),
+		});
 		expect(replicaUnsafeReason(memorySessionStoresModule)).toMatch(/back-channel logout/);
 		// The reason states what forks, with no issue number.
 		expect(replicaUnsafeReason(memorySessionStoresModule)).not.toMatch(/#\d/);
@@ -584,19 +585,18 @@ describe("replicaSafety declared from the module's own section", () => {
 		});
 	});
 
-	it("types the function's section as the schema's output", () => {
-		defineModule({
-			name: "section-store-typed",
-			section: { schema: StoreSection },
-			replicaSafety: (section) =>
-				section.store === "memory" ? { unsafe: true, reason: MEMORY_REASON } : undefined,
+	it("hands a module without a section undefined", async () => {
+		const declare = vi.fn(() => ({ unsafe: true as const, reason: MEMORY_REASON }));
+		await expect(
+			createApp({
+				modules: [defineModule({ name: "sectionless-store", replicaSafety: declare })],
+				bootstrapComponents: bootWith({ store: "shared" }, "multi"),
+			}),
+		).rejects.toMatchObject({
+			reason: "replica-unsafe-adapter",
+			details: { modules: ["sectionless-store"] },
 		});
-		defineModule({
-			name: "section-store-mistyped",
-			section: { schema: StoreSection },
-			// @ts-expect-error -- the section has no `storage` key
-			replicaSafety: (section) => (section.storage === "memory" ? undefined : undefined),
-		});
+		expect(declare).toHaveBeenCalledExactlyOnceWith(undefined);
 	});
 
 	it("replicaUnsafeReason answers for the section it is handed", () => {

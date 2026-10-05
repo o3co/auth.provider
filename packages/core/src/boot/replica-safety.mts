@@ -32,6 +32,7 @@ import { memoryRefreshTokenFamilyStoreModule } from "../refresh-token-family/mod
 import { memoryReplaySeenSetModule } from "../replay-seen-set/module.mjs";
 import { memorySessionStoresModule } from "../user-sessions/modules/memory.mjs";
 import { memoryWebAuthnCredentialStoreModule } from "../webauthn-credentials/module.mjs";
+import { failureSummary } from "./failure-summary.mjs";
 import { BootError } from "./types.mjs";
 
 /**
@@ -47,16 +48,22 @@ import { BootError } from "./types.mjs";
  * manifest, and the guard reads that off every installed module, not off the
  * config: a composition root can wire modules directly, or with a config that
  * names none of the adapter keys, and its own modules must be covered too.
+ * A module whose section decides what it holds declares a function of that
+ * section instead; stage 1 reads it once ({@link readReplicaSafety}) and
+ * hands the guard the declaration it answered.
  */
 
 /**
  * The module manifest fields the guard reads. A full `Module` satisfies it;
  * so does a name-only reference, which is answered from core's bundled
- * declarations (see {@link replicaUnsafeReason}).
+ * declarations (see {@link replicaUnsafeReason}). A declaration made from the
+ * section is answered for the section {@link replicaUnsafeReason} is handed,
+ * and for none in {@link checkReplicaSafety}: boot hands the guard each
+ * declaration as stage 1 read it.
  */
 export interface ReplicaSafetyModuleRef {
 	readonly name: string;
-	readonly replicaSafety?: ReplicaSafetyDeclaration;
+	readonly replicaSafety?: Module["replicaSafety"];
 }
 
 /**
@@ -82,11 +89,18 @@ export const REPLICA_UNSAFE_BUNDLED_MODULES: readonly Module[] = [
 	memoryMfaTransactionStoreModule,
 ];
 
-/** A `Map`, so a module named "toString" or "constructor" cannot match a prototype key. */
+/**
+ * A `Map`, so a module named "toString" or "constructor" cannot match a
+ * prototype key. Core's bundled modules declare statically: their state does
+ * not depend on their section.
+ */
 const BUNDLED_REASONS_BY_NAME: ReadonlyMap<string, string> = new Map(
-	REPLICA_UNSAFE_BUNDLED_MODULES.flatMap((m) =>
-		m.replicaSafety?.unsafe === true ? [[m.name, m.replicaSafety.reason] as const] : [],
-	),
+	REPLICA_UNSAFE_BUNDLED_MODULES.flatMap((m) => {
+		const declared = m.replicaSafety;
+		return typeof declared === "object" && declared.unsafe === true
+			? [[m.name, declared.reason] as const]
+			: [];
+	}),
 );
 
 /**
@@ -97,13 +111,56 @@ const BUNDLED_REASONS_BY_NAME: ReadonlyMap<string, string> = new Map(
 export const REPLICA_UNSAFE_MODULES: readonly string[] = [...BUNDLED_REASONS_BY_NAME.keys()];
 
 /**
- * What diverges per replica for `module`, or `undefined` when the guard does
- * not refuse it. The manifest's declaration answers first; a name-only
- * reference is answered from core's bundled declarations.
+ * A declaration made from the section, callable with the section as boot
+ * holds it: the erased `Module` types its parameter `never`.
  */
-export function replicaUnsafeReason(module: ReplicaSafetyModuleRef): string | undefined {
-	if (module.replicaSafety?.unsafe === true) return module.replicaSafety.reason;
+const fromSection = (declared: (section: never) => unknown) =>
+	declared as (section: unknown) => Partial<ReplicaSafetyDeclaration> | undefined;
+
+/**
+ * What diverges per replica for `module`, or `undefined` when the guard does
+ * not refuse it. The manifest's declaration answers first — one made from the
+ * section answers for `section`, the module's parsed section, and throws what
+ * it throws; a name-only reference is answered from core's bundled
+ * declarations.
+ */
+export function replicaUnsafeReason(
+	module: ReplicaSafetyModuleRef,
+	section?: unknown,
+): string | undefined {
+	const declared = module.replicaSafety;
+	const declaration: Partial<ReplicaSafetyDeclaration> | undefined =
+		typeof declared === "function" ? fromSection(declared).call(module, section) : declared;
+	if (declaration?.unsafe === true) return declaration.reason;
 	return BUNDLED_REASONS_BY_NAME.get(module.name);
+}
+
+/**
+ * Stage 1's one reading of `module`'s declaration for its parsed `section`: a
+ * static declaration as written; a function's answer, called once and copied
+ * into a frozen declaration. A throw, or an answer that is neither `undefined`
+ * nor `{ unsafe: true, reason }` with a non-empty string `reason`, is a
+ * `problem` for boot to refuse.
+ */
+export function readReplicaSafety(
+	module: ReplicaSafetyModuleRef,
+	section: unknown,
+): { readonly declaration: ReplicaSafetyDeclaration | undefined } | { readonly problem: string } {
+	const declared = module.replicaSafety;
+	if (typeof declared !== "function") return { declaration: declared };
+	try {
+		const answer: unknown = fromSection(declared).call(module, section);
+		if (answer === undefined) return { declaration: undefined };
+		if (typeof answer === "object" && answer !== null) {
+			const { unsafe, reason } = answer as Record<string, unknown>;
+			if (unsafe === true && typeof reason === "string" && reason !== "") {
+				return { declaration: Object.freeze({ unsafe, reason }) };
+			}
+		}
+		return { problem: "it answered neither undefined nor { unsafe: true, reason } with a reason" };
+	} catch (thrown) {
+		return { problem: `it threw: ${failureSummary(thrown)}` };
+	}
 }
 
 export interface CheckReplicaSafetyInput {

@@ -79,7 +79,11 @@ import {
 	parseFederationEntries,
 } from "./federation-entries.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
-import { checkReplicaSafety } from "./replica-safety.mjs";
+import {
+	checkReplicaSafety,
+	type ReplicaSafetyModuleRef,
+	readReplicaSafety,
+} from "./replica-safety.mjs";
 import type {
 	BootStage,
 	BootstrapMap,
@@ -2364,6 +2368,48 @@ function switchedOffModules(
 }
 
 /**
+ * Each module's replica-safety declaration as the guard reads it: a static
+ * one as written, one made from the section answered once for the section
+ * the module is handed (`readReplicaSafety`). A declaration that throws or
+ * answers a malformed value is one more issue at its section's path, all of
+ * them refused together as `config-validation-failed`.
+ * @internal
+ */
+function replicaSafetyAsRead(
+	modules: readonly Module[],
+	sections: ReadonlyMap<string, { readonly value: unknown }>,
+): readonly ReplicaSafetyModuleRef[] {
+	const read: ReplicaSafetyModuleRef[] = [];
+	const issues: z.ZodIssue[] = [];
+	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
+	for (const m of modules) {
+		const answer = readReplicaSafety(m, sections.get(m.name)?.value);
+		if ("declaration" in answer) {
+			read.push({
+				name: m.name,
+				...(answer.declaration === undefined ? {} : { replicaSafety: answer.declaration }),
+			});
+			continue;
+		}
+		issues.push({
+			code: "custom",
+			path: [...sectionSegmentsOf(m)],
+			message: `module "${m.name}"'s replicaSafety did not answer what its section holds per replica: ${answer.problem}`,
+		} as z.ZodIssue);
+		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
+	}
+	if (issues.length > 0) {
+		throw new BootError({
+			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`).join("; ")}.`,
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+			details: { reason: "config-validation-failed", issues, modules: refused },
+		});
+	}
+	return read;
+}
+
+/**
  * What a switched-off module is to every stage after the parse: its name and
  * its section, nothing it would register.
  */
@@ -3164,6 +3210,8 @@ interface StageOneContext {
 	 */
 	readonly relocating: readonly Module[];
 	readonly parsedConfig: unknown;
+	/** Each module's parsed section, by module name; empty before the parse. */
+	readonly sections: ReadonlyMap<string, { readonly value: unknown }>;
 	/** The modules their section switches off; empty before the parse. */
 	readonly switchedOff: ReadonlySet<string>;
 	/**
@@ -3413,11 +3461,15 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		//
 		// `rawModules`, not the normalised view: the guard reads each manifest's
 		// own `replicaSafety` declaration, which normalisation does not carry.
-		// A switched-off module holds no state, whatever its name.
+		// A switched-off module holds no state, whatever its name, and its
+		// declaration is not read.
 		run: (ctx) => {
 			const bootLogger = warningLogger(ctx.bootstrapComponents);
 			checkReplicaSafety({
-				modules: ctx.rawModules.filter((m) => !ctx.switchedOff.has(m.name)),
+				modules: replicaSafetyAsRead(
+					ctx.rawModules.filter((m) => !ctx.switchedOff.has(m.name)),
+					ctx.sections,
+				),
 				config: ctx.parsedConfig,
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});
@@ -3484,6 +3536,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		contributionKinds,
 		relocating: withCoreRelocations(modules, input.core ?? CORE_RELOCATIONS),
 		parsedConfig: undefined,
+		sections: new Map(),
 		switchedOff: new Set<string>(),
 		plannedKeys: plannedKeysOf(normalisedModules),
 	};
@@ -3540,6 +3593,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		rawModules: switchedOn,
 		modules: switchedOnNormalised,
 		parsedConfig,
+		sections,
 		switchedOff: off,
 		plannedKeys: plannedKeysOf(switchedOnNormalised),
 	};
