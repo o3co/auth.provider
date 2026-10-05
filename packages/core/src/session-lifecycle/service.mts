@@ -581,6 +581,11 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 				return false;
 			}
 		}
+		// Adopting, the join opened the record itself: a close that completed
+		// since the read above, and whose closed record then left the store,
+		// let the open land. The close deletes the user session before it
+		// closes the record, so a session still read now was never closed.
+		if (read === null && (await userSessionOf(sid)) === null) return false;
 		return true;
 	};
 

@@ -332,6 +332,46 @@ describe("join", () => {
 		expect((await h.read())?.value.participants.map((p) => p.id)).toEqual(["google"]);
 	});
 
+	it("refuses a join whose session a close ended, and whose closed record went, while it adopted the record", async () => {
+		// The race: the join reads no record and a live user session; before
+		// it opens the record, a close of the session completes and its closed
+		// record leaves the store. The open then finds no record to refuse it.
+		let current: SessionLifecycleStore | undefined;
+		let closeDuringOpen: (() => Promise<void>) | undefined;
+		const h = harness({
+			familyIndexWithoutEnd: true,
+			store: (inner) => {
+				current = inner;
+				const now = (): SessionLifecycleStore => current ?? inner;
+				return {
+					kind: inner.kind,
+					open: async (sid, sub, expiresAt) => {
+						const race = closeDuringOpen;
+						closeDuringOpen = undefined;
+						if (race !== undefined) await race();
+						return now().open(sid, sub, expiresAt);
+					},
+					join: (sid, participant) => now().join(sid, participant),
+					beginClose: (sid, request) => now().beginClose(sid, request),
+					completeIf: (sid, expected, item) => now().completeIf(sid, expected, item),
+					read: (sid) => now().read(sid),
+					listClosing: (limit, after) => now().listClosing(limit, after),
+				};
+			},
+		});
+		await h.establish(SID, { open: false });
+		closeDuringOpen = async () => {
+			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+			current = createInMemorySessionLifecycleStore();
+		};
+		expect(await h.lifecycle.join(SID, { familyId: "f-late", federation: "google" })).toEqual({
+			outcome: "refused",
+		});
+		expect(h.revoked.has("f-late")).toBe(true);
+		expect(h.calls).toContain(`delete_federation_tokens:${SID}:google`);
+		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+	});
+
 	it("answers unavailable when the lifecycle store cannot answer", async () => {
 		const h = harness({
 			store: (inner) => ({
