@@ -36,10 +36,10 @@ import {
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
 	createMemoryReplaySeenSet,
-	defineModule,
 } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
+	federationTypeForTests,
 	makeValidCoreConfig,
 	type OutboundSectionForTests,
 	withOutbound,
@@ -126,27 +126,18 @@ const logger = {
 	child: () => logger,
 };
 
-const federationModule = defineModule({
-	name: "test-federation-upstream",
-	contributes: {
-		federations: {
-			upstream: () =>
-				({
-					buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
-					exchangeDelegatedCode: async () => ({
-						upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
-						tokens: {},
-					}),
-					refreshDelegatedToken: async () => ({}),
-				}) as unknown as FederationProvider,
-		},
-		federationRedirectPolicies: {
-			upstream: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
+/** The module that handles the `upstream` entry's type. */
+const federationModule = federationTypeForTests("upstream-idp", {
+	provider: () =>
+		({
+			name: "upstream",
+			buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+			exchangeDelegatedCode: async () => ({
+				upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
+				tokens: {},
 			}),
-		},
-	} as never,
+			refreshDelegatedToken: async () => ({}),
+		}) as unknown as FederationProvider,
 });
 
 const boot = async (outbound?: OutboundSectionForTests) => {
@@ -158,6 +149,8 @@ const boot = async (outbound?: OutboundSectionForTests) => {
 			federations: {
 				upstream: {
 					enabled: true,
+					type: "upstream-idp",
+					callbackURL: "https://provider.example/federation/upstream/callback",
 					issuer: connection.upstreamIssuer,
 					clientId: connection.upstreamClientId,
 				},
