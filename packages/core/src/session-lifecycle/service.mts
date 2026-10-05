@@ -46,6 +46,7 @@ import { readRecord } from "../session-admission/live-session.mjs";
 import {
 	checkSessionLifecycleKey,
 	checkSessionParticipant,
+	isSessionLifecycleKey,
 	readSessionCloseAnswer,
 	readSessionJoinAnswer,
 	readSessionLifecycleListing,
@@ -145,11 +146,12 @@ export interface SessionLifecycle {
 	join(sid: string, request: SessionJoinRequest): Promise<SessionJoinOutcome>;
 	/** Closes `sid` for `cause` (the first close's cause is kept), and runs or resumes its close work. */
 	close(sid: string, cause: SessionCloseCause): Promise<SessionCloseOutcome>;
-	/** Whether `sid` is live. */
+	/** Whether `sid` is live: `not_live` for a sid the port cannot hold, which names no session. */
 	liveness(sid: string): Promise<SessionLiveness>;
 	/**
 	 * The federations `sid` joined, before it is closed: what a logout reads to
-	 * end the first one upstream with the tokens a close removes.
+	 * end the first one upstream with the tokens a close removes. None for a
+	 * sid the port cannot hold, which names no session.
 	 */
 	federations(sid: string): Promise<SessionFederations>;
 	/** Runs the close work of every closing session. Rejects when the closing listing cannot be read. */
@@ -625,7 +627,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		},
 
 		async federations(sid) {
-			checkSessionLifecycleKey(sid, "sid");
+			// A sid the port cannot hold names no session; only a write refuses it.
+			if (!isSessionLifecycleKey(sid)) return { outcome: "listed", federations: [] };
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
 				const own = read === null ? [] : idsOf(read.value, "federation");
@@ -641,7 +644,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		},
 
 		async liveness(sid) {
-			checkSessionLifecycleKey(sid, "sid");
+			// A sid the port cannot hold names no session; only a write refuses it.
+			if (!isSessionLifecycleKey(sid)) return { outcome: "not_live" };
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
 				// A logout through the per-session stores alone leaves a record

@@ -70,8 +70,6 @@ const SHARED_WITH_OAUTH: ReadonlySet<string> = new Set([
 	"oauth.nonce.maxLength",
 	"oauth.oidcMode",
 	"oauth.refreshToken.expiresIn",
-	"oauth.refreshToken.legacyRtPolicy",
-	"oauth.refreshToken.unknownFamilyPolicy",
 	"oauth.requireEmailVerified",
 	"oauth.requireGrantTypeAllowlist",
 	"oauth.resourceIndicator.enabled",

@@ -41,6 +41,7 @@ import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -142,7 +143,7 @@ async function buildApp(
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry,
-		config: fullConfig,
+		...routerInputsOf(fullConfig),
 		clientRepository: clientRepo,
 		codeRepository: codeRepoStub,
 		keyStore,

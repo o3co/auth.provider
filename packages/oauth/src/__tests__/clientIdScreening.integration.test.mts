@@ -51,6 +51,7 @@ import { authorizationServerRegistry } from "./_helpers/authorizationServerRegis
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import { storeReplyError } from "./_helpers/projectedLog.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const ISSUER = "https://auth.example.com";
 const TOKEN_ENDPOINT = `${ISSUER}/oauth/token`;
@@ -98,7 +99,7 @@ async function buildApp(clientRepository: ClientRepository) {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!", "v0"),

@@ -235,7 +235,7 @@ export interface MfaEnrollmentStart {
 	readonly mail?: MfaFactorMail<"email_factor_enrollment">;
 }
 
-/** What a verification answers. */
+/** What a verification answers. `ok` is the literal `true` or `false`; anything else is the factor's failure. */
 export type MfaVerification =
 	| {
 			readonly ok: true;
@@ -272,7 +272,7 @@ export type MfaVerification =
 			readonly factorId?: string;
 	  };
 
-/** What the end of an enrollment answers. */
+/** What the end of an enrollment answers. `ok` is the literal `true` or `false`; anything else is the factor's failure. */
 export type MfaEnrollmentCompletion =
 	| { readonly ok: true; readonly data: MfaFactorData; readonly label?: string }
 	| { readonly ok: false; readonly reason: "invalid" | "expired" | "malformed" | "duplicate" };

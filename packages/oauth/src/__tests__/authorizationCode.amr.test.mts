@@ -50,6 +50,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const ISSUER = "https://issuer.test";
 const SECRET = "code-amr-test-secret-32-bytes-long!!";
@@ -139,7 +140,7 @@ const world = async (
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
 		registry,
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore,

@@ -55,7 +55,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-import { capturing, withGrants } from "./_helpers/sections.mjs";
+import { capturing, routerInputsOf, withGrants } from "./_helpers/sections.mjs";
 
 /** `config` with the captures of the renames the module declares, as a resolution under an empty environment makes them. */
 const captured = <C extends object>(config: C): C =>
@@ -222,7 +222,7 @@ async function buildAuthorizeApp(opts: {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
-		config: mergedConfig,
+		...routerInputsOf(mergedConfig),
 		clientRepository: opts.clientRepo ?? authorizeClientRepo,
 		codeRepository: codeRepo,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -1526,7 +1526,7 @@ describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () =
 			loginEntry: createTestLoginEntry(),
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: authorizationServerRegistry(),
-			config: authorizeConfig,
+			...routerInputsOf(authorizeConfig),
 			clientRepository: publicClientRepo,
 			codeRepository: codeRepo,
 			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
