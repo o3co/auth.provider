@@ -909,6 +909,32 @@ describe("step 4 — the revocation boundary", () => {
 		}
 	});
 
+	it("compares in whole seconds, as verifyJwt compares the auth_time a token from the session carries", async () => {
+		// The boundary a tenth of a second into second T, with the default
+		// one-second allowance: every authTime in second T+1 is covered, as
+		// its auth_time is; the first one in T+2 is not.
+		const second = minutesAgo(5).getTime();
+		const boundary = new Date(second + 100);
+		for (const [offsetMs, outcome] of [
+			[1_101, "revoked"],
+			[1_500, "revoked"],
+			[1_999, "revoked"],
+			[2_000, "admitted"],
+			[2_500, "admitted"],
+		] as const) {
+			expect(
+				await admitSession(
+					deps({
+						userSessionStore: holding(session({ authTime: new Date(second + offsetMs) })),
+						subjectRevocation: revocationOf(async () => boundary),
+					}),
+					request(),
+				),
+				`authTime T+${offsetMs}ms`,
+			).toMatchObject({ outcome });
+		}
+	});
+
 	it("reads the boundary for the record's subject", async () => {
 		const asked: string[] = [];
 		await admitSession(
