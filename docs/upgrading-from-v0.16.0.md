@@ -237,10 +237,13 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
   too (#1329): an empty `mfa.factors` block an older configuration leaves
   behind (the TOTP factor's old path, its variables unset) is such a key —
-  delete it. So does `webauthn`, at every level (#1336), and so does
-  `session`, at every level (#728). So do `oauth-session` and
-  `oauth-authorization`, the latter at every level: `grants` holds the four
-  grants' blocks alone, and each block `enabled` alone (#728). The keys under `audit-sink` are the
+  delete it. So do `webauthn`, at every level (#1336), `session`, at every
+  level (#728), and `federation-grants`, at every level: the keys under
+  `federation-grants.connections` are the connections you name, and a
+  connection's `authorizationParams` the upstream's parameters, so those stay
+  open. So do `oauth-session` and `oauth-authorization`, the latter at every
+  level: `grants` holds the four grants' blocks alone, and each block
+  `enabled` alone (#728). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -629,6 +632,29 @@ modules fills them.
   federation's redirect policy through `federationRedirectPolicies` overrides
   the type instead (`overrides.federationTypes.<type>`, with its own
   `redirectPolicy`).
+- **BREAKING: a contribution kind's container is its kind's shape (#911).**
+  In `contributes` and in `overrides`, a name-keyed kind (`grants`,
+  `tokenExchangeValidators`, `mfaFactors`, `sessionRequirements`,
+  `rateLimitBudgets`, `federationTypes`, `admissionActions`,
+  `sessionCloseNotifiers`, and a kind of your own whose collector is
+  name-keyed) takes a record, and a list-shaped kind (`routes`,
+  `auditHooks`, `grantPolicyHooks`, `grantMiddleware`,
+  `tokenBindingMechanisms`, `discoveryMetadata`, and a list-shaped kind of
+  your own) takes an array. A manifest that bypasses `ContributesMap`'s
+  types — written in JavaScript, or cast — with an array under a name-keyed
+  kind used to boot with those contributions dropped, filed under keys no
+  reader reaches, or to fail with a plain `TypeError` when they were
+  overrides or a factory failed; a record under a list-shaped kind failed
+  with a `TypeError`, and `null` or a function was ignored for most kinds.
+  Each is now refused before any factory runs (`contribution-malformed`,
+  naming the module, the kind, the channel and what the container was).
+  A record is a plain object — a literal, or `Object.create(null)`; a class
+  instance, a `Map` or an object with another prototype is refused too,
+  though `ContributesMap`'s types accept it. Write the kind's shape as a
+  literal record or array. An array under `overrides.sessionCloseNotifiers`
+  is now refused for its container (`contribution-malformed`) before the
+  override guard (`contribution-kind-guarded`) that a record there still
+  meets.
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
   overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot
@@ -803,6 +829,27 @@ modules fills them.
   `tokenBindingSettings`; a factory refuses a missing or broken
   `oauthTokenSettings` with a `RangeError` naming it, and a
   `tokenBindingSettings` whose rule is not a boolean with a `TypeError`.
+- **BREAKING: enabled federation grants require `oauthTokenSettings`, and
+  `federationGrantsModule` no longer reads the configuration (#728).** It
+  takes the issuer every route, `connect_uri` and callback check is built on
+  from the slot alone, and no longer falls back to `oauth.jwt.issuer` when no
+  module provides it. With `oauthModule` installed nothing changes. A
+  composition with `federation-grants.enabled = true` and without
+  `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`,
+  or the boot is refused for the missing component. The federations a
+  connection names — whether each is configured and on, its `issuer` and
+  `clientId` — come from core's `federationSettings` slot, which core fills
+  from `core.federations` in every composition: nothing to do under
+  `createApp`, and the refusals are unchanged. A deps object handed to the
+  module's route factories carries `oauthTokenSettings`,
+  `federationSettings` and `section`; `config` is no longer read. The audit
+  sink's declared absence is now core's guard: enabled with no `auditSink`
+  and no `core.declaredAbsent = ["auditSink"]`, the boot is refused at
+  manifest validation with core's `component-absence-undeclared`
+  (`consumedBy` naming `federation-grants`), ahead of the module's other
+  refusals, and no longer with the module's own
+  `federationGrantsModule: … with no auditSink component` error; match on
+  the reason. Disabled, the module requires nothing.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from

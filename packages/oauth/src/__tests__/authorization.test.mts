@@ -30,13 +30,17 @@ import {
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 // codeData must carry client_id and redirect_uri (required fields), and
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
@@ -324,6 +328,8 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			// `expires_in` is the time left when answered: read on a frozen clock.
+			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 			// A configuration with only `defaultExpiresIn` / `maxExpiresIn`: read
 			// through `resolveAccessTokenLifetime`, not the deprecated `expiresIn`,
 			// which is absent here. Only token exchange honours `expires_in`.

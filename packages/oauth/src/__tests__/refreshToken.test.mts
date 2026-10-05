@@ -29,10 +29,14 @@ import {
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 // Vitest mock-shaped Logger that satisfies the interface; tests pass a fresh
 // `vi.fn()` for `warn` and inspect its calls. Other levels are vi.fn() so
@@ -260,6 +264,8 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			// `expires_in` is the time left when answered: read on a frozen clock.
+			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 			// Only the current keys are configured, so a grant reading the
 			// deprecated `expiresIn` would mint a token with no `exp` at all.
 			const handler = createRefreshTokenGrant({

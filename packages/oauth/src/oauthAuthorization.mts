@@ -189,6 +189,9 @@ const OPTIONAL = [
 	"sessionRPRegistry",
 	"sessionFamilyIndex",
 	"sessionFederationIndex",
+	// Core's session lifecycle: where installed, the authorization_code grant
+	// joins the session through it instead of the per-session stores.
+	"sessionLifecycle",
 	"logger", // structured logger; security audit logs
 ] as const;
 

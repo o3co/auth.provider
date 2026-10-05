@@ -87,6 +87,7 @@ import {
 import type {
 	BootStage,
 	BootstrapMap,
+	ContributionContainer,
 	ContributionEntry,
 	ContributionKind,
 	ContributionKindMap,
@@ -211,12 +212,65 @@ function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
 	return federationTypeRegistration(value);
 }
 
+/** What a kind's container was read as, and how a refusal names it. */
+function containerAsRead(container: unknown): Pick<ContributionContainer, "shape" | "given"> {
+	if (Array.isArray(container)) return { shape: "list", given: "an array" };
+	if (isPlainConfigObject(container)) return { shape: "record", given: "a record" };
+	if (typeof container === "object" && container !== null) {
+		// A record is a plain object: an instance, a Map or an object with
+		// another prototype reads as one only through what it inherits.
+		return { shape: "other", given: `${describeValue(container)}, not a plain object` };
+	}
+	return { shape: "other", given: describeValue(container) };
+}
+
+/**
+ * One channel of a manifest — its `contributes` or `overrides`, read once by
+ * the caller — flattened: each kind's container as read, and its entries. An
+ * array files its entries under Symbol keys, an object under its names;
+ * whether either is the kind's shape is `checkContributionContainers`'s to
+ * judge, off `containers`.
+ */
+function normaliseChannel(
+	m: Module,
+	channel: "contributes" | "overrides",
+	map: unknown,
+): { readonly entries: ContributionEntry[]; readonly containers: ContributionContainer[] } {
+	const entries: ContributionEntry[] = [];
+	const containers: ContributionContainer[] = [];
+	for (const [kind, container] of Object.entries(map ?? {})) {
+		if (container === undefined) continue;
+		containers.push({ kind: kind as ContributionKind, channel, ...containerAsRead(container) });
+		if (Array.isArray(container)) {
+			for (const factory of container) {
+				entries.push({
+					kind: kind as ContributionKind,
+					key: Symbol(kind),
+					factory,
+					contributedBy: m.name,
+				});
+			}
+		} else if (container !== null && typeof container === "object") {
+			for (const [name, value] of Object.entries(container as Record<string, unknown>)) {
+				entries.push({
+					kind: kind as ContributionKind,
+					key: name,
+					factory: nameKeyedFactory(kind, name, value),
+					contributedBy: m.name,
+				});
+			}
+		}
+	}
+	return { entries, containers };
+}
+
 /**
  * Flatten a raw Module manifest into a NormalisedModule for fast lookup
  * by subsequent checks. Collects:
  * - `requires` / `optional` key arrays
  * - `providesKeys` from `Object.keys(module.provides ?? {})`
- * - `contributesEntries` / `overridesEntries` as flat ContributionEntry[]
+ * - `contributesEntries` / `overridesEntries` as flat ContributionEntry[],
+ *   and `containers`, each kind's container as read
  * - `lifecycleKeys` from `Object.keys(module.lifecycle ?? {})`
  *
  * @internal
@@ -231,53 +285,8 @@ function normaliseModule(m: Module): NormalisedModule {
 		? [...(authoritativeDeclared as readonly ComponentKey[])]
 		: [];
 
-	const contributesEntries: ContributionEntry[] = [];
-	for (const [kind, kindMap] of Object.entries(m.contributes ?? {})) {
-		if (Array.isArray(kindMap)) {
-			// List-shaped kinds: auditHooks, routes, grantPolicyHooks, grantMiddleware
-			for (const factory of kindMap) {
-				contributesEntries.push({
-					kind: kind as ContributionKind,
-					key: Symbol(kind),
-					factory,
-					contributedBy: m.name,
-				});
-			}
-		} else if (kindMap !== null && typeof kindMap === "object") {
-			// Name-keyed kinds: grants, tokenExchangeValidators, mfaFactors, …
-			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
-				contributesEntries.push({
-					kind: kind as ContributionKind,
-					key: name,
-					factory: nameKeyedFactory(kind, name, value),
-					contributedBy: m.name,
-				});
-			}
-		}
-	}
-
-	const overridesEntries: ContributionEntry[] = [];
-	for (const [kind, kindMap] of Object.entries(m.overrides ?? {})) {
-		if (Array.isArray(kindMap)) {
-			for (const factory of kindMap) {
-				overridesEntries.push({
-					kind: kind as ContributionKind,
-					key: Symbol(kind),
-					factory,
-					contributedBy: m.name,
-				});
-			}
-		} else if (kindMap !== null && typeof kindMap === "object") {
-			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
-				overridesEntries.push({
-					kind: kind as ContributionKind,
-					key: name,
-					factory: nameKeyedFactory(kind, name, value),
-					contributedBy: m.name,
-				});
-			}
-		}
-	}
+	const contributes = normaliseChannel(m, "contributes", m.contributes);
+	const overrides = normaliseChannel(m, "overrides", m.overrides);
 
 	const lifecycleKeys = Object.keys(m.lifecycle ?? {}) as ComponentKey[];
 
@@ -288,8 +297,9 @@ function normaliseModule(m: Module): NormalisedModule {
 		providesKeys,
 		authoritativeDeclared,
 		authoritativeKeys,
-		contributesEntries,
-		overridesEntries,
+		contributesEntries: contributes.entries,
+		overridesEntries: overrides.entries,
+		containers: [...contributes.containers, ...overrides.containers],
 		lifecycleKeys,
 	};
 }
@@ -298,23 +308,29 @@ function normaliseModule(m: Module): NormalisedModule {
 // Built-in contribution kinds — auto-wired by core; no collector required
 // ---------------------------------------------------------------------------
 
-const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
-	"grants",
-	"federations",
-	"federationRedirectPolicies",
-	"tokenExchangeValidators",
-	"mfaFactors",
-	"sessionRequirements",
-	"auditHooks",
-	"routes",
-	"grantPolicyHooks",
-	"grantMiddleware",
-	"tokenBindingMechanisms",
-	"discoveryMetadata",
-	"rateLimitBudgets",
-	"federationTypes",
-	"admissionActions",
-	"sessionCloseNotifiers",
+/**
+ * Core's contribution kinds, each with the container it takes: a record for
+ * a name-keyed kind, a list for a list-shaped one — the shapes of the
+ * collectors `createApp` seeds.
+ * @internal Exported for its test.
+ */
+export const BUILTIN_CONTRIBUTION_KINDS: ReadonlyMap<string, "record" | "list"> = new Map([
+	["grants", "record"],
+	["federations", "record"],
+	["federationRedirectPolicies", "record"],
+	["tokenExchangeValidators", "record"],
+	["mfaFactors", "record"],
+	["sessionRequirements", "record"],
+	["auditHooks", "list"],
+	["routes", "list"],
+	["grantPolicyHooks", "list"],
+	["grantMiddleware", "list"],
+	["tokenBindingMechanisms", "list"],
+	["discoveryMetadata", "list"],
+	["rateLimitBudgets", "record"],
+	["federationTypes", "record"],
+	["admissionActions", "record"],
+	["sessionCloseNotifiers", "record"],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -977,18 +993,13 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	}
 }
 
-/** What a container that is not a record is called in a refusal. */
-const containerShape = (container: unknown): string =>
-	container === null ? "null" : Array.isArray(container) ? "an array" : `a ${typeof container}`;
-
 /**
- * What a `rateLimitBudgets`, `federationTypes` or `admissionActions`
- * contribution or override must be, read off the manifest before any factory
- * runs:
+ * What a `rateLimitBudgets`, `federationTypes`, `admissionActions` or
+ * `sessionCloseNotifiers` contribution or override holds, read off the
+ * entries normalisation captured, which stage 4 applies, before any factory
+ * runs; each container is already its kind's shape
+ * (`checkContributionContainers`):
  *
- * - its container is a record keyed by prefix, type or action name
- *   (normalisation would file an array as list-shaped under Symbol keys, and
- *   skip a function or `null`);
  * - a prefix is not empty and holds no `:`, since a limiter key carries it
  *   before its first `:`, whatever the budget's factory answers;
  * - a prefix names no `Object.prototype` member (`constructor`, `__proto__`),
@@ -1005,61 +1016,35 @@ const containerShape = (container: unknown): string =>
  *   (`admissionActionProblem`); an action is registered by the module that
  *   admits it, so an override of one is refused as the kind guarded
  *   (`contribution-kind-guarded`);
- * - a `sessionCloseNotifiers` container is a record keyed by name, and no
- *   module overrides the kind (`contribution-kind-guarded`): the notifier is
- *   its contributor's, switched off only by not installing it. Both read off
- *   the entries normalisation captured, which stage 4 applies.
+ * - no module overrides `sessionCloseNotifiers` (`contribution-kind-guarded`):
+ *   the notifier is its contributor's, switched off only by not installing
+ *   it.
  *
- * Throws `contribution-malformed`; `name` is absent for a container.
+ * Throws `contribution-malformed`, naming the entry.
  * @internal
  */
-function checkContributionShapes(
-	rawModules: readonly Module[],
-	modules: readonly NormalisedModule[],
-): void {
+function checkContributionShapes(modules: readonly NormalisedModule[]): void {
 	const refuse = (
-		m: Module,
-		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions" | "sessionCloseNotifiers",
-		name: string | undefined,
+		m: NormalisedModule,
+		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions",
+		name: string,
 		channel: "contributes" | "overrides",
 		problem: string,
 	): never => {
 		throw new BootError({
-			message: `Module "${m.name}" ${channel} ${kind}${name === undefined ? "" : ` "${name}"`}: ${problem}.`,
+			message: `Module "${m.name}" ${channel} ${kind} "${name}": ${problem}.`,
 			reason: "contribution-malformed",
 			stage: "validateManifests",
-			details: {
-				reason: "contribution-malformed",
-				module: m.name,
-				kind,
-				...(name === undefined ? {} : { name }),
-				channel,
-				problem,
-			},
+			details: { reason: "contribution-malformed", module: m.name, kind, name, channel, problem },
 		});
 	};
 	const declaredVerifiers = declaredVerifierLimits(modules);
-	rawModules.forEach((m, index) => {
+	for (const m of modules) {
 		for (const channel of ["contributes", "overrides"] as const) {
-			const map = m[channel] as Readonly<Record<string, unknown>> | undefined;
-			for (const [kind, keyedBy] of [
-				["rateLimitBudgets", "prefix"],
-				["federationTypes", "type"],
-				["admissionActions", "action name"],
-			] as const) {
-				const container = map?.[kind];
-				if (container === undefined) continue;
-				if (typeof container !== "object" || container === null || Array.isArray(container)) {
-					refuse(
-						m,
-						kind,
-						undefined,
-						channel,
-						`the kind takes a record keyed by ${keyedBy}, not ${containerShape(container)}`,
-					);
-				}
-			}
-			for (const prefix of Object.keys(m[channel]?.rateLimitBudgets ?? {})) {
+			const entries = channel === "contributes" ? m.contributesEntries : m.overridesEntries;
+			for (const entry of entries) {
+				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+				const prefix = entry.key;
 				if (prefix.length === 0 || prefix.includes(":")) {
 					refuse(
 						m,
@@ -1079,11 +1064,7 @@ function checkContributionShapes(
 					);
 				}
 			}
-			const normalised = modules[index];
-			const entries =
-				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
-			// Read off the entries normalisation captured, which stage 4 applies.
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "sessionCloseNotifiers") continue;
 				if (channel === "overrides") {
 					throw new BootError({
@@ -1098,18 +1079,8 @@ function checkContributionShapes(
 						},
 					});
 				}
-				// Normalisation files a list under Symbol keys.
-				if (typeof entry.key !== "string") {
-					refuse(
-						m,
-						"sessionCloseNotifiers",
-						undefined,
-						channel,
-						"the kind takes a record keyed by name, not a list",
-					);
-				}
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (
 					channel !== "overrides" ||
 					entry.kind !== "rateLimitBudgets" ||
@@ -1135,13 +1106,13 @@ function checkContributionShapes(
 					},
 				});
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
 				const snapshot = verifierClaimSnapshots.get(entry.factory as object);
 				const problem = snapshot === undefined ? undefined : verifierClaimProblem(snapshot);
 				if (problem !== undefined) refuse(m, "rateLimitBudgets", entry.key, channel, problem);
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
 				if (channel === "overrides") {
 					throw new BootError({
@@ -1161,7 +1132,7 @@ function checkContributionShapes(
 				const problem = admissionActionProblem(entry.key, snapshot ?? entry.factory);
 				if (problem !== undefined) refuse(m, "admissionActions", entry.key, channel, problem);
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "federationTypes" || typeof entry.key !== "string") continue;
 				const snapshot = federationTypeSnapshot(entry.factory);
 				if (snapshot === undefined) {
@@ -1185,7 +1156,7 @@ function checkContributionShapes(
 				}
 			}
 		}
-	});
+	}
 }
 
 /**
@@ -1276,6 +1247,67 @@ function checkContributionKindCoverage(
 					kind,
 					contributedBy: unique,
 				},
+			});
+		}
+	}
+}
+
+/**
+ * The container `kind` takes: a record when its collector is name-keyed, a
+ * list when it is list-shaped — the collector's own `kind`, as stage 4
+ * dispatches on it, so a consumer's kinds are held to the same rule — or, for
+ * one of core's kinds with no collector in `contributionKinds`, its built-in
+ * shape. `undefined` for a kind nothing names a shape for.
+ */
+function containerTaken(
+	kind: string,
+	contributionKinds: ContributionKindMap | undefined,
+): "record" | "list" | undefined {
+	const collector =
+		contributionKinds !== undefined && Object.hasOwn(contributionKinds, kind)
+			? ((contributionKinds as Record<string, unknown>)[kind] as { kind?: unknown } | undefined)
+			: undefined;
+	switch (collector?.kind) {
+		case "name-keyed":
+			return "record";
+		case "list":
+		case "list-routes":
+			return "list";
+		default:
+			return BUILTIN_CONTRIBUTION_KINDS.get(kind);
+	}
+}
+
+/**
+ * Every kind's container, in `contributes` and in `overrides`, is the shape
+ * its kind takes (`containerTaken`): a record — a plain object — for a
+ * name-keyed kind, an array for a list-shaped one. Anything else is
+ * `contribution-malformed`, naming the module, the kind, the channel and
+ * what it was given: an array under a name-keyed kind would file its entries
+ * under Symbol keys no name-keyed check reads and no reader reaches, and a
+ * record under a list-shaped kind holds no list to append. Read off the
+ * containers normalisation read, once — the ones its entries came from. A
+ * kind no shape is known for has no container rule: the coverage check
+ * refuses its entries, if it has any.
+ * @internal
+ */
+function checkContributionContainers(
+	modules: readonly NormalisedModule[],
+	contributionKinds: ContributionKindMap | undefined,
+): void {
+	for (const m of modules) {
+		for (const { kind, channel, shape, given } of m.containers) {
+			const taken = containerTaken(kind, contributionKinds);
+			if (taken === undefined || taken === shape) continue;
+			const problem =
+				taken === "record"
+					? `the kind takes a record keyed by name, not ${given}`
+					: `the kind takes a list, not ${given}`;
+			throw new BootError({
+				message: `Module "${m.name}" ${channel} ${kind}: ${problem}.`,
+				reason: "contribution-malformed",
+				stage: "validateManifests",
+				details: { reason: "contribution-malformed", module: m.name, kind, channel, problem },
 			});
 		}
 	}
@@ -3462,9 +3494,14 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		run: (ctx) => checkContributionKindCoverage(ctx.modules, ctx.contributionKinds),
 	},
 	{
+		id: "contribution-containers",
+		spec: "A2-β §5.1 step 5 (each kind's container is its collector's shape)",
+		run: (ctx) => checkContributionContainers(ctx.modules, ctx.contributionKinds),
+	},
+	{
 		id: "contribution-shapes",
 		spec: "issue #728 (a rate-limit prefix; a federation type's declaration)",
-		run: (ctx) => checkContributionShapes(ctx.rawModules, ctx.modules),
+		run: (ctx) => checkContributionShapes(ctx.modules),
 	},
 	{
 		id: "per-kind-contribute-duplicates",

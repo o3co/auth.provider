@@ -31,6 +31,7 @@ import { isWellFormedErrorCode } from "../errors/envelope.mjs";
 import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
+import type { SessionLifecycleStore } from "../user-sessions/lifecycle/types.mjs";
 import type {
 	SessionAuthentication,
 	SessionEnrollmentFacts,
@@ -51,6 +52,7 @@ import type { AdmissionAction } from "./actions.mjs";
 export const ADMISSION_INFRASTRUCTURE_STORES = Object.freeze([
 	"user_session",
 	"revocation_boundary",
+	"session_lifecycle",
 ] as const);
 
 /** A store admission reads itself, by the name its outage is given. */
@@ -66,6 +68,7 @@ export const isAdmissionInfrastructureStore = (
 const INFRASTRUCTURE_OUTAGES: Readonly<Record<AdmissionInfrastructureStore, string>> = {
 	user_session: "session store unavailable",
 	revocation_boundary: "revocation store unavailable",
+	session_lifecycle: "session lifecycle store unavailable",
 };
 
 /**
@@ -137,6 +140,12 @@ export interface AdmissionRequest {
 export interface AdmissionDeps {
 	readonly userSessionStore: UserSessionStore | undefined;
 	readonly subjectRevocation: SubjectRevocation | undefined;
+	/**
+	 * The consumer's `sessionLifecycleStore` slot, read after a live record:
+	 * its record closing or closed is `not_live` (`closing`). Absent, or no
+	 * record for the sid, the session is read as it was without one.
+	 */
+	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 	/** The synthetic key `sessionRequirementResolver`; only the boot planner and `resolverForTests` build one. */
 	readonly requirements: SessionRequirementResolver;
 	/** The vouchable table; empty when the consumer has none. */
@@ -844,8 +853,17 @@ export type Admission =
 	| { readonly outcome: "unauthenticated" }
 	| {
 			readonly outcome: "not_live";
-			/** `renewed`: the record is bound to another cookie session, one a renewal moved it to. */
-			readonly reason: "no_subject" | "no_sid" | "gone" | "subject_mismatch" | "renewed";
+			/**
+			 * `renewed`: the record is bound to another cookie session, one a renewal moved it to.
+			 * `closing`: the session's lifecycle record is closing or closed.
+			 */
+			readonly reason:
+				| "no_subject"
+				| "no_sid"
+				| "gone"
+				| "subject_mismatch"
+				| "renewed"
+				| "closing";
 	  }
 	| { readonly outcome: "revoked" }
 	| {

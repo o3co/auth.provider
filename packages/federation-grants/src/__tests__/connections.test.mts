@@ -23,10 +23,12 @@
  * the grant does.
  */
 
+import { createTestFederationSettings } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { resolveFederationGrantConnections } from "#/connections.mjs";
 
-const FEDERATIONS = {
+/** The `federationSettings` slot core fills from `core.federations`. */
+const FEDERATIONS = createTestFederationSettings({
 	upstream: {
 		enabled: true,
 		type: "oidc",
@@ -35,7 +37,7 @@ const FEDERATIONS = {
 	},
 	disabled: { enabled: false, type: "oidc", issuer: "https://off.example", clientId: "x" },
 	noIssuer: { enabled: true, type: "oidc", clientId: "y" },
-};
+});
 
 const CONNECTION = {
 	federation: "upstream",
@@ -44,8 +46,8 @@ const CONNECTION = {
 	maxAccessTokenLifetime: 3600,
 };
 
-const resolve = (connections: Record<string, unknown>, federations: unknown = FEDERATIONS) =>
-	resolveFederationGrantConnections({ connections }, { core: { federations } });
+const resolve = (connections: Record<string, unknown>, federations = FEDERATIONS) =>
+	resolveFederationGrantConnections({ connections }, federations);
 
 describe("resolveFederationGrantConnections", () => {
 	it("joins the entry with the issuer and client id the federation is configured with", () => {
@@ -86,9 +88,7 @@ describe("resolveFederationGrantConnections", () => {
 		// Removing the last one must stay an operable change: a deployment with
 		// no connections issues no new grants and still answers about the ones
 		// it has.
-		expect(
-			resolveFederationGrantConnections(undefined, { core: { federations: FEDERATIONS } }).size,
-		).toBe(0);
+		expect(resolveFederationGrantConnections(undefined, FEDERATIONS).size).toBe(0);
 		expect(resolve({}).size).toBe(0);
 	});
 
@@ -110,6 +110,19 @@ describe("resolveFederationGrantConnections", () => {
 	it("refuses a connection pointing at a federation that is missing or switched off", () => {
 		expect(() => resolve({ g: { ...CONNECTION, federation: "absent" } })).toThrow(/absent/);
 		expect(() => resolve({ g: { ...CONNECTION, federation: "disabled" } })).toThrow(/disabled/);
+	});
+
+	it("reads the federations from the federationSettings slot, where a name no entry has is absent", () => {
+		// The slot inherits nothing, so `constructor` is no entry; and a
+		// configuration-shaped value is not where the federations are read from.
+		expect(() => resolve({ g: { ...CONNECTION, federation: "constructor" } })).toThrow(
+			/federation "constructor" is not configured/,
+		);
+		expect(() =>
+			resolveFederationGrantConnections({ connections: { g: CONNECTION } }, {
+				core: { federations: { upstream: FEDERATIONS.upstream } },
+			} as never),
+		).toThrow(/federation "upstream" is not configured/);
 	});
 
 	it("refuses a federation with no configured issuer rather than guessing one", () => {
@@ -257,7 +270,9 @@ describe("resolveFederationGrantConnections", () => {
 		expect(() =>
 			resolve(
 				{ g: CONNECTION },
-				{ upstream: { enabled: true, type: "oidc", issuer: "https://i.example" } },
+				createTestFederationSettings({
+					upstream: { enabled: true, type: "oidc", issuer: "https://i.example" },
+				}),
 			),
 		).toThrow(/clientId/);
 	});
