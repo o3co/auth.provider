@@ -701,6 +701,26 @@ modules fills them.
   false }` alone, without the package's `reference.conf`, is refused; delete
   the section or layer the reference. Parsed directly, an absent section is
   `undefined`.
+- **BREAKING: the session grant is one module, `oauthSessionGrantModule`,
+  switched by its own section (#728).** List it as it is: it reads
+  `oauth-session.enabled` from the configuration boot parses, and an absent
+  section or key is off. `oauthSessionModule({ config })` is deprecated: it
+  ignores its argument and returns that module, so a composition calling it
+  still boots. The refusal of a module built from a configuration that
+  disagrees with the booted one about `oauth-session.enabled` is gone. The
+  section is strict and its schema, `oauthSessionConfigSchema`, fills no
+  default: the package's `config/reference.conf` ships `enabled = false`.
+- **BREAKING: an enabled session grant requires `oauthTokenSettings`, and no
+  longer reads the configuration (#728).** It takes the access-token
+  lifetime it mints and `requireEmailVerified` from the slot alone, and no
+  longer reads `oauth.accessToken` or `oauth.requireEmailVerified` from
+  `config`. With `oauthModule` installed nothing changes. A composition with
+  the grant enabled and without `oauthModule` puts an `oauthTokenSettings`
+  value in `bootstrapComponents`, or the boot is refused for the missing
+  component. In code: `createSessionGrant` requires `oauthTokenSettings` and
+  throws a `RangeError` naming it when it is missing or breaks the slot's
+  contract; `SessionGrantDeps` no longer has `config` (in a test,
+  `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from

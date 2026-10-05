@@ -19,8 +19,8 @@
  * through the template's own reading of the full set: the operator's layer
  * and environment read once, phase one's switches, then the layers over every
  * loaded package's `reference.conf` handed to boot. The grant switches sit in
- * the sections of the modules that install the grants, `oauth-session` and
- * `oauth-authorization`, and phase one reads them there; the consent page and
+ * the sections of the modules that install the grants: `oauth-session`'s,
+ * which boot reads, and `oauth-authorization`'s, which phase one reads; the consent page and
  * the Client ID Metadata Documents in the oauth module's `oauth {}`; the
  * token-binding settings in core's `core {}`; the session cookie and its store
  * in the session store's `session-store {}`, whose storage phase one reads;
@@ -85,8 +85,8 @@ async function advertisedGrants(composition: FullSet): Promise<string[]> {
 	return [...(doc.grant_types_supported as string[])].sort();
 }
 
-describe("the grant switches, read by phase one at their modules' sections", () => {
-	it("OAUTH_SESSION_ENABLED=false: phase one leaves the session grant out", async () => {
+describe("the grant switches, read at their modules' sections", () => {
+	it("OAUTH_SESSION_ENABLED=false: the module's own section leaves the session grant out", async () => {
 		const composition = await boot({ env: { ...SINGLE_ENV, OAUTH_SESSION_ENABLED: "false" } });
 
 		expect(await advertisedGrants(composition)).not.toContain("session");

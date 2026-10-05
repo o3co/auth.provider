@@ -57,7 +57,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
-import { oauthSessionModule } from "#/oauthSession.mjs";
+import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
@@ -1255,7 +1255,7 @@ describe("oauthModule — a consumer of session admission", () => {
 			"oauth.code_exchange": { grade: "use" },
 			"oauth.refresh": { grade: "use" },
 		});
-		expect(oauthSessionModule({ config }).contributes?.admissionActions).toEqual({
+		expect(oauthSessionGrantModule.contributes?.admissionActions).toEqual({
 			"oauth.session_grant": { grade: "use" },
 		});
 	});
@@ -1265,7 +1265,8 @@ describe("oauthModule — a consumer of session admission", () => {
 		expect(oauthAuthorizationModule({ config }).contributes?.admissionActions).toEqual({
 			"oauth.code_exchange": { grade: "use" },
 		});
-		expect(oauthSessionModule({ config }).contributes?.admissionActions).toBeUndefined();
+		// The session grant's module registers nothing at all while its section is off.
+		expect(oauthSessionGrantModule.section?.isEnabled?.(config["oauth-session"])).toBe(false);
 	});
 });
 

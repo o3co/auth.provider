@@ -19,6 +19,7 @@ import {
 	admitSession,
 	authTimeAt,
 	boundPolicyAudience,
+	checkOAuthTokenSettings,
 	checkResolver,
 	cookieClaim,
 	describeAdmissionOutage,
@@ -34,13 +35,11 @@ import {
 	ownedConfirmation,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
-	resolveAccessTokenLifetime,
 	vouchedAmr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
 import type { SESSION_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
-import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /**
  * `session` grant: mints an access token for the user of an already
@@ -56,13 +55,15 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 /**
  * What the session grant reads. The requirement resolver, `subjectRevocation`
  * and `auditSink` feed session admission; the resolver is required, and a
- * factory built without one is refused.
+ * factory built without one is refused. The access-token lifetime and
+ * `requireEmailVerified` come from the `oauthTokenSettings` slot; nothing is
+ * read from the whole configuration.
  */
 export type SessionGrantDeps = Pick<
 	GrantDependencies,
-	"config" | "keyStore" | "userSessionStore" | "subjectRevocation" | "grantPolicy" | "logger"
+	"keyStore" | "userSessionStore" | "subjectRevocation" | "grantPolicy" | "logger"
 > &
-	ProviderDeps<"sessionRequirementResolver", "auditSink">;
+	ProviderDeps<"sessionRequirementResolver" | "oauthTokenSettings", "auditSink">;
 
 /**
  * The token endpoint's answer to an admission that does not mint, or
@@ -110,7 +111,7 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 };
 
 export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
-	const { config, keyStore } = deps;
+	const { keyStore } = deps;
 	// What admission reads for this grant: the module's own slots as wired,
 	// and no acr table, since the grant asks for no acr.
 	const admissionDeps: AdmissionDeps = {
@@ -121,12 +122,12 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 		logger: deps.logger,
 		auditSink: deps.auditSink,
 	};
-	// Deployment config, resolved once at construction; `resolveOAuthOptions`
-	// owns the defensive read for hand-built configs.
-	const { requireEmailVerified } = resolveOAuthOptions(config.oauth);
-	// Read once at construction, so an invalid hand-built configuration is
-	// refused before any request.
-	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
+	// The token settings are read once, here, from the `oauthTokenSettings`
+	// slot alone, checked whole first: a hand-built value the check refuses,
+	// or none, fails at composition, naming the slot, before any request.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+	const { requireEmailVerified } = tokenSettings;
+	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
