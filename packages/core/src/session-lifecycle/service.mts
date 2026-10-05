@@ -353,6 +353,12 @@ const participantsOf = (request: SessionJoinRequest): SessionParticipant[] => {
 	return participants;
 };
 
+/** Whether `a` and `b` are one session: the same subject, authentication time and end. */
+const sameSession = (a: UserSession, b: UserSession): boolean =>
+	a.sub === b.sub &&
+	a.authTime.getTime() === b.authTime.getTime() &&
+	a.expiresAt.getTime() === b.expiresAt.getTime();
+
 /** The most sids one page of the closing listing asks for. */
 const RESUME_PAGE = 100;
 
@@ -643,7 +649,15 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		if ((await bridge.join(sid, request, session.expiresAt, read === null)) === "refused") {
 			return false;
 		}
-		if (read === null) readSessionOpenAnswer(await store.open(sid, session.sub, session.expiresAt));
+		// Adopting, the open must land for this session: a record it refuses
+		// belongs to another session of the sid, or is closing.
+		if (
+			read === null &&
+			readSessionOpenAnswer(await store.open(sid, session.sub, session.expiresAt)).outcome !==
+				"opened"
+		) {
+			return false;
+		}
 		for (const participant of participants) {
 			if (readSessionJoinAnswer(await store.join(sid, participant)).outcome !== "joined") {
 				return false;
@@ -652,8 +666,12 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		// Adopting, the join opened the record itself: a close that completed
 		// since the read above, and whose closed record then left the store,
 		// let the open land. The close deletes the user session before it
-		// closes the record, so a session still read now was never closed.
-		if (read === null && (await userSessionOf(sid)) === null) return false;
+		// closes the record, so the session read first, still read now, was
+		// never closed; one gone, or another created under the sid since, was.
+		if (read === null) {
+			const again = await userSessionOf(sid);
+			if (again === null || !sameSession(again, session)) return false;
+		}
 		return true;
 	};
 

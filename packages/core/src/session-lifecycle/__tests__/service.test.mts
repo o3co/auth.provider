@@ -373,6 +373,88 @@ describe("join", () => {
 		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
 	});
 
+	describe("a join that adopts, when the sid is closed and its session replaced meanwhile", () => {
+		/** A harness whose store runs `race` once, inside the next `open`, then answers from `current`. */
+		const racing = () => {
+			const state: {
+				current?: SessionLifecycleStore;
+				race?: () => Promise<void>;
+			} = {};
+			const h = harness({
+				familyIndexWithoutEnd: true,
+				store: (inner) => {
+					state.current = inner;
+					const now = (): SessionLifecycleStore => state.current ?? inner;
+					return {
+						kind: inner.kind,
+						open: async (sid, sub, expiresAt) => {
+							const race = state.race;
+							state.race = undefined;
+							if (race !== undefined) await race();
+							return now().open(sid, sub, expiresAt);
+						},
+						join: (sid, participant) => now().join(sid, participant),
+						beginClose: (sid, request) => now().beginClose(sid, request),
+						completeIf: (sid, expected, item) => now().completeIf(sid, expected, item),
+						read: (sid) => now().read(sid),
+						listClosing: (limit, after) => now().listClosing(limit, after),
+					};
+				},
+			});
+			return { h, state };
+		};
+
+		/** A new user session under `SID`, the closed one's record gone from the store. */
+		const replace = async (
+			h: Harness,
+			state: { current?: SessionLifecycleStore },
+			sub: string,
+			expiresAt: Date,
+			{ open }: { readonly open: boolean },
+		): Promise<SessionLifecycleStore> => {
+			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+			const fresh = createInMemorySessionLifecycleStore();
+			state.current = fresh;
+			await h.sessions.create({
+				sid: SID,
+				sub,
+				authTime: new Date(),
+				expiresAt,
+				claims: {},
+				amr: ["pwd"],
+				authentication: undefined,
+			});
+			if (open) expect((await fresh.open(SID, sub, expiresAt)).outcome).toBe("opened");
+			return fresh;
+		};
+
+		it("is refused and withdrawn when the replacement holds its record, which gets no participant", async () => {
+			const { h, state } = racing();
+			await h.establish(SID, { open: false });
+			let fresh: SessionLifecycleStore | undefined;
+			state.race = async () => {
+				fresh = await replace(h, state, "someone-else", new Date(Date.now() + DAY), { open: true });
+			};
+			expect(await h.lifecycle.join(SID, { familyId: "f-stale" })).toEqual({ outcome: "refused" });
+			expect(h.revoked.has("f-stale")).toBe(true);
+			const record = readVersionedSessionLifecycle(
+				await (fresh as SessionLifecycleStore).read(SID),
+			);
+			expect(record?.value.sub).toBe("someone-else");
+			expect(record?.value.participants).toEqual([]);
+		});
+
+		it("is refused and withdrawn when the replacement has the same subject but another end", async () => {
+			const { h, state } = racing();
+			await h.establish(SID, { open: false });
+			state.race = async () => {
+				await replace(h, state, SUB, new Date(Date.now() + 2 * DAY), { open: false });
+			};
+			expect(await h.lifecycle.join(SID, { familyId: "f-stale" })).toEqual({ outcome: "refused" });
+			expect(h.revoked.has("f-stale")).toBe(true);
+		});
+	});
+
 	it("answers unavailable when the lifecycle store cannot answer", async () => {
 		const h = harness({
 			store: (inner) => ({

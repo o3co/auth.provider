@@ -288,11 +288,14 @@ never unsafe; by a join only where no end mark can be present — its family
 passed `addFamilyIdUnlessEnded`, or the family index keeps no mark. A join
 with no family, on an index that keeps the mark, cannot read it and is
 refused with nothing written: the conservative reading of "only when no old
-mark is present". A join that adopts reads the user session again once it
-has opened the record and joined: a close that completed since its first
-read, and whose closed record then left the store, let the open land, and
-the close deleted the user session before it closed the record, so a join
-that finds it gone is refused and withdrawn like one the record refuses.
+mark is present". A join that adopts is refused when the store refuses its
+open, and reads the user session again once it has opened the record and
+joined: a close that completed since its first read, and whose closed
+record then left the store, let the open land, and the close deleted the
+user session before it closed the record, so a join that finds it gone, or
+finds another session created under the sid since (another subject,
+authentication time or end), is refused and withdrawn like one the record
+refuses.
 Liveness of a session with no record reads its user session alone. The bridge and adoption go with the old stores; an absent
 record then reads as closed.
 
