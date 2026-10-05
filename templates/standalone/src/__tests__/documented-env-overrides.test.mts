@@ -28,7 +28,7 @@ import {
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
-import { oauthModule } from "@o3co/auth-provider-oauth";
+import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
@@ -691,7 +691,7 @@ function oauthSection(config: AppConfig): {
 	readonly consentPage?: { readonly url: string };
 	readonly clientIdMetadataDocuments?: Readonly<Record<string, unknown>>;
 } {
-	const schema = oauthModule({ config }).section?.schema;
+	const schema = oauthEndpointsModule.section?.schema;
 	if (schema === undefined) throw new Error("the oauth module declares no section");
 	return schema.parse(config.oauth) as ReturnType<typeof oauthSection>;
 }

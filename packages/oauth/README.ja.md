@@ -50,7 +50,7 @@ npm install @o3co/auth-provider-oauth @o3co/auth-provider-core express express-s
 peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-session@^1.17.0`。
 このパッケージは `accepts`、`jose`、`zod` に依存する。
 
-core が peer なのは、構成が core を 1 つだけ持つようにするため: コンポジションルートが `createApp` を import する core であり、他のパッケージの `declare module` による core の拡張が届く core である。express-session が peer なのは、ルーターがブラウザーセッションを読み、その型を拡張するから（`/authorize`、`session` グラント、ログアウト）。ブラウザーのフローを扱う構成は、下の例のとおり `@o3co/auth-provider-session` の `sessionStoreModuleFor(config)` でそれをマウントする。
+core が peer なのは、構成が core を 1 つだけ持つようにするため: コンポジションルートが `createApp` を import する core であり、他のパッケージの `declare module` による core の拡張が届く core である。express-session が peer なのは、ルーターがブラウザーセッションを読み、その型を拡張するから（`/authorize`、`session` グラント、ログアウト）。ブラウザーのフローを扱う構成は、下の例のとおり `@o3co/auth-provider-session` の `sessionStoreModule` でそれをマウントする。
 
 ## 組み込み方
 
@@ -62,13 +62,13 @@ import {
   oauthEndpointsModule,
   oauthSessionGrantModule,
 } from "@o3co/auth-provider-oauth";
-import { sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
     // express-session をマウントする。自前の順序指定を持たないので、
     // ブラウザーセッションを読むすべてのモジュールより前に並べること。
-    sessionStoreModuleFor(config),
+    sessionStoreModule,
     oauthEndpointsModule,
     oauthSessionGrantModule,
     oauthAuthorizationGrantsModule,
@@ -142,9 +142,9 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **モジュール** — [なぜ 4 つのモジュールか](#責務と役割)を参照。
 
-- `oauthEndpointsModule`（ファクトリーではなくモジュールの値） — [`module.mts`](./src/module.mts)。`oauthModule({ config })` は非推奨: `oauthEndpointsModule` を返し、引数を一度も読んでいない。
+- `oauthEndpointsModule`（ファクトリーではなくモジュールの値） — [`module.mts`](./src/module.mts)。
 - `oauthAuthorizationGrantsModule`（ファクトリーではなくモジュールの値）— [`oauthAuthorization.mts`](./src/oauthAuthorization.mts)。
-- `oauthSessionGrantModule`（ファクトリではなくモジュールの値）— [`oauthSession.mts`](./src/oauthSession.mts)。`oauthSessionModule({ config })` は非推奨: 引数を無視して `oauthSessionGrantModule` を返す。
+- `oauthSessionGrantModule`（ファクトリではなくモジュールの値）— [`oauthSession.mts`](./src/oauthSession.mts)。
 - `subjectRevocationServiceModule`（ファクトリではなくモジュールの値） — [`logout/subjectRevocationService.mts`](./src/logout/subjectRevocationService.mts)
 
 **ルーター。** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — 明示的なオプションから `/oauth` ルーターを組み立てる。`oauthEndpointsModule` が解決済みの deps と自分のセクション（`section`、型は `OAuthSection`）を渡して呼ぶものであり、ルーターを自分でマウントする composition root 向け。`section` と `federationSettings` は必須で、ルーターは設定を受け取らない: ルーターが読む `oauth.*` の設定はすべてその 1 つのセクションから来て、インストールされたフェデレーションのどれが上流 IdP の `amr` を信頼するかは、core の `core.federations` の見え方である `federationSettings` から来る（テストは `@o3co/auth-provider-core/testing` の `createTestFederationSettings` で作る）。どちらかが無ければ、ルーターはそれを名指して組み立てを拒否する。グラントレジストリは生成しない: `registry` は呼び出し元が渡す `get(grantType)` を持つ任意のオブジェクトで、同じ値がそのまま返る。`/oauth/token` はこれに対して振り分け、`/authorize` はこれが `authorization_code` グラントを持つときだけマウントされる。そのとき `codeRepository` は必須である。登録済みのグラントタイプが必要な呼び出し元は core の `grantHandlerResolver` を読むこと。`requirements` は必須である: boot プランナーが組み立てた `sessionRequirementResolver` で、`/authorize` と同意ステップはそれを通してセッションを読む。それが無い場合も、プランナーが組み立てていないものが渡された場合も、ルーターは組み立てを拒否する。この二つが許可を求めるアクションは `oauth.authorize` と `oauth.consent` で、`oauthEndpointsModule` が登録する。ルーターを自分でマウントする root は `OAUTH_ROUTER_ADMISSION_ACTIONS` を `contributes.admissionActions` に登録する。登録しなければ、ルーターはハンドラーとアクションを名指して組み立てを拒否する。テストは `@o3co/auth-provider-core/testing` の `resolverForTests` でリゾルバーを作り、それらを登録する。ルーターが読む登録済みクライアントはすべて、渡された `clientRepository` の上に置いた core のクライアントレコード境界（`validatedClientRepository`）を通して読む。Client ID Metadata Documents の有効・無効によらない。登録のスキーマが拒否するレコードは `client_record_refused` を warn で出し、検索は core のブランド付きの拒否（`isClientRecordRefused`）で reject する: `/authorize`・`/token`・`/introspect`・`/revoke`・同意は、読み取りが例外を投げたときと同じく `503 temporarily_unavailable` で答え、エラーの射影に `reason: "client_record_refused"` を載せた `client_repository_unavailable` をログに出す。ドキュメントが有効なときも同じである（[Client ID Metadata Documents](#client-id-metadata-documents-529)）。すでに境界の後ろにあるリポジトリはそのまま読み、二重にはラップしない。ドキュメントが有効なときは、渡されたセクションの `oauth.clientIdMetadataDocuments` から、ルーターがそのリポジトリの上に自分のドキュメントのフォールバックを置く。フォールバックは登録済みクライアントを自分で境界を通して読む。
@@ -568,7 +568,7 @@ OIDC のログアウトエンドポイントは、セッションカスケード
 
 ### セッション終了の通知器
 
-`oauthModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。まだライフサイクルを通してセッションを終了するものはなく、以下のログアウトルートは今も自分のカスケードを走らせる。
+`oauthEndpointsModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。まだライフサイクルを通してセッションを終了するものはなく、以下のログアウトルートは今も自分のカスケードを走らせる。
 
 - 通知を送る時点の登録で読んだ relying party の `backchannelLogoutUri` へ、OIDC Back-Channel Logout 1.0 の `logout_token` を 1 つ POST する。送り手と外向きの経路はログアウトルートのブロードキャストと同じである。トークンはキーストアが署名し、`iss` はモジュールの issuer（`oauth.jwt.issuer`）である。
 - トークンは、relying party が断っていない限り（`backchannelLogoutSessionRequired: false`）、何がセッションを終了させたかにかかわらず、そのセッションの `sid` を含む。

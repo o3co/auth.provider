@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-apple
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 Sign in with Apple federation provider for `auth.provider` — Apple's **web**
 flow, in a browser, back to this server.
@@ -80,11 +80,11 @@ module requires no dependency.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { appleFederationTypeModule } from "@o3co/auth-provider-federation-apple";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config), // the form_post transaction lives in this store
+    sessionStoreModule, // the form_post transaction lives in this store
     sessionModule,
     appleFederationTypeModule(),
     // ... composition-root modules supplying userRepository and the session stores

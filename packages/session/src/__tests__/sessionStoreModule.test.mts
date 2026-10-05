@@ -25,7 +25,7 @@ import express from "express";
 import { createClient } from "redis";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { sessionStoreModule, sessionStoreModuleFor } from "../modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "../modules/sessionStoreModule.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 // The redis session-store builder dynamically imports these; mock them so the
@@ -95,7 +95,7 @@ describe("sessionStoreModule", () => {
 	it("declares lifecycleRegistrar and readinessRegistrar as optional, and reads its own section, not config", () => {
 		const m = sessionStoreModule as unknown as Module;
 		expect(m.name).toBe("session-store");
-		expect(m.requires).not.toContain("config");
+		expect(m.requires ?? []).not.toContain("config");
 		expect(m.section?.at).toBeUndefined();
 		expect(m.optional).toContain("lifecycleRegistrar");
 		expect(m.optional).toContain("readinessRegistrar");
@@ -244,8 +244,6 @@ describe("sessionStoreModule", () => {
 // the replica-safety guard refuses, and the storage type is the module's own
 // section: `sessionStoreModule` declares its replica safety from that section,
 // so the guard reads the declaration at stage 1 like the others.
-// `sessionStoreModuleFor(config)` declares the same from the config it is
-// handed.
 // ---------------------------------------------------------------------------
 
 const memoryConfig = baseConfig;
@@ -284,7 +282,6 @@ describe("sessionStoreModule — replica safety declared from its section", () =
 		const reason = replicaUnsafeReason(sessionStoreModule, memoryConfig["session-store"]);
 		// The guard quotes this; it has to say what breaks, not "use redis".
 		expect(reason).toMatch(/^the express-session store forks per replica/);
-		expect(reason).toBe(replicaUnsafeReason(sessionStoreModuleFor(memoryConfig as never)));
 	});
 
 	it("declares nothing when the store is redis — the state lives in a shared store", () => {
@@ -338,151 +335,19 @@ describe("sessionStoreModule — replica safety declared from its section", () =
 			}),
 		).toBe("silent");
 	});
-
-	describe.each([
-		["memory", memoryConfig],
-		["redis", redisConfig],
-	] as const)("with session-store.storage.type = %s", (_type, config) => {
-		it.each(Object.keys(MODES) as (keyof typeof MODES)[])(
-			"the guard answers under %s as it does for sessionStoreModuleFor(config)",
-			(mode) => {
-				expect(
-					guardOutcome({
-						modules: [sessionStoreModule],
-						config: MODES[mode],
-						sections: sectionsOf(config),
-					}),
-				).toEqual(
-					guardOutcome({
-						modules: [sessionStoreModuleFor(config as never)],
-						config: MODES[mode],
-					}),
-				);
-			},
-		);
-	});
 });
 
-describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
-	it("declares replica-unsafe state on the manifest when session-store.storage.type is memory", () => {
-		const m = sessionStoreModuleFor(memoryConfig as never) as unknown as Module;
-		expect(m.replicaSafety).toMatchObject({ unsafe: true });
-		expect(replicaUnsafeReason(m)).toMatch(/^the express-session store forks per replica/);
+describe("sessionStoreModule — the storage under core.deployment.mode", () => {
+	// The guard decides by the section boot parsed, which is the one the route
+	// mounts, and refuses before any route is built: the route reads no mode.
+	it("reads no deploymentMode slot", () => {
+		expect([
+			...(sessionStoreModule.requires ?? []),
+			...(sessionStoreModule.optional ?? []),
+		]).not.toContain("deploymentMode");
 	});
 
-	it("declares nothing when the store is redis — the state lives in a shared store", () => {
-		const m = sessionStoreModuleFor(redisConfig as never) as unknown as Module;
-		expect(m.replicaSafety).toBeUndefined();
-		expect(replicaUnsafeReason(m)).toBeUndefined();
-	});
-
-	it("is otherwise the same module: name, slots, section and the one route", () => {
-		const base = sessionStoreModule as unknown as Module;
-		for (const m of [
-			sessionStoreModuleFor(memoryConfig as never),
-			sessionStoreModuleFor(redisConfig as never),
-		]) {
-			const built = m as unknown as Module;
-			expect(built.name).toBe(base.name);
-			expect(built.requires).toEqual(base.requires);
-			expect(built.optional).toEqual(base.optional);
-			expect(built.section).toBe(base.section);
-			expect(built.contributes?.routes).toHaveLength(1);
-		}
-	});
-});
-
-describe("sessionStoreModule — the route factory's refusal under multi, and boot's", () => {
-	// The route factory, which mounts the store its section names, refuses
-	// the same combination with the same reason rather than mount a
-	// per-process store: a module built by `sessionStoreModuleFor` from a
-	// config other than the one booted told the guard nothing. The mode is
-	// the `deploymentMode` slot core fills from `core.deployment.mode`; the
-	// configuration's own `deployment` is not read.
-	const factoryOf = (m: unknown) => {
-		const factory = (m as Module).contributes?.routes?.[0];
-		if (typeof factory !== "function") throw new Error("not a factory");
-		return factory;
-	};
-
-	it("requires the deploymentMode slot, as the configured module does", () => {
-		expect(sessionStoreModule.requires).toContain("deploymentMode");
-		expect(sessionStoreModuleFor(memoryConfig as never).requires).toContain("deploymentMode");
-	});
-
-	it('refuses memory storage when the slot says "multi"', async () => {
-		await expect(
-			factoryOf(sessionStoreModule)({
-				section: memoryConfig["session-store"] as never,
-				deploymentMode: "multi",
-				lifecycleRegistrar: undefined,
-			} as never),
-		).rejects.toMatchObject({
-			name: "BootError",
-			reason: "replica-unsafe-adapter",
-			details: { modules: ["session-store"] },
-		});
-	});
-
-	it('mounts memory storage when the slot says "single" or "unset"', async () => {
-		for (const deploymentMode of ["single", "unset"] as const) {
-			const route = await factoryOf(sessionStoreModule)({
-				section: memoryConfig["session-store"] as never,
-				deploymentMode,
-				lifecycleRegistrar: undefined,
-			} as never);
-			expect(route.id).toBe("session-middleware");
-		}
-	});
-
-	it('mounts redis storage when the slot says "multi"', async () => {
-		const route = await factoryOf(sessionStoreModule)({
-			section: redisConfig["session-store"] as never,
-			deploymentMode: "multi",
-			lifecycleRegistrar: undefined,
-		} as never);
-		expect(route.id).toBe("session-middleware");
-	});
-
-	it("refuses a slot it cannot read, absent included, as a TypeError naming it", async () => {
-		for (const deploymentMode of [undefined, "MULTI", null]) {
-			await expect(
-				factoryOf(sessionStoreModule)({
-					section: redisConfig["session-store"] as never,
-					deploymentMode,
-					lifecycleRegistrar: undefined,
-				} as never),
-				String(deploymentMode),
-			).rejects.toThrow(
-				new TypeError('session-store: deploymentMode must be "single", "multi" or "unset"'),
-			);
-		}
-	});
-
-	it("decides by the slot, whatever the configuration's deployment says", async () => {
-		await expect(
-			factoryOf(sessionStoreModule)({
-				config: { ...memoryConfig, core: { deployment: { mode: "single" } } } as never,
-				section: memoryConfig["session-store"] as never,
-				deploymentMode: "multi",
-				lifecycleRegistrar: undefined,
-			} as never),
-		).rejects.toMatchObject({ reason: "replica-unsafe-adapter" });
-		const route = await factoryOf(sessionStoreModule)({
-			config: { ...memoryConfig, core: { deployment: { mode: "multi" } } } as never,
-			section: memoryConfig["session-store"] as never,
-			deploymentMode: "single",
-			lifecycleRegistrar: undefined,
-		} as never);
-		expect(route.id).toBe("session-middleware");
-	});
-
-	const BOOT_FORMS = [
-		["sessionStoreModule", () => sessionStoreModule],
-		["sessionStoreModuleFor(config)", (config: never) => sessionStoreModuleFor(config)],
-	] as const;
-
-	describe.each(BOOT_FORMS)("through createApp, %s", (_form, form) => {
+	describe("through createApp", () => {
 		it.each([
 			["refused", "core.deployment.mode = multi", { mode: "multi" }],
 			["silent", "core.deployment.mode = single", { mode: "single" }],
@@ -505,7 +370,7 @@ describe("sessionStoreModule — the route factory's refusal under multi, and bo
 				child: vi.fn(),
 			};
 			const boot = createApp({
-				modules: [form(config as never)],
+				modules: [sessionStoreModule],
 				bootstrapComponents: { config, logger, pathResolver: (p: string) => p } as never,
 			});
 			if (outcome === "refused") {
@@ -543,7 +408,7 @@ describe("sessionStoreModule — the route factory's refusal under multi, and bo
 				core: { ...base.core, deployment: { mode: "multi" } },
 			});
 			const handle = await createApp({
-				modules: [form(config as never)],
+				modules: [sessionStoreModule],
 				bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
 			});
 			try {
@@ -581,16 +446,11 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 	const configWith = (change: Record<string, unknown>) =>
 		withSessionCaptures(withStore(makeValidAppConfig(), change));
 
-	const FORMS = [
-		["sessionStoreModuleFor(config)", (config: never) => sessionStoreModuleFor(config)],
-		["sessionStoreModule", () => sessionStoreModule],
-	] as const;
-
 	/** Boots the session store's module alone: nothing requires the slot. */
-	const bootAlone = (form: (typeof FORMS)[number][1], change: Record<string, unknown>) => {
+	const bootAlone = (change: Record<string, unknown>) => {
 		const config = configWith(change);
 		return createApp({
-			modules: [form(config as never)],
+			modules: [sessionStoreModule],
 			bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
 		});
 	};
@@ -661,11 +521,11 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		["a lifetime above the ceiling", "maxAge", { maxAge: MAX_DURATION_MS + 1 }, LIFETIME],
 	] as const;
 
-	describe.each(FORMS)("through createApp, with %s installed alone", (_form, form) => {
+	describe("through createApp, with the module installed alone", () => {
 		it.each(REFUSED_BY_THE_STORE)(
 			"refuses %s at validation, its one issue naming session-store.%s with the policy's message",
 			async (_what, key, change, message) => {
-				expect(await settled(bootAlone(form, change))).toMatchObject({
+				expect(await settled(bootAlone(change))).toMatchObject({
 					name: "BootError",
 					reason: "config-validation-failed",
 					stage: "validateManifests",
@@ -680,7 +540,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		it.each(REFUSED_BY_THE_SCHEMA)(
 			"refuses %s at validation, naming session-store.%s",
 			async (_what, key, change) => {
-				expect(await settled(bootAlone(form, change))).toMatchObject({
+				expect(await settled(bootAlone(change))).toMatchObject({
 					name: "BootError",
 					reason: "config-validation-failed",
 					stage: "validateManifests",
@@ -712,7 +572,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			["a lifetime of 1 ms", { maxAge: 1 }],
 			["a lifetime at the ceiling", { maxAge: MAX_DURATION_MS }],
 		])("mounts %s", async (_what, change) => {
-			const handle = await bootAlone(form, change);
+			const handle = await bootAlone(change);
 			try {
 				expect(handle.routes.map((r) => r.contribution.id)).toContain("session-middleware");
 			} finally {

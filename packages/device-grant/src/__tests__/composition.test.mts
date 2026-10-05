@@ -15,7 +15,7 @@
  */
 
 /**
- * The device grant booted beside `oauthModule` through core's `createApp`,
+ * The device grant booted beside `oauthEndpointsModule` through core's `createApp`,
  * the composition the package README's Quick start describes. What this
  * package contributes is only checked for real once core's discovery builder,
  * oauth's token endpoint and oauth's router under the same `/oauth` prefix
@@ -57,8 +57,8 @@ import {
 	memorySessionStoresModule,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
-import { oauthModule, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { oauthEndpointsModule, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import express, { type RequestHandler } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -83,7 +83,7 @@ const clientRepository: ClientRepository = {
 	authenticate: async () => null,
 };
 
-/** `oauthModule` requires one; nothing here runs the authorization-code flow. */
+/** `oauthEndpointsModule` requires one; nothing here runs the authorization-code flow. */
 const codeRepository: CodeRepository = {
 	createCode: async () => {
 		throw new Error("the authorization-code flow is not exercised here");
@@ -281,34 +281,25 @@ const startDevice = async (app: express.Express): Promise<string> => {
 
 /**
  * Both orders of the two modules that share `/oauth`. Each parses its own
- * body (`oauthModule`'s router only for its own routes), so every case below
+ * body (`oauthEndpointsModule`'s router only for its own routes), so every case below
  * has to come out the same in either list order.
  */
 const orders = [
-	[
-		"oauthModule listed first",
-		(config: AppConfig) => [oauthModule({ config }), deviceAuthorizationGrantModule],
-	],
-	[
-		"the device-grant module listed first",
-		(config: AppConfig) => [deviceAuthorizationGrantModule, oauthModule({ config })],
-	],
+	["oauthEndpointsModule listed first", [oauthEndpointsModule, deviceAuthorizationGrantModule]],
+	["the device-grant module listed first", [deviceAuthorizationGrantModule, oauthEndpointsModule]],
 ] as const;
 
-describe("the device-grant module beside oauthModule — discovery (RFC 8628 §4)", () => {
+describe("the device-grant module beside oauthEndpointsModule — discovery (RFC 8628 §4)", () => {
 	it.each(orders)(
 		"boots enabled and advertises device_authorization_endpoint under the issuer (%s)",
 		async (_label, ordered) => {
-			// `oauthModule` always activates discovery, and core's builder refuses
+			// `oauthEndpointsModule` always activates discovery, and core's builder refuses
 			// an issuer-relative endpoint handed over as a literal `metadata`
 			// field. So the one composition that needs this field — an enabled
 			// grant beside the token endpoint it is polled at — is the one that
 			// has to boot for the field to exist at all.
 			const config = makeConfig(ENABLED);
-			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
-				...ordered(config),
-			]);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered]);
 			try {
 				const res = await request(app).get("/.well-known/openid-configuration");
 
@@ -324,7 +315,7 @@ describe("the device-grant module beside oauthModule — discovery (RFC 8628 §4
 	);
 });
 
-describe("the device-grant module beside oauthModule — installed but disabled", () => {
+describe("the device-grant module beside oauthEndpointsModule — installed but disabled", () => {
 	it.each(orders)(
 		"does not advertise the grant, and /oauth/token refuses it as unsupported (%s)",
 		async (_label, ordered) => {
@@ -333,10 +324,7 @@ describe("the device-grant module beside oauthModule — installed but disabled"
 			// that is advertised — including a handler whose only job is to
 			// refuse. The document must say what the endpoint does.
 			const config = makeConfig({ enabled: false });
-			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
-				...ordered(config),
-			]);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered]);
 			try {
 				const discovery = await request(app).get("/.well-known/openid-configuration");
 				expect(discovery.status).toBe(200);
@@ -356,7 +344,7 @@ describe("the device-grant module beside oauthModule — installed but disabled"
 	);
 });
 
-describe("the device-grant module beside oauthModule — POST /oauth/device/verification is JSON-only", () => {
+describe("the device-grant module beside oauthEndpointsModule — POST /oauth/device/verification is JSON-only", () => {
 	// A form body is a CORS "simple" request: a browser sends it cross-site,
 	// with the victim's session cookie and no preflight. The refusal must hold
 	// in either list order. The CSRF token is valid here on purpose: the media
@@ -365,10 +353,7 @@ describe("the device-grant module beside oauthModule — POST /oauth/device/veri
 		"refuses a form-encoded approval carrying a valid CSRF token (%s)",
 		async (_label, ordered) => {
 			const config = makeConfig(ENABLED);
-			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
-				...ordered(config),
-			]);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered]);
 			try {
 				const userCode = await startDevice(app);
 				const agent = request.agent(app);
@@ -406,13 +391,10 @@ describe("the device-grant module beside oauthModule — POST /oauth/device/veri
 			// The session's token may travel in a body field, which the guard
 			// can only see in a body something has parsed. The route parses
 			// JSON only, so a form carrying its token in the body has none —
-			// the same answer whether or not `oauthModule`'s router could have
+			// the same answer whether or not `oauthEndpointsModule`'s router could have
 			// parsed it first.
 			const config = makeConfig(ENABLED);
-			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
-				...ordered(config),
-			]);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered]);
 			try {
 				const userCode = await startDevice(app);
 				const agent = request.agent(app);
@@ -435,16 +417,16 @@ describe("the device-grant module beside oauthModule — POST /oauth/device/veri
 	);
 });
 
-describe("the device-grant module beside oauthModule — the 16 KiB body limit", () => {
+describe("the device-grant module beside oauthEndpointsModule — the 16 KiB body limit", () => {
 	// Both routes parse with a 16 KiB limit, and `body-parser` does not parse a
 	// body twice — so the bound holds only if no other parser (such as
-	// `oauthModule`'s 100 KiB ones) reads the body first. Declared or chunked,
-	// just over the bound or over `oauthModule`'s own limit, the answer is one
+	// `oauthEndpointsModule`'s 100 KiB ones) reads the body first. Declared or chunked,
+	// just over the bound or over `oauthEndpointsModule`'s own limit, the answer is one
 	// JSON 413 in either order.
 	const TOO_LARGE = { error: "invalid_request", error_description: "body_too_large" };
 
-	// 40 000 bytes is over this package's bound and under `oauthModule`'s;
-	// 102 401 is one byte over `oauthModule`'s own 100 KiB, where its parser
+	// 40 000 bytes is over this package's bound and under `oauthEndpointsModule`'s;
+	// 102 401 is one byte over `oauthEndpointsModule`'s own 100 KiB, where its parser
 	// refuses the body itself if it reads it first.
 	const oversized = orders.flatMap(([label, ordered]) =>
 		[40_000, 102_401].map((bytes) => [bytes, label, ordered] as const),
@@ -454,10 +436,7 @@ describe("the device-grant module beside oauthModule — the 16 KiB body limit",
 		"refuses a declared %i-byte JSON body at both routes with 413 body_too_large (%s)",
 		async (bytes, _label, ordered) => {
 			const config = makeConfig(ENABLED);
-			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
-				...ordered(config),
-			]);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered]);
 			try {
 				const userCode = await startDevice(app);
 				const agent = request.agent(app);
@@ -494,10 +473,7 @@ describe("the device-grant module beside oauthModule — the 16 KiB body limit",
 			// whatever error handler the host app happens to run. Nothing is
 			// signed in: the size is refused before anything else is asked.
 			const config = makeConfig(ENABLED);
-			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
-				...ordered(config),
-			]);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered]);
 			try {
 				const body = sized(40_000, { client_id: CLIENT_ID, action: "lookup" });
 				for (const path of ["/oauth/device_authorization", "/oauth/device/verification"]) {
@@ -520,10 +496,7 @@ describe("the device-grant module beside oauthModule — the 16 KiB body limit",
 			// parser refuses it before anything else is asked, so nothing is
 			// signed in.
 			const config = makeConfig(ENABLED);
-			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
-				...ordered(config),
-			]);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered]);
 			try {
 				for (const path of ["/oauth/device_authorization", "/oauth/device/verification"]) {
 					const res = await request(app).post(path).type("json").send("{not json");
@@ -548,10 +521,7 @@ describe("the device-grant module beside oauthModule — the 16 KiB body limit",
 			// restated bound that disagreed with the parser would accept or
 			// refuse the same request depending on how its size was known.
 			const config = makeConfig(ENABLED);
-			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
-				...ordered(config),
-			]);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered]);
 			try {
 				const authorization = await request(app)
 					.post("/oauth/device_authorization")
@@ -578,7 +548,7 @@ describe("the device-grant module beside oauthModule — the 16 KiB body limit",
 	);
 });
 
-describe("the device-grant module beside oauthModule — error text (RFC 6749 Appendix A.8)", () => {
+describe("the device-grant module beside oauthEndpointsModule — error text (RFC 6749 Appendix A.8)", () => {
 	// `error_description` is 1*NQSCHAR: printable ASCII without `"` and `\`.
 	it("sends a refused scope the client asked for within that set", async () => {
 		// The refused values are the client's own. A scope is read strictly by
@@ -588,8 +558,8 @@ describe("the device-grant module beside oauthModule — error text (RFC 6749 Ap
 		// well-formed refused entry is a scope-token, which the set admits, and
 		// is echoed as sent. The sanitiser still stands behind the echo.
 		const config = makeConfig(ENABLED);
-		const [oauth, device] = orders[0][1](config);
-		const { handle, app } = await bootWith(config, [sessionStoreModuleFor(config), oauth, device]);
+		const [oauth, device] = orders[0][1];
+		const { handle, app } = await bootWith(config, [sessionStoreModule, oauth, device]);
 		const NQSCHAR = /^[\x20-\x21\x23-\x5B\x5D-\x7E]+$/;
 		try {
 			const malformed = await request(app)
@@ -620,8 +590,8 @@ describe("the device-grant module beside oauthModule — error text (RFC 6749 Ap
 
 	it("answers an unknown code in plain ASCII", async () => {
 		const config = makeConfig(ENABLED);
-		const [oauth, device] = orders[0][1](config);
-		const { handle, app } = await bootWith(config, [sessionStoreModuleFor(config), oauth, device]);
+		const [oauth, device] = orders[0][1];
+		const { handle, app } = await bootWith(config, [sessionStoreModule, oauth, device]);
 		try {
 			const agent = request.agent(app);
 			await signIn(agent);
@@ -662,9 +632,9 @@ const readsItsOwnBody: RequestHandler = (req, res) => {
 	});
 };
 
-describe("a route of another module under /oauth, listed after oauthModule", () => {
+describe("a route of another module under /oauth, listed after oauthEndpointsModule", () => {
 	// What enabling this grant must not change. The route has no parser of
-	// its own and reads the request stream itself: whatever oauthModule's
+	// its own and reads the request stream itself: whatever oauthEndpointsModule's
 	// router or this package's routes do, the body has to reach it unread.
 
 	const elsewhereModule = defineModule({
@@ -695,9 +665,9 @@ describe("a route of another module under /oauth, listed after oauthModule", () 
 		"receives its body unread, with %s",
 		async (_label, deviceAuthorization, ordered) => {
 			const config = makeConfig(deviceAuthorization as Record<string, unknown>);
-			const [first, second] = ordered(config);
+			const [first, second] = ordered;
 			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
+				sessionStoreModule,
 				first,
 				elsewhereModule,
 				second,
@@ -748,9 +718,9 @@ describe("a route of another module beneath the device routes' paths", () => {
 		"%s receives its body unread and none of the device routes' answers, with %s",
 		async (path, _state, deviceAuthorization) => {
 			const config = makeConfig(deviceAuthorization as Record<string, unknown>);
-			const [first, second] = orders[0][1](config);
+			const [first, second] = orders[0][1];
 			const { handle, app } = await bootWith(config, [
-				sessionStoreModuleFor(config),
+				sessionStoreModule,
 				first,
 				second,
 				beneathModule,
@@ -771,7 +741,7 @@ describe("a route of another module beneath the device routes' paths", () => {
 	);
 });
 
-describe("the device-grant module beside oauthModule — a device-code store outage is 503 temporarily_unavailable", () => {
+describe("the device-grant module beside oauthEndpointsModule — a device-code store outage is 503 temporarily_unavailable", () => {
 	// The store can be down after the device asked for its codes: the human's
 	// lookup and decision and the device's poll then each reach a store that
 	// answers with a transport error. That is an outage, which the product
@@ -833,20 +803,16 @@ describe("the device-grant module beside oauthModule — a device-code store out
 			const outage = storeWithOutage();
 			const logger = recordingLogger();
 			const events: AuditEvent[] = [];
-			const { handle, app } = await bootWith(
-				config,
-				[sessionStoreModuleFor(config), ...ordered(config)],
-				{
-					deviceCodeStore: outage.module,
-					logger: logger as unknown as Logger,
-					auditSink: {
-						kind: "recording",
-						record: async (event) => {
-							events.push(event);
-						},
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered], {
+				deviceCodeStore: outage.module,
+				logger: logger as unknown as Logger,
+				auditSink: {
+					kind: "recording",
+					record: async (event) => {
+						events.push(event);
 					},
 				},
-			);
+			});
 			try {
 				const userCode = await startDevice(app);
 				const agent = request.agent(app);
@@ -933,14 +899,10 @@ describe("the device-grant module beside oauthModule — a device-code store out
 			const config = makeConfig(ENABLED);
 			const outage = storeWithOutage();
 			const logger = recordingLogger();
-			const { handle, app } = await bootWith(
-				config,
-				[sessionStoreModuleFor(config), ...ordered(config)],
-				{
-					deviceCodeStore: outage.module,
-					logger: logger as unknown as Logger,
-				},
-			);
+			const { handle, app } = await bootWith(config, [sessionStoreModule, ...ordered], {
+				deviceCodeStore: outage.module,
+				logger: logger as unknown as Logger,
+			});
 			try {
 				const started = await request(app)
 					.post("/oauth/device_authorization")
@@ -980,7 +942,7 @@ describe("the device-grant module beside oauthModule — a device-code store out
 	);
 });
 
-describe("the device-grant module beside oauthModule — an approval needs the live session behind the cookie", () => {
+describe("the device-grant module beside oauthEndpointsModule — an approval needs the live session behind the cookie", () => {
 	// The cookie's `isAuthenticated` is the browser's claim; the `UserSession`
 	// its `sid` names is the fact. The device token an approval leads to
 	// carries no `sid` and no `family_id`, so the approval is the one place the
@@ -988,10 +950,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 	// the live session".
 
 	const [first] = orders;
-	const modulesFor = (config: AppConfig): Module[] => [
-		sessionStoreModuleFor(config),
-		...first[1](config),
-	];
+	const modules: Module[] = [sessionStoreModule, ...first[1]];
 
 	/** The one session `user-1` holds, found the way a credential change finds it. */
 	const sidOf = async (components: Readonly<Partial<ComponentMap>>): Promise<string> => {
@@ -1025,7 +984,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 
 	it("approves from a live session, and the device's poll is then answered with a token", async () => {
 		const config = makeConfig(ENABLED);
-		const { handle, app } = await bootWith(config, modulesFor(config));
+		const { handle, app } = await bootWith(config, modules);
 		try {
 			const { userCode, deviceCode } = await startWithCodes(app);
 			const agent = request.agent(app);
@@ -1049,7 +1008,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 
 	it("refuses every action once the UserSession behind the cookie is deleted, and the device stays pending", async () => {
 		const config = makeConfig(ENABLED);
-		const { handle, app } = await bootWith(config, modulesFor(config));
+		const { handle, app } = await bootWith(config, modules);
 		try {
 			const { userCode, deviceCode } = await startWithCodes(app);
 			const agent = request.agent(app);
@@ -1086,7 +1045,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 		// a later `iat`, so the watermark cannot reach it. Only the approval can.
 		const config = makeConfig(ENABLED);
 		const { handle, app } = await bootWith(config, [
-			...modulesFor(config),
+			...modules,
 			subjectRevocationServiceModule,
 			memoryRefreshTokenFamilyStoreModule,
 			defaultRefreshTokenFamilyRevocationModule,
@@ -1123,7 +1082,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 		// the boundary is in force: the record says live, the boundary says
 		// ended, and the boundary is the one a credential change relies on.
 		const config = makeConfig(ENABLED);
-		const { handle, app } = await bootWith(config, modulesFor(config));
+		const { handle, app } = await bootWith(config, modules);
 		try {
 			const { userCode, deviceCode } = await startWithCodes(app);
 			const agent = request.agent(app);
@@ -1157,7 +1116,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 		// package README, "Polling".
 		const config = makeConfig(ENABLED);
 		const { handle, app } = await bootWith(config, [
-			...modulesFor(config),
+			...modules,
 			subjectRevocationServiceModule,
 			memoryRefreshTokenFamilyStoreModule,
 			defaultRefreshTokenFamilyRevocationModule,
@@ -1204,7 +1163,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 		};
 		const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
 		const config = makeConfig(ENABLED);
-		const { handle, app } = await bootWith(config, modulesFor(config), {
+		const { handle, app } = await bootWith(config, modules, {
 			logger: logger as unknown as Logger,
 			overrideComponents: { userSessionStore },
 		});
@@ -1264,7 +1223,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 		// find those two gated and this path open.
 		const base = makeConfig(ENABLED);
 		const config = { ...base, oauth: { ...base.oauth, requireEmailVerified: true } } as AppConfig;
-		const { handle, app } = await bootWith(config, modulesFor(config));
+		const { handle, app } = await bootWith(config, modules);
 		try {
 			const unverified = await startWithCodes(app);
 			const alice = request.agent(app);
@@ -1298,7 +1257,7 @@ describe("the device-grant module beside oauthModule — an approval needs the l
 	});
 });
 
-describe("the device-grant module beside oauthModule — the composition's grantPolicy decides at the poll", () => {
+describe("the device-grant module beside oauthEndpointsModule — the composition's grantPolicy decides at the poll", () => {
 	// Boot hands a module only the slots its manifest names: without the
 	// declaration the grant reads no policy and mints.
 	const policyModule = (evaluate: GrantPolicyHook["evaluate"]): Module =>
@@ -1339,8 +1298,8 @@ describe("the device-grant module beside oauthModule — the composition's grant
 			errorDescription: "devices are closed",
 		}));
 		const { handle, app } = await bootWith(config, [
-			sessionStoreModuleFor(config),
-			oauthModule({ config }),
+			sessionStoreModule,
+			oauthEndpointsModule,
 			deviceAuthorizationGrantModule,
 			policyModule(evaluate),
 		]);

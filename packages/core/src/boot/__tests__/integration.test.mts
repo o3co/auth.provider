@@ -277,7 +277,7 @@ describe("integration — Scenario 2: missing-required-component failure diagnos
 			},
 		});
 
-		const oauthModule = defineModule({
+		const oauthEndpointsModule = defineModule({
 			name: "oauth",
 			requires: ["keyStore"],
 			provides: {},
@@ -325,7 +325,7 @@ describe("integration — Scenario 2: missing-required-component failure diagnos
 					repositoriesModule,
 					oauthAuthorizationModule,
 					sessionModule,
-					oauthModule,
+					oauthEndpointsModule,
 					googleFederationModule,
 					auditModule,
 				],

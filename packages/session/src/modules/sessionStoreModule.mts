@@ -9,9 +9,7 @@
  */
 
 import {
-	BootError,
 	type BuilderContext,
-	checkDeploymentMode,
 	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
@@ -146,14 +144,6 @@ const MEMORY_STORE_REPLICA_SAFETY: ReplicaSafetyDeclaration = {
 		"the express-session store forks per replica — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, logout clears only the session the replica it lands on can see, and every session is lost on restart",
 };
 
-/** The slice of config this module's manifest is built from. */
-export interface SessionStoreModuleConfig {
-	readonly "session-store"?: { readonly storage?: { readonly type?: unknown } };
-}
-
-const storageTypeOf = (config: SessionStoreModuleConfig | undefined): unknown =>
-	config?.["session-store"]?.storage?.type;
-
 /**
  * The module's replica safety, from its parsed section: express-session's
  * per-process `MemoryStore` for `storage.type = "memory"`; nothing for every
@@ -174,127 +164,6 @@ function sessionCookieOf(session: SessionCookieConfigSlice): SessionCookiePolicy
 	return policy;
 }
 
-function buildSessionStoreModule(
-	replicaSafety:
-		| ReplicaSafetyDeclaration
-		| ((section: SessionStoreSection) => ReplicaSafetyDeclaration | undefined)
-		| undefined,
-) {
-	// Written type arguments infer nothing, so the section schema (none) and
-	// the provided keys `authoritative` is typed against are written too.
-	return defineModule<
-		"deploymentMode",
-		"lifecycleRegistrar" | "readinessRegistrar" | "logger",
-		typeof sessionStoreConfigSchema,
-		"sessionCookiePolicy" | "csrfTokenSigner"
-	>({
-		name: MODULE_NAME,
-		section: SECTION,
-		// `deploymentMode`: memory storage is refused under `multi`, so a mode
-		// read as absent must not lift that.
-		requires: ["deploymentMode"],
-		// `logger` is optional: the redis client's error handler, and the
-		// middleware's report of a store that cannot load or save a session,
-		// fall back to consoleLogger when the composition wires no logger slot.
-		optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"],
-		...(replicaSafety === undefined ? {} : { replicaSafety }),
-		provides: {
-			// The session cookie's attributes, for a module that sets a cookie of
-			// its own beside the session's or sizes what must outlive a session:
-			// this module owns the cookie, and the others require the slot instead
-			// of reading `session-store.*`. They are the attributes express-session
-			// is given below; the signing secret is not among them.
-			sessionCookiePolicy: (deps) => sessionCookieOf(deps.section),
-			// The CSRF token's signature, under a key derived from the secret this
-			// module owns: the session module's guard and routes sign through it,
-			// and neither the secret nor the key leaves the signer.
-			csrfTokenSigner: (deps) => createSessionCsrfTokenSigner(requireSecret(deps.section)),
-		},
-		// The route mounts the cookie `session-store.*` describes: an override
-		// would describe a cookie no browser is given.
-		authoritative: ["sessionCookiePolicy"],
-		contributes: {
-			routes: [
-				async (deps) => {
-					const section = deps.section;
-					const secret = requireSecret(section);
-					const replicas = checkDeploymentMode(
-						deps.deploymentMode,
-						"session-store: deploymentMode",
-					);
-					const ctx: BuilderContext = {
-						lifecycle: deps.lifecycleRegistrar,
-						readiness: deps.readinessRegistrar,
-						logger: deps.logger,
-					};
-					const factory = createSessionStoreFactory(ctx);
-					registerBuiltinSessionStores(factory);
-					const storageSlice = section.storage as { type: string } & Record<string, unknown>;
-					// The stage-1 guard refused this combination already when the
-					// module declared from the section it was booted with. A module
-					// `sessionStoreModuleFor` built from another config told the
-					// guard nothing: refuse it here, with the same reason, rather
-					// than mount a per-process store.
-					if (storageSlice.type === "memory" && replicas === "multi") {
-						throw new BootError({
-							stage: "applyContributions",
-							reason: "replica-unsafe-adapter",
-							message: `core.deployment.mode is "multi" but session-store.storage.type is "memory", which cannot be shared across replicas: ${MEMORY_STORE_REPLICA_SAFETY.reason}. Set session-store.storage.type = "redis", or set core.deployment.mode = "single".`,
-							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
-						});
-					}
-					// The slot's cookie, refused before the store opens a connection.
-					const cookie = sessionCookieOf(section);
-					const store = await factory.create({
-						type: storageSlice.type,
-						...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),
-					});
-					// A store error express-session would hand to `next(err)` is
-					// answered by the guard: `503` when the session cannot be loaded,
-					// one error line either way (`../internal/cookieSession.mts`).
-					const middleware = session({
-						name: cookie.name,
-						secret,
-						resave: false,
-						saveUninitialized: false,
-						store,
-						cookie: {
-							path: "/",
-							httpOnly: true,
-							secure: cookie.secure,
-							maxAge: cookie.maxAgeMs,
-							sameSite: cookie.sameSite,
-							domain: cookie.domain,
-						},
-					});
-					// No `before` clause: see the mount-order contract on
-					// `sessionStoreModule` below.
-					return {
-						id: "session-middleware",
-						mountPath: "/",
-						handler: guardCookieSession(middleware, deps.logger ?? consoleLogger),
-					};
-				},
-			],
-		},
-	});
-}
-
-/**
- * The session-store module built for one config: {@link sessionStoreModule},
- * with its replica safety declared from `config` rather than from the section
- * boot parses. It declares `replicaSafety` when the configured
- * `session-store.storage.type` is `"memory"`, and nothing for every other
- * type, which is what {@link sessionStoreModule} answers for the same
- * section. List {@link sessionStoreModule} instead: it needs no config at
- * composition time.
- */
-export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
-	return buildSessionStoreModule(
-		storageTypeOf(config) === "memory" ? MEMORY_STORE_REPLICA_SAFETY : undefined,
-	);
-}
-
 /**
  * The session-store manifest: the express-session middleware as a
  * route at `mountPath: "/"`, built in the boot planner's DI graph so the
@@ -313,8 +182,85 @@ export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
  * `MemoryStore`, the same shape as every memory store the replica-safety
  * guard refuses, so the module declares `replicaSafety` for it: the guard
  * refuses it by name under `core.deployment.mode = "multi"`, listed with the
- * other offenders, warns when the mode is unset, and says nothing under
- * `"single"`. Every other storage type is a shared store and declares
- * nothing.
+ * other offenders, before any route is built, warns when the mode is unset,
+ * and says nothing under `"single"`. Every other storage type is a shared
+ * store and declares nothing. The route reads the section the guard decided
+ * by, so it mounts no store the guard did not see.
  */
-export const sessionStoreModule = buildSessionStoreModule(replicaSafetyOf);
+export const sessionStoreModule = defineModule<
+	// Written type arguments infer nothing, so the section schema and the
+	// provided keys `authoritative` is typed against are written too.
+	never,
+	"lifecycleRegistrar" | "readinessRegistrar" | "logger",
+	typeof sessionStoreConfigSchema,
+	"sessionCookiePolicy" | "csrfTokenSigner"
+>({
+	name: MODULE_NAME,
+	section: SECTION,
+	// `logger` is optional: the redis client's error handler, and the
+	// middleware's report of a store that cannot load or save a session,
+	// fall back to consoleLogger when the composition wires no logger slot.
+	optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"],
+	replicaSafety: replicaSafetyOf,
+	provides: {
+		// The session cookie's attributes, for a module that sets a cookie of
+		// its own beside the session's or sizes what must outlive a session:
+		// this module owns the cookie, and the others require the slot instead
+		// of reading `session-store.*`. They are the attributes express-session
+		// is given below; the signing secret is not among them.
+		sessionCookiePolicy: (deps) => sessionCookieOf(deps.section),
+		// The CSRF token's signature, under a key derived from the secret this
+		// module owns: the session module's guard and routes sign through it,
+		// and neither the secret nor the key leaves the signer.
+		csrfTokenSigner: (deps) => createSessionCsrfTokenSigner(requireSecret(deps.section)),
+	},
+	// The route mounts the cookie `session-store.*` describes: an override
+	// would describe a cookie no browser is given.
+	authoritative: ["sessionCookiePolicy"],
+	contributes: {
+		routes: [
+			async (deps) => {
+				const section = deps.section;
+				const secret = requireSecret(section);
+				const ctx: BuilderContext = {
+					lifecycle: deps.lifecycleRegistrar,
+					readiness: deps.readinessRegistrar,
+					logger: deps.logger,
+				};
+				const factory = createSessionStoreFactory(ctx);
+				registerBuiltinSessionStores(factory);
+				const storageSlice = section.storage as { type: string } & Record<string, unknown>;
+				// The slot's cookie, refused before the store opens a connection.
+				const cookie = sessionCookieOf(section);
+				const store = await factory.create({
+					type: storageSlice.type,
+					...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),
+				});
+				// A store error express-session would hand to `next(err)` is
+				// answered by the guard: `503` when the session cannot be loaded,
+				// one error line either way (`../internal/cookieSession.mts`).
+				const middleware = session({
+					name: cookie.name,
+					secret,
+					resave: false,
+					saveUninitialized: false,
+					store,
+					cookie: {
+						path: "/",
+						httpOnly: true,
+						secure: cookie.secure,
+						maxAge: cookie.maxAgeMs,
+						sameSite: cookie.sameSite,
+						domain: cookie.domain,
+					},
+				});
+				// No `before` clause: see the mount-order contract above.
+				return {
+					id: "session-middleware",
+					mountPath: "/",
+					handler: guardCookieSession(middleware, deps.logger ?? consoleLogger),
+				};
+			},
+		],
+	},
+});

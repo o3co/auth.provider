@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-oidc
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 Generic OpenID Connect federation provider for `auth.provider`: any
 OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
@@ -68,11 +68,11 @@ and fills no slot. The module requires no dependency.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config),
+    sessionStoreModule,
     sessionModule,
     oidcFederationTypeModule(),
     // ... composition-root modules supplying userRepository + the session stores

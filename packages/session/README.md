@@ -30,9 +30,8 @@ responsibilities:
    rules it is built from. The helpers an adapter builds its upstream requests
    with — `codeChallenge`, `callbackUrlForExchange`, `FederationClientSecret` /
    `resolveClientSecret` — are core's.
-3. **The browser session store** — `sessionStoreModule` (and
-   `sessionStoreModuleFor(config)`, the same module declaring its replica safety
-   from `config`) and `createSessionStoreFactory` / `registerBuiltinSessionStores`:
+3. **The browser session store** — `sessionStoreModule` and
+   `createSessionStoreFactory` / `registerBuiltinSessionStores`:
    the express-session middleware, its cookie and its store (memory, or Redis
    through `connect-redis`).
 
@@ -280,15 +279,10 @@ What holds:
   parsed section: replica-unsafe when `session-store.storage.type` is
   `memory`, nothing for any other type. So core's replica-safety guard refuses
   it at boot by name with the other offenders, warns when
-  `core.deployment.mode` is unset, and says nothing under `"single"`.
-  `sessionStoreModuleFor(config)` is the same module declaring the same from
-  `config`, read when it is built, not from the section boot parses,
-  so list `sessionStoreModule`. The route factory refuses the combination too
-  when it runs (`replica-unsafe-adapter`), for a module built from a config
-  other than the one booted. Both forms require core's `deploymentMode`
-  slot, which core fills from `core.deployment.mode`, and read nothing of
-  `deployment` themselves; a slot value that is none of `single`, `multi`,
-  `unset` is a TypeError.
+  `core.deployment.mode` is unset, and says nothing under `"single"`. The guard
+  decides before any route is built, by the section the route mounts, so the
+  module reads no mode itself: it neither requires `deploymentMode` nor reads
+  `deployment`.
 - **The Redis store opens its own connection.** A `redis` (node-redis) client to
   `session-store.storage.redis.url` (with `password` when set), under `connect-redis`'s
   `RedisStore`. With a readiness registrar wired it registers the probe

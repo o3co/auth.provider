@@ -16,7 +16,7 @@
 
 /**
  * These routes live UNDER another package's mount path (README, "Beside
- * `oauthModule`"). `body-parser` does not parse a body twice, so a router
+ * `oauthEndpointsModule`"). `body-parser` does not parse a body twice, so a router
  * mounted ahead of this one that parses every request under `/oauth` would
  * skip this package's 16 KiB limit; the bound is checked ahead of the parsers
  * to hold whatever else is mounted. `withOauthMountedFirst` is such a router.

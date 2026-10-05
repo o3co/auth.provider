@@ -844,8 +844,8 @@ describe("what creating a grant needs", () => {
 	});
 
 	it("refuses a deployment with no login page to send a browser that is not signed in to", async () => {
-		// Core's schema takes an empty page and only oauthModule requires one;
-		// this composition has no oauthModule. The page is the session
+		// Core's schema takes an empty page and only oauthEndpointsModule requires one;
+		// this composition has no oauthEndpointsModule. The page is the session
 		// module's `loginEntry`, which is built without one and fails where it
 		// is read: here, at boot, rather than as a 500 for every such browser.
 		await expect(boot({ withLoginEntry: "unconfigured" })).rejects.toThrow(

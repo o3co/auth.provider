@@ -10,7 +10,7 @@
 
 /**
  * A token exchange over HTTP, the way a client makes one: `tokenExchangeModule`
- * composed with `@o3co/auth-provider-oauth`'s `oauthModule` through core's
+ * composed with `@o3co/auth-provider-oauth`'s `oauthEndpointsModule` through core's
  * `createApp`, and the request POSTed to the real `/oauth/token` route.
  *
  * The other suites call the handler, so this one checks what only the route
@@ -37,7 +37,7 @@ import {
 	type PublicClient,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
-import { oauthModule } from "@o3co/auth-provider-oauth";
+import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
@@ -90,7 +90,7 @@ const clientRepository: ClientRepository = {
 	authenticate: async (id, secret) => (secret === SECRET ? (clients.get(id) ?? null) : null),
 };
 
-/** `oauthModule` requires one; nothing here runs the authorization-code flow. */
+/** `oauthEndpointsModule` requires one; nothing here runs the authorization-code flow. */
 const codeRepository: CodeRepository = {
 	createCode: async () => {
 		throw new Error("the authorization-code flow is not exercised here");
@@ -124,7 +124,7 @@ function makeConfig(): AppConfig {
 	};
 }
 
-describe("token exchange through oauthModule's POST /oauth/token", () => {
+describe("token exchange through oauthEndpointsModule's POST /oauth/token", () => {
 	let handle: AppHandle | undefined;
 	afterEach(async () => {
 		await handle?.dispose();
@@ -138,7 +138,7 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 		const config = makeConfig();
 		const modules = [
 			...extra,
-			oauthModule({ config }),
+			oauthEndpointsModule,
 			tokenExchangeModule,
 			memoryRefreshTokenFamilyStoreModule,
 			defaultRefreshTokenFamilyRevocationModule,

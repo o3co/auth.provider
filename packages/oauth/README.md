@@ -55,7 +55,7 @@ composition root imports `createApp` from, which every other package's
 `declare module` augmentation of core extends. express-session is a peer
 because the router reads and augments the browser session (`/authorize`, the
 `session` grant, logout); a composition that serves browser flows mounts it
-through `@o3co/auth-provider-session`'s `sessionStoreModuleFor(config)`, as
+through `@o3co/auth-provider-session`'s `sessionStoreModule`, as
 below.
 
 ## Composing it
@@ -68,13 +68,13 @@ import {
   oauthEndpointsModule,
   oauthSessionGrantModule,
 } from "@o3co/auth-provider-oauth";
-import { sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
     // Mounts express-session. It has no ordering edge of its own, so it must be
     // listed ahead of every module that reads the browser session.
-    sessionStoreModuleFor(config),
+    sessionStoreModule,
     oauthEndpointsModule,
     oauthSessionGrantModule,
     oauthAuthorizationGrantsModule,
@@ -148,9 +148,9 @@ Everything below is exported from [`src/index.mts`](./src/index.mts); the linked
 
 **Modules** — see [Why four modules](#responsibility).
 
-- `oauthEndpointsModule` (a module value, not a factory) — [`module.mts`](./src/module.mts). `oauthModule({ config })` is deprecated: it answers `oauthEndpointsModule` and never read its parameter.
+- `oauthEndpointsModule` (a module value, not a factory) — [`module.mts`](./src/module.mts).
 - `oauthAuthorizationGrantsModule` (a module value, not a factory) — [`oauthAuthorization.mts`](./src/oauthAuthorization.mts).
-- `oauthSessionGrantModule` (a module value, not a factory) — [`oauthSession.mts`](./src/oauthSession.mts). `oauthSessionModule({ config })` is deprecated: it answers `oauthSessionGrantModule` and ignores its argument.
+- `oauthSessionGrantModule` (a module value, not a factory) — [`oauthSession.mts`](./src/oauthSession.mts).
 - `subjectRevocationServiceModule` (a module value, not a factory) — [`logout/subjectRevocationService.mts`](./src/logout/subjectRevocationService.mts)
 
 **Router.** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — builds the `/oauth` router from explicit options; it is what `oauthEndpointsModule` calls with its resolved deps and its own section (`section`, typed `OAuthSection`), for a composition root that mounts the router itself. `section` and `federationSettings` are required, and the router takes no configuration: every `oauth.*` setting it reads comes from that one section, and which installed federation trusts its upstream IdP's `amr` from `federationSettings`, core's view of `core.federations` (a test builds one with `createTestFederationSettings` from `@o3co/auth-provider-core/testing`). Without either, the router refuses to build, naming it. It creates no grant registry: `registry` is whatever object with a `get(grantType)` the caller passes, and the same value is returned. `/oauth/token` dispatches against it, and `/authorize` is mounted only when it holds the `authorization_code` grant; `codeRepository` is then required. A caller that needs the registered grant types reads core's `grantHandlerResolver` instead. `requirements` is required: the `sessionRequirementResolver` the boot planner built, which `/authorize` and the consent step read their sessions through; the router refuses to build without one, or with one the planner did not build. The two admit `oauth.authorize` and `oauth.consent`, which `oauthEndpointsModule` registers; a root that mounts the router itself registers `OAUTH_ROUTER_ADMISSION_ACTIONS` under `contributes.admissionActions`, or the router refuses to be built, naming the handler and the action. A test builds the resolver with `resolverForTests` from `@o3co/auth-provider-core/testing`, registering them. Every registered client the router reads, it reads through core's client-record boundary (`validatedClientRepository`) over the `clientRepository` it is handed, with Client ID Metadata Documents on or off. A record the registration schema refuses is warned `client_record_refused`, and the lookup rejects with core's branded refusal (`isClientRecordRefused`): `/authorize`, `/token`, `/introspect`, `/revoke` and consent answer it as they answer a read that throws, `503 temporarily_unavailable`, logged `client_repository_unavailable` with `reason: "client_record_refused"` on the error's projection. With documents on, the same ([Client ID Metadata Documents](#client-id-metadata-documents-529)). A repository already behind the boundary is read as it is, never wrapped twice. With documents on, the router installs its own document fallback over that repository, from `oauth.clientIdMetadataDocuments` in the section it is handed; the fallback reads the registered clients through the boundary itself.
@@ -578,7 +578,7 @@ The OIDC logout endpoints are mounted when the six session-cascade slots are all
 
 ### The session-close notifier
 
-`oauthModule` contributes core's session-close notifier (`sessionCloseNotifiers`, under `oauth`), which core's session lifecycle calls once per relying party of a closing session, for each cause that tells them (every cause but `expiry`) — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts). Nothing closes a session through the lifecycle yet; the logout routes below still run their own cascade.
+`oauthEndpointsModule` contributes core's session-close notifier (`sessionCloseNotifiers`, under `oauth`), which core's session lifecycle calls once per relying party of a closing session, for each cause that tells them (every cause but `expiry`) — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts). Nothing closes a session through the lifecycle yet; the logout routes below still run their own cascade.
 
 - It posts one OIDC Back-Channel Logout 1.0 `logout_token` to the relying party's `backchannelLogoutUri` as its registration reads when the notice is sent, over the same sender and outbound path as the logout routes' broadcast. The token is signed by the key store, its `iss` the module's issuer (`oauth.jwt.issuer`).
 - The token carries the session's `sid` unless the relying party declined one (`backchannelLogoutSessionRequired: false`), whatever closed the session.

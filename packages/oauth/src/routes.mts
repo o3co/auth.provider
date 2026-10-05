@@ -491,7 +491,7 @@ export const createOAuthRouter = async (
 		 * Read **once when `createOAuthRouter` is called**, so it must already
 		 * answer every federation the composition installs: installed federations
 		 * decide which acr entries are satisfiable (`./acrValues.mts`), and a map
-		 * that fills later leaves those entries dropped. `oauthModule`'s map is
+		 * that fills later leaves those entries dropped. `oauthEndpointsModule`'s map is
 		 * filled by the boot planner before any route factory runs (federations
 		 * are name-keyed contributions, registered before `routes`). Read again
 		 * at request time by the federation logout and token routes.
@@ -502,7 +502,7 @@ export const createOAuthRouter = async (
 		 * 2026-09-28-session-admission): what every consumer of admission in
 		 * this router — `/authorize`, the consent step — reads its session
 		 * through, and what a step-up can add, which decides which acr entries
-		 * this composition can satisfy (`./acrValues.mts`). `oauthModule` passes
+		 * this composition can satisfy (`./acrValues.mts`). `oauthEndpointsModule` passes
 		 * the synthetic key `sessionRequirementResolver`, filled by the boot
 		 * planner before any route factory runs. A router built by hand without
 		 * one, or with one the planner (or `resolverForTests`) did not build, is

@@ -12,7 +12,7 @@
  * Integration tests for the `grantMiddleware` contribution kind:
  *
  *   1. A factory's non-null RequestHandler runs BEFORE a `routes`
- *      contribution mounted at `/oauth` (the bundled oauthModule's
+ *      contribution mounted at `/oauth` (the bundled oauthEndpointsModule's
  *      mountPath). DPoP / mTLS rely on this: the middleware MUST inspect the
  *      request before the OAuth /token handler runs.
  *   2. A factory returning null is invoked (so it can decide
@@ -40,7 +40,7 @@ const minBoot = {
 
 // ---------------------------------------------------------------------------
 // Fixture: a routes contribution mounting a `/token` handler under `/oauth`,
-// the bundled oauthModule's shape, so ordering is checked against the real
+// the bundled oauthEndpointsModule's shape, so ordering is checked against the real
 // grant-dispatch path (`/oauth/token`).
 // ---------------------------------------------------------------------------
 

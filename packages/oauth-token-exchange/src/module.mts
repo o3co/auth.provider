@@ -78,7 +78,7 @@ const OPTIONAL = [
 	// Read by the grant alone (`sessionRefusal` in grant.mts): a subject or
 	// actor token carrying a `sid` is refused once its session has ended, and
 	// the issued token carries the subject's `sid`, so the logout that ends
-	// the one ends the other. Optional as it is on `oauthModule`: without a
+	// the one ends the other. Optional as it is on `oauthEndpointsModule`: without a
 	// store no surface judges a `sid`.
 	"userSessionStore",
 ] as const;
@@ -118,7 +118,7 @@ export const tokenExchangeModule: Module = defineModule<
 	},
 	requires: REQUIRES,
 	optional: OPTIONAL,
-	// Same policies as oauthModule: an unfilled denylist slot must be declared
+	// Same policies as oauthEndpointsModule: an unfilled denylist slot must be declared
 	// with oauth.revocation.accessToken = "unsupported", and an unfilled
 	// subject-revocation slot with oauth.revocation.subject = "unsupported",
 	// or a credential change silently invalidates nothing already issued.

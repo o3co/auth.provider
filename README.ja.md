@@ -1,6 +1,6 @@
 # auth.provider
 
-最終更新: 2026-10-03
+最終更新: 2026-10-05
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -162,7 +162,7 @@ standalone テンプレートのような構成での主なエンドポイント
 | `POST /oauth/revoke` | oauth | トークン失効 (RFC 7009) |
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect の userinfo |
 | `GET`, `POST /oauth/logout` | oauth | RP 起点のログアウトと、バックチャネルログアウトのカスケード |
-| `GET /.well-known/openid-configuration` | core | ディスカバリー。`oauthModule` が組み込まれているときに提供される |
+| `GET /.well-known/openid-configuration` | core | ディスカバリー。`oauthEndpointsModule` が組み込まれているときに提供される |
 | `GET /.well-known/jwks.json` | core | 検証鍵（`jwks.path` で移動できる）。HS256 では `404 jwks_not_published` を返す |
 | `GET /session/csrf` | session | double-submit CSRF トークンの発行 |
 | `POST /session/login` | session | ローカル認証 |

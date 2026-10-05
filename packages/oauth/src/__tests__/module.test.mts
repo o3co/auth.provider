@@ -137,7 +137,7 @@ const loginEntryModule = defineModule({
 });
 
 /**
- * A stand-in authorization_code grant: what makes `oauthModule` serve
+ * A stand-in authorization_code grant: what makes `oauthEndpointsModule` serve
  * `/authorize` and name it in discovery. Never dispatched to.
  */
 const authorizationCodeGrantModule = defineModule({
@@ -178,7 +178,7 @@ const asymmetricKeyStoreModule = defineModule({
 // Module manifest structural tests (static, no createTestApp needed)
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — manifest shape", () => {
+describe("oauthEndpointsModule — manifest shape", () => {
 	it("has name 'oauth'", () => {
 		expect(oauthEndpointsModule.name).toBe("oauth");
 	});
@@ -207,7 +207,7 @@ describe("oauthModule — manifest shape", () => {
 // createTestApp integration tests (boot + inspect)
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — createTestApp route inspection", () => {
+describe("oauthEndpointsModule — createTestApp route inspection", () => {
 	it("contributes no oidc-discovery route even with an issuer; core mounts discovery from aggregated metadata", async () => {
 		// Core's assembleApp mounts discovery from the aggregated
 		// `discoveryMetadata` collector, so it never appears in the inspected
@@ -221,7 +221,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -244,7 +244,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -274,7 +274,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -293,7 +293,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 	});
 });
 
-describe("oauthModule — the acr table in the served discovery document", () => {
+describe("oauthEndpointsModule — the acr table in the served discovery document", () => {
 	const acrValues = {
 		"urn:example:pwd": ["pwd"],
 		"urn:example:mfa": ["pwd", "mfa"],
@@ -439,7 +439,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 // a `jwks.path` override (the route and `jwks_uri` resolve the same path).
 // ---------------------------------------------------------------------------
 
-describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
+describe("oauthEndpointsModule + jwksModule — discovery/JWKS path agreement", () => {
 	function issuerConfig(extraJwt: Record<string, unknown> = {}) {
 		const base = makeValidAppConfig();
 		return {
@@ -456,7 +456,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -499,7 +499,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -629,7 +629,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -657,7 +657,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 // correctly through the deps injected by the boot planner.
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () => {
+describe("oauthEndpointsModule — behavioral: rateLimiter + auditSink forwarding", () => {
 	it("forwards rateLimiter and auditSink into oauth routes (rate limit returns 429)", async () => {
 		const SECRET = "test-secret-at-least-32-chars!!";
 
@@ -692,7 +692,7 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -724,7 +724,7 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 	});
 });
 
-describe("oauthModule — no rateLimiter wired", () => {
+describe("oauthEndpointsModule — no rateLimiter wired", () => {
 	const SECRET = "test-secret-at-least-32-chars!!";
 	const modules = () => [
 		oauthEndpointsModule,
@@ -789,11 +789,11 @@ describe("oauthModule — no rateLimiter wired", () => {
 // ---------------------------------------------------------------------------
 // Behavioral: federation logout — deps.federationProviders typed slot
 //
-// oauthModule reads federationProviders from typed deps, supplied at boot via
+// oauthEndpointsModule reads federationProviders from typed deps, supplied at boot via
 // the DI graph, not through a lazy () => ctx.federationProviders closure.
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — federation logout via typed deps", () => {
+describe("oauthEndpointsModule — federation logout via typed deps", () => {
 	it("federation logout works when federationProviders is supplied via module", async () => {
 		const SECRET = "test-secret-at-least-32-chars!!";
 		const secretKey = createSecretKey(Buffer.from(SECRET));
@@ -923,7 +923,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				// Issuer is configured, so the discovery presence contract requires
@@ -1038,7 +1038,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -1086,7 +1086,7 @@ describe("absence policies", () => {
 	});
 });
 
-describe("oauthModule — the login trip is the loginEntry slot when a module provides it", () => {
+describe("oauthEndpointsModule — the login trip is the loginEntry slot when a module provides it", () => {
 	const CLIENT = "client1";
 	const REDIRECT = "https://rp.example/cb";
 	const clientsWithOne = defineModule({
@@ -1216,7 +1216,7 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 	});
 });
 
-describe("oauthModule — the session-close notifier", () => {
+describe("oauthEndpointsModule — the session-close notifier", () => {
 	it("contributes one notifier, built over its client registry, key store and issuer", async () => {
 		const factories = oauthEndpointsModule.contributes?.sessionCloseNotifiers;
 		expect(Object.keys(factories ?? {})).toEqual(["oauth"]);
@@ -1237,7 +1237,7 @@ describe("oauthModule — the session-close notifier", () => {
 	});
 });
 
-describe("oauthModule — a consumer of session admission", () => {
+describe("oauthEndpointsModule — a consumer of session admission", () => {
 	it("requires sessionRequirementResolver, the synthetic key every consumer of admission takes", () => {
 		const module = oauthEndpointsModule;
 		expect(module.requires).toContain("sessionRequirementResolver");
@@ -1299,7 +1299,7 @@ describe("oauthModule — a consumer of session admission", () => {
 	});
 });
 
-describe("oauthModule — a composition with no authorization_code grant", () => {
+describe("oauthEndpointsModule — a composition with no authorization_code grant", () => {
 	/**
 	 * Tokens for machines only: client_credentials, no code repository, no
 	 * session package. The issuer is set, so core serves the discovery

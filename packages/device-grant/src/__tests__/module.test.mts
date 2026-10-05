@@ -55,11 +55,7 @@ import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
-import {
-	deviceAuthorizationGrantModule,
-	deviceGrantConfigSchema,
-	deviceGrantModule,
-} from "#/module.mjs";
+import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { LIVE_AUTH_TIME_MS, liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 import { shippedDeviceGrantSection } from "./shippedSection.mjs";
@@ -232,24 +228,6 @@ const ENABLED = {
 };
 
 describe("the device-grant module — boot", () => {
-	it("refuses the deprecated factory listed uncalled, `modules: [deviceGrantModule]`", async () => {
-		// The compiler does not catch it: a function has a `name`, the one
-		// field `Module` requires. Listed that way the module would contribute
-		// nothing and boot succeed, with no grant, no route and none of the
-		// refusals below. Core refuses any such entry.
-		await expect(
-			createApp({
-				modules: [deviceGrantModule as unknown as Module],
-				bootstrapComponents: makeBoot({ deviceGrant: ENABLED }),
-			}),
-		).rejects.toMatchObject({
-			reason: "module-factory-not-called",
-			message: expect.stringMatching(
-				/module entry "deviceGrantModule" is a function — call it with its arguments/,
-			),
-		});
-	});
-
 	it("boots disabled without any of the required settings", async () => {
 		// Installing the package must not turn on a grant, and a deployment
 		// that leaves it off must never trip settings it does not use.
@@ -452,10 +430,10 @@ describe("the device-grant module — boot", () => {
 		).rejects.toThrow(/enabled = true requires a deviceCodeStore component/);
 	});
 
-	it("boots with everything wired, without oauthModule", async () => {
+	it("boots with everything wired, without oauthEndpointsModule", async () => {
 		// The routes declare no ordering edge — each module under `/oauth`
 		// parses its own body — so nothing here needs another module's route
-		// to exist. The composition beside oauthModule is composition.test.mts.
+		// to exist. The composition beside oauthEndpointsModule is composition.test.mts.
 		const handle = await boot({ deviceGrant: ENABLED });
 		await handle.dispose();
 	});
@@ -1682,7 +1660,7 @@ describe("the device-grant module — disabled surface", () => {
 		// Observable behaviour matches "not installed": with nothing
 		// registered, the token endpoint answers `unsupported_grant_type` and
 		// `grant_types_supported` does not name the grant — both pinned beside
-		// `oauthModule` in composition.test.mts. A refusing handler registered
+		// `oauthEndpointsModule` in composition.test.mts. A refusing handler registered
 		// in its place was advertised as a supported grant.
 		const handle = await boot({ deviceGrant: { enabled: false } });
 		try {

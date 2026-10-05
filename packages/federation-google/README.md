@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-google
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 Google federation provider for `auth.provider`: sign-in with a Google account
 through Google's OpenID Connect endpoints, with token refresh, upstream logout
@@ -76,11 +76,11 @@ module requires no dependency.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config),
+    sessionStoreModule,
     sessionModule,
     googleFederationTypeModule(),
     // ... composition-root modules supplying userRepository and the session stores

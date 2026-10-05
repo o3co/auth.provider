@@ -341,7 +341,7 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	readonly grantPolicyHooks?: readonly GrantPolicyHookFactory<Deps>[];
 	/**
 	 * Express middleware mounted on the token endpoint (`/oauth/token` with the
-	 * bundled `oauthModule`) BEFORE grant dispatch: token binding, custom rate
+	 * bundled `oauthEndpointsModule`) BEFORE grant dispatch: token binding, custom rate
 	 * limiters, body pre-processing. `null`-returning factories are skipped.
 	 * List-shaped; mounted in module-registration order.
 	 *

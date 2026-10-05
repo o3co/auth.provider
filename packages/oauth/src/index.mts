@@ -41,7 +41,7 @@ export {
 	renderFrontchannelLogoutHtml,
 } from "./logout/renderFrontchannel.mjs";
 // The subject revocation service, installed explicitly — it needs the whole
-// session cascade, which `oauthModule` does not (ADR
+// session cascade, which `oauthEndpointsModule` does not (ADR
 // 2026-09-17-federation-grants-offline-delegation, D13).
 export { subjectRevocationServiceModule } from "./logout/subjectRevocationService.mjs";
 // private_key_jwt client authentication (RFC 7523 §2.2).
@@ -58,14 +58,14 @@ export {
 } from "./middleware/clientAssertion.mjs";
 export type { ClientAuthMiddlewareOptions } from "./middleware/clientAuth.mjs";
 export { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
-export { oauthEndpointsModule, oauthModule } from "./module.mjs";
+export { oauthEndpointsModule } from "./module.mjs";
 export { oauthAuthorizationGrantsModule } from "./oauthAuthorization.mjs";
-export { oauthSessionGrantModule, oauthSessionModule } from "./oauthSession.mjs";
+export { oauthSessionGrantModule } from "./oauthSession.mjs";
 export { createOAuthRouter } from "./routes.mjs";
 // `oauth {}` as the oauth module's schema parses it: what `createOAuthRouter`
 // takes as its `section`.
 export type { OAuthSection } from "./section.mjs";
-// The oauthTokenSettings slot's value, which oauthModule provides;
+// The oauthTokenSettings slot's value, which oauthEndpointsModule provides;
 // exported so a composition that provides the slot without the module
 // resolves it the same way.
 export { type OAuthTokenSection, oauthTokenSettingsFrom } from "./tokenSettings.mjs";

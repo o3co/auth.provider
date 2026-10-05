@@ -211,7 +211,7 @@ export interface DeviceCodeStore {
  * `/oauth/device_authorization` request.
  *
  * Applied while the grant is on; a module switched off declares no policy.
- * An enabled grant without a store is refused by `deviceGrantModule` whatever
+ * An enabled grant without a store is refused by `deviceAuthorizationGrantModule` whatever
  * the declaration says. The hint is quoted into the boot error, so it must not
  * tell an operator with the grant enabled to write a line that is itself
  * refused.

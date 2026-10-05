@@ -38,7 +38,7 @@ afterAll(async () => {
 });
 
 /**
- * Stands in for `deviceGrantModule`, which this package does not depend on:
+ * Stands in for `deviceAuthorizationGrantModule`, which this package does not depend on:
  * reads the slot under the same absence policy the grant attaches, so a boot
  * here fails for the same reasons a real composition's would. The route
  * contribution is what puts it in the closure root.
