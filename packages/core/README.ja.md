@@ -245,6 +245,10 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 リング（`SealingKeyRing`: `{ id, key }` の `SealingKey` の並び、[`src/sealing/keyRing.mts`](src/sealing/keyRing.mts)）は先頭の鍵で封印し、どの鍵でも開けます。ID は `A-Za-z0-9_-` の 1〜64 文字（`isSealingKeyId`）、鍵は `SEALING_KEY_BYTES`（32）バイトの Buffer です。`checkSealingKeyRing(ring, setting)` は規則を破るリングを、`setting` で始まるメッセージの `RangeError` で拒否します。ストアは構築時に、リングを読んだ設定キーやオプションの名前（`redis-federation-grant-store.encryptionKeys`）でこれを呼ぶので、不正なリングは起動時に、書かれた場所を名指して拒否されます。どの拒否もエントリをインデックスで名指し、ID を引用しません。32 バイトの鍵を hex やパディングなしの base64url で書いたものは ID の規則を通るので、ID と鍵を取り違えた運用者には、引用すれば鍵が見えてしまうからです。封印と開封はリングを「sealing key ring」として改めて確かめ、規則外の目的ラベルに対して、封印は空のリングに対しても、`RangeError` を throw します。`decodeSealingKey` は設定された鍵を読みます。空白を含まない、ちょうど 32 バイトの正準な base64 なら鍵の値を、そうでなければ `undefined` を返し、呼び出し元が自分の設定キーを名指して拒否します。`@o3co/auth-provider-redis` のフェデレーショングラントストアは、この方法でクレデンシャルを封印しています。MFA パッケージも、`mfa.encryptionKeys` に設定されたリングで、要素のデータとセレモニーの状態をこの方法で封印します。
 
+### プレーンな JSON 値
+
+`copyPlainJson(value)`（[`src/json/plainJson.mts`](src/json/plainJson.mts)）は、JSON がそのまま返す値の唯一の規則と、それによって取るコピーです。`{ ok: true, copy }`（すべての深さで凍結され、各フィールドを自前の getter も含めて一度だけ読んだコピー。コピーに作用するものは、確かめたものに作用します）か、値がそうでない場所を名指す `{ ok: false, at }`（値そのものは `""`、フィールドは `.name`、リストの要素は `[index]`）を返します。`null`、真偽値、文字列、`-0` 以外の有限の数、自前のキーがちょうどインデックスで `undefined` の要素を持たないプレーンなリスト、プロトタイプが `Object.prototype` かなしで、自前のキーがすべて列挙可能な文字列であるオブジェクトを受け取ります。`undefined` と読めたフィールドは、JSON と同じく省きます。それ以外（クラスのインスタンス、組み込みオブジェクト、関数、シンボルや隠れたフィールド、循環、throw する読み取り、スタックを超える入れ子）は拒否し、throw することはありません。MFA のコーディネーターは要素の状態・データ・応答をこれで取り、テストキットの `mfaFactorContract` は要素をこれに照らします。
+
 ### リポジトリ
 
 リポジトリインターフェースはデータアクセスのコントラクトを定義します。開発・テスト向けのインメモリ実装が標準で提供されています。

@@ -1752,6 +1752,12 @@ export {
 } from "./sealing/keyRing.mjs";
 
 // ===========================================================================
+// Plain JSON — the one rule for a value JSON gives back as it is, and its copy
+// ===========================================================================
+
+export { copyPlainJson, type PlainJsonCopy } from "./json/plainJson.mjs";
+
+// ===========================================================================
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628)
 // ===========================================================================
 

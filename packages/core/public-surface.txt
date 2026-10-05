@@ -497,6 +497,7 @@
 . PendingConsentStore type
 . PendingConsentStoreFactory type
 . PendingFederationGrant type
+. PlainJsonCopy type
 . PolicyAudienceOutcome type
 . PolicyDeniedOptions type
 . PolicyScopeCeiling type
@@ -805,6 +806,7 @@
 . cookieClaim value
 . cookieRenewedAway value
 . cookieSessionUser value
+. copyPlainJson value
 . coreReference value
 . corsMw value
 . coveredByRevocationBoundary value
