@@ -492,9 +492,10 @@ export const createOAuthRouter = async (
 		sessionFederationIndex?: SessionFederationIndex;
 		federationTokenStore?: FederationTokenStore;
 		/**
-		 * Core's session lifecycle. Where installed, introspection, userinfo
-		 * and the federation-token route ask it whether a token's session is
-		 * live.
+		 * Core's session lifecycle. Where installed, `/oauth/logout` ends the
+		 * session through its `close` instead of its own cascade, and
+		 * introspection, userinfo and the federation-token route ask it
+		 * whether a token's session is live.
 		 */
 		sessionLifecycle?: SessionLifecycle;
 		/**
@@ -811,6 +812,7 @@ export const createOAuthRouter = async (
 				auditSink,
 				logger,
 				legacyTypAccept: legacyTypAcceptOpt,
+				...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 			}),
 		);
 	}
