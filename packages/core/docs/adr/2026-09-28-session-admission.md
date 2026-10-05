@@ -561,15 +561,17 @@ Second round, after the two reviews — recorded here for the owner's confirmati
 
 ## Amendment 2026-10-05 — the session lifecycle's state
 
-Written against `develop` at `0bc8c5d1d`. Step 2 gains a read
+Written against `develop` at `0bc8c5d1d`. After step 3 (the subject and the renewal nonce), admission gains a read
 ([#1030](https://github.com/o3co/auth.provider/issues/1030); the session
 lifecycle ADR, `2026-10-05-session-lifecycle.md`): after a live record, where
 the consumer hands its `sessionLifecycleStore` (`AdmissionDeps`, optional),
 admission reads that port's record for the claim's `sid` through core's
 reader. A record closing or closed is `not_live` (`closing`), from the
-closing commit on, whatever the user session still holds. No record for the
+closing commit on, for admission's consumers, whatever the user session still
+holds. No record for the
 sid, or no store handed, reads as before. A store that throws, or answers
-outside the port's types, is `unavailable` with the new store name
+outside the port's types — a record naming another subject than the user
+session's among them — is `unavailable` with the new store name
 `session_lifecycle`, which joins `ADMISSION_INFRASTRUCTURE_STORES` (so no
 requirement may be named it) and `describeAdmissionOutage` ("session
 lifecycle store unavailable"). The port is read, never the lifecycle service;

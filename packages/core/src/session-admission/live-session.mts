@@ -16,7 +16,7 @@
 
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
- * read and the session's lifecycle, the subject, the renewal nonce and the
+ * read, the subject, the renewal nonce, the session's lifecycle and the
  * revocation boundary, then the
  * store's step-up capability over the live record. The session store, the
  * lifecycle store, the boundary and the audit sink are read here and nowhere
@@ -121,27 +121,6 @@ export async function readLiveSession(
 		session = record;
 	}
 
-	// Step 2b: the session's lifecycle, after a live record. Closing or closed
-	// from its closing commit on is not live; no record, or no store, reads as
-	// before. The store is read off `deps` once, in the same guarded section as
-	// its answer, which core's reader holds to the port's types.
-	if (session !== null && presented.sid !== undefined) {
-		try {
-			const lifecycleStore = checked.readSessionLifecycleStore();
-			const lifecycle =
-				lifecycleStore === undefined
-					? null
-					: readVersionedSessionLifecycle(await lifecycleStore.read(presented.sid));
-			if (lifecycle !== null && lifecycle.value.state !== "active") {
-				return { answer: { outcome: "not_live", reason: "closing" } };
-			}
-		} catch (err) {
-			return {
-				answer: unavailable("session_lifecycle" satisfies AdmissionInfrastructureStore, err),
-			};
-		}
-	}
-
 	// Step 3: the subject.
 	if (session !== null && presented.subject !== undefined && presented.subject !== session.sub) {
 		logger?.warn({ action: label }, "session_admission_subject_mismatch");
@@ -179,6 +158,32 @@ export async function readLiveSession(
 		// record to no cookie session, whatever the cookie session holds.
 		if (renewedAway(session.renewalNonce, presented.renewalNonce)) {
 			return { answer: { outcome: "not_live", reason: "renewed" } };
+		}
+	}
+
+	// Step 3c: the session's lifecycle, after the subject and the renewal
+	// nonce. Closing or closed from its closing commit on is not live; no
+	// record, or no store, reads as before. The store is read off `deps` once,
+	// in the same guarded section as its answer, which core's reader holds to
+	// the port's types; a record of another subject is no answer for this
+	// session, refused as malformed.
+	if (session !== null && presented.sid !== undefined) {
+		try {
+			const lifecycleStore = checked.readSessionLifecycleStore();
+			const lifecycle =
+				lifecycleStore === undefined
+					? null
+					: readVersionedSessionLifecycle(await lifecycleStore.read(presented.sid));
+			if (lifecycle !== null && lifecycle.value.sub !== session.sub) {
+				throw new TypeError("the session lifecycle record names another subject");
+			}
+			if (lifecycle !== null && lifecycle.value.state !== "active") {
+				return { answer: { outcome: "not_live", reason: "closing" } };
+			}
+		} catch (err) {
+			return {
+				answer: unavailable("session_lifecycle" satisfies AdmissionInfrastructureStore, err),
+			};
 		}
 	}
 

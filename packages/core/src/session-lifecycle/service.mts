@@ -15,7 +15,8 @@
  */
 
 /**
- * The session lifecycle service, the one caller of `SessionLifecycleStore`:
+ * The session lifecycle service, the one writer of `SessionLifecycleStore`
+ * (session admission reads a record's state):
  * joins a session, closes it and runs the close work, says whether it is
  * live, and resumes closes left pending. Its callers see `joined` /
  * `refused`, `done` / `pending`, `live` / `not_live` and `unavailable`;

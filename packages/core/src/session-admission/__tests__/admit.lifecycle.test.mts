@@ -23,10 +23,15 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { AuditEvent } from "#/audit/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import { admitSession, cookieClaim, tokenClaim } from "#/session-admission/admit.mjs";
-import type { AdmissionDeps, AdmissionRequest } from "#/session-admission/requirement.mjs";
+import type {
+	AdmissionDeps,
+	AdmissionRequest,
+	SessionRequirement,
+} from "#/session-admission/requirement.mjs";
 import {
 	ADMISSION_INFRASTRUCTURE_STORES,
 	describeAdmissionOutage,
@@ -198,6 +203,82 @@ describe("admission's read of the session lifecycle", () => {
 		}
 	});
 
+	it("refuses a closing session whose cookie names another subject as the subject mismatch, audited, reading no lifecycle", async () => {
+		let reads = 0;
+		const store = await lifecycle();
+		await close(store, ["delete_user_session"]);
+		const counting: SessionLifecycleStore = {
+			...store,
+			read: async (sid) => {
+				reads += 1;
+				return store.read(sid);
+			},
+		};
+		const events: AuditEvent[] = [];
+		lines.length = 0;
+		const answer = await admitSession(
+			deps({
+				sessionLifecycleStore: counting,
+				auditSink: { kind: "test", record: async (event) => void events.push(event) },
+			}),
+			{
+				claim: cookieClaim({
+					session: { isAuthenticated: true, sid: SID, user: { id: "someone-else" } },
+				}),
+				action: "test.use",
+			},
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(answer).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
+		expect(lines.map((line) => line.message)).toEqual(["session_admission_subject_mismatch"]);
+		expect(events.map((event) => event.type)).toEqual(["session.admission.subject_mismatch"]);
+		expect(reads).toBe(0);
+	});
+
+	it("is unavailable (session_lifecycle) for a lifecycle record of another subject", async () => {
+		const store = createInMemorySessionLifecycleStore({ now: () => NOW.getTime() });
+		expect((await store.open(SID, "another-user", EXPIRES_AT)).outcome).toBe("opened");
+		lines.length = 0;
+		expect(await admitSession(deps({ sessionLifecycleStore: store }), cookie())).toEqual({
+			outcome: "unavailable",
+			store: "session_lifecycle",
+		});
+		expect(lines).toHaveLength(1);
+	});
+
+	it("answers the last reading's not_live (closing) when a close commits while a requirement is asked", async () => {
+		let reads = 0;
+		const store = await lifecycle();
+		const counting: SessionLifecycleStore = {
+			...store,
+			read: async (sid) => {
+				reads += 1;
+				return store.read(sid);
+			},
+		};
+		const closing: SessionRequirement = {
+			name: "pending",
+			reach: new Set(),
+			stepUpPage: undefined,
+			remediations: [],
+			hintKeys: [],
+			admit: async () => {
+				// The close commits while the requirement is being asked.
+				await close(store, ["delete_user_session"]);
+				return { outcome: "met" };
+			},
+		};
+		const answer = await admitSession(
+			deps({
+				sessionLifecycleStore: counting,
+				requirements: resolverForTests([closing], { actions: TEST_ACTIONS, allowAnyReach: true }),
+			}),
+			cookie(),
+		);
+		expect(answer).toEqual({ outcome: "not_live", reason: "closing" });
+		expect(reads).toBe(2);
+	});
+
 	it("is unavailable (session_lifecycle) when reading the store off deps throws — never a rejection", async () => {
 		const throwing = {
 			...deps(),
@@ -205,9 +286,16 @@ describe("admission's read of the session lifecycle", () => {
 				throw new Error("deps down");
 			},
 		};
+		lines.length = 0;
 		expect(await admitSession(throwing, cookie())).toEqual({
 			outcome: "unavailable",
 			store: "session_lifecycle",
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({
+			level: "error",
+			message: "session_admission_unavailable",
+			fields: { store: "session_lifecycle", action: "test.use" },
 		});
 	});
 
