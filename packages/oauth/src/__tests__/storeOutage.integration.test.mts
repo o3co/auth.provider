@@ -56,6 +56,7 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example.com";
@@ -144,7 +145,7 @@ async function buildApp(stores: Stores = {}): Promise<Harness> {
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore(SECRET, "v0"),

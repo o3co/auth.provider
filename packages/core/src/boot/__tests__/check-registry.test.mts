@@ -63,6 +63,7 @@ describe("stage-1 check registries", () => {
 			"session-requirement-kind-guard",
 			"requires-closure",
 			"contribution-kind-coverage",
+			"contribution-containers",
 			"contribution-shapes",
 			"per-kind-contribute-duplicates",
 			"one-session-close-notifier",

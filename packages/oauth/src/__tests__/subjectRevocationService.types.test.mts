@@ -31,7 +31,6 @@ import {
 // those keys are not slots. The typed callback is the whole of the guard.
 
 const REQUIRES = [
-	"config",
 	"userSessionStore",
 	"sessionRPRegistry",
 	"sessionFamilyIndex",
@@ -40,6 +39,8 @@ const REQUIRES = [
 	"federationTokenStore",
 	// The session's lifetime, which the horizon is sized from.
 	"sessionCookiePolicy",
+	// The token lifetimes the horizon is sized from.
+	"oauthTokenSettings",
 ] as const;
 const OPTIONAL = [
 	"subjectSessionIndex",
@@ -47,9 +48,8 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
-	// The token lifetimes the horizon is sized from, read from the
-	// configuration without it.
-	"oauthTokenSettings",
+	// Whether grants are on and may be kept; absent, grants are off.
+	"federationGrantPolicy",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

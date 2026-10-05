@@ -50,6 +50,7 @@ import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -155,6 +156,7 @@ const makeGrant = (opts: {
 			: opts.family.revocation;
 	const handler = createRefreshTokenGrant({
 		config: opts.config ?? config,
+		...grantSettingsFrom(opts.config ?? config),
 		keyStore: createSymmetricKeyStore(SECRET),
 		refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate: rotation },
 		...(familyRevocation === null ? {} : { refreshTokenFamilyRevocation: familyRevocation }),

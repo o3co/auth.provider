@@ -52,6 +52,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -205,7 +206,7 @@ const makeApp = async (opts: {
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
 		registry: authorizationServerRegistry(),
-		config: makeConfig(opts.oauth),
+		...routerInputsOf(makeConfig(opts.oauth)),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),

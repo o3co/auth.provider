@@ -26,11 +26,11 @@
  */
 
 import {
-	type AppConfig,
 	type AuditEvent,
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createMemoryConsentStore,
 	createMemoryPendingConsentStore,
@@ -38,6 +38,7 @@ import {
 	type PublicClient,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type SubjectRevocation,
 	type UserSession,
@@ -51,6 +52,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const CLIENT_ID = "third-party-chat";
 const REDIRECT_URI = "https://chat.example/cb";
@@ -117,6 +119,7 @@ const makeApp = async (opts: {
 	session?: Session;
 	userSessionStore?: UserSessionStore;
 	subjectRevocation?: SubjectRevocation;
+	sessionLifecycleStore?: SessionLifecycleStore;
 	requirements?: readonly SessionRequirement[];
 	auditSink?: AuditSink;
 	/** The parked request's subject; default the cookie's. */
@@ -149,11 +152,9 @@ const makeApp = async (opts: {
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
 		registry: authorizationServerRegistry(),
-		config: {
+		...routerInputsOf({
 			oauth: { jwt: { issuer: ISSUER }, oidcMode: "dual", grants: {} },
-			rateLimit: { failMode: "open" as const },
-			endpoints: { login: { url: "/login" }, consent: { url: "/consent" } },
-		} as unknown as AppConfig,
+		}),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -166,6 +167,7 @@ const makeApp = async (opts: {
 		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
+		...(opts.sessionLifecycleStore ? { sessionLifecycleStore: opts.sessionLifecycleStore } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 	});
 	// A request `/authorize` parked for this session, as it parks one.
@@ -208,6 +210,26 @@ const expectLoginRequired = (res: request.Response): void => {
 };
 
 describe("/oauth/consent on admission", () => {
+	it("a session whose lifecycle record is closing is not_live: 401 login_required on both methods, its record still there", async () => {
+		const live = record();
+		const lifecycle = createInMemorySessionLifecycleStore();
+		expect((await lifecycle.open(SID, SUBJECT, live.expiresAt)).outcome).toBe("opened");
+		const closing = await lifecycle.beginClose(SID, {
+			cause: "rp_logout",
+			steps: ["held_open"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+		expect(closing.outcome).toBe("closing");
+		const { app, consentStore } = await makeApp({
+			userSessionStore: storeWith(live),
+			sessionLifecycleStore: lifecycle,
+		});
+		expectLoginRequired(await show(app));
+		expectLoginRequired(await answer(app, "accept"));
+		expect(await consentStore.find(SUBJECT, CLIENT_ID)).toBeNull();
+	});
+
 	it("a cookie whose isAuthenticated is not exactly true is refused before anything is read, as every reader reads the flag", async () => {
 		const store = storeWith(record());
 		const { app } = await makeApp({

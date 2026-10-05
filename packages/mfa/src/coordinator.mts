@@ -104,12 +104,15 @@
  *   Another is dropped and flagged, never quoted.
  * - A factor's answer — a challenge's, a verification's — is read once, field
  *   by field, however the factor holds it (a getter, a class's instance), and
- *   only what was read is used. The state and data in it are taken as their
- *   plain copy (`copyFactorValue`) where the answer is read, and that one copy
- *   is what `amrFor`, the recovery-code rules and the seal act on; data or
- *   state that is not plain JSON-shaped is the factor's failure (`503`), the
- *   stored data left as it was. A challenge's `response` must be a plain
- *   object: it is answered as the factor built it.
+ *   only what was read is used. The state, data and response in it are taken
+ *   as their plain copy (`copyFactorValue`) where the answer is read, and that
+ *   one copy is what `amrFor`, the recovery-code rules, the seal and the page
+ *   act on; one that is not plain JSON-shaped is the factor's failure
+ *   (`503`), the stored data left as it was. A mail it asks for is read there
+ *   too (`copyAskedMail`). A verification is a success only when its `ok` is
+ *   `true` and a refusal only when it is `false` with a reason its type
+ *   names: anything else is the factor's failure. What `amrFor` answers is
+ *   copied once, and only the copy is checked and used.
  * - A factor's `identity` is read as a non-empty string or none; one that
  *   throws is none — the record a duplicate of none — and is said through
  *   `identityFailed`.
@@ -176,7 +179,14 @@ import {
 	readFirstBindingMark,
 } from "./firstBindingMark.mjs";
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
-import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
+import {
+	copyAskedMail,
+	keptState,
+	mailedAnswer,
+	mailRefusalOf,
+	readKeptState,
+	sendMfaMail,
+} from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import { isRecoveryCodeFactor, recoveryCodesLeft, recoverySetRefusal } from "./recovery/factor.mjs";
 import { createLoginReopen } from "./reopen.mjs";
@@ -203,11 +213,30 @@ const isWrittenAt = (written: unknown, tx: MfaTransaction): boolean => {
 	}
 };
 
-/** Whether `amr`, what a factor's `amrFor` answered, names at least one value, and only values the factor declares. */
-const declaresEach = (factor: MfaFactor, amr: unknown): amr is readonly string[] =>
-	Array.isArray(amr) &&
-	amr.length > 0 &&
-	amr.every((value) => typeof value === "string" && factor.amrValues.includes(value));
+/**
+ * What a factor's `amrFor` answered, copied once: the copy when it names at
+ * least one value and only values the factor declares, else `undefined`. Only
+ * the copy is checked and acted on; a read that throws is thrown.
+ */
+const declaredAmrOf = (factor: MfaFactor, amr: unknown): readonly string[] | undefined => {
+	if (!Array.isArray(amr)) return undefined;
+	const copy: unknown[] = [...amr];
+	return copy.length > 0 &&
+		copy.every((value) => typeof value === "string" && factor.amrValues.includes(value))
+		? (copy as string[])
+		: undefined;
+};
+
+/** The reasons a verification may refuse with: any other is the factor's failure. */
+const VERIFICATION_REFUSALS: Readonly<
+	Record<Extract<MfaVerification, { readonly ok: false }>["reason"], true>
+> = {
+	invalid: true,
+	expired: true,
+	replayed: true,
+	malformed: true,
+	sign_count_regression: true,
+};
 
 /** What a refusal says of the factor it concerns, as the `refused` outcome carries it. */
 type RefusalConcerns = Pick<
@@ -275,13 +304,6 @@ export interface MfaCoordinatorOptions {
 	/** Where a factor's `identity` that threw is said; the record is judged a duplicate of none. */
 	readonly identityFailed?: (kind: string, cause: unknown) => void;
 }
-
-/** Whether `value` is an object `res.json` answers as the factor built it: a plain object. */
-const isPlainObject = (value: unknown): value is object => {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-	const prototype = Object.getPrototypeOf(value);
-	return prototype === Object.prototype || prototype === null;
-};
 
 /** The coordinator over `options` (see this file's header). */
 export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordinator {
@@ -775,11 +797,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return { failed };
 			}
 		},
-		answerable: isPlainObject,
 		declaredAmr: (factor, data) => {
 			try {
-				const amr: unknown = factor.amrFor(data);
-				return declaresEach(factor, amr) ? amr : undefined;
+				return declaredAmrOf(factor, factor.amrFor(data));
 			} catch {
 				return undefined;
 			}
@@ -871,11 +891,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				factorId: record.id,
 				cause,
 			});
-			type Issued = Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>;
 			let issued: {
-				readonly state: Issued["state"] | undefined;
-				readonly response: Issued["response"];
-				readonly mail: Issued["mail"] | undefined;
+				readonly state: Readonly<Record<string, unknown>> | undefined;
+				readonly response: Readonly<Record<string, unknown>>;
+				readonly mail: unknown;
 			};
 			try {
 				const answer = await factor.challenge({
@@ -888,16 +907,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					factors: opened.all,
 				});
 				// The factor's answer, each field read once, however it holds them; its
-				// state as the plain copy that is sealed (`copyFactorValue`).
+				// state as the plain copy that is sealed, its response as the plain copy
+				// the page is answered (`copyFactorValue`).
 				const state = answer?.state;
 				issued = {
 					state: state === undefined ? undefined : copyFactorValue(state),
-					response: answer?.response,
-					mail: answer?.mail,
+					response: copyFactorValue(answer?.response),
+					mail: copyAskedMail(answer?.mail),
 				};
-				if (!isPlainObject(issued.response)) {
-					throw new TypeError("the factor's challenge answered a response that is not an object");
-				}
 			} catch (cause) {
 				return failed(cause);
 			}
@@ -908,7 +925,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			};
 			const sent: MfaChallengeOutcome = {
 				outcome: "sent",
-				response: issued.response as object,
+				response: issued.response,
 				...about,
 			};
 			/** The pending challenge, sealed with the address's digest when a code went out, living until `expiresAtMs`. */
@@ -1139,11 +1156,24 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 							proof: call.proof,
 						});
 						// The factor's answer, each field read once, however it holds them: a
-						// read that throws is the factor's failure, as a throw of its own.
-						if (answer.ok) {
-							result = { ok: true, factorId: answer.factorId, next: answer.next };
+						// read that throws, an `ok` neither `true` nor `false`, or a refusal's
+						// reason outside the contract's, is the factor's failure, as a throw of
+						// its own.
+						const ok: unknown = answer.ok;
+						if (ok === true) {
+							const { factorId, next } = answer as Extract<MfaVerification, { readonly ok: true }>;
+							result = { ok: true, factorId, next };
+						} else if (ok === false) {
+							const { reason, factorId } = answer as Extract<
+								MfaVerification,
+								{ readonly ok: false }
+							>;
+							if (typeof reason !== "string" || !Object.hasOwn(VERIFICATION_REFUSALS, reason)) {
+								throw new TypeError("the factor's verification refused with a reason it may not");
+							}
+							result = { ok: false, reason, factorId };
 						} else {
-							result = { ok: false, reason: answer.reason, factorId: answer.factorId };
+							throw new TypeError("the factor's verification answered an ok that is not a boolean");
 						}
 					} catch (cause) {
 						return unreadable(cause);
@@ -1173,13 +1203,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						dataRefused = true;
 						return unreadable(cause);
 					}
-					let amr: unknown;
+					let amr: readonly string[] | undefined;
 					try {
-						amr = factor.amrFor(next);
+						amr = declaredAmrOf(factor, factor.amrFor(next));
 					} catch (cause) {
 						return unreadable(cause);
 					}
-					if (!declaresEach(factor, amr)) {
+					if (amr === undefined) {
 						return unreadable(
 							new TypeError("the factor's amrFor answered values it does not declare"),
 						);

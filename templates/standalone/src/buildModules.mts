@@ -31,7 +31,7 @@ import { googleFederationTypeModule } from "@o3co/auth-provider-federation-googl
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import {
-	oauthAuthorizationModule,
+	oauthAuthorizationGrantsModule,
 	oauthModule,
 	oauthSessionGrantModule,
 	subjectRevocationServiceModule,
@@ -350,7 +350,7 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		...(federationGrantsEnabled ? federationGrantsModules : []),
 		oauthModule({ config }),
 		oauthSessionGrantModule,
-		oauthAuthorizationModule({ config }),
+		oauthAuthorizationGrantsModule,
 		// Always wired: a provider that signs tokens must publish its
 		// verification keys regardless of OIDC issuer config, and `oauthModule`'s
 		// discovery `jwks_uri` (advertised when an issuer is set) must resolve.

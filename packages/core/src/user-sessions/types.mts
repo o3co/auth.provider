@@ -133,8 +133,8 @@ export type MailAddressFact = "none" | "address" | "unreadable";
  * federation, what an untrusted upstream IdP asserted, and when a second
  * factor was last verified. Read through `sessionAuthentication`
  * (`./authentication.mts`), which answers the same shape for older sessions.
- * Every field is a required key, holding `undefined` where there is nothing
- * to say, so a copy names each one.
+ * Every field but `upstreamAuthTime` is a required key, holding `undefined`
+ * where there is nothing to say, so a copy names each one.
  */
 export interface SessionAuthentication {
 	/** How the session was established: `"pwd"` (`POST /session/login`), `"fed"` (a federation callback). */
@@ -151,6 +151,15 @@ export interface SessionAuthentication {
 	readonly upstreamAmr: readonly string[] | undefined;
 	/** When a second factor was last verified, or bound, in this session. */
 	readonly mfaAt: Date | undefined;
+	/**
+	 * For `"fed"`: when the upstream last authenticated the user, its verified
+	 * id_token's `auth_time`. `null`: it showed none, and the federation's
+	 * callback does not meet a freshness ask, so the session is never fresh.
+	 * Absent: nothing to say — a password login, a session written before the
+	 * key, or a federation whose callback meets a freshness ask — so the
+	 * session is as fresh as `authTime`. Read through `authenticationFreshness`.
+	 */
+	readonly upstreamAuthTime?: Date | null;
 }
 
 /**
