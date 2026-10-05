@@ -639,17 +639,17 @@ modules fills them.
   deps object for their factories carries. `createDeviceVerificationHandler`'s
   `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
   `revokedBefore` (#717).
-- **BREAKING: a switched-off grant or second factor is no override target
-  (#728).** A `grants` or `mfaFactors` contribution whose factory answers
-  `null` — switched off by its module's settings — stays claimed, and an
-  `overrides.grants` or `overrides.mfaFactors` entry for it now refuses the
-  boot before any factory runs (`override-target-missing`, naming the kind,
-  the name and the overriding module; the message says the entry is switched
-  off). It used to register the override, switching on what the owner's
-  settings switched off. Switch the grant or factor on at its owner's
-  setting (`oauth-authorization.grants.<grant>.enabled`,
-  `mfa-totp-factor.enabled`, …) and keep the override, or drop the override.
-  An override may still answer `null`, switching off the entry it replaces.
+- **A switched-off grant or second factor is no override target (#728).** A
+  `grants` or `mfaFactors` factory may answer `null` — switched off by its
+  module's settings while the module is on; the entry stays claimed, and an
+  `overrides.grants` or `overrides.mfaFactors` entry for it refuses the boot
+  before any factory runs (`override-target-missing`, naming the kind, the
+  name and the overriding module; the message says the entry is switched
+  off), so an override never switches on what its owner switched off. Switch
+  the entry on at its owner's setting and keep the override, or drop the
+  override. A module that is itself off contributes nothing, so an override
+  of its entries is refused as a missing target. An override may still
+  answer `null`, switching off the entry it replaces.
 - **BREAKING: an enabled `dpopModule` requires `oauthTokenSettings`, and
   no longer reads the configuration (#728).** It takes the issuer every
   proof's `htu` is checked against from the slot alone, and no longer falls
