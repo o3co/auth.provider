@@ -691,6 +691,14 @@ export interface FederatedLogin {
 	readonly upstreamAmr: readonly string[];
 	/** Whether that federation's upstream `amr` counts (`federationTrustsUpstreamAmr`). */
 	readonly trusted: boolean;
+	/** When the upstream last authenticated the user (`FederationProfile.authTime`), when it showed one. */
+	readonly upstreamAuthTime?: Date;
+	/**
+	 * Whether that federation's callback alone meets a freshness ask
+	 * (`federationCallbackMeetsFreshness`); decides what is recorded when the
+	 * upstream showed no instant (`federatedSessionAuthentication`).
+	 */
+	readonly callbackMeetsFreshness?: boolean;
 	readonly authTime: Date;
 	readonly redirectTo: string | undefined;
 	readonly request: { readonly ip?: string; readonly userAgent?: string };
@@ -726,10 +734,24 @@ export function establishWithoutAsking(
 	if (typeof login.trusted !== "boolean") {
 		throw new RangeError("establishWithoutAsking: trusted must be true or false");
 	}
+	const { upstreamAuthTime, callbackMeetsFreshness } = login;
+	if (
+		upstreamAuthTime !== undefined &&
+		!(upstreamAuthTime instanceof Date && Number.isFinite(upstreamAuthTime.getTime()))
+	) {
+		throw new RangeError("establishWithoutAsking: upstreamAuthTime must be a valid date or absent");
+	}
+	if (callbackMeetsFreshness !== undefined && typeof callbackMeetsFreshness !== "boolean") {
+		throw new RangeError(
+			"establishWithoutAsking: callbackMeetsFreshness must be true, false or absent",
+		);
+	}
 	const recorded = federatedSessionAuthentication({
 		federation: login.federation,
 		upstreamAmr: login.upstreamAmr,
 		trusted: login.trusted,
+		...(upstreamAuthTime === undefined ? {} : { upstreamAuthTime }),
+		...(callbackMeetsFreshness === undefined ? {} : { callbackMeetsFreshness }),
 	});
 	const primary = checkPrimaryAuthentication({
 		subject: login.subject,

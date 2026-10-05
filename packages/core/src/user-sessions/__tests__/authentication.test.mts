@@ -28,8 +28,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import {
+	authenticationFreshness,
 	canRecordSecondFactor,
 	checkSecondFactorEvent,
+	copySessionAuthentication,
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
@@ -38,6 +40,7 @@ import {
 	requirementSessionFromAmr,
 	sessionAfterSecondFactor,
 	sessionAuthentication,
+	sessionFreshness,
 	vouchedAmr,
 } from "#/user-sessions/authentication.mjs";
 import type { SessionAuthentication, UserSession } from "#/user-sessions/types.mjs";
@@ -770,5 +773,204 @@ describe("never a verification time ahead of the store's clock", () => {
 				NOW,
 			)?.authentication.mfaAt,
 		).toStrictEqual(new Date(NOW - 1_000));
+	});
+});
+
+describe("upstreamAuthTime — when the upstream last authenticated a federated session's user", () => {
+	const AUTH = new Date("2026-09-28T00:00:00Z");
+	const UPSTREAM = new Date("2026-09-27T23:50:00Z");
+	const NOW_MS = Date.parse("2026-09-28T00:00:30Z");
+
+	describe("federatedSessionAuthentication — what the callback records of it", () => {
+		const login = { federation: "google", upstreamAmr: [], trusted: false } as const;
+
+		it("records the upstream's instant when it showed one, as a copy", () => {
+			const upstreamAuthTime = new Date(UPSTREAM.getTime());
+			for (const callbackMeetsFreshness of [true, false]) {
+				const { authentication } = federatedSessionAuthentication({
+					...login,
+					upstreamAuthTime,
+					callbackMeetsFreshness,
+				});
+				expect(authentication.upstreamAuthTime).toEqual(UPSTREAM);
+				expect(authentication.upstreamAuthTime).not.toBe(upstreamAuthTime);
+			}
+		});
+
+		it("records null when the upstream showed none and the federation's callback does not meet a freshness ask", () => {
+			const { authentication } = federatedSessionAuthentication({
+				...login,
+				callbackMeetsFreshness: false,
+			});
+			expect(authentication.upstreamAuthTime).toBeNull();
+		});
+
+		it("records nothing when the upstream showed none and the callback meets a freshness ask, or the caller says neither", () => {
+			for (const extra of [{ callbackMeetsFreshness: true }, {}]) {
+				const { authentication } = federatedSessionAuthentication({ ...login, ...extra });
+				expect(Object.hasOwn(authentication, "upstreamAuthTime")).toBe(false);
+			}
+		});
+
+		it("a password login records nothing of it", () => {
+			expect(
+				Object.hasOwn(passwordSessionAuthentication().authentication, "upstreamAuthTime"),
+			).toBe(false);
+		});
+	});
+
+	describe("copySessionAuthentication", () => {
+		it("copies a Date and keeps null and absence", () => {
+			const withDate = { ...FEDERATED, upstreamAuthTime: UPSTREAM };
+			const copied = copySessionAuthentication(withDate);
+			expect(copied.upstreamAuthTime).toEqual(UPSTREAM);
+			expect(copied.upstreamAuthTime).not.toBe(UPSTREAM);
+			expect(
+				copySessionAuthentication({ ...FEDERATED, upstreamAuthTime: null }).upstreamAuthTime,
+			).toBeNull();
+			expect(Object.hasOwn(copySessionAuthentication(FEDERATED), "upstreamAuthTime")).toBe(false);
+		});
+	});
+
+	describe("recordableSessionAuthentication — what a store records of it", () => {
+		it("records a Date no later than the store's clock, null, or nothing", () => {
+			expect(
+				recordableSessionAuthentication(
+					"sid-1",
+					{ ...FEDERATED, upstreamAuthTime: UPSTREAM },
+					NOW_MS,
+				)?.upstreamAuthTime,
+			).toEqual(UPSTREAM);
+			const ahead = new Date(NOW_MS + DEFAULT_CLOCK_SKEW_MS);
+			expect(
+				recordableSessionAuthentication("sid-1", { ...FEDERATED, upstreamAuthTime: ahead }, NOW_MS)
+					?.upstreamAuthTime,
+			).toEqual(new Date(NOW_MS));
+			expect(
+				recordableSessionAuthentication("sid-1", { ...FEDERATED, upstreamAuthTime: null }, NOW_MS)
+					?.upstreamAuthTime,
+			).toBeNull();
+			const none = recordableSessionAuthentication("sid-1", FEDERATED, NOW_MS);
+			expect(none === undefined ? true : Object.hasOwn(none, "upstreamAuthTime")).toBe(false);
+		});
+
+		it.each([
+			["a string", UPSTREAM.toISOString()],
+			["a number", UPSTREAM.getTime()],
+			["an Invalid Date", new Date(Number.NaN)],
+			["a date before the epoch", new Date(-1)],
+			[
+				"a date further ahead than hosts' clocks drift",
+				new Date(NOW_MS + DEFAULT_CLOCK_SKEW_MS + 1),
+			],
+		])("refuses one that is %s, naming the field", (_label, upstreamAuthTime) => {
+			expect(() =>
+				recordableSessionAuthentication("sid-1", { ...FEDERATED, upstreamAuthTime }, NOW_MS),
+			).toThrow(
+				new RangeError(
+					"UserSession sid-1: authentication.upstreamAuthTime must be a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined",
+				),
+			);
+		});
+	});
+
+	describe("sessionAuthentication — as it is read", () => {
+		it("reads a Date as a copy, null as null, and absence as absence", () => {
+			const stored = new Date(UPSTREAM.getTime());
+			const read = sessionAuthentication(
+				recorded(["fed"], { ...FEDERATED, upstreamAuthTime: stored }),
+			);
+			expect(read?.upstreamAuthTime).toEqual(UPSTREAM);
+			expect(read?.upstreamAuthTime).not.toBe(stored);
+			expect(
+				sessionAuthentication(recorded(["fed"], { ...FEDERATED, upstreamAuthTime: null }))
+					?.upstreamAuthTime,
+			).toBeNull();
+			const absent = sessionAuthentication(recorded(["fed"], FEDERATED));
+			expect(absent === undefined ? true : Object.hasOwn(absent, "upstreamAuthTime")).toBe(false);
+		});
+
+		it.each([
+			["a string", UPSTREAM.toISOString()],
+			["an Invalid Date", new Date(Number.NaN)],
+			["a date before the epoch", new Date(-1)],
+		])("cannot tell a session whose stored one is %s", (_label, upstreamAuthTime) => {
+			const session = recorded(["fed"], { ...FEDERATED, upstreamAuthTime } as never);
+			expect(sessionAuthentication(session)).toBeUndefined();
+			expect(vouchedAmr(session)).toEqual([]);
+		});
+
+		it("is kept by what a second factor makes of the session, and by the requirement's input", () => {
+			const session = recorded(["fed"], { ...FEDERATED, upstreamAuthTime: UPSTREAM });
+			const after = sessionAfterSecondFactor(
+				session,
+				{ amr: ["otp", "mfa"], at: new Date(NOW_MS) },
+				NOW_MS,
+			);
+			expect(after?.authentication.upstreamAuthTime).toEqual(UPSTREAM);
+			expect(requirementSession(session)?.authentication?.upstreamAuthTime).toEqual(UPSTREAM);
+			const nulled = recorded(["fed"], { ...FEDERATED, upstreamAuthTime: null });
+			expect(
+				sessionAfterSecondFactor(nulled, { amr: ["otp", "mfa"], at: new Date(NOW_MS) }, NOW_MS)
+					?.authentication.upstreamAuthTime,
+			).toBeNull();
+		});
+	});
+
+	describe("authenticationFreshness — the instant a session's authentication is as fresh as", () => {
+		it.each([
+			["no authentication", undefined, AUTH],
+			["none recorded", FEDERATED, AUTH],
+			["a password login", passwordSessionAuthentication().authentication, AUTH],
+			[
+				"an upstream instant before authTime",
+				{ ...FEDERATED, upstreamAuthTime: UPSTREAM },
+				UPSTREAM,
+			],
+			[
+				"an upstream instant after authTime",
+				{ ...FEDERATED, upstreamAuthTime: new Date(AUTH.getTime() + 60_000) },
+				AUTH,
+			],
+			["an upstream instant equal to authTime", { ...FEDERATED, upstreamAuthTime: AUTH }, AUTH],
+			["null: the upstream showed none", { ...FEDERATED, upstreamAuthTime: null }, undefined],
+		] as const)("answers for %s", (_label, authentication, expected) => {
+			const answer = authenticationFreshness(
+				AUTH,
+				authentication as SessionAuthentication | undefined,
+			);
+			expect(answer).toEqual(expected);
+			if (answer !== undefined) {
+				expect(answer).not.toBe(AUTH);
+				expect(answer).not.toBe(UPSTREAM);
+			}
+		});
+
+		it("answers undefined for an authTime that is not a valid date: an unreadable time is stale", () => {
+			expect(authenticationFreshness(new Date(Number.NaN), FEDERATED)).toBeUndefined();
+			expect(authenticationFreshness(undefined as never, undefined)).toBeUndefined();
+		});
+	});
+
+	describe("sessionFreshness — a session's freshness, read from its record", () => {
+		const at = (authentication: unknown): UserSession =>
+			({ ...session(["fed"]), authTime: AUTH, authentication }) as UserSession;
+
+		it("is authTime for a session that records no upstream instant, or none at all", () => {
+			expect(sessionFreshness(at(undefined))).toEqual(AUTH);
+			expect(sessionFreshness(at(FEDERATED))).toEqual(AUTH);
+		});
+
+		it("is the earlier of authTime and the upstream instant, and undefined for null", () => {
+			expect(sessionFreshness(at({ ...FEDERATED, upstreamAuthTime: UPSTREAM }))).toEqual(UPSTREAM);
+			expect(sessionFreshness(at({ ...FEDERATED, upstreamAuthTime: null }))).toBeUndefined();
+		});
+
+		it("is undefined for a recorded authentication it cannot read: never fresher than it was written", () => {
+			expect(
+				sessionFreshness(at({ ...FEDERATED, upstreamAuthTime: "2026-09-28" })),
+			).toBeUndefined();
+			expect(sessionFreshness(at({ primary: "" }))).toBeUndefined();
+		});
 	});
 });

@@ -161,6 +161,17 @@ function copyAuthentication(
 	// A primary is what a login path records before any second factor: one
 	// that already says when a second factor was verified was rebuilt by hand.
 	if (value.mfaAt !== undefined) refuse("a primary authentication records no mfaAt");
+	// Only a federation has an upstream; a password login's continuation, the
+	// one a requirement persists, therefore never carries an instant here.
+	const upstreamAuthTime = value.upstreamAuthTime;
+	if (upstreamAuthTime !== undefined) {
+		if (value.primary === PASSWORD_AMR) {
+			refuse("a password primary records no upstreamAuthTime");
+		}
+		if (upstreamAuthTime !== null && !isValidDate(upstreamAuthTime)) {
+			refuse("recorded.authentication.upstreamAuthTime must be a valid date, null or absent");
+		}
+	}
 	return Object.freeze({
 		primary: value.primary as string,
 		federation: value.federation as string | undefined,
@@ -169,6 +180,12 @@ function copyAuthentication(
 				? undefined
 				: Object.freeze([...(value.upstreamAmr as readonly string[])]),
 		mfaAt: undefined,
+		...(upstreamAuthTime === undefined
+			? {}
+			: {
+					upstreamAuthTime:
+						upstreamAuthTime === null ? null : new Date((upstreamAuthTime as Date).getTime()),
+				}),
 	});
 }
 
