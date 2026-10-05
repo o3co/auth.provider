@@ -25,13 +25,15 @@
 
 /**
  * The keys of an entry core owns — whether it is on, the type that handles
- * it, whether its upstream's `amr` counts, and where the upstream redirects
- * back to. They are removed before an entry is handed to its type's schema.
+ * it, whether its upstream's `amr` counts, whether its callback alone meets a
+ * freshness ask, and where the upstream redirects back to. They are removed
+ * before an entry is handed to its type's schema.
  */
 export const FEDERATION_ENTRY_CORE_KEYS: readonly string[] = Object.freeze([
 	"enabled",
 	"type",
 	"trustUpstreamAmr",
+	"callbackMeetsFreshness",
 	"callbackURL",
 ]);
 

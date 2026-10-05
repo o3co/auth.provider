@@ -15,6 +15,7 @@
  */
 
 import {
+	callbackUrlForExchange,
 	codeChallenge,
 	type EndSessionRequest,
 	type EndSessionResult,
@@ -28,7 +29,20 @@ import {
 } from "@o3co/auth-provider-core";
 import * as oidc from "openid-client";
 
-const GITHUB_ISSUER = "https://github.com";
+/**
+ * GitHub's authorization server's issuer, as its published metadata
+ * (`/.well-known/oauth-authorization-server/login/oauth`) names it: what the
+ * library compares a callback's RFC 9207 `iss` with.
+ */
+const GITHUB_AUTHORIZATION_SERVER_ISSUER = "https://github.com/login/oauth";
+/**
+ * The issuer label a GitHub profile carries, part of the identity a linked
+ * account is keyed by: not GitHub's authorization server's issuer, and never
+ * changed, or every linked GitHub identity would be orphaned.
+ */
+const GITHUB_PROFILE_ISSUER = "https://github.com";
+/** Where GitHub signs a browser out, when nothing else is configured. */
+const GITHUB_LOGOUT_URL = "https://github.com/logout";
 const SCOPES = ["read:user", "user:email"] as const;
 const GITHUB_USER_URL = "https://api.github.com/user";
 const GITHUB_EMAILS_URL = "https://api.github.com/user/emails";
@@ -186,8 +200,10 @@ export function createNamedGithubProvider(
 	// Local variable type (oidc.ServerMetadata) does not survive to the .d.mts.
 	// No `userinfo_endpoint`: GitHub has none. `/user` is read as a protected
 	// resource in exchangeCode.
+	// `authorization_response_iss_parameter_supported` is left unset: a callback's
+	// `iss` that is not GitHub's is refused, and one without `iss` is accepted.
 	const serverMetadata: oidc.ServerMetadata = {
-		issuer: GITHUB_ISSUER,
+		issuer: GITHUB_AUTHORIZATION_SERVER_ISSUER,
 		authorization_endpoint: "https://github.com/login/oauth/authorize",
 		token_endpoint: "https://github.com/login/oauth/access_token",
 	};
@@ -219,17 +235,16 @@ export function createNamedGithubProvider(
 			readonly code: string;
 			readonly codeVerifier: string;
 			readonly redirectUri: string;
+			readonly callbackParams?: Readonly<Record<string, string>>;
 		}): Promise<FederationProfile> {
-			// Synthesize the callback URL from redirectUri + code.
-			//
-			// Unlike the OIDC, Google and Apple providers, this one does NOT forward
-			// the callback's RFC 9207 `iss` to the library. GitHub's published
-			// metadata (/.well-known/oauth-authorization-server/login/oauth) names
-			// its issuer "https://github.com/login/oauth", while the library is
-			// configured with GITHUB_ISSUER, "https://github.com" (the profile's
-			// label), so forwarding `iss` would refuse every GitHub login.
-			const callbackUrl = new URL(params.redirectUri);
-			callbackUrl.searchParams.set("code", params.code);
+			// The callback URL from redirectUri + code, with the callback's RFC 9207
+			// `iss` when it carried one, which the library compares with GitHub's
+			// authorization server's issuer.
+			const callbackUrl = callbackUrlForExchange({
+				redirectUri: params.redirectUri,
+				code: params.code,
+				callbackParams: params.callbackParams,
+			});
 
 			const tokens = await oidc.authorizationCodeGrant(oidcConfig, callbackUrl, {
 				pkceCodeVerifier: params.codeVerifier,
@@ -310,7 +325,7 @@ export function createNamedGithubProvider(
 			} = federationTokenSnapshot(tokens, obtainedAt);
 
 			return {
-				issuer: GITHUB_ISSUER,
+				issuer: GITHUB_PROFILE_ISSUER,
 				sub,
 				email,
 				emailVerified,
@@ -350,7 +365,7 @@ export function createNamedGithubProvider(
 				if (req.state) url.searchParams.set("state", req.state);
 				return { url, method: "GET" };
 			}
-			const base = req.postLogoutRedirectUri ?? `${GITHUB_ISSUER}/logout`;
+			const base = req.postLogoutRedirectUri ?? GITHUB_LOGOUT_URL;
 			let url: URL;
 			try {
 				url = new URL(base);

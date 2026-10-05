@@ -114,7 +114,10 @@ export const expectBestEffortWarn = (
  * `http-non-loopback` carries.
  */
 export const expectUriNotLogged = (logger: MockLogger, uri: string): void => {
-	const logged = serialisedCalls(logger);
+	// A projected error's stack names source files and line numbers, never
+	// the record: left out, so a value such as `42` is not found in a line
+	// number.
+	const logged = serialisedCalls(logger).replace(/"stack":"(?:[^"\\]|\\.)*"/g, '"stack":""');
 	const forms = [JSON.stringify(uri).slice(1, -1)];
 	try {
 		const url = new URL(uri);

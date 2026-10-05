@@ -391,6 +391,7 @@ export type {
 	DelegatedTokens,
 	EndSessionRequest,
 	EndSessionResult,
+	FederationAsk,
 	FederationProfile,
 	MappedClaims,
 	RefreshedTokens,
@@ -409,6 +410,7 @@ export {
 	supportsLogout,
 	supportsRefresh,
 } from "./federations/types.mjs";
+export { readUpstreamAuthTime } from "./federations/upstream-auth-time.mjs";
 // The authentication claims a token may carry
 export {
 	authTimeAt,
@@ -1227,6 +1229,7 @@ export type {
 export {
 	createSessionLifecycle,
 	type SessionCloseOutcome,
+	type SessionFederations,
 	type SessionJoinOutcome,
 	type SessionJoinRequest,
 	type SessionLifecycle,
@@ -1251,6 +1254,7 @@ export {
 	checkSecondFactorEvent,
 	expectsRenewalNonce,
 	federatedSessionAuthentication,
+	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	type RecordedAuthentication,
@@ -1625,6 +1629,13 @@ export {
 	memoryFederationGrantIntentStoreModule,
 	memoryFederationGrantStoreModule,
 } from "./federation-grants/module.mjs";
+// What modules outside the federation-grants module read of its section —
+// the switch and the keep policy — through the `federationGrantPolicy` slot,
+// and the check a reader holds the slot to.
+export {
+	checkFederationGrantPolicy,
+	type FederationGrantPolicy,
+} from "./federation-grants/policy.mjs";
 export {
 	assertFederationGrantRetrievalLimits,
 	type FederationGrantAuditEvent,

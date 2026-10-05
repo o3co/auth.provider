@@ -28,7 +28,7 @@ import {
 	type AcrTable,
 	auditErrorList,
 	auditErrorText,
-	federationTrustsUpstreamAmr,
+	type FederationSettings,
 	type Logger,
 	producibleAmr,
 	SECOND_FACTOR_AMR,
@@ -48,34 +48,35 @@ export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
  *   (core's `stepUpReach`), is what a step-up can add: the second-factor
  *   values once the MFA requirement is registered, `mfa` among them when an
  *   enabled factor adds it.
- * - An installed federation whose section is enabled and trusts its upstream
- *   IdP's `amr` (`core.federations.<name>.trustUpstreamAmr`) makes every entry
- *   satisfiable: the callback records what that IdP asserts beside `fed`. One
- *   that does not adds `fed` alone; its IdP's values meet no `acr`.
+ * - An installed federation whose entry in core's `federationSettings` trusts
+ *   its upstream IdP's `amr` (`trustsUpstreamAmr`, true only beside `enabled`)
+ *   makes every entry satisfiable: the callback records what that IdP asserts
+ *   beside `fed`. One that does not, or that the settings hold no entry for,
+ *   adds `fed` alone; its IdP's values meet no `acr`.
  *
  * Runs at composition, after every name-keyed contribution has registered.
- * Each switch is read as the federation callback reads it, so the two cannot
- * disagree; a switch that is given but unusable is a `RangeError`, which
- * refuses the composition.
+ * The federation callback reads the same settings, so the two cannot
+ * disagree; boot refuses a switch that is given but unusable when it fills
+ * them.
  */
 export const vouchableAcrValues = (
 	configured: AcrTable,
 	federations: ReadonlyMap<string, unknown> | undefined,
-	config: unknown,
+	federationSettings: FederationSettings,
 	reach: ReadonlySet<string>,
 ): { readonly table: AcrTable; readonly dropped: readonly UnsatisfiableAcrValue[] } => {
 	const installed = [...(federations?.keys() ?? [])];
-	// Every switch is read, not only up to the first trusted one, so an
-	// unusable switch refuses the composition wherever it is. Only an enabled
-	// section's switch counts (a disabled one signs nobody in), as in the
-	// federation callback.
-	const trusted = installed.map((name) => federationTrustsUpstreamAmr(config, name));
+	const trustedFederation = installed.some(
+		(name) =>
+			Object.hasOwn(federationSettings, name) &&
+			federationSettings[name]?.trustsUpstreamAmr === true,
+	);
 	return vouchableAcrTable(
 		configured,
 		producibleAmr({
 			reach,
 			federationInstalled: installed.length > 0,
-			trustedFederation: trusted.includes(true),
+			trustedFederation,
 		}),
 	);
 };

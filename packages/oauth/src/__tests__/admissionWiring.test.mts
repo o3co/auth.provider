@@ -50,9 +50,11 @@ import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createSessionGrant } from "#/grants/session.mjs";
-import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const config = {
 	oauth: {
@@ -85,7 +87,11 @@ const codeRepository: CodeRepository = {
 };
 
 /** The grant factories' shared slots, without `requirements`. */
-const grantDeps = { config, keyStore } as unknown as GrantDependencies;
+const grantDeps = {
+	config,
+	...grantSettingsFrom(config),
+	keyStore,
+} as unknown as GrantDependencies & ReturnType<typeof grantSettingsFrom>;
 
 /** The session grant's slots, without `requirements`: it reads the token settings from their slot. */
 const sessionGrantDeps = { keyStore, oauthTokenSettings: createTestOAuthTokenSettings() };
@@ -96,7 +102,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 			createOAuthRouter(express, {
 				loginEntry: createTestLoginEntry(),
 				registry: new GrantRegistry(),
-				config,
+				...routerInputsOf(config),
 				clientRepository,
 				codeRepository,
 				keyStore,
@@ -110,7 +116,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 		const { router } = await createOAuthRouter(express, {
 			loginEntry: createTestLoginEntry(),
 			registry: new GrantRegistry(),
-			config,
+			...routerInputsOf(config),
 			clientRepository,
 			codeRepository,
 			keyStore,
@@ -130,7 +136,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 			createOAuthRouter(express, {
 				loginEntry: createTestLoginEntry(),
 				registry,
-				config,
+				...routerInputsOf(config),
 				clientRepository,
 				codeRepository,
 				keyStore,
@@ -185,7 +191,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 			createOAuthRouter(express, {
 				loginEntry: createTestLoginEntry(),
 				registry: new GrantRegistry(),
-				config,
+				...routerInputsOf(config),
 				clientRepository,
 				codeRepository,
 				keyStore,
@@ -214,6 +220,7 @@ describe("the grant manifests declare what admission reads", () => {
 		const module = oauthSessionGrantModule;
 		expect(module.requires).toContain("sessionRequirementResolver");
 		expect(module.optional).toContain("userSessionStore");
+		expect(module.optional).toContain("sessionLifecycleStore");
 		expect(module.optional).toContain("subjectRevocation");
 		expect(module.optional).toContain("auditSink");
 		expect(module.optional).toContain("logger");
@@ -228,10 +235,11 @@ describe("the grant manifests declare what admission reads", () => {
 		expect(oauthSessionGrantModule.section?.isEnabled?.(undefined)).toBe(false);
 	});
 
-	it("oauthAuthorizationModule requires sessionRequirementResolver and lists the slots admission reads", () => {
-		const module = oauthAuthorizationModule({ config });
+	it("oauthAuthorizationGrantsModule requires sessionRequirementResolver and lists the slots admission reads", () => {
+		const module = oauthAuthorizationGrantsModule;
 		expect(module.requires).toContain("sessionRequirementResolver");
 		expect(module.optional).toContain("userSessionStore");
+		expect(module.optional).toContain("sessionLifecycleStore");
 		expect(module.optional).toContain("subjectRevocation");
 		expect(module.optional).toContain("auditSink");
 		expect(module.optional).toContain("logger");

@@ -37,6 +37,8 @@ import { describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -90,11 +92,14 @@ async function buildApp(config: AppConfig): Promise<express.Express> {
 	app.use(express.urlencoded({ extended: false }));
 	const keyStore = createSymmetricKeyStore(SECRET);
 	const registry = new GrantRegistry();
-	registry.register("client_credentials", createClientCredentialsGrant({ config, keyStore }));
+	registry.register(
+		"client_credentials",
+		createClientCredentialsGrant({ ...grantSettingsFrom(config), keyStore }),
+	);
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry,
-		config,
+		...routerInputsOf(config),
 		clientRepository: clientRepo,
 		codeRepository: codeRepoStub,
 		keyStore,

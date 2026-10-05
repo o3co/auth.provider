@@ -91,3 +91,31 @@ describe("oauth.refreshToken schema — the legacyRtPolicy enum", () => {
 		expect(flagged).toBe(true);
 	});
 });
+
+describe("oauth.refreshToken schema — the family policy keys are the oauth package's", () => {
+	// Core's copy of `oauth {}` holds their shape and no default: the oauth
+	// package's reference sets the default and its section requires them.
+	const base = { expiresIn: 86400 };
+
+	it("accepts a refreshToken that sets neither key", () => {
+		const result = refreshTokenSchema.safeParse(base);
+		expect(result.success).toBe(true);
+		if (!result.success) return;
+		expect(result.data).toEqual({ expiresIn: 86400 });
+	});
+
+	it.each(["accept", "reject"])("accepts unknownFamilyPolicy='%s'", (policy) => {
+		expect(refreshTokenSchema.safeParse({ ...base, unknownFamilyPolicy: policy }).success).toBe(
+			true,
+		);
+	});
+
+	it("refuses any other unknownFamilyPolicy, so no other string reaches the refresh grant", () => {
+		const result = refreshTokenSchema.safeParse({ ...base, unknownFamilyPolicy: "warn" });
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual([
+			"unknownFamilyPolicy",
+		]);
+	});
+});

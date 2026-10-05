@@ -28,7 +28,11 @@ import {
 	type GrantDependencies,
 	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
@@ -58,6 +62,8 @@ const grantWith = (evaluate: GrantPolicyHook["evaluate"]) =>
 				resourceIndicator: { enabled: true },
 			},
 		} as unknown as GrantDependencies["config"],
+		oauthTokenSettings: createTestOAuthTokenSettings({ resourceIndicatorEnabled: true }),
+		tokenBindingSettings: createTestTokenBindingSettings(),
 		keyStore,
 		grantPolicy: { kind: "stub", evaluate },
 	} as RefreshTokenGrantDeps);

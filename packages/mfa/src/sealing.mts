@@ -154,8 +154,9 @@ const bindingRecord = (parts: readonly unknown[]): Buffer | undefined =>
 const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** What every refusal of a factor's data or state says: nothing of the value. */
-const NOT_PLAIN_VALUE = "a factor's data or state must be a plain JSON object of plain JSON values";
+/** What every refusal of a factor's data, state or response says: nothing of the value. */
+const NOT_PLAIN_VALUE =
+	"a factor's data, state or response must be a plain JSON object of plain JSON values";
 
 /** What `copies` holds for an object while it is copied: met again inside itself, it is a cycle. */
 const COPYING: unique symbol = Symbol("being copied");
@@ -165,9 +166,10 @@ const refuse = (): never => {
 };
 
 /**
- * A factor's data or state as a plain JSON-shaped copy, each field read once,
- * frozen at every depth: what is sealed, and what the coordinator hands
- * everything that acts on the value, so nothing acts on what was not sealed.
+ * A factor's data, state or response as a plain JSON-shaped copy, each field
+ * read once, frozen at every depth: what is sealed or answered, and what the
+ * coordinator hands everything that acts on the value, so nothing acts on
+ * what was not taken.
  *
  * - `null`, a boolean, a string or a finite number other than `-0` (JSON writes
  *   it as `0`), as it is;
