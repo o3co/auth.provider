@@ -76,9 +76,11 @@ const MFA_UNAVAILABLE = {
 	error_description: "MFA temporarily unavailable",
 };
 
-/** How long the mark stands under the package's defaults: max(300 s, 2 × 600 s) and twice the skew. */
-// max(300, 2 × 600) s, twice the skew, and one factor-set lease (16 × the default 5000 ms Store timeout).
-const LIFETIME_MS = 1_200_000 + 2 * DEFAULT_CLOCK_SKEW_MS + 80_000;
+/** A factor-set write's lease: 16 × the default 5000 ms Store timeout. */
+const LEASE_MS = 80_000;
+
+/** How long the mark stands under the package's defaults: max(300, 2 × 600) s, twice the skew, and one factor-set lease. */
+const LIFETIME_MS = 1_200_000 + 2 * DEFAULT_CLOCK_SKEW_MS + LEASE_MS;
 
 /** Boots `mode` with no mail sender, so no first binding asks the account-email proof; alice's witness as `enrolled` says. */
 async function composed(mode: "optional" | "required", enrolled?: true) {
@@ -221,13 +223,32 @@ describe("a first binding in a session after the subject's first binding elsewhe
 		expect(await factorStore.list(ALICE.id)).toEqual([]);
 	});
 
-	it("is admitted to a session signed in more than the clock skew after the mark: it binds", async () => {
-		const { app, factorStore, userSessionStore, users } = await composed("optional");
+	it("is refused to a session signed in after the mark and the clock skew, but within a factor-set lease of them: the owner's factor may still have been landing", async () => {
+		const { app, factorStore, userSessionStore, users, logger } = await composed("optional");
 		const first = await signIn(app, userSessionStore);
 		expect((await bindFromAccount(first.agent)).status).toBe(200);
 		await loseFactors(factorStore);
 		await forgetWitness(users);
 		freezeClock(T0 + DEFAULT_CLOCK_SKEW_MS + 1);
+		const within = await signIn(app, userSessionStore);
+
+		const res = await enrollFromAccount(within.agent, "totp");
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(
+			logger.info.mock.calls.filter((call) => call[1] === "mfa_first_binding_distrusted"),
+		).toEqual([[{ sub: ALICE.id, action: "mfa.manage" }, "mfa_first_binding_distrusted"]]);
+	});
+
+	it("is admitted to a session signed in more than the clock skew and a factor-set lease after the mark: it binds", async () => {
+		const { app, factorStore, userSessionStore, users } = await composed("optional");
+		const first = await signIn(app, userSessionStore);
+		expect((await bindFromAccount(first.agent)).status).toBe(200);
+		await loseFactors(factorStore);
+		await forgetWitness(users);
+		freezeClock(T0 + DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 1);
 		const fresh = await signIn(app, userSessionStore);
 
 		const res = await bindFromAccount(fresh.agent);
@@ -237,7 +258,7 @@ describe("a first binding in a session after the subject's first binding elsewhe
 });
 
 describe("a first binding at a login after the subject's first binding elsewhere", () => {
-	it("is refused at the completion of a login begun before it: 401 login_required with Retry-After until the mark and the clock skew have passed, one info line, nothing bound, nothing spent", async () => {
+	it("is refused at the completion of a login begun before it: 401 login_required with Retry-After until the mark, the clock skew and a factor-set lease have passed, one info line, nothing bound, nothing spent", async () => {
 		const { app, factorStore, transactionStore, logger } = await composed("required");
 		const stale = await beginFirstBinding(app);
 		const begun = await beginEnrollment(stale.agent, stale.transaction, "totp");
@@ -262,9 +283,9 @@ describe("a first binding at a login after the subject's first binding elsewhere
 
 		expect(res.status).toBe(401);
 		expect(res.body).toEqual(LOGIN_REQUIRED);
-		// The mark was noted at T0 + 30 s: a login binds once past it and the skew.
+		// The mark was noted at T0 + 30 s: a login binds once past it, the skew and the lease.
 		expect(res.headers["retry-after"]).toBe(
-			String(Math.ceil((30_000 + DEFAULT_CLOCK_SKEW_MS + 1 - 60_000) / 1000)),
+			String(Math.ceil((30_000 + DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 1 - 60_000) / 1000)),
 		);
 		expect(await factorStore.list(ALICE.id)).toEqual([]);
 		expect(await transactionStore.get(stale.transaction)).toMatchObject({ attempts: 0 });
@@ -401,7 +422,7 @@ describe("a first binding at a login after the subject's first binding elsewhere
 		expect((await factorStore.list(ALICE.id)).some((record) => record.kind === "totp")).toBe(false);
 	});
 
-	it("is admitted at a login authenticated more than the clock skew after the mark: it binds", async () => {
+	it("is admitted at a login authenticated more than the clock skew and a factor-set lease after the mark: it binds", async () => {
 		const { app, factorStore, users } = await composed("required");
 		const first = await beginFirstBinding(app);
 		const firstBegun = await beginEnrollment(first.agent, first.transaction, "totp");
@@ -416,7 +437,7 @@ describe("a first binding at a login after the subject's first binding elsewhere
 		).toBe(200);
 		await loseFactors(factorStore);
 		await forgetWitness(users);
-		freezeClock(T0 + DEFAULT_CLOCK_SKEW_MS + 1);
+		freezeClock(T0 + DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 1);
 		const fresh = await beginFirstBinding(app);
 		const begun = await beginEnrollment(fresh.agent, fresh.transaction, "totp");
 

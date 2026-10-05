@@ -26,11 +26,12 @@
  *   can still bind, with the skew once for the clock that dated the
  *   authentication and once for the store's clock that ends the mark, and the
  *   lease a write it marks may still be landing in.
- * - An authentication at or before the mark plus `DEFAULT_CLOCK_SKEW_MS` is
- *   distrusted, and so is one whose time cannot be read; a fresh one is not
- *   until the mark plus the skew has passed (`firstBindingRetryAfterMs`). A
- *   caller that must also distrust a sign-in made while the marked write was
- *   still landing — a regeneration — widens both by that write's window.
+ * - An authentication at or before the mark plus `DEFAULT_CLOCK_SKEW_MS` and
+ *   one factor-set lease is distrusted — a sign-in made while the marked write
+ *   may still have been landing, on a clock up to the skew ahead — and so is
+ *   one whose time cannot be read; a fresh one is not until that has passed
+ *   (`retryAfterMs`). Every reader judges by the same mark
+ *   (`createFirstBindingMark`), which holds the lease: none passes it.
  * - An answer the port does not promise is an outage, never "no mark".
  */
 
@@ -65,33 +66,44 @@ export function readFirstBindingMark(answer: unknown, nowMs: number): number | n
 	return read;
 }
 
-/**
- * Whether a mark at `markAtMs` distrusts an authentication at
- * `authTimeMs`: one not later than the mark by more than
- * `DEFAULT_CLOCK_SKEW_MS` and `writeWindowMs`, or one that is not a number.
- * None, with no mark.
- */
-export function distrustedByFirstBinding(
-	authTimeMs: number | undefined,
-	markAtMs: number | null,
-	writeWindowMs = 0,
-): boolean {
-	if (markAtMs === null) return false;
-	return !(
-		typeof authTimeMs === "number" && authTimeMs > markAtMs + DEFAULT_CLOCK_SKEW_MS + writeWindowMs
-	);
+/** One subject's first-binding mark as every reader judges it, over the settings it was built with. */
+export interface FirstBindingMark {
+	/** How long a mark noted now stands, in whole milliseconds. */
+	readonly lifetimeMs: number;
+	/**
+	 * How long after a read finds no mark that read still covers a binding: a
+	 * mark noted since stands its lifetime, less the skew and the lease it may
+	 * be noted ahead of its write.
+	 */
+	readonly readCoversMs: number;
+	/**
+	 * Whether a mark at `markAtMs` distrusts an authentication at
+	 * `authTimeMs`: one not later than the mark by more than
+	 * `DEFAULT_CLOCK_SKEW_MS` and one lease, or one that is not a number.
+	 * None, with no mark.
+	 */
+	distrusts(authTimeMs: number | undefined, markAtMs: number | null): boolean;
+	/**
+	 * How long from `nowMs` until an authentication is no longer distrusted by
+	 * a mark at `markAtMs`, on this clock. Another replica's clock may put it
+	 * up to the skew later.
+	 */
+	retryAfterMs(markAtMs: number, nowMs: number): number;
 }
 
-/**
- * How long from `nowMs` until an authentication is no longer distrusted by a
- * mark at `markAtMs`: past the mark plus `DEFAULT_CLOCK_SKEW_MS` and
- * `writeWindowMs`, on this clock. Another replica's clock may put it up to
- * the skew later.
- */
-export function firstBindingRetryAfterMs(
-	markAtMs: number,
-	nowMs: number,
-	writeWindowMs = 0,
-): number {
-	return Math.max(0, markAtMs + DEFAULT_CLOCK_SKEW_MS + writeWindowMs + 1 - nowMs);
+/** The mark over `settings` (see this file's header). */
+export function createFirstBindingMark(settings: FirstBindingMarkSettings): FirstBindingMark {
+	const lifetimeMs = firstBindingMarkLifetimeMs(settings);
+	const { leaseMs } = settings;
+	/** The latest authentication a mark at `markAtMs` distrusts. */
+	const distrustedUntil = (markAtMs: number): number => markAtMs + DEFAULT_CLOCK_SKEW_MS + leaseMs;
+	return Object.freeze({
+		lifetimeMs,
+		readCoversMs: lifetimeMs - DEFAULT_CLOCK_SKEW_MS - leaseMs,
+		distrusts: (authTimeMs: number | undefined, markAtMs: number | null): boolean =>
+			markAtMs !== null &&
+			!(typeof authTimeMs === "number" && authTimeMs > distrustedUntil(markAtMs)),
+		retryAfterMs: (markAtMs: number, nowMs: number): number =>
+			Math.max(0, distrustedUntil(markAtMs) + 1 - nowMs),
+	});
 }

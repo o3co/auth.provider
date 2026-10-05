@@ -117,7 +117,7 @@ import {
 	leaseMsFor,
 	type MfaSubjectLeases,
 } from "./factorSet.mjs";
-import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
+import { createFirstBindingMark, type FirstBindingMark } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { createMfaLockRecovery } from "./lockRecovery.mjs";
 import { mailFailureOf } from "./mail.mjs";
@@ -180,6 +180,8 @@ export interface MfaBootState {
 	readonly requirement: SessionRequirement;
 	/** The enrollment witness over the composition's directory. */
 	readonly witness: MfaEnrollmentWitness;
+	/** The one first-binding mark every reader of this boot judges by. */
+	readonly firstBindingMark: FirstBindingMark;
 	readonly logger: Logger;
 }
 
@@ -474,6 +476,11 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						logger.warn({ slot: "userRepository" }, "mfa_enrollment_witness_unwritable");
 					}
 					const sealing = createMfaSealing({ ring: settings.encryptionKeys, logger });
+					const firstBindingMark = createFirstBindingMark({
+						manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
+						transactionTtlSeconds: settings.transactionTtlSeconds,
+						leaseMs: leaseMsFor(settings.storeTimeoutMs),
+					});
 					const requirement = createMfaRequirement({
 						mode,
 						factors: deps.mfaFactorResolver,
@@ -493,6 +500,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 						firstBindingAt: (subject, nowMs) =>
 							deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+						firstBindingMark,
 						recoverySetFloor: boundedRecoverySetFloor(
 							deps.mfaTransactionStore,
 							settings.storeTimeoutMs,
@@ -505,6 +513,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						sealing,
 						requirement,
 						witness,
+						firstBindingMark,
 						logger,
 					});
 					return requirement;
@@ -512,9 +521,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			},
 			routes: [
 				(deps) => {
-					const { mode, settings, sealing, requirement, witness, logger } = mfaBootState(
-						deps.mfaFactorResolver,
-					);
+					const { mode, settings, sealing, requirement, witness, firstBindingMark, logger } =
+						mfaBootState(deps.mfaFactorResolver);
 					checkInstalledFactors(deps.mfaFactorResolver, mode);
 					// The subject's records as read, and the writes the witness follows: one per boot.
 					const factorSet = createMfaFactorSet({
@@ -583,11 +591,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
 								requireEmailProof: settings.enrollment.requireEmailProof,
 								sessionProofSeconds: settings.manage.maxAgeSeconds,
-								firstBindingMarkMs: firstBindingMarkLifetimeMs({
-									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
-									transactionTtlSeconds: settings.transactionTtlSeconds,
-									leaseMs: leaseMsFor(settings.storeTimeoutMs),
-								}),
+								firstBindingMark,
 								...(deps.subjectRevocation === undefined
 									? {}
 									: { subjectRevocation: deps.subjectRevocation }),
@@ -632,12 +636,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
 								firstBindingAt: (subject, nowMs) =>
 									deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
-								firstBindingMarkMs: firstBindingMarkLifetimeMs({
-									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
-									transactionTtlSeconds: settings.transactionTtlSeconds,
-									leaseMs: leaseMsFor(settings.storeTimeoutMs),
-								}),
-								leaseMs: leaseMsFor(settings.storeTimeoutMs),
+								firstBindingMark,
 							},
 						}),
 					};

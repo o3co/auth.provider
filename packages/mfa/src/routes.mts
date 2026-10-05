@@ -268,7 +268,7 @@ export interface MfaRoutesOptions {
 	/** What the regeneration of recovery codes reads beside the management's (`recoveryCodes.mts`). */
 	readonly recoveryCodes: Pick<
 		MfaRecoveryCodesOptions,
-		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMarkMs" | "leaseMs"
+		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMark"
 	>;
 }
 

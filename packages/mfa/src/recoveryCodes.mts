@@ -66,7 +66,6 @@
 
 import {
 	type AuditSink,
-	DEFAULT_CLOCK_SKEW_MS,
 	emitAuditEvent,
 	errorEnvelope,
 	type Logger,
@@ -76,11 +75,7 @@ import {
 import express, { type Request, type Response, type Router } from "express";
 import type { MfaFactorSet } from "./factorSet.mjs";
 import { mayCount, recordsAfterRecoveryCodes } from "./firstBinding.mjs";
-import {
-	distrustedByFirstBinding,
-	firstBindingRetryAfterMs,
-	readFirstBindingMark,
-} from "./firstBindingMark.mjs";
+import { type FirstBindingMark, readFirstBindingMark } from "./firstBindingMark.mjs";
 import type { MfaManagingSession } from "./management.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
 import { issueRecoveryCodes, type MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
@@ -130,10 +125,8 @@ export interface MfaRecoveryCodesOptions {
 	readonly maxFactorsPerSubject: number;
 	/** The subject's first-binding mark (`MfaTransactionStore.firstBindingAt`), read under the lease. */
 	readonly firstBindingAt: (subject: string, nowMs: number) => Promise<unknown>;
-	/** How long a first-binding mark stands, in milliseconds (`firstBindingMarkLifetimeMs`). */
-	readonly firstBindingMarkMs: number;
-	/** How long a factor-set write's lease stands, in milliseconds (`leaseMsFor`). */
-	readonly leaseMs: number;
+	/** The first-binding mark as every reader judges it (`createFirstBindingMark`). */
+	readonly firstBindingMark: FirstBindingMark;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -189,21 +182,15 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 				} catch (cause) {
 					return { outcome: "unmarked", cause };
 				}
-				// Widened by a lease: the owner's factor may land up to a lease after its mark,
-				// so a sign-in in that stretch — a clock up to the skew ahead — is distrusted too.
-				if (distrustedByFirstBinding(session.authTimeMs, mark, options.leaseMs) && mark !== null) {
+				if (mark !== null && options.firstBindingMark.distrusts(session.authTimeMs, mark)) {
 					return {
 						outcome: "distrusted",
-						retryAfterMs: firstBindingRetryAfterMs(mark, nowMs, options.leaseMs),
+						retryAfterMs: options.firstBindingMark.retryAfterMs(mark, nowMs),
 					};
 				}
 				// Two legs: admission's own mark read covers a mark noted before this request
-				// began; this read covers one noted since, while it stands — the mark's
-				// lifetime, less the skew and the binding's lease it may be noted ahead of.
-				if (
-					now() - startedAtMs >
-					options.firstBindingMarkMs - DEFAULT_CLOCK_SKEW_MS - options.leaseMs
-				) {
+				// began; this read covers one noted since, while it stands.
+				if (now() - startedAtMs > options.firstBindingMark.readCoversMs) {
 					return { outcome: "stale" };
 				}
 				if (recordsAfterRecoveryCodes(factors, records, "mfa") > maxFactorsPerSubject) {

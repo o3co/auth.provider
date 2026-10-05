@@ -110,7 +110,7 @@ import {
 	mayCount,
 	type RequireEmailProof,
 } from "./firstBinding.mjs";
-import { distrustedByFirstBinding, readFirstBindingMark } from "./firstBindingMark.mjs";
+import { type FirstBindingMark, readFirstBindingMark } from "./firstBindingMark.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
 import { MfaEnrollmentStateInconsistentError } from "./witness.mjs";
@@ -169,6 +169,8 @@ export interface MfaRequirementOptions {
 	 * (`MfaTransactionStore.firstBindingAt`); rejects on an outage.
 	 */
 	readonly firstBindingAt: (subject: string, nowMs: number) => Promise<number | null>;
+	/** The first-binding mark as every reader judges it (`createFirstBindingMark`). */
+	readonly firstBindingMark: Pick<FirstBindingMark, "distrusts">;
 	/** The key ring's sealing: what tells a recovery set with no code left (`factorState.mts`). */
 	readonly sealing: MfaSealing;
 }
@@ -285,6 +287,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		emailProofRequiredAtNextBinding,
 		sessionEmailProofAt,
 		firstBindingAt,
+		firstBindingMark,
 		sealing,
 	} = options;
 
@@ -465,7 +468,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		);
 		if (!recentPrimary) return REAUTHENTICATE;
 		const mark = readFirstBindingMark(await firstBindingAt(session.sub, nowMs), nowMs);
-		if (distrustedByFirstBinding(session.authTime.getTime(), mark)) {
+		if (firstBindingMark.distrusts(session.authTime.getTime(), mark)) {
 			logger.info({ sub: session.sub, action: action.name }, "mfa_first_binding_distrusted");
 			return REAUTHENTICATE;
 		}
