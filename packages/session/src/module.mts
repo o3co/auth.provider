@@ -26,6 +26,7 @@ import {
 	loginPageCarriesReturn,
 	type SessionCookiePolicy,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	verifierLimitClaim,
 	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import express from "express";
@@ -268,8 +269,10 @@ export const sessionModule = defineModule<
 		// What the link flow's start and callback admit.
 		admissionActions: SESSION_ADMISSION_ACTIONS,
 		// The `login` prefix is claimed with no budget: no limiter decides the
-		// login's limit, which the attempt guard counts.
-		rateLimitBudgets: { [LOGIN_ATTEMPT_TAG]: () => null },
+		// login's limit, which the attempt guard counts at the declared setting.
+		rateLimitBudgets: {
+			[LOGIN_ATTEMPT_TAG]: verifierLimitClaim({ setting: "session.rateLimit.login" }),
+		},
 		routes: [
 			(deps) => {
 				return {
