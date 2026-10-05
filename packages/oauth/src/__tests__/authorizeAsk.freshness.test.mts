@@ -70,4 +70,25 @@ describe("loginSince and freshSince", () => {
 		expect(readableFreshness(federated(NOW - 1_000, new Date(NOW - 5_000)), NOW)).toBe(NOW - 5_000);
 		expect(readableFreshness(federated(NOW - 5_000, new Date(NOW - 1_000)), NOW)).toBe(NOW - 5_000);
 	});
+
+	it("compare an upstream authentication to the ask in whole seconds: one in the ask's second counts, one a second earlier does not", () => {
+		const ask = Date.parse("2026-10-05T11:59:00.800Z");
+		const inSecond = federated(NOW - 1_000, new Date("2026-10-05T11:59:00.000Z"));
+		expect(freshSince(inSecond, ask, NOW)).toBe(true);
+		const secondBefore = federated(NOW - 1_000, new Date("2026-10-05T11:58:59.000Z"));
+		expect(freshSince(secondBefore, ask, NOW)).toBe(false);
+	});
+
+	it("still compare a session's establishment to the ask to the millisecond", () => {
+		const ask = Date.parse("2026-10-05T11:59:00.800Z");
+		const sameSecondBefore = federated(Date.parse("2026-10-05T11:59:00.200Z"), undefined);
+		expect(freshSince(sameSecondBefore, ask, NOW)).toBe(false);
+		expect(loginSince(sameSecondBefore, ask, NOW)).toBe(false);
+		// The upstream is later than the establishment, so the establishment is the freshness.
+		const upstreamLater = federated(
+			Date.parse("2026-10-05T11:59:00.200Z"),
+			new Date("2026-10-05T11:59:01.000Z"),
+		);
+		expect(freshSince(upstreamLater, ask, NOW)).toBe(false);
+	});
 });

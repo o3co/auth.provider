@@ -2098,6 +2098,42 @@ describe("/authorize — step-up and re-authentication", () => {
 			expect(redirectParams(res).get("error")).toBe("login_required");
 		});
 
+		it("meets a login ask with an upstream authentication in the ask's second, and not with one a second earlier", async () => {
+			// An upstream `auth_time` is whole seconds: a re-login in the ask's
+			// second is shown as that second's start.
+			vi.useFakeTimers({ toFake: ["Date"] });
+			try {
+				for (const [upstream, expected] of [
+					["2026-09-13T12:00:00.000Z", "code"],
+					["2026-09-13T11:59:59.000Z", "error"],
+				] as const) {
+					vi.setSystemTime(new Date("2026-09-13T12:00:00.800Z"));
+					const state = {
+						authTime: new Date("2026-09-13T11:50:00.000Z"),
+						upstream: new Date("2026-09-13T11:50:00.000Z") as Date | null,
+					};
+					const harness = await makeApp({
+						session,
+						userSessionStore: federatedStore(() => state),
+						createCode: mintingCode(),
+					});
+					const back = loginRedirectTo(
+						await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+					);
+					vi.setSystemTime(new Date("2026-09-13T12:00:02.000Z"));
+					state.authTime = new Date("2026-09-13T12:00:01.500Z");
+					state.upstream = new Date(upstream);
+					const params = redirectParams(
+						await request(harness.app).get(back.pathname + back.search),
+					);
+					expect(params.has(expected), upstream).toBe(true);
+					if (expected === "error") expect(params.get("error")).toBe("login_required");
+				}
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it("reads a federated session that records no upstream time as fresh as its establishment", async () => {
 			const createCode = mintingCode();
 			const state = { authTime: minutesAgo(1), upstream: undefined };

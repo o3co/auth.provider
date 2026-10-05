@@ -384,8 +384,12 @@ export const readableFreshness = (session: UserSession, nowMs: number): number |
 
 /**
  * `loginSince` over the session's freshness (`readableFreshness`): whether
- * the authentication a freshness ask judges was made strictly after
- * `instant`, or `unreadable`.
+ * the authentication a freshness ask judges was made since `instant`, or
+ * `unreadable`. Strictly after it, to the millisecond, as `loginSince`
+ * reads — except where the upstream's authentication is what the freshness
+ * is (earlier than the session's establishment): an `auth_time` is whole
+ * seconds, so it is compared in whole seconds, one in the ask's second
+ * counting.
  */
 export const freshSince = (
 	session: UserSession,
@@ -393,7 +397,11 @@ export const freshSince = (
 	nowMs: number,
 ): boolean | "unreadable" => {
 	const at = readableFreshness(session, nowMs);
-	return at === undefined ? "unreadable" : at > instant;
+	if (at === undefined) return "unreadable";
+	const established = readableAuthTime(session, nowMs);
+	return established !== undefined && at < established
+		? Math.floor(at / 1000) >= Math.floor(instant / 1000)
+		: at > instant;
 };
 
 /**
