@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-10-05
+最終更新: 2026-10-06
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージの type がプロバイダーと並べて作るリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -137,7 +137,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | GET | `/session/csrf` | double-submit CSRF トークンの発行 |
 | POST | `/session/login` | パスワードログイン |
 | POST | `/session/logout` | ブラウザセッションの終了 — [無効化するもの](#post-sessionlogout-が無効化するもの) を参照 |
-| GET | `/session/oauth/federation/:name` | フェデレーションの開始（`?redirect_to=`、`?link=1`） |
+| GET | `/session/oauth/federation/:name` | フェデレーションの開始（`?redirect_to=`、`?link=1`、鮮度のヒント `?prompt=` — `login` だけを数える — と `?max_age=`、2^53−1 以下の負でない整数。繰り返しや不正なヒントは `400 invalid_request`） |
 | GET | `/session/oauth/federation/:name/callback` | `query` フェデレーションのコールバック。`form_post` フェデレーションには `405`（`Allow: POST`） |
 | POST | `/session/oauth/federation/:name/callback` | `form_post` フェデレーションのコールバック。`query` フェデレーションには `405`（`Allow: GET`） |
 

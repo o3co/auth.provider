@@ -156,13 +156,19 @@ describe("the shipped configuration reaches the Redis rate limiter", () => {
 		expect(booted.switches.adapters.rateLimiter).toBe("redis");
 	});
 
-	it("carries the operator's per-endpoint budgets through boot's parse", () => {
+	it("carries the operator's per-endpoint budgets through boot's parse, merged with the template's", () => {
 		expect(
 			(config as unknown as Record<string, { limits?: unknown }>)["redis-rate-limiter"]?.limits,
 		).toEqual({
 			token: { limit: 120, windowSeconds: 60 },
 			authorize: { limit: 30, windowSeconds: 60 },
+			mfa: { limit: 60, windowSeconds: 300 },
 		});
+	});
+
+	it("keeps the MFA routes' budget the template ships beside the operator's", async () => {
+		const decision = await limiter.check("mfa:ip:203.0.113.5", { ip: "203.0.113.5" });
+		expect(decision.limit).toBe(60);
 	});
 
 	it("applies the declared budget at /token", async () => {

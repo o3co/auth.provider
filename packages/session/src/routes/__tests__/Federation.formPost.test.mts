@@ -287,6 +287,14 @@ describe("GET /oauth/federation/:name (start) — response mode", () => {
 		expect(location.searchParams.get("response_mode")).toBe("form_post");
 	});
 
+	it("passes a freshness hint on as the ask for a form_post federation too", async () => {
+		const { app, apple } = buildApp();
+		const buildSpy = vi.spyOn(apple, "buildAuthorizationUrl");
+		const res = await request(app).get("/oauth/federation/apple?prompt=login&max_age=60");
+		expect(res.status).toBe(302);
+		expect(buildSpy.mock.calls[0]?.[0].ask).toEqual({ login: true, maxAgeSeconds: 60 });
+	});
+
 	it("adds no response_mode for a federation that declares none", async () => {
 		const { app } = buildApp();
 		const res = await request(app).get("/oauth/federation/query-idp");

@@ -401,10 +401,23 @@ describe.each(["store", "memory"] as const)(
 			const set = await boot(factors, {
 				userRepositoryAt: { ...store.urls, linkFederatedIdentityUrl: linkFederatedIdentityUrl() },
 				...(factors === "store" ? { mfaFactorStoreAt: store.urls } : {}),
-				adjust: (config) => ({
-					...config,
-					...mfaConfigForTests({ key: MFA_KEY, mode: "optional" }),
-				}),
+				adjust: (config) => {
+					const core = (config as { core?: { federations?: Record<string, object> } }).core;
+					return {
+						...config,
+						...mfaConfigForTests({ key: MFA_KEY, mode: "optional" }),
+						// GitHub reports no auth_time: the callback stands for the
+						// recent primary a first binding needs only when the federation
+						// says so.
+						core: {
+							...core,
+							federations: {
+								...core?.federations,
+								github: { ...core?.federations?.github, callbackMeetsFreshness: true },
+							},
+						},
+					} as unknown as typeof config;
+				},
 			});
 			const agent = request.agent(set.app);
 			const start = await agent.get("/session/oauth/federation/github");

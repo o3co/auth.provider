@@ -204,6 +204,26 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   refused. Delete the key.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
+- `mfa.rateLimit.routes` is removed, and any key under `mfa.rateLimit`
+  refuses the boot wherever `mfaModule` is installed (#807). The MFA routes
+  are limited by your `rateLimiter` alone, under the prefix `mfa`: configure
+  `limits.mfa` on it instead (`redis-rate-limiter.limits.mfa` or
+  `core-rate-limiter-memory.limits.mfa`), or its `defaultLimit` (60 per 60 s
+  on the bundled limiters) applies. The standalone template's
+  `config/application.conf` sets `limits.mfa { limit = 60, windowSeconds = 300 }`
+  on both limiters, the old budget, so a scaffold keeps it; a composition of
+  your own sets it on its limiter to keep it. Without a `rateLimiter` —
+  declared in `core.declaredAbsent` — the MFA routes are no longer limited
+  by a per-process fallback, and no longer refuse the boot under
+  `core.deployment.mode = "multi"`: they pass every request through, as the
+  OAuth endpoints do. Declaring the limiter absent is a choice with costs: an
+  MFA email challenge, or an account-email proof resent, is then bounded only
+  by the mail sender's own limit, and `@o3co/auth-provider-standard`'s SMTP
+  sender has none — wire a limiter, or a sender with a limit of its own; and
+  with the in-process MFA transaction store, one signed-in account can fill
+  the store's cap (`maxEntries`) by beginning enrollments, after which new
+  MFA transactions are refused until entries expire. The MFA lock (attempts
+  per transaction, backoff, weekly failures) is unchanged.
 
 ### Values read more strictly
 
@@ -333,10 +353,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   refused (`component-absence-undeclared`, naming `rateLimiter`) unless
   `core.declaredAbsent` lists it: `core.declaredAbsent = ["rateLimiter"]`,
   beside `"auditSink"` if you list that. Declared absent, a route that keys
-  the limiter lets every request through unless its module falls back to a
-  per-process limiter (WebAuthn authentication options and the MFA routes
-  do), so request-volume limits on the others are then for what
-  sits in front of the provider. The template wires a limiter
+  the limiter lets every request through — no module falls back to a
+  per-process limiter — so request-volume limits are then for what sits in
+  front of the provider. The template wires a limiter
   (`adapters.rateLimiter`), so a scaffold needs nothing.
 - **Federation grants no longer require a rate limiter (#807).** With
   `federation-grants.enabled = true` and no `rateLimiter` wired, the module
@@ -567,6 +586,19 @@ The boot refusals you can meet, with their messages, are in
 - **The CSRF token.** One whose expiry is more than `ttlSeconds` + 60 s ahead
   is refused, so after lowering `ttlSeconds` older tokens are refused until
   within the new bound (#774).
+- **The federation start's freshness hints (#1084).** `GET
+  /session/oauth/federation/:name` reads optional `prompt` (a space-delimited
+  list, of which only `login` counts) and `max_age` (a non-negative integer
+  no larger than 2^53−1).
+  An empty value reads as omitted. A repeated or malformed one — a query
+  parameter this route used to ignore — is now `400 invalid_request`. The
+  hints are passed to the adapter as its freshness ask. A start from a browser
+  that already holds an application session, and is not a link, is a
+  re-authentication: `login` is asked whether or not the hint named it. A link
+  start asks only what its hint names. The OIDC adapter forwards the ask as
+  `prompt=login` / `max_age`, so its IdP prompts a signed-in user who starts a
+  federated login again. A login page that links to the federation start
+  should forward the `prompt` and `max_age` it finds in `redirect_to`.
 
 ### Redirect and logout URIs
 
@@ -776,11 +808,13 @@ modules fills them.
   gone from `createDeviceVerificationHandler`, the federation-grants routers,
   `RateLimitGuardOptions` and `RateLimitPolicyOptions`; `checkWithFailMode`
   takes a policy from `createRateLimitPolicy` and refuses any other object;
-  `memoryRateLimiterModule`, `redisRateLimiterModule` and `webauthnModule`
-  require `rateLimitBudgetResolver`, which a hand-built
-  deps object for their factories carries. `createDeviceVerificationHandler`'s
-  `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
-  `revokedBefore` (#717).
+  `memoryRateLimiterModule` and `webauthnModule` require
+  `rateLimitBudgetResolver`, which a hand-built deps object for their
+  factories carries. `createRedisRateLimiter` no longer takes `budgets` and
+  `redisRateLimiterModule` requires only `rateLimiterClient`; set a prefix's
+  limit as `redis-rate-limiter.limits.<prefix>` (#807).
+  `createDeviceVerificationHandler`'s `subjectRevocation` is the full
+  `SubjectRevocation`, no longer a `Pick` of `revokedBefore` (#717).
 - **A switched-off grant or second factor is no override target (#728).** A
   `grants` or `mfaFactors` factory may answer `null` — switched off by its
   module's settings while the module is on; the entry stays claimed, and an
