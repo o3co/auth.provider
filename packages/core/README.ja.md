@@ -601,7 +601,7 @@ const clientRepo = new InMemoryClientRepository(
 
 - ポートは [`src/refresh-token-family/types.mts`](src/refresh-token-family/types.mts) の `RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation`
 - すべての `rt+jwt` は `family_id` claim を持つ
-- `refreshTokenFamilyRotation` / `refreshTokenFamilyRevocation` スロット（ファミリーストア — `memoryRefreshTokenFamilyStoreModule` または Redis アダプター — と `defaultRefreshTokenFamilyRotationModule`、`defaultRefreshTokenFamilyRevocationModule`）を提供すると replay 検出と family revocation が働く。`refresh_token` グラントが有効なとき、両方が配線されていなければ `oauthAuthorizationModule` は起動を拒否する（[oauth パッケージ](../oauth/README.ja.md#refresh_token)）
+- `refreshTokenFamilyRotation` / `refreshTokenFamilyRevocation` スロット（ファミリーストア — `memoryRefreshTokenFamilyStoreModule` または Redis アダプター — と `defaultRefreshTokenFamilyRotationModule`、`defaultRefreshTokenFamilyRevocationModule`）を提供すると replay 検出と family revocation が働く。`refresh_token` グラントが有効なとき、両方が配線されていなければ `oauthAuthorizationGrantsModule` は起動を拒否する（[oauth パッケージ](../oauth/README.ja.md#refresh_token)）
 - 失効したファミリーは、それが発行し得た最後のアクセストークンが受け入れられなくなるまで記憶される。失効させる書き込み（revocation、またはファミリーを失効させる replay）は、ファミリー自身の期限と「現在 + `oauth.accessToken.maxExpiresIn`」の遅い方に `REVOCATION_RETENTION_ALLOWANCE_MS` を足した時刻まで記録を保持する（[`src/refresh-token-family/retention.mts`](src/refresh-token-family/retention.mts)）。記録がすでに期限切れのファミリーも失効として記録される。`createRefreshTokenFamilyRevocation` と `createRefreshTokenFamilyRotation` はこの horizon を `accessTokenHorizonMs`（`resolveFamilyAccessTokenHorizonMs(config)`）として受け取り、デフォルトのモジュールは `config` から読む
 - memory ストアは再起動で失効済みを含むすべてのファミリーを忘れるので、再起動前に失効したファミリーのアクセストークンは、再起動後は期限まで family チェックを通過する。単一レプリカ・開発用に限る
 

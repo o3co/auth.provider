@@ -32,6 +32,7 @@ import {
 	type AuditEvent,
 	auditErrorText,
 	type CsrfGuard,
+	createInMemorySessionLifecycleStore,
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
@@ -46,6 +47,7 @@ import {
 	type RateLimiter,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type UserSession,
 	validatedClientRepository,
@@ -158,6 +160,8 @@ interface WorldOptions {
 	readonly login?: LoginEntry;
 	/** The `csrfGuard` slot: core's double, trusting {@link TRUSTED_SIBLING}, by default. */
 	readonly csrfGuard?: CsrfGuard;
+	/** The session lifecycle port admission reads after a live record; none by default. */
+	readonly sessionLifecycleStore?: SessionLifecycleStore;
 }
 
 function world(options: WorldOptions = {}) {
@@ -304,6 +308,7 @@ function world(options: WorldOptions = {}) {
 					return state.sessionsBoundary;
 				},
 			},
+			sessionLifecycleStore: options.sessionLifecycleStore,
 			requirements: resolverForTests(options.requirements ?? [], {
 				issuer: ISSUER,
 				actions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
@@ -592,6 +597,24 @@ describe("GET /session/federation-grants/connect — the start a client sends th
 		const covered = await w.connect(handle, "b-2");
 		expect(covered.status).toBe(403);
 		expect(covered.text).toMatch(/sign in again/i);
+	});
+
+	it("asks the user to sign in again when the session's lifecycle record is closing", async () => {
+		const lifecycle = createInMemorySessionLifecycleStore();
+		const w = world({ sessionLifecycleStore: lifecycle });
+		const { handle } = await w.lodge();
+		const sid = w.signIn("b-1");
+		await lifecycle.open(sid, "alice", new Date(Date.now() + DAY));
+		await lifecycle.beginClose(sid, {
+			cause: "rp_logout",
+			steps: ["tokens"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+		const closing = await w.connect(handle, "b-1");
+		expect(closing.status).toBe(403);
+		isPlain(closing);
+		expect(closing.text).toMatch(/sign in again/i);
 	});
 
 	it("fails closed on a boundary it cannot read", async () => {

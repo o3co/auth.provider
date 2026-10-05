@@ -113,7 +113,8 @@ local field = 'p:' .. ARGV[3]
 if redis.call('HEXISTS', KEYS[1], field) == 0 then
   local count = lc_int(KEYS[1], 'np')
   if count >= tonumber(ARGV[6]) then return 'full' end
-  redis.call('HSET', KEYS[1], 'np', lc_ms(count + 1))
+  -- The participant's join ordinal, written once: a repeat join keeps it.
+  redis.call('HSET', KEYS[1], 'np', lc_ms(count + 1), 'o:' .. ARGV[3], lc_ms(count + 1))
 end
 redis.call('HSET', KEYS[1], field, ARGV[4], 'gen', ARGV[5])
 return lc_keep(KEYS[2], 'joined', ARGV[2])

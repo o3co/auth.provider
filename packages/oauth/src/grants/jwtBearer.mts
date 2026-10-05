@@ -27,6 +27,7 @@ import {
 	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
 	auditErrorText,
 	boundPolicyAudience,
+	checkOAuthTokenSettings,
 	deriveAudienceFromResources,
 	evaluateGrantPolicy,
 	extractResourceParam,
@@ -38,12 +39,10 @@ import {
 	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	ownedConfirmation,
 	readSpaceDelimitedParameter,
-	resolveAccessTokenLifetime,
 	subjectBoundaryCovers,
 	unrepresentedResources,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 } from "@o3co/auth-provider-core";
-import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /** RFC 7523 §2.1. */
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -95,22 +94,26 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
 /**
  * What the jwt-bearer grant reads. The verifier and repository are required
  * here; the module checks both before building the grant, so a missing one is
- * refused at composition, not at the first request.
+ * refused at composition, not at the first request. The access-token
+ * lifetime, the resource-indicator switch and `requireEmailVerified` come
+ * from the `oauthTokenSettings` slot; nothing is read from the whole
+ * configuration.
  */
 export type JwtBearerGrantDeps = Pick<
 	GrantDependencies,
-	"config" | "keyStore" | "grantPolicy" | "subjectRevocation" | "logger"
+	"keyStore" | "grantPolicy" | "subjectRevocation" | "logger"
 > &
-	ProviderDeps<"assertionVerifier" | "userRepository">;
+	ProviderDeps<"assertionVerifier" | "userRepository" | "oauthTokenSettings">;
 
 export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => {
-	const { config, keyStore, assertionVerifier, userRepository } = deps;
-	// Resolved once at construction; `resolveOAuthOptions` owns the defensive read.
-	const { requireEmailVerified } = resolveOAuthOptions(config.oauth);
-	// Read once at construction, so an invalid hand-built configuration is
-	// refused before any request rather than after the verifier has recorded
-	// an ID-JAG's `jti`.
-	const { defaultExpiresIn } = resolveAccessTokenLifetime(config);
+	const { keyStore, assertionVerifier, userRepository } = deps;
+	// The token settings are read once, here, from the `oauthTokenSettings`
+	// slot alone, checked whole first: a hand-built value the check refuses,
+	// or none, fails at composition, naming the slot, before any request
+	// rather than after the verifier has recorded an ID-JAG's `jti`.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+	const { requireEmailVerified, resourceIndicatorEnabled } = tokenSettings;
+	const { defaultExpiresIn } = tokenSettings.accessTokenLifetime;
 
 	return {
 		// A device credential is a standing capability of a registration: an
@@ -245,7 +248,6 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 
 			// RFC 8707: read under the flag alone, whether or not a policy is
 			// wired. Flag off, the parameter is ignored (RFC 6749 §3.2).
-			const resourceIndicatorEnabled = config.oauth.resourceIndicator?.enabled === true;
 			const requestedResource = resourceIndicatorEnabled
 				? extractResourceParam(ctx.body as Record<string, unknown>)
 				: null;
