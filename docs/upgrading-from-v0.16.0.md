@@ -517,6 +517,17 @@ The boot refusals you can meet, with their messages, are in
 - **The CSRF token.** One whose expiry is more than `ttlSeconds` + 60 s ahead
   is refused, so after lowering `ttlSeconds` older tokens are refused until
   within the new bound (#774).
+- **The federation start's freshness hints (#1084).** `GET
+  /session/oauth/federation/:name` reads optional `prompt` (a space-delimited
+  list, of which only `login` counts) and `max_age` (a non-negative integer).
+  An empty value reads as omitted. A repeated or malformed one — a query
+  parameter this route used to ignore — is now `400 invalid_request`. The
+  hints, and a start from a browser that already holds an application session
+  (not a link, which is a re-authentication and asks `login`), are passed to
+  the adapter as its freshness ask; the OIDC adapter forwards them as
+  `prompt=login` / `max_age`, so its IdP prompts a signed-in user who starts a
+  federated login again. A login page that links to the federation start
+  should forward the `prompt` and `max_age` it finds in `redirect_to`.
 
 ### Redirect and logout URIs
 
