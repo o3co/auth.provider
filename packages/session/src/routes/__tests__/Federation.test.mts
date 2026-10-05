@@ -3333,6 +3333,7 @@ describe("amr on federated sessions", () => {
 			federation: "test",
 			upstreamAmr: ["hwk", "mfa"],
 			mfaAt: undefined,
+			upstreamAuthTime: null,
 		});
 	});
 
@@ -3347,6 +3348,7 @@ describe("amr on federated sessions", () => {
 			federation: "test",
 			upstreamAmr: undefined,
 			mfaAt: undefined,
+			upstreamAuthTime: null,
 		});
 	});
 
@@ -3362,6 +3364,7 @@ describe("amr on federated sessions", () => {
 				federation: "test",
 				upstreamAmr: undefined,
 				mfaAt: undefined,
+				upstreamAuthTime: null,
 			});
 		}
 	});
@@ -3431,6 +3434,7 @@ describe("amr on federated sessions", () => {
 				federation: "test",
 				upstreamAmr: ["hwk", "mfa"],
 				mfaAt: undefined,
+				upstreamAuthTime: null,
 			});
 		}
 	});
@@ -3443,6 +3447,114 @@ describe("amr on federated sessions", () => {
 // error's projection; each best-effort rollback step that fails is one
 // `federation_cleanup_failed` warn.
 // ---------------------------------------------------------------------------
+
+describe("the upstream's authentication time on federated sessions", () => {
+	/** One federated login through the callback, the adapter reporting `authTime`: what it handed `UserSessionStore.create`. */
+	const loginWith = async (
+		authTime: Date | undefined,
+		federationSettings: FederationSettings,
+	): Promise<{ authentication?: Record<string, unknown> }> => {
+		const provider = makeFakeProvider({
+			exchangeCode: vi.fn(async () => ({
+				issuer: "https://idp.example.com",
+				sub: "external-42",
+				accessToken: "at",
+				expiresAt: null,
+				...(authTime === undefined ? {} : { authTime }),
+			})),
+		});
+		const uss = makeUserSessionStore();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", provider]]),
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
+			userSessionStore: uss,
+			federationSettings,
+		});
+		const res = await (await plantAndGetAgent(app)).get(
+			"/oauth/federation/test/callback?state=s1&code=c1",
+		);
+		expect(res.status).toBe(302);
+		return (uss.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			authentication?: Record<string, unknown>;
+		};
+	};
+	const UPSTREAM = new Date(Date.now() - 600_000);
+
+	it("records the upstream's authentication time the adapter reported, whatever the federation's switch", async () => {
+		for (const callbackMeetsFreshness of [true, false]) {
+			const created = await loginWith(
+				UPSTREAM,
+				createTestFederationSettings({ test: { type: "test", callbackMeetsFreshness } }),
+			);
+			expect(created.authentication?.upstreamAuthTime).toEqual(UPSTREAM);
+		}
+	});
+
+	it("records null when the upstream showed none and the federation's callback does not meet a freshness ask, as by default", async () => {
+		for (const settings of [
+			createTestFederationSettings({ test: { type: "test" } }),
+			createTestFederationSettings({ test: { type: "test", callbackMeetsFreshness: false } }),
+			// A name the settings do not hold meets nothing.
+			NO_FEDERATIONS,
+		]) {
+			const created = await loginWith(undefined, settings);
+			expect(created.authentication?.upstreamAuthTime).toBeNull();
+		}
+	});
+
+	it("records nothing when the upstream showed none and the federation's callback meets a freshness ask", async () => {
+		const created = await loginWith(
+			undefined,
+			createTestFederationSettings({ test: { type: "test", callbackMeetsFreshness: true } }),
+		);
+		expect(Object.hasOwn(created.authentication ?? {}, "upstreamAuthTime")).toBe(false);
+	});
+});
+
+describe("GET /oauth/federation/:name — a freshness hint for the upstream", () => {
+	const startWith = async (query: string) => {
+		const provider = makeFakeProvider();
+		const buildSpy = vi.spyOn(provider, "buildAuthorizationUrl");
+		const app = buildStatelessApp({ providers: new Map([["test", provider]]) });
+		const res = await request(app).get(`/oauth/federation/test${query}`);
+		return { res, params: buildSpy.mock.calls[0]?.[0] };
+	};
+
+	it("asks the upstream for nothing without a hint", async () => {
+		const { res, params } = await startWith("");
+		expect(res.status).toBe(302);
+		expect(params).not.toHaveProperty("ask");
+	});
+
+	it("passes prompt=login and max_age on as the ask", async () => {
+		const { res, params } = await startWith("?prompt=login&max_age=300");
+		expect(res.status).toBe(302);
+		expect(params?.ask).toEqual({ login: true, maxAgeSeconds: 300 });
+		expect((await startWith("?prompt=login")).params?.ask).toEqual({ login: true });
+		expect((await startWith("?max_age=0")).params?.ask).toEqual({ maxAgeSeconds: 0 });
+		// A space list: only `login` counts.
+		expect((await startWith("?prompt=consent%20login")).params?.ask).toEqual({ login: true });
+		expect((await startWith("?prompt=consent")).params).not.toHaveProperty("ask");
+		// Empty reads as omitted, as /authorize reads it (RFC 6749 §3.1).
+		expect((await startWith("?prompt=&max_age=")).params).not.toHaveProperty("ask");
+	});
+
+	it.each([
+		["a negative max_age", "?max_age=-1"],
+		["a fractional max_age", "?max_age=1.5"],
+		["a max_age that is not a number", "?max_age=abc"],
+		["a max_age past a safe integer", "?max_age=9007199254740993"],
+		["a repeated max_age", "?max_age=1&max_age=2"],
+		["a repeated prompt", "?prompt=login&prompt=none"],
+		["a prompt that is not a space list of tokens", "?prompt=login%09none"],
+	])("refuses %s with 400 invalid_request, before anything is kept", async (_label, query) => {
+		const { res, params } = await startWith(query);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_request");
+		expect(params).toBeUndefined();
+	});
+});
 
 describe("the federation login callback answers a store that cannot answer as an outage", () => {
 	const federation = { name: "test", state: "s1", codeVerifier: "v1" };

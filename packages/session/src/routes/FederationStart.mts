@@ -15,8 +15,9 @@
  */
 
 /**
- * The start leg, `GET /oauth/federation/:name`: the `redirect_to` and a link
- * start checked, then the state, PKCE verifier and nonce minted and kept —
+ * The start leg, `GET /oauth/federation/:name`: the `redirect_to`, a
+ * freshness hint (`prompt`, `max_age`) and a link start checked, then the
+ * state, PKCE verifier and nonce minted and kept —
  * in the session, or a `form_post` federation's transaction and its cookie —
  * before the browser is sent to the IdP. The browser is sent to the IdP only
  * after they are kept.
@@ -25,6 +26,8 @@
 import { randomBytes } from "node:crypto";
 import {
 	errorEnvelope,
+	type FederationAsk,
+	readSpaceDelimitedParameter,
 	resolveFederationResponseMode,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
@@ -37,6 +40,34 @@ import type { FederationRouterContext } from "./FederationContext.mjs";
 import { checkLinkStart } from "./FederationLinkStart.mjs";
 import { logMisconfigured, logStoreUnavailable } from "./FederationLog.mjs";
 import { answerNoRedirectPolicy } from "./FederationRedirectAnswer.mjs";
+
+/**
+ * The freshness the login asks the upstream for, from the start's query: a
+ * `prompt` space list in which only `login` counts, and a `max_age` of
+ * non-negative whole seconds. Empty reads as omitted (RFC 6749 §3.1).
+ * `undefined` when it asks nothing, `null` when malformed. A hint only: it can
+ * make the upstream stricter, and whether a session meets an ask is judged
+ * from what the upstream reports, never from this.
+ */
+function readFreshnessHint(query: Request["query"]): FederationAsk | undefined | null {
+	const { prompt, max_age: maxAge } = query;
+	if (prompt !== undefined && typeof prompt !== "string") return null;
+	if (maxAge !== undefined && typeof maxAge !== "string") return null;
+	const prompts = prompt ? readSpaceDelimitedParameter(prompt) : [];
+	if (prompts === null) return null;
+	let maxAgeSeconds: number | undefined;
+	if (maxAge) {
+		if (!/^[0-9]+$/.test(maxAge)) return null;
+		maxAgeSeconds = Number(maxAge);
+		if (!Number.isSafeInteger(maxAgeSeconds)) return null;
+	}
+	const login = prompts.includes("login");
+	if (!login && maxAgeSeconds === undefined) return undefined;
+	return {
+		...(login ? { login: true } : {}),
+		...(maxAgeSeconds === undefined ? {} : { maxAgeSeconds }),
+	};
+}
 
 /** The start route's handler, over the router's context. */
 export const createStartHandler =
@@ -89,6 +120,18 @@ export const createStartHandler =
 					.json(refusalEnvelope(validation, logger, { provider: provider.name }));
 			}
 			redirectTo = redirect_to;
+		}
+
+		const ask = readFreshnessHint(req.query);
+		if (ask === null) {
+			return res
+				.status(400)
+				.json(
+					errorEnvelope(
+						"invalid_request",
+						"prompt must be a space-delimited list, and max_age a non-negative integer",
+					),
+				);
 		}
 
 		// `link=1` asks to link this federation's identity to the signed-in
@@ -217,6 +260,7 @@ export const createStartHandler =
 			state,
 			codeVerifier,
 			nonce,
+			...(ask === undefined ? {} : { ask }),
 		});
 
 		// The route, not the adapter, writes `response_mode`, keeping it paired

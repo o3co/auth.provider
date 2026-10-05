@@ -387,6 +387,13 @@ export const createRouter = (
 				federation: fed.name,
 				upstreamAmr: upstreamAmrOf(profile),
 				trusted: trustsUpstreamAmr.get(fed.name) === true,
+				// The upstream's authentication time (the verified id_token's
+				// `auth_time`), and whether this federation's callback alone meets a
+				// freshness ask when there is none; core records either as it reads them.
+				...(profile.authTime === undefined ? {} : { upstreamAuthTime: profile.authTime }),
+				callbackMeetsFreshness:
+					Object.hasOwn(federationSettings, fed.name) &&
+					federationSettings[fed.name]?.callbackMeetsFreshness === true,
 				authTime: new Date(),
 				redirectTo: undefined,
 				request: loginRequestFacts(req),
