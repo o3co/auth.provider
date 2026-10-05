@@ -28,8 +28,9 @@
  *
  * Sequence:
  * 1. the record: where the session lifecycle is wired, its lifecycle record
- *    opened first, then `UserSessionStore.create`. Either failing, or the
- *    open refused, is the record's outage at `create`, with nothing to undo:
+ *    opened first, then `UserSessionStore.create`. Either failing or
+ *    throwing, or the open refused, is the record's outage at `create`, with
+ *    nothing to undo:
  *    an open record with no user session is not live and nothing joins it;
  * 2. `SubjectSessionIndex.addSid`, best effort, at the earliest point the
  *    session exists: a missing entry is a live session a credential change
@@ -176,6 +177,25 @@ export type EstablishSessionResult<S extends string = never, T extends string = 
 	  };
 
 /**
+ * Opens `record`'s lifecycle in `lifecycle`. Anything but `opened` throws,
+ * named as the lifecycle's so its line tells it apart from the store's.
+ */
+const openLifecycle = async (
+	lifecycle: Pick<SessionLifecycle, "open">,
+	record: EstablishedRecord,
+): Promise<void> => {
+	let opened: Awaited<ReturnType<SessionLifecycle["open"]>>;
+	try {
+		opened = await lifecycle.open(record.sid, { sub: record.sub, expiresAt: record.expiresAt });
+	} catch (cause) {
+		throw new Error("the session lifecycle could not open the session", { cause });
+	}
+	if (opened.outcome !== "opened") {
+		throw new Error(`the session lifecycle answered ${opened.outcome} to the open`);
+	}
+};
+
+/**
  * Establish the session admission established (sequence and rollback in this
  * file's header). Answers `established` with the record's `sid` (`undefined`
  * without a store), or `unavailable` naming the store and step that failed,
@@ -263,21 +283,8 @@ export async function establishSession<S extends string = never, T extends strin
 	};
 
 	if (record !== undefined && userSessionStore !== undefined) {
-		if (sessionLifecycle !== undefined) {
-			const opened = await sessionLifecycle.open(record.sid, {
-				sub,
-				expiresAt: record.expiresAt,
-			});
-			if (opened.outcome !== "opened") {
-				reporter.storeUnavailable(
-					"user_session",
-					"create",
-					new Error(`the session lifecycle answered ${opened.outcome} to the open`),
-				);
-				return { outcome: "unavailable", store: "user_session", step: "create" };
-			}
-		}
 		try {
+			if (sessionLifecycle !== undefined) await openLifecycle(sessionLifecycle, record);
 			await userSessionStore.create({
 				sid: record.sid,
 				sub,

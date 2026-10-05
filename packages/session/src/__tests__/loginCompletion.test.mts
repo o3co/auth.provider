@@ -117,7 +117,7 @@ describe("createLoginCompletion keeps core's loginCompletion contract", () => {
 	});
 });
 
-describe("createLoginCompletion with core's session lifecycle", () => {
+describe("the login-completion module's provider, with core's session lifecycle", () => {
 	const guard = createTestCsrfGuard();
 	/** Every record is created only once its lifecycle is open, or the login fails. */
 	const opened = new Set<string>();
@@ -139,12 +139,12 @@ describe("createLoginCompletion with core's session lifecycle", () => {
 		loginCompletionContract({
 			build: () => {
 				counted = countingStore();
-				return createLoginCompletion({
+				return loginCompletionModule.provides?.loginCompletion?.({
 					userSessionStore: openFirst(counted.store),
 					sessionLifecycle: lifecycle,
-					sessionTtlMs: 3_600_000,
-					csrf: guard,
-				});
+					sessionCookiePolicy: createTestSessionCookiePolicy(),
+					csrfGuard: guard,
+				} as never) as LoginCompletion;
 			},
 			records: () => counted.records(),
 			csrfCookieName: guard.cookieName,

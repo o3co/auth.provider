@@ -107,8 +107,8 @@ function harness(
 		readonly redirectTo?: string;
 		/** The reporter's calls join the trace where they happen. */
 		readonly traceReporter?: boolean;
-		/** A session lifecycle whose `open` answers this. Absent: none is wired. */
-		readonly lifecycle?: SessionOpenOutcome["outcome"];
+		/** A session lifecycle whose `open` answers this, or rejects with it. Absent: none is wired. */
+		readonly lifecycle?: SessionOpenOutcome["outcome"] | Error;
 	} = {},
 ) {
 	const trace: string[] = [];
@@ -148,6 +148,7 @@ function harness(
 	const sessionLifecycle = {
 		open: vi.fn(async (_sid: string, _request: { sub: string; expiresAt: Date }) => {
 			trace.push("open");
+			if (shape.lifecycle instanceof Error) throw shape.lifecycle;
 			return { outcome: shape.lifecycle ?? "opened" } as SessionOpenOutcome;
 		}),
 	} satisfies Pick<SessionLifecycle, "open">;
@@ -580,12 +581,33 @@ describe("establishSession", () => {
 				expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
 					"user_session",
 					"create",
-					expect.any(Error),
+					expect.objectContaining({
+						message: `the session lifecycle answered ${outcome} to the open`,
+					}),
 				);
 				expect(h.reporter.cleanupFailed).not.toHaveBeenCalled();
 				expect(h.req.session).toMatchObject({ id: "stale" });
 			},
 		);
+
+		it("an open that throws is the record's outage at create, named as the lifecycle's, its error the cause", async () => {
+			const thrown = new RangeError("session lifecycle: sub must be 1 to 512 characters");
+			const h = harness({}, { lifecycle: thrown });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
+			expect(h.trace).toEqual(["reporter", "open"]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"user_session",
+				"create",
+				expect.objectContaining({
+					message: "the session lifecycle could not open the session",
+					cause: thrown,
+				}),
+			);
+			expect(h.req.session).toMatchObject({ id: "stale" });
+		});
 
 		it("opens nothing without a UserSessionStore: there is no record", async () => {
 			const h = harness({}, { userSessionStore: false, lifecycle: "opened" });

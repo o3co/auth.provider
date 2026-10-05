@@ -556,7 +556,8 @@ data, is refused by the snapshot; the login then answers `500` with nothing
 written. It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session-store.maxAge` after
 `authTime`), its lifecycle record opened first where core's session lifecycle
-is installed (`open` failing or refused is the record's outage at `create`); the `subjectSessionIndex` entry when that is wired (best-effort:
+is installed (an `open` that fails, throws or is refused is the record's
+outage at `create`, its error naming the session lifecycle); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the
 regeneration; the express session's regeneration (session fixation); the
 caller's steps after it; `isAuthenticated`, `user`, `sid` and the primary's

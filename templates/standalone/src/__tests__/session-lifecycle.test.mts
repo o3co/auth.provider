@@ -32,6 +32,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ALICE,
 	compose,
+	federatedCallback,
 	ISSUER,
 	login,
 	WEB,
@@ -132,6 +133,25 @@ describe("the template with the session lifecycle module", () => {
 			const store = components.sessionLifecycleStore as SessionLifecycleStore;
 			const record = readVersionedSessionLifecycle(await store.read(String(sid)));
 			expect(record?.value).toMatchObject({ sub: ALICE.sub, state: "active", participants: [] });
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("opens a federated login's session in the lifecycle, through the session module's federation routes", async () => {
+		const { app, handle, upstreams } = await compose({
+			extraModules: () => [sessionLifecycleModule],
+		});
+		try {
+			const callback = await (await federatedCallback(app, "oidc", upstreams.oidc))();
+			expect(callback.status).toBe(302);
+			const components = handle.components as Record<string, unknown>;
+			const [sid] = await (components.subjectSessionIndex as SubjectSessionIndex).listSids(
+				ALICE.sub,
+			);
+			const store = components.sessionLifecycleStore as SessionLifecycleStore;
+			const record = readVersionedSessionLifecycle(await store.read(String(sid)));
+			expect(record?.value).toMatchObject({ sub: ALICE.sub, state: "active" });
 		} finally {
 			await handle.dispose();
 		}
