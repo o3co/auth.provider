@@ -16,11 +16,8 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AppConfigSchema } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import { webauthnConfigSchema } from "../config.mjs";
-import { webauthnModule } from "../module.mjs";
 
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
 // packages/webauthn/config/reference.conf (not in Zod .default() calls).
@@ -463,10 +460,7 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 
 	it("refuses a list entry that is not a string at its index, rather than dropping it", () => {
 		// Dropping it would shorten the list the operator wrote and accept the
-		// rest — or, for a list of nothing else, refuse it as empty. (Through
-		// core's AppConfigSchema first, as the README composes it, the entry is
-		// refused there already, as `invalid_union` at `webauthn.origin`; this
-		// is the refusal for a composition that parses this schema directly.)
+		// rest — or, for a list of nothing else, refuse it as empty.
 		for (const key of ["origin", "topOrigin"] as const) {
 			for (const [bad, index] of [
 				[[5], 0],
@@ -491,54 +485,10 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 	});
 });
 
-// A composition root parses its HOCON with core's `AppConfigSchema` before
-// this package sees it, and `AppConfigSchema` is a strip-mode object: a key
-// its `webauthn` section does not name is gone by the time a bootstrap module
-// hands `config.webauthn` to `webauthnConfigSchema`. Core cannot
-// import this package, so the parity is checked from this side, over the
-// whole key tree.
-describe("core's AppConfigSchema passes through every key webauthnConfigSchema reads, and every removed one", () => {
-	/** Every dotted key path in an object schema, through optional / default / pipe wrappers. */
-	const keyPaths = (schema: z.ZodType, prefix = ""): string[] => {
-		let inner: z.ZodType = schema;
-		for (;;) {
-			if (inner instanceof z.ZodOptional || inner instanceof z.ZodNullable) {
-				inner = inner.unwrap() as z.ZodType;
-			} else if (inner instanceof z.ZodDefault) {
-				inner = inner.removeDefault() as z.ZodType;
-			} else if (inner instanceof z.ZodPipe) {
-				inner = inner.out as z.ZodType;
-			} else {
-				break;
-			}
-		}
-		if (!(inner instanceof z.ZodObject)) return [];
-		return Object.entries(inner.shape).flatMap(([key, value]) => {
-			const path = prefix === "" ? key : `${prefix}.${key}`;
-			return [path, ...keyPaths(value as z.ZodType, path)];
-		});
-	};
-
-	it("names the same key tree in both schemas, and the keys the module declares removed", () => {
-		const coreSection = AppConfigSchema.shape.webauthn;
-		// A removed key stays in core's shape, presence-only, so the removed-key
-		// refusal still sees it in a configuration parsed before boot.
-		const removed = Object.entries(webauthnModule.section?.relocatedFrom ?? {})
-			.filter(([, to]) => to === null)
-			.map(([from]) => from.replace(/^webauthn\./, ""));
-		expect(removed).toEqual(["allowCredentialsForKnownUser", "rateLimit"]);
-		expect(keyPaths(coreSection).sort()).toEqual(
-			[...keyPaths(webauthnConfigSchema), ...removed].sort(),
-		);
-		// Not vacuous: the walk reached the section's keys, a removed one included.
-		expect(keyPaths(coreSection)).toEqual(expect.arrayContaining(["challengeTtlMs", "rateLimit"]));
-	});
-});
-
 /**
- * Every number setting is read as a whole number in decimal digits, held to the
- * range core's schema holds the same key to: a typo such as `"1e3"` or `"0x10"`,
- * or an exported-but-empty variable, fails boot naming the key.
+ * Every number setting is read as a whole number in decimal digits: a typo such
+ * as `"1e3"` or `"0x10"`, or an exported-but-empty variable, fails boot naming
+ * the key.
  */
 describe("webauthnConfigSchema reads each number setting in decimal digits", () => {
 	const KEYS: ReadonlyArray<

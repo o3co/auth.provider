@@ -23,7 +23,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-	AppConfigSchema,
 	createApp,
 	createMemoryWebAuthnCredentialStore,
 	createSymmetricKeyStore,
@@ -409,15 +408,15 @@ describe("webauthnModule boot integration", () => {
 
 /**
  * The operator's path for `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN`: the
- * composition root parses its resolved HOCON with core's `AppConfigSchema`,
- * and boot parses `webauthn` with `webauthnConfigSchema`, the module's section
- * schema, which the module provides as the `webauthnConfig` slot.
+ * composition root hands boot its resolved HOCON, and boot parses `webauthn`
+ * with `webauthnConfigSchema`, the module's section schema, which the module
+ * provides as the `webauthnConfig` slot.
  *
  * `hoconWebauthn` is the `webauthn` section as the shipped reference.conf
  * resolves with these variables set: literals keep their types, every `${?VAR}`
- * arrives as a string, and the origin list is still one comma-separated string
- * after core's parse. Core's `reference-conf-drift.test.mts` pins that shape
- * against the real HOCON resolution; this package has no HOCON library.
+ * arrives as a string, and the origin list is one comma-separated string.
+ * Core's `reference-conf-drift.test.mts` pins that shape against the real
+ * HOCON resolution, and section.test.mts resolves the shipped reference.conf.
  */
 describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIGIN)", () => {
 	const ANDROID = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
@@ -432,10 +431,6 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 	};
 
 	it("boots with both origins and the top origin the variables name", async () => {
-		const config = AppConfigSchema.parse({ ...coreConfig, webauthn: hoconWebauthn });
-		// AppConfigSchema passes the origin list on as the one string it is.
-		expect(config.webauthn?.origin).toBe(`https://example.com,${ANDROID}`);
-
 		let resolved: WebAuthnConfig | undefined;
 		const handle = await createApp({
 			modules: [
@@ -464,10 +459,8 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 				noopGrantPolicyModule,
 				activatorModule,
 			],
-			// The parse drops what the resolution captured of core's renamed
-			// variables; boot reads them beside the parsed sections.
 			bootstrapComponents: {
-				config: { ...config, "renamed-variables": coreConfig["renamed-variables"] },
+				config: withWebAuthnSection(coreConfig, hoconWebauthn),
 				pathResolver: (p: string) => p,
 				oauthTokenSettings: tokenSettings,
 			} as never,
@@ -522,16 +515,14 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 	);
 
 	it.each([true, false])(
-		"refuses it set to %j in a configuration a composition parsed with AppConfigSchema before the boot",
+		"refuses it set to %j beside a complete section, in the resolved configuration a composition hands the boot",
 		async (value) => {
-			const parsed = AppConfigSchema.parse({
-				...coreConfig,
-				webauthn: { allowCredentialsForKnownUser: value },
-			});
-			const refused = await refusedWith({
-				...parsed,
-				"renamed-variables": coreConfig["renamed-variables"],
-			});
+			const refused = await refusedWith(
+				withWebAuthnSection(coreConfig, {
+					...stubWebAuthnConfig,
+					allowCredentialsForKnownUser: value,
+				}),
+			);
 			expect(refused).toMatchObject({ name: "BootError", reason: "config-path-relocated" });
 			expect(refused.message).toContain("webauthn.allowCredentialsForKnownUser was removed");
 		},
