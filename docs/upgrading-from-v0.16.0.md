@@ -407,6 +407,41 @@ The boot refusals you can meet, with their messages, are in
   Decide it per federation before you upgrade: [operator runbook §7](operator-runbook.md#before-you-upgrade),
   step 3, has what codes and refresh tokens issued before the upgrade keep,
   and the remedy.
+- **A federated login's freshness is the upstream's (#1084).** `prompt=login`,
+  `max_age` and the MFA module's first binding (a recent primary) now judge a
+  federated session by the earlier of when this provider established it and
+  when the upstream IdP last authenticated the user (the verified id_token's
+  `auth_time`). Before, the callback alone counted as a fresh login, so an
+  upstream single sign-on met `prompt=login` without the user signing in
+  again. What changes:
+  - The federation start (`GET /session/oauth/federation/:name`) takes
+    optional `prompt` and `max_age` hints; a malformed one is `400
+    invalid_request`. Your login page should forward the `prompt` and
+    `max_age` it finds in `redirect_to` to the federation start, so the
+    upstream is asked to re-authenticate. The OIDC adapter forwards both. The
+    Google, Apple and GitHub adapters forward neither, because their
+    upstreams do not document them.
+  - A federation whose upstream reports no `auth_time` meets no
+    `prompt=login` or `max_age` (`login_required`), and its users never bind
+    a first factor (they are sent to log in again each time), while the new
+    core-owned key `core.federations.<name>.callbackMeetsFreshness` is
+    `false`, the default. GitHub never reports one. Google reports one only
+    when it is requested and enabled for the client, which the adapter does
+    not do. Apple and a generic OIDC IdP report one when their id_token
+    carries it.
+  - **Set `core.federations.<name>.callbackMeetsFreshness = true`** for each
+    such federation, Google included, if you need `prompt=login`, `max_age`
+    or an MFA first binding through it. The callback then counts as the
+    authentication, which is the behaviour before this release. The switch
+    is read when the session is written, so sessions already live keep what
+    they recorded.
+  - `auth_time` in the id_token and access token is still when this provider
+    established the session. Revocation still reads that too.
+  - A custom `UserSessionStore` round-trips the new optional
+    `authentication.upstreamAuthTime` (a `Date`, `null`, or absent;
+    [upgrading-required-record-keys.md](upgrading-required-record-keys.md)).
+    One that drops it reads as fresh as `authTime`. One that turns `null`
+    into absent reads such a session as fresh.
 - **`/authorize` exists only with the `authorization_code` grant.** Without
   it, `/oauth/authorize` and `/oauth/consent` answer `404` and discovery names
   no authorization endpoint (#775).

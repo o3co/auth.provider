@@ -244,6 +244,17 @@ What `exchangeCode` returns:
 The token fields are core's `federationTokenSnapshot`, the one reading every
 bundled adapter gives a token response.
 
+### Freshness: `prompt=login`, `max_age` and an MFA first binding
+
+`/authorize`'s `prompt=login` and `max_age`, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user: the `authTime` above. A conforming IdP answers a
+forwarded `max_age` with `auth_time` (OIDC Core §3.1.2.1), so it meets those
+asks when it re-authenticates the user. An IdP whose id_token carries no
+`auth_time` meets none of them while `core.federations.<name>.callbackMeetsFreshness`
+is `false`, the default; set it to `true` for such an IdP to count the callback
+itself as the authentication, which is the behaviour before 0.17.0.
+
 ### Optional capabilities
 
 - `SupportsRefresh` — `refreshToken()` runs the `refresh_token` grant at the

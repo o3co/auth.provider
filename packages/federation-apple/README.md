@@ -326,6 +326,19 @@ What `exchangeCode` returns:
 
 `mapClaims` maps `email`, `emailVerified`, `name` and `isPrivateEmail`.
 
+## Freshness: `prompt=login`, `max_age` and an MFA first binding
+
+`/authorize`'s `prompt=login` and `max_age`, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user: the id_token's `auth_time`. Apple's request has
+neither `prompt` nor `max_age`, so this adapter cannot ask for a new login, and
+a login whose id_token carries no `auth_time` reports none. With
+`core.federations.<name>.callbackMeetsFreshness` at its default `false`, such a
+session meets no `prompt=login` or `max_age` (`login_required`) and binds no
+first factor: the user is sent to log in again each time. To use them with Apple, set
+`core.federations.<name>.callbackMeetsFreshness = true`: the callback itself
+then counts as the authentication, which is the behaviour before 0.17.0.
+
 ## Refresh and logout
 
 - **`refreshToken()`** (`SupportsRefresh`) runs the `refresh_token` grant with a

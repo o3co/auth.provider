@@ -178,6 +178,19 @@ What `exchangeCode` returns:
 package promotes only `email`, `name` and `picture`, and only where the local
 record is silent.
 
+### Freshness: `prompt=login`, `max_age` and an MFA first binding
+
+`/authorize`'s `prompt=login` and `max_age`, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user. GitHub reports no such time. With
+`core.federations.<name>.callbackMeetsFreshness` at its default `false`, a
+GitHub session therefore never meets `prompt=login` or `max_age` (a client
+asking for them gets `login_required`) and never binds a first factor
+(`mfa.manage`, a first passkey or linked identity) — the user is sent to log
+in again every time. To use them with GitHub, set
+`core.federations.<name>.callbackMeetsFreshness = true`: the callback itself
+then counts as the authentication, which is the behaviour before 0.17.0.
+
 ## Refresh and logout
 
 - **No refresh.** The provider does not implement `SupportsRefresh`, so `oauth`'s

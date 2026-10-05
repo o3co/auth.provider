@@ -791,8 +791,18 @@ offline lives until its `exp`. `revokeAllForSubject` needs
 has the procedure.
 
 Re-authentication is a *new* session: `POST /session/login` and the federation
-callback always create one with a fresh `authTime`, which is what `max_age` and
-`prompt=login` measure. A login page that bounces an already-authenticated
+callback always create one with a fresh `authTime`. What `max_age` and
+`prompt=login` measure is the session's freshness (core's `sessionFreshness`):
+`authTime`, or for a federated login the earlier of that and the upstream's
+recorded authentication. The federation start
+(`GET /session/oauth/federation/:name`) takes optional `prompt` and `max_age`
+hints — a space list in which only `login` counts, and a non-negative integer;
+anything else is `400 invalid_request` — and passes them to the adapter as its
+`ask`, which forwards only what its upstream documents. The callback records
+the upstream's `auth_time` the adapter reports (`authentication.upstreamAuthTime`);
+when it reports none, a federation with `core.federations.<name>.callbackMeetsFreshness`
+`false` (the default) records `null`, never fresh, and one with `true` records
+nothing, so the session is as fresh as its `authTime`. A login page that bounces an already-authenticated
 browser straight back to `/authorize` is answered `login_required` there, not
 looped.
 

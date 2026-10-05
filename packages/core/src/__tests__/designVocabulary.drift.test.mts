@@ -344,6 +344,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+federationTrustsUpstreamAmr\b/,
 	},
 	{
+		concept: "whether a federation's callback alone meets a freshness ask — callbackMeetsFreshness",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+federationCallbackMeetsFreshness\b/,
+	},
+	{
+		concept: "an upstream id_token's auth_time as an instant",
+		home: "packages/core/src/federations/upstream-auth-time.mts",
+		definition: /(?:function|const)\s+readUpstreamAuthTime\b/,
+	},
+	{
 		concept: "what a verified second factor makes of a session (the MFA ADR's D9)",
 		home: "packages/core/src/user-sessions/authentication.mts",
 		definition: /(?:function|const)\s+sessionAfterSecondFactor\b/,
