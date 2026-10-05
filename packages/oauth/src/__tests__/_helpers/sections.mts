@@ -20,11 +20,15 @@
  * variables the modules declare renamed.
  */
 
-import type { Module } from "@o3co/auth-provider-core";
-import { renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
+import type { FederationSettings, Module } from "@o3co/auth-provider-core";
+import {
+	createTestFederationSettings,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionGrantModule } from "#/oauthSession.mjs";
+import type { OAuthSection } from "#/section.mjs";
 
 /**
  * `config` with what a resolution of the modules' references under an
@@ -95,5 +99,20 @@ export function withGrants<C extends object>(config: C, switches: GrantSwitches)
 				),
 			},
 		},
+	};
+}
+
+/**
+ * What `createOAuthRouter` takes of a configuration built by hand: its
+ * `oauth {}` as the router's section, as written, and core's view of the
+ * federations with none declared.
+ */
+export function routerInputsOf(config: object): {
+	readonly section: OAuthSection;
+	readonly federationSettings: FederationSettings;
+} {
+	return {
+		section: (config as { readonly oauth?: unknown }).oauth as OAuthSection,
+		federationSettings: createTestFederationSettings(),
 	};
 }

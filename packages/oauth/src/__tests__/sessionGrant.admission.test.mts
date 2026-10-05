@@ -58,6 +58,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SID = "sid-1";
 const SUBJECT = "user-1";
@@ -625,7 +626,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 		);
 		const { router } = await createOAuthRouter(express, {
 			registry,
-			config,
+			...routerInputsOf(config),
 			keyStore,
 			codeRepository,
 			clientRepository,
