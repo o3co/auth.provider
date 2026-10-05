@@ -827,17 +827,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				}
 			}
 
-			// An id_token needs the openid scope, a session (none without a
-			// userSessionStore) and a configured issuer (see `configuredIssuer`).
-			// A session implies a sid here; `&& sid` is defensive.
+			// An id_token needs the openid scope and a session (none without a
+			// userSessionStore); the issuer is always the slot's. A session
+			// implies a sid here; `&& sid` is defensive.
 			let idToken: Token | undefined;
-			if (
-				grantedScopes?.includes("openid") &&
-				userSession &&
-				sid &&
-				configuredIssuer &&
-				authTime !== undefined
-			) {
+			if (grantedScopes?.includes("openid") && userSession && sid && authTime !== undefined) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
 					aud: authenticatedClientId,

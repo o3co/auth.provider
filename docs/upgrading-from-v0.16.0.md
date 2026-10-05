@@ -732,7 +732,13 @@ modules fills them.
   The refusal of a module built from a configuration that disagrees with the
   booted one about a grant's switch is gone, and the standalone template no longer reads
   `oauth-authorization.grants` before boot (its `SWITCHES` no longer lists
-  it). A grant switched off registers nothing; with every grant off the
+  it). A grant switched off registers nothing, but while the module is on it
+  still claims its grant type: a composition that pairs the module with its
+  own `client_credentials`, `refresh_token` or jwt-bearer grant, this
+  module's switch for it off, is refused (`duplicate-contribute`) where it
+  used to boot — and an override of a switched-off grant is refused
+  (`override-target-missing`). Drop your grant, or switch every grant of
+  this module off; with every grant off the
   module registers and requires nothing — no slot, and no `subjectRevocation`
   or `auditSink` absence policy. While any grant is on, the module declares
   both session-bound grants' actions (`oauth.code_exchange`,

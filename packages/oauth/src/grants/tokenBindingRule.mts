@@ -19,6 +19,10 @@
  * read it: `bindConfidentialClientRefreshTokens` from core's
  * `tokenBindingSettings` slot, which core fills frozen from
  * `core.tokenBinding`. Read once, when a grant is built.
+ *
+ * Held here until core's token-binding settings carry a check of their own,
+ * as `checkOAuthTokenSettings` does for the token settings; the grants then
+ * call that and this file goes.
  */
 
 /**
