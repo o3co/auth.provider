@@ -73,11 +73,16 @@ export type AuthorizationGrantDeps = Pick<
 	| "sessionFamilyIndex"
 	| "sessionRPRegistry"
 > &
+	// `sessionLifecycle`, where core's session lifecycle module is installed, is
+	// what the family and the client join the session through.
 	// `sessionRequirementResolver` (the synthetic key, by its slot's name, so
 	// the module hands its deps over whole) is what the two reads of the
 	// code's session go through (ADR 2026-09-28-session-admission). Required:
 	// a factory built by hand without one is refused.
-	ProviderDeps<"codeRepository" | "clientRepository" | "sessionRequirementResolver", "auditSink">;
+	ProviderDeps<
+		"codeRepository" | "clientRepository" | "sessionRequirementResolver",
+		"auditSink" | "sessionLifecycle"
+	>;
 
 /**
  * A requirement's verdict or an outage, as the token endpoint answers it:
@@ -141,6 +146,16 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	): void => {
 		logger?.error(
 			{ store, step, clientId: auditErrorText(clientId), err: loggableError(err) },
+			"authorization_grant_store_unavailable",
+		);
+	};
+	/**
+	 * The session lifecycle's outage at the join, said once at error on the
+	 * grant's line; the error is on the lifecycle's own line.
+	 */
+	const lifecycleUnavailable = (clientId: string): void => {
+		logger?.error(
+			{ store: "session_lifecycle", step: "join", clientId: auditErrorText(clientId) },
 			"authorization_grant_store_unavailable",
 		);
 	};
@@ -765,49 +780,66 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// The revalidated session drives the TTLs below and the id_token's other claims.
 					userSession = revalidation.session;
 
-					// Composition-root invariant: the session-stores module wires its
-					// sibling stores together, so with userSessionStore present these
-					// two are too. `?.` would silently no-op on a misconfigured root.
-					const joined = await joinSession(
-						{
-							// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
-							sessionRPRegistry: deps.sessionRPRegistry!,
-							// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
-							sessionFamilyIndex: deps.sessionFamilyIndex!,
-						},
-						{
-							sid,
-							rp: {
-								clientId: authenticatedClientId,
-								// Typed reads: a misspelt field would silently drop the RP
-								// from the logout cascade.
-								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
-								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-								// http(s) only: the record is the boundary's validated
-								// copy (above), which refuses any other value (a
-								// document client registers none).
-								frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
-								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
-								registeredAt: new Date(),
+					const rp = {
+						clientId: authenticatedClientId,
+						// Typed reads: a misspelt field would silently drop the RP
+						// from the logout cascade.
+						backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
+						backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
+						// http(s) only: the record is the boundary's validated
+						// copy (above), which refuses any other value (a
+						// document client registers none).
+						frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
+						frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
+						registeredAt: new Date(),
+					};
+					if (deps.sessionLifecycle) {
+						// Core's session lifecycle joins the session: it refuses one
+						// closing, closed or gone, and on a refusal has already revoked
+						// the family it was handed, or logged its failure as
+						// `session_join_withdraw_failed`.
+						const joined = await deps.sessionLifecycle.join(sid, { rp, familyId });
+						if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
+						if (joined.outcome === "unavailable") {
+							lifecycleUnavailable(authenticatedClientId);
+							await revokeRefusedFamily(familyId, at);
+							return {
+								result: {
+									status: 503,
+									error: "temporarily_unavailable",
+									errorDescription: "session linking unavailable",
+								},
+							};
+						}
+					} else {
+						// Composition-root invariant: the session-stores module wires its
+						// sibling stores together, so with userSessionStore present these
+						// two are too. `?.` would silently no-op on a misconfigured root.
+						const joined = await joinSession(
+							{
+								// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
+								sessionRPRegistry: deps.sessionRPRegistry!,
+								// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
+								sessionFamilyIndex: deps.sessionFamilyIndex!,
 							},
-							familyId,
-							expiresAt: userSession.expiresAt,
-						},
-					);
-					if (joined.outcome === "ended") {
-						const refusal = sessionInvalidated(at);
-						await revokeRefusedFamily(familyId, at);
-						return { result: refusal };
-					}
-					if (joined.outcome === "unavailable") {
-						storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
-						return {
-							result: {
-								status: 503,
-								error: "temporarily_unavailable",
-								errorDescription: "session linking unavailable",
-							},
-						};
+							{ sid, rp, familyId, expiresAt: userSession.expiresAt },
+						);
+						if (joined.outcome === "ended") {
+							const refusal = sessionInvalidated(at);
+							await revokeRefusedFamily(familyId, at);
+							return { result: refusal };
+						}
+						if (joined.outcome === "unavailable") {
+							storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
+							await revokeRefusedFamily(familyId, at);
+							return {
+								result: {
+									status: 503,
+									error: "temporarily_unavailable",
+									errorDescription: "session linking unavailable",
+								},
+							};
+						}
 					}
 				} catch (err) {
 					// The family is registered and its tokens are never served: revoked
