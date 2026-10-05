@@ -292,6 +292,30 @@ describe("planBoot — step 4: the stores an enabled federation needs", () => {
 		expect(plan.providerActivations.some((pa) => pa.componentKey === "slotA")).toBe(false);
 	});
 
+	it("labels nothing when an active module reads the store: a reader brings it in, not the seed", () => {
+		const modA = defineModule({ name: "A", provides: { slotA: () => 1 } });
+		const reader = defineModule({
+			name: "R",
+			requires: ["slotA"] as const,
+			contributes: { auditHooks: [() => fakeAuditSink("hook")] },
+		});
+
+		const vm = {
+			...validated([modA, reader], minBootstrap, {
+				auditHooks: makeStubListCollector<AuditSink>(),
+			}),
+			federationStoreSlots: ["slotA"],
+		} as never;
+		const plan = planBoot(vm, minBootstrap, undefined);
+
+		const act = plan.providerActivations.find(
+			(pa) => pa.module === "A" && pa.componentKey === "slotA",
+		);
+		expect(act).toBeDefined();
+		expect(act?.eager).toBe(false);
+		expect(act && Object.hasOwn(act, "seededBy")).toBe(false);
+	});
+
 	it("labels an eager component's activation by its own seed", () => {
 		const modB = defineModule({
 			name: "B",

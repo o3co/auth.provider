@@ -245,6 +245,33 @@ describe("an enabled federation's stores are built at boot", () => {
 		for (const key of STORE_KEYS) expect(factories[key]).not.toHaveBeenCalled();
 	});
 
+	it("builds what a store's provider requires, once, though no module reads either", async () => {
+		const dependency = vi.fn(() => ({ kind: "dependency" }));
+		const tokenStore = vi.fn(() => ({ kind: "stub" }));
+		const { factories } = storesModule();
+		const withRequirement = defineModule({
+			name: "test:token-store-with-a-requirement",
+			requires: ["challengeStore"] as never,
+			provides: { federationTokenStore: tokenStore } as never,
+		});
+		const dependencyModule = defineModule({
+			name: "test:dependency",
+			provides: { challengeStore: dependency } as never,
+		});
+		const { federationTokenStore: _replaced, ...rest } = factories;
+		const others = defineModule({ name: "test:other-stores", provides: rest as never });
+
+		await expect(
+			createApp({
+				modules: [dependencyModule, withRequirement, others, googleFederationModule],
+				bootstrapComponents: makeBootWithFederationEnabled(),
+			}),
+		).resolves.toBeDefined();
+
+		expect(dependency).toHaveBeenCalledTimes(1);
+		expect(tokenStore).toHaveBeenCalledTimes(1);
+	});
+
 	it("does not build a provider of a store a host map fills", async () => {
 		const { factories, module } = storesModule();
 

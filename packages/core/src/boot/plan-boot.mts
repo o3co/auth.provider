@@ -360,15 +360,13 @@ function topologicalSort(graph: DependencyGraph, validated: ValidatedManifests):
 // ---------------------------------------------------------------------------
 
 /**
- * The `(moduleName, componentKey)` pairs to materialise, and those that
- * entered only as eager seeds, never through a require chain.
+ * The `(moduleName, componentKey)` pairs to materialise, and, for those that
+ * entered only through a seed (never through a require chain), which seed.
  * @internal
  */
 interface ActivationClosure {
 	/** All (module, key) pairs that should materialise. Key: `${module}::${key}`. */
 	readonly inClosure: ReadonlySet<string>;
-	/** (module, key) pairs that entered the closure exclusively via an eager or core-read seed. */
-	readonly eagerOnlyKeys: ReadonlySet<string>;
 	/** Why each (module, key) pair that entered only as a seed was seeded: its first seed. */
 	readonly seedOnly: ReadonlyMap<string, ActivationSeed>;
 }
@@ -395,8 +393,8 @@ const CORE_READ_SLOTS: readonly ComponentKey[] = ["httpSettings", "oauthTokenSet
  * Computes the per-component activation closure. Its roots are the modules
  * with any `contributes` or `overrides` entry, and its seeds the components
  * with `lifecycle[K].eager === true`, and the providers of `CORE_READ_SLOTS`
- * and of `validated.federationStoreSlots` no host map fills; from each, the module's `requires` and `optional` edges
- * are walked recursively. A module is not all-or-nothing: each (module, key)
+ * and of `validated.federationStoreSlots` no host map fills; from each, the
+ * module's `requires` and `optional` edges are walked recursively. A module is not all-or-nothing: each (module, key)
  * pair is decided on its own.
  * @internal
  */
@@ -486,11 +484,7 @@ function computeActivationClosure(
 	for (const [ck, seed] of viaSeed) {
 		if (!viaRequireChain.has(ck)) seedOnly.set(ck, seed);
 	}
-	const eagerOnlyKeys = new Set<string>(
-		[...seedOnly].filter(([, seed]) => seed !== "federation-store").map(([ck]) => ck),
-	);
-
-	return { inClosure, eagerOnlyKeys, seedOnly };
+	return { inClosure, seedOnly };
 }
 
 // ---------------------------------------------------------------------------
@@ -525,8 +519,8 @@ function buildPlanOutputs(
 			const ck = closureKey(moduleName, key);
 			if (closure.inClosure.has(ck)) {
 				inClosureKeys.push(key);
-				const eager = closure.eagerOnlyKeys.has(ck);
 				const seededBy = closure.seedOnly.get(ck);
+				const eager = seededBy === "eager" || seededBy === "core-read";
 				providerActivations.push({
 					module: moduleName,
 					componentKey: key,

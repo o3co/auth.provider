@@ -252,8 +252,11 @@ export interface ProviderActivation {
 	readonly componentKey: ComponentKey;
 	/**
 	 * True when this entry is in the activation closure only as an eager or
-	 * core-read seed: `lifecycle[componentKey].eager === true`, or a slot core
-	 * reads. Used by diagnostics; does not change runtime behaviour.
+	 * core-read seed (`seededBy` is `eager` or `core-read`):
+	 * `lifecycle[componentKey].eager === true`, or a slot core reads. A
+	 * `federation-store` seed is left out on purpose: its provider is built
+	 * because the configuration needs the slot, not as an eager component.
+	 * Used by diagnostics; does not change runtime behaviour.
 	 */
 	readonly eager: boolean;
 	/**
