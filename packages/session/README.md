@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -662,6 +662,11 @@ import `@o3co/auth-provider-oauth` — they are siblings over core.
 The `session` grant issues no refresh token, so a deployment whose tokens all
 come from that grant has no family to revoke and `/session/logout` is
 sufficient on its own.
+
+**Where core's session lifecycle is installed** (`sessionLifecycleModule` fills the `sessionLifecycle` slot), the logout closes the session with `sessionLifecycle.close(sid, "session_logout")` instead of the table above. The close revokes the session's refresh-token families and tells its relying parties back-channel (through the notifier `oauthModule` contributes), as `/oauth/logout` does, then removes the federation tokens, the subject-index entry and the per-session indexes, and deletes the `UserSession` last.
+- A close that committed answers the same `200` and destroys the express session, whether its work is `done` or still `pending`: from the commit on, no liveness read answers the session live, and a later close or the lifecycle's sweep resumes what is left.
+- A close that did not commit, or a lifecycle that threw, answers `503 temporarily_unavailable` and keeps the express session for a retry. It is logged once as `session_logout_store_unavailable` (error, `store: "session_lifecycle"`, `step: "close"`, `sid`), carrying the error's projection only when the lifecycle threw; the lifecycle logs its own outage as `session_lifecycle_unavailable`.
+- A `sid` the lifecycle cannot hold names no session of its: the logout destroys the express session and answers `200`.
 
 **A copy the record was renewed away from.** Before it invalidates anything,
 the logout asks core's `cookieRenewedAway`: when the record the cookie names

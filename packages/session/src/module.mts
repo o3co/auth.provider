@@ -211,7 +211,8 @@ export const sessionModule = defineModule<
 	| "auditSink"
 	| "subjectSessionIndex"
 	| "subjectRevocation"
-	| "sessionLifecycleStore",
+	| "sessionLifecycleStore"
+	| "sessionLifecycle",
 	typeof sessionSectionSchema
 >({
 	name: "session",
@@ -235,7 +236,8 @@ export const sessionModule = defineModule<
 	// `subjectSessionIndex`, `revokeAllForSubject` reports the capability as
 	// unavailable; `subjectRevocation` is the boundary, and
 	// `sessionLifecycleStore` the lifecycle port, the link routes' admission
-	// reads when wired.
+	// reads when wired; `sessionLifecycle`, core's session lifecycle, where its
+	// module is installed, is what `POST /session/logout` closes the session through.
 	optional: [
 		"logger",
 		"attemptCounter",
@@ -243,6 +245,7 @@ export const sessionModule = defineModule<
 		"subjectSessionIndex",
 		"subjectRevocation",
 		"sessionLifecycleStore",
+		"sessionLifecycle",
 	],
 	// Optional to wire, not optional to decide: an unfilled `auditSink` must be
 	// declared (`auditSink` in `core.declaredAbsent`), and absent subject-level
@@ -308,6 +311,7 @@ export const sessionModule = defineModule<
 						...(deps.attemptCounter ? { attemptCounter: deps.attemptCounter } : {}),
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
+						sessionLifecycle: deps.sessionLifecycle,
 						sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
 						logger: deps.logger ?? consoleLogger,
 						// A password login asks the registered requirements through

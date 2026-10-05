@@ -22,8 +22,9 @@
  * establishes, `establishSession` writes the session and a fresh CSRF token
  * is returned; if one interrupts, its ceremony is opened on a regenerated,
  * unauthenticated session and its `403` answered. A logout invalidates the
- * records the session owns before destroying the cookie session — unless the
- * record was renewed away from this cookie session (core's
+ * records the session owns before destroying the cookie session — or, where
+ * core's session lifecycle is installed, closes the session through it — unless
+ * the record was renewed away from this cookie session (core's
  * `cookieRenewedAway`), when only the cookie session is destroyed.
  */
 
@@ -47,6 +48,7 @@ import {
 	readUserSnapshot,
 	type SessionCookiePolicy,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SessionRequirementResolver,
 	type SubjectSessionIndex,
 	type User,
@@ -95,6 +97,7 @@ export const createRouter = (
 		deploymentMode,
 		userSessionStore,
 		subjectSessionIndex,
+		sessionLifecycle,
 		federationTokenStore,
 		sessionFederationIndex,
 		attemptCounter,
@@ -133,6 +136,11 @@ export const createRouter = (
 		 * credential change can enumerate what to revoke.
 		 */
 		subjectSessionIndex?: SubjectSessionIndex;
+		/**
+		 * Core's session lifecycle, where installed: `POST /session/logout` closes
+		 * the session through it instead of deleting the records it owns.
+		 */
+		sessionLifecycle?: SessionLifecycle | undefined;
 		/**
 		 * Upstream-IdP tokens held for the session, dropped on logout. Optional:
 		 * a composition that federates nothing wires none.
@@ -290,6 +298,35 @@ export const createRouter = (
 				);
 			}
 		}
+	};
+
+	/**
+	 * Closes `sid` through core's session lifecycle for a session logout:
+	 * `closed` once the closing commit has landed, or when the lifecycle
+	 * refuses the sid as one it cannot hold (no session of its carries it);
+	 * `unavailable` when the commit did not land, or the lifecycle threw,
+	 * logged once as `session_logout_store_unavailable`.
+	 */
+	const closeSession = async (
+		lifecycle: SessionLifecycle,
+		sid: string,
+	): Promise<"closed" | "unavailable"> => {
+		try {
+			const answer = await lifecycle.close(sid, "session_logout");
+			if (answer.outcome !== "unavailable") return "closed";
+			// The lifecycle logs its own error; this line carries none.
+			logger.error(
+				{ sid, store: "session_lifecycle", step: "close" },
+				"session_logout_store_unavailable",
+			);
+		} catch (err) {
+			if (err instanceof RangeError) return "closed";
+			logger.error(
+				{ sid, store: "session_lifecycle", step: "close", err: loggableError(err) },
+				"session_logout_store_unavailable",
+			);
+		}
+		return "unavailable";
 	};
 
 	/**
@@ -482,7 +519,16 @@ export const createRouter = (
 				}
 			}
 			if (sid && !renewedAway) {
-				await invalidateSessionRecords(sid, sub);
+				if (sessionLifecycle) {
+					// Core's session lifecycle closes the session: it revokes its
+					// families, tells its relying parties and deletes its records.
+					// A close that committed is the logout's success, its work left
+					// pending or not; one that did not keeps the cookie for a retry.
+					const closed = await closeSession(sessionLifecycle, sid);
+					if (closed === "unavailable") return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				} else {
+					await invalidateSessionRecords(sid, sub);
+				}
 			}
 
 			const destroyErr = await new Promise<unknown>((resolve) => {

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-10-05
+最終更新: 2026-10-06
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージの type がプロバイダーと並べて作るリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -201,6 +201,11 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 この境界は構造的なもの: カスケード（`packages/oauth/src/logout/cascadeLogout.mts`）は `refreshTokenFamilyRevocation`、`sessionFamilyIndex`、`sessionRPRegistry` を必要とし、このモジュールはそのどれも宣言しない。そして `@o3co/auth-provider-session` は `@o3co/auth-provider-oauth` を import しない — 両者は core の上の兄弟である。
 
 `session` グラントはリフレッシュトークンを発行しないので、トークンがすべてそのグラント由来のデプロイには失効させるファミリーが無く、`/session/logout` だけで足りる。
+
+**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、ログアウトは上の表の代わりに `sessionLifecycle.close(sid, "session_logout")` でセッションを終了する。終了は `/oauth/logout` と同じく、セッションのリフレッシュトークンファミリーを失効させ、その relying party にバックチャネルで知らせ（`oauthModule` が寄与する通知器を通して）、フェデレーショントークン、subject インデックスのエントリー、セッションごとのインデックスを削除し、最後に `UserSession` を削除する。
+- コミットされた終了は、作業が `done` でも `pending` でも同じ `200` を返し、express session を破棄する。コミットの時点から、どの liveness の読み取りもそのセッションを live と答えず、残りは後の終了かライフサイクルの巡回が再開する。
+- コミットされなかった終了、または例外を投げたライフサイクルは `503 temporarily_unavailable` を返し、再試行のために express session を残す。`session_logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`、`sid`）として 1 回ログに出し、エラーの射影はライフサイクルが例外を投げたときだけ持つ。ライフサイクル自身はその障害を `session_lifecycle_unavailable` としてログに出す。
+- ライフサイクルが保持できない `sid` は、そのどのセッションも指さない: ログアウトは express session を破棄して `200` を返す。
 
 **失敗時の振る舞い。** 上の表のレコードに対する各ステップはベストエフォートでログに出し、呼び出し側には伝えない: それらのストアの障害でログアウトが `5xx` になり、ユーザーが生きた cookie を持ったままになってはならない。`UserSession` の削除が **最初に**、express session の破棄とベストエフォートの後片付けより前に実行されるので、フェデレーション系ストアの障害が肝心の無効化を妨げることはない。失敗は `logout_user_session_delete_failed`、`logout_subject_session_index_remove_failed`、`logout_federation_token_remove_failed`、`logout_session_federation_index_remove_failed` としてログに出る — アラートは最初のものに掛ける。唯一の例外は express session そのものである: その破棄が失敗する — cookie ストアの障害 — とユーザーはログアウトできていないので、応答は `503 temporarily_unavailable` で、error レベルで 1 行、`session_logout_store_unavailable`（`store: "cookie_session"`、`step: "destroy"`、`sid`）としてログに出て、クライアントは再試行する。その時点でレコードは既に消えているので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには無効化するレコードが無く、express session だけが破棄される。
 
