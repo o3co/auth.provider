@@ -346,7 +346,7 @@ once the notifier would have registered, and only where
 filled it with is the host's. It is refused as before, as that module's
 provider failing (`provides-factory-failed`, naming
 `core-session-lifecycle`), its remedy now naming the contribution: install a
-module that contributes a `sessionCloseNotifiers` entry, as `oauthModule`
+module that contributes a `sessionCloseNotifiers` entry, as `oauthEndpointsModule`
 does.
 
 **D17. Join order, and the federations a logout reads first.** A record's

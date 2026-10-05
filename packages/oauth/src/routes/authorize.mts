@@ -72,7 +72,7 @@ export { REDIRECT_TO_PARAM } from "./authorizeAsk.mjs";
 export type { AuthorizeHandlerOptions } from "./authorizeContext.mjs";
 export { authorizeParams } from "./authorizeContext.mjs";
 
-/** The action /authorize admits, as `oauthModule` registers it. */
+/** The action /authorize admits, as `oauthEndpointsModule` registers it. */
 const AUTHORIZE_ACTION = "oauth.authorize" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
 
 /** What `authorize.rejected` carries for a policy decision past the client's ceiling. */

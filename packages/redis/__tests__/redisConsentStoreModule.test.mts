@@ -40,7 +40,7 @@ afterAll(async () => {
 
 /**
  * Stands in for the OAuth module, which this package does not depend on:
- * reads both consent slots as `oauthModule` does (optional), and contributes a
+ * reads both consent slots as `oauthEndpointsModule` does (optional), and contributes a
  * route so it is in the closure root.
  */
 const consentStepStandIn = defineModule({

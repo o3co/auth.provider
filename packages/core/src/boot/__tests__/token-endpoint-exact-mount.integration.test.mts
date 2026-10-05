@@ -70,7 +70,7 @@ const shapeOf = (req: { path: string; url: string; baseUrl: string }): SeenShape
 /**
  * A booted app whose DPoP mechanism refuses every proof it is shown, with a
  * grant middleware beside it; both record the requests they saw, and the
- * shape of each. The token route stands in for `oauthModule`'s, and a later
+ * shape of each. The token route stands in for `oauthEndpointsModule`'s, and a later
  * module serves `POST /oauth/token/custom` and `GET /oauth/token`. The router
  * is mounted at `mountedAt`, as a host app may mount it; `config` is merged
  * over the valid core config.

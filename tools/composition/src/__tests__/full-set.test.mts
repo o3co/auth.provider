@@ -1519,7 +1519,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 		await composed.handle.dispose();
 	});
 
-	it("puts the added routers on the other side of oauthModule's, and swaps the /session pair", () => {
+	it("puts the added routers on the other side of oauthEndpointsModule's, and swaps the /session pair", () => {
 		const ids = composed.handle.routes.map((r) => r.contribution.id);
 		for (const [own, added] of [
 			["oauth-endpoints", "device-authorization"],
@@ -1807,6 +1807,9 @@ describe("a first passkey and a first link, behind the first-binding gate, under
 
 	/** Alice signed in through the OIDC federation on one cookie jar, and a CSRF pair. */
 	const federatedAlice = async (set: FullSet) => {
+		// The IdP says when it authenticated the user: now, as a real login's
+		// id_token does; a first binding reads that as the recent primary.
+		set.upstreams.oidc.idTokenClaims.auth_time = Math.floor(Date.now() / 1000);
 		const agent = request.agent(set.app);
 		const start = await agent.get("/session/oauth/federation/oidc");
 		expect(start.status).toBe(302);

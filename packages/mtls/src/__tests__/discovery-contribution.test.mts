@@ -105,7 +105,7 @@ const keyStoreModule = defineModule({
 });
 
 /**
- * Stands in for the authorization-server-owning module (`oauthModule` lives
+ * Stands in for the authorization-server-owning module (`oauthEndpointsModule` lives
  * downstream of this package, so it cannot be imported here). Sets
  * `providerRoot` and supplies the OIDC-required fields
  * `buildDiscoveryDocument` insists on.

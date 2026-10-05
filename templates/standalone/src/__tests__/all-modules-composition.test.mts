@@ -115,7 +115,7 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-mfa":
 		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule) and mfaResetModule, under MFA_MODE (mfa-switch.test.mts)",
 	"@o3co/auth-provider-oauth":
-		"oauthModule, oauthSessionGrantModule, oauthAuthorizationGrantsModule, subjectRevocationServiceModule",
+		"oauthEndpointsModule, oauthSessionGrantModule, oauthAuthorizationGrantsModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
 	"@o3co/auth-provider-session": "sessionModule, sessionStoreModule",
 	"@o3co/auth-provider-standard":
@@ -131,7 +131,7 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
  * here, through this file's fixture.
  */
 const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
-	"@o3co/auth-provider-device-grant": "deviceGrantModule",
+	"@o3co/auth-provider-device-grant": "deviceAuthorizationGrantModule",
 	"@o3co/auth-provider-dpop": "dpopModule",
 	"@o3co/auth-provider-federation-apple": "appleFederationTypeModule",
 	"@o3co/auth-provider-federation-github": "githubFederationTypeModule",
@@ -612,7 +612,7 @@ describe("every module's primary route answers in the one app", () => {
 		},
 	);
 
-	it("a federation grant is lodged, beside oauthModule under /oauth", async () => {
+	it("a federation grant is lodged, beside oauthEndpointsModule under /oauth", async () => {
 		const { app } = await boot();
 		const res = await lodgeGrant(app);
 		expect(res.status).toBe(201);
@@ -654,7 +654,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])(
 		});
 
 		it.each(TRANSFERS)(
-			"federation grants keep their 16 KiB bound beneath oauthModule's /oauth, a body sent %s",
+			"federation grants keep their 16 KiB bound beneath oauthEndpointsModule's /oauth, a body sent %s",
 			async (_transfer, send) => {
 				for (const type of [JSON_TYPE, FORM_TYPE]) {
 					const body =

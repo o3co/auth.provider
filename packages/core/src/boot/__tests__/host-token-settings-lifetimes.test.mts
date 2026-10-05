@@ -127,7 +127,7 @@ describe("a host-filled oauthTokenSettings is held to the configuration's lifeti
 	});
 
 	it("refuses a slot a module provides that outlasts the configuration's, as it is materialised", async () => {
-		// Not oauthModule, whose provider resolves its lifetimes from the same
+		// Not oauthEndpointsModule, whose provider resolves its lifetimes from the same
 		// configuration: another module, advertising a longer refresh token.
 		const booting = createApp({
 			modules: [

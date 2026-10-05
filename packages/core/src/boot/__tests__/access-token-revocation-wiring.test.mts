@@ -30,7 +30,7 @@
  *
  * The trigger is the policy on the reading module's manifest, not a key core
  * hardcodes: a hand-built module that reads the slot without attaching the
- * policy does not trip the guard. The bundled `oauthModule` /
+ * policy does not trip the guard. The bundled `oauthEndpointsModule` /
  * `tokenExchangeModule` both attach it.
  */
 import { describe, expect, it } from "vitest";
@@ -39,7 +39,7 @@ import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
 /**
- * Stand-in for `oauthModule` / `tokenExchangeModule`: reads
+ * Stand-in for `oauthEndpointsModule` / `tokenExchangeModule`: reads
  * `accessTokenDenylist` opportunistically and attaches the shared policy —
  * the declaration that denylist-backed revocation is part of this app's
  * surface.

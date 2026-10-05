@@ -36,7 +36,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
-import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import {
 	type SessionCookieConfigSlice,
 	sessionCookiePolicyFrom,
@@ -316,72 +316,58 @@ describe("the session store module provides sessionCookiePolicy", () => {
 		expect(Object.isFrozen(seen.policy)).toBe(true);
 	});
 
-	it.each([
-		["sessionStoreModuleFor(config)", (config: AppConfig) => sessionStoreModuleFor(config)],
-		["sessionStoreModule", () => sessionStoreModule],
-	] as const)(
-		"%s: a section it refuses is refused at validation, whether or not a module requires the slot",
-		async (_form, form) => {
-			const base = makeValidAppConfig() as AppConfig;
-			const config = withSessionCaptures(withStore(base, { name: "auth session" })) as AppConfig;
-			const message = 'session-store.name "auth session" is not a cookie name (an RFC 6265 token)';
-			for (const readers of [[], [consumer({})]]) {
-				expect(
-					await settled(
-						createTestApp({
-							modules: [form(config), ...readers],
-							bootstrapComponents: { config, pathResolver: (s: string) => s },
-						}),
-					),
-				).toMatchObject({
-					name: "BootError",
+	it("a section it refuses is refused at validation, whether or not a module requires the slot", async () => {
+		const base = makeValidAppConfig() as AppConfig;
+		const config = withSessionCaptures(withStore(base, { name: "auth session" })) as AppConfig;
+		const message = 'session-store.name "auth session" is not a cookie name (an RFC 6265 token)';
+		for (const readers of [[], [consumer({})]]) {
+			expect(
+				await settled(
+					createTestApp({
+						modules: [sessionStoreModule, ...readers],
+						bootstrapComponents: { config, pathResolver: (s: string) => s },
+					}),
+				),
+			).toMatchObject({
+				name: "BootError",
+				reason: "config-validation-failed",
+				stage: "validateManifests",
+				details: {
 					reason: "config-validation-failed",
-					stage: "validateManifests",
-					details: {
-						reason: "config-validation-failed",
-						issues: [{ code: "custom", path: ["session-store", "name"], message }],
-					},
-				});
-			}
-		},
-	);
+					issues: [{ code: "custom", path: ["session-store", "name"], message }],
+				},
+			});
+		}
+	});
 });
 
 describe("the session store module names sessionCookiePolicy authoritative", () => {
 	/** A policy that differs from the section's, as a second source would. */
 	const SECOND = createTestSessionCookiePolicy({ name: "__Host-second.session" });
 
-	const FORMS = [
-		["sessionStoreModuleFor(config)", (config: AppConfig) => sessionStoreModuleFor(config)],
-		["sessionStoreModule", () => sessionStoreModule],
-	] as const;
-
-	it.each(FORMS)("%s names it, and nothing else it provides", (_form, form) => {
-		expect(form(makeValidAppConfig() as AppConfig).authoritative).toEqual(["sessionCookiePolicy"]);
+	it("names it, and nothing else it provides", () => {
+		expect(sessionStoreModule.authoritative).toEqual(["sessionCookiePolicy"]);
 	});
 
-	it.each(FORMS)(
-		"%s: an override of the slot refuses boot, naming the module and the key, whether or not a module requires it",
-		async (_form, form) => {
-			const config = withSessionCaptures(makeValidAppConfig()) as AppConfig;
-			for (const readers of [[], [consumer({})]]) {
-				const caught = await settled(
-					createTestApp({
-						modules: [form(config), ...readers],
-						bootstrapComponents: { config, pathResolver: (s: string) => s },
-						overrideComponents: { sessionCookiePolicy: SECOND },
-					}),
-				);
-				expect(caught).toBeInstanceOf(BootError);
-				expect((caught as BootError).reason).toBe("authoritative-component-overridden");
-				expect((caught as BootError).details).toEqual({
-					reason: "authoritative-component-overridden",
-					module: "session-store",
-					componentKey: "sessionCookiePolicy",
-				});
-			}
-		},
-	);
+	it("an override of the slot refuses boot, naming the module and the key, whether or not a module requires it", async () => {
+		const config = withSessionCaptures(makeValidAppConfig()) as AppConfig;
+		for (const readers of [[], [consumer({})]]) {
+			const caught = await settled(
+				createTestApp({
+					modules: [sessionStoreModule, ...readers],
+					bootstrapComponents: { config, pathResolver: (s: string) => s },
+					overrideComponents: { sessionCookiePolicy: SECOND },
+				}),
+			);
+			expect(caught).toBeInstanceOf(BootError);
+			expect((caught as BootError).reason).toBe("authoritative-component-overridden");
+			expect((caught as BootError).details).toEqual({
+				reason: "authoritative-component-overridden",
+				module: "session-store",
+				componentKey: "sessionCookiePolicy",
+			});
+		}
+	});
 
 	it.each(["overrideComponents", "bootstrapComponents"] as const)(
 		"lets a composition without the module fill the slot itself, through %s",
