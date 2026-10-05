@@ -832,11 +832,11 @@ export type BootstrapComponentCollisionDetails =
 
 /**
  * A synthetic ComponentMap key (`SYNTHETIC_COMPONENT_KEYS`: the resolvers,
- * the two registrars, `deploymentMode`, `tokenBindingSettings`) appeared in
- * a module's `provides`, `bootstrapComponents` or `overrideComponents`; only
- * the boot planner produces these keys. `source: "module-provides"` carries
- * `module`; the other two sources are composition-root data and carry no
- * module name.
+ * the two registrars, `deploymentMode`, `tokenBindingSettings`,
+ * `federationSettings`) appeared in a module's `provides`,
+ * `bootstrapComponents` or `overrideComponents`; only the boot planner
+ * produces these keys. `source: "module-provides"` carries `module`; the
+ * other two sources are composition-root data and carry no module name.
  */
 export type SyntheticKeyCollisionDetails =
 	| {
