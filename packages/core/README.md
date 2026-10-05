@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 ## Responsibility
 
@@ -295,8 +295,7 @@ A module whose state lives in this process's memory says so on its manifest, `re
 A section's leaf that an environment variable can set reads the string HOCON substitutes for `${?VAR}`. Core exports the readers for those strings, all defined in [`src/config/application.schema.mts`](src/config/application.schema.mts), so every package reads a variable the same way:
 
 - `wholeNumberFromEnv(bounds)` reads a whole number. It accepts a number as written, or a string of decimal digits (a whole number), whitespace around the digits allowed. Anything else reaches `bounds` unchanged and is refused there, with the message `bounds` gives. That includes an empty or blank string, a string with a sign, a fraction, an exponent (`"8e3"`) or hexadecimal (`"0x50"`), and `null`, `true` or a list. `z.coerce.number()` would read `""`, `null` and `[]` as `0` and `"1e3"` as `1000`. `bounds` is a `z.number()` schema that decides every other rule: an integer check for a number written as one, the minimum, the maximum and the message. The standalone template reads `http.port` with it, so an exported-but-empty `HTTP_PORT` fails boot instead of listening on a port the OS picks.
-- `durationFromEnv(bounds)` is the same reader, under the name its duration leaves use.
-- `wholeNumberInRangeFromEnv(min, max?)` is the same reader held to `min`, and to `max` when given, refusing every other value with one message that names the range and the form (`must be a whole number from 1 to 31536000, in decimal digits`). Core reads its token lifetimes (`oauth.accessToken.*`, `oauth.refreshToken.expiresIn`), `oauth.nonce.maxLength`, `webauthn.challengeTtlMs`, the `core-rate-limiter-memory` section and the memory code repository's `defaultExpiresIn` with it. A number setting that needs a message of its own passes its own `bounds` to `wholeNumberFromEnv`.
+- `wholeNumberInRangeFromEnv(min, max?)` is the same reader held to `min`, and to `max` when given, refusing every other value with one message that names the range and the form (`must be a whole number from 1 to 31536000, in decimal digits`). Core reads its token lifetimes (`oauth.accessToken.*`, `oauth.refreshToken.expiresIn`), `oauth.nonce.maxLength`, `webauthn.challengeTtlMs`, `jwks.cacheMaxAge`, the `core-rate-limiter-memory` section, the memory code repository's `defaultExpiresIn` and the memory federation grant store's `tombstoneRetention` with it. A number setting that needs a message of its own passes its own `bounds` to `wholeNumberFromEnv`.
 - `coerceBooleanFromEnv` reads a boolean: `"true"` / `"1"` and `"false"` / `"0"` / `""`, trimmed and case-insensitive. Anything else fails boot.
 
 A key several modules read has one owner, and the others receive it through a slot whose contract is core's: the owner parses its own section and provides the value, and in code a package imports only core. Core declares these slots; the session package's modules provide `loginCompletion`, `loginEntry`, `csrfGuard`, `sessionCookiePolicy` and `csrfTokenSigner`, the oauth module provides `oauthTokenSettings`, core fills `deploymentMode`, `tokenBindingSettings`, `federationSettings` and `outboundPolicy` itself, and the others are declared ahead of their providers:

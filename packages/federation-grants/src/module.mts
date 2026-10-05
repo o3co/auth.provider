@@ -42,7 +42,6 @@ import {
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
 	defineModule,
-	durationFromEnv,
 	type FederationGrantConnection,
 	type FederationGrantPolicy,
 	type FederationGrantRefresher,
@@ -55,6 +54,7 @@ import {
 	supportsDelegatedAuthorization,
 	type UserSessionStore,
 	wholeNumberFromEnv,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import {
@@ -74,8 +74,8 @@ import { resolveFederationGrantConnections } from "./connections.mjs";
 import { createFederationGrantRouter, FEDERATION_GRANTS_RATE_LIMIT_PREFIX } from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 
-/** A duration in whole units, read strictly from a number or a variable's decimal string. */
-const duration = (bounds: z.ZodNumber) => durationFromEnv(bounds).optional();
+/** A duration in whole units of at least `min`, read strictly from a number or a variable's decimal string. */
+const duration = (min: number) => wholeNumberInRangeFromEnv(min).optional();
 
 /** What a grant may be for: one entry of `federation-grants.connections`. Strict. */
 const connectionSchema = z
@@ -86,7 +86,7 @@ const connectionSchema = z
 		// No default for either: a guessed access-token maximum invents a
 		// residual-access policy, and a guessed boundary silently shares one.
 		boundary: z.string().min(1),
-		maxAccessTokenLifetime: durationFromEnv(z.number().int().positive()),
+		maxAccessTokenLifetime: wholeNumberInRangeFromEnv(1),
 		allowScopeSubsets: coerceBooleanFromEnv.optional(),
 		authorizationParams: z.record(z.string(), z.string()).optional(),
 		callbackURL: z.string().min(1).optional(),
@@ -107,22 +107,22 @@ export const federationGrantsConfigSchema = z
 		enabled: coerceBooleanFromEnv.optional(),
 		// Seconds. A new grant's lifetime, and the most an operator permits;
 		// the code's one-year ceiling still applies above it.
-		defaultExpiresIn: duration(z.number().int().positive()),
-		maxExpiresIn: duration(z.number().int().positive()),
+		defaultExpiresIn: duration(1),
+		maxExpiresIn: duration(1),
 		// Seconds. The retrieval's timings.
-		refreshBuffer: duration(z.number().int().nonnegative()),
-		ineligibleRetryAfter: duration(z.number().int().positive()),
-		refreshFailureBackoff: duration(z.number().int().nonnegative()),
+		refreshBuffer: duration(0),
+		ineligibleRetryAfter: duration(1),
+		refreshFailureBackoff: duration(0),
 		// Milliseconds, as the limits they become are.
-		upstreamTimeoutMs: duration(z.number().int().positive()),
-		upstreamHardTimeoutMs: duration(z.number().int().positive()),
-		refreshLockTtlMs: duration(z.number().int().positive()),
-		lockWaitMs: duration(z.number().int().nonnegative()),
-		persistRetryBudgetMs: duration(z.number().int().positive()),
+		upstreamTimeoutMs: duration(1),
+		upstreamHardTimeoutMs: duration(1),
+		refreshLockTtlMs: duration(1),
+		lockWaitMs: duration(0),
+		persistRetryBudgetMs: duration(1),
 		// The rotation budget: upstream refresh-token rotations a grant may
 		// take in a window, and the window in seconds.
 		rotationBudget: wholeNumberFromEnv(z.number().int().positive()).optional(),
-		rotationWindow: duration(z.number().int().positive()),
+		rotationWindow: duration(1),
 		// Whether a subject-wide revocation may be asked to leave this subject's
 		// established grants standing: an allowance the caller must use.
 		allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),

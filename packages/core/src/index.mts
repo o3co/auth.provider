@@ -239,9 +239,6 @@ export {
 	// for the packages outside core that read a section this file declares.
 	coerceBooleanFromEnv,
 	composeConfigSchema,
-	// A duration read strictly from a number or the decimal string a variable
-	// carries, for the packages outside core that declare a section's schema.
-	durationFromEnv,
 	fullSectionsSchema,
 	isLifetimeSeconds,
 	// The hop ceiling `http.trustProxy` is held to, which the
@@ -251,9 +248,9 @@ export {
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
-	// Any other whole number read strictly from a number or a string of
-	// decimal digits a variable carries, for the packages outside core that
-	// declare a section's schema.
+	// A whole number read strictly from a number or a string of decimal
+	// digits a variable carries, for the packages outside core that declare a
+	// section's schema.
 	wholeNumberFromEnv,
 	// The same reader held to a range, refusing with one message that names
 	// the range and the form.

@@ -15,7 +15,7 @@
  */
 
 import { z } from "zod";
-import { durationFromEnv } from "../config/application.schema.mjs";
+import { wholeNumberInRangeFromEnv } from "../config/application.schema.mjs";
 import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import { coreReference } from "../config/references.mjs";
 import { defineModule } from "../modules/index.mjs";
@@ -65,14 +65,12 @@ export const memoryFederationGrantStoreModule = defineModule({
 		reason:
 			"federation grants fork per replica — a grant lodged or authorized on one replica is unknown to every other, one revoked there still yields upstream tokens here, and a refresh token rotated on one replica leaves every other presenting the old one, which a reuse-detecting IdP answers by revoking the family",
 	},
-	// Read strictly (`durationFromEnv`): a `null` read as zero would keep no
-	// tombstones, silently.
+	// Read strictly (`wholeNumberInRangeFromEnv`): a `null` read as zero would
+	// keep no tombstones, silently.
 	section: {
 		schema: z
 			.object({
-				tombstoneRetention: durationFromEnv(
-					z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
-				).optional(),
+				tombstoneRetention: wholeNumberInRangeFromEnv(0, MAX_DURATION_SECONDS).optional(),
 			})
 			.strict()
 			.optional(),
