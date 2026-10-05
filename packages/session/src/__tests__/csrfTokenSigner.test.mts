@@ -38,9 +38,9 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
-	coreConfigForTests,
 	createTestApp,
 	createTestCsrfTokenSigner,
+	createTestFederationSettings,
 	createTestSessionCookiePolicy,
 	csrfTokenSignerContract,
 	makeValidAppConfig,
@@ -475,31 +475,11 @@ describe("the session module signs and verifies through the signer in the slot, 
 });
 
 describe("the session module reads no session-store.secret", () => {
-	it("neither its providers nor its route factories nor its routes — csrf, login, logout, a federation's start and callback — read it", async () => {
-		const reads: string[] = [];
+	it("neither its providers nor its route factories nor its routes — csrf, login, logout, a federation's start and callback — are handed it", async () => {
+		// The module's deps are its section and its slots: no configuration,
+		// so nothing it builds can reach session-store.secret.
+		expect(sessionModule.requires).not.toContain("config");
 		const base = configWith(VECTOR.secret) as unknown as Record<string, unknown>;
-		const store = new Proxy(base["session-store"] as object, {
-			get(target, key, receiver) {
-				if (key === "secret") reads.push("session-store.secret");
-				return Reflect.get(target, key, receiver);
-			},
-		});
-		const config = {
-			...base,
-			"session-store": store,
-			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
-				federations: {
-					stub: {
-						enabled: true,
-						type: "stub",
-						clientId: "id",
-						clientSecret: "federation-client-secret",
-						callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
-					},
-				},
-			}),
-		} as unknown as AppConfig;
 		const stub: FederationProvider = {
 			name: "stub",
 			scope: ["openid"],
@@ -516,8 +496,13 @@ describe("the session module reads no session-store.secret", () => {
 		};
 		// What the planner hands the module's factories.
 		const deps = {
-			config,
 			section: base.session,
+			federationSettings: createTestFederationSettings({
+				stub: {
+					type: "stub",
+					callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
+				},
+			}),
 			sessionCookiePolicy: COOKIE,
 			deploymentMode: "single",
 			csrfTokenSigner: createTestCsrfTokenSigner(),
@@ -586,7 +571,6 @@ describe("the session module reads no session-store.secret", () => {
 			`/session/oauth/federation/stub/callback?code=code-1&state=${encodeURIComponent(state ?? "")}`,
 		);
 		expect(callback.status).toBeLessThan(500);
-		expect(reads).toEqual([]);
 	});
 });
 
