@@ -175,7 +175,7 @@ What `exchangeCode` returns:
 | `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when Google sent no `expires_in`** (Google documents it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
 | `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when Google sent none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
-| `authTime` | the verified id_token's `auth_time` as a `Date`, when Google sent one; absent otherwise (Google sends it only when it is requested and enabled for the client, and this adapter does not request it). Never read from UserInfo. One that is not whole seconds since the epoch, or lies further ahead than the clock skew tolerated between hosts, fails the exchange |
+| `authTime` | the verified id_token's `auth_time` as a `Date`, when Google sent one; absent otherwise (Google sends it only when it is requested and enabled for the client, and this adapter does not request it). Never read from UserInfo. A fraction is floored to its second; one that is not a non-negative number, or lies further ahead than the clock skew tolerated between hosts, fails the exchange |
 
 `mapClaims` maps `email`, `emailVerified`, `name`, `picture` and `hd`; the session
 package promotes only `email`, `name` and `picture`, and only where the local
