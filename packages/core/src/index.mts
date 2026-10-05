@@ -534,6 +534,7 @@ export type {
 	VerifyRevocation,
 } from "./jwt/verify.mjs";
 export {
+	claimCoveredByRevocationBoundary,
 	isVerificationUnavailable,
 	JwtVerificationError,
 	REVOCATION_RETENTION_ALLOWANCE_MS,

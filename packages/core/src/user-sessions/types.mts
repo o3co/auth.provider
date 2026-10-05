@@ -477,11 +477,12 @@ export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
  * change must invalidate outstanding tokens whose jtis are not enumerable, so
  * the watermark names the moment before which none count.
  *
- * Compared inclusively against `iat` (`iat <= watermark` is revoked): `iat`
- * is second-truncated and replica clocks differ, so a token minted just
- * before the reset often shares the watermark's second. Killing one minted
- * just after costs a retry; letting one from just before survive is the
- * vulnerability this closes.
+ * Compared inclusively against `iat`, and against `auth_time` when a token
+ * carries one (either at or before the watermark is revoked;
+ * `claimCoveredByRevocationBoundary`): `iat` is second-truncated and replica
+ * clocks differ, so a token minted just before the reset often shares the
+ * watermark's second. Killing one minted just after costs a retry; letting
+ * one from just before survive is the vulnerability this closes.
  *
  * `revokeBefore`'s `expiresAt` MUST reach at least as far as the
  * longest-lived credential the watermark must refuse, since it is the

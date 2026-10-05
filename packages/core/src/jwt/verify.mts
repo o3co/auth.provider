@@ -28,6 +28,7 @@ import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { guardedRead, lineSafeText, thrownText } from "../logging/loggableError.mjs";
 import type { SubjectRevocation } from "../user-sessions/types.mjs";
+import { isWholeEpochSeconds } from "./numericDate.mjs";
 
 /**
  * Token type — drives default `typ` expectation and selects appropriate
@@ -149,8 +150,9 @@ export const VERIFICATION_UNAVAILABLE_DESCRIPTION: Readonly<
  *
  * - `denylist`: `denylist.has(jti)` runs after the signature, expiry and type
  *   checks; a hit throws `reason: "revoked"`.
- * - `subjectRevocation`: a token whose `iat` is at or before the subject's
- *   watermark throws `reason: "revoked"`. The denylist revokes one token by
+ * - `subjectRevocation`: a token whose `iat`, or whose `auth_time` when it
+ *   carries one, is at or before the subject's watermark throws
+ *   `reason: "revoked"`. The denylist revokes one token by
  *   identity; the watermark revokes every token a subject held as of a moment,
  *   which a credential change needs because a subject's jtis are not
  *   enumerable.
@@ -222,7 +224,9 @@ export interface JwtVerifyOptions {
 	 * refuse every token minted in the five minutes after a credential change,
 	 * including the re-login the change sends the user to.
 	 *
-	 * The comparison is `iat <= watermark`, second-truncated and inclusive. A
+	 * The comparison is `iat <= watermark` (and `auth_time <= watermark` for a
+	 * token that carries one), second-truncated and inclusive
+	 * ({@link claimCoveredByRevocationBoundary}). A
 	 * minting replica whose clock runs a second ahead of the watermark writer
 	 * stamps `iat` past it, so tokens minted just before the change would
 	 * survive; one second covers a monitored fleet's skew. The cost is
@@ -315,6 +319,48 @@ export const DEFAULT_CLOCK_SKEW_MS = 300_000;
  * logins. See `JwtVerifyOptions.subjectRevocationSkewMs`.
  */
 export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
+
+/**
+ * Whether a subject's revocation boundary covers a claim in NumericDate
+ * seconds (`iat`, `auth_time`): the rule `verifyJwt` applies, so a caller
+ * that compares before signing never mints a token the verifier refuses.
+ *
+ * Inclusive to the boundary's second plus `skewMs` rounded up to whole
+ * seconds: `iat` is second-truncated and replicas keep independent clocks, so
+ * a token minted just before the revocation often lands in its second, and a
+ * replica running ahead by up to the allowance stamps one just past it.
+ * Killing one minted just after costs a retry; letting one from just before
+ * survive is the vulnerability. A negative allowance reads as none; `null` is
+ * no boundary in force.
+ *
+ * @throws RangeError for a value that cannot be compared: a boundary that is
+ * not a `Date` with a finite time, a claim that is not a number, or an
+ * allowance that is not finite. Neither answer is safe; the caller answers it
+ * as an outage, as `verifyJwt` does.
+ */
+export function claimCoveredByRevocationBoundary(
+	claimSeconds: number,
+	boundary: Date | null,
+	skewMs: number,
+): boolean {
+	if (typeof claimSeconds !== "number" || Number.isNaN(claimSeconds)) {
+		throw new RangeError("claimCoveredByRevocationBoundary: the claim is not a number of seconds");
+	}
+	if (boundary === null) return false;
+	let boundaryMs: number;
+	try {
+		boundaryMs = Date.prototype.getTime.call(boundary);
+	} catch {
+		boundaryMs = Number.NaN;
+	}
+	if (!Number.isFinite(boundaryMs)) {
+		throw new RangeError("claimCoveredByRevocationBoundary: the boundary is not a valid date");
+	}
+	if (typeof skewMs !== "number" || !Number.isFinite(skewMs)) {
+		throw new RangeError("claimCoveredByRevocationBoundary: skewMs must be a finite number");
+	}
+	return claimSeconds <= Math.floor(boundaryMs / 1000) + Math.max(0, Math.ceil(skewMs / 1000));
+}
 
 /**
  * Whether `cause` is the finding `name` names: an instance of the class, or —
@@ -696,25 +742,50 @@ export async function verifyJwt(
 				emitRejection(logger, err, payload, header);
 				throw err;
 			}
-			// Inclusive on purpose: `iat` is second-truncated and replicas keep
-			// independent clocks, so a token minted just before the revocation
-			// often lands in the watermark's second. Killing one minted just
-			// after costs a retry; letting one from just before survive is the
-			// vulnerability. `subjectRevocationSkewMs` extends this to a replica
-			// a full second ahead of the watermark writer.
-			//
-			// `ceil` so a sub-second allowance does not weaken the guard (1500ms
-			// must not act as 1000ms), and clamped at zero so a negative value
-			// cannot move the boundary before the watermark.
-			const watermarkBoundarySeconds =
-				watermark === null
-					? 0
-					: Math.floor(watermark.getTime() / 1000) +
-						Math.max(0, Math.ceil(subjectRevocationSkewMs / 1000));
-			if (watermark !== null && iat !== undefined && iat <= watermarkBoundarySeconds) {
+			// `auth_time`, when present, must be one this provider could have
+			// minted, for the same reason: a malformed one cannot be placed
+			// against the watermark. Absent, `iat` alone decides.
+			const carriesAuthTime = Object.hasOwn(payload, "auth_time");
+			const authTime = isWholeEpochSeconds(payload.auth_time) ? payload.auth_time : undefined;
+			if (watermark !== null && carriesAuthTime && authTime === undefined) {
 				const err = new JwtVerificationError(
 					"revoked",
-					`JWT for subject ${sub} predates the subject revocation watermark`,
+					`JWT for subject ${sub} carries a malformed auth_time while a subject ` +
+						"revocation watermark is in force (fail-closed)",
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+			let covered: "iat" | "auth_time" | undefined;
+			try {
+				if (
+					iat !== undefined &&
+					claimCoveredByRevocationBoundary(iat, watermark, subjectRevocationSkewMs)
+				) {
+					covered = "iat";
+				} else if (
+					authTime !== undefined &&
+					claimCoveredByRevocationBoundary(authTime, watermark, subjectRevocationSkewMs)
+				) {
+					covered = "auth_time";
+				}
+			} catch (cause) {
+				// A watermark (or allowance) that cannot be compared answers neither
+				// "revoked" nor "not revoked": the same outage as a consult that throws.
+				const err = new JwtVerificationError(
+					"revocation_unavailable",
+					"subject revocation watermark cannot be compared (fail-closed)",
+					{ cause },
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+			if (covered !== undefined) {
+				const err = new JwtVerificationError(
+					"revoked",
+					covered === "iat"
+						? `JWT for subject ${sub} predates the subject revocation watermark`
+						: `JWT for subject ${sub} carries an auth_time that predates the subject revocation watermark`,
 				);
 				emitRejection(logger, err, payload, header);
 				throw err;

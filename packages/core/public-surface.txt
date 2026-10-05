@@ -770,6 +770,7 @@
 . checkSubjectRevocationInstant value
 . checkTrustedProxyEntry value
 . checkWithFailMode value
+. claimCoveredByRevocationBoundary value
 . clampSubjectRevocationBoundary value
 . classifyFederationRefreshError value
 . codeChallenge value
