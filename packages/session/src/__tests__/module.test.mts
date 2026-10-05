@@ -346,6 +346,11 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		});
 	});
 
+	it("takes sessionLifecycle as an optional slot: core's session lifecycle, which opens each login's session record", () => {
+		expect(sessionModule.optional).toContain("sessionLifecycle");
+		expect(sessionModule.requires).not.toContain("sessionLifecycle");
+	});
+
 	it("takes sessionLifecycleStore as an optional slot: the lifecycle port the link routes' admission reads", () => {
 		expect(sessionModule.optional).toContain("sessionLifecycleStore");
 		expect(sessionModule.requires).not.toContain("sessionLifecycleStore");

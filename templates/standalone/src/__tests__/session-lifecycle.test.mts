@@ -24,11 +24,19 @@ import {
 	readVersionedSessionLifecycle,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
+	type SubjectSessionIndex,
 	sessionLifecycleModule,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { compose, ISSUER, WEB, webTokens } from "./all-modules-composition.fixture.mjs";
+import {
+	ALICE,
+	compose,
+	ISSUER,
+	login,
+	WEB,
+	webTokens,
+} from "./all-modules-composition.fixture.mjs";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -108,6 +116,22 @@ describe("the template with the session lifecycle module", () => {
 				sub: "u-bc",
 				sid: "sid-bc",
 			});
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("opens a password login's session in the lifecycle, active with nothing joined yet", async () => {
+		const { app, handle } = await compose({ extraModules: () => [sessionLifecycleModule] });
+		try {
+			expect((await login(app)).res.status).toBe(200);
+			const components = handle.components as Record<string, unknown>;
+			const [sid] = await (components.subjectSessionIndex as SubjectSessionIndex).listSids(
+				ALICE.sub,
+			);
+			const store = components.sessionLifecycleStore as SessionLifecycleStore;
+			const record = readVersionedSessionLifecycle(await store.read(String(sid)));
+			expect(record?.value).toMatchObject({ sub: ALICE.sub, state: "active", participants: [] });
 		} finally {
 			await handle.dispose();
 		}

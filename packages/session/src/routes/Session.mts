@@ -47,6 +47,7 @@ import {
 	readUserSnapshot,
 	type SessionCookiePolicy,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SessionRequirementResolver,
 	type SubjectSessionIndex,
 	type User,
@@ -95,6 +96,7 @@ export const createRouter = (
 		deploymentMode,
 		userSessionStore,
 		subjectSessionIndex,
+		sessionLifecycle,
 		federationTokenStore,
 		sessionFederationIndex,
 		attemptCounter,
@@ -133,6 +135,8 @@ export const createRouter = (
 		 * credential change can enumerate what to revoke.
 		 */
 		subjectSessionIndex?: SubjectSessionIndex;
+		/** Core's session lifecycle, where installed: a login opens the session's lifecycle record in it. */
+		sessionLifecycle?: SessionLifecycle | undefined;
 		/**
 		 * Upstream-IdP tokens held for the session, dropped on logout. Optional:
 		 * a composition that federates nothing wires none.
@@ -424,6 +428,7 @@ export const createRouter = (
 					req,
 					...(userSessionStore === undefined ? {} : { userSessionStore }),
 					...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+					...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 					sessionTtlMs,
 					reporter: ({ sid, sub }) => {
 						// Every line names the sid where there is one; the record's

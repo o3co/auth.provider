@@ -32,6 +32,7 @@
 import type {
 	CsrfGuard,
 	LoginCompletion,
+	SessionLifecycle,
 	SubjectSessionIndex,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -43,6 +44,8 @@ export interface LoginCompletionDeps {
 	/** Absent: no record is created, and the express session alone is signed in. */
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
+	/** Core's session lifecycle, where installed: a login opens the session's lifecycle record in it. */
+	readonly sessionLifecycle?: SessionLifecycle;
 	/** The session's lifetime: a record expires this long after its `authTime`. */
 	readonly sessionTtlMs: number;
 	/** Issues the fresh token an interruption's `403` carries: the deployment's CSRF guard. */
@@ -51,7 +54,7 @@ export interface LoginCompletionDeps {
 
 /** The session package's two login tails and its session renewal over `deps`, as core's `LoginCompletion`. Frozen. */
 export function createLoginCompletion(deps: LoginCompletionDeps): LoginCompletion {
-	const { userSessionStore, subjectSessionIndex, sessionTtlMs, csrf } = deps;
+	const { userSessionStore, subjectSessionIndex, sessionLifecycle, sessionTtlMs, csrf } = deps;
 	return Object.freeze({
 		// No steps of the caller's beside the record: the store and step names
 		// are the contract's own.
@@ -60,6 +63,7 @@ export function createLoginCompletion(deps: LoginCompletionDeps): LoginCompletio
 				req,
 				...(userSessionStore === undefined ? {} : { userSessionStore }),
 				...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+				...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 				sessionTtlMs,
 				reporter,
 			}),

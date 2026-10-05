@@ -27,7 +27,10 @@
  * (steps) and their log vocabulary (reporter).
  *
  * Sequence:
- * 1. `UserSessionStore.create` (a failure has nothing to undo);
+ * 1. the record: where the session lifecycle is wired, its lifecycle record
+ *    opened first, then `UserSessionStore.create`. Either failing, or the
+ *    open refused, is the record's outage at `create`, with nothing to undo:
+ *    an open record with no user session is not live and nothing joins it;
  * 2. `SubjectSessionIndex.addSid`, best effort, at the earliest point the
  *    session exists: a missing entry is a live session a credential change
  *    never finds, while an orphan costs only a redundant cascade;
@@ -63,6 +66,7 @@ import {
 	type Establishment,
 	isEstablishment,
 	newRenewalNonce,
+	type SessionLifecycle,
 	type SessionRenewalReporter,
 	type SessionRenewalResult,
 	type SessionRenewalStep,
@@ -144,6 +148,8 @@ export interface EstablishSessionDeps<S extends string = never, T extends string
 	/** Absent: no record is created, and the express session alone is authenticated. */
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
+	/** Where installed, the session lifecycle the record's lifecycle is opened in. */
+	readonly sessionLifecycle?: Pick<SessionLifecycle, "open">;
 	/** The session's lifetime: the record expires this long after `authTime`. */
 	readonly sessionTtlMs: number;
 	/** Writes beside the record before the express session is regenerated. */
@@ -187,7 +193,7 @@ export async function establishSession<S extends string = never, T extends strin
 			"establishSession: the establishment must be one admitPrimary, resumePrimary or establishWithoutAsking built",
 		);
 	}
-	const { req, userSessionStore, subjectSessionIndex, sessionTtlMs } = deps;
+	const { req, userSessionStore, subjectSessionIndex, sessionLifecycle, sessionTtlMs } = deps;
 	const {
 		subject: sub,
 		user,
@@ -257,6 +263,20 @@ export async function establishSession<S extends string = never, T extends strin
 	};
 
 	if (record !== undefined && userSessionStore !== undefined) {
+		if (sessionLifecycle !== undefined) {
+			const opened = await sessionLifecycle.open(record.sid, {
+				sub,
+				expiresAt: record.expiresAt,
+			});
+			if (opened.outcome !== "opened") {
+				reporter.storeUnavailable(
+					"user_session",
+					"create",
+					new Error(`the session lifecycle answered ${opened.outcome} to the open`),
+				);
+				return { outcome: "unavailable", store: "user_session", step: "create" };
+			}
+		}
 		try {
 			await userSessionStore.create({
 				sid: record.sid,
