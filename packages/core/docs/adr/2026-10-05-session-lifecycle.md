@@ -185,7 +185,10 @@ record. A participant's `data` is `""`: its kind and id are all it holds
 From the closing commit on, liveness answers `not_live` and nothing joins,
 so a close with work still outstanding has ended the session; it answers
 `pending`, distinct from `done`. `unavailable` means the commit did not land,
-or whether it did could not be read. How a route answers `pending` (the
+or whether it did could not be read. A commit that finds no live record —
+the session's end passed on the store's clock before its record could be
+opened, or since it was read — has nothing to close: the close answers
+`done` with no relying party and no federation. How a route answers `pending` (the
 logout's 200 and a `logout.close_pending` audit event) is decided when that
 route switches.
 

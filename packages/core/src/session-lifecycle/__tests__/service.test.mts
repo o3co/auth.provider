@@ -633,6 +633,34 @@ describe("close", () => {
 		expect((await h.read())?.value.state).toBe("closed");
 	});
 
+	it("answers done with nothing listed for a session that ended before its record could be opened", async () => {
+		let now = Date.now();
+		const h = harness({ lifecycleStore: { now: () => now } });
+		const expiresAt = await h.establish(SID, { open: false });
+		now = expiresAt.getTime() + 1;
+		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
+			outcome: "done",
+			rps: [],
+			federations: [],
+		});
+		expect(await h.read()).toBeNull();
+	});
+
+	it("answers done with nothing listed when the record lapses between its read and the closing commit", async () => {
+		const h = harness({
+			store: (inner) => ({
+				...inner,
+				beginClose: async () => ({ outcome: "missing" }),
+			}),
+		});
+		await h.establish();
+		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
+			outcome: "done",
+			rps: [],
+			federations: [],
+		});
+	});
+
 	it("revokes what joined through the old stores when the close comes after the session's end", async () => {
 		let now = Date.now();
 		const h = harness({ lifecycleStore: { now: () => now } });

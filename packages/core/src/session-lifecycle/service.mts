@@ -526,7 +526,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	 * user session, then the commit. What joined through the per-session
 	 * stores is not imported: the bridge steps read those stores when they
 	 * run. Answers the record and what the per-session stores listed after the
-	 * mark; `null` when there is neither a record nor a user session to close.
+	 * mark; `null` when there is neither a record nor a user session to close,
+	 * or when the commit finds no live record: the session's end has passed on
+	 * the store's clock, before its record could be opened or since it was
+	 * read, so there is nothing left to close.
 	 */
 	const begin = async (
 		sid: string,
@@ -545,11 +548,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		const bridged = await bridge.close(sid, end.expiresAt);
 		if (record === undefined) readSessionOpenAnswer(await store.open(sid, end.sub, end.expiresAt));
 		const answer = readSessionCloseAnswer(await store.beginClose(sid, requestFor(cause)));
-		if (answer.outcome === "missing") {
-			throw new Error(
-				"no lifecycle record to close: the session's end has passed on the store's clock",
-			);
-		}
+		if (answer.outcome === "missing") return null;
 		return { closing: { value: answer.record, generation: answer.generation }, bridged };
 	};
 
