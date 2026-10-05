@@ -852,8 +852,9 @@ export type Admission =
 			/**
 			 * The record's renewal nonce as admission read it, absent when the record
 			 * holds none: what a consumer writing the record next expects of it
-			 * (`recordSecondFactor`'s `expectedRenewalNonce`). For a cookie carrier
-			 * it is the one the cookie session presented.
+			 * (`recordSecondFactor`'s `expectedRenewalNonce`). When present for a
+			 * cookie carrier, the cookie session presented the same one; a cookie
+			 * session's nonce over a record without one is not carried.
 			 */
 			readonly renewalNonce?: string;
 	  }
