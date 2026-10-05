@@ -22,7 +22,7 @@
  */
 
 import { z } from "zod";
-import { durationFromEnv } from "../config/application.schema.mjs";
+import { wholeNumberInRangeFromEnv } from "../config/application.schema.mjs";
 import { isValidJwksPath } from "./path.mjs";
 
 export const JWKS_SECTION = z
@@ -41,7 +41,7 @@ export const JWKS_SECTION = z
 		// `Cache-Control: public, max-age=<N>`, in seconds. Keep it well below
 		// the key-overlap window so a rotated kid reaches caching verifiers in
 		// time. An empty variable is refused, not served as `max-age=0`.
-		cacheMaxAge: durationFromEnv(z.number().int().nonnegative()).optional(),
+		cacheMaxAge: wholeNumberInRangeFromEnv(0).optional(),
 	})
 	.strict()
 	.optional();

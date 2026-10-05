@@ -173,6 +173,7 @@ describe("jwksModule — its own section, jwks {}", () => {
 		const err = await refusal(withJwks({ cacheMaxAge: "" }));
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toContain("jwks.cacheMaxAge");
+		expect(err.message).toContain("must be a whole number of at least 0, in decimal digits");
 	});
 
 	it("refuses an unknown key under jwks — a typo of path — naming jwks and the key", async () => {

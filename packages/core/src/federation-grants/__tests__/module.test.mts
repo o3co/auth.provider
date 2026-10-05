@@ -48,14 +48,12 @@ describe("memoryFederationGrantStoreModule", () => {
 	});
 
 	it("refuses a retention that is not a duration, or past a year, rather than reading it as zero, and a key it does not declare", () => {
-		for (const section of [
-			...[null, true, [], "1e3", "thirty", -1, 1.5, 31_536_001].map((tombstoneRetention) => ({
-				tombstoneRetention,
-			})),
-			{ tombstone: 60 },
-		]) {
-			expect(() => parse(section), JSON.stringify(section)).toThrow();
+		for (const tombstoneRetention of [null, true, [], "", "1e3", "thirty", -1, 1.5, 31_536_001]) {
+			expect(() => parse({ tombstoneRetention }), JSON.stringify(tombstoneRetention)).toThrow(
+				"must be a whole number from 0 to 31536000, in decimal digits",
+			);
 		}
+		expect(() => parse({ tombstone: 60 })).toThrow();
 	});
 
 	it("needs no configuration at all to be installed", () => {

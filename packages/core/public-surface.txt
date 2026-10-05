@@ -897,7 +897,6 @@
 . describeSerializedOriginRejection value
 . describeTrustedProxyEntryRejection value
 . describeWeakSecret value
-. durationFromEnv value
 . effectiveFederationGrantStatus value
 . emitAuditEvent value
 . enabledFederationsOf value

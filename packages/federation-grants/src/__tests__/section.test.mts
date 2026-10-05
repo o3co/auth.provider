@@ -103,7 +103,15 @@ describe("the federation-grants section", () => {
 		// which refuses exactly these — saw it. `refreshBuffer: null` would
 		// hand out tokens with milliseconds left.
 		for (const value of ["thirty", "", "1e3", "0x10", -1, 0, 1.5, null, true, false, [], [45]]) {
-			expect(() => parse({ maxExpiresIn: value }), JSON.stringify(value)).toThrow();
+			expect(() => parse({ maxExpiresIn: value }), JSON.stringify(value)).toThrow(
+				"must be a whole number of at least 1, in decimal digits",
+			);
+		}
+		// A duration that may be zero names its own floor.
+		for (const value of ["thirty", "", "1e3", "0x10", -1, 1.5, null, true, false, [], [45]]) {
+			expect(() => parse({ refreshBuffer: value }), JSON.stringify(value)).toThrow(
+				"must be a whole number of at least 0, in decimal digits",
+			);
 		}
 	});
 

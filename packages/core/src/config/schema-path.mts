@@ -112,7 +112,7 @@ const ENVIRONMENT_COERCERS = new WeakSet<object>();
 
 /**
  * Names `schema` as one of core's environment coercers (`coerceBooleanFromEnv`,
- * each `durationFromEnv`), whose preprocess reads the string a `${?VAR}`
+ * each `wholeNumberFromEnv`), whose preprocess reads the string a `${?VAR}`
  * carries into the type its schema takes, so `readsEnvironmentString` trusts
  * it. Tagged rather than probed: a probe ("false", "1") would run the
  * schema's own bounds and refinements, and report a leaf that refuses `"1"`

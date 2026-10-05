@@ -131,12 +131,6 @@ export const wholeNumberFromEnv = (bounds: z.ZodNumber) =>
 	);
 
 /**
- * A duration read strictly, as {@link wholeNumberFromEnv} reads one: a
- * `tombstoneRetention: null` fails boot instead of disabling tombstones.
- */
-export const durationFromEnv = wholeNumberFromEnv;
-
-/**
  * {@link wholeNumberFromEnv} held to `min`, and to `max` when given, every
  * refusal carrying one message that names the range and the form. The reader
  * for a number setting that needs no message of its own.

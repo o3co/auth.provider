@@ -245,13 +245,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   modules (#1199), the Store transport's `timeout` and `maxResponseBytes`
   (#1200) and the template (#1201). Most refusals at these keys carry one
   message, `must be a whole number … in decimal digits`. The exceptions refuse
-  in words of their own: `http.port` with the template's own text; the Store
-  transport's `timeout` and `maxResponseBytes` with the transport's
-  constructor errors; and the durations read through core's
-  `durationFromEnv` — `jwks.cacheMaxAge`, the federation grant settings'
-  durations such as `tombstoneRetention`, and the Redis grant store's
-  `listingAllowanceMs` and `tombstoneRetention` — with zod's default
-  message. Match an alert on the key the refusal names, not on its message. Core's exported `configuredNumber`
+  in words of their own: `http.port` with the template's own text, and the
+  Store transport's `timeout` and `maxResponseBytes` with the transport's
+  constructor errors. Match an alert on the key the refusal names, not on its message. Core's exported `configuredNumber`
   answers `undefined` for those strings, so a rate-limit budget given as one
   is no budget, or a `RangeError` naming the key (#1208).
 - **An issuer ending in a slash.** `oauth.jwt.issuer` with a trailing slash
