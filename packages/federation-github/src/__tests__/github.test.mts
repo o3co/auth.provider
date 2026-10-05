@@ -445,3 +445,24 @@ describe("config.fetch — a proxy, or a test seam", () => {
 		]);
 	});
 });
+
+describe("the freshness ask and the upstream's authentication instant", () => {
+	it("ignores an ask: GitHub's OAuth authorization has neither prompt=login nor max_age", () => {
+		const p = createGithubProvider(baseConfig);
+		const build = (ask?: { readonly login?: true; readonly maxAgeSeconds?: number }) =>
+			p.buildAuthorizationUrl({
+				redirectUri: baseConfig.callbackURL,
+				state: "abc",
+				codeVerifier: VERIFIER,
+				...(ask === undefined ? {} : { ask }),
+			} as Parameters<typeof p.buildAuthorizationUrl>[0]);
+		const asked = build({ login: true, maxAgeSeconds: 0 });
+		expect(asked.href).toBe(build().href);
+		expect(asked.searchParams.has("prompt")).toBe(false);
+		expect(asked.searchParams.has("max_age")).toBe(false);
+	});
+
+	it("reports no authTime: GitHub issues no id_token to carry one", async () => {
+		expect(await exchange()).not.toHaveProperty("authTime");
+	});
+});

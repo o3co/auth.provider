@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-github
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 GitHub federation provider for `auth.provider`: sign-in with a GitHub account
 through a GitHub OAuth App, with upstream logout and claim mapping.
@@ -123,7 +123,9 @@ read by the provider and the redirect policy; the schema fills in no default.
 
 - **Authorization request:** scope `read:user user:email` and PKCE S256. The
   `nonce` the session router mints is ignored — GitHub issues no id_token to bind
-  it to.
+  it to. A freshness ask (`prompt=login`, `max_age`) is ignored too: GitHub's
+  OAuth authorization has neither, and with no id_token there is no
+  `auth_time`, so the profile never carries `authTime`.
 - **Code exchange:** at GitHub's token endpoint, the client secret in the
   request body (`client_secret_post`, `openid-client`'s default), with the PKCE
   verifier.
