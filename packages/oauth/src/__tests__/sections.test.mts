@@ -526,6 +526,15 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		expect(result.success).toBe(false);
 	});
 
+	it("refuses the boot with the variable captured empty, naming the path", async () => {
+		const err = await refusal((config) => oauthWith(config, { consentPage: { url: "" } }), {
+			OAUTH_CONSENT_PAGE_URL: "",
+		});
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("oauth.consentPage.url must not be empty");
+	});
+
 	it("refuses a key oauth.clientIdMetadataDocuments does not declare, naming it", async () => {
 		const err = await refusal((config) =>
 			oauthWith(config, {

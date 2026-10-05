@@ -214,8 +214,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   same keys with the same message, so a section parsed with either alone —
   a composition root's own check, a test — is refused as boot refuses it.
 - **BREAKING: an empty `oauth.consentPage.url` refuses the boot (#728).** An
-  `OAUTH_CONSENT_PAGE_URL` exported empty (`OAUTH_CONSENT_PAGE_URL=` in a
-  `.env`, a compose file or a ConfigMap) used to boot, and every client that
+  `ENDPOINTS_CONSENT_URL` (now `OAUTH_CONSENT_PAGE_URL`) exported empty
+  (`ENDPOINTS_CONSENT_URL=` in a `.env`, a compose file or a ConfigMap) used
+  to boot, and every client that
   is not first-party was then redirected to `?challenge=<id>` relative to
   `/oauth/authorize` — a page that is not there. It now refuses the boot
   (`config-validation-failed` at `oauth.consentPage.url`), as an empty
