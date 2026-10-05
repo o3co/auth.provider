@@ -139,20 +139,25 @@ const makeGrant = (opts: {
 	requirements?: readonly SessionRequirement[];
 	logger?: MockLogger;
 	grantPolicy?: GrantPolicyHook;
+	/** `revocation: null` wires no `refreshTokenFamilyRevocation`. */
 	family?: {
 		readonly rotation: RefreshTokenFamilyRotation;
-		readonly revocation: RefreshTokenFamilyRevocation;
+		readonly revocation: RefreshTokenFamilyRevocation | null;
 	};
+	config?: AppConfig;
 }) => {
 	const rotation = vi.fn(
 		opts.family?.rotation.rotate ?? (async () => ({ outcome: "rotated" as const })),
 	);
+	const familyRevocation =
+		opts.family?.revocation === undefined
+			? ({ revokeFamily: vi.fn(async () => {}) } as never)
+			: opts.family.revocation;
 	const handler = createRefreshTokenGrant({
-		config,
+		config: opts.config ?? config,
 		keyStore: createSymmetricKeyStore(SECRET),
 		refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate: rotation },
-		refreshTokenFamilyRevocation:
-			opts.family?.revocation ?? ({ revokeFamily: vi.fn(async () => {}) } as never),
+		...(familyRevocation === null ? {} : { refreshTokenFamilyRevocation: familyRevocation }),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
 			issuer: "https://issuer.test",
@@ -565,6 +570,89 @@ describe("the refresh grant — the subject's revocation and the session are rea
 			// Before the rotation the family is untouched; after it, revoked.
 			expect(await family.revocation.isFamilyRevoked("fam-1")).toBe(revokingCall === 2);
 		}
+	});
+
+	/** A store whose session is deleted while `rotate` runs, and that rotation. */
+	const endedDuringRotation = (
+		rotate: RefreshTokenFamilyRotation["rotate"],
+	): { store: UserSessionStore; rotation: RefreshTokenFamilyRotation } => {
+		let live: UserSession | null = record();
+		return {
+			store: storeAnswering(async (sid) => (sid === SID ? live : null)),
+			rotation: {
+				register: async () => {},
+				rotate: async (...args) => {
+					const outcome = await rotate(...args);
+					live = null;
+					return outcome;
+				},
+			},
+		};
+	};
+
+	it("a refusal after a committed rotation is still answered without a family revocation wired", async () => {
+		const family = await registeredFamily();
+		const ended = endedDuringRotation(family.rotation.rotate);
+		const { handler } = makeGrant({
+			userSessionStore: ended.store,
+			family: { rotation: ended.rotation, revocation: null },
+		});
+		expect(await refused(handler, await refreshToken())).toEqual(SESSION_INVALID);
+		// The spent token rotates nothing on: it reads as a replay.
+		expect(await family.rotation.rotate("jti-1", "jti-x", "fam-1", Date.now() + 60_000)).toEqual(
+			expect.objectContaining({ outcome: "replayed" }),
+		);
+	});
+
+	it("a family revocation that fails after a committed rotation is logged, and the refusal still answered", async () => {
+		const family = await registeredFamily();
+		const ended = endedDuringRotation(family.rotation.rotate);
+		const logger = createMockLogger();
+		const { handler } = makeGrant({
+			logger,
+			userSessionStore: ended.store,
+			family: {
+				rotation: ended.rotation,
+				revocation: {
+					revokeFamily: async () => {
+						throw new Error("redis down");
+					},
+					isFamilyRevoked: async () => false,
+				},
+			},
+		});
+		expect(await refused(handler, await refreshToken())).toEqual(SESSION_INVALID);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				store: "refresh_token_family",
+				step: "revoke",
+				familyId: "fam-1",
+				clientId: CLIENT_ID,
+				err: expect.anything(),
+			}),
+			"refresh_token_store_unavailable",
+		);
+	});
+
+	it("a refusal after an unknown family was accepted revokes nothing, since nothing was committed", async () => {
+		const revokeFamily = vi.fn(async () => {});
+		const ended = endedDuringRotation(async () => ({ outcome: "unknown_family" }));
+		const { handler } = makeGrant({
+			config: {
+				...config,
+				oauth: {
+					...config.oauth,
+					refreshToken: { ...config.oauth.refreshToken, unknownFamilyPolicy: "accept" },
+				},
+			} as AppConfig,
+			userSessionStore: ended.store,
+			family: {
+				rotation: ended.rotation,
+				revocation: { revokeFamily, isFamilyRevoked: async () => false },
+			},
+		});
+		expect(await refused(handler, await refreshToken())).toEqual(SESSION_INVALID);
+		expect(revokeFamily).not.toHaveBeenCalled();
 	});
 
 	it("a family lifetime the re-checks spend mints nothing", async () => {
