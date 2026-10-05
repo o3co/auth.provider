@@ -20,6 +20,14 @@
  */
 export interface Challenge {
 	readonly expiresAtMs: number;
+	/**
+	 * When the caller issued the challenge, as `issue` was given it; absent
+	 * when it was not given, or the adapter does not record it. A reader that
+	 * needs it falls back, when it is absent, to the earliest issuance a
+	 * challenge still live at its read could have had: its lifetime before
+	 * that read.
+	 */
+	readonly issuedAtMs?: number;
 }
 
 /**
@@ -53,8 +61,14 @@ export interface ChallengeStore {
 	 *   a caller fault, not the timing race above. Nothing is
 	 *   recorded. A fractional expiresAtMs is valid; the challenge lives at
 	 *   least until it.
+	 * @throws RangeError, recording nothing, for an `issuedAtMs` that is not a
+	 *   finite instant within the Date range, or is after `expiresAtMs`.
+	 *
+	 * `issuedAtMs`, optional, is when the caller issued the challenge; an
+	 * adapter that records it answers it on `find` exactly, and one that does
+	 * not answers none.
 	 */
-	issue(scope: string, value: string, expiresAtMs: number): Promise<void>;
+	issue(scope: string, value: string, expiresAtMs: number, issuedAtMs?: number): Promise<void>;
 
 	/**
 	 * Non-mutating lookup; null for an absent or expired entry. Safe to call
@@ -88,6 +102,8 @@ export interface ChallengeStore {
  *     expiry `ChallengeStore.find` answered for this challenge, never later
  *     than the issued one (see `find`); a ceremony
  *     that cannot tell it omits it, so a reader MUST handle its absence.
+ *     `issuedAtMs` is the issuance `find` answered, omitted when it answered
+ *     none; a reader MUST handle its absence the same way.
  *   "replayed": consumed before (race loss, or an earlier call recorded in
  *     ReplaySeenSet). The caller MUST reject and treat it as a replay-attack
  *     audit signal.
@@ -95,7 +111,11 @@ export interface ChallengeStore {
  *     expected outcome for an attacker probing random values.
  */
 export type ChallengeCeremonyOutcome =
-	| { readonly outcome: "consumed"; readonly expiresAtMs?: number }
+	| {
+			readonly outcome: "consumed";
+			readonly expiresAtMs?: number;
+			readonly issuedAtMs?: number;
+	  }
 	| { readonly outcome: "replayed" }
 	| { readonly outcome: "unknown" };
 

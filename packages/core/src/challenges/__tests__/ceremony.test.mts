@@ -65,6 +65,22 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 		expect(Object.isFrozen(result)).toBe(true);
 	});
 
+	it("'consumed' carries the issuance find answered, and none when find answered none", async () => {
+		const { store, ceremony } = makeCeremonyWithMemoryBackends();
+		const issuedAtMs = Date.now();
+		const expiresAtMs = issuedAtMs + 60_000;
+		await store.issue("scope-A", "with", expiresAtMs, issuedAtMs);
+		await store.issue("scope-A", "without", expiresAtMs);
+
+		const withIssuance = await ceremony.consume("scope-A", "with");
+		const withoutIssuance = await ceremony.consume("scope-A", "without");
+
+		expect(withIssuance).toEqual({ outcome: "consumed", expiresAtMs, issuedAtMs });
+		expect(Object.isFrozen(withIssuance)).toBe(true);
+		expect(withoutIssuance).toEqual({ outcome: "consumed", expiresAtMs });
+		expect(Object.hasOwn(withoutIssuance, "issuedAtMs")).toBe(false);
+	});
+
 	it("'replayed' and 'unknown' carry no expiry", async () => {
 		const { store, ceremony } = makeCeremonyWithMemoryBackends();
 		const unknown = await ceremony.consume("scope-A", "never-existed");
