@@ -98,10 +98,12 @@ export type SessionJoinOutcome =
  * `pending`: the closing commit has landed — no liveness read answers `live`
  * from it on and nothing joins — while work is still outstanding; a later
  * close of the session or the sweep resumes it. Both carry the relying
- * parties (`client_id`) and federations of the snapshot, in no promised
- * order, and, from the call that made the closing commit, those the
- * per-session stores listed. `unavailable`: the closing commit did not land, or whether it did
- * could not be read.
+ * parties (`client_id`) and federations the session joined: the call that
+ * made the closing commit answers, while the per-session stores are read
+ * elsewhere, those they listed first, then the snapshot's, each once — the
+ * federations in the order they joined; a later call answers the snapshot's.
+ * `unavailable`: the closing commit did not land, or whether it did could
+ * not be read.
  */
 export type SessionCloseOutcome =
 	| {
@@ -112,10 +114,11 @@ export type SessionCloseOutcome =
 	| { readonly outcome: "unavailable" };
 
 /**
- * `listed`: the federations a session joined, the record's in the order they
- * joined, then, while the per-session stores are read elsewhere, those of
- * their index in the order they were added, each once — the order and union a
- * close answers. `unavailable`: a store could not answer.
+ * `listed`: the federations a session joined, in the order they joined:
+ * while the per-session stores are read elsewhere, those of their index in
+ * the order they were added (every join writes the index before the record),
+ * then the record's, each once — the union and order the close that makes the
+ * closing commit answers. `unavailable`: a store could not answer.
  */
 export type SessionFederations =
 	| { readonly outcome: "listed"; readonly federations: readonly string[] }
@@ -549,8 +552,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 				return { outcome: "unavailable" };
 			}
 			const outcome = closing.value.state === "closed" ? "done" : await finish(sid, closing);
+			// What the per-session stores listed first: every join writes them
+			// before the record, so their order is the order of joining.
 			const union = (own: readonly string[], listed: readonly string[]): string[] => [
-				...new Set([...own, ...listed]),
+				...new Set([...listed, ...own]),
 			];
 			return {
 				outcome,
@@ -564,9 +569,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
 				const own = read === null ? [] : idsOf(read.value, "federation");
+				// The index first: every join writes it before the record.
 				return {
 					outcome: "listed",
-					federations: [...new Set([...own, ...(await bridge.federations(sid))])],
+					federations: [...new Set([...(await bridge.federations(sid)), ...own])],
 				};
 			} catch (error) {
 				unavailable("federations", sid, error);

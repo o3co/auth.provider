@@ -318,10 +318,15 @@ does.
 participants are answered in the order each first joined; a repeat join
 replaces its `data` and does not move it — the order the per-session
 federation index has always kept, which a logout reads to pick the
-federation it ends upstream. `SessionLifecycle.federations(sid)` answers the
-record's federations in that order, then, while the bridge stands, the
-index's in its insertion order, each once — the union and order a close
-answers. A logout reads it before the close, since the close removes the
+federation it ends upstream. The in-process store keeps that order; the
+Redis store keeps it from the join ordinal its join script writes, and
+until then answers byte order. `SessionLifecycle.federations(sid)` answers
+the federations in the order they joined: while the bridge stands, the
+index's first, in its insertion order — every join writes the index before
+the record, so that is the order of joining, a federation joined before the
+switch included — then the record's, each once. That is the union and order
+the close that makes the closing commit answers; a later close answers the
+snapshot's. Once the bridge goes, the record's order alone holds it. A logout reads it before the close, since the close removes the
 federation tokens that carry the upstream `id_token_hint`. A logout whose
 close commits with work still pending is audited as `logout.close_pending`.
 

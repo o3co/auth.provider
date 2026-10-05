@@ -670,7 +670,7 @@ describe("the cause policy", () => {
 });
 
 describe("federations", () => {
-	it("lists the record's federations in the order they joined, then the per-session index's, once each", async () => {
+	it("lists the federations in the order they joined, the per-session index's first, once each", async () => {
 		const h = harness();
 		const expiresAt = await h.establish();
 		expect(await h.lifecycle.join(SID, { familyId: "f1", federation: "oidc" })).toEqual({
@@ -680,10 +680,32 @@ describe("federations", () => {
 			outcome: "joined",
 		});
 		await h.sessionFederationIndex.addFederation(SID, "github", expiresAt);
+		// Every join wrote the index before the record, so the index holds
+		// them all, in join order.
 		expect(await h.lifecycle.federations(SID)).toEqual({
 			outcome: "listed",
 			federations: ["oidc", "apple", "github"],
 		});
+	});
+
+	it("lists an older federation only the per-session index holds before the record's newer one", async () => {
+		const h = harness();
+		const expiresAt = await h.establish(SID, { open: false });
+		// Joined through the per-session stores alone, before the lifecycle.
+		await h.sessionFederationIndex.addFederation(SID, "github", expiresAt);
+		// A later join through the service adopts the record with a newer one.
+		expect(await h.lifecycle.join(SID, { familyId: "f1", federation: "oidc" })).toEqual({
+			outcome: "joined",
+		});
+		expect(await h.lifecycle.federations(SID)).toEqual({
+			outcome: "listed",
+			federations: ["github", "oidc"],
+		});
+		const closed = await h.lifecycle.close(SID, "rp_logout");
+		expect(closed.outcome === "unavailable" ? undefined : closed.federations).toEqual([
+			"github",
+			"oidc",
+		]);
 	});
 
 	it("lists the per-session index's alone for a session with no record", async () => {
@@ -702,9 +724,12 @@ describe("federations", () => {
 		await joinAll(h);
 		const listed = await h.lifecycle.federations(SID);
 		const closed = await h.lifecycle.close(SID, "rp_logout");
+		expect(listed.outcome).toBe("listed");
+		expect(closed.outcome).not.toBe("unavailable");
 		expect(closed.outcome === "unavailable" ? undefined : closed.federations).toEqual(
 			listed.outcome === "listed" ? listed.federations : undefined,
 		);
+		expect(listed.outcome === "listed" ? listed.federations : []).toEqual(["google"]);
 	});
 
 	it("is unavailable when the lifecycle store or the index cannot answer", async () => {

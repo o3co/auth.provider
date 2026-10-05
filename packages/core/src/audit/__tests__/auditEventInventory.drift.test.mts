@@ -36,10 +36,10 @@ import { BUILT_IN_AUDIT_EVENT_TYPES } from "#/audit/types.mjs";
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../../..");
 
 /**
- * Events listed before anything emits them, each with the step that is to:
- * the MFA ADR's D28 events, emitted by the MFA package's routes from its
- * build-order step named here. An entry is listed and not emitted; the step
- * that emits it deletes it here.
+ * Events listed before anything emits them, each with the change that is to:
+ * `logout.close_pending`, which the logout route emits once it closes
+ * sessions through the session lifecycle. An entry is listed and not
+ * emitted; the change that emits it deletes it here.
  */
 const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {
 	"logout.close_pending":
