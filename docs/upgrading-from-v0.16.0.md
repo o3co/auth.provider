@@ -431,13 +431,11 @@ The boot refusals you can meet, with their messages, are in
   `auth_time`). Before, the callback alone counted as a fresh login, so an
   upstream single sign-on met `prompt=login` without the user signing in
   again. What changes:
-  - The federation start (`GET /session/oauth/federation/:name`) takes
-    optional `prompt` and `max_age` hints; a malformed one is `400
-    invalid_request`. Your login page should forward the `prompt` and
-    `max_age` it finds in `redirect_to` to the federation start, so the
-    upstream is asked to re-authenticate. The OIDC adapter forwards both. The
-    Google, Apple and GitHub adapters forward neither, because their
-    upstreams do not document them.
+  - Your login page should forward the `prompt` and `max_age` it finds in
+    `redirect_to` to the federation start (its hints are under "Passkeys,
+    users and sessions" below), so the upstream is asked to re-authenticate.
+    The OIDC adapter forwards both. The Google, Apple and GitHub adapters
+    forward neither, because their upstreams do not document them.
   - A federation whose upstream reports no `auth_time` meets no
     `prompt=login` or `max_age` (`login_required`), and its users never bind
     a first factor (they are sent to log in again each time), while the new
