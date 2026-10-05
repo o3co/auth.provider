@@ -200,8 +200,14 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   declared in `core.declaredAbsent` — the MFA routes are no longer limited
   by a per-process fallback, and no longer refuse the boot under
   `core.deployment.mode = "multi"`: they pass every request through, as the
-  OAuth endpoints do. The MFA lock (attempts per transaction, backoff,
-  weekly failures) is unchanged.
+  OAuth endpoints do. Declaring the limiter absent is a choice with costs: an
+  MFA email challenge, or an account-email proof resent, is then bounded only
+  by the mail sender's own limit, and `@o3co/auth-provider-standard`'s SMTP
+  sender has none — wire a limiter, or a sender with a limit of its own; and
+  with the in-process MFA transaction store, one signed-in account can fill
+  the store's cap (`maxEntries`) by beginning enrollments, after which new
+  MFA transactions are refused until entries expire. The MFA lock (attempts
+  per transaction, backoff, weekly failures) is unchanged.
 
 ### Values read more strictly
 
