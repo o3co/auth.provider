@@ -1786,15 +1786,14 @@ export {
 	type DeviceAuthorizationReading,
 	readDeviceAuthorization,
 } from "./device-authorization/reading.mjs";
-export {
-	type ApproveDeviceAuthorizationInput,
-	type CreateDeviceAuthorizationInput,
-	DEVICE_CODE_STORE_ABSENCE_POLICY,
-	type DeviceAuthorization,
-	type DeviceAuthorizationStatus,
-	type DeviceCodeStore,
-	type DeviceDecisionOutcome,
-	type DevicePollOutcome,
+export type {
+	ApproveDeviceAuthorizationInput,
+	CreateDeviceAuthorizationInput,
+	DeviceAuthorization,
+	DeviceAuthorizationStatus,
+	DeviceCodeStore,
+	DeviceDecisionOutcome,
+	DevicePollOutcome,
 } from "./device-authorization/types.mjs";
 export {
 	formatUserCode,

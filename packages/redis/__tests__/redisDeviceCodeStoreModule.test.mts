@@ -9,12 +9,11 @@
  * "multi"`: `checkReplicaSafety` refuses the in-memory store under that mode,
  * since pending authorizations fork per replica. Pinned: the planner accepts
  * the Redis store where it refuses the memory one, and the slot it fills is
- * the one `DEVICE_CODE_STORE_ABSENCE_POLICY` guards.
+ * the one an enabled device grant cannot run without.
  */
 
 import {
 	createApp,
-	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
 	memoryDeviceCodeStoreModule,
 	REPLICA_UNSAFE_MODULES,
@@ -38,15 +37,15 @@ afterAll(async () => {
 });
 
 /**
- * Stands in for `deviceAuthorizationGrantModule`, which this package does not depend on:
- * reads the slot under the same absence policy the grant attaches, so a boot
- * here fails for the same reasons a real composition's would. The route
- * contribution is what puts it in the closure root.
+ * Stands in for an enabled `deviceAuthorizationGrantModule`, which this
+ * package does not depend on: the grant cannot run without a store, so the
+ * stand-in requires the slot, and a boot here fails without one as a
+ * composition with the grant enabled does. The route contribution is what
+ * puts it in the closure root.
  */
 const deviceGrantStandIn = defineModule({
 	name: "test:device-grant-stand-in",
-	optional: ["deviceCodeStore"] as const,
-	absencePolicies: { deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY },
+	requires: ["deviceCodeStore"] as const,
 	contributes: {
 		routes: [
 			{
@@ -131,7 +130,7 @@ describe("redisDeviceCodeStoreModule wiring", () => {
 		});
 	});
 
-	it("fills the slot DEVICE_CODE_STORE_ABSENCE_POLICY guards — without it, boot demands a declaration", async () => {
+	it("fills the slot the device grant requires — without it, boot names deviceCodeStore as missing", async () => {
 		await expect(
 			createApp({
 				modules: [deviceGrantStandIn],
@@ -142,8 +141,8 @@ describe("redisDeviceCodeStoreModule wiring", () => {
 			}),
 		).rejects.toMatchObject({
 			name: "BootError",
-			reason: "component-absence-undeclared",
-			details: { componentKey: "deviceCodeStore" },
+			reason: "missing-required-component",
+			details: { missingKey: "deviceCodeStore" },
 		});
 	});
 

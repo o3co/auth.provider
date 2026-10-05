@@ -1051,6 +1051,12 @@ modules fills them.
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
+- **`DEVICE_CODE_STORE_ABSENCE_POLICY`** is removed from core (#728). An
+  enabled device grant requires a `deviceCodeStore`, and nothing declares its
+  absence: `device-grant` no longer attaches the policy, and
+  `device-grant.store`, the key it named, is refused
+  ([Keys removed](#keys-removed)). A module of your own that attached it
+  requires `deviceCodeStore` instead, or reads the slot without a policy.
 - **A manifest's `replicaSafety` may be a function of the module's section**
   (#1371, #728). A declaration written as `{ unsafe: true, reason }` is read
   as before. Code that reads the field off a `Module` (`module.replicaSafety.reason`)
