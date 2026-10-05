@@ -2205,6 +2205,82 @@ describe("a subject revocation between the approval and the poll", () => {
 		});
 	});
 
+	it("refuses the poll when the approving session authenticated at or before a boundary its approval postdates", async () => {
+		// Admission saw no boundary; the boundary is stamped, and the clock
+		// moves past it, while the attempt is counted, so the approval's own
+		// instant postdates the boundary and only the session's does not.
+		const subjectRevocation = boundariesAsSet();
+		const clock = makeClock(APPROVAL);
+		const inner = createMemoryAttemptCounter({ now: clock.now });
+		const counter: AttemptCounter = {
+			consume: async (key, spec) => {
+				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 2_000), FAR);
+				clock.advance(5_000);
+				return inner.consume(key, spec);
+			},
+		};
+		const harness = makeHarness({ clock, attemptCounter: counter, subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+		});
+	});
+
+	it("refuses an approval at or before the boundary whatever authentication time it records", async () => {
+		const subjectRevocation = boundariesAsSet();
+		const harness = makeHarness({
+			subjectRevocation,
+			store: answeringBroken("poll", "authTimeMs", { value: APPROVAL + 9_000 }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	it("honours an approval whose session authenticated after the boundary", async () => {
+		const subjectRevocation = boundariesAsSet();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const harness = makeHarness({ subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+		expect(result).toHaveProperty("tokens.access_token");
+	});
+
+	it("refuses an approval that records no authentication time while a boundary is in force", async () => {
+		// The approval's own instant postdates the boundary; the session's
+		// authentication, which the boundary is held against, cannot be shown to.
+		const subjectRevocation = boundariesAsSet();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const harness = makeHarness({
+			subjectRevocation,
+			store: answeringBroken("poll", "authTimeMs", { value: undefined }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+		});
+	});
+
+	it("honours an approval that records no authentication time while no boundary is in force", async () => {
+		const harness = makeHarness({
+			subjectRevocation: boundariesAsSet(),
+			store: answeringBroken("poll", "authTimeMs", { value: undefined }),
+		});
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+	});
+
 	it.each([
 		["with a boundary in force", true],
 		["with no boundary", false],
@@ -2223,7 +2299,9 @@ describe("a subject revocation between the approval and the poll", () => {
 			});
 			const deviceCode = await approvedDevice(harness);
 			if (withBoundary) {
-				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
+				// Before the session's authentication: only the future approval
+				// instant is left for the clock check to refuse.
+				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
 			}
 			const { result } = await harness.poll(deviceCode);
 			expect(result).toEqual({
