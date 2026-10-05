@@ -61,9 +61,10 @@ export interface ChallengeStore {
 	 * repeatedly.
 	 *
 	 * Redis-backed adapters rebuild expiresAtMs from PTTL and may drift by
-	 * under 10 ms from the issued value. Benign: `ChallengeCeremony` uses it
-	 * only for the following `markSeen` TTL, and the security window stays
-	 * TTL-bounded.
+	 * under 10 ms from the issued value. `ChallengeCeremony` uses it for the
+	 * following `markSeen` TTL and reports it on the `consumed` outcome, so a
+	 * reader of that outcome must tolerate the drift; the security window
+	 * stays TTL-bounded.
 	 */
 	find(scope: string, value: string): Promise<Challenge | null>;
 
@@ -80,7 +81,9 @@ export interface ChallengeStore {
  * errors and are not classified here.
  *
  *   "consumed": deleted by this call and recorded in ReplaySeenSet. The
- *     caller MAY proceed with the protected operation.
+ *     caller MAY proceed with the protected operation. `expiresAtMs` is the
+ *     expiry `ChallengeStore.find` answered for this challenge; a ceremony
+ *     that cannot tell it omits it, so a reader MUST handle its absence.
  *   "replayed": consumed before (race loss, or an earlier call recorded in
  *     ReplaySeenSet). The caller MUST reject and treat it as a replay-attack
  *     audit signal.
@@ -88,7 +91,7 @@ export interface ChallengeStore {
  *     expected outcome for an attacker probing random values.
  */
 export type ChallengeCeremonyOutcome =
-	| { readonly outcome: "consumed" }
+	| { readonly outcome: "consumed"; readonly expiresAtMs?: number }
 	| { readonly outcome: "replayed" }
 	| { readonly outcome: "unknown" };
 
