@@ -110,7 +110,6 @@ function makeRefreshDeps(
 	}
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config: base as unknown as GrantDependencies["config"],
 		...grantSettingsFrom(base),
 		keyStore,
 		...extra,

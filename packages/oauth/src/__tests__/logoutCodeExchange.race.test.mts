@@ -41,7 +41,6 @@ import {
 	defaultRefreshTokenFamilyRotationModule,
 	defineModule,
 	type FederationTokenStore,
-	type GrantDependencies,
 	type GrantHandler,
 	type GrantResult,
 	type Module,
@@ -85,7 +84,7 @@ const RP_URI = "https://rp.example/cb";
 const CODE_VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(CODE_VERIFIER).digest("base64url");
 
-const config: GrantDependencies["config"] = { ...makeValidAppConfig(), ...oauthConfigForTests() };
+const config = { ...makeValidAppConfig(), ...oauthConfigForTests() };
 
 /** The line the grant logs when the session ended while it was issuing. */
 const INVALIDATED_LINE = "authorization_grant_rejected_session_invalidated_during_token_issuance";

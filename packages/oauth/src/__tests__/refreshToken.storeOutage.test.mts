@@ -57,15 +57,6 @@ import {
 const SECRET = "test-secret-at-least-32-chars!!";
 const CLIENT_ID = "client1";
 
-const config = {
-	oauth: {
-		jwt: { issuer: "localhost" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
-		grants: { refresh_token: { enabled: true } },
-	},
-} as unknown as GrantDependencies["config"];
-
 const refreshToken = (claims: Record<string, unknown> = {}) =>
 	new SignJWT({ sub: "u1", family_id: "fam-1", jti: "rt-1", azp: CLIENT_ID, ...claims })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
@@ -99,9 +90,7 @@ const failingFamilyStore = (): RefreshTokenFamilyStore => {
 const grant = (deps: Partial<GrantDependencies>, logger: MockLogger) =>
 	createRefreshTokenGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config,
-		// The token settings the configuration above names; the grant
-		// verifies the presented token against the request's issuer.
+		// The grant verifies the presented token against the request's issuer.
 		oauthTokenSettings: createTestOAuthTokenSettings(),
 		tokenBindingSettings: createTestTokenBindingSettings(),
 		keyStore: createSymmetricKeyStore(SECRET),

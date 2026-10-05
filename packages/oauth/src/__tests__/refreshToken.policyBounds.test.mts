@@ -25,7 +25,6 @@ import {
 	type AuthenticatedClient,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
 import {
@@ -54,14 +53,6 @@ const refreshToken = (): Promise<string> =>
 const grantWith = (evaluate: GrantPolicyHook["evaluate"]) =>
 	createRefreshTokenGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config: {
-			oauth: {
-				jwt: { secret: SECRET },
-				accessToken: { expiresIn: 3600 },
-				refreshToken: { expiresIn: 86400 },
-				resourceIndicator: { enabled: true },
-			},
-		} as unknown as GrantDependencies["config"],
 		oauthTokenSettings: createTestOAuthTokenSettings({ resourceIndicatorEnabled: true }),
 		tokenBindingSettings: createTestTokenBindingSettings(),
 		keyStore,

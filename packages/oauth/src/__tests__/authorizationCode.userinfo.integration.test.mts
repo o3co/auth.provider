@@ -26,7 +26,6 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
-	type GrantDependencies,
 	type RefreshTokenFamilyRevocation,
 	type UserSession,
 	type UserSessionStore,
@@ -71,7 +70,7 @@ const config = {
 		refreshToken: { expiresIn: 86400 },
 		grants: { authorization_code: { enabled: true } },
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const clientRepository: ClientRepository = {
 	findById: vi.fn().mockResolvedValue(null),

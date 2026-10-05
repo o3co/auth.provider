@@ -39,7 +39,6 @@ import { createSecretKey } from "node:crypto";
 import {
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type TokenBinding,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -69,7 +68,7 @@ const mockConfig = {
 			refresh_token: { enabled: true },
 		},
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const mockDeps: RefreshTokenGrantDeps = {
 	...grantSettingsFrom(mockConfig),

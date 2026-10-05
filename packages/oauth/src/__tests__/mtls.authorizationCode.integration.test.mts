@@ -32,7 +32,6 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
@@ -89,7 +88,7 @@ const mockConfig = {
 			authorization_code: { enabled: true },
 		},
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const mockClientRepository: ClientRepository = {
 	findById: vi.fn().mockResolvedValue(null),

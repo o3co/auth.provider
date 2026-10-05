@@ -268,6 +268,7 @@ describe("the reference, read by the module's schema", () => {
 				defaultExpiresIn: 900,
 				maxExpiresIn: 900,
 			});
+			expect(load({}, "oauth.accessToken.expiresIn = 900").accessToken.expiresIn).toBe(900);
 		});
 
 		it("lets an application layer's defaultExpiresIn outrank the shipped literal on the deprecated key", () => {

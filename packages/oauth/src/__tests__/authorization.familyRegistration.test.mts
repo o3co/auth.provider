@@ -37,7 +37,6 @@ import {
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
-	type GrantDependencies,
 	type KeyStore,
 	type RefreshTokenFamilyStore,
 } from "@o3co/auth-provider-core";
@@ -62,7 +61,7 @@ const config = {
 		refreshToken: { expiresIn: REFRESH_TOKEN_TTL },
 		grants: { authorization_code: { enabled: true } },
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const signing = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 

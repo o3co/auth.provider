@@ -20,7 +20,6 @@ import {
 	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type GrantPolicyHook,
 	type Logger,
 	type RefreshTokenFamilyRotation,
@@ -69,7 +68,7 @@ const mockConfig = {
 			refresh_token: { enabled: true },
 		},
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const mockDeps: RefreshTokenGrantDeps = {
 	...grantSettingsFrom(mockConfig),
