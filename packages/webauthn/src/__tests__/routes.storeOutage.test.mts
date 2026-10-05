@@ -65,7 +65,6 @@ const webauthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	rateLimit: { authenticationOptions: { limit: 100, windowSeconds: 60 } },
 };
 
 /** A logger whose every level is a spy; `child` answers the same logger. */

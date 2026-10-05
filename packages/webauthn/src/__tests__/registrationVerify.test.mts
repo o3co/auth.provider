@@ -58,9 +58,6 @@ const BASE_CONFIG: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	rateLimit: {
-		authenticationOptions: { limit: 30, windowSeconds: 60 },
-	},
 };
 
 const STUB_MATERIAL = {

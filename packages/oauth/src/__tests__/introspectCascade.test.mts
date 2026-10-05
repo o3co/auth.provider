@@ -39,7 +39,7 @@ import { describe, expect, it, vi } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
-import { withOauthCaptures } from "./_helpers/sections.mjs";
+import { routerInputsOf, withOauthCaptures } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -94,7 +94,7 @@ async function buildApp(
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
-		config: mockConfig,
+		...routerInputsOf(mockConfig),
 		clientRepository: mockClientRepository,
 		codeRepository: mockCodeRepository,
 		keyStore,

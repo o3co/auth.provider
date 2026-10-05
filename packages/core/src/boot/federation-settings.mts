@@ -18,12 +18,16 @@
  * boot/federation-settings.mts: what boot fills the `federationSettings`
  * slot with — core's view of `core.federations`, built from core's own
  * readings of it (`federationsOf`, `enabledFederationsOf`,
- * `federationTrustsUpstreamAmr`) over the configuration stage 1 parsed.
+ * `federationTrustsUpstreamAmr`, `federationCallbackMeetsFreshness`) over the
+ * configuration stage 1 parsed.
  */
 
 import { enabledFederationsOf, federationsOf } from "../federations/configured.mjs";
 import type { ConfiguredFederation, FederationSettings } from "../federations/settings.mjs";
-import { federationTrustsUpstreamAmr } from "../user-sessions/authentication.mjs";
+import {
+	federationCallbackMeetsFreshness,
+	federationTrustsUpstreamAmr,
+} from "../user-sessions/authentication.mjs";
 
 /** The keys an entry is read for as written, each kept only when it is a non-empty string. */
 const WRITTEN_KEYS = ["callbackURL", "issuer", "clientId"] as const;
@@ -31,7 +35,7 @@ const WRITTEN_KEYS = ["callbackURL", "issuer", "clientId"] as const;
 /**
  * Every `core.federations` entry of `config`, by name in the map's order,
  * as `ConfiguredFederation`: its type, whether it is on, whether its
- * upstream `amr` counts, and `callbackURL`, `issuer` and `clientId` where
+ * upstream `amr` counts, whether its callback alone meets a freshness ask, and `callbackURL`, `issuer` and `clientId` where
  * written as non-empty strings — nothing else of it, so no secret. The map
  * inherits nothing and is frozen with each entry. Reads the configuration
  * core's schema parsed, which holds every entry to an object naming its type
@@ -53,6 +57,7 @@ export function federationSettingsOf(config: unknown): FederationSettings {
 			type: written.type as string,
 			enabled: enabled.has(name),
 			trustsUpstreamAmr: federationTrustsUpstreamAmr(config, name),
+			callbackMeetsFreshness: federationCallbackMeetsFreshness(config, name),
 			...strings,
 		});
 	}

@@ -243,7 +243,7 @@ describe("the federations, under core.federations", () => {
 	it("reads each federation written there, its switches as the strings an environment variable carries", async () => {
 		const handle = await boot(
 			{},
-			'core.federations.upstream { enabled = "false", type = "oidc", trustUpstreamAmr = "true" }\n',
+			'core.federations.upstream { enabled = "false", type = "oidc", trustUpstreamAmr = "true", callbackMeetsFreshness = "true" }\n',
 		);
 		const config = handle.components.config as {
 			core?: { federations?: Record<string, Record<string, unknown>> };
@@ -252,6 +252,7 @@ describe("the federations, under core.federations", () => {
 			enabled: false,
 			type: "oidc",
 			trustUpstreamAmr: true,
+			callbackMeetsFreshness: true,
 		});
 		await handle.dispose();
 	});

@@ -63,7 +63,10 @@ export type SessionGrantDeps = Pick<
 	GrantDependencies,
 	"keyStore" | "userSessionStore" | "subjectRevocation" | "grantPolicy" | "logger"
 > &
-	ProviderDeps<"sessionRequirementResolver" | "oauthTokenSettings", "auditSink">;
+	ProviderDeps<
+		"sessionRequirementResolver" | "oauthTokenSettings",
+		"auditSink" | "sessionLifecycleStore"
+	>;
 
 /**
  * The token endpoint's answer to an admission that does not mint, or
@@ -116,6 +119,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	// and no acr table, since the grant asks for no acr.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		subjectRevocation: deps.subjectRevocation,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createSessionGrant"),
 		acrTable: {},

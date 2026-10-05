@@ -33,6 +33,7 @@ import {
 	checkSecondFactorEvent,
 	copySessionAuthentication,
 	federatedSessionAuthentication,
+	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	recordableSessionAuthentication,
@@ -626,6 +627,96 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts",
 	});
 });
 
+describe("federationCallbackMeetsFreshness — whether a federation's callback alone meets a freshness ask", () => {
+	const config = (entry: unknown) => ({ core: { federations: { google: entry } } });
+
+	it("is false by default: a callback with no upstream instant meets no freshness ask", () => {
+		expect(federationCallbackMeetsFreshness(config({ enabled: true }), "google")).toBe(false);
+		expect(federationCallbackMeetsFreshness({ core: { federations: {} } }, "google")).toBe(false);
+		expect(federationCallbackMeetsFreshness({}, "google")).toBe(false);
+		expect(federationCallbackMeetsFreshness(undefined, "google")).toBe(false);
+		// The map written at the top level is not core's: boot refuses it.
+		expect(
+			federationCallbackMeetsFreshness(
+				{ federations: { google: { enabled: true, callbackMeetsFreshness: true } } },
+				"google",
+			),
+		).toBe(false);
+	});
+
+	it("is true only for an enabled federation configured with callbackMeetsFreshness = true", () => {
+		expect(
+			federationCallbackMeetsFreshness(
+				config({ enabled: true, callbackMeetsFreshness: true }),
+				"google",
+			),
+		).toBe(true);
+		expect(
+			federationCallbackMeetsFreshness(
+				config({ enabled: true, callbackMeetsFreshness: false }),
+				"google",
+			),
+		).toBe(false);
+		for (const enabled of [false, undefined, "true", 1]) {
+			expect(
+				federationCallbackMeetsFreshness(
+					config({ enabled, callbackMeetsFreshness: true }),
+					"google",
+				),
+			).toBe(false);
+		}
+		// Another federation's switch is not this one's.
+		expect(
+			federationCallbackMeetsFreshness(
+				{ core: { federations: { github: { enabled: true, callbackMeetsFreshness: true } } } },
+				"google",
+			),
+		).toBe(false);
+	});
+
+	it("does not read a key named after the type, an entry being flat", () => {
+		expect(
+			federationCallbackMeetsFreshness(
+				{
+					core: {
+						federations: {
+							okta: { enabled: true, type: "oidc", oidc: { callbackMeetsFreshness: true } },
+						},
+					},
+				},
+				"okta",
+			),
+		).toBe(false);
+	});
+
+	it.each([
+		["a string", "true"],
+		["a number", 1],
+		["null", null],
+		["an object", {}],
+	])("refuses a value that is %s, naming the key, enabled or not", (_label, value) => {
+		for (const enabled of [true, false]) {
+			expect(() =>
+				federationCallbackMeetsFreshness(
+					config({ enabled, callbackMeetsFreshness: value }),
+					"google",
+				),
+			).toThrow(
+				new RangeError("core.federations.google.callbackMeetsFreshness must be true or false"),
+			);
+		}
+	});
+
+	it("reads no inherited key: a federation named like an Object.prototype member has no switch", () => {
+		expect(federationCallbackMeetsFreshness({ core: { federations: {} } }, "constructor")).toBe(
+			false,
+		);
+		expect(federationCallbackMeetsFreshness({ core: { federations: {} } }, "__proto__")).toBe(
+			false,
+		);
+	});
+});
+
 describe("checkSecondFactorEvent — what a verified second factor may add, and when", () => {
 	const NOW = Date.parse("2026-09-28T12:00:00Z");
 
@@ -854,6 +945,22 @@ describe("upstreamAuthTime — when the upstream last authenticated a federated 
 			expect(none === undefined ? true : Object.hasOwn(none, "upstreamAuthTime")).toBe(false);
 		});
 
+		it("refuses one on a password primary, a Date or null, naming the field", () => {
+			for (const upstreamAuthTime of [UPSTREAM, null]) {
+				expect(() =>
+					recordableSessionAuthentication(
+						"sid-1",
+						{ ...passwordSessionAuthentication().authentication, upstreamAuthTime },
+						NOW_MS,
+					),
+				).toThrow(
+					new RangeError(
+						"UserSession sid-1: authentication.upstreamAuthTime must be a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined — undefined for a password primary",
+					),
+				);
+			}
+		});
+
 		it.each([
 			["a string", UPSTREAM.toISOString()],
 			["a number", UPSTREAM.getTime()],
@@ -868,7 +975,7 @@ describe("upstreamAuthTime — when the upstream last authenticated a federated 
 				recordableSessionAuthentication("sid-1", { ...FEDERATED, upstreamAuthTime }, NOW_MS),
 			).toThrow(
 				new RangeError(
-					"UserSession sid-1: authentication.upstreamAuthTime must be a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined",
+					"UserSession sid-1: authentication.upstreamAuthTime must be a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined — undefined for a password primary",
 				),
 			);
 		});
@@ -892,12 +999,30 @@ describe("upstreamAuthTime — when the upstream last authenticated a federated 
 
 		it.each([
 			["a string", UPSTREAM.toISOString()],
+			["a number", UPSTREAM.getTime()],
 			["an Invalid Date", new Date(Number.NaN)],
 			["a date before the epoch", new Date(-1)],
 		])("cannot tell a session whose stored one is %s", (_label, upstreamAuthTime) => {
 			const session = recorded(["fed"], { ...FEDERATED, upstreamAuthTime } as never);
 			expect(sessionAuthentication(session)).toBeUndefined();
 			expect(vouchedAmr(session)).toEqual([]);
+		});
+
+		it("cannot tell a password session that records one, a Date or null: only a federation has an upstream", () => {
+			for (const upstreamAuthTime of [UPSTREAM, null]) {
+				const session = recorded(["pwd"], {
+					...passwordSessionAuthentication().authentication,
+					upstreamAuthTime,
+				});
+				expect(sessionAuthentication(session)).toBeUndefined();
+				expect(vouchedAmr(session)).toEqual([]);
+				expect(sessionFreshness({ ...session, authTime: AUTH })).toBeUndefined();
+			}
+		});
+
+		it("keeps null in the requirement's input", () => {
+			const session = recorded(["fed"], { ...FEDERATED, upstreamAuthTime: null });
+			expect(requirementSession(session)?.authentication?.upstreamAuthTime).toBeNull();
 		});
 
 		it("is kept by what a second factor makes of the session, and by the requirement's input", () => {

@@ -20,9 +20,16 @@
  * `/authorize`, which records it on the code `/token` stamps, and the
  * `session` grant through `vouchedAmr`), beside what each
  * login path records (`passwordSessionAuthentication`,
- * `federatedSessionAuthentication`, `federationTrustsUpstreamAmr`), so the
- * write and the read are one design. See ADR
+ * `federatedSessionAuthentication`, `federationTrustsUpstreamAmr`,
+ * `federationCallbackMeetsFreshness`), so the write and the read are one
+ * design. See ADR
  * 2026-09-25-multi-factor-authentication.
+ *
+ * Also how fresh a session's authentication is (`authenticationFreshness`,
+ * `sessionFreshness`): what a freshness ask is judged against — the earlier
+ * of `authTime` and a federated login's recorded upstream authentication,
+ * never fresh when the upstream showed no time. `authTime` stays when this
+ * provider established the session.
  *
  * A session carrying `authentication` holds in `amr` only what this
  * provider vouches for. One written before that key is split as it is read:
@@ -468,7 +475,7 @@ const RECORDABLE_RULES: Readonly<Record<AuthenticationField, string>> = {
 	"authentication.mfaAt":
 		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, or undefined",
 	"authentication.upstreamAuthTime":
-		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined",
+		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined — undefined for a password primary",
 };
 
 /** {@link readAuthentication}'s answer: a copy of what it admits, or the first field it refuses. */
@@ -483,7 +490,7 @@ type AuthenticationRead =
  * is none when `rules.nullFederationIsNone`); an `upstreamAmr` that is not a
  * list of strings; an `mfaAt` that is not a `Date` whose time
  * `rules.admitsInstant`; an `upstreamAuthTime` that is neither `null` nor
- * such a `Date`. A field may be `undefined`, `primary` excepted; an
+ * such a `Date`, or any on a password primary, which has no upstream. A field may be `undefined`, `primary` excepted; an
  * `upstreamAuthTime` that is `undefined` is left out of the answer. The one
  * rule a store records by and the readers read by.
  */
@@ -519,8 +526,8 @@ function readAuthentication(value: unknown, rules: AuthenticationRules): Authent
 		upstreamAuthTime instanceof Date ? upstreamAuthTime.getTime() : Number.NaN;
 	if (
 		upstreamAuthTime !== undefined &&
-		upstreamAuthTime !== null &&
-		!rules.admitsInstant(upstreamAuthTimeMs)
+		(primary === PASSWORD_AMR ||
+			(upstreamAuthTime !== null && !rules.admitsInstant(upstreamAuthTimeMs)))
 	) {
 		return { refused: "authentication.upstreamAuthTime" };
 	}
@@ -654,17 +661,57 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
  * read this one function, so they cannot disagree.
  */
 export function federationTrustsUpstreamAmr(config: unknown, name: string): boolean {
+	return enabledFederationSwitch(config, name, "trustUpstreamAmr", false);
+}
+
+/**
+ * What an absent `callbackMeetsFreshness` reads as: `false`, so a federation
+ * whose upstream shows no `auth_time` meets no freshness ask until an
+ * operator says its callback does.
+ */
+export const CALLBACK_MEETS_FRESHNESS_DEFAULT = false;
+
+/**
+ * Whether federation `name`'s callback alone meets a freshness ask
+ * (`prompt=login`, `max_age`) when its upstream shows no `auth_time`:
+ * `core.federations.<name>.callbackMeetsFreshness`, absent read as
+ * `CALLBACK_MEETS_FRESHNESS_DEFAULT`, and `false` unless `enabled: true`.
+ * The federation callback decides with it what a session records, so the
+ * readers of a session's freshness never read configuration. A non-boolean
+ * value is a `RangeError`, as for `federationTrustsUpstreamAmr`.
+ */
+export function federationCallbackMeetsFreshness(config: unknown, name: string): boolean {
+	return enabledFederationSwitch(
+		config,
+		name,
+		"callbackMeetsFreshness",
+		CALLBACK_MEETS_FRESHNESS_DEFAULT,
+	);
+}
+
+/**
+ * A boolean switch of federation `name`'s entry, read as an own key of the
+ * flat entry: `absent` when not written, and `false` unless the entry is
+ * enabled. A written value that is not a boolean is a `RangeError` naming
+ * the key and quoting nothing of the value, enabled or not.
+ */
+function enabledFederationSwitch(
+	config: unknown,
+	name: string,
+	key: string,
+	absent: boolean,
+): boolean {
 	const federations = federationsOf(config);
 	if (!Object.hasOwn(federations, name)) return false;
 	const section = federations[name];
 	if (typeof section !== "object" || section === null) return false;
-	const trust = Object.hasOwn(section, "trustUpstreamAmr")
-		? (section as { trustUpstreamAmr?: unknown }).trustUpstreamAmr
+	const value = Object.hasOwn(section, key)
+		? (section as Readonly<Record<string, unknown>>)[key]
 		: undefined;
-	if (trust !== undefined && typeof trust !== "boolean") {
-		throw new RangeError(`core.federations.${name}.trustUpstreamAmr must be true or false`);
+	if (value !== undefined && typeof value !== "boolean") {
+		throw new RangeError(`core.federations.${name}.${key} must be true or false`);
 	}
 	const enabled =
 		Object.hasOwn(section, "enabled") && (section as { enabled?: unknown }).enabled === true;
-	return enabled && trust === true;
+	return enabled && (value ?? absent);
 }

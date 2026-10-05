@@ -152,9 +152,9 @@ const positiveIntOrUndefined = (value: unknown): number | undefined => {
 
 /**
  * Resolves every `oauth.*` knob the OAuth routers and grants consume into one
- * plain typed options object, at composition time, from the section `oauth`:
- * the oauth module's parsed section, or, for a router or grant built by hand,
- * the `oauth {}` its configuration carries, which may have bypassed the schema.
+ * plain typed options object, at composition time, from the section `oauth`
+ * the router is handed, read defensively: a router built by hand may hand one
+ * that bypassed the schema.
  * Defaults:
  *
  * - boolean opt-ins (`requireEmailVerified`, `resourceIndicator.enabled`)

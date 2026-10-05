@@ -321,8 +321,8 @@ describe("the sessionRequirements kind and sessionRequirementResolver", () => {
 		expect(misnamed.message).toMatch(/name/);
 	});
 
-	it("refuses a requirement named for a store admission names its own outage by — user_session, revocation_boundary — as the contribution's failure: a consumer telling an outage by its store would take the requirement's for the store's", async () => {
-		for (const name of ["user_session", "revocation_boundary"]) {
+	it("refuses a requirement named for a store admission names its own outage by — user_session, revocation_boundary, session_lifecycle — as the contribution's failure: a consumer telling an outage by its store would take the requirement's for the store's", async () => {
+		for (const name of ["user_session", "revocation_boundary", "session_lifecycle"]) {
 			const err = await refusal(
 				boot([contributing("test:named", { [name]: () => requirement(name) })], {
 					core: { sessionRequirements: { expected: [name] } },

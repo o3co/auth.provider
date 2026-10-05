@@ -38,6 +38,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const CLIENT_ID = "client-1";
 const REDIRECT = "https://example.test/cb";
@@ -101,7 +102,7 @@ async function buildApp(opts: {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
-		config,
+		...routerInputsOf(config),
 		clientRepository: clientRepo,
 		codeRepository: codeRepo,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
