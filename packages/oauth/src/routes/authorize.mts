@@ -264,6 +264,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	// resolver, and the vouchable acr table the router computed once.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: opts.userSessionStore,
+		sessionLifecycleStore: opts.sessionLifecycleStore,
 		subjectRevocation: opts.subjectRevocation,
 		requirements: checkResolver(opts.requirements, "createAuthorizeHandler", [AUTHORIZE_ACTION]),
 		acrTable: opts.oauth.acrValues,

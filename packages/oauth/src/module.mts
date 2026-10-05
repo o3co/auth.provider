@@ -108,6 +108,7 @@ export const oauthEndpointsModule: Module = defineModule<
 	| "accessTokenDenylist"
 	| "subjectRevocation"
 	| "userSessionStore"
+	| "sessionLifecycleStore"
 	| "sessionRPRegistry"
 	| "sessionFamilyIndex"
 	| "sessionFederationIndex"
@@ -139,6 +140,7 @@ export const oauthEndpointsModule: Module = defineModule<
 		"accessTokenDenylist", // RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
 		"subjectRevocation", // per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
 		"userSessionStore", // this and the next three: the four session stores
+		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step
 		"sessionRPRegistry",
 		"sessionFamilyIndex",
 		"sessionFederationIndex",
@@ -220,6 +222,7 @@ export const oauthEndpointsModule: Module = defineModule<
 					accessTokenDenylist: deps.accessTokenDenylist,
 					subjectRevocation: deps.subjectRevocation,
 					userSessionStore: deps.userSessionStore,
+					sessionLifecycleStore: deps.sessionLifecycleStore,
 					sessionRPRegistry: deps.sessionRPRegistry,
 					sessionFamilyIndex: deps.sessionFamilyIndex,
 					sessionFederationIndex: deps.sessionFederationIndex,

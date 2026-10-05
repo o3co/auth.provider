@@ -81,7 +81,7 @@ export type AuthorizationGrantDeps = Pick<
 	// a factory built by hand without one is refused.
 	ProviderDeps<
 		"codeRepository" | "clientRepository" | "sessionRequirementResolver",
-		"auditSink" | "sessionLifecycle"
+		"auditSink" | "sessionLifecycle" | "sessionLifecycleStore"
 	>;
 
 /**
@@ -124,6 +124,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	// No acr table: the acr was chosen at /authorize and travels on the code.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		subjectRevocation: deps.subjectRevocation,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createAuthorizationGrant"),
 		acrTable: {},

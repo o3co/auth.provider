@@ -197,6 +197,9 @@ const OPTIONAL = [
 	// Core's session lifecycle: where installed, the authorization_code grant
 	// joins the session through it instead of the per-session stores.
 	"sessionLifecycle",
+	// The session lifecycle's record, which admission reads for the
+	// authorization_code and refresh_token grants: a closing session is not live.
+	"sessionLifecycleStore",
 	"logger", // structured logger; security audit logs
 ] as const;
 
