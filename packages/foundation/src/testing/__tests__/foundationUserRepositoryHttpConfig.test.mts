@@ -18,8 +18,7 @@
  * The testing entry's builder of the user repository's `http` block: the
  * Store URLs the `"http"` builder reads, taken from what it is handed — any
  * other endpoint a fake Store names left behind — and the extra keys a test
- * adds on purpose. A composition places the block with core's
- * `withUserRepositoryHttp`.
+ * adds on purpose: a block the `"http"` builder takes.
  */
 
 import {

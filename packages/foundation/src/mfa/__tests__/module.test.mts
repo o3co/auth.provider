@@ -31,11 +31,7 @@ import {
 	type MfaFactorRecord,
 	type MfaFactorStore,
 } from "@o3co/auth-provider-core";
-import {
-	makeValidAppConfig,
-	userRepositoryHttpOf,
-	withUserRepositoryHttp,
-} from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 import {
@@ -48,7 +44,10 @@ import {
 	FOUNDATION_MFA_FACTOR_STORE_SECTION,
 	foundationMfaFactorStoreLifecycle,
 } from "#/mfa/section.mjs";
-import { foundationMfaFactorStoreConfig } from "#/testing/index.mjs";
+import {
+	foundationMfaFactorStoreConfig,
+	foundationUserRepositoryHttpConfig,
+} from "#/testing/index.mjs";
 import { consumer } from "./consumer.mjs";
 
 const TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -76,9 +75,9 @@ afterEach(async () => {
 	await fake.close();
 });
 
-/** The configuration: the user repository's HTTP settings `http`, and the section on `store`'s URLs. */
-const configOver = (http: Readonly<Record<string, unknown>>, store = fake) => ({
-	...withUserRepositoryHttp(makeValidAppConfig(), http),
+/** The configuration: the section on `store`'s URLs. */
+const configOver = (store = fake) => ({
+	...makeValidAppConfig(),
 	...foundationMfaFactorStoreConfig(store.urls),
 });
 
@@ -93,10 +92,9 @@ async function bootWith(storeTransport: unknown, config: object): Promise<MfaFac
 	return seen.store;
 }
 
-/** Boots the module as a composition root does: handed the user repository's HTTP settings of the configuration it boots. */
+/** Boots the module as a composition root does: handed the user repository's HTTP settings, `http` over `store`'s URLs. */
 function provided(http: Readonly<Record<string, unknown>>, store = fake): Promise<MfaFactorStore> {
-	const config = configOver(http, store);
-	return bootWith(userRepositoryHttpOf(config), config);
+	return bootWith(foundationUserRepositoryHttpConfig(store.urls, http), configOver(store));
 }
 
 async function refusal(boot: () => Promise<unknown>): Promise<BootError> {
@@ -112,7 +110,7 @@ async function refusal(boot: () => Promise<unknown>): Promise<BootError> {
 describe("foundationMfaFactorStoreModule", () => {
 	it("is the section's module, provides mfaFactorStore at boot, requires no slot, and declares no replica-unsafe state", () => {
 		const module = foundationMfaFactorStoreModule({
-			storeTransport: userRepositoryHttpOf(withUserRepositoryHttp(makeValidAppConfig(), {})),
+			storeTransport: foundationUserRepositoryHttpConfig({}),
 		});
 		expect(module.name).toBe(FOUNDATION_MFA_FACTOR_STORE_SECTION);
 		expect(module.lifecycle).toEqual(foundationMfaFactorStoreLifecycle);
@@ -202,7 +200,7 @@ describe("foundationMfaFactorStoreModule", () => {
 
 	it("refuses the boot when the settings it is handed are absent or not a section of keys, rather than sending no credential", async () => {
 		for (const storeTransport of [undefined, "https://store.example", 5000, null, ["x"]]) {
-			const refused = await refusal(() => bootWith(storeTransport, configOver({})));
+			const refused = await refusal(() => bootWith(storeTransport, configOver()));
 			expect(refused.reason, JSON.stringify(storeTransport)).toBe("provides-factory-failed");
 			expect(refused.message, JSON.stringify(storeTransport)).toContain(
 				"storeTransport, the Store transport settings, must be a section of keys ({} for none)",
