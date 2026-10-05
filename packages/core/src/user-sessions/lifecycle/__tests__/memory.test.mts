@@ -303,6 +303,33 @@ describe("createInMemorySessionLifecycleStore", () => {
 		});
 	});
 
+	// Moves into the shared `sessionLifecycleStoreContract` with the Redis
+	// store's join ordinal, so the suite and its Redis parity copy stay alike.
+	describe("participant order", () => {
+		it("answers participants in the order they first joined, a repeat join not moving one", async () => {
+			const c = clock();
+			const store = createInMemorySessionLifecycleStore({ now: c.now });
+			const expiresAt = new Date(START + HOUR);
+			expect((await store.open("s", "u", expiresAt)).outcome).toBe("opened");
+			for (const [kind, id] of [
+				["federation", "oidc"],
+				["rp", "zeta"],
+				["federation", "apple"],
+				["family", "f1"],
+				["federation", "oidc"],
+			] as const) {
+				expect((await store.join("s", { kind, id, data: "" })).outcome).toBe("joined");
+			}
+			const order = (await read(store, "s"))?.value.participants.map((p) => `${p.kind}:${p.id}`);
+			expect(order).toEqual(["federation:oidc", "rp:zeta", "federation:apple", "family:f1"]);
+			// The closing snapshot keeps the order.
+			const closed = readSessionCloseAnswer(await store.beginClose("s", CLOSE));
+			expect(
+				closed.outcome === "missing" ? [] : closed.record.participants.map((p) => p.id),
+			).toEqual(["oidc", "zeta", "apple", "f1"]);
+		});
+	});
+
 	describe("its own copies", () => {
 		it("keeps neither the participant nor the Date it was handed, and hands out copies", async () => {
 			const store = createInMemorySessionLifecycleStore();
