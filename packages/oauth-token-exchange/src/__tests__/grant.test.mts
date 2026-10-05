@@ -17,7 +17,9 @@
 import {
 	type ClientRepository,
 	consoleLogger,
+	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
+	createSessionLifecycle,
 	type ExchangeTokenValidator,
 	type GrantContext,
 	type GrantPolicyContext,
@@ -2228,6 +2230,33 @@ describe("createTokenExchangeGrant — the session rule through the session life
 				"token_exchange_session_store_unavailable",
 			);
 		}
+	});
+
+	it("refuses a subject token whose sid the lifecycle cannot hold as session_invalid, not as an outage", async () => {
+		// Core's lifecycle answers such a sid `not_live`: it names no session.
+		const lifecycle = createSessionLifecycle({
+			store: createInMemorySessionLifecycleStore(),
+			userSessionStore: createInMemoryUserSessionStore(),
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
+			federationTokenStore: {} as never,
+			sessionRPRegistry: {} as never,
+			sessionFamilyIndex: {} as never,
+			sessionFederationIndex: {} as never,
+			retainMs: 60_000,
+		});
+		const { result } = await buildGrant({ sessionLifecycle: lifecycle }).handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				subject_token: await signSelfIssuedAccessToken({ sid: "s".repeat(513) }),
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "session_invalid",
+		});
 	});
 
 	it("reads no lifecycle for a subject token without a sid", async () => {
