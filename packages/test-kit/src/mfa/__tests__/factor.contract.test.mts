@@ -38,7 +38,8 @@ const RULES = {
 	flags:
 		"addsMfa, counting and guessable are true or false, and reusableChallenge true, false or absent",
 	enrollable: "enrollable, when present, answers true for an account that can enroll the factor",
-	begin: "beginEnrollment answers state that survives a JSON round trip",
+	begin:
+		"beginEnrollment answers state that survives a JSON round trip, and a response that is a plain object that does too",
 	beginMail:
 		"beginEnrollment, when it asks for a code to be mailed, asks for the enrollment code, non-empty, with an expiry after now when it gives one, and its response carries no form of the code",
 	completeMalformed:
@@ -46,7 +47,8 @@ const RULES = {
 	complete:
 		"completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and at least one amr value, each among amrValues",
 	describe: "describe answers a hint that is a string, or none, and never the account's address",
-	challenge: "challenge, when present, answers state that survives a JSON round trip",
+	challenge:
+		"challenge, when present, answers state that survives a JSON round trip, and a response that is a plain object that does too",
 	challengeMail:
 		"challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one and the keyed digest of the account's address, another at each challenge, and its response carries no form of the code",
 	handed:
@@ -231,6 +233,53 @@ describe("mfaFactorContract", () => {
 		).toEqual([RULES.begin]);
 	});
 
+	it("fails an enrollment whose response is not a plain object that survives JSON", async () => {
+		class Options {}
+		// Each keeps the fields the double's proof reads, so only the response's shape breaks the contract.
+		for (const reshape of [
+			(response: object) => Object.assign(new Options(), response),
+			(response: object) => Object.assign([], response),
+			(response: object) => ({ ...response, at: new Date(0) }),
+		]) {
+			expect(
+				await failing(
+					inputFor({}, (factor) => ({
+						...factor,
+						beginEnrollment: async (ctx) => {
+							const start = await factor.beginEnrollment(ctx);
+							return { ...start, response: reshape(start.response as object) };
+						},
+					})),
+				),
+			).toEqual([RULES.begin]);
+		}
+	});
+
+	it("fails a completion or a verification whose ok is truthy but not true", async () => {
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({
+					...factor,
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? ({ ...done, ok: 1 } as never) : done;
+					},
+				})),
+			),
+		).toContain(RULES.complete);
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({
+					...factor,
+					verify: async (ctx) => {
+						const verdict = await factor.verify(ctx);
+						return verdict.ok ? ({ ...verdict, ok: "yes" } as never) : verdict;
+					},
+				})),
+			),
+		).toContain(RULES.verify);
+	});
+
 	it("fails a completion whose data amrFor answers nothing for", async () => {
 		expect(await failing(inputFor({}, (factor) => ({ ...factor, amrFor: () => [] })))).toEqual([
 			RULES.complete,
@@ -292,6 +341,20 @@ describe("mfaFactorContract", () => {
 					challenge: async (ctx) => {
 						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
 						return { ...sent, state: { ...sent.state, sentAt: new Map([["at", ctx.nowMs]]) } };
+					},
+				})),
+			),
+		).toEqual([RULES.challenge]);
+	});
+
+	it("fails a challenge whose response is not a plain object that survives JSON", async () => {
+		expect(
+			await failing(
+				inputFor({ challenge: true }, (factor) => ({
+					...factor,
+					challenge: async (ctx) => {
+						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+						return { ...sent, response: { ...(sent.response as object), at: new Date(0) } };
 					},
 				})),
 			),
@@ -378,7 +441,10 @@ describe("mfaFactorContract", () => {
 		).toEqual([RULES.beginMail]);
 		expect(
 			await failing(
-				challenging((sent) => ({ ...sent, response: `sent ${sent.mail?.code} to your mailbox` })),
+				challenging((sent) => ({
+					...sent,
+					response: { message: `sent ${sent.mail?.code} to your mailbox` },
+				})),
 			),
 		).toEqual([RULES.challengeMail]);
 	});
@@ -390,7 +456,7 @@ describe("mfaFactorContract", () => {
 			["ab12cd34", (c: string) => ({ hint: c.toUpperCase().replace(/(....)/, "$1-") })],
 			["482913", (c: string) => ({ code: Number(c) })],
 			["482913", (c: string) => ({ codes: { [c]: true } })],
-			["482913", (c: string) => [`${c.slice(0, 3)} ${c.slice(3)}`]],
+			["482913", (c: string) => ({ lines: [`${c.slice(0, 3)} ${c.slice(3)}`] })],
 		] as const) {
 			expect(await failing(challenging(withCode(code, response))), code).toEqual([
 				RULES.challengeMail,
@@ -840,6 +906,15 @@ describe("mfaFactorContract", () => {
 				}),
 		});
 		expect(await failing(inputFor({ mail: true }, fallingBack))).toEqual([RULES.unhanded]);
+		// A refusal whose ok is falsy but not false.
+		const looselyRefusing = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			completeEnrollment: async (ctx) =>
+				ctx.addressDigest === undefined
+					? ({ ok: 0, reason: "invalid" } as never)
+					: factor.completeEnrollment(ctx),
+		});
+		expect(await failing(inputFor({ mail: true }, looselyRefusing))).toEqual([RULES.unhanded]);
 	});
 
 	it("fails a factor that keeps no digest it is handed under a newer key, or keeps the old one", async () => {

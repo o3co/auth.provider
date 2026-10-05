@@ -298,7 +298,10 @@ it.
 MFA coordinator relies on: a kind a hint can carry; `amrValues` it can vouch
 for — no primary's marker, no `mfa` — and `amrFor` answering at least one of
 them; boolean flags; state and data that survive the JSON round trip sealing
-puts them through, and are handed back after it; a code an enrollment or a
+puts them through, and are handed back after it; an enrollment's and a
+challenge's response a plain object that survives it too; `ok` the literal
+`true` on a completion or a verification that succeeds, and `false` on a
+refusal; a code an enrollment or a
 challenge asks to be mailed only for the call's purpose —
 `email_factor_enrollment` for an enrollment, `login_code` for a challenge —
 never empty, with an expiry after the call's time when it gives one, another

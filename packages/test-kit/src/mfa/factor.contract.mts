@@ -198,6 +198,15 @@ function survivesJson(value: unknown, what: string): void {
 	assert.ok(at === undefined, `${at} is not a value JSON gives back as it is`);
 }
 
+/** Refuses a page's response unless it is a plain object JSON gives back as it is, as the coordinator answers it. */
+function plainResponse(value: unknown, what: string): void {
+	assert.ok(
+		typeof value === "object" && value !== null && !Array.isArray(value),
+		`${what} is not an object`,
+	);
+	survivesJson(value, what);
+}
+
 /** `value` as the coordinator hands it back after keeping it: through JSON. */
 const reopened = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
@@ -504,8 +513,9 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 	): Promise<MfaEnrolledFactor> => {
 		const begun = await begin(factor, held === undefined ? [] : [held]);
 		const done = await complete(factor, begun, await proofOf(begun.start, begun.context));
-		assert.ok(
+		assert.strictEqual(
 			done.ok,
+			true,
 			`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 		);
 		return {
@@ -582,11 +592,12 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "beginEnrollment answers state that survives a JSON round trip",
+			name: "beginEnrollment answers state that survives a JSON round trip, and a response that is a plain object that does too",
 			run: async () => {
 				const factor = input.build();
 				const { start } = await begin(factor);
 				survivesJson(start.state, "the pending enrollment's state");
+				plainResponse(start.response, "the enrollment's response");
 			},
 		},
 		{
@@ -622,8 +633,9 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					begun,
 					await input.enrollmentProof(begun.start, begun.context),
 				);
-				assert.ok(
+				assert.strictEqual(
 					done.ok,
+					true,
 					`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 				);
 				survivesJson(done.data, "the enrolled factor's data");
@@ -655,12 +667,13 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "challenge, when present, answers state that survives a JSON round trip",
+			name: "challenge, when present, answers state that survives a JSON round trip, and a response that is a plain object that does too",
 			run: async () => {
 				const factor = input.build();
 				if (factor.challenge === undefined) return;
 				const { sent } = await challenge(factor, await enroll(factor));
 				if (sent?.state !== undefined) survivesJson(sent.state, "the challenge's state");
+				plainResponse(sent?.response, "the challenge's response");
 			},
 		},
 		{
@@ -710,8 +723,9 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					await input.enrollmentProof(begun.start, begun.context),
 					moved,
 				);
-				assert.ok(
+				assert.strictEqual(
 					done.ok,
+					true,
 					`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 				);
 				assert.ok(
@@ -742,8 +756,9 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					{ ...begun, sentTo: undefined },
 					await input.enrollmentProof(begun.start, begun.context),
 				);
-				assert.ok(
-					!done.ok,
+				assert.strictEqual(
+					done.ok,
+					false,
 					"a completion after a mailed code, handed no address digest, completed: what it recorded is no address a code went to",
 				);
 			},
@@ -769,7 +784,11 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					state: sent.state === undefined ? undefined : reopened(sent.state),
 					proof: await input.verificationProof(enrolled, sent, context),
 				});
-				assert.ok(verdict.ok, `a valid proof was refused: ${JSON.stringify(verdict)}`);
+				assert.strictEqual(
+					verdict.ok,
+					true,
+					`a valid proof was refused: ${JSON.stringify(verdict)}`,
+				);
 				assert.ok(
 					verdict.next !== undefined && pathTo(verdict.next, handed) !== undefined,
 					"the factor's next data does not keep the address digest it was handed under the newer key: the older key could never leave the ring",
@@ -840,8 +859,9 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					begun,
 					await input.enrollmentProof(begun.start, begun.context),
 				);
-				assert.ok(
+				assert.strictEqual(
 					done.ok,
+					true,
 					`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 				);
 				carriesNoAddress(done.data, input.user, "the enrolled factor's data");
@@ -864,7 +884,8 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					state: sent?.state === undefined ? undefined : reopened(sent.state),
 					proof: await input.verificationProof(enrolled, sent, later),
 				});
-				if (verdict.ok) carriesNoAddress(verdict.next, input.user, "the factor's next data");
+				if (verdict.ok === true)
+					carriesNoAddress(verdict.next, input.user, "the factor's next data");
 			},
 		},
 		{
@@ -976,7 +997,11 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					state: sent?.state === undefined ? undefined : reopened(sent.state),
 					proof: await input.verificationProof(enrolled, sent, context),
 				});
-				assert.ok(verdict.ok, `a valid proof was refused: ${JSON.stringify(verdict)}`);
+				assert.strictEqual(
+					verdict.ok,
+					true,
+					`a valid proof was refused: ${JSON.stringify(verdict)}`,
+				);
 				assert.equal(
 					verdict.factorId,
 					enrolled.id,
@@ -1014,7 +1039,11 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					state: sent?.state === undefined ? undefined : reopened(sent.state),
 					proof: await input.verificationProof(enrolled, sent, context),
 				});
-				assert.ok(verdict.ok, `a valid proof was refused: ${JSON.stringify(verdict)}`);
+				assert.strictEqual(
+					verdict.ok,
+					true,
+					`a valid proof was refused: ${JSON.stringify(verdict)}`,
+				);
 				if (verdict.next === undefined) return;
 				assert.equal(
 					factor.identity(reopened(verdict.next)),
