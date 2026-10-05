@@ -2263,19 +2263,7 @@ function parseModuleSections(
 	}[] = [];
 	const issues: z.ZodIssue[] = [];
 	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
-	const refuse = () => {
-		const named = issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`);
-		return new BootError({
-			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: {
-				reason: "config-validation-failed",
-				issues,
-				modules: refused,
-			},
-		});
-	};
+	const refuse = () => moduleSectionsRefusal(issues, refused);
 
 	for (const m of modules) {
 		if (m.section === undefined) continue;
@@ -2356,23 +2344,17 @@ function switchedOffModules(
 		} as z.ZodIssue);
 		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
 	}
-	if (issues.length > 0) {
-		throw new BootError({
-			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`).join("; ")}.`,
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: { reason: "config-validation-failed", issues, modules: refused },
-		});
-	}
+	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
 	return off;
 }
 
 /**
- * Each module's replica-safety declaration as the guard reads it: a static
- * one as written, one made from the section answered once for the section
- * the module is handed (`readReplicaSafety`). A declaration that throws or
- * answers a malformed value is one more issue at its section's path, all of
- * them refused together as `config-validation-failed`.
+ * Each module's replica-safety declaration as the guard reads it
+ * (`readReplicaSafety`): a static one as written, one made from the section
+ * answered once for the section the module is handed. A declaration that
+ * throws or answers a malformed value is one more issue — at its section's
+ * path, or naming the module alone when it has no section — all of them
+ * refused together as `config-validation-failed`.
  * @internal
  */
 function replicaSafetyAsRead(
@@ -2381,9 +2363,9 @@ function replicaSafetyAsRead(
 ): readonly ReplicaSafetyModuleRef[] {
 	const read: ReplicaSafetyModuleRef[] = [];
 	const issues: z.ZodIssue[] = [];
-	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
+	const refused: { readonly module: string; readonly schemaPath?: string }[] = [];
 	for (const m of modules) {
-		const answer = readReplicaSafety(m, sections.get(m.name)?.value);
+		const answer = readReplicaSafety(m, sections.get(m.name));
 		if ("declaration" in answer) {
 			read.push({
 				name: m.name,
@@ -2391,22 +2373,38 @@ function replicaSafetyAsRead(
 			});
 			continue;
 		}
+		const sectioned = m.section !== undefined;
 		issues.push({
 			code: "custom",
-			path: [...sectionSegmentsOf(m)],
-			message: `module "${m.name}"'s replicaSafety did not answer what its section holds per replica: ${answer.problem}`,
+			path: sectioned ? [...sectionSegmentsOf(m)] : [],
+			message: `module "${m.name}"'s replicaSafety did not answer what ${sectioned ? "its section holds" : "it holds"} per replica: ${answer.problem}`,
 		} as z.ZodIssue);
-		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
+		refused.push(sectioned ? { module: m.name, schemaPath: sectionPathOf(m) } : { module: m.name });
 	}
-	if (issues.length > 0) {
-		throw new BootError({
-			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`).join("; ")}.`,
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: { reason: "config-validation-failed", issues, modules: refused },
-		});
-	}
+	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
 	return read;
+}
+
+/**
+ * The one refusal of what module sections answered — a section's parse, a
+ * switch, a replica-safety declaration made from the section: every issue
+ * together, each at its path (an issue with no path names its module
+ * itself), as `config-validation-failed`.
+ * @internal
+ */
+function moduleSectionsRefusal(
+	issues: readonly z.ZodIssue[],
+	refused: readonly { readonly module: string; readonly schemaPath?: string }[],
+): BootError {
+	const named = issues.map((issue) =>
+		issue.path.length === 0 ? issue.message : `${operatorPath(issue.path)}: ${issue.message}`,
+	);
+	return new BootError({
+		message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
+		reason: "config-validation-failed",
+		stage: "validateManifests",
+		details: { reason: "config-validation-failed", issues: [...issues], modules: [...refused] },
+	});
 }
 
 /**
@@ -3210,8 +3208,11 @@ interface StageOneContext {
 	 */
 	readonly relocating: readonly Module[];
 	readonly parsedConfig: unknown;
-	/** Each module's parsed section, by module name; empty before the parse. */
-	readonly sections: ReadonlyMap<string, { readonly value: unknown }>;
+	/**
+	 * Each switched-on module's replica-safety declaration as stage 1 read it,
+	 * once, right after the switches; empty before the parse.
+	 */
+	readonly replicaSafety: readonly ReplicaSafetyModuleRef[];
 	/** The modules their section switches off; empty before the parse. */
 	readonly switchedOff: ReadonlySet<string>;
 	/**
@@ -3459,17 +3460,14 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		// the warning is worthless if it goes somewhere the operator is not
 		// reading.
 		//
-		// `rawModules`, not the normalised view: the guard reads each manifest's
-		// own `replicaSafety` declaration, which normalisation does not carry.
-		// A switched-off module holds no state, whatever its name, and its
-		// declaration is not read.
+		// The declarations are each manifest's own, which normalisation does not
+		// carry, read right after the switches (made from the section where a
+		// module declares so): a switched-off module holds no state, whatever
+		// its name, and its declaration is not read.
 		run: (ctx) => {
 			const bootLogger = warningLogger(ctx.bootstrapComponents);
 			checkReplicaSafety({
-				modules: replicaSafetyAsRead(
-					ctx.rawModules.filter((m) => !ctx.switchedOff.has(m.name)),
-					ctx.sections,
-				),
+				modules: ctx.replicaSafety,
 				config: ctx.parsedConfig,
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});
@@ -3500,7 +3498,8 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * Stage 1 of the boot planner: runs {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then
  * step 13 (`validateAndComposeConfig`, the one composed parse, and
  * `parseModuleSections`, which writes each module's section back into the
- * parsed config), then reads each module's switch (`section.isEnabled`), then
+ * parsed config), then reads each module's switch (`section.isEnabled`) and
+ * each switched-on module's replica-safety declaration, then
  * runs {@link STAGE_ONE_POST_CONFIG_CHECKS} over the modules switched on: a
  * module switched off is, from there on, its name and its section alone, so
  * it registers nothing. Last, it parses each enabled `core.federations` entry
@@ -3536,7 +3535,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		contributionKinds,
 		relocating: withCoreRelocations(modules, input.core ?? CORE_RELOCATIONS),
 		parsedConfig: undefined,
-		sections: new Map(),
+		replicaSafety: [],
 		switchedOff: new Set<string>(),
 		plannedKeys: plannedKeysOf(normalisedModules),
 	};
@@ -3583,6 +3582,13 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// A module its section switches off stays its name and its section: what
 	// it would register is out of every row below and every later stage.
 	const off = switchedOffModules(modules, sections);
+	// Each switched-on module's replica-safety declaration, read once here, so
+	// one that cannot answer is refused with what the sections answered,
+	// before any wiring row.
+	const replicaSafety = replicaSafetyAsRead(
+		modules.filter((m) => !off.has(m.name)),
+		sections,
+	);
 	const switchedOn = modules.map((m) => (off.has(m.name) ? switchedOff(m) : m));
 	const switchedOnNormalised = normalisedModules.map((normalised, i) =>
 		off.has(normalised.name) ? normaliseModule(switchedOn[i] as Module) : normalised,
@@ -3593,7 +3599,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		rawModules: switchedOn,
 		modules: switchedOnNormalised,
 		parsedConfig,
-		sections,
+		replicaSafety,
 		switchedOff: off,
 		plannedKeys: plannedKeysOf(switchedOnNormalised),
 	};

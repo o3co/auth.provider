@@ -149,7 +149,7 @@ export interface ModuleSpec<
 	 * switched on; a module without a section is handed `undefined`. A throw, or
 	 * an answer that is neither `undefined` nor `{ unsafe: true, reason }` with
 	 * a non-empty `reason`, refuses boot (`config-validation-failed`, naming the
-	 * module and its section's path).
+	 * module, and its section's path when it has one), before any wiring check.
 	 */
 	readonly replicaSafety?:
 		| ReplicaSafetyDeclaration

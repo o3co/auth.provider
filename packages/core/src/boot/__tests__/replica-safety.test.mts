@@ -433,7 +433,13 @@ describe("checkReplicaSafety — wired into boot", () => {
 describe("replicaSafety declared from the module's own section", () => {
 	// A module whose storage is configuration declares the replica safety of
 	// the store its section selects: unsafe for one value, nothing for another.
-	const StoreSection = z.object({ enabled: z.boolean().optional(), store: z.string() }).strict();
+	const StoreSection = z
+		.object({
+			enabled: z.boolean().optional(),
+			store: z.string(),
+			ttlSeconds: z.coerce.number().default(60),
+		})
+		.strict();
 	const MEMORY_REASON =
 		"the store is in this process's memory — a value written on one replica is unknown to the others";
 
@@ -521,15 +527,23 @@ describe("replicaSafety declared from the module's own section", () => {
 		await handle.dispose();
 	});
 
-	it("is handed the parsed section, once", async () => {
+	it("is handed the parsed section, not the written one, once", async () => {
 		const declare = vi.fn((_section: z.output<typeof StoreSection>) => undefined);
 		const handle = await createApp({
 			modules: [selecting(declare)],
 			bootstrapComponents: bootWith({ store: "shared" }, "multi"),
 		});
-		expect(declare).toHaveBeenCalledOnce();
-		expect(declare).toHaveBeenCalledWith({ store: "shared" });
+		// The schema's default is in what the declaration reads.
+		expect(declare).toHaveBeenCalledExactlyOnceWith({ store: "shared", ttlSeconds: 60 });
 		await handle.dispose();
+
+		const coerced = vi.fn((_section: z.output<typeof StoreSection>) => undefined);
+		const again = await createApp({
+			modules: [selecting(coerced)],
+			bootstrapComponents: bootWith({ store: "shared", ttlSeconds: "30" }, "multi"),
+		});
+		expect(coerced).toHaveBeenCalledExactlyOnceWith({ store: "shared", ttlSeconds: 30 });
+		await again.dispose();
 	});
 
 	it("is not called for a module its section switches off", async () => {
@@ -599,9 +613,115 @@ describe("replicaSafety declared from the module's own section", () => {
 		expect(declare).toHaveBeenCalledExactlyOnceWith(undefined);
 	});
 
+	it("refuses a module without a section naming the module alone, at no section path", async () => {
+		const err = await createApp({
+			modules: [
+				defineModule({
+					name: "sectionless-store",
+					replicaSafety: () => {
+						throw new Error("cannot tell");
+					},
+				}),
+			],
+			bootstrapComponents: bootWith({ store: "shared" }, "single"),
+		}).then(
+			() => expect.unreachable("boot should have been refused"),
+			(e: unknown) => e as BootError,
+		);
+		expect(err.reason).toBe("config-validation-failed");
+		const details = err.details;
+		if (details.reason !== "config-validation-failed") expect.unreachable("wrong reason");
+		expect(details.modules).toEqual([{ module: "sectionless-store" }]);
+		expect(details.issues.map((issue) => issue.path)).toEqual([[]]);
+		expect(err.message).toMatch(
+			/found in module sections: module "sectionless-store"'s replicaSafety did not answer what it holds per replica: it threw/,
+		);
+	});
+
+	it("is refused before any wiring row: a declaration that cannot answer comes before a missing slot", async () => {
+		await expect(
+			createApp({
+				modules: [
+					defineModule({
+						name: "section-store",
+						section: { schema: StoreSection },
+						requires: ["clientRepository"],
+						replicaSafety: () => {
+							throw new Error("cannot tell");
+						},
+					}),
+				],
+				bootstrapComponents: bootWith({ store: "memory" }, "multi"),
+			}),
+		).rejects.toMatchObject({ reason: "config-validation-failed" });
+	});
+
 	it("replicaUnsafeReason answers for the section it is handed", () => {
 		const module = selecting();
 		expect(replicaUnsafeReason(module, { store: "memory" })).toBe(MEMORY_REASON);
 		expect(replicaUnsafeReason(module, { store: "shared" })).toBeUndefined();
+	});
+
+	it("replicaUnsafeReason refuses, naming the module, a declaration made from the section when no section is given", () => {
+		const declare = vi.fn(() => undefined);
+		expect(() => replicaUnsafeReason(selecting(declare))).toThrow(
+			/module "section-store"'s replicaSafety .*no parsed section was given/,
+		);
+		expect(declare).not.toHaveBeenCalled();
+	});
+
+	it("replicaUnsafeReason hands a module without a section undefined, given or not", () => {
+		const declare = vi.fn(() => ({ unsafe: true as const, reason: MEMORY_REASON }));
+		const module = defineModule({ name: "sectionless-store", replicaSafety: declare });
+		expect(replicaUnsafeReason(module)).toBe(MEMORY_REASON);
+		expect(declare).toHaveBeenLastCalledWith(undefined);
+	});
+
+	it("replicaUnsafeReason reads the answer as boot does, refusing a malformed one", () => {
+		expect(() =>
+			replicaUnsafeReason(
+				selecting(() => ({ unsafe: true }) as never),
+				{},
+			),
+		).toThrow(/module "section-store"'s replicaSafety .*neither undefined nor/);
+		expect(() =>
+			replicaUnsafeReason(
+				selecting(() => {
+					throw new Error("cannot tell");
+				}),
+				{},
+			),
+		).toThrow(/module "section-store"'s replicaSafety .*it threw: .*cannot tell/);
+	});
+
+	it("checkReplicaSafety evaluates a declaration made from the section against the sections it is handed", () => {
+		const { logger: log } = logger();
+		expect(() =>
+			checkReplicaSafety({
+				modules: [selecting()],
+				config: { core: { deployment: { mode: "multi" } } },
+				sections: new Map([["section-store", { store: "memory" }]]),
+				logger: log,
+			}),
+		).toThrow(/section-store: the store is in this process's memory/);
+		expect(() =>
+			checkReplicaSafety({
+				modules: [selecting()],
+				config: { core: { deployment: { mode: "multi" } } },
+				sections: new Map([["section-store", { store: "shared" }]]),
+				logger: log,
+			}),
+		).not.toThrow();
+	});
+
+	it("checkReplicaSafety refuses, naming the module, a declaration made from the section with no section handed", () => {
+		const { logger: log } = logger();
+		expect(() =>
+			checkReplicaSafety({
+				modules: [selecting()],
+				config: { core: { deployment: { mode: "single" } } },
+				logger: log,
+			}),
+		).toThrow(/module "section-store"'s replicaSafety .*no parsed section was given/);
 	});
 });

@@ -49,22 +49,30 @@ import { BootError } from "./types.mjs";
  * config: a composition root can wire modules directly, or with a config that
  * names none of the adapter keys, and its own modules must be covered too.
  * A module whose section decides what it holds declares a function of that
- * section instead; stage 1 reads it once ({@link readReplicaSafety}) and
- * hands the guard the declaration it answered.
+ * section instead; stage 1 reads it once ({@link readReplicaSafety}), right
+ * after the parse, and hands the guard the declaration it answered.
  */
 
 /**
  * The module manifest fields the guard reads. A full `Module` satisfies it;
  * so does a name-only reference, which is answered from core's bundled
- * declarations (see {@link replicaUnsafeReason}). A declaration made from the
- * section is answered for the section {@link replicaUnsafeReason} is handed,
- * and for none in {@link checkReplicaSafety}: boot hands the guard each
- * declaration as stage 1 read it.
+ * declarations (see {@link replicaUnsafeReason}). `section` is the manifest's
+ * section declaration, read only for whether there is one: a declaration made
+ * from the section is handed `undefined` for a module without one, and needs
+ * the parsed section of a module with one.
  */
 export interface ReplicaSafetyModuleRef {
 	readonly name: string;
+	readonly section?: unknown;
 	readonly replicaSafety?: Module["replicaSafety"];
 }
+
+/**
+ * The parsed section a declaration made from the section is answered for:
+ * `{ value }`, or `undefined` when none was given — which a module with a
+ * section cannot be answered without.
+ */
+export type GivenSection = { readonly value: unknown } | undefined;
 
 /**
  * Core's bundled modules that declare `replicaSafety`. The guard reads every
@@ -115,41 +123,29 @@ export const REPLICA_UNSAFE_MODULES: readonly string[] = [...BUNDLED_REASONS_BY_
  * holds it: the erased `Module` types its parameter `never`.
  */
 const fromSection = (declared: (section: never) => unknown) =>
-	declared as (section: unknown) => Partial<ReplicaSafetyDeclaration> | undefined;
+	declared as (section: unknown) => unknown;
 
 /**
- * What diverges per replica for `module`, or `undefined` when the guard does
- * not refuse it. The manifest's declaration answers first — one made from the
- * section answers for `section`, the module's parsed section, and throws what
- * it throws; a name-only reference is answered from core's bundled
- * declarations.
- */
-export function replicaUnsafeReason(
-	module: ReplicaSafetyModuleRef,
-	section?: unknown,
-): string | undefined {
-	const declared = module.replicaSafety;
-	const declaration: Partial<ReplicaSafetyDeclaration> | undefined =
-		typeof declared === "function" ? fromSection(declared).call(module, section) : declared;
-	if (declaration?.unsafe === true) return declaration.reason;
-	return BUNDLED_REASONS_BY_NAME.get(module.name);
-}
-
-/**
- * Stage 1's one reading of `module`'s declaration for its parsed `section`: a
- * static declaration as written; a function's answer, called once and copied
- * into a frozen declaration. A throw, or an answer that is neither `undefined`
- * nor `{ unsafe: true, reason }` with a non-empty string `reason`, is a
- * `problem` for boot to refuse.
+ * The one reading of `module`'s declaration: a static one as written; a
+ * function's answer for the module's parsed section, called once and copied
+ * into a frozen declaration. A module without a section is handed `undefined`
+ * whatever `given` is. A module with one and no section `given`, a throw, or
+ * an answer that is neither `undefined` nor `{ unsafe: true, reason }` with a
+ * non-empty string `reason`, is a `problem`: the function is not called
+ * without its section.
  */
 export function readReplicaSafety(
 	module: ReplicaSafetyModuleRef,
-	section: unknown,
+	given: GivenSection,
 ): { readonly declaration: ReplicaSafetyDeclaration | undefined } | { readonly problem: string } {
 	const declared = module.replicaSafety;
 	if (typeof declared !== "function") return { declaration: declared };
+	const hasSection = module.section !== undefined;
+	if (hasSection && given === undefined) {
+		return { problem: "it is made from the module's section, and no parsed section was given" };
+	}
 	try {
-		const answer: unknown = fromSection(declared).call(module, section);
+		const answer = fromSection(declared).call(module, hasSection ? given?.value : undefined);
 		if (answer === undefined) return { declaration: undefined };
 		if (typeof answer === "object" && answer !== null) {
 			const { unsafe, reason } = answer as Record<string, unknown>;
@@ -163,6 +159,40 @@ export function readReplicaSafety(
 	}
 }
 
+/** The problem {@link readReplicaSafety} found, as the error a public reader throws. */
+const problemError = (module: ReplicaSafetyModuleRef, problem: string): TypeError =>
+	new TypeError(`module "${module.name}"'s replicaSafety did not answer: ${problem}`);
+
+/**
+ * What diverges per replica for `module`, or `undefined` when the guard does
+ * not refuse it. The manifest's declaration answers first, read as boot reads
+ * it ({@link readReplicaSafety}); a name-only reference is answered from
+ * core's bundled declarations.
+ *
+ * A declaration made from the section is answered for `section`, the module's
+ * parsed section; called without one, for a module that has a section, it
+ * throws a `TypeError` naming the module rather than guess. It throws the same
+ * for a declaration that throws or answers a malformed value.
+ */
+export function replicaUnsafeReason(module: ReplicaSafetyModuleRef): string | undefined;
+export function replicaUnsafeReason(
+	module: ReplicaSafetyModuleRef,
+	section: unknown,
+): string | undefined;
+export function replicaUnsafeReason(
+	module: ReplicaSafetyModuleRef,
+	...section: [] | [unknown]
+): string | undefined {
+	return reasonFor(module, section.length === 0 ? undefined : { value: section[0] });
+}
+
+function reasonFor(module: ReplicaSafetyModuleRef, given: GivenSection): string | undefined {
+	const read = readReplicaSafety(module, given);
+	if ("problem" in read) throw problemError(module, read.problem);
+	if (read.declaration?.unsafe === true) return read.declaration.reason;
+	return BUNDLED_REASONS_BY_NAME.get(module.name);
+}
+
 export interface CheckReplicaSafetyInput {
 	readonly modules: readonly ReplicaSafetyModuleRef[];
 	/**
@@ -171,6 +201,13 @@ export interface CheckReplicaSafetyInput {
 	 * with.
 	 */
 	readonly config: unknown;
+	/**
+	 * Each module's parsed section, by module name, for the declarations made
+	 * from the section. A module with a section and such a declaration, and
+	 * no entry here, is refused (a `TypeError` naming it). Boot hands the guard
+	 * declarations it has read already, and no sections.
+	 */
+	readonly sections?: ReadonlyMap<string, unknown>;
 	readonly logger?: Logger;
 }
 
@@ -186,9 +223,17 @@ export interface CheckReplicaSafetyInput {
  * state unreachable. An operator who scales without setting the mode cannot be
  * detected: a process whose state is all in its own memory cannot see peers.
  */
-export function checkReplicaSafety({ modules, config, logger }: CheckReplicaSafetyInput): void {
+export function checkReplicaSafety({
+	modules,
+	config,
+	sections,
+	logger,
+}: CheckReplicaSafetyInput): void {
 	const offenders = modules.flatMap((m) => {
-		const reason = replicaUnsafeReason(m);
+		const reason = reasonFor(
+			m,
+			sections?.has(m.name) === true ? { value: sections.get(m.name) } : undefined,
+		);
 		return reason === undefined ? [] : [{ name: m.name, reason }];
 	});
 	if (offenders.length === 0) return;

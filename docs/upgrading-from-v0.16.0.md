@@ -755,8 +755,12 @@ modules fills them.
 - **A manifest's `replicaSafety` may be a function of the module's section**
   (#1371, #728). A declaration written as `{ unsafe: true, reason }` is read
   as before. Code that reads the field off a `Module` (`module.replicaSafety.reason`)
-  no longer compiles, since the field may now be a function: ask
-  `replicaUnsafeReason(module, section)` instead, which answers both forms.
+  no longer compiles, since the field may now be a function, and the exported
+  `ReplicaSafetyModuleRef.replicaSafety` widened the same way: ask
+  `replicaUnsafeReason(module, section)` instead, which answers both forms
+  and throws for a declaration made from the section when no section is
+  given. A composition root that runs `checkReplicaSafety` itself hands it
+  the parsed sections (`sections`) once any module declares from its section.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name
