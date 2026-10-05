@@ -44,7 +44,7 @@ const baseConfig = {
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const baseDeps: ClientCredentialsGrantDeps = {
 	...grantSettingsFrom(baseConfig),

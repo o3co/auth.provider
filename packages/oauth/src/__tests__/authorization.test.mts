@@ -19,7 +19,6 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type GrantHandler,
 	InMemoryCodeRepository,
 	type RefreshTokenFamilyRotation,
@@ -78,7 +77,7 @@ const mockConfig = {
 			refresh_token: { enabled: true },
 		},
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const mockClientRepository: ClientRepository = {
 	findById: vi.fn().mockResolvedValue(null),
@@ -797,19 +796,18 @@ describe("createAuthorizationGrant", () => {
 		// A config still setting the legacy `pkce.requireS256` changes nothing in
 		// either direction: S256 is mandatory whatever it says.
 		describe("legacy pkce.requireS256 is inert", () => {
-			const legacyConfig = (requireS256: boolean) =>
-				({
-					oauth: {
-						jwt: { secret: "test-secret" },
-						accessToken: { expiresIn: 3600 },
-						refreshToken: { expiresIn: 86400 },
-						grants: {
-							session: { enabled: true },
-							authorization_code: { enabled: true, pkce: { requireS256 } },
-							refresh_token: { enabled: true },
-						},
+			const legacyConfig = (requireS256: boolean) => ({
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					grants: {
+						session: { enabled: true },
+						authorization_code: { enabled: true, pkce: { requireS256 } },
+						refresh_token: { enabled: true },
 					},
-				}) as unknown as GrantDependencies["config"];
+				},
+			});
 
 			const makeLegacyDeps = (requireS256: boolean, codeData: Record<string, unknown>) => ({
 				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
@@ -1139,7 +1137,7 @@ describe("createAuthorizationGrant", () => {
 							},
 						},
 					},
-				} as unknown as GrantDependencies["config"];
+				};
 			}
 
 			const makeConfiguredDeps = (
@@ -1257,7 +1255,7 @@ describe("createAuthorizationGrant", () => {
 						refresh_token: { enabled: true },
 					},
 				},
-			} as unknown as GrantDependencies["config"];
+			};
 
 			function makeDepsWithIssuer(
 				consumeByCodeImpl: CodeRepository["consumeByCode"],
@@ -2639,7 +2637,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 				refresh_token: { enabled: true },
 			},
 		},
-	} as unknown as GrantDependencies["config"];
+	};
 
 	function makeStore(sid: string, sub: string) {
 		return {
