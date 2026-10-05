@@ -64,7 +64,7 @@ import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 const grantSwitch = z.object({ enabled: coerceBooleanFromEnv.optional() }).strict().optional();
 
 /**
- * The refresh_token grant's keys: its switch, and what it answers a refresh
+ * The refresh_token grant's keys: its switch, and its policy for a refresh
  * token whose family no record holds. `"reject"` is the safe choice and what
  * absent reads as; `"accept"` is for a bounded migration window only.
  */

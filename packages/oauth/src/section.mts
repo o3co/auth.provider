@@ -24,7 +24,10 @@
  * an environment variable carries.
  *
  * Core's schema declares the same keys, with the same rules and messages,
- * until it stops declaring `oauth {}`; boot parses the section with core's
+ * until it stops declaring `oauth {}`, and two more it keeps optional:
+ * `oauth.refreshToken.unknownFamilyPolicy`, which moved to the
+ * oauth-authorization module's section, and `oauth.refreshToken.legacyRtPolicy`,
+ * which this module refuses as removed. Boot parses the section with core's
  * first. Core alone holds what it retired from the section: the keys it
  * refuses naming what became of them (`oauth.jwt`'s flat key fields,
  * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`),
