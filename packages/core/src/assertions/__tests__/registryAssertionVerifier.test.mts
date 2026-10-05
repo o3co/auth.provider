@@ -133,6 +133,15 @@ describe("createRegistryAssertionVerifier — issuers and their keys", () => {
 		expect(result).toEqual({ subjectHandle: "device:1", issuer: ISSUER_A, expiresAt: exp });
 	});
 
+	it("reports an RFC 7523 assertion's iat as issuedAt, and leaves it out when the assertion has none", async () => {
+		const iat = Math.floor(Date.now() / 1000) - 30;
+		const verifier = verifierOver([entryA()]);
+		expect((await verifier.verify(await mint({ sub: "device:1", iat })))?.issuedAt).toBe(iat);
+		const withoutIat = await verifier.verify(await mint({ sub: "device:1" }));
+		expect(withoutIat).not.toBeNull();
+		expect(withoutIat !== null && "issuedAt" in withoutIat).toBe(false);
+	});
+
 	it("keeps two issuers' keys apart", async () => {
 		const verifier = verifierOver([entryA(), entryB()]);
 		expect(await verifier.verify(await mint({ sub: "d" }))).toMatchObject({ issuer: ISSUER_A });
@@ -625,14 +634,19 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile", () => {
 		});
 	const asApp = { clientId: "app" };
 
-	it("accepts a conformant ID-JAG and hands back the issuer, a namespaced handle, the claims' ceilings and its expiry", async () => {
-		const exp = Math.floor(Date.now() / 1000) + 300;
-		const result = await make().verify(await idJag({ scope: "read admin" }, { exp }), asApp);
+	it("accepts a conformant ID-JAG and hands back the issuer, a namespaced handle, the claims' ceilings, its issue time and its expiry", async () => {
+		const iat = Math.floor(Date.now() / 1000) - 30;
+		const exp = iat + 330;
+		const result = await make().verify(
+			await idJag({ scope: "read admin", iat }, { exp, iat: false }),
+			asApp,
+		);
 		expect(result).toEqual({
 			subjectHandle: `${IDP}#user-1`,
 			issuer: IDP,
 			scope: ["read"],
 			audience: ["https://api.example"],
+			issuedAt: iat,
 			expiresAt: exp,
 		});
 	});

@@ -48,6 +48,13 @@ export interface AssertionVerificationResult {
 	 */
 	readonly audience?: readonly string[];
 	/**
+	 * When the verified assertion was issued (its `iat`), in epoch seconds, as
+	 * the assertion claims it. Present, it is a finite number.
+	 *
+	 * Absent: the verifier did not establish an issue time.
+	 */
+	readonly issuedAt?: number;
+	/**
 	 * When the verified assertion expires (its `exp`), in epoch seconds.
 	 *
 	 * A ceiling on the issued token's lifetime: the jwt-bearer grant mints

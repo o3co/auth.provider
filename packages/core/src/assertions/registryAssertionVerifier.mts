@@ -164,8 +164,9 @@ const isRefusal = (err: unknown): boolean =>
  * assertion claiming issuer B is verified against B's keys only. `exp` is
  * mandatory (RFC 7523 §3 item 4), and `exp` / `nbf` / `iat` must be
  * NumericDates: jose only checks for a number, so `exp: 1e400` would never
- * expire. The result carries the entry's scope and audience ceilings and `exp`
- * as `expiresAt`, which caps the issued token.
+ * expire. The result carries the entry's scope and audience ceilings, `iat`
+ * as `issuedAt` when the assertion carries one, and `exp` as `expiresAt`,
+ * which caps the issued token.
  *
  * An entry with `profile: "id-jag"` accepts the Identity Assertion JWT
  * Authorization Grant (draft-ietf-oauth-identity-assertion-authz-grant) and
@@ -409,6 +410,8 @@ export function createRegistryAssertionVerifier(
 				issuer: entry.issuer,
 				...(scope === undefined ? {} : { scope }),
 				...(audienceCeiling === undefined ? {} : { audience: audienceCeiling }),
+				// NumericDate-checked above when present; reported as claimed.
+				...(claims.iat === undefined ? {} : { issuedAt: claims.iat as number }),
 				// NumericDate-checked above. Kept as claimed: one already past
 				// within the clock tolerance is refused by the grant, not here.
 				expiresAt: claims.exp as number,
