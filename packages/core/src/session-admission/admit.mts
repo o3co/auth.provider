@@ -27,6 +27,7 @@ import {
 	PASSWORD_AMR,
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
@@ -692,6 +693,14 @@ export interface FederatedLogin {
 	readonly upstreamAmr: readonly string[];
 	/** Whether that federation's upstream `amr` counts (`federationTrustsUpstreamAmr`). */
 	readonly trusted: boolean;
+	/** When the upstream last authenticated the user (`FederationProfile.authTime`), when it showed one. */
+	readonly upstreamAuthTime?: Date;
+	/**
+	 * Whether that federation's callback alone meets a freshness ask
+	 * (`federationCallbackMeetsFreshness`); decides what is recorded when the
+	 * upstream showed no instant (`federatedSessionAuthentication`).
+	 */
+	readonly callbackMeetsFreshness?: boolean;
 	readonly authTime: Date;
 	readonly redirectTo: string | undefined;
 	readonly request: { readonly ip?: string; readonly userAgent?: string };
@@ -727,10 +736,33 @@ export function establishWithoutAsking(
 	if (typeof login.trusted !== "boolean") {
 		throw new RangeError("establishWithoutAsking: trusted must be true or false");
 	}
+	const { upstreamAuthTime, callbackMeetsFreshness } = login;
+	// Refused here, before the callback spends anything, rather than by the
+	// store's `create`: an instant further ahead than hosts' clocks drift is
+	// no upstream clock's reading.
+	if (
+		upstreamAuthTime !== undefined &&
+		!(
+			upstreamAuthTime instanceof Date &&
+			Number.isFinite(upstreamAuthTime.getTime()) &&
+			upstreamAuthTime.getTime() <= Date.now() + DEFAULT_CLOCK_SKEW_MS
+		)
+	) {
+		throw new RangeError(
+			"establishWithoutAsking: upstreamAuthTime must be a valid date no further ahead than hosts' clocks drift, or absent",
+		);
+	}
+	if (callbackMeetsFreshness !== undefined && typeof callbackMeetsFreshness !== "boolean") {
+		throw new RangeError(
+			"establishWithoutAsking: callbackMeetsFreshness must be true, false or absent",
+		);
+	}
 	const recorded = federatedSessionAuthentication({
 		federation: login.federation,
 		upstreamAmr: login.upstreamAmr,
 		trusted: login.trusted,
+		...(upstreamAuthTime === undefined ? {} : { upstreamAuthTime }),
+		...(callbackMeetsFreshness === undefined ? {} : { callbackMeetsFreshness }),
 	});
 	const primary = checkPrimaryAuthentication({
 		subject: login.subject,
