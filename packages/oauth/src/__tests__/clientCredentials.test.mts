@@ -21,8 +21,12 @@ import {
 	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -145,6 +149,8 @@ describe("createClientCredentialsGrant — token issuance", () => {
 	});
 
 	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const handler = createClientCredentialsGrant({
 			...baseDeps,
 			config: {
