@@ -44,7 +44,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { describe, expect, it } from "vitest";
-import { oauthEndpointsModule, oauthModule } from "#/module.mjs";
+import { oauthEndpointsModule } from "#/module.mjs";
 import { resolveRouterSettings } from "#/routerSettings.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { type OAuthSection, oauthSectionSchema } from "#/section.mjs";
@@ -87,11 +87,6 @@ describe("the oauth module is one module value", () => {
 			...(oauthEndpointsModule.requires ?? []),
 			...(oauthEndpointsModule.optional ?? []),
 		]).not.toContain("config");
-	});
-
-	it("is what the deprecated oauthModule answers, whatever it is handed", () => {
-		expect(oauthModule({ config: fixture() })).toBe(oauthEndpointsModule);
-		expect(oauthModule({ config: {} as never })).toBe(oauthEndpointsModule);
 	});
 });
 

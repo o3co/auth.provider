@@ -59,7 +59,6 @@ import {
 	loginCompletionModule,
 	sessionModule,
 	sessionStoreModule,
-	sessionStoreModuleFor,
 } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
@@ -332,7 +331,6 @@ export function modulesFor(options: BootOptions = {}): {
 	readonly transactionStore: MfaTransactionStore;
 	readonly userSessionStore: UserSessionStore | null;
 } {
-	const config = options.config ?? configFor("required");
 	const factorStore = options.factorStore ?? createMemoryMfaFactorStore();
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
 	const userSessionStore =
@@ -346,7 +344,7 @@ export function modulesFor(options: BootOptions = {}): {
 			...(options.withoutLogin === true
 				? [loginStandIns()]
 				: [
-						sessionStoreModuleFor(config as never),
+						sessionStoreModule,
 						sessionModule,
 						...(options.withoutLoginCompletion === true ? [] : [loginCompletionModule]),
 						...sessionSupport(rateLimiter, options.userRepository),

@@ -656,7 +656,7 @@ describe("the retired webauthn.rateLimit", () => {
 
 /**
  * Each contributed router installs its own `express.json()` before its POST
- * handlers: createApp installs no global JSON parser, and oauthModule's router
+ * handlers: createApp installs no global JSON parser, and oauthEndpointsModule's router
  * parses only its own routes' bodies. Without it, `req.body` is `undefined`.
  * These tests mount `handle.router` on a bare express app and POST JSON.
  */

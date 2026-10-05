@@ -35,11 +35,7 @@ export {
 	type DeviceAuthorizationEndpointOptions,
 } from "./deviceAuthorizationEndpoint.mjs";
 export { createDeviceCodeGrant, type DeviceCodeGrantOptions } from "./grant.mjs";
-export {
-	deviceAuthorizationGrantModule,
-	deviceGrantConfigSchema,
-	deviceGrantModule,
-} from "./module.mjs";
+export { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "./module.mjs";
 export {
 	DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
 	DEVICE_CODE_GRANT_TYPE,

@@ -1519,7 +1519,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 		await composed.handle.dispose();
 	});
 
-	it("puts the added routers on the other side of oauthModule's, and swaps the /session pair", () => {
+	it("puts the added routers on the other side of oauthEndpointsModule's, and swaps the /session pair", () => {
 		const ids = composed.handle.routes.map((r) => r.contribution.id);
 		for (const [own, added] of [
 			["oauth-endpoints", "device-authorization"],

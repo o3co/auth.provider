@@ -112,7 +112,7 @@ export const oauthSessionGrantModule = defineModule<
 	optional: OPTIONAL,
 	// Optional to wire, not optional to decide: an unfilled slot must be
 	// declared absent, as every other consumer of the two slots declares it,
-	// so that the grants installed without `oauthModule` still refuse a
+	// so that the grants installed without `oauthEndpointsModule` still refuse a
 	// composition that left the decision unmade.
 	absencePolicies: {
 		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
@@ -125,12 +125,3 @@ export const oauthSessionGrantModule = defineModule<
 		},
 	},
 });
-
-/**
- * Returns {@link oauthSessionGrantModule}; the argument is ignored.
- *
- * @deprecated List {@link oauthSessionGrantModule} instead.
- */
-export const oauthSessionModule = (_params?: {
-	readonly config?: unknown;
-}): typeof oauthSessionGrantModule => oauthSessionGrantModule;

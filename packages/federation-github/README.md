@@ -56,11 +56,11 @@ writes no bridge. The module requires no dependency.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { githubFederationTypeModule } from "@o3co/auth-provider-federation-github";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config),
+    sessionStoreModule,
     sessionModule,
     githubFederationTypeModule(),
     // ... composition-root modules supplying userRepository and the session stores

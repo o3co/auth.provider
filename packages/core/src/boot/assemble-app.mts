@@ -666,7 +666,7 @@ export function assembleApp(
 	//
 	// `/oauth/token` is deliberately exempt: it authenticates a *client*, has
 	// no access token in play, and runs the token-endpoint binding profile
-	// instead. The path is coupled to the bundled `oauthModule`'s mountPath;
+	// instead. The path is coupled to the bundled `oauthEndpointsModule`'s mountPath;
 	// see the NOTE on the `grantMiddleware` mount.
 	const TOKEN_ENDPOINT_PATH = "/oauth/token";
 	/** The token endpoint's one method (RFC 6749 §3.2). */
@@ -773,13 +773,13 @@ export function assembleApp(
 
 	// Mount `grantMiddleware` contributions on `/oauth/token` AFTER the
 	// synthesized tokenBindingMw above, for the token endpoint alone. The
-	// bundled `oauthModule` mounts its sub-router at `/oauth`
+	// bundled `oauthEndpointsModule` mounts its sub-router at `/oauth`
 	// (packages/oauth/src/module.mts), so these handlers fire before its
 	// `/token` route handler, which the routes loop installs below. Null
 	// returns (disabled by config) are skipped here; the collector still
 	// records them for value-identity dedup with other contributions.
 	//
-	// NOTE: this mount path is coupled to the bundled `oauthModule`'s
+	// NOTE: this mount path is coupled to the bundled `oauthEndpointsModule`'s
 	// mountPath. A downstream that re-mounts the OAuth router at a different
 	// path must also wrap or replace this composition step.
 	const grantMwCollector = frozen.registries.get("grantMiddleware") as

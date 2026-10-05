@@ -108,7 +108,7 @@ export const SESSION_LIFECYCLE_MODULE = "core-session-lifecycle";
 export const SESSION_LIFECYCLE_NOTIFIER_MISSING =
 	"core-session-lifecycle: relying parties are served (the clientRepository slot is filled) " +
 	"and no sessionCloseNotifier is wired, so a closed session's relying parties would never " +
-	"be told. Install a module that contributes a sessionCloseNotifiers entry (oauthModule does).";
+	"be told. Install a module that contributes a sessionCloseNotifiers entry (oauthEndpointsModule does).";
 
 export const sessionLifecycleModule = defineModule({
 	name: SESSION_LIFECYCLE_MODULE,
