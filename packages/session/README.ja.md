@@ -202,7 +202,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 
 `session` グラントはリフレッシュトークンを発行しないので、トークンがすべてそのグラント由来のデプロイには失効させるファミリーが無く、`/session/logout` だけで足りる。
 
-**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、ログアウトは上の表の代わりに `sessionLifecycle.close(sid, "session_logout")` でセッションを終了する。終了は `/oauth/logout` と同じく、セッションのリフレッシュトークンファミリーを失効させ、その relying party にバックチャネルで知らせ（`oauthModule` が寄与する通知器を通して）、フェデレーショントークン、subject インデックスのエントリー、セッションごとのインデックスを削除し、最後に `UserSession` を削除する。
+**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、ログアウトは上の表の代わりに `sessionLifecycle.close(sid, "session_logout")` でセッションを終了する。終了は `/oauth/logout` と同じ順で進む: セッションのリフレッシュトークンファミリーを失効させてフェデレーショントークンを削除し、次に relying party にバックチャネルで知らせ（`oauthModule` が寄与する通知器を通して）、次にセッションごとのインデックスを削除し、次に `UserSession` を削除し、最後に subject インデックスのエントリーを削除する。終了が保留のあいだ、sid は subject 単位の失効が見つける場所に残る。
 - コミットされた終了は、作業が `done` でも `pending` でも同じ `200` を返し、express session を破棄する。コミットの時点から、どの liveness の読み取りもそのセッションを live と答えず、残りは後の終了かライフサイクルの巡回が再開する。
 - コミットされなかった終了、または例外を投げたライフサイクルは `503 temporarily_unavailable` を返し、再試行のために express session を残す。`session_logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`、`sid`）として 1 回ログに出し、エラーの射影はライフサイクルが例外を投げたときだけ持つ。ライフサイクル自身はその障害を `session_lifecycle_unavailable` としてログに出す。
 - ライフサイクルが保持できない `sid` は、そのどのセッションも指さない: ログアウトは express session を破棄して `200` を返す。
