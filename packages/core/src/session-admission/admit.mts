@@ -326,8 +326,8 @@ const copyView = (view: SessionView): SessionView =>
  *    steps 1 to 4 again, on a fresh clock reading and with the claim's
  *    subject held to the first reading's, whatever step 7 answered. An
  *    answer they give is the admission's; else step 7's stands, carrying the
- *    first reading's session and view. A requirement that throws has already
- *    answered `unavailable`.
+ *    first reading's session, view and renewal nonce. A requirement that
+ *    throws has already answered `unavailable`.
  */
 export async function admitSession(
 	deps: AdmissionDeps,
