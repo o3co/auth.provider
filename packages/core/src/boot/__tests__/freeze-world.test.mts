@@ -44,6 +44,7 @@ function makeMinimalRegistryWorld(
 					usedKinds: new Set(),
 					dispatchedFederations: [],
 					undeclaredAbsenceSlots: [],
+					federationStoreSlots: [],
 					bootstrapComponents: {} as never,
 				},
 				initOrder: [],

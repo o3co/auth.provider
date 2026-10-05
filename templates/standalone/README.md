@@ -1071,7 +1071,7 @@ are configured per federation (`CORE_FEDERATIONS_GOOGLE_CALLBACK_URL`,
 
 [`src/buildModules.mts`](src/buildModules.mts) is the single source of truth for which modules are composed and in what order — read it rather than a copy of it. The boot planner resolves `requires` / `provides` topologically, but it mounts routes and middleware in list order unless a module declares `before` / `after` — so position matters for anything that mounts. These are the rules to keep when you edit the list:
 
-1. **`sessionStoreModuleFor(config)` stays first.** It mounts the `express-session` middleware and declares no `before` / `after`, so its position in the list is what puts it ahead of every route that reads `req.session`. It is built from `config` so that `session-store.storage.type = "memory"` declares itself replica-unsafe.
+1. **`sessionStoreModule` stays first.** It mounts the `express-session` middleware and declares no `before` / `after`, so its position in the list is what puts it ahead of every route that reads `req.session`. It declares its replica safety from its own section, so `session-store.storage.type = "memory"` is replica-unsafe and refused under `core.deployment.mode = "multi"`.
 2. **Under `/oauth`, the order does not matter.** `federationGrantsModules` (while federation grants are enabled), `oauthModule` and any module of your own may all mount routes under `/oauth`. `oauthModule`'s router parses the bodies of its own routes only, so each module's requests reach its own parsers whatever the list order — provided every module under `/oauth` parses its own body and scopes its parsers to exactly its own paths, as the shipped ones do — a route (`router.all(path, parser)` or the route's own handler list), not `router.use(path, parser)`, which matches every path beneath `path` as well. The federation grants browser half orders itself after the session middleware with its own `after`.
 3. **One module per store slot.** Each adapter switch — `adapters.federationTokenStore`, `adapters.userSessionStores`, `adapters.rateLimiter`, `adapters.codeRepository`, `adapters.accessTokenDenylist`, `adapters.replaySeenSet`, `adapters.consentStore`, the two federation-grant store switches and the two MFA store switches — picks one of a memory / Redis pair (or, for the MFA factors, the Store). Both provide the same slot, so wiring both is a boot-time slot collision. `adapters.consentStore = "none"` wires neither, the federation-grant stores are wired only while the feature is enabled, and the MFA stores only while `MFA_MODE` installs MFA.
 4. **The shared Redis connection comes with the first Redis-backed module.** `standaloneRedisClientsModule` opens the one ioredis connection every Redis adapter here uses, from its own section (`redis-clients`), and is added whenever a composed module needs one. The refresh-token family store is on Redis in the shipped composition, so a deployment always has it; the in-memory family store is a test override (`overrides.refreshTokenFamilyModules`).
@@ -1300,7 +1300,7 @@ To add a custom module, import it in `src/buildModules.mts` and add it to the ar
 +import { myCustomModule } from "./my-custom-module.mjs";
  …
  	return [
- 		sessionStoreModuleFor(config),
+ 		sessionStoreModule,
  		…
  		...(federationGrantsEnabled || mfaInstalled ? [subjectRevocationServiceModule] : []),
 +		myCustomModule,

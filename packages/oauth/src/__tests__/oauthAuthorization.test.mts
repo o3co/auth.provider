@@ -27,6 +27,7 @@ import {
 	type Logger,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
+	memorySessionStoresModule,
 	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
@@ -469,6 +470,86 @@ describe("oauthAuthorizationGrantsModule — the authorization_code grant needs 
 			codeRepositoryModule,
 		]);
 		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
+		await handle.dispose();
+	});
+});
+
+/**
+ * The authorization_code grant binds each family it opens to the code's
+ * session, and the subject watermark is read against that session. With a
+ * watermark wired and no session store, the grant would open families no
+ * credential change can reach, so the composition is refused.
+ */
+describe("oauthAuthorizationModule — the authorization_code grant with subject revocation needs a session store", () => {
+	const subjectRevocationModule = defineModule({
+		name: "test:subject-revocation",
+		provides: {
+			subjectRevocation: () => ({
+				kind: "test",
+				revokeBefore: async () => {},
+				revokedBefore: async () => null,
+			}),
+		} as never,
+	});
+	const boot = (config: AppConfig, modules: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthAuthorizationModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+				...familyStoreModules,
+				...modules,
+			],
+			bootstrapComponents: { config: captured(config), pathResolver: (s: string) => s },
+		});
+	const authorizationCodeOn = () => withGrants(makeValidAppConfig(), { authorizationCode: true });
+
+	it("refuses to boot with subjectRevocation wired and no userSessionStore, naming both slots", async () => {
+		const refusal = await boot(authorizationCodeOn(), [subjectRevocationModule]).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "authorization_code" },
+		});
+		const message = String(refusal?.cause?.message);
+		expect(message).toMatch(
+			/authorization_code grant is enabled \(oauth-authorization\.grants\.authorizationCode\.enabled\) and subjectRevocation is wired, but userSessionStore is not wired/,
+		);
+		expect(message).toMatch(/Wire a userSessionStore/);
+		expect(message).toMatch(/remove subjectRevocation/);
+	});
+
+	it("boots with subjectRevocation and userSessionStore both wired", async () => {
+		const handle = await boot(authorizationCodeOn(), [memorySessionStoresModule]);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("boots with neither wired", async () => {
+		const handle = await boot(authorizationCodeOn(), []);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("leaves the other grants alone: subjectRevocation without userSessionStore boots with the authorization_code grant off", async () => {
+		const handle = await boot(
+			withGrants(makeValidAppConfig(), {
+				authorizationCode: false,
+				refreshToken: true,
+				clientCredentials: true,
+			}),
+			[subjectRevocationModule],
+		);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(false);
+		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
+		expect(handle.inspect.grants.has("client_credentials")).toBe(true);
 		await handle.dispose();
 	});
 });

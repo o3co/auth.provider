@@ -38,9 +38,9 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
-	coreConfigForTests,
 	createTestApp,
 	createTestCsrfTokenSigner,
+	createTestFederationSettings,
 	createTestSessionCookiePolicy,
 	csrfTokenSignerContract,
 	makeValidAppConfig,
@@ -52,7 +52,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createSessionCsrfTokenSigner } from "#/csrf-token-signer.mjs";
 import { sessionModule } from "#/module.mjs";
-import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { createRouter as createSessionRouter } from "#/routes/Session.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
@@ -206,7 +206,7 @@ describe("the session store module provides csrfTokenSigner", () => {
 		const config = configWith(VECTOR.secret);
 		const handle = await createTestApp({
 			modules: [
-				sessionStoreModuleFor(config),
+				sessionStoreModule,
 				defineModule({
 					name: "test:csrf-token-signer-consumer",
 					requires: ["csrfTokenSigner"],
@@ -475,31 +475,11 @@ describe("the session module signs and verifies through the signer in the slot, 
 });
 
 describe("the session module reads no session-store.secret", () => {
-	it("neither its providers nor its route factories nor its routes — csrf, login, logout, a federation's start and callback — read it", async () => {
-		const reads: string[] = [];
+	it("neither its providers nor its route factories nor its routes — csrf, login, logout, a federation's start and callback — are handed it", async () => {
+		// The module's deps are its section and its slots: no configuration,
+		// so nothing it builds can reach session-store.secret.
+		expect(sessionModule.requires).not.toContain("config");
 		const base = configWith(VECTOR.secret) as unknown as Record<string, unknown>;
-		const store = new Proxy(base["session-store"] as object, {
-			get(target, key, receiver) {
-				if (key === "secret") reads.push("session-store.secret");
-				return Reflect.get(target, key, receiver);
-			},
-		});
-		const config = {
-			...base,
-			"session-store": store,
-			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
-				federations: {
-					stub: {
-						enabled: true,
-						type: "stub",
-						clientId: "id",
-						clientSecret: "federation-client-secret",
-						callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
-					},
-				},
-			}),
-		} as unknown as AppConfig;
 		const stub: FederationProvider = {
 			name: "stub",
 			scope: ["openid"],
@@ -516,8 +496,13 @@ describe("the session module reads no session-store.secret", () => {
 		};
 		// What the planner hands the module's factories.
 		const deps = {
-			config,
 			section: base.session,
+			federationSettings: createTestFederationSettings({
+				stub: {
+					type: "stub",
+					callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
+				},
+			}),
 			sessionCookiePolicy: COOKIE,
 			deploymentMode: "single",
 			csrfTokenSigner: createTestCsrfTokenSigner(),
@@ -586,7 +571,6 @@ describe("the session module reads no session-store.secret", () => {
 			`/session/oauth/federation/stub/callback?code=code-1&state=${encodeURIComponent(state ?? "")}`,
 		);
 		expect(callback.status).toBeLessThan(500);
-		expect(reads).toEqual([]);
 	});
 });
 
@@ -597,10 +581,7 @@ describe("the session module reads no session-store.secret", () => {
 describe("a token signed under session-store.secret verifies through the session store's signer", () => {
 	it("passes POST /session/logout and the csrfGuard slot in a composition with the session store's module", async () => {
 		const config = configWith(VECTOR.secret);
-		const app = await bootApp(
-			[sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
-			config,
-		);
+		const app = await bootApp([sessionStoreModule, sessionModule, ...stores(), probe()], config);
 		const token = secretSignedToken();
 		expect((await withToken(request(app).post("/session/logout"), token).send({})).status).toBe(
 			200,
@@ -610,10 +591,7 @@ describe("a token signed under session-store.secret verifies through the session
 
 	it("is refused by both when the session secret is another", async () => {
 		const config = configWith(OTHER_SECRET);
-		const app = await bootApp(
-			[sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
-			config,
-		);
+		const app = await bootApp([sessionStoreModule, sessionModule, ...stores(), probe()], config);
 		const token = secretSignedToken();
 		expect((await withToken(request(app).post("/session/logout"), token).send({})).status).toBe(
 			403,
@@ -631,7 +609,7 @@ describe("a composition may put its own signer in the slot beside the session st
 		const config = configWith(VECTOR.secret);
 		const override = createTestCsrfTokenSigner();
 		const handle = await createTestApp({
-			modules: [sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
+			modules: [sessionStoreModule, sessionModule, ...stores(), probe()],
 			bootstrapComponents: { config, pathResolver: (s: string) => s },
 			overrideComponents: { csrfTokenSigner: override },
 		});

@@ -72,6 +72,14 @@ export interface ReplicaSafetyDeclaration {
 }
 
 /**
+ * What a declaration made from the section is handed: the schema's output,
+ * `never` without a section, and `never` for the widest schema
+ * ({@link SectionSchema}, the erased `Module`), so every manifest's function
+ * is assignable to the erased one, as `SectionDeps` does for the deps.
+ */
+type SectionValue<S extends SectionSchema> = [SectionSchema] extends [S] ? never : z.output<S>;
+
+/**
  * Parameterised manifest type. `defineModule` infers `R` / `O` from the literal
  * `requires` / `optional` arrays, so providers and factories get typed deps.
  * `S`, the section's schema, types `deps.section`: inferred from
@@ -134,8 +142,18 @@ export interface ModuleSpec<
 	 * Declares in-process state that must be shared across replicas; read by the
 	 * replica-safety guard at stage 1 (see {@link ReplicaSafetyDeclaration}).
 	 * Omit it when the module's state lives in a shared store, or it holds none.
+	 *
+	 * Where the section decides what the module holds (a storage type), declare
+	 * it as a function of the parsed section, answering the declaration or
+	 * `undefined`. Stage 1 calls it once, after the parse and only for a module
+	 * switched on; a module without a section is handed `undefined`. A throw, or
+	 * an answer that is neither `undefined` nor `{ unsafe: true, reason }` with
+	 * a non-empty `reason`, refuses boot (`config-validation-failed`, naming the
+	 * module, and its section's path when it has one), before any wiring check.
 	 */
-	readonly replicaSafety?: ReplicaSafetyDeclaration;
+	readonly replicaSafety?:
+		| ReplicaSafetyDeclaration
+		| ((section: SectionValue<S>) => ReplicaSafetyDeclaration | undefined);
 
 	/**
 	 * Component values this module materialises into the DI graph, each

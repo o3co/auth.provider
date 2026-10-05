@@ -117,7 +117,7 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-oauth":
 		"oauthModule, oauthSessionGrantModule, oauthAuthorizationGrantsModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
-	"@o3co/auth-provider-session": "sessionModule, sessionStoreModuleFor",
+	"@o3co/auth-provider-session": "sessionModule, sessionStoreModule",
 	"@o3co/auth-provider-standard":
 		"standardSmtpMailSenderModule; standardDevelopmentMailSenderModule in development",
 };

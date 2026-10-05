@@ -115,6 +115,13 @@ export type {
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
 	SessionFamilyIndexClient,
+	SessionLifecycleCloseInput,
+	SessionLifecycleCompleteInput,
+	SessionLifecycleJoinInput,
+	SessionLifecycleKeys,
+	SessionLifecycleOpenInput,
+	SessionLifecycleStoreClient,
+	SessionLifecycleWriteDeadline,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
@@ -244,6 +251,15 @@ export {
 	redisReplaySeenSetBuilder,
 	redisReplaySeenSetModule,
 } from "./replay-seen-set.mjs";
+// SessionLifecycleStore: a session's state, participants and close work in
+// one key per session, spread over fixed shards that each keep a closing
+// index on the records' slot. `redisSessionStoresModule` provides it.
+export {
+	createRedisSessionLifecycleStore,
+	DEFAULT_REDIS_SESSION_LIFECYCLE_KEY_PREFIX,
+	DEFAULT_REDIS_SESSION_LIFECYCLE_MAX_PARTICIPANTS,
+	type RedisSessionLifecycleStoreOptions,
+} from "./session-lifecycle-store.mjs";
 export {
 	createRedisSessionFamilyIndex,
 	type RedisSessionFamilyIndexOptions,

@@ -29,7 +29,7 @@ export interface ChallengeCeremonyDeps {
  *
  *   1. find → null     → contains → outcome `replayed | unknown`
  *   2. find → Challenge, consume → true  → markSeen (swallow expired-at-issue) → outcome `consumed`
- *      carrying the expiry find answered
+ *      carrying the expiry, and the issuance when there is one, that find answered
  *   3. find → Challenge, consume → false → outcome `replayed` (race-loss / TTL boundary, fail-closed)
  *
  * A replay inside the consume → markSeen gap (sub-millisecond on one Redis
@@ -63,7 +63,14 @@ export function createChallengeCeremony(deps: ChallengeCeremonyDeps): ChallengeC
 					}
 					// Suppress — TTL just elapsed, no replay window remains.
 				}
-				return Object.freeze({ outcome: "consumed", expiresAtMs: challenge.expiresAtMs } as const);
+				return Object.freeze({
+					outcome: "consumed",
+					expiresAtMs: challenge.expiresAtMs,
+					// Anything but a finite number from an adapter reads as no issuance.
+					...(typeof challenge.issuedAtMs === "number" && Number.isFinite(challenge.issuedAtMs)
+						? { issuedAtMs: challenge.issuedAtMs }
+						: {}),
+				} as const);
 			}
 
 			// Branch C: consume returned false. Concurrent caller deleted between

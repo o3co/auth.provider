@@ -175,7 +175,9 @@ const OPTIONAL = [
 	// (`requireRefreshTokenFamilies`).
 	"refreshTokenFamilyRevocation",
 	// The subject watermark, consulted at RT redemption as the backstop
-	// for a partial credential-change cascade.
+	// for a partial credential-change cascade. With the authorization_code
+	// grant on, wiring it requires `userSessionStore`
+	// (`requireSessionStoreWithSubjectRevocation`).
 	"subjectRevocation",
 	// Read by the jwt-bearer grant. Optional so a deployment that
 	// never enables that grant is not made to wire one; the grant
@@ -235,6 +237,23 @@ function requireCodeRepository(deps: OAuthAuthorizationModuleDeps): CodeReposito
 			"codeRepository is not wired. The grant redeems the codes /authorize issues into it. " +
 			"Wire a code repository (redisCodeRepositoryModule for more than one replica), or turn " +
 			"the grant off.",
+	);
+}
+
+/**
+ * Refuse the authorization_code grant a composition that wires
+ * `subjectRevocation` without a `userSessionStore`: the grant binds what it
+ * issues to the code's session, and subject revocation reaches those tokens
+ * through it.
+ */
+function requireSessionStoreWithSubjectRevocation(deps: OAuthAuthorizationModuleDeps): void {
+	if (deps.subjectRevocation === undefined || deps.userSessionStore !== undefined) return;
+	throw new Error(
+		"The authorization_code grant is enabled (oauth-authorization.grants.authorizationCode.enabled) " +
+			"and subjectRevocation is wired, but userSessionStore is not wired. The grant binds the " +
+			"tokens it issues to the code's session, and subject revocation reaches them through it. " +
+			"Wire a userSessionStore (core's memorySessionStoresModule for a single replica, or " +
+			"redisSessionStoresModule), or remove subjectRevocation.",
 	);
 }
 
@@ -327,6 +346,7 @@ export const oauthAuthorizationGrantsModule = defineModule<
 		grants: {
 			authorization_code: (deps) => {
 				if (!switchedOn(deps.section, "authorizationCode")) return null;
+				requireSessionStoreWithSubjectRevocation(deps);
 				const grant = createAuthorizationGrant({
 					...deps,
 					codeRepository: requireCodeRepository(deps),

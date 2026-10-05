@@ -84,7 +84,8 @@ type What =
 	| "continuationOf"
 	| "brandClaim"
 	| "establish"
-	| "askEvery";
+	| "askEvery"
+	| "readSubjectRevocationBoundary";
 
 /** The guarded functions: a call, a reference (`.bind`, `.call`, a value passed on) or an aliased import of any is a site. */
 const GUARDED_FUNCTIONS: ReadonlySet<string> = new Set([
@@ -96,6 +97,7 @@ const GUARDED_FUNCTIONS: ReadonlySet<string> = new Set([
 	"brandClaim",
 	"establish",
 	"askEvery",
+	"readSubjectRevocationBoundary",
 ]);
 
 interface Site {
@@ -381,7 +383,7 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 	{
 		file: "packages/core/src/jwt/verify.mts",
 		sites: { revokedBefore: 1 },
-		why: "permanent: the subject-revocation boundary applied to a token by verifyJwt (D9); a token carrier's admission skips the boundary because this reads it",
+		why: "permanent: the subject-revocation boundary applied to a token by verifyJwt (D9), and to a claim a grant compares before signing through subjectBoundaryCovers; a token carrier's admission skips the boundary because this reads it",
 	},
 ];
 
@@ -410,6 +412,31 @@ const MINTER_CALLERS: Readonly<Record<"brandClaim" | "establish" | "askEvery", r
 		establish: [ADMIT, ESTABLISHMENT],
 		askEvery: [ADMIT, ESTABLISHMENT],
 	};
+
+/**
+ * Core's own boundary reader, `readSubjectRevocationBoundary(`, at each of
+ * its callers and nowhere else: `verifyJwt`, and `subjectBoundaryCovers`,
+ * the public check a grant calls. Pinned by count, so a `verifyJwt` that
+ * stops reading the boundary fails here although the reader's own
+ * `revokedBefore` stays.
+ */
+const BOUNDARY_READER_CALLERS: Readonly<Record<string, number>> = {
+	"packages/core/src/jwt/verify.mts": 1,
+	"packages/core/src/user-sessions/subjectRevocationBoundary.mts": 1,
+};
+
+/** Each file's `readSubjectRevocationBoundary(` sites, counted. */
+const boundaryReaderCounts = (
+	sites: ReadonlyMap<string, readonly Site[]>,
+): Record<string, number> =>
+	Object.fromEntries(
+		[...sites]
+			.map(([file, found]) => [
+				file,
+				found.filter((s) => s.what === "readSubjectRevocationBoundary").length,
+			])
+			.filter(([, count]) => count !== 0),
+	);
 
 /** `sites`, counted by kind. */
 const counted = (sites: readonly Site[]): Partial<Record<What, number>> => {
@@ -493,6 +520,10 @@ const ONE_SITE: ReadonlyArray<readonly [string, What]> = [
 		"establish",
 	],
 	["run(askEvery);", "askEvery"],
+	[
+		'import { readSubjectRevocationBoundary as read } from "../jwt/verify.mjs"; await read(r, sub);',
+		"readSubjectRevocationBoundary",
+	],
 ];
 
 /** A probe and the one site it holds, on its first line. */
@@ -648,6 +679,7 @@ describe("session-admission callers", () => {
 					establishWithoutAsking: _e,
 					resumePrimary: _p,
 					continuationOf: _c,
+					readSubjectRevocationBoundary: _b,
 					...rest
 				} = counted(found);
 				return [file, rest] as const;
@@ -692,6 +724,21 @@ describe("session-admission callers", () => {
 		expect(inAdmit.askEvery).toBe(2);
 	});
 
+	it("keeps core's boundary reader to verifyJwt and subjectBoundaryCovers, once each", () => {
+		expect(boundaryReaderCounts(sites)).toEqual(BOUNDARY_READER_CALLERS);
+	});
+
+	it("fails when verifyJwt stops reading the boundary, though the reader's own revokedBefore stays", () => {
+		const verify = "packages/core/src/jwt/verify.mts";
+		const withoutVerifyRead = new Map(sites);
+		withoutVerifyRead.set(
+			verify,
+			(sites.get(verify) ?? []).filter((s) => s.what !== "readSubjectRevocationBoundary"),
+		);
+		expect(counted(withoutVerifyRead.get(verify) ?? []).revokedBefore).toBe(1);
+		expect(boundaryReaderCounts(withoutVerifyRead)).not.toEqual(BOUNDARY_READER_CALLERS);
+	});
+
 	it("has the federation callback call establishWithoutAsking exactly once", () => {
 		const [callback] = ESTABLISH_WITHOUT_ASKING_CALLERS;
 		const found = (sites.get(callback) ?? []).filter((s) => s.what === "establishWithoutAsking");
@@ -707,6 +754,7 @@ describe("session-admission callers", () => {
 				establishWithoutAsking: _e,
 				resumePrimary: _p,
 				continuationOf: _c,
+				readSubjectRevocationBoundary: _b,
 				...rest
 			} = counted(found ?? []);
 			expect(rest, `${file} — ${why}`).toEqual(s);

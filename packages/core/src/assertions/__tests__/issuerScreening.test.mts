@@ -115,6 +115,7 @@ describe("checkAssertionIssuerEntry — an issuer no assertion could name", () =
 		expiresAt: undefined,
 		profile: undefined,
 		clockToleranceSeconds: undefined,
+		maxLifetimeSeconds: undefined,
 	});
 	for (const [label, iss] of MALFORMED) {
 		it(`refuses one carrying ${label}, without repeating it`, () => {

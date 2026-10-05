@@ -40,11 +40,13 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	consoleLogger,
+	coveredByRevocationBoundary,
 	createInMemorySubjectRevocation,
 	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
 	createSymmetricKeyStore,
 	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	generateUserCode,
 	normaliseUserCode,
 } from "@o3co/auth-provider-core";
@@ -2242,6 +2244,52 @@ describe("a subject revocation between the approval and the poll", () => {
 		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
 	});
 
+	/** A memory store whose poll answers its approval with `instants` recorded. */
+	const answeringInstants = (instants: { approvedAtMs: number; authTimeMs: number }) => {
+		const inner = createMemoryDeviceCodeStore();
+		const poll = inner.poll as (...args: unknown[]) => Promise<unknown>;
+		return {
+			...inner,
+			poll: async (...args: unknown[]) => {
+				const answered = (await poll(...args)) as Record<string, unknown> | null;
+				return answered !== null && (answered.status === "approved" || answered.status === "ok")
+					? {
+							...answered,
+							authorization: { ...(answered.authorization as object), ...instants },
+						}
+					: answered;
+			},
+		} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+	};
+
+	it.each([
+		["approvedAtMs", APPROVAL + 1_101, 400],
+		["approvedAtMs", APPROVAL + 1_999, 400],
+		["approvedAtMs", APPROVAL + 2_000, 200],
+		["authTimeMs", APPROVAL + 1_101, 400],
+		["authTimeMs", APPROVAL + 1_999, 400],
+		["authTimeMs", APPROVAL + 2_000, 200],
+	] as const)(
+		"compares %s with the boundary in whole seconds, as token verification does (%i: %i)",
+		async (field, instantMs, status) => {
+			// The boundary 100 ms into a second: the allowance covers the next
+			// whole second, so an instant anywhere in it is refused.
+			const subjectRevocation = boundariesAsSet();
+			const harness = makeHarness({
+				subjectRevocation,
+				store: answeringInstants({
+					approvedAtMs: APPROVAL + 5_000,
+					authTimeMs: APPROVAL + 5_000,
+					[field]: instantMs,
+				}),
+			});
+			const deviceCode = await approvedDevice(harness);
+			await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 100), FAR);
+			const { result } = await harness.poll(deviceCode);
+			expect(result.status).toBe(status);
+		},
+	);
+
 	it("honours an approval whose session authenticated after the boundary", async () => {
 		const subjectRevocation = boundariesAsSet();
 		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
@@ -2375,6 +2423,48 @@ describe("a subject revocation between the approval and the poll", () => {
 		const harness = makeHarness({ subjectRevocation, store: legacy as never });
 		const deviceCode = await approvedDevice(harness);
 		expect((await harness.poll(deviceCode)).result.status).toBe(200);
+	});
+
+	it("mints a token the boundary covers when the boundary is stamped while the poll reads it", async () => {
+		// The reader answers what it read before the stamp, and replies after
+		// the clock has moved on: the token's `iat` must still fall at or
+		// before the boundary, so every surface that checks `iat` refuses it.
+		const inner = boundariesAsSet();
+		const clock = makeClock(APPROVAL);
+		let stamped: Date | null = null;
+		// Armed for the poll's read only: verification's admission reads it too.
+		let armed = false;
+		const subjectRevocation: SubjectRevocation = {
+			kind: "stamped-while-read",
+			revokeBefore: (...args) => inner.revokeBefore(...args),
+			revokedBefore: async (subject) => {
+				const read = await inner.revokedBefore(subject);
+				if (!armed) return read;
+				armed = false;
+				clock.advance(1_000);
+				stamped = new Date(clock.now());
+				await inner.revokeBefore(subject, stamped, FAR);
+				clock.advance(4_000);
+				return read;
+			},
+		};
+		const harness = makeHarness({ clock, subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		armed = true;
+		const { result } = await harness.poll(deviceCode);
+		expect(result.status).toBe(200);
+		const accessToken = (result as { tokens: { access_token: string } }).tokens.access_token;
+		const claims = JSON.parse(
+			Buffer.from(accessToken.split(".")[1] as string, "base64url").toString("utf8"),
+		) as { iat: number };
+		expect(stamped).not.toBeNull();
+		expect(
+			coveredByRevocationBoundary(
+				new Date(claims.iat * 1000),
+				stamped,
+				DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+			),
+		).toBe(true);
 	});
 
 	it("answers a boundary it cannot read at the poll with 503, logged once at error", async () => {

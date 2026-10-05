@@ -200,13 +200,20 @@ describe("createJwtAssertionVerifier — construction", () => {
 		expect(verifier().kind).toBe("jwt");
 	});
 
-	it("takes a client context, and reports the issuer and the expiry beside the handle", async () => {
+	it("takes a client context, and reports the issuer, the issue time and the expiry beside the handle", async () => {
 		// The static-key configuration keeps working: its result also names the
 		// issuer, and it accepts any presenting client.
-		const exp = Math.floor(Date.now() / 1000) + 300;
-		const result = await verifier().verify(await mint({ sub: "device:abc" }, { expSec: exp }), {
-			clientId: "any-client",
+		const iat = Math.floor(Date.now() / 1000) - 30;
+		const exp = iat + 330;
+		const result = await verifier().verify(
+			await mint({ sub: "device:abc" }, { expSec: exp, iatSec: iat }),
+			{ clientId: "any-client" },
+		);
+		expect(result).toEqual({
+			subjectHandle: "device:abc",
+			issuer: ISSUER,
+			issuedAt: iat,
+			expiresAt: exp,
 		});
-		expect(result).toEqual({ subjectHandle: "device:abc", issuer: ISSUER, expiresAt: exp });
 	});
 });

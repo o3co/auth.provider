@@ -15,6 +15,7 @@
  */
 
 import { isStorableExpiry } from "../../adapters/expiry.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
 import { canonicalKey } from "../../single-use/canonical-key.mjs";
 import { ChallengeStorageError } from "../../single-use/errors.mjs";
 import { usableMaxEntries } from "../../single-use/max-entries.mjs";
@@ -138,7 +139,7 @@ export function createMemoryChallengeStore(
 			: options.maxEntries,
 		"createMemoryChallengeStore",
 	);
-	const map = new Map<string, { expiresAtMs: number }>();
+	const map = new Map<string, Challenge>();
 	const schedule = createAmortizedSweep(
 		options,
 		{
@@ -148,7 +149,7 @@ export function createMemoryChallengeStore(
 		"createMemoryChallengeStore",
 	);
 
-	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
+	function getLive(key: string, nowMs: number): Challenge | undefined {
 		const entry = map.get(key);
 		if (entry === undefined) return undefined;
 		if (entry.expiresAtMs <= nowMs) {
@@ -173,7 +174,7 @@ export function createMemoryChallengeStore(
 
 		maxEntries,
 
-		async issue(scope, value, expiresAtMs) {
+		async issue(scope, value, expiresAtMs, issuedAtMs) {
 			// NaN is never `<= now`, and ±Infinity is no expiry: without this the
 			// challenge would be kept forever (the sweep never drops it either).
 			if (!isStorableExpiry(expiresAtMs)) {
@@ -182,6 +183,18 @@ export function createMemoryChallengeStore(
 				);
 			}
 			const nowMs = Date.now();
+			if (
+				issuedAtMs !== undefined &&
+				!(
+					isStorableExpiry(issuedAtMs) &&
+					issuedAtMs <= expiresAtMs &&
+					issuedAtMs <= nowMs + DEFAULT_CLOCK_SKEW_MS
+				)
+			) {
+				throw new RangeError(
+					`ChallengeStore.issue: issuedAtMs must be a finite instant within the Date range, not after expiresAtMs (${String(expiresAtMs)}) nor further ahead of the store's clock than DEFAULT_CLOCK_SKEW_MS (got ${String(issuedAtMs)})`,
+				);
+			}
 			if (expiresAtMs <= nowMs) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
 			}
@@ -196,14 +209,14 @@ export function createMemoryChallengeStore(
 				if (schedule.due()) sweep(nowMs);
 				if (map.size >= maxEntries) throw new ChallengeStoreFullError(maxEntries);
 			}
-			map.set(key, { expiresAtMs });
+			map.set(key, issuedAtMs === undefined ? { expiresAtMs } : { expiresAtMs, issuedAtMs });
 			if (schedule.wrote()) sweep(nowMs);
 		},
 
 		async find(scope, value): Promise<Challenge | null> {
 			const entry = getLive(canonicalKey(scope, value), Date.now());
 			if (entry === undefined) return null;
-			return { expiresAtMs: entry.expiresAtMs };
+			return { ...entry };
 		},
 
 		async consume(scope, value) {

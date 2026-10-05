@@ -65,6 +65,48 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 		expect(Object.isFrozen(result)).toBe(true);
 	});
 
+	it("'consumed' carries the issuance find answered, and none when find answered none", async () => {
+		const { store, ceremony } = makeCeremonyWithMemoryBackends();
+		const issuedAtMs = Date.now();
+		const expiresAtMs = issuedAtMs + 60_000;
+		await store.issue("scope-A", "with", expiresAtMs, issuedAtMs);
+		await store.issue("scope-A", "without", expiresAtMs);
+
+		const withIssuance = await ceremony.consume("scope-A", "with");
+		const withoutIssuance = await ceremony.consume("scope-A", "without");
+
+		expect(withIssuance).toEqual({ outcome: "consumed", expiresAtMs, issuedAtMs });
+		expect(Object.isFrozen(withIssuance)).toBe(true);
+		expect(withoutIssuance).toEqual({ outcome: "consumed", expiresAtMs });
+		expect(Object.hasOwn(withoutIssuance, "issuedAtMs")).toBe(false);
+	});
+
+	for (const [label, answered] of [
+		["null", null],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a string", "1791168982932"],
+	] as const) {
+		it(`'consumed' carries no issuance when find answered ${label} for it`, async () => {
+			const expiresAtMs = future();
+			const store: ChallengeStore = {
+				kind: "stub",
+				issue: vi.fn(async () => undefined),
+				find: vi.fn(async () => ({ expiresAtMs, issuedAtMs: answered as unknown as number })),
+				consume: vi.fn(async () => true),
+			};
+			const ceremony = createChallengeCeremony({
+				challengeStore: store,
+				replaySeenSet: createMemoryReplaySeenSet(),
+			});
+
+			const result = await ceremony.consume("scope-A", "v");
+
+			expect(result).toEqual({ outcome: "consumed", expiresAtMs });
+			expect(Object.hasOwn(result, "issuedAtMs")).toBe(false);
+		});
+	}
+
 	it("'replayed' and 'unknown' carry no expiry", async () => {
 		const { store, ceremony } = makeCeremonyWithMemoryBackends();
 		const unknown = await ceremony.consume("scope-A", "never-existed");

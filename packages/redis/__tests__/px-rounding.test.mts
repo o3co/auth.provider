@@ -265,6 +265,7 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 				set: client.set,
 				pttl: async () => -2,
 				del: async () => 0,
+				get: async () => null,
 			} as ChallengeStoreClient,
 			keyPrefix: "chal:",
 		});
@@ -519,7 +520,12 @@ describe("an expiry or lifetime past the Date range is refused before Redis is a
 	it("ChallengeStore.issue, ReplaySeenSet.markSeen and AccessTokenDenylist.add", async () => {
 		const client = recorder();
 		const challenges = createRedisChallengeStore({
-			client: { set: client.set, pttl: async () => -2, del: async () => 0 } as ChallengeStoreClient,
+			client: {
+				set: client.set,
+				pttl: async () => -2,
+				del: async () => 0,
+				get: async () => null,
+			} as ChallengeStoreClient,
 			keyPrefix: "chal:",
 		});
 		const seen = createRedisReplaySeenSet({

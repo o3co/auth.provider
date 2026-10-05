@@ -24,6 +24,7 @@ import type {
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import {
+	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
 	auditErrorText,
 	boundPolicyAudience,
 	checkOAuthTokenSettings,
@@ -33,10 +34,14 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	isNumericDate,
 	loggableError,
+	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	ownedConfirmation,
 	readSpaceDelimitedParameter,
+	subjectBoundaryCovers,
 	unrepresentedResources,
+	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 } from "@o3co/auth-provider-core";
 
 /** RFC 7523 §2.1. */
@@ -66,7 +71,25 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * - a policy that exceeds its authority (widened scope, audience outside the
  *   ceiling) → `500 server_error`;
  * - a `resource` the final `aud` cannot represent → `invalid_target`;
- * - client and assertion issuer admit no common audience → `invalid_grant`.
+ * - client and assertion issuer admit no common audience → `invalid_grant`;
+ * - with `subjectRevocation` wired, before the Store is asked and whichever
+ *   verifier answered, an assertion is the same uniform `invalid_grant` when
+ *   its `issuedAt` is absent, not a NumericDate, or ahead of this clock by
+ *   more than `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS`; or when its
+ *   `expiresAt` is absent, not a NumericDate, not after `issuedAt`, or more
+ *   than `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS` after it. A boundary is kept
+ *   that long, so a longer-lived assertion would outlive it;
+ * - with `subjectRevocation` wired, an assertion whose `issuedAt` (never
+ *   later than this grant's issuance second) the resolved subject's
+ *   revocation boundary covers (core's `subjectBoundaryCovers`, `verifyJwt`'s
+ *   rule) → the same `invalid_grant`; an unreadable boundary → `503
+ *   temporarily_unavailable`. The boundary is the last read before signing.
+ *   After that read, an assertion that lapsed during it → `invalid_grant`,
+ *   and a token whose lifetime the read used up → `503
+ *   temporarily_unavailable` (a retry succeeds). The guarantee holds up to
+ *   the issuer's clock skew, which the verifier's clock tolerance bounds (at
+ *   most 300 s for the bundled verifiers); a custom verifier must refuse an
+ *   `iat` ahead of its clock by more than its tolerance.
  */
 /**
  * What the jwt-bearer grant reads. The verifier and repository are required
@@ -76,7 +99,10 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * from the `oauthTokenSettings` slot; nothing is read from the whole
  * configuration.
  */
-export type JwtBearerGrantDeps = Pick<GrantDependencies, "keyStore" | "grantPolicy" | "logger"> &
+export type JwtBearerGrantDeps = Pick<
+	GrantDependencies,
+	"keyStore" | "grantPolicy" | "subjectRevocation" | "logger"
+> &
 	ProviderDeps<"assertionVerifier" | "userRepository" | "oauthTokenSettings">;
 
 export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => {
@@ -138,6 +164,26 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 						errorDescription: "assertion did not verify",
 					},
 				};
+			}
+			// See the header: with a revocation boundary to honour, an assertion
+			// must say when it was issued and live no longer than a boundary is
+			// kept. Refused before the Store is asked.
+			if (deps.subjectRevocation !== undefined) {
+				const unbounded = unboundedAssertion(
+					verified.issuedAt,
+					verified.expiresAt,
+					Date.now() / 1000,
+				);
+				if (unbounded !== undefined) {
+					deps.logger?.info({ kind: assertionVerifier.kind, issuer: verified.issuer }, unbounded);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "assertion did not verify",
+						},
+					};
+				}
 			}
 
 			let user: Awaited<ReturnType<UserRepository["authenticateByToken"]>>;
@@ -329,24 +375,75 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			const nowSeconds = Date.now() / 1000;
 			const issuedAt = Math.floor(nowSeconds);
 			const { expiresAt } = verified;
+			// Present means a finite number. The port is typed, not checked:
+			// arithmetic would coerce a custom verifier's numeric string into an
+			// expiry and read Infinity as none, so anything else is NaN here and
+			// refused — a malformed expiry is neither an expiry nor its absence.
+			const remainingAt = (atSeconds: number): number =>
+				typeof expiresAt === "number" && Number.isFinite(expiresAt)
+					? Math.floor(expiresAt - atSeconds)
+					: Number.NaN;
+			// The uniform description, not "has expired": a distinct answer this
+			// far in would reveal that the handle resolves to a real account.
+			const lapsed = (): GrantHandlerResult => {
+				deps.logger?.info(
+					{ kind: assertionVerifier.kind, issuer: verified.issuer },
+					"jwt_bearer_assertion_expired",
+				);
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "assertion did not verify",
+					},
+				};
+			};
 			if (expiresAt !== undefined) {
-				// Present means a finite number. The port is typed, not checked:
-				// arithmetic would coerce a custom verifier's numeric string into
-				// an expiry and read Infinity as none, so anything else is refused
-				// below — a malformed expiry is neither an expiry nor its absence.
-				const remaining =
-					typeof expiresAt === "number" && Number.isFinite(expiresAt)
-						? Math.floor(expiresAt - nowSeconds)
-						: Number.NaN;
+				const remaining = remainingAt(nowSeconds);
 				// `<= 0`: already past `exp` (within a verifier's clock tolerance,
 				// or lapsed while the Store answered) or expiring this second — a
-				// token dead on arrival. `!(> 0)` also catches NaN. The uniform
-				// description, not "has expired": a distinct answer this far in
-				// would reveal that the handle resolves to a real account.
-				if (!(remaining > 0)) {
+				// token dead on arrival. `!(> 0)` also catches NaN.
+				if (!(remaining > 0)) return lapsed();
+				expiresIn = Math.min(expiresIn, remaining);
+			}
+			// No `expiresAt` leaves the configured lifetime standing: the
+			// verifier is asserting a credential with no expiry, not declining
+			// to say (see `AssertionVerificationResult.expiresAt`).
+
+			// See the header: read after the issuance instant is fixed, so a
+			// revocation stamped while the Store or the policy answered is seen.
+			const revocation = deps.subjectRevocation;
+			if (revocation !== undefined) {
+				// Never later than this grant's own issuance second: an issue time
+				// a verifier reports ahead of this clock (within the tolerance the
+				// check above allows) is compared as issued now.
+				const assertionIssuedAt = verified.issuedAt;
+				const boundary = await subjectBoundaryCovers(
+					revocation,
+					subject,
+					typeof assertionIssuedAt === "number"
+						? Math.min(assertionIssuedAt, issuedAt)
+						: assertionIssuedAt,
+				);
+				if (boundary.answer === "unavailable") {
+					deps.logger?.error(
+						{ store: "revocation_boundary", err: loggableError(boundary.cause) },
+						"jwt_bearer_revocation_boundary_unavailable",
+					);
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: VERIFICATION_UNAVAILABLE_DESCRIPTION.revocation_unavailable,
+						},
+					};
+				}
+				if (boundary.answer === "covered") {
+					// The uniform answer: a distinct one would reveal that the
+					// handle resolves to an account with a revocation in force.
 					deps.logger?.info(
 						{ kind: assertionVerifier.kind, issuer: verified.issuer },
-						"jwt_bearer_assertion_expired",
+						"jwt_bearer_assertion_revoked",
 					);
 					return {
 						result: {
@@ -356,11 +453,25 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 						},
 					};
 				}
-				expiresIn = Math.min(expiresIn, remaining);
+				// The read awaited: an assertion that lapsed meanwhile is refused,
+				// as one that had lapsed before it.
+				if (expiresAt !== undefined && !(remainingAt(Date.now() / 1000) > 0)) return lapsed();
+				// Nor is a token signed whose own lifetime the read used up: the
+				// assertion still stands, so the caller is told to retry.
+				if (!(issuedAt + expiresIn > Date.now() / 1000)) {
+					deps.logger?.warn(
+						{ kind: assertionVerifier.kind, expiresIn },
+						"jwt_bearer_issuance_outlasted_token_lifetime",
+					);
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "token issuance took longer than the token's lifetime",
+						},
+					};
+				}
 			}
-			// No `expiresAt` leaves the configured lifetime standing: the
-			// verifier is asserting a credential with no expiry, not declining
-			// to say (see `AssertionVerificationResult.expiresAt`).
 
 			const accessToken = await generateToken(
 				{ ...(clientId ? { client_id: clientId } : {}) },
@@ -387,6 +498,35 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 		},
 	};
 };
+
+/**
+ * Why an assertion cannot be held to a revocation boundary, as its log event,
+ * or `undefined` when it can: an issue time that is absent or not a
+ * NumericDate, or further ahead of `nowSeconds` than any verifier's clock
+ * tolerance; an expiry that is absent or not a NumericDate; a lifetime that is
+ * not positive, or longer than a boundary is kept.
+ */
+function unboundedAssertion(
+	issuedAt: unknown,
+	expiresAt: unknown,
+	nowSeconds: number,
+):
+	| "jwt_bearer_assertion_issued_at_unusable"
+	| "jwt_bearer_assertion_issued_at_ahead"
+	| "jwt_bearer_assertion_expiry_unusable"
+	| "jwt_bearer_assertion_lifetime_empty"
+	| "jwt_bearer_assertion_lifetime_exceeded"
+	| undefined {
+	if (!isNumericDate(issuedAt)) return "jwt_bearer_assertion_issued_at_unusable";
+	if (issuedAt > nowSeconds + MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS) {
+		return "jwt_bearer_assertion_issued_at_ahead";
+	}
+	if (!isNumericDate(expiresAt)) return "jwt_bearer_assertion_expiry_unusable";
+	if (!(expiresAt > issuedAt)) return "jwt_bearer_assertion_lifetime_empty";
+	return expiresAt - issuedAt > ASSERTION_MAX_LIFETIME_LIMIT_SECONDS
+		? "jwt_bearer_assertion_lifetime_exceeded"
+		: undefined;
+}
 
 /**
  * Intersect what the request asks for, what the assertion authorizes, and what

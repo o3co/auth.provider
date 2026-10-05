@@ -15,14 +15,12 @@
  */
 
 import {
-	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
-	CoreConfigSchema,
 	type CsrfGuard,
 	type CsrfTokenSigner,
 	consoleLogger,
 	defineModule,
-	enabledFederationsOf,
+	type FederationSettings,
 	LOGIN_RETURN_PARAMETER,
 	type Logger,
 	loginPageCarriesReturn,
@@ -44,9 +42,6 @@ import { createLoginEntry } from "./login-entry.mjs";
 import { LOGIN_ATTEMPT_TAG, MAX_LOGIN_WINDOW_MS } from "./loginAttempts.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
-
-/** What the module reads of the configuration beside its own section: core's, for `core.federations`. */
-const sessionConfigSchema = CoreConfigSchema.pick({ core: true });
 
 /**
  * The schema of `session {}`, the module's own section, strict at every
@@ -134,18 +129,16 @@ const SECTION = {
 } as const;
 
 /**
- * Each enabled `core.federations` entry's name and flat `callbackURL`, read
- * as core reads the entries it dispatches (`enabledFederationsOf`). Core
- * refuses the boot before any route is built when an enabled entry has no
- * non-empty `callbackURL`, so the value is taken as written; a key named
- * after the entry's type is one of the type's own keys and is not read here.
+ * Each enabled federation's name and `callbackURL`, from core's
+ * `federationSettings`. Boot refuses an enabled entry without a non-empty
+ * `callbackURL` before any route is built, so every enabled entry carries
+ * one; a disabled entry's is not read.
  */
-const providerCallbackUrlsOf = (config: unknown): ReadonlyMap<string, string> =>
+const providerCallbackUrlsOf = (settings: FederationSettings): ReadonlyMap<string, string> =>
 	new Map(
-		enabledFederationsOf(config).map(([name, entry]) => [
-			name,
-			(entry as { readonly callbackURL: string }).callbackURL,
-		]),
+		Object.entries(settings).flatMap(([name, entry]) =>
+			entry.enabled && entry.callbackURL !== undefined ? [[name, entry.callbackURL] as const] : [],
+		),
 	);
 
 /**
@@ -177,10 +170,12 @@ const csrfGuardOf = (
  *                           POST /session/logout
  *   - "federation-routes" — GET /session/oauth/federation/:name (+ callback)
  *
- * Its section is `session {}` (`sessionSectionSchema`); `config` is read for
- * `core.federations` alone.
+ * Its section is `session {}` (`sessionSectionSchema`); it reads nothing else
+ * of the configuration.
  *
- * `requires`: `config` and `userRepository`; the three stores these routes
+ * `requires`: `userRepository`; core's `federationSettings`, the federations
+ * `core.federations` declares (each enabled one's callback URL, and whether
+ * an installed one's upstream `amr` counts); the three stores these routes
  * use (`userSessionStore`, `federationTokenStore`, `sessionFederationIndex`);
  * `csrfTokenSigner`, what the CSRF token is signed and checked with (the
  * session store's module provides it from `session-store.secret`, which this
@@ -195,12 +190,11 @@ const csrfGuardOf = (
  *
  * `provides` what other packages need of the browser session through
  * core-owned slot contracts, so none imports this package: `csrfGuard` and
- * `loginEntry`. `providerCallbackUrls` is derived from config inside the
- * federation-routes lambda rather than being a synthetic key, since it has no
- * contribution surface.
+ * `loginEntry`. `providerCallbackUrls` is derived from `federationSettings`
+ * inside the federation-routes lambda.
  */
 export const sessionModule = defineModule<
-	| "config"
+	| "federationSettings"
 	| "userRepository"
 	| "userSessionStore"
 	| "federationTokenStore"
@@ -216,9 +210,8 @@ export const sessionModule = defineModule<
 >({
 	name: "session",
 	section: SECTION,
-	configSchema: sessionConfigSchema,
 	requires: [
-		"config",
+		"federationSettings",
 		"userRepository",
 		"userSessionStore",
 		"federationTokenStore",
@@ -308,15 +301,17 @@ export const sessionModule = defineModule<
 				};
 			},
 			(deps) => {
-				const config = deps.config as AppConfig;
 				return {
 					id: "federation-routes",
 					mountPath: "/session",
 					handler: federationRoutes.createRouter(express, {
-						config,
+						federationSettings: deps.federationSettings,
+						// Where an account-link start may be navigated from: the
+						// trust list the CSRF guard reads.
+						linkTrustedOrigins: deps.section.csrf?.trustedOrigins ?? [],
 						federationProviders: deps.federationProviders,
 						federationRedirectPolicyResolver: deps.federationRedirectPolicyResolver,
-						providerCallbackUrls: providerCallbackUrlsOf(config),
+						providerCallbackUrls: providerCallbackUrlsOf(deps.federationSettings),
 						userRepository: deps.userRepository,
 						userSessionStore: deps.userSessionStore,
 						sessionFederationIndex: deps.sessionFederationIndex,

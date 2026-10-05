@@ -1216,6 +1216,27 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 	});
 });
 
+describe("oauthModule — the session-close notifier", () => {
+	it("contributes one notifier, built over its client registry, key store and issuer", async () => {
+		const factories = oauthEndpointsModule.contributes?.sessionCloseNotifiers;
+		expect(Object.keys(factories ?? {})).toEqual(["oauth"]);
+		const notifier = await factories?.oauth?.({
+			keyStore: createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx"),
+			clientRepository: { findById: async () => null },
+			section: {
+				jwt: { issuer: "https://auth.test" },
+				accessToken: { defaultExpiresIn: 3600, maxExpiresIn: 3600 },
+				refreshToken: { expiresIn: 86_400 },
+			},
+		} as never);
+		expect(typeof notifier?.notify).toBe("function");
+		// An unregistered client is settled, nothing sent.
+		await expect(
+			notifier?.notify({ sid: "s", sub: "u", clientId: "gone", cause: "rp_logout" }),
+		).resolves.toBeUndefined();
+	});
+});
+
 describe("oauthModule — a consumer of session admission", () => {
 	it("requires sessionRequirementResolver, the synthetic key every consumer of admission takes", () => {
 		const module = oauthEndpointsModule;

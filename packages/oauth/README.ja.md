@@ -93,7 +93,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 - `oauthEndpointsModule` は `config`、`clientRepository`、`keyStore` を要求する。`/authorize` は未認証のブラウザーを `loginEntry` スロットが示すログインページへ送る。これは `@o3co/auth-provider-session` の session モジュールが `session.loginPage.url` から provide する: パスでも絶対 URL でもよく、自身のクエリを持ってよい（`/login?tenant=x`）が、`redirect_to` は持てない — `/authorize` が戻り先のリクエストを示す `redirect_to` を付け加えるので、既にあれば 2 つ目としてページに届いてしまう（そのようなページは session モジュールが boot で拒否する。`config-validation-failed`、キーを名指しする）。フラグメント内の `redirect_to` はクエリのものではないので受け入れる。フラグメントは `redirect_to` を加えたクエリの後ろに保たれる（`/login#x` → `/login?redirect_to=…#x`）。スロットはマニフェストでは任意で、`/authorize` を組み立てるところでは必須: provide するモジュールが無いか、そのエントリがページを示さなければ、ルーターは組み立てを拒否する（`contribute-factory-failed`、スロットを名指しする）。
 - `/authorize` は、ルーターを組み立てる時点でグラントレジストリが `authorization_code` グラントを持つときだけ存在し、そのときはコードを発行する先の `codeRepository` が要る: 無ければルーターは組み立てを拒否する。同意ステップと Client ID Metadata Document もそれと並んでだけ存在する。このグラントの無い構成 — マシン向けのトークンだけ — はそのどれもマウントせず、discovery で authorization endpoint を示さず、コードリポジトリも要らない。
-- `authorization_code` グラントを有効にした `oauthAuthorizationGrantsModule` は、グラントがコードを引き換える `codeRepository` を要求し、無ければスイッチを名指しして boot を拒否する（`contribute-factory-failed`）。ほかのグラントはこれを読まない。
+- `authorization_code` グラントを有効にした `oauthAuthorizationGrantsModule` は、グラントがコードを引き換える `codeRepository` を要求し、無ければスイッチを名指しして boot を拒否する（`contribute-factory-failed`）。ほかのグラントはこれを読まない。`subjectRevocation` を配線したときは、このグラントは `userSessionStore` も要求し、無ければ両方のスロットを名指しして boot を拒否する（`contribute-factory-failed`）: `userSessionStore` を配線する（1 レプリカなら core の `memorySessionStoresModule`、または `redisSessionStoresModule`）か、`subjectRevocation` を外す。ほかのグラントには影響しない。
 - `subjectRevocation`、`auditSink`、`accessTokenDenylist` は配線は任意だが決定は任意ではない: 埋めないスロットは不在を宣言すること — `oauth.revocation.subject = "unsupported"`、`core.declaredAbsent = ["auditSink"]`、`oauth.revocation.accessToken = "unsupported"` — さもなければ boot が拒否する。
 - `oauthEndpointsModule`、およびセクションがグラントを有効にしている間の `oauthAuthorizationGrantsModule` と `oauthSessionGrantModule` は `sessionRequirementResolver` — boot プランナーが埋める core の合成キー — を要求する。したがってそのどれかをインストールする構成は、インストールするセッション要件を `core.sessionRequirements.expected` で宣言しなければならず（無ければ `[]`）、さもなければ boot が拒否する（core の session-admission ADR、D7）。
 - `oauth.jwt.issuer` が正規の issuer URL でなければルーターの構築が失敗する: `iss` はデプロイの属性であり、リクエストから読むものではない。
@@ -176,7 +176,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 | [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー（`/authorize` はハンドラーと、それが順に呼ぶ段階ごとのファイル） — authorize、consent、logout、federation token（ハンドラーと、それが順に呼ぶ段階ごとのファイル。呼び出し元がまだ有効かの確認は `routes/federationToken.mts` に残る。そのセッションの読み取りを core のドリフトガードがそのファイルに固定しているため）、revoke、token（`/oauth/token` のディスパッチ）、introspect（誰が問い合わせてよいかと、必要なストアが落ちているときの答え。トークンそのものへの答えは `routes.mts` に残る。そのセッションと `amr` の読み取りを core のドリフトガードがそのファイルに固定しているため）、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorizeRequest.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
 | [`grants/`](./src/grants) | グラントハンドラー: core のグラント契約の上での、リクエストからトークンへの純粋な判断。HTTP を持たない。 |
 | [`middleware/`](./src/middleware) | クライアント認証。兄弟パッケージが再利用する。 |
-| [`logout/`](./src/logout) | 順序の決まったセッションカスケード（`cascadeLogout`）、RP へのバックチャネル POST、フロントチャネルのページ、subject revocation service を配線するモジュール。 |
+| [`logout/`](./src/logout) | 順序の決まったセッションカスケード（`cascadeLogout`）、RP へのバックチャネル POST、モジュールが core のセッションライフサイクルに寄与するセッション終了の通知器、フロントチャネルのページ、subject revocation service を配線するモジュール。 |
 | [`clients/`](./src/clients) | Client ID Metadata Documents の解決: クライアントが名指す URL からその登録を SSRF ガード越しに取得し、キャッシュする。 |
 | [`types/`](./src/types) | イントロスペクション応答の契約。 |
 | [`testing/`](./src/testing) | テスト用エントリー `@o3co/auth-provider-oauth/testing`: テストがこのパッケージの設定を組み立てるもの。 |
@@ -564,6 +564,14 @@ OIDC のログアウトエンドポイントは、セッションカスケード
 > リフレッシュトークンを持つなら、呼ぶべきはこちらである。
 > [session パッケージの README](../session/README.md#what-post-sessionlogout-invalidates) を参照。
 
+### セッション終了の通知器
+
+`oauthModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。まだライフサイクルを通してセッションを終了するものはなく、以下のログアウトルートは今も自分のカスケードを走らせる。
+
+- 通知を送る時点の登録で読んだ relying party の `backchannelLogoutUri` へ、OIDC Back-Channel Logout 1.0 の `logout_token` を 1 つ POST する。送り手と外向きの経路はログアウトルートのブロードキャストと同じである。トークンはキーストアが署名し、`iss` はモジュールの issuer（`oauth.jwt.issuer`）である。
+- トークンは、relying party が断っていない限り（`backchannelLogoutSessionRequired: false`）、何がセッションを終了させたかにかかわらず、そのセッションの `sid` を含む。
+- 通知は、届いたとき、送り先がないとき（URI がない、またはクライアントがもう登録されていない）、relying party が恒久的に断ったとき（それ以外の 4xx。warn で `logout_backchannel_rejected` と記録する）に片付き、resolve する。送り直す価値があるとき — クライアントの登録簿かキーストアが答えられない、期限内にリクエストが終わらない、応答が 408・429・5xx — だけ reject し、ライフサイクルはその relying party の作業を後の終了か巡回のために保留のまま残す。
+
 ### `POST /oauth/logout` と `GET /oauth/logout`
 
 OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`POST` は `application/x-www-form-urlencoded`、`GET` はクエリ）:
@@ -815,6 +823,7 @@ const assertionVerifier = createRegistryAssertionVerifier({
 - **`exp`・`iat`・`nbf` は NumericDate でなければならない**（core の `isNumericDate`）: `1e400`（JSON では Infinity）や Date の範囲を超える値を持つアサーションは `invalid_grant` で、ID-JAG の `jti` を記録する前に拒否される — 以前は replay seen-set に届いて `503` として返っていた。小数は構わない。
 - **登録されていない `iss` は署名の処理より前に拒否される。** 誰も登録していない発行者については、鍵も取得せず署名も確認しない。「A が署名し、B を名乗る」ものは B の鍵で失敗する。発行者を指し得ない `iss`（256 文字を超える、または制御文字を含む — `client_id` と同じ規則）は、レジストリに問い合わせる前に拒否される。自前のストアに裏打ちされたレジストリにそのような値が渡ることはないので、それで例外を投げさせられることもない。そのような名前で登録しようとしたエントリーは追加時に拒否される。`findIssuer` は未知の発行者に `null` で答え、例外を投げてはならない。
 - **`allowedClients`** は発行者のアサーションを提示してよい者を制限する。リストがあれば未認証の提示者は拒否される。無ければ誰でもよい。
+- **`maxLifetimeSeconds`** は、その発行者の素の RFC 7523 アサーションが生きてよい長さを `exp − iat` で制限する。それより長く生きるアサーションは `invalid_grant` で、`lifetime` としてログに出す。既定は 1 時間（core の `DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS`）。エントリーは 1 日（`ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`）までの整数秒を指定できる。サブジェクトの失効境界はその長さだけ保持され、それが覆うすべてのアサーションより長く残らなければならないからである。`iat` の無いアサーションには測る有効期間が無い。ID-JAG はプロファイル自身の 1 時間に従う。
 - **`allowedScopes`** はアサーション自身の `scope` クレームとの共通部分をとり（アサーションが何も名指さなければ単独で）、リクエストとクライアント登録がさらに絞るスコープの上限になる。
 - **`allowedAudiences`** は、何が選んだかに関係なく発行される `aud` を抑える — `grantPolicy`、RFC 8707 の `resource`、クライアント登録（その `allowedAudiences` を発行者のものに絞ったもの、クライアント ID は発行者が認める場合だけ）。認証済みクライアントが無ければそれがソースにもなる: トークンはこのサーバーではなく発行者の最初の audience を名指す。共通の audience を 1 つも認めないクライアントと発行者の組は `invalid_grant` で、`jwt_bearer_issuer_audience_mismatch` をログに出す。
 - **`expiresAt`** はその場で変わる唯一のフィールドで（`registry.setExpiresAt`）、それ以外は不変 — 削除して追加し直す — なので、何を信頼してきたかの履歴は追加と削除の履歴である。`add`、`list`、`remove` が管理面の残りである。**メモリーのレジストリではその管理面は 1 プロセスにしか届かない:** あるレプリカで `setExpiresAt` によって失効させた発行者は他のレプリカでは信頼されたままで、再起動は構成のエントリーからレジストリを組み直し — 失効させた場所でも発行者を復活させる — しかも `core.deployment.mode = "multi"` はそれを捕まえられない。レジストリはモジュール上ではなく、渡した `assertionVerifier` の内側にあるからである。レジストリ構築時に与えたエントリーはどこでも同一である。複数レプリカではエントリーのリストを変えて再デプロイするか、共有ストアの上にレジストリを実装すること。
@@ -883,6 +892,27 @@ const assertionVerifier = createRegistryAssertionVerifier({
 - **短命なアサーションからは短命なアクセストークンが生まれる。** ID-JAG の `iat` は最大 1 時間前までで、IdP は一般に数分の有効期間しか与えない。そこから交換したトークンもそれより長くは生きない。リフレッシュトークンは発行されないので、トークンが期限切れになったらクライアントは**新しいアサーションで交換し直す**。同じ ID-JAG を再び提示することはできない — 各 `jti` は 1 回しか受け付けない。
 - **1 秒も残っていないアサーションは拒否される**（`invalid_grant` / `assertion did not verify` — 検証に失敗したすべての応答と同じ答えなので、その背後のハンドルについて呼び出し元に何も伝えない）。オペレーター向けには `jwt_bearer_assertion_expired` としてログに出す。これは `exp` を過ぎていても、エントリーの `clockToleranceSeconds`（既定 60）によって検証は通ってしまうアサーションも含む: 許容は検証の際の時計のずれを吸収するが、トークンが引き継ぐ有効期間は残さない。1 つの発行者からこの行が定常的に出るなら、このサーバーと時計がずれているか、クライアントが最後の瞬間にアサーションを提示している。
 - **独自の `AssertionVerifier` は**、資格情報に期限がある限り **`expiresAt` を報告する**。このフィールドは任意だが、省略すると**期限の無い**資格情報を主張することになり、設定した有効期間が上限無しで適用される。あるなら有限の数値でなければならない: 数値の文字列、`null`、`NaN`、`Infinity` は期限としても期限なしとしても読まず、`invalid_grant` で拒否する。`createRegistryAssertionVerifier` と `createJwtAssertionVerifier` は、自分が要求する `exp` から常にそれを報告する。
+
+### サブジェクトの失効は、それより前に発行されたアサーションに及ぶ
+
+`subjectRevocation` が配線されていると、境界が有効かどうか、どの検証器が答えたかにかかわらず、すべてのアサーションは `iat` と `exp` を持たなければならない。グラントはストアに尋ねる前に、次のいずれかに当たるアサーションを拒否する:
+
+- 検証器が使える `issuedAt` を報告しない（`jwt_bearer_assertion_issued_at_unusable`）
+- `issuedAt` がこのサーバーの時計より core の `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS`（300 秒）を超えて先にある（`jwt_bearer_assertion_issued_at_ahead`）
+- 使える `expiresAt` を報告しない（`jwt_bearer_assertion_expiry_unusable`）
+- `expiresAt` が `issuedAt` より後でない（`jwt_bearer_assertion_lifetime_empty`）
+- `expiresAt − issuedAt` が 1 日（core の `ASSERTION_MAX_LIFETIME_LIMIT_SECONDS`）を超える（`jwt_bearer_assertion_lifetime_exceeded`）
+
+サブジェクトの境界は 1 日保持されるので、それより長く生きるアサーションは、それを覆う境界より長く残ってしまう。
+
+そのうえでグラントは、署名前の最後の読み取りとして、core の `subjectBoundaryCovers` を通じて解決したサブジェクトの失効境界を読む。アサーションの `issuedAt` を、グラント自身の発行の秒より後にならない値として、`verifyJwt` がトークンの `iat` に適用するのと同じ規則と許容幅で比べる。境界以前のものは拒否する（`jwt_bearer_assertion_revoked`）。ここまでの拒否はすべて一律の `invalid_grant` / `assertion did not verify` である。
+
+境界を読めないときは `503 temporarily_unavailable`（`jwt_bearer_revocation_boundary_unavailable`）である。読み取りの後、その間に期限切れになったアサーションは `invalid_grant`（`jwt_bearer_assertion_expired`）である。読み取りがトークン自身の有効期間を使い切ったときは署名せず、`503 temporarily_unavailable`（`jwt_bearer_issuance_outlasted_token_lifetime`）を返す。再試行すれば成功する。
+
+この保証は発行者の時計のずれの範囲で成り立つ。そのずれは検証器の時計の許容幅で抑えられ、同梱の検証器では最大 300 秒である。`subjectRevocation` が無ければ何も変わらない。
+
+- **独自の `AssertionVerifier` は `issuedAt` と `expiresAt` を報告し、自分の時計より許容幅を超えて先にある `iat` を拒否する。** `subjectRevocation` が配線されていると、グラントはどちらかを報告しないアサーションと、1 日より長く生きるアサーションをすべて拒否する。`createRegistryAssertionVerifier` と `createJwtAssertionVerifier` は、アサーションが `iat` を持てば常に `issuedAt` を報告し、エントリーの許容幅を超えて時計より先にあるものを拒否する。
+- サブジェクトの失効は、上流の発行者の資格情報を失効させない。その発行者が失効の後に署名したアサーションは新しい認証であり、受け入れられる。
 
 ## テスト
 

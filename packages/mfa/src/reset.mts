@@ -279,7 +279,9 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 					? { report, complete: true }
 					: {
 							report,
-							cause: new Error("the subject's sessions could not all be ended"),
+							cause: new Error(
+								"the subject's sessions could not all be ended, or a boundary is in force without covering in-flight issuance; re-run",
+							),
 							complete: false,
 						};
 			};

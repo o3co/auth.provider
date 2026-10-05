@@ -39,7 +39,11 @@ import {
 	type Logger,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestFederationSettings,
+	makeValidAppConfig,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -89,7 +93,7 @@ const fake = vi.hoisted(() => {
 vi.mock("redis", () => ({ createClient: () => fake.client }));
 
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
-import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import {
 	makeFederationTokenStore,
 	makePermissivePolicy,
@@ -172,7 +176,7 @@ beforeEach(() => {
 const alice = { id: "user-1", username: "alice" };
 
 /**
- * `sessionStoreModuleFor` over the fake Redis, then a module of routes that
+ * `sessionStoreModule` over the fake Redis, then a module of routes that
  * read and write `req.session` — two probes, and the session package's own
  * login and federation routers.
  */
@@ -224,7 +228,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 					mountPath: "/session",
 					handler: createFederationRouter(express, {
 						requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
-						config: config as never,
+						federationSettings: createTestFederationSettings(),
 						federationTransactionCookieName: deriveFederationTransactionCookieName(
 							deps.sessionCookiePolicy.name,
 						),
@@ -276,7 +280,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 		},
 	});
 	const handle = await createApp({
-		modules: [sessionStoreModuleFor(config), routes],
+		modules: [sessionStoreModule, routes],
 		bootstrapComponents: {
 			config,
 			pathResolver: (p: string) => p,

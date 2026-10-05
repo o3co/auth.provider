@@ -42,7 +42,7 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { sessionModule } from "#/module.mjs";
-import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSessionCaptures } from "./_helpers/sections.mjs";
 
 /** The type the entries name: its schema accepts any key beside core's. */
@@ -85,7 +85,7 @@ async function boot(federations: Readonly<Record<string, object>>): Promise<expr
 	}) as unknown as AppConfig;
 	const handle = await createApp({
 		modules: [
-			sessionStoreModuleFor(config),
+			sessionStoreModule,
 			sessionModule,
 			memorySessionStoresModule,
 			memoryFederationTokenStoreModule,

@@ -79,7 +79,11 @@ import {
 	parseFederationEntries,
 } from "./federation-entries.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
-import { checkReplicaSafety } from "./replica-safety.mjs";
+import {
+	checkReplicaSafety,
+	type ReplicaSafetyModuleRef,
+	readReplicaSafety,
+} from "./replica-safety.mjs";
 import type {
 	BootStage,
 	BootstrapMap,
@@ -310,6 +314,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"rateLimitBudgets",
 	"federationTypes",
 	"admissionActions",
+	"sessionCloseNotifiers",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -534,7 +539,7 @@ function checkAuthoritativeOverrides(
 /**
  * What a `synthetic-key-collision` message adds for `key`: for a key boot
  * fills from the configuration (`deploymentMode`, `tokenBindingSettings`,
- * `federationSettings`), where to state its value instead.
+ * `federationSettings`, `outboundPolicy`), where to state its value instead.
  */
 const SYNTHETIC_KEY_REMEDIES: ReadonlyMap<string, string> = new Map([
 	[
@@ -548,6 +553,10 @@ const SYNTHETIC_KEY_REMEDIES: ReadonlyMap<string, string> = new Map([
 	[
 		"federationSettings",
 		" Set core.federations in the configuration instead: boot fills federationSettings from it.",
+	],
+	[
+		"outboundPolicy",
+		" Set core.outbound in the configuration instead: boot fills outboundPolicy from it.",
 	],
 ]);
 const syntheticKeyRemedy = (key: string): string => SYNTHETIC_KEY_REMEDIES.get(key) ?? "";
@@ -808,6 +817,7 @@ const FEDERATION_KINDS_REGISTERED =
  */
 const PLANNER_OWNED_KINDS = [
 	"rateLimitBudgets",
+	"sessionCloseNotifiers",
 	"federationTypes",
 	"admissionActions",
 	"auditHooks",
@@ -825,6 +835,8 @@ const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string
 		case "admissionActions":
 		case "rateLimitBudgets":
 			return "the modules that own its entries contribute them, and no module overrides one";
+		case "sessionCloseNotifiers":
+			return "the module that tells relying parties contributes its notifier, which the session lifecycle reads, and no module overrides one";
 		default:
 			return "the modules that own its entries contribute them, and a module may override one";
 	}
@@ -992,7 +1004,11 @@ const containerShape = (container: unknown): string =>
  *   (`admissionActionSnapshots`), are what registration admits
  *   (`admissionActionProblem`); an action is registered by the module that
  *   admits it, so an override of one is refused as the kind guarded
- *   (`contribution-kind-guarded`).
+ *   (`contribution-kind-guarded`);
+ * - a `sessionCloseNotifiers` container is a record keyed by name, and no
+ *   module overrides the kind (`contribution-kind-guarded`): the notifier is
+ *   its contributor's, switched off only by not installing it. Both read off
+ *   the entries normalisation captured, which stage 4 applies.
  *
  * Throws `contribution-malformed`; `name` is absent for a container.
  * @internal
@@ -1003,7 +1019,7 @@ function checkContributionShapes(
 ): void {
 	const refuse = (
 		m: Module,
-		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions",
+		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions" | "sessionCloseNotifiers",
 		name: string | undefined,
 		channel: "contributes" | "overrides",
 		problem: string,
@@ -1067,6 +1083,32 @@ function checkContributionShapes(
 			const entries =
 				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
 			// Read off the entries normalisation captured, which stage 4 applies.
+			for (const entry of entries ?? []) {
+				if (entry.kind !== "sessionCloseNotifiers") continue;
+				if (channel === "overrides") {
+					throw new BootError({
+						message: `Module "${m.name}" overrides sessionCloseNotifiers, which no module may: the notifier is its contributor's, switched off only by not installing it.`,
+						reason: "contribution-kind-guarded",
+						stage: "validateManifests",
+						details: {
+							reason: "contribution-kind-guarded",
+							kind: "sessionCloseNotifiers",
+							channel: "overrides",
+							module: m.name,
+						},
+					});
+				}
+				// Normalisation files a list under Symbol keys.
+				if (typeof entry.key !== "string") {
+					refuse(
+						m,
+						"sessionCloseNotifiers",
+						undefined,
+						channel,
+						"the kind takes a record keyed by name, not a list",
+					);
+				}
+			}
 			for (const entry of entries ?? []) {
 				if (
 					channel !== "overrides" ||
@@ -1291,6 +1333,35 @@ function checkPerKindContributeDuplicates(
 	}
 }
 
+/**
+ * At most one session-close notifier per composition, read off the
+ * manifests: two contributions, under any names, refuse boot
+ * (`duplicate-contribute`), since the session lifecycle tells relying parties
+ * through one.
+ * @internal
+ */
+function checkOneSessionCloseNotifier(modules: readonly NormalisedModule[]): void {
+	const contributions = modules.flatMap((m) =>
+		m.contributesEntries
+			.filter((entry) => entry.kind === "sessionCloseNotifiers")
+			.map((entry) => ({ module: m.name, name: String(entry.key) })),
+	);
+	const [first, second] = contributions;
+	if (first === undefined || second === undefined) return;
+	throw new BootError({
+		message: `sessionCloseNotifiers is contributed more than once — "${first.name}" by module "${first.module}" and "${second.name}" by module "${second.module}"; a composition tells relying parties through one notifier.`,
+		reason: "duplicate-contribute",
+		stage: "validateManifests",
+		details: {
+			reason: "duplicate-contribute",
+			kind: "sessionCloseNotifiers",
+			identity: second.name,
+			identityKind: "name",
+			modules: [first.module, second.module],
+		},
+	});
+}
+
 // ---------------------------------------------------------------------------
 // Step 7 — RouteContribution collision check
 // ---------------------------------------------------------------------------
@@ -1492,6 +1563,14 @@ const FEDERATION_REQUIRED_STORES = [
 ] as const;
 
 /**
+ * The stores an enabled federation needs: all six when any
+ * `core.federations` entry is enabled, else none.
+ */
+function federationStoreSlotsOf(config: AppConfig): readonly ComponentKey[] {
+	return enabledFederationsOf(config).length > 0 ? FEDERATION_REQUIRED_STORES : [];
+}
+
+/**
  * If any `core.federations.<name>.enabled === true`, all six session,
  * federation and refresh-token-family slots must be wired. A missing one
  * makes federation routes either fail at runtime with an opaque 503 (the
@@ -1499,7 +1578,8 @@ const FEDERATION_REQUIRED_STORES = [
  * unexpected 404s (refreshTokenFamilyRevocation, per the `logoutSupported` /
  * `federationTokenSupported` gates in `packages/oauth/src/routes.mts`).
  * Refusing at boot makes both visible. Stage 1 counts a planned slot as
- * wired; stage 3 refuses one that holds `undefined`.
+ * wired; stage 2 builds every provider of one (`federationStoreSlots`), read
+ * or not; stage 3 refuses one that holds `undefined`.
  */
 export function checkFederationStoresWiring(
 	config: AppConfig,
@@ -2259,19 +2339,7 @@ function parseModuleSections(
 	}[] = [];
 	const issues: z.ZodIssue[] = [];
 	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
-	const refuse = () => {
-		const named = issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`);
-		return new BootError({
-			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: {
-				reason: "config-validation-failed",
-				issues,
-				modules: refused,
-			},
-		});
-	};
+	const refuse = () => moduleSectionsRefusal(issues, refused);
 
 	for (const m of modules) {
 		if (m.section === undefined) continue;
@@ -2352,15 +2420,67 @@ function switchedOffModules(
 		} as z.ZodIssue);
 		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
 	}
-	if (issues.length > 0) {
-		throw new BootError({
-			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`).join("; ")}.`,
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: { reason: "config-validation-failed", issues, modules: refused },
-		});
-	}
+	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
 	return off;
+}
+
+/**
+ * Each module's replica-safety declaration as the guard reads it
+ * (`readReplicaSafety`): a static one as written, one made from the section
+ * answered once for the section the module is handed. A declaration that
+ * throws or answers a malformed value is one more issue — at its section's
+ * path, or naming the module alone when it has no section — all of them
+ * refused together as `config-validation-failed`.
+ * @internal
+ */
+function replicaSafetyAsRead(
+	modules: readonly Module[],
+	sections: ReadonlyMap<string, { readonly value: unknown }>,
+): readonly ReplicaSafetyModuleRef[] {
+	const read: ReplicaSafetyModuleRef[] = [];
+	const issues: z.ZodIssue[] = [];
+	const refused: { readonly module: string; readonly schemaPath?: string }[] = [];
+	for (const m of modules) {
+		const answer = readReplicaSafety(m, sections.get(m.name));
+		if ("declaration" in answer) {
+			read.push({
+				name: m.name,
+				...(answer.declaration === undefined ? {} : { replicaSafety: answer.declaration }),
+			});
+			continue;
+		}
+		const sectioned = m.section !== undefined;
+		issues.push({
+			code: "custom",
+			path: sectioned ? [...sectionSegmentsOf(m)] : [],
+			message: `module "${m.name}"'s replicaSafety did not answer what ${sectioned ? "its section holds" : "it holds"} per replica: ${answer.problem}`,
+		} as z.ZodIssue);
+		refused.push(sectioned ? { module: m.name, schemaPath: sectionPathOf(m) } : { module: m.name });
+	}
+	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
+	return read;
+}
+
+/**
+ * The one refusal of what module sections answered — a section's parse, a
+ * switch, a replica-safety declaration made from the section: every issue
+ * together, each at its path (an issue with no path names its module
+ * itself), as `config-validation-failed`.
+ * @internal
+ */
+function moduleSectionsRefusal(
+	issues: readonly z.ZodIssue[],
+	refused: readonly { readonly module: string; readonly schemaPath?: string }[],
+): BootError {
+	const named = issues.map((issue) =>
+		issue.path.length === 0 ? issue.message : `${operatorPath(issue.path)}: ${issue.message}`,
+	);
+	return new BootError({
+		message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
+		reason: "config-validation-failed",
+		stage: "validateManifests",
+		details: { reason: "config-validation-failed", issues: [...issues], modules: [...refused] },
+	});
 }
 
 /**
@@ -3164,6 +3284,11 @@ interface StageOneContext {
 	 */
 	readonly relocating: readonly Module[];
 	readonly parsedConfig: unknown;
+	/**
+	 * Each switched-on module's replica-safety declaration as stage 1 read it,
+	 * once, right after the switches; empty before the parse.
+	 */
+	readonly replicaSafety: readonly ReplicaSafetyModuleRef[];
 	/** The modules their section switches off; empty before the parse. */
 	readonly switchedOff: ReadonlySet<string>;
 	/**
@@ -3347,6 +3472,11 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		run: (ctx) => checkPerKindContributeDuplicates(ctx.modules, ctx.contributionKinds ?? {}),
 	},
 	{
+		id: "one-session-close-notifier",
+		spec: "issue #1030 (one session-close notifier; ADR 2026-10-05-session-lifecycle D16)",
+		run: (ctx) => checkOneSessionCloseNotifier(ctx.modules),
+	},
+	{
 		id: "route-collisions",
 		spec: "A2-β §5.1 step 7",
 		run: (ctx) => checkRouteCollisions(ctx.modules, ctx.rawModules),
@@ -3411,13 +3541,14 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		// the warning is worthless if it goes somewhere the operator is not
 		// reading.
 		//
-		// `rawModules`, not the normalised view: the guard reads each manifest's
-		// own `replicaSafety` declaration, which normalisation does not carry.
-		// A switched-off module holds no state, whatever its name.
+		// The declarations are each manifest's own, which normalisation does not
+		// carry, read right after the switches (made from the section where a
+		// module declares so): a switched-off module holds no state, whatever
+		// its name, and its declaration is not read.
 		run: (ctx) => {
 			const bootLogger = warningLogger(ctx.bootstrapComponents);
 			checkReplicaSafety({
-				modules: ctx.rawModules.filter((m) => !ctx.switchedOff.has(m.name)),
+				modules: ctx.replicaSafety,
 				config: ctx.parsedConfig,
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});
@@ -3448,7 +3579,8 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * Stage 1 of the boot planner: runs {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then
  * step 13 (`validateAndComposeConfig`, the one composed parse, and
  * `parseModuleSections`, which writes each module's section back into the
- * parsed config), then reads each module's switch (`section.isEnabled`), then
+ * parsed config), then reads each module's switch (`section.isEnabled`) and
+ * each switched-on module's replica-safety declaration, then
  * runs {@link STAGE_ONE_POST_CONFIG_CHECKS} over the modules switched on: a
  * module switched off is, from there on, its name and its section alone, so
  * it registers nothing. Last, it parses each enabled `core.federations` entry
@@ -3484,6 +3616,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		contributionKinds,
 		relocating: withCoreRelocations(modules, input.core ?? CORE_RELOCATIONS),
 		parsedConfig: undefined,
+		replicaSafety: [],
 		switchedOff: new Set<string>(),
 		plannedKeys: plannedKeysOf(normalisedModules),
 	};
@@ -3530,6 +3663,13 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// A module its section switches off stays its name and its section: what
 	// it would register is out of every row below and every later stage.
 	const off = switchedOffModules(modules, sections);
+	// Each switched-on module's replica-safety declaration, read once here, so
+	// one that cannot answer is refused with what the sections answered,
+	// before any wiring row.
+	const replicaSafety = replicaSafetyAsRead(
+		modules.filter((m) => !off.has(m.name)),
+		sections,
+	);
 	const switchedOn = modules.map((m) => (off.has(m.name) ? switchedOff(m) : m));
 	const switchedOnNormalised = normalisedModules.map((normalised, i) =>
 		off.has(normalised.name) ? normaliseModule(switchedOn[i] as Module) : normalised,
@@ -3540,6 +3680,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		rawModules: switchedOn,
 		modules: switchedOnNormalised,
 		parsedConfig,
+		replicaSafety,
 		switchedOff: off,
 		plannedKeys: plannedKeysOf(switchedOnNormalised),
 	};
@@ -3594,5 +3735,6 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 			switchedOn,
 			parsedConfig,
 		),
+		federationStoreSlots: federationStoreSlotsOf(parsedConfig as AppConfig),
 	};
 }

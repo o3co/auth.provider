@@ -16,6 +16,7 @@
 
 import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { SessionRequirementResolver } from "../../session-admission/requirement.mjs";
+import type { SessionCloseNotifier } from "../../session-lifecycle/notifier.mjs";
 import type {
 	ExchangeTokenValidator,
 	FederationProvider,
@@ -64,6 +65,15 @@ export interface RateLimitBudgetResolver {
 	readonly entries: () => IterableIterator<readonly [string, RateLimitSpec]>;
 }
 
+/**
+ * Read-only projection of the boot planner's `sessionCloseNotifiers`
+ * collector: the one contributed notifier, or `undefined` when none is. Read
+ * when a close runs; a read while the `provides` factories run throws.
+ */
+export interface SessionCloseNotifierResolver {
+	readonly get: () => SessionCloseNotifier | undefined;
+}
+
 /** Re-export for consumers that name the `federationProviders` slot's value type. */
 export type { FederationProvider };
 
@@ -78,7 +88,9 @@ export type { FederationProvider };
  * `core.tokenBinding` (`resolveTokenBindingSettings`), typed with its slot in
  * `middleware/tokenBinding.mts`; `federationSettings` is its
  * `core.federations` (`boot/federation-settings.mts`), typed with its slot in
- * `federations/settings.mts`.
+ * `federations/settings.mts`; `outboundPolicy` is its `core.outbound`
+ * (`outboundPolicyOf`, `net/outbound-fetch.mts`), typed with its slot in
+ * `net/outbound-policy.mts`.
  *
  * Immutability rests on the `ReadonlySet<string>` type. `Object.freeze` does
  * not stop the built-in Set methods from mutating `[[SetData]]`, so a cast to
@@ -93,6 +105,7 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"mfaFactorResolver",
 		"sessionRequirementResolver",
 		"rateLimitBudgetResolver",
+		"sessionCloseNotifierResolver",
 		// Boot-planner-owned (createApp pre-seeds it). A consumer-supplied
 		// registrar would diverge silently: the planner drains its own while
 		// builders register cleanups on the consumer's.
@@ -113,6 +126,10 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		// set it would be a second statement of the federations, beside the
 		// one boot dispatches by.
 		"federationSettings",
+		// Filled the same way, from `core.outbound`: a module or host that set
+		// it would be a second statement of the outbound policy, beside the one
+		// a fetch built from the configuration reads.
+		"outboundPolicy",
 	]),
 );
 
@@ -147,5 +164,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly sessionRequirementResolver?: SessionRequirementResolver;
 		/** Every module's rate-limit budget by prefix, read by a limiter at request time. */
 		readonly rateLimitBudgetResolver?: RateLimitBudgetResolver;
+		/** The contributed session-close notifier, read by the session lifecycle when a close runs. */
+		readonly sessionCloseNotifierResolver?: SessionCloseNotifierResolver;
 	}
 }
