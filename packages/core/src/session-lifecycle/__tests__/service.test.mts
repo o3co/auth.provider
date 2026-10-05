@@ -196,6 +196,21 @@ function harness(options: HarnessOptions = {}) {
 
 type Harness = ReturnType<typeof harness>;
 
+/** Sids the lifecycle port cannot hold, by why. */
+const UNHOLDABLE_SIDS: readonly (readonly [string, string])[] = [
+	["empty", ""],
+	["513 characters", "s".repeat(513)],
+	["a lone surrogate", "sid-\ud800"],
+];
+
+/** A lifecycle store whose every read fails the test: a read of a sid it cannot hold reaches no store. */
+const unreadStore = (inner: SessionLifecycleStore): SessionLifecycleStore => ({
+	...inner,
+	read: async (sid) => {
+		throw new Error(`the lifecycle store was read for ${JSON.stringify(sid)}`);
+	},
+});
+
 /** `sid` joined by relying party `a`, family `f1` and federation `google`. */
 const joinAll = async (h: Harness, sid = SID): Promise<void> => {
 	expect(
@@ -751,10 +766,13 @@ describe("federations", () => {
 		expect(await g.lifecycle.federations(SID)).toEqual({ outcome: "unavailable" });
 	});
 
-	it("refuses a sid the port cannot hold with a RangeError", async () => {
-		const h = harness();
-		await expect(h.lifecycle.federations("")).rejects.toThrow(RangeError);
-	});
+	it.each(UNHOLDABLE_SIDS)(
+		"lists none for a sid the port cannot hold (%s), reading no store",
+		async (_, sid) => {
+			const h = harness({ store: unreadStore });
+			expect(await h.lifecycle.federations(sid)).toEqual({ outcome: "listed", federations: [] });
+		},
+	);
 });
 
 describe("liveness", () => {
@@ -802,6 +820,25 @@ describe("liveness", () => {
 		await h.establish();
 		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "unavailable" });
 	});
+
+	it.each(UNHOLDABLE_SIDS)(
+		"is not_live for a sid the port cannot hold (%s), reading no store",
+		async (_, sid) => {
+			const h = harness({ store: unreadStore });
+			expect(await h.lifecycle.liveness(sid)).toEqual({ outcome: "not_live" });
+		},
+	);
+});
+
+describe("a sid the port cannot hold", () => {
+	it.each(UNHOLDABLE_SIDS)(
+		"is refused with a RangeError by a join and a close (%s)",
+		async (_, sid) => {
+			const h = harness();
+			await expect(h.lifecycle.join(sid, { familyId: "f1" })).rejects.toThrow(RangeError);
+			await expect(h.lifecycle.close(sid, "rp_logout")).rejects.toThrow(RangeError);
+		},
+	);
 });
 
 describe("resumePending", () => {
