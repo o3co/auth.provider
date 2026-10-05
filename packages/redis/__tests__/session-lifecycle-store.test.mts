@@ -228,6 +228,21 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 		await expect(store.read(sid)).rejects.toThrow();
 	});
 
+	it("refuses an ordinal not written as a decimal integer of at least 1, though it reads as a number", async () => {
+		const { store, record } = fresh();
+		const sid = "ordinal-form";
+		await store.open(sid, "u", await later());
+		await store.join(sid, { kind: "rp", id: "a", data: "" });
+		for (const ordinal of ["0x2", "1e1", "+3", " 2", "2.0", "02", "0", "-1", "9007199254740993"]) {
+			await io.hset(record(sid), "o:rp:a", ordinal);
+			await expect(store.read(sid), ordinal).rejects.toThrow(/join ordinal/);
+		}
+		await io.hset(record(sid), "o:rp:a", "1");
+		expect(readVersionedSessionLifecycle(await store.read(sid))?.value.participants).toHaveLength(
+			1,
+		);
+	});
+
 	it("a join past maxParticipants rejects and writes nothing; a participant joined again is not counted twice", async () => {
 		const { store } = fresh({ maxParticipants: 2 });
 		const sid = "full";

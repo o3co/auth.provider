@@ -50,6 +50,7 @@ import {
 	readAccessTokenRevocationMode,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SessionRPRegistry,
 	type SubjectRevocation,
@@ -379,6 +380,7 @@ export const createOAuthRouter = async (
 		accessTokenDenylist,
 		subjectRevocation,
 		userSessionStore,
+		sessionLifecycleStore,
 		sessionRPRegistry,
 		sessionFamilyIndex,
 		sessionFederationIndex,
@@ -441,6 +443,8 @@ export const createOAuthRouter = async (
 		 */
 		subjectRevocation?: SubjectRevocation;
 		userSessionStore?: UserSessionStore;
+		/** The session lifecycle's record, which admission reads after a live session. */
+		sessionLifecycleStore?: SessionLifecycleStore;
 		sessionRPRegistry?: SessionRPRegistry;
 		sessionFamilyIndex?: SessionFamilyIndex;
 		sessionFederationIndex?: SessionFederationIndex;
@@ -586,7 +590,8 @@ export const createOAuthRouter = async (
 					login: requireLoginEntry(loginEntry),
 					// The consent page, `oauth.consentPage.url`, read per request. The
 					// default lives in the package's reference.conf; a hand-built section
-					// without the key falls back the same way.
+					// without the key falls back the same way. An empty or blank url is
+					// the section schema's to refuse.
 					consentUrl: () =>
 						(oauth as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
 						"/consent",
@@ -598,6 +603,7 @@ export const createOAuthRouter = async (
 					// composition without session-backed login wires none), the
 					// subject-revocation boundary (applied when wired) and the resolver.
 					userSessionStore,
+					sessionLifecycleStore,
 					subjectRevocation,
 					requirements,
 				})
@@ -834,6 +840,7 @@ export const createOAuthRouter = async (
 				// The same reading `/authorize` makes, through admission with the
 				// same slots.
 				userSessionStore,
+				sessionLifecycleStore,
 				subjectRevocation,
 				requirements,
 			}),

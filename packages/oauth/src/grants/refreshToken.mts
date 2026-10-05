@@ -83,7 +83,7 @@ export type RefreshTokenGrantDeps = Pick<
 > &
 	ProviderDeps<
 		"sessionRequirementResolver" | "oauthTokenSettings" | "tokenBindingSettings",
-		"auditSink"
+		"auditSink" | "sessionLifecycleStore"
 	>;
 
 /**
@@ -128,6 +128,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 	// refresh asks for no acr.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		subjectRevocation,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createRefreshTokenGrant"),
 		acrTable: {},
