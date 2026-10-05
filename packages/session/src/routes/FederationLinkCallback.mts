@@ -86,8 +86,14 @@ export const completeLink = async (
 	res: Response,
 	log: Logger,
 ): Promise<unknown> => {
-	const { admitLink, auditSink, userRepository, sessionFederationIndex, federationTokenStore } =
-		ctx;
+	const {
+		admitLink,
+		auditSink,
+		userRepository,
+		sessionFederationIndex,
+		federationTokenStore,
+		sessionLifecycle,
+	} = ctx;
 	// The link belongs to the session the start recorded, not whichever
 	// session the browser holds now: a `form_post` callback arrives without
 	// the session cookie (SameSite=Lax), so the recorded `sid` is the only
@@ -213,8 +219,12 @@ export const completeLink = async (
 			provider.name,
 		);
 		listed = true;
-		linking = { store: "session_federation_index", step: "add" };
-		await sessionFederationIndex.addFederation(currentSid, provider.name, current.expiresAt);
+		// Where core's session lifecycle is installed, the join below writes
+		// the index entry.
+		if (sessionLifecycle === undefined) {
+			linking = { store: "session_federation_index", step: "add" };
+			await sessionFederationIndex.addFederation(currentSid, provider.name, current.expiresAt);
+		}
 		if (profile.accessToken) {
 			linking = { store: "federation_token", step: "attach" };
 			const consented = consentedScope(profile.scope, provider.scope);
@@ -237,6 +247,17 @@ export const completeLink = async (
 				// since `FederationTokens` requires it.
 				tokenType,
 			});
+		}
+		// The federation joins the session once its tokens are attached: a
+		// session closed since its admission is refused, and the lifecycle
+		// removes those tokens.
+		if (sessionLifecycle !== undefined) {
+			linking = { store: "session_lifecycle", step: "join" };
+			const joined = await sessionLifecycle.join(currentSid, { federation: provider.name });
+			if (joined.outcome === "refused") return notLive();
+			if (joined.outcome === "unavailable") {
+				throw new Error("the session lifecycle could not answer the join");
+			}
 		}
 	} catch (err) {
 		logStoreUnavailable(

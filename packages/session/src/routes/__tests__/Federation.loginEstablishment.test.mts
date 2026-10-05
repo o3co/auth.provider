@@ -145,7 +145,10 @@ describe("the federation callback's login — the session lifecycle, where it is
 		const harness = buildFederationApp({
 			providers: new Map([["test", provider]]),
 			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
-			sessionLifecycle: { open } as unknown as SessionLifecycle,
+			sessionLifecycle: {
+				open,
+				join: async () => ({ outcome: "joined" }),
+			} as unknown as SessionLifecycle,
 		});
 		harness.store.set("browser", {
 			data: { federation: { name: "test", state: "st-1", codeVerifier: "cv-1" } },
