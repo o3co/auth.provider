@@ -84,7 +84,8 @@ export interface JwtAssertionVerifierOptions {
  * `alg: none` and every unlisted algorithm are refused.
  *
  * `exp` is the only lifetime bound: it is reported as `expiresAt` and the
- * jwt-bearer grant caps its token there. Replay within `exp` is not detected
+ * jwt-bearer grant caps its token there. `iat`, when present, is reported as
+ * `issuedAt`. Replay within `exp` is not detected
  * (no `jti` tracking, RFC 7523 §3 item 7), so authorities should mint
  * short-lived assertions. Verification here is local and never fails to be
  * attempted; a vendor-backed verifier throws instead and the grant answers 503.

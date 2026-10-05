@@ -35,7 +35,8 @@
  *   `Bearer` for mTLS, RFC 8705 §3).
  * - With `subjectRevocation` wired, an approval whose `approvedAtMs` or
  *   approving session's `authTimeMs` is at or before the subject's sessions
- *   boundary (`coveredByRevocationBoundary`, with `verifyJwt`'s skew), or
+ *   boundary (`claimCoveredByRevocationBoundary`, in whole seconds with
+ *   `verifyJwt`'s skew, as `verifyJwt` compares `auth_time`), or
  *   that records either as none while a boundary is in force, is
  *   `invalid_grant`. The approval check alone is not enough: a stolen
  *   session could approve codes ahead and redeem them after the victim's
@@ -92,8 +93,8 @@ import type {
 import {
 	authTimeAt,
 	boundPolicyAudience,
+	claimCoveredByRevocationBoundary,
 	consoleLogger,
-	coveredByRevocationBoundary,
 	DEFAULT_CLOCK_SKEW_MS,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	evaluateGrantPolicy,
@@ -350,10 +351,11 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					if (boundary !== null && !(boundary instanceof Date)) {
 						throw new TypeError("the sessions boundary is neither a date nor null");
 					}
+					// In whole seconds, as `verifyJwt` compares the token's `auth_time`.
 					const covered = (instantMs: number | undefined): boolean =>
 						instantMs === undefined ||
-						coveredByRevocationBoundary(
-							new Date(instantMs),
+						claimCoveredByRevocationBoundary(
+							Math.floor(instantMs / 1000),
 							boundary,
 							DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 						);

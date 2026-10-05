@@ -21,12 +21,13 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { replicaUnsafeReason } from "#/boot/replica-safety.mjs";
 import { memoryDeviceCodeStoreModule } from "#/device-authorization/module.mjs";
 
 describe("memoryDeviceCodeStoreModule", () => {
 	it("declares what forks per replica, with no issue number", () => {
-		expect(memoryDeviceCodeStoreModule.replicaSafety?.reason).toMatch(/fork per replica/);
-		expect(memoryDeviceCodeStoreModule.replicaSafety?.reason).not.toMatch(/#\d/);
+		expect(replicaUnsafeReason(memoryDeviceCodeStoreModule)).toMatch(/fork per replica/);
+		expect(replicaUnsafeReason(memoryDeviceCodeStoreModule)).not.toMatch(/#\d/);
 	});
 
 	it("declares the lifecycle registrar as an optional dependency", () => {

@@ -570,6 +570,17 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.subjectRevocationClient;
 		},
+		// Required by `redisSessionStoresModule`, which builds the session
+		// lifecycle store from it once a module reads that store.
+		sessionLifecycleStoreClient: async ({
+			section,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
+				.sessionLifecycleStoreClient;
+		},
 		// Required by `redisDeviceCodeStoreModule`. This template does not mount
 		// the device grant; the slot is provided anyway, so a deployment that
 		// adds `deviceGrantModule` with the Redis store is not refused at boot
