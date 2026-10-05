@@ -270,6 +270,44 @@ describe("planBoot — step 4: skip unused providers", () => {
 	});
 });
 
+describe("planBoot — step 4: the stores an enabled federation needs", () => {
+	it("activates the provider of each slot in federationStoreSlots, labelled federation-store", () => {
+		const modA = defineModule({ name: "A", provides: { slotA: () => 1 } });
+
+		const vm = { ...validated([modA]), federationStoreSlots: ["slotA"] } as never;
+		const plan = planBoot(vm, minBootstrap, undefined);
+
+		const act = plan.providerActivations.find(
+			(pa) => pa.module === "A" && pa.componentKey === "slotA",
+		);
+		expect(act).toMatchObject({ seededBy: "federation-store", eager: false });
+	});
+
+	it("does not activate it when a host map fills the slot", () => {
+		const modA = defineModule({ name: "A", provides: { slotA: () => 1 } });
+
+		const vm = { ...validated([modA]), federationStoreSlots: ["slotA"] } as never;
+		const plan = planBoot(vm, minBootstrap, { slotA: 7 } as never);
+
+		expect(plan.providerActivations.some((pa) => pa.componentKey === "slotA")).toBe(false);
+	});
+
+	it("labels an eager component's activation by its own seed", () => {
+		const modB = defineModule({
+			name: "B",
+			provides: { slotB: () => 2 },
+			lifecycle: { slotB: { eager: true } },
+		});
+
+		const plan = planBoot(validated([modB]), minBootstrap, undefined);
+
+		expect(plan.providerActivations.find((pa) => pa.componentKey === "slotB")).toMatchObject({
+			seededBy: "eager",
+			eager: true,
+		});
+	});
+});
+
 describe("planBoot — step 4: closure root via contributes", () => {
 	it("contribute-driven module causes its required provider to appear in providerActivations", () => {
 		// Module C requires slotC and contributes auditHooks.

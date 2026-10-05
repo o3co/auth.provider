@@ -22,6 +22,7 @@
 
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
+	ActivationSeed,
 	BootPlan,
 	BootstrapMap,
 	DepsBlueprint,
@@ -366,8 +367,10 @@ function topologicalSort(graph: DependencyGraph, validated: ValidatedManifests):
 interface ActivationClosure {
 	/** All (module, key) pairs that should materialise. Key: `${module}::${key}`. */
 	readonly inClosure: ReadonlySet<string>;
-	/** (module, key) pairs that entered the closure exclusively via eager-seed. */
+	/** (module, key) pairs that entered the closure exclusively via an eager or core-read seed. */
 	readonly eagerOnlyKeys: ReadonlySet<string>;
+	/** Why each (module, key) pair that entered only as a seed was seeded: its first seed. */
+	readonly seedOnly: ReadonlyMap<string, ActivationSeed>;
 }
 
 /**
@@ -391,8 +394,8 @@ const CORE_READ_SLOTS: readonly ComponentKey[] = ["httpSettings", "oauthTokenSet
 /**
  * Computes the per-component activation closure. Its roots are the modules
  * with any `contributes` or `overrides` entry, and its seeds the components
- * with `lifecycle[K].eager === true` and the providers of `CORE_READ_SLOTS`
- * no host map fills; from each, the module's `requires` and `optional` edges
+ * with `lifecycle[K].eager === true`, and the providers of `CORE_READ_SLOTS`
+ * and of `validated.federationStoreSlots` no host map fills; from each, the module's `requires` and `optional` edges
  * are walked recursively. A module is not all-or-nothing: each (module, key)
  * pair is decided on its own.
  * @internal
@@ -404,8 +407,8 @@ function computeActivationClosure(
 	const inClosure = new Set<string>();
 	/** Tracks all (module, key) pairs that entered via require-chain (not eager-seed). */
 	const viaRequireChain = new Set<string>();
-	/** Tracks all (module, key) pairs that entered via eager-seed. */
-	const viaEagerSeed = new Set<string>();
+	/** Each (module, key) pair that entered via a seed, with its first seed. */
+	const viaSeed = new Map<string, ActivationSeed>();
 
 	/**
 	 * Add a (module, key) pair to the closure, walking requires recursively.
@@ -414,11 +417,11 @@ function computeActivationClosure(
 	function addToClosureAndWalk(
 		vm: ValidatedModule,
 		key: ComponentKey,
-		source: "require-chain" | "eager",
+		source: "require-chain" | ActivationSeed,
 	): void {
 		const ck = closureKey(vm.manifest.name, key);
-		if (source === "eager") {
-			viaEagerSeed.add(ck);
+		if (source !== "require-chain") {
+			if (!viaSeed.has(ck)) viaSeed.set(ck, source);
 		} else {
 			viaRequireChain.add(ck);
 		}
@@ -468,18 +471,26 @@ function computeActivationClosure(
 	for (const key of CORE_READ_SLOTS) {
 		if (virtualKeys.has(key)) continue;
 		const provider = validated.providers.get(key);
-		if (provider) addToClosureAndWalk(provider, key, "eager");
+		if (provider) addToClosureAndWalk(provider, key, "core-read");
 	}
 
-	// --- Compute eagerOnlyKeys: in viaEagerSeed but NOT in viaRequireChain ---
-	const eagerOnlyKeys = new Set<string>();
-	for (const ck of viaEagerSeed) {
-		if (!viaRequireChain.has(ck)) {
-			eagerOnlyKeys.add(ck);
-		}
+	// --- Federation-store seeds: every provider of a store an enabled federation needs, unless a host fills it ---
+	for (const key of validated.federationStoreSlots) {
+		if (virtualKeys.has(key)) continue;
+		const provider = validated.providers.get(key);
+		if (provider) addToClosureAndWalk(provider, key, "federation-store");
 	}
 
-	return { inClosure, eagerOnlyKeys };
+	// --- Seed-only pairs: entered via a seed, never via a require chain ---
+	const seedOnly = new Map<string, ActivationSeed>();
+	for (const [ck, seed] of viaSeed) {
+		if (!viaRequireChain.has(ck)) seedOnly.set(ck, seed);
+	}
+	const eagerOnlyKeys = new Set<string>(
+		[...seedOnly].filter(([, seed]) => seed !== "federation-store").map(([ck]) => ck),
+	);
+
+	return { inClosure, eagerOnlyKeys, seedOnly };
 }
 
 // ---------------------------------------------------------------------------
@@ -515,7 +526,13 @@ function buildPlanOutputs(
 			if (closure.inClosure.has(ck)) {
 				inClosureKeys.push(key);
 				const eager = closure.eagerOnlyKeys.has(ck);
-				providerActivations.push({ module: moduleName, componentKey: key, eager });
+				const seededBy = closure.seedOnly.get(ck);
+				providerActivations.push({
+					module: moduleName,
+					componentKey: key,
+					eager,
+					...(seededBy === undefined ? {} : { seededBy }),
+				});
 			}
 		}
 
@@ -546,8 +563,8 @@ function buildPlanOutputs(
  *    `reason: "circular-dependency"`, `stage: "planBoot"`.
  * 3. Topological sort (Kahn's), ties broken by declaration order.
  * 4. Per-component activation closure from the contribute/override roots and
- *    the seeds (eager components, providers of slots core reads); other
- *    siblings do not come along.
+ *    the seeds (eager components, providers of slots core reads and of the
+ *    stores an enabled federation needs); other siblings do not come along.
  * 5. `providerActivations` (per component, not per module) and
  *    `depsBlueprint` (lookup keys, not values).
  */

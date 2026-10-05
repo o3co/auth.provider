@@ -27,7 +27,7 @@
  * federationTokenSupported gates in packages/oauth/src/routes.mts). The
  * validator catches both at boot.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
 import { federationTypeForTests } from "../../testing/fixtures/federationType.mjs";
 import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
@@ -162,5 +162,101 @@ describe("checkFederationStoresWiring", () => {
 				} as never,
 			}),
 		).resolves.toBeDefined();
+	});
+});
+
+const STORE_KEYS = [
+	"userSessionStore",
+	"sessionRPRegistry",
+	"sessionFamilyIndex",
+	"sessionFederationIndex",
+	"federationTokenStore",
+	"refreshTokenFamilyRevocation",
+] as const;
+
+/**
+ * A module providing the six stores, no module reading them: each factory a
+ * spy answering a stub, or what `answers` gives for its key.
+ */
+function storesModule(answers: Partial<Record<(typeof STORE_KEYS)[number], () => unknown>> = {}) {
+	const factories = Object.fromEntries(
+		STORE_KEYS.map((key) => [key, vi.fn(answers[key] ?? (() => ({ kind: "stub" })))]),
+	) as Record<(typeof STORE_KEYS)[number], ReturnType<typeof vi.fn>>;
+	return {
+		factories,
+		module: defineModule({ name: "test:unread-federation-stores", provides: factories as never }),
+	};
+}
+
+describe("an enabled federation's stores are built at boot", () => {
+	it("builds each of the six once, though no module reads them", async () => {
+		const { factories, module } = storesModule();
+
+		await expect(
+			createApp({
+				modules: [module, googleFederationModule],
+				bootstrapComponents: makeBootWithFederationEnabled(),
+			}),
+		).resolves.toBeDefined();
+
+		for (const key of STORE_KEYS) expect(factories[key]).toHaveBeenCalledTimes(1);
+	});
+
+	it("refuses one whose provider yields nothing", async () => {
+		const { factories, module } = storesModule({ sessionFederationIndex: () => undefined });
+
+		await expect(
+			createApp({
+				modules: [module, googleFederationModule],
+				bootstrapComponents: makeBootWithFederationEnabled(),
+			}),
+		).rejects.toMatchObject({
+			details: {
+				reason: "federation-stores-incomplete",
+				federationName: "google",
+				missing: ["sessionFederationIndex"],
+			},
+		});
+		expect(factories.sessionFederationIndex).toHaveBeenCalledTimes(1);
+	});
+
+	it("fails boot when a store's provider throws", async () => {
+		const { module } = storesModule({
+			federationTokenStore: () => {
+				throw new Error("the token store cannot be built");
+			},
+		});
+
+		await expect(
+			createApp({
+				modules: [module, googleFederationModule],
+				bootstrapComponents: makeBootWithFederationEnabled(),
+			}),
+		).rejects.toMatchObject({ details: { reason: "provides-factory-failed" } });
+	});
+
+	it("does not build an unread store when no federation is enabled", async () => {
+		const { factories, module } = storesModule();
+
+		await expect(
+			createApp({ modules: [module], bootstrapComponents: makeBootWithNoFederations() }),
+		).resolves.toBeDefined();
+
+		for (const key of STORE_KEYS) expect(factories[key]).not.toHaveBeenCalled();
+	});
+
+	it("does not build a provider of a store a host map fills", async () => {
+		const { factories, module } = storesModule();
+
+		await expect(
+			createApp({
+				modules: [module, googleFederationModule],
+				bootstrapComponents: makeBootWithFederationEnabled(),
+				overrideComponents: { sessionFederationIndex: { kind: "host" } } as never,
+			}),
+		).resolves.toBeDefined();
+
+		expect(factories.sessionFederationIndex).not.toHaveBeenCalled();
+		expect(factories.userSessionStore).toHaveBeenCalledTimes(1);
 	});
 });
