@@ -852,6 +852,29 @@ modules fills them.
   throws a `RangeError` naming it when it is missing or breaks the slot's
   contract; `SessionGrantDeps` no longer has `config` (in a test,
   `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
+- **BREAKING: `subjectRevocationServiceModule` requires `oauthTokenSettings`,
+  reads `federationGrantPolicy`, and no longer reads the configuration
+  (#728).** It sizes the subject's revocation boundary from the token
+  lifetimes in `oauthTokenSettings` and no longer falls back to
+  `oauth.accessToken` and `oauth.refreshToken.expiresIn`; it reads whether
+  federation grants are on, and whether a revocation may keep them, from the
+  `federationGrantPolicy` slot the federation-grants module provides, not
+  from `federation-grants {}`. With `oauthModule` and the federation-grants
+  module installed nothing changes. A composition without `oauthModule` puts
+  an `oauthTokenSettings` value in `bootstrapComponents`, or the boot is
+  refused for the missing component. A composition that wires a
+  `federationGrantStore` and holds no `federationGrantPolicy` — grants on
+  without the federation-grants module, or the module installed but switched
+  off (`federation-grants.enabled = false`) with a grant store still wired —
+  is refused at boot (`provides-factory-failed`, naming both), where grants
+  used to be read from `federation-grants.enabled`: install the
+  federation-grants module and switch it on, or, to keep grants off with the
+  store wired, put `federationGrantPolicy` `{ enabled: false,
+  allowKeepOnSubjectRevocation: false }` in `bootstrapComponents`. A deps
+  object handed to the module's provider carries `oauthTokenSettings` and,
+  for grants, `federationGrantPolicy` (in a test,
+  `createTestOAuthTokenSettings()` and `createTestFederationGrantPolicy()`);
+  `SubjectRevocationServiceModuleDeps` no longer has `config`.
 - **BREAKING: the authorization_code, refresh_token, client_credentials and
   jwt-bearer grants are one module, `oauthAuthorizationGrantsModule`,
   switched by its own section (#728).** List it as it is: it reads each
@@ -1029,6 +1052,15 @@ modules fills them.
   configuration (#728).** A composition that provides the `oauthTokenSettings`
   slot itself calls `oauthTokenSettingsFrom(config.oauth)` where it called
   `oauthTokenSettingsFrom(config)`.
+- **`oauth.refreshToken.unknownFamilyPolicy` and `legacyRtPolicy` are
+  optional in `AppConfig` and `CoreConfig` (#728).** Core's schema holds
+  their shape, the same enums, and no default; core's `reference.conf` no
+  longer sets them or binds `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`. The
+  oauth package's reference sets both to `"reject"` and binds the variable,
+  and the oauth module's section still requires both, so a composition with
+  the oauth module behaves as before. Code that reads either key off
+  `AppConfig` or `CoreConfig` handles `undefined`; a configuration built by
+  hand for core's schema alone may leave both out.
 - **The oauth module is one value, `oauthEndpointsModule` (#728).** Compose it
   where you composed `oauthModule({ config })`. `oauthModule` is deprecated:
   it answers `oauthEndpointsModule` whatever it is handed, and never read its

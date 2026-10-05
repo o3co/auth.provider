@@ -25,6 +25,12 @@
  * design. See ADR
  * 2026-09-25-multi-factor-authentication.
  *
+ * Also how fresh a session's authentication is (`authenticationFreshness`,
+ * `sessionFreshness`): what a freshness ask is judged against — the earlier
+ * of `authTime` and a federated login's recorded upstream authentication,
+ * never fresh when the upstream showed no time. `authTime` stays when this
+ * provider established the session.
+ *
  * A session carrying `authentication` holds in `amr` only what this
  * provider vouches for. One written before that key is split as it is read:
  * `fed` makes it federated and every other value an upstream IdP's, never
@@ -53,10 +59,11 @@ import type { RequirementSession } from "../session-admission/requirement.mjs";
 import { isRenewalNonce } from "./renewalNonce.mjs";
 import type { SecondFactorEvent, SessionAuthentication, UserSession } from "./types.mjs";
 
-/** A copy of `authentication` that shares nothing with it: its list and its date are new. */
+/** A copy of `authentication` that shares nothing with it: its list and its dates are new. */
 export function copySessionAuthentication(
 	authentication: SessionAuthentication,
 ): SessionAuthentication {
+	const { upstreamAuthTime } = authentication;
 	return {
 		primary: authentication.primary,
 		federation: authentication.federation,
@@ -64,7 +71,51 @@ export function copySessionAuthentication(
 			authentication.upstreamAmr === undefined ? undefined : [...authentication.upstreamAmr],
 		mfaAt:
 			authentication.mfaAt === undefined ? undefined : new Date(authentication.mfaAt.getTime()),
+		...upstreamAuthTimeEntry(
+			upstreamAuthTime instanceof Date ? new Date(upstreamAuthTime.getTime()) : upstreamAuthTime,
+		),
 	};
+}
+
+/** `upstreamAuthTime` as an entry to spread: none for `undefined`, so absence stays absence. */
+const upstreamAuthTimeEntry = (
+	value: Date | null | undefined,
+): { readonly upstreamAuthTime?: Date | null } =>
+	value === undefined ? {} : { upstreamAuthTime: value };
+
+/**
+ * The instant `authentication` is as fresh as, for a session established at
+ * `authTime`: the earlier of `authTime` and `upstreamAuthTime`; `authTime`
+ * when the record holds no upstream instant (absent, or no `authentication`);
+ * `undefined` — never fresh — for `null`, or an instant that is not a valid
+ * date. A new `Date`. What a freshness ask (`max_age`, `prompt=login`, a
+ * recent primary) is judged against; `authTime` itself stays when this
+ * provider established the session.
+ */
+export function authenticationFreshness(
+	authTime: Date,
+	authentication: SessionAuthentication | undefined,
+): Date | undefined {
+	const authMs = authTime instanceof Date ? authTime.getTime() : Number.NaN;
+	if (!Number.isFinite(authMs)) return undefined;
+	const upstream = authentication?.upstreamAuthTime;
+	if (upstream === undefined) return new Date(authMs);
+	if (upstream === null) return undefined;
+	const upstreamMs = upstream instanceof Date ? upstream.getTime() : Number.NaN;
+	return Number.isFinite(upstreamMs) ? new Date(Math.min(authMs, upstreamMs)) : undefined;
+}
+
+/**
+ * {@link authenticationFreshness} of `session`, its record read once by the
+ * one reading of it: a recorded `authentication` that reading refuses is
+ * `undefined`, never fresher than it was written; one written before the key
+ * is as fresh as `authTime`.
+ */
+export function sessionFreshness(session: UserSession): Date | undefined {
+	const reading = readRecord(session);
+	return reading.unreadable
+		? undefined
+		: authenticationFreshness(session.authTime, reading.established);
 }
 
 /**
@@ -101,10 +152,15 @@ export function canRecordSecondFactor(session: UserSession): boolean {
 	return isRecordable(readRecord(session));
 }
 
-/** A session record as the readers above take it, each part `undefined` when it cannot be told. */
+/**
+ * A session record as the readers above take it, each part `undefined` when
+ * it cannot be told; `unreadable` when a recorded `authentication` was
+ * refused, as against one written before the key.
+ */
 interface RecordReading {
 	readonly established: SessionAuthentication | undefined;
 	readonly vouched: readonly string[] | undefined;
+	readonly unreadable?: true;
 }
 
 /** A reading a second factor can be recorded on. */
@@ -134,7 +190,7 @@ function readRecord(session: UserSession): RecordReading {
 	if (stored !== undefined) {
 		const read = readAuthentication(stored, READ_RULES);
 		return read.admitted === undefined
-			? { established: undefined, vouched: undefined }
+			? { established: undefined, vouched: undefined, unreadable: true }
 			: { established: read.admitted, vouched };
 	}
 	if (values?.includes(FEDERATED_AMR)) {
@@ -187,13 +243,28 @@ export function passwordSessionAuthentication(): RecordedAuthentication {
  * otherwise `amr` is `fed` alone and the values, if any, are kept in
  * `authentication.upstreamAmr` for the record, where nothing stamps them or
  * reads them for `acr`. The values are copied.
+ *
+ * `upstreamAuthTime` is the upstream's authentication instant
+ * (`FederationProfile.authTime`), recorded as a copy. When it showed none,
+ * `callbackMeetsFreshness` (`federationCallbackMeetsFreshness`) decides:
+ * `false` records `null`, never fresh; `true` records nothing, so the
+ * session is as fresh as `authTime`. A caller that passes neither records
+ * nothing.
  */
 export function federatedSessionAuthentication(login: {
 	readonly federation: string;
 	readonly upstreamAmr: readonly string[];
 	readonly trusted: boolean;
+	readonly upstreamAuthTime?: Date;
+	readonly callbackMeetsFreshness?: boolean;
 }): RecordedAuthentication {
 	const upstream = [...login.upstreamAmr];
+	const upstreamAuthTime =
+		login.upstreamAuthTime !== undefined
+			? new Date(login.upstreamAuthTime.getTime())
+			: login.callbackMeetsFreshness === false
+				? null
+				: undefined;
 	return {
 		amr: login.trusted ? [...new Set([...upstream, FEDERATED_AMR])] : [FEDERATED_AMR],
 		authentication: {
@@ -201,6 +272,7 @@ export function federatedSessionAuthentication(login: {
 			federation: login.federation,
 			upstreamAmr: !login.trusted && upstream.length > 0 ? upstream : undefined,
 			mfaAt: undefined,
+			...upstreamAuthTimeEntry(upstreamAuthTime),
 		},
 	};
 }
@@ -226,8 +298,8 @@ const isReadableVerificationTime = (ms: number): boolean => Number.isFinite(ms) 
 
 /** What {@link readAuthentication} holds a field to beyond its type. */
 interface AuthenticationRules {
-	/** Whether an `mfaAt` whose time is `ms` is admitted. */
-	readonly admitsMfaAt: (ms: number) => boolean;
+	/** Whether an `mfaAt` or an `upstreamAuthTime` whose time is `ms` is admitted. */
+	readonly admitsInstant: (ms: number) => boolean;
 	/** Whether a `null` `federation` reads as none rather than being refused. */
 	readonly nullFederationIsNone: boolean;
 }
@@ -235,10 +307,11 @@ interface AuthenticationRules {
 /**
  * The rules a stored `authentication` is read by. A `null` `federation` is
  * none: a store may map an empty column to `null`, and the federation grants
- * nothing. Any other `null` field is refused.
+ * nothing. A `null` `upstreamAuthTime` is a value of its own (never fresh).
+ * Any other `null` field is refused.
  */
 const READ_RULES: AuthenticationRules = {
-	admitsMfaAt: isReadableVerificationTime,
+	admitsInstant: isReadableVerificationTime,
 	nullFederationIsNone: true,
 };
 
@@ -324,15 +397,15 @@ export function expectsRenewalNonce(held: string | undefined, nonces: RenewalNon
 
 /**
  * What a store records as a session's `authentication`: the value given,
- * checked, answered as a copy whose `mfaAt` is no later than `nowMs`, the
- * store's clock (a time a little ahead is a clock, but kept as it came it
+ * checked, answered as a copy whose `mfaAt` and `upstreamAuthTime` are no
+ * later than `nowMs`, the store's clock (a time a little ahead is a clock, but kept as it came it
  * would count as recent for longer than it is). Every bundled store's
  * `create` records this answer, never its own input, so both refuse the
  * same values.
  *
  * `undefined` is a session written as one from before the key; anything
- * else must be what `SessionAuthentication` admits, its `mfaAt` passing
- * `isRecordableSessionInstant`.
+ * else must be what `SessionAuthentication` admits, its `mfaAt` and a
+ * `Date` `upstreamAuthTime` passing `isRecordableSessionInstant`.
  *
  * @throws RangeError naming the session and the field, quoting nothing of
  *   the value.
@@ -344,7 +417,7 @@ export function recordableSessionAuthentication(
 ): SessionAuthentication | undefined {
 	if (authentication === undefined) return undefined;
 	const read = readAuthentication(authentication, {
-		admitsMfaAt: (ms) => isRecordableSessionInstant(ms, nowMs),
+		admitsInstant: (ms) => isRecordableSessionInstant(ms, nowMs),
 		nullFederationIsNone: false,
 	});
 	if (read.admitted === undefined) {
@@ -352,10 +425,15 @@ export function recordableSessionAuthentication(
 			`UserSession ${sid}: ${read.refused} must be ${RECORDABLE_RULES[read.refused]}`,
 		);
 	}
-	const { mfaAt } = read.admitted;
+	const { mfaAt, upstreamAuthTime } = read.admitted;
 	return {
 		...read.admitted,
 		mfaAt: mfaAt === undefined ? undefined : notAfter(mfaAt.getTime(), nowMs),
+		...upstreamAuthTimeEntry(
+			upstreamAuthTime instanceof Date
+				? notAfter(upstreamAuthTime.getTime(), nowMs)
+				: upstreamAuthTime,
+		),
 	};
 }
 
@@ -385,7 +463,8 @@ type AuthenticationField =
 	| "authentication.primary"
 	| "authentication.federation"
 	| "authentication.upstreamAmr"
-	| "authentication.mfaAt";
+	| "authentication.mfaAt"
+	| "authentication.upstreamAuthTime";
 
 /** What `recordableSessionAuthentication` says each field must be. */
 const RECORDABLE_RULES: Readonly<Record<AuthenticationField, string>> = {
@@ -395,6 +474,8 @@ const RECORDABLE_RULES: Readonly<Record<AuthenticationField, string>> = {
 	"authentication.upstreamAmr": "a list of strings, or undefined",
 	"authentication.mfaAt":
 		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, or undefined",
+	"authentication.upstreamAuthTime":
+		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined — undefined for a password primary",
 };
 
 /** {@link readAuthentication}'s answer: a copy of what it admits, or the first field it refuses. */
@@ -408,8 +489,10 @@ type AuthenticationRead =
  * not a non-empty string; a `federation` that is not a string (a `null` one
  * is none when `rules.nullFederationIsNone`); an `upstreamAmr` that is not a
  * list of strings; an `mfaAt` that is not a `Date` whose time
- * `rules.admitsMfaAt`. A field may be `undefined`, `primary` excepted. The
- * one rule a store records by and the readers read by.
+ * `rules.admitsInstant`; an `upstreamAuthTime` that is neither `null` nor
+ * such a `Date`, or any on a password primary, which has no upstream. A field may be `undefined`, `primary` excepted; an
+ * `upstreamAuthTime` that is `undefined` is left out of the answer. The one
+ * rule a store records by and the readers read by.
  */
 function readAuthentication(value: unknown, rules: AuthenticationRules): AuthenticationRead {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -435,8 +518,18 @@ function readAuthentication(value: unknown, rules: AuthenticationRules): Authent
 	}
 	const mfaAt = a.mfaAt;
 	const mfaAtMs = mfaAt instanceof Date ? mfaAt.getTime() : Number.NaN;
-	if (mfaAt !== undefined && !rules.admitsMfaAt(mfaAtMs)) {
+	if (mfaAt !== undefined && !rules.admitsInstant(mfaAtMs)) {
 		return { refused: "authentication.mfaAt" };
+	}
+	const upstreamAuthTime = a.upstreamAuthTime;
+	const upstreamAuthTimeMs =
+		upstreamAuthTime instanceof Date ? upstreamAuthTime.getTime() : Number.NaN;
+	if (
+		upstreamAuthTime !== undefined &&
+		(primary === PASSWORD_AMR ||
+			(upstreamAuthTime !== null && !rules.admitsInstant(upstreamAuthTimeMs)))
+	) {
+		return { refused: "authentication.upstreamAuthTime" };
 	}
 	return {
 		admitted: {
@@ -444,6 +537,11 @@ function readAuthentication(value: unknown, rules: AuthenticationRules): Authent
 			federation,
 			upstreamAmr: upstreamAmr as string[] | undefined,
 			mfaAt: mfaAt === undefined ? undefined : new Date(mfaAtMs),
+			...upstreamAuthTimeEntry(
+				upstreamAuthTime === undefined || upstreamAuthTime === null
+					? upstreamAuthTime
+					: new Date(upstreamAuthTimeMs),
+			),
 		},
 	};
 }

@@ -57,7 +57,12 @@ const isValidDate = (value: unknown): value is Date =>
  */
 export type LiveSession =
 	| { readonly answer: Admission }
-	| { readonly session: UserSession | null; readonly storeRecords: boolean };
+	| {
+			readonly session: UserSession | null;
+			readonly storeRecords: boolean;
+			/** The record's renewal nonce, read once; `undefined` without a record or one that holds none. */
+			readonly renewalNonce: string | undefined;
+	  };
 
 /**
  * Whether a record bound to `bound` — its renewal nonce, read once by the
@@ -152,11 +157,13 @@ export async function readLiveSession(
 	// id a concurrent request saved back after the renewal holds another or
 	// none. A record without one is bound to nothing; other carriers hold no
 	// cookie session to compare.
+	// Read once: a store's accessor cannot answer one value to the check, and
+	// another to the comparison or to the consumer.
+	const bound: unknown = session === null ? undefined : session.renewalNonce;
 	if (session !== null && presented.carrier === "cookie") {
-		// Read once: a store's accessor cannot answer one value to the check
-		// and another to the comparison. A value that is not a nonce binds the
-		// record to no cookie session, whatever the cookie session holds.
-		if (renewedAway(session.renewalNonce, presented.renewalNonce)) {
+		// A value that is not a nonce binds the record to no cookie session,
+		// whatever the cookie session holds.
+		if (renewedAway(bound, presented.renewalNonce)) {
 			return { answer: { outcome: "not_live", reason: "renewed" } };
 		}
 	}
@@ -227,5 +234,5 @@ export async function readLiveSession(
 		}
 	}
 
-	return { session, storeRecords };
+	return { session, storeRecords, renewalNonce: isRenewalNonce(bound) ? bound : undefined };
 }

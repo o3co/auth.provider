@@ -1218,9 +1218,11 @@ ADR's D5, D21, D24).
   session holding a nonce the record does not: a session never escalated
   before stays as it was and is answered `401` at its next step-up, and one
   escalated before keeps the earlier nonce on its record, so it is
-  `not_live` at once — either way the user signs in again; reading the expected
-  nonce from the record admission read
-  ([#940](https://github.com/o3co/auth.provider/issues/940)) removes this.
+  `not_live` at once — either way the user signs in again. The first case
+  goes once the step-up's finish expects the nonce admission reports from the
+  record (`renewalNonce` on the admitted outcome). The second is kept
+  fail-closed: a cookie session the record's nonce does not match cannot be
+  told from an old id saved back after the renewal.
   A store that answers the escalated record without the new nonce has the
   session ended (`mfa_escalation_unbound`). A step-up's email code goes to
   the address the session's `User` carried at its sign-in: after the
@@ -2479,7 +2481,7 @@ lists every breaking change since, and which of the steps below each needs.
    `redis-federation-token-store.scanFallback` ([§5](#operational-notes)),
    `oauth.jwt.legacyTypAccept` (`OAUTH_JWT_LEGACY_TYP_ACCEPT`), and
    `oauth.refreshToken.unknownFamilyPolicy = "accept"`
-   (`packages/core/config/reference.conf`). That last one does not close by
+   (`packages/oauth/config/reference.conf`). That last one does not close by
    waiting: under `"accept"` a refresh token with no family record is
    redeemed with a new one of the full `oauth.refreshToken.expiresIn`, in the
    same family and still with no record, so a client that keeps refreshing

@@ -321,6 +321,26 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 		await handle.dispose();
 	});
 
+	it("keeps grants exactly when the federationGrantPolicy this module provides allows it", async () => {
+		// The service reads the switch and the keep policy from the slot, not
+		// from the section: what it honours is what the slot says.
+		for (const allowKeep of [true, false]) {
+			const { handle, service } = await boot(allowKeep);
+			expect(handle.components.federationGrantPolicy).toEqual({
+				enabled: true,
+				allowKeepOnSubjectRevocation: allowKeep,
+			});
+
+			const result = await service.revokeAllForSubject({
+				subject: SUBJECT,
+				federationGrants: "keep",
+			});
+
+			expect(result.federationGrants.applied).toBe(allowKeep ? "keep" : "revoke");
+			await handle.dispose();
+		}
+	});
+
 	it("ends it through the boundary alone, with no grant pass at all", async () => {
 		// The case the backstop exists for. A grant-unaware caller passes no
 		// grant store, so nothing enumerates the subject's grants — and the

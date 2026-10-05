@@ -749,6 +749,7 @@
 . auditedError value
 . authTimeAt value
 . authTimeClaim value
+. authenticationFreshness value
 . boundPolicyAudience value
 . browserFacingCorsRoutes value
 . buildCanonicalRequestUrl value
@@ -1133,6 +1134,7 @@
 . sessionAuthentication value
 . sessionCloseItemOf value
 . sessionEmailProofAnswer value
+. sessionFreshness value
 . sessionLifecycleModule value
 . shownConfigValue value
 . stepUpReach value
