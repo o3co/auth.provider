@@ -1253,7 +1253,7 @@ export interface FederationStoresIncompleteDetails {
 	readonly reason: "federation-stores-incomplete";
 	/** The federation name whose enabled flag triggered the check. */
 	readonly federationName: string;
-	/** The store keys that are absent from the planned component set. */
+	/** The store keys no source plans, or whose slot holds `undefined`. */
 	readonly missing: readonly string[];
 }
 

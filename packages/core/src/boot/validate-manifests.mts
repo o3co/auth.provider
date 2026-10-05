@@ -1489,28 +1489,48 @@ const FEDERATION_REQUIRED_STORES = [
 
 /**
  * If any `core.federations.<name>.enabled === true`, all six session,
- * federation and refresh-token-family slots must be in the planned component
- * set. A missing one makes federation routes either fail at runtime with an
- * opaque 503 (the session and federation-token stores) or never mount,
- * surfacing as unexpected 404s (refreshTokenFamilyRevocation, per the
- * `logoutSupported` / `federationTokenSupported` gates in
- * `packages/oauth/src/routes.mts`). Refusing at boot makes both visible.
+ * federation and refresh-token-family slots must be wired. A missing one
+ * makes federation routes either fail at runtime with an opaque 503 (the
+ * session and federation-token stores) or never mount, surfacing as
+ * unexpected 404s (refreshTokenFamilyRevocation, per the `logoutSupported` /
+ * `federationTokenSupported` gates in `packages/oauth/src/routes.mts`).
+ * Refusing at boot makes both visible. Stage 1 counts a planned slot as
+ * wired; stage 3 refuses one that holds `undefined`.
  */
 export function checkFederationStoresWiring(
 	config: AppConfig,
 	plannedKeys: ReadonlySet<string>,
 ): void {
+	const refusal = federationStoresRefusal(
+		config,
+		(key) => plannedKeys.has(key),
+		"validateManifests",
+	);
+	if (refusal !== undefined) throw refusal;
+}
+
+/**
+ * The `federation-stores-incomplete` refusal of the first enabled federation
+ * whose stores `isWired` does not answer for, or `undefined`.
+ * @internal
+ */
+export function federationStoresRefusal(
+	config: AppConfig,
+	isWired: (key: ComponentKey) => boolean,
+	stage: BootStage,
+): BootError | undefined {
 	for (const [name] of enabledFederationsOf(config)) {
-		const missing = FEDERATION_REQUIRED_STORES.filter((k) => !plannedKeys.has(k));
+		const missing = FEDERATION_REQUIRED_STORES.filter((k) => !isWired(k));
 		if (missing.length > 0) {
-			throw new BootError({
-				stage: "validateManifests",
+			return new BootError({
+				stage,
 				reason: "federation-stores-incomplete",
 				message: `core.federations.${name} is enabled but required federation stores are missing: ${missing.join(", ")}`,
 				details: { reason: "federation-stores-incomplete", federationName: name, missing },
 			});
 		}
 	}
+	return undefined;
 }
 
 // ---------------------------------------------------------------------------
