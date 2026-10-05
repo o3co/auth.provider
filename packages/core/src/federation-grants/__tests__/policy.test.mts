@@ -311,6 +311,21 @@ describe("checkFederationGrantPolicy", () => {
 		expect((thrown as Error).cause).toBe(failure);
 	});
 
+	it("refuses the first member that is refused, and reads no member after it", () => {
+		let laterRead = false;
+		const value = {
+			enabled: "true",
+			get allowKeepOnSubjectRevocation(): boolean {
+				laterRead = true;
+				throw new Error("must not be read");
+			},
+		};
+		expect(() => checkFederationGrantPolicy(value)).toThrow(
+			/^federationGrantPolicy\.enabled must be true or false/,
+		);
+		expect(laterRead).toBe(false);
+	});
+
 	it("passes what the double answers and refuses what the contract refuses", async () => {
 		const double = createTestFederationGrantPolicy({ enabled: true });
 		expect(checkFederationGrantPolicy(double)).toStrictEqual(double);

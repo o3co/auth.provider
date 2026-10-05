@@ -99,15 +99,15 @@ export function checkFederationGrantPolicy(value: unknown): FederationGrantPolic
 		);
 	}
 	const slot = value as Record<string, unknown>;
-	const read = new Map<(typeof SWITCHES)[number], unknown>(
-		SWITCHES.map((name) => [name, readOnce(name, () => slot[name])]),
-	);
-	for (const [name, member] of read) {
+	const read = new Map<(typeof SWITCHES)[number], boolean>();
+	for (const name of SWITCHES) {
+		const member = readOnce(name, () => slot[name]);
 		if (typeof member !== "boolean") {
 			throw new RangeError(
 				`federationGrantPolicy.${name} must be true or false, and the composition's slot carries ${shown(member)}. ${WHY}`,
 			);
 		}
+		read.set(name, member);
 	}
 	const enabled = read.get("enabled") as boolean;
 	const allowKeepOnSubjectRevocation = read.get("allowKeepOnSubjectRevocation") as boolean;
