@@ -80,9 +80,10 @@ const readMember = (read: () => unknown): unknown => {
  * The first token lifetime `settings` names beyond the one core resolves
  * from `config` (access-token max, then refresh-token), or `undefined`. A
  * non-number member is not compared; one whose read throws counts as none.
- * The configured lifetimes size retention (revoked refresh-token families,
- * the subject revocation boundary) and neither reads the slot, so a longer
- * slot lifetime would mint a token that outlives the record revoking it.
+ * The configured lifetimes size the retention of revoked refresh-token
+ * families, and the refresh-token family modules do not read the slot, so a
+ * longer slot lifetime would mint a token that outlives the record revoking
+ * it.
  * The resolver refuses a configuration that resolves no lifetime, naming
  * the key. Internal to core.
  */

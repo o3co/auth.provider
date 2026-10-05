@@ -168,7 +168,10 @@ family and deletes that federation's tokens it was handed, and the caller
 hands out nothing. `close(sid, cause)` answers `done`, `pending` or
 `unavailable`, with the snapshot's relying parties and federations.
 `liveness(sid)` answers `live` with the user session, or `not_live`, or
-`unavailable`. `resumePending()` runs the close work of every closing
+`unavailable`. A sid the port cannot hold names no session, so the reads
+answer it as one never opened — `liveness` `not_live`, `federations` none —
+and reach no store; the writes, `join` and `close`, refuse it with a
+RangeError. `resumePending()` runs the close work of every closing
 record. A participant's `data` is `""`: its kind and id are all it holds
 (D7).
 
@@ -313,3 +316,20 @@ provider failing (`provides-factory-failed`, naming
 `core-session-lifecycle`), its remedy now naming the contribution: install a
 module that contributes a `sessionCloseNotifiers` entry, as `oauthModule`
 does.
+
+**D17. Join order, and the federations a logout reads first.** A record's
+participants are answered in the order each first joined; a repeat join
+replaces its `data` and does not move it — the order the per-session
+federation index has always kept, which a logout reads to pick the
+federation it ends upstream. The in-process store keeps that order; the
+Redis store keeps it from the join ordinal its join script writes, and
+until then answers byte order. `SessionLifecycle.federations(sid)` answers
+the federations in the order they joined: while the bridge stands, the
+index's first, in its insertion order — every join writes the index before
+the record, so that is the order of joining, a federation joined before the
+switch included — then the record's, each once. That is the union and order
+the close that makes the closing commit answers; a later close answers the
+snapshot's. Once the bridge goes, the record's order alone holds it. A logout reads it before the close, since the close removes the
+federation tokens that carry the upstream `id_token_hint`. A logout whose
+close commits with work still pending is audited as `logout.close_pending`.
+

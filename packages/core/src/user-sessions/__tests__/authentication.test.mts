@@ -33,6 +33,7 @@ import {
 	checkSecondFactorEvent,
 	copySessionAuthentication,
 	federatedSessionAuthentication,
+	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	recordableSessionAuthentication,
@@ -623,6 +624,96 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts",
 	it("reads no inherited key: a federation named like an Object.prototype member has no switch", () => {
 		expect(federationTrustsUpstreamAmr({ core: { federations: {} } }, "constructor")).toBe(false);
 		expect(federationTrustsUpstreamAmr({ core: { federations: {} } }, "__proto__")).toBe(false);
+	});
+});
+
+describe("federationCallbackMeetsFreshness — whether a federation's callback alone meets a freshness ask", () => {
+	const config = (entry: unknown) => ({ core: { federations: { google: entry } } });
+
+	it("is false by default: a callback with no upstream instant meets no freshness ask", () => {
+		expect(federationCallbackMeetsFreshness(config({ enabled: true }), "google")).toBe(false);
+		expect(federationCallbackMeetsFreshness({ core: { federations: {} } }, "google")).toBe(false);
+		expect(federationCallbackMeetsFreshness({}, "google")).toBe(false);
+		expect(federationCallbackMeetsFreshness(undefined, "google")).toBe(false);
+		// The map written at the top level is not core's: boot refuses it.
+		expect(
+			federationCallbackMeetsFreshness(
+				{ federations: { google: { enabled: true, callbackMeetsFreshness: true } } },
+				"google",
+			),
+		).toBe(false);
+	});
+
+	it("is true only for an enabled federation configured with callbackMeetsFreshness = true", () => {
+		expect(
+			federationCallbackMeetsFreshness(
+				config({ enabled: true, callbackMeetsFreshness: true }),
+				"google",
+			),
+		).toBe(true);
+		expect(
+			federationCallbackMeetsFreshness(
+				config({ enabled: true, callbackMeetsFreshness: false }),
+				"google",
+			),
+		).toBe(false);
+		for (const enabled of [false, undefined, "true", 1]) {
+			expect(
+				federationCallbackMeetsFreshness(
+					config({ enabled, callbackMeetsFreshness: true }),
+					"google",
+				),
+			).toBe(false);
+		}
+		// Another federation's switch is not this one's.
+		expect(
+			federationCallbackMeetsFreshness(
+				{ core: { federations: { github: { enabled: true, callbackMeetsFreshness: true } } } },
+				"google",
+			),
+		).toBe(false);
+	});
+
+	it("does not read a key named after the type, an entry being flat", () => {
+		expect(
+			federationCallbackMeetsFreshness(
+				{
+					core: {
+						federations: {
+							okta: { enabled: true, type: "oidc", oidc: { callbackMeetsFreshness: true } },
+						},
+					},
+				},
+				"okta",
+			),
+		).toBe(false);
+	});
+
+	it.each([
+		["a string", "true"],
+		["a number", 1],
+		["null", null],
+		["an object", {}],
+	])("refuses a value that is %s, naming the key, enabled or not", (_label, value) => {
+		for (const enabled of [true, false]) {
+			expect(() =>
+				federationCallbackMeetsFreshness(
+					config({ enabled, callbackMeetsFreshness: value }),
+					"google",
+				),
+			).toThrow(
+				new RangeError("core.federations.google.callbackMeetsFreshness must be true or false"),
+			);
+		}
+	});
+
+	it("reads no inherited key: a federation named like an Object.prototype member has no switch", () => {
+		expect(federationCallbackMeetsFreshness({ core: { federations: {} } }, "constructor")).toBe(
+			false,
+		);
+		expect(federationCallbackMeetsFreshness({ core: { federations: {} } }, "__proto__")).toBe(
+			false,
+		);
 	});
 });
 

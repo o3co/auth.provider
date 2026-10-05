@@ -36,14 +36,14 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
-	resolveTokenBindingSettings,
 	type TokenBinding,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestTokenBindingSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
 	COMPOUND_MTLS_BINDING,
@@ -78,26 +78,17 @@ const mockConfig = {
 
 const mockDeps: RefreshTokenGrantDeps = {
 	config: mockConfig,
+	...grantSettingsFrom(mockConfig),
 	keyStore,
 	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 };
 
-/** `mockDeps` with the opt-in `core.tokenBinding.bindConfidentialClientRefreshTokens` set. */
+/** `mockDeps` with core's opt-in `bindConfidentialClientRefreshTokens` set in its slot. */
 const depsWithConfidentialBinding = (enabled: boolean): RefreshTokenGrantDeps => ({
 	...mockDeps,
-	config: {
-		...(mockConfig as unknown as Record<string, unknown>),
-		core: {
-			...(mockConfig as unknown as { core?: Record<string, unknown> }).core,
-			// `dispatchPolicy` is required by core's schema and comes from
-			// reference.conf in a real deployment. Restated here so the stub
-			// stays a shape the schema would accept.
-			tokenBinding: {
-				dispatchPolicy: "intent-explicit",
-				bindConfidentialClientRefreshTokens: enabled,
-			},
-		},
-	} as unknown as GrantDependencies["config"],
+	tokenBindingSettings: createTestTokenBindingSettings({
+		bindConfidentialClientRefreshTokens: enabled,
+	}),
 });
 
 const confidentialAuthClient = {
@@ -482,23 +473,21 @@ describe("confidential-client RT binding — opt-in", () => {
 		expect(result.error).toBe("invalid_grant");
 	});
 
-	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's", async () => {
-		const base = mockConfig as unknown as { core?: Record<string, unknown> };
-		for (const tokenBinding of [
-			undefined,
-			{},
-			{ bindConfidentialClientRefreshTokens: true },
-			{ bindConfidentialClientRefreshTokens: false },
-			// A configuration built by hand, which no schema coerced.
-			{ bindConfidentialClientRefreshTokens: "true" },
-			{ dispatchPolicy: "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
+	it("binds exactly when core's tokenBindingSettings slot says so: the setting is core's", async () => {
+		for (const tokenBindingSettings of [
+			createTestTokenBindingSettings(),
+			createTestTokenBindingSettings({ bindConfidentialClientRefreshTokens: true }),
+			createTestTokenBindingSettings({ bindConfidentialClientRefreshTokens: false }),
+			createTestTokenBindingSettings({
+				dispatchPolicy: "strict-mutual-exclusion",
+				bindConfidentialClientRefreshTokens: true,
+			}),
 		]) {
-			const config = {
-				...base,
-				core: { ...base.core, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
-			} as unknown as GrantDependencies["config"];
 			const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
-			const { result } = await createRefreshTokenGrant({ ...mockDeps, config }).handle(
+			const { result } = await createRefreshTokenGrant({
+				...mockDeps,
+				tokenBindingSettings,
+			}).handle(
 				buildCtx({
 					refreshToken: rt,
 					authenticatedClient: confidentialAuthClient,
@@ -508,8 +497,8 @@ describe("confidential-client RT binding — opt-in", () => {
 			expect(result.status).toBe(200);
 			if (!("tokens" in result)) expect.fail("Expected tokens in result");
 			const bound = decodeJwt(result.tokens.refresh_token as string).cnf !== undefined;
-			expect(bound, JSON.stringify(tokenBinding)).toBe(
-				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens,
+			expect(bound, JSON.stringify(tokenBindingSettings)).toBe(
+				tokenBindingSettings.bindConfidentialClientRefreshTokens,
 			);
 		}
 	});

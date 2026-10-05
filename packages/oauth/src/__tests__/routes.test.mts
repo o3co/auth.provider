@@ -45,6 +45,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const mockConfig = {
 	// `oauth.jwt.issuer` is required by createOAuthRouter — the router
@@ -150,7 +151,7 @@ describe("createOAuthRouter", () => {
 		const result = await createOAuthRouter(mockExpress, {
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
-			config: mockConfig,
+			...routerInputsOf(mockConfig),
 			clientRepository: {} as ClientRepository,
 			codeRepository: {} as CodeRepository,
 			keyStore: createSymmetricKeyStore("test-secret"),
@@ -180,7 +181,7 @@ describe("createOAuthRouter", () => {
 		await createOAuthRouter(trackingExpress, {
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
-			config: mockConfig,
+			...routerInputsOf(mockConfig),
 			clientRepository: {} as ClientRepository,
 			codeRepository: {} as CodeRepository,
 			keyStore: createSymmetricKeyStore("test-secret"),
@@ -205,7 +206,7 @@ describe("createOAuthRouter", () => {
 		await createOAuthRouter(expressLike, {
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
-			config: mockConfig,
+			...routerInputsOf(mockConfig),
 			clientRepository: {} as ClientRepository,
 			codeRepository: {} as CodeRepository,
 			keyStore: createSymmetricKeyStore("test-secret"),
@@ -225,7 +226,7 @@ describe("createOAuthRouter", () => {
 			loginEntry: createTestLoginEntry(),
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: authorizationServerRegistry(),
-			config: mockConfig,
+			...routerInputsOf(mockConfig),
 			clientRepository: {} as ClientRepository,
 			codeRepository: {} as CodeRepository,
 			keyStore: createSymmetricKeyStore("test-secret"),
@@ -242,7 +243,7 @@ describe("createOAuthRouter", () => {
 		await createOAuthRouter(expressLike, {
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
-			config: fullConfig,
+			...routerInputsOf(fullConfig),
 			clientRepository: {} as ClientRepository,
 			codeRepository: {} as CodeRepository,
 			keyStore: createSymmetricKeyStore("test-secret"),
@@ -279,7 +280,7 @@ describe("createOAuthRouter", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry,
-				config: fullConfig,
+				...routerInputsOf(fullConfig),
 				clientRepository: integrationClientRepo,
 				codeRepository: integrationCodeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -672,7 +673,7 @@ describe("createOAuthRouter", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry,
-				config: fullConfig,
+				...routerInputsOf(fullConfig),
 				clientRepository: integrationClientRepo,
 				codeRepository: integrationCodeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -707,7 +708,7 @@ describe("createOAuthRouter", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: new GrantRegistry(),
-				config: fullConfig,
+				...routerInputsOf(fullConfig),
 				clientRepository: integrationClientRepo,
 				codeRepository: integrationCodeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -745,7 +746,7 @@ describe("createOAuthRouter — /authorize is the authorization_code grant's", (
 			loginEntry: createTestLoginEntry(),
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry,
-			config: mockConfig,
+			...routerInputsOf(mockConfig),
 			clientRepository: {} as ClientRepository,
 			...(codeRepository === undefined ? {} : { codeRepository }),
 			keyStore: createSymmetricKeyStore("test-secret"),
@@ -773,7 +774,7 @@ describe("createOAuthRouter — /authorize is the authorization_code grant's", (
 			loginEntry: createTestLoginEntry(),
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: registryOf("client_credentials"),
-			config: mockConfig,
+			...routerInputsOf(mockConfig),
 			clientRepository: {} as ClientRepository,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			consentStore: createMemoryConsentStore(),

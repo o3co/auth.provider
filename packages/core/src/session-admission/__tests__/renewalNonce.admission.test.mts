@@ -29,9 +29,14 @@ import {
 	codeClaimRevalidation,
 	cookieClaim,
 	cookieRenewedAway,
+	linkClaim,
 	tokenClaim,
 } from "#/session-admission/admit.mjs";
-import type { AdmissionDeps, SessionClaim } from "#/session-admission/requirement.mjs";
+import type {
+	AdmissionDeps,
+	SessionClaim,
+	SessionRequirement,
+} from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import { createInMemoryUserSessionStore } from "#/user-sessions/memory/userSessionStore.mjs";
 import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
@@ -230,5 +235,138 @@ describe("cookieRenewedAway — whether the record a cookie names is bound to an
 			},
 		};
 		await expect(cookieRenewedAway(down, cookie())).rejects.toThrow("store down");
+	});
+});
+
+/**
+ * What a consumer that writes the record next expects of it: the record's own
+ * renewal nonce as admission read it, so a conditional write compares with the
+ * record and not with the cookie session.
+ */
+describe("the admitted outcome carries the record's renewal nonce", () => {
+	it("carries the record's nonce, which the cookie session holding it presented", async () => {
+		const nonce = newRenewalNonce();
+		expect(await admit(await holding(nonce), cookie(nonce))).toMatchObject({
+			outcome: "admitted",
+			renewalNonce: nonce,
+		});
+	});
+
+	it("carries none for a record without one, whatever the cookie session holds", async () => {
+		const store = await holding();
+		for (const presented of [undefined, newRenewalNonce()]) {
+			const admission = await admit(store, cookie(presented));
+			expect(admission, String(presented)).toMatchObject({ outcome: "admitted" });
+			expect(Object.hasOwn(admission, "renewalNonce"), String(presented)).toBe(false);
+		}
+	});
+
+	it("reads the record's nonce once: an accessor answering another value later changes nothing", async () => {
+		const nonce = newRenewalNonce();
+		const inner = await holding(nonce);
+		const flipping: UserSessionStore = {
+			...inner,
+			get: async (sid) => {
+				const session = await inner.get(sid);
+				if (session === null) return null;
+				let reads = 0;
+				return Object.defineProperty({ ...session }, "renewalNonce", {
+					get: () => (reads++ === 0 ? nonce : newRenewalNonce()),
+					enumerable: true,
+				});
+			},
+		};
+		expect(await admit(flipping, cookie(nonce))).toMatchObject({
+			outcome: "admitted",
+			renewalNonce: nonce,
+		});
+	});
+
+	/** A requirement that is always met, so admission asks it and reads the record again (step 8). */
+	const asked: SessionRequirement = {
+		name: "asked",
+		reach: new Set(),
+		stepUpPage: undefined,
+		remediations: [],
+		hintKeys: [],
+		admit: async () => ({ outcome: "met" }),
+	};
+	const withRequirement = (store: UserSessionStore): AdmissionDeps => ({
+		...deps(store),
+		requirements: resolverForTests([asked], { actions: TEST_ACTIONS }),
+	});
+
+	it("carries the first reading's nonce through the last reading, a requirement having been asked", async () => {
+		const nonce = newRenewalNonce();
+		expect(
+			await admitSession(withRequirement(await holding(nonce)), {
+				claim: cookie(nonce),
+				action: "test.use",
+			}),
+		).toMatchObject({ outcome: "admitted", renewalNonce: nonce });
+	});
+
+	it("refuses, not_live (renewed), a cookie whose record moved to another nonce by the last reading", async () => {
+		const nonce = newRenewalNonce();
+		const inner = await holding(nonce);
+		let reads = 0;
+		const moving: UserSessionStore = {
+			...inner,
+			get: async (sid) => {
+				const session = await inner.get(sid);
+				reads += 1;
+				return session === null || reads === 1
+					? session
+					: { ...session, renewalNonce: newRenewalNonce() };
+			},
+		};
+		expect(
+			await admitSession(withRequirement(moving), { claim: cookie(nonce), action: "test.use" }),
+		).toEqual({ outcome: "not_live", reason: "renewed" });
+		expect(reads).toBe(2);
+	});
+
+	it("carries the record's nonce for a code and a link carrier too", async () => {
+		const nonce = newRenewalNonce();
+		const store = await holding(nonce);
+		for (const claim of [
+			codeClaimRevalidation({ sid: SID }, SUB),
+			linkClaim({ sid: SID, subject: SUB }),
+		]) {
+			expect(await admit(store, claim), claim.carrier).toMatchObject({
+				outcome: "admitted",
+				renewalNonce: nonce,
+			});
+		}
+	});
+
+	it("carries none for a non-cookie carrier over a stored value that is not a nonce", async () => {
+		const inner = await holding();
+		const odd: UserSessionStore = {
+			...inner,
+			get: async (sid) => {
+				const session = await inner.get(sid);
+				return session === null ? null : { ...session, renewalNonce: "not-a-nonce" };
+			},
+		};
+		for (const claim of [
+			tokenClaim({ sid: SID, sub: SUB }),
+			codeClaimRevalidation({ sid: SID }, SUB),
+			linkClaim({ sid: SID, subject: SUB }),
+		]) {
+			const admission = await admit(odd, claim);
+			expect(admission, claim.carrier).toMatchObject({ outcome: "admitted" });
+			expect(Object.hasOwn(admission, "renewalNonce"), claim.carrier).toBe(false);
+		}
+	});
+
+	it("carries the record's nonce for a token carrier too, whose cookie is never compared", async () => {
+		const nonce = newRenewalNonce();
+		expect(
+			await admitSession(deps(await holding(nonce)), {
+				claim: tokenClaim({ sid: SID, sub: SUB }),
+				action: "test.use",
+			}),
+		).toMatchObject({ outcome: "admitted", renewalNonce: nonce });
 	});
 });

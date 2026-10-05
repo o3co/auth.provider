@@ -50,7 +50,6 @@ const webauthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
 
 const base = makeAppConfig();
