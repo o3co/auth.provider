@@ -93,7 +93,8 @@ describe("revokeAllForSubject with a grant store", () => {
 			now: () => now().getTime(),
 		});
 
-		expect(order).toEqual(["stamp", "list"]);
+		// Both stamps, the second once the first took effect, before the list.
+		expect(order).toEqual(["stamp", "stamp", "list"]);
 	});
 
 	it("still runs the grant pass when the stamp failed", async () => {
