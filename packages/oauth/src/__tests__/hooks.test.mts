@@ -37,6 +37,7 @@ import { authorizationServerRegistry } from "./_helpers/authorizationServerRegis
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 // A limiter outage is answered by the limiter's own `failMode`; the mock
 // config carries `rateLimit.failMode = "open"`, which the routes do not read.
@@ -146,15 +147,16 @@ async function buildApp(overrides: {
 	app.use(express.json());
 	app.use(express.urlencoded({ extended: false }));
 
+	const { config, ...hooks } = overrides;
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
-		config: overrides.config ?? mockConfig,
+		...routerInputsOf(config ?? mockConfig),
 		clientRepository: mockClientRepository,
 		codeRepository: mockCodeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
-		...overrides,
+		...hooks,
 	});
 
 	app.use("/oauth", router);
@@ -503,7 +505,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -605,7 +607,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -644,7 +646,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -680,7 +682,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -718,7 +720,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -752,7 +754,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -789,7 +791,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -836,7 +838,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -887,7 +889,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -986,7 +988,7 @@ describe("oauth routes — hooks", () => {
 				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
-				config: mockConfig,
+				...routerInputsOf(mockConfig),
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),

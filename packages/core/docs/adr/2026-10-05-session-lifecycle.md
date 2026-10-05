@@ -168,7 +168,10 @@ family and deletes that federation's tokens it was handed, and the caller
 hands out nothing. `close(sid, cause)` answers `done`, `pending` or
 `unavailable`, with the snapshot's relying parties and federations.
 `liveness(sid)` answers `live` with the user session, or `not_live`, or
-`unavailable`. `resumePending()` runs the close work of every closing
+`unavailable`. A sid the port cannot hold names no session, so the reads
+answer it as one never opened — `liveness` `not_live`, `federations` none —
+and reach no store; the writes, `join` and `close`, refuse it with a
+RangeError. `resumePending()` runs the close work of every closing
 record. A participant's `data` is `""`: its kind and id are all it holds
 (D7).
 

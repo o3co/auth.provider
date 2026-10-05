@@ -54,6 +54,7 @@ import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const config = {
 	oauth: {
@@ -101,7 +102,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 			createOAuthRouter(express, {
 				loginEntry: createTestLoginEntry(),
 				registry: new GrantRegistry(),
-				config,
+				...routerInputsOf(config),
 				clientRepository,
 				codeRepository,
 				keyStore,
@@ -115,7 +116,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 		const { router } = await createOAuthRouter(express, {
 			loginEntry: createTestLoginEntry(),
 			registry: new GrantRegistry(),
-			config,
+			...routerInputsOf(config),
 			clientRepository,
 			codeRepository,
 			keyStore,
@@ -135,7 +136,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 			createOAuthRouter(express, {
 				loginEntry: createTestLoginEntry(),
 				registry,
-				config,
+				...routerInputsOf(config),
 				clientRepository,
 				codeRepository,
 				keyStore,
@@ -190,7 +191,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 			createOAuthRouter(express, {
 				loginEntry: createTestLoginEntry(),
 				registry: new GrantRegistry(),
-				config,
+				...routerInputsOf(config),
 				clientRepository,
 				codeRepository,
 				keyStore,
