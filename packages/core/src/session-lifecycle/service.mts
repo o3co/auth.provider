@@ -143,8 +143,12 @@ export interface SessionLifecycleOptions {
 	readonly federationTokenStore: FederationTokenStore;
 	/** Absent: a close removes no subject index entry. */
 	readonly subjectSessionIndex?: SubjectSessionIndex;
-	/** Absent: a close tells no relying party. */
-	readonly notifier?: SessionCloseNotifier;
+	/**
+	 * How to read the notifier when a close runs: at the closing commit and
+	 * when it tells. Absent, or answering `undefined`: a close tells no relying
+	 * party.
+	 */
+	readonly notifier?: () => SessionCloseNotifier | undefined;
 	/** The per-session stores written beside the lifecycle record. */
 	readonly sessionRPRegistry: SessionRPRegistry;
 	readonly sessionFamilyIndex: SessionFamilyIndex;
@@ -255,7 +259,6 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		refreshTokenFamilyRevocation,
 		federationTokenStore,
 		subjectSessionIndex,
-		notifier,
 		retainMs,
 	} = options;
 	if (!Number.isInteger(retainMs) || retainMs < 0 || retainMs > MAX_DURATION_MS) {
@@ -264,10 +267,11 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		);
 	}
 	const logger = options.logger ?? consoleLogger;
+	const notifierNow = options.notifier ?? ((): SessionCloseNotifier | undefined => undefined);
 	const bridge = createSessionStoresBridge(options);
 
 	const requestFor = (cause: SessionCloseCause): SessionCloseRequest => {
-		const tells = CLOSE_POLICY[cause].tellsRelyingParties && notifier !== undefined;
+		const tells = CLOSE_POLICY[cause].tellsRelyingParties && notifierNow() !== undefined;
 		return {
 			cause,
 			steps: [
@@ -297,6 +301,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
 	/** Tells relying party `clientId` that the closing `record` closed. */
 	const tell = (sid: string, record: SessionLifecycleRecord, clientId: string): Promise<void> => {
+		const notifier = notifierNow();
 		if (notifier === undefined) throw new Error("no sessionCloseNotifier is wired");
 		const cause = record.close?.cause;
 		if (cause === undefined) throw new Error("the record holds no close");

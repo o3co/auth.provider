@@ -49,6 +49,8 @@ export type {
 	OidcDiscoveryContributionFactory,
 	// A module's budget for a rate-limit prefix it owns.
 	RateLimitBudgetFactory,
+	// The session-close notifier a module contributes.
+	SessionCloseNotifierFactory,
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 	// What a verifier's claim of a rate-limit prefix declares.
@@ -86,6 +88,7 @@ export type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
 	RateLimitBudgetResolver,
+	SessionCloseNotifierResolver,
 	TokenExchangeValidatorResolver,
 } from "./synthetic-keys.mjs";
 export { SYNTHETIC_COMPONENT_KEYS } from "./synthetic-keys.mjs";

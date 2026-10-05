@@ -27,15 +27,21 @@ import {
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
 	InMemoryClientRepository,
+	type Module,
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 	readCoreSection,
+	type SessionCloseNotice,
 	type SessionCloseNotifier,
 	type SessionLifecycle,
 	sessionLifecycleModule,
 } from "#/index.mjs";
-import { coreConfigForTests, makeValidCoreConfig } from "#/testing/index.mjs";
+import {
+	coreConfigForTests,
+	createTestOAuthTokenSettings,
+	makeValidCoreConfig,
+} from "#/testing/index.mjs";
 
 const SWEEP_KEY = "core.sessionLifecycle.sweepIntervalSeconds";
 
@@ -65,6 +71,16 @@ const MODULES = [
 
 const notifier: SessionCloseNotifier = { notify: async () => undefined };
 
+/** A module that contributes `notifier` as its session-close notifier. */
+const notifierModule = (
+	name = "test-notifier",
+	contributed: SessionCloseNotifier | null = notifier,
+): Module =>
+	defineModule({
+		name,
+		contributes: { sessionCloseNotifiers: { [name]: () => contributed as SessionCloseNotifier } },
+	});
+
 /** Boots the modules over core's valid config, its `core` section laid over by `sweep`. */
 const boot = (
 	options: {
@@ -72,6 +88,7 @@ const boot = (
 		readonly components?: Record<string, unknown>;
 		readonly overrides?: Record<string, unknown>;
 		readonly activated?: boolean;
+		readonly extra?: readonly Module[];
 	} = {},
 ) => {
 	const config = makeValidCoreConfig();
@@ -81,7 +98,10 @@ const boot = (
 			: { sessionLifecycleSweepIntervalSeconds: options.sweepIntervalSeconds },
 	).core;
 	return createApp({
-		modules: options.activated === false ? MODULES.filter((m) => m !== activator) : MODULES,
+		modules: [
+			...(options.activated === false ? MODULES.filter((m) => m !== activator) : MODULES),
+			...(options.extra ?? []),
+		],
 		bootstrapComponents: {
 			config: { ...config, core },
 			pathResolver: (p: string) => p,
@@ -137,13 +157,112 @@ describe("sessionLifecycleModule", () => {
 		).rejects.toThrow(/sessionCloseNotifier/);
 	});
 
-	it("boots with relying parties and a notifier", async () => {
+	it("boots with relying parties and a contributed notifier", async () => {
 		const handle = await boot({
-			components: {
-				clientRepository: new InMemoryClientRepository(new Map()),
-				sessionCloseNotifier: notifier,
-			},
+			components: { clientRepository: new InMemoryClientRepository(new Map()) },
+			extra: [notifierModule()],
 		});
+		await handle.dispose();
+	});
+
+	it("refuses with the provider's reason and text, at the end of the contributions", async () => {
+		await expect(
+			boot({ components: { clientRepository: new InMemoryClientRepository(new Map()) } }),
+		).rejects.toMatchObject({
+			reason: "provides-factory-failed",
+			message: expect.stringContaining(
+				"core-session-lifecycle: relying parties are served (the clientRepository slot is filled) " +
+					"and no sessionCloseNotifier is wired, so a closed session's relying parties would never " +
+					"be told. Install a module that contributes a sessionCloseNotifiers entry.",
+			),
+		});
+	});
+
+	it("refuses a second notifier at stage 1", async () => {
+		await expect(
+			boot({ extra: [notifierModule("notifier-a"), notifierModule("notifier-b")] }),
+		).rejects.toMatchObject({
+			reason: "duplicate-contribute",
+			stage: "validateManifests",
+			details: { kind: "sessionCloseNotifiers", modules: ["notifier-a", "notifier-b"] },
+		});
+	});
+
+	it("refuses a notifier factory that answers no notifier", async () => {
+		await expect(boot({ extra: [notifierModule("notifier-a", null)] })).rejects.toMatchObject({
+			reason: "contribute-factory-failed",
+		});
+	});
+
+	it("refuses a host collector for the notifiers", async () => {
+		const config = makeValidCoreConfig();
+		await expect(
+			createApp({
+				modules: MODULES,
+				bootstrapComponents: { config, pathResolver: (p: string) => p },
+				contributionKinds: { sessionCloseNotifiers: {} },
+			} as never),
+		).rejects.toMatchObject({
+			reason: "contribution-kind-guarded",
+			details: { kind: "sessionCloseNotifiers" },
+		});
+	});
+
+	it("boots a notifier that reads a slot of a module requiring the lifecycle, with no cycle", async () => {
+		const notices: SessionCloseNotice[] = [];
+		// Stands in for the module that issues to relying parties: it provides
+		// the token settings and requires the lifecycle.
+		const issuing = defineModule({
+			name: "issuing",
+			requires: ["sessionLifecycle"] as never,
+			provides: { oauthTokenSettings: () => createTestOAuthTokenSettings() },
+		});
+		const telling = defineModule({
+			name: "telling",
+			requires: ["oauthTokenSettings"] as never,
+			contributes: {
+				sessionCloseNotifiers: {
+					telling: (deps: { readonly oauthTokenSettings: { readonly issuer: string } }) => ({
+						notify: async (notice: SessionCloseNotice) => {
+							expect(deps.oauthTokenSettings.issuer).toBeTypeOf("string");
+							notices.push(notice);
+						},
+					}),
+				},
+			} as never,
+		});
+		const handle = await boot({
+			components: { clientRepository: new InMemoryClientRepository(new Map()) },
+			extra: [issuing, telling],
+		});
+		const components = handle.components as Record<string, unknown>;
+		const lifecycle = components.sessionLifecycle as SessionLifecycle;
+		const sessions = components.userSessionStore as {
+			create(input: unknown): Promise<void>;
+		};
+		const expiresAt = new Date(Date.now() + 3_600_000);
+		await sessions.create({
+			sid: "sid-1",
+			sub: "user-1",
+			authTime: new Date(),
+			expiresAt,
+			claims: {},
+			amr: ["pwd"],
+			authentication: undefined,
+		});
+		const rp = {
+			clientId: "rp-a",
+			backchannelLogoutUri: undefined,
+			backchannelLogoutSessionRequired: undefined,
+			frontchannelLogoutUri: undefined,
+			frontchannelLogoutSessionRequired: undefined,
+			registeredAt: new Date(),
+		};
+		expect(await lifecycle.join("sid-1", { rp, familyId: "f1" })).toEqual({ outcome: "joined" });
+		expect((await lifecycle.close("sid-1", "rp_logout")).outcome).toBe("done");
+		expect(notices).toEqual([
+			{ sid: "sid-1", sub: "user-1", clientId: "rp-a", cause: "rp_logout" },
+		]);
 		await handle.dispose();
 	});
 

@@ -314,6 +314,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"rateLimitBudgets",
 	"federationTypes",
 	"admissionActions",
+	"sessionCloseNotifiers",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -816,6 +817,7 @@ const FEDERATION_KINDS_REGISTERED =
  */
 const PLANNER_OWNED_KINDS = [
 	"rateLimitBudgets",
+	"sessionCloseNotifiers",
 	"federationTypes",
 	"admissionActions",
 	"auditHooks",
@@ -833,6 +835,8 @@ const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string
 		case "admissionActions":
 		case "rateLimitBudgets":
 			return "the modules that own its entries contribute them, and no module overrides one";
+		case "sessionCloseNotifiers":
+			return "the module that tells relying parties contributes its notifier, which the session lifecycle reads, and no module overrides one";
 		default:
 			return "the modules that own its entries contribute them, and a module may override one";
 	}
@@ -1000,7 +1004,11 @@ const containerShape = (container: unknown): string =>
  *   (`admissionActionSnapshots`), are what registration admits
  *   (`admissionActionProblem`); an action is registered by the module that
  *   admits it, so an override of one is refused as the kind guarded
- *   (`contribution-kind-guarded`).
+ *   (`contribution-kind-guarded`);
+ * - a `sessionCloseNotifiers` container is a record keyed by name, and no
+ *   module overrides the kind (`contribution-kind-guarded`): the notifier is
+ *   its contributor's, switched off only by not installing it. Both read off
+ *   the entries normalisation captured, which stage 4 applies.
  *
  * Throws `contribution-malformed`; `name` is absent for a container.
  * @internal
@@ -1011,7 +1019,7 @@ function checkContributionShapes(
 ): void {
 	const refuse = (
 		m: Module,
-		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions",
+		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions" | "sessionCloseNotifiers",
 		name: string | undefined,
 		channel: "contributes" | "overrides",
 		problem: string,
@@ -1075,6 +1083,32 @@ function checkContributionShapes(
 			const entries =
 				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
 			// Read off the entries normalisation captured, which stage 4 applies.
+			for (const entry of entries ?? []) {
+				if (entry.kind !== "sessionCloseNotifiers") continue;
+				if (channel === "overrides") {
+					throw new BootError({
+						message: `Module "${m.name}" overrides sessionCloseNotifiers, which no module may: the notifier is its contributor's, switched off only by not installing it.`,
+						reason: "contribution-kind-guarded",
+						stage: "validateManifests",
+						details: {
+							reason: "contribution-kind-guarded",
+							kind: "sessionCloseNotifiers",
+							channel: "overrides",
+							module: m.name,
+						},
+					});
+				}
+				// Normalisation files a list under Symbol keys.
+				if (typeof entry.key !== "string") {
+					refuse(
+						m,
+						"sessionCloseNotifiers",
+						undefined,
+						channel,
+						"the kind takes a record keyed by name, not a list",
+					);
+				}
+			}
 			for (const entry of entries ?? []) {
 				if (
 					channel !== "overrides" ||
@@ -1297,6 +1331,35 @@ function checkPerKindContributeDuplicates(
 			seen.set(compoundKey, m.name);
 		}
 	}
+}
+
+/**
+ * At most one session-close notifier per composition, read off the
+ * manifests: two contributions, under any names, refuse boot
+ * (`duplicate-contribute`), since the session lifecycle tells relying parties
+ * through one.
+ * @internal
+ */
+function checkOneSessionCloseNotifier(modules: readonly NormalisedModule[]): void {
+	const contributions = modules.flatMap((m) =>
+		m.contributesEntries
+			.filter((entry) => entry.kind === "sessionCloseNotifiers")
+			.map((entry) => ({ module: m.name, name: String(entry.key) })),
+	);
+	const [first, second] = contributions;
+	if (first === undefined || second === undefined) return;
+	throw new BootError({
+		message: `sessionCloseNotifiers is contributed more than once — "${first.name}" by module "${first.module}" and "${second.name}" by module "${second.module}"; a composition tells relying parties through one notifier.`,
+		reason: "duplicate-contribute",
+		stage: "validateManifests",
+		details: {
+			reason: "duplicate-contribute",
+			kind: "sessionCloseNotifiers",
+			identity: second.name,
+			identityKind: "name",
+			modules: [first.module, second.module],
+		},
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -3398,6 +3461,11 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		id: "per-kind-contribute-duplicates",
 		spec: "A2-β §5.1 step 6",
 		run: (ctx) => checkPerKindContributeDuplicates(ctx.modules, ctx.contributionKinds ?? {}),
+	},
+	{
+		id: "one-session-close-notifier",
+		spec: "issue #1030 (one session-close notifier; ADR 2026-10-05-session-lifecycle D16)",
+		run: (ctx) => checkOneSessionCloseNotifier(ctx.modules),
 	},
 	{
 		id: "route-collisions",

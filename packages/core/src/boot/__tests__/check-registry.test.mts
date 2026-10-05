@@ -65,6 +65,7 @@ describe("stage-1 check registries", () => {
 			"contribution-kind-coverage",
 			"contribution-shapes",
 			"per-kind-contribute-duplicates",
+			"one-session-close-notifier",
 			"route-collisions",
 			"override-targets",
 			"override-duplicates",

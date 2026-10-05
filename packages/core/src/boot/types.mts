@@ -49,6 +49,7 @@ import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
+import type { SessionCloseNotifier } from "../session-lifecycle/notifier.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap bootstrap slots
@@ -109,6 +110,7 @@ export type ContributionKind =
 	| "rateLimitBudgets"
 	| "federationTypes"
 	| "admissionActions"
+	| "sessionCloseNotifiers"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -488,6 +490,12 @@ export interface ContributionCollectorMap {
 	 * `rateLimitBudgetResolver` leaves out.
 	 */
 	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
+	/**
+	 * Collector for `sessionCloseNotifiers` contributions, by name: each
+	 * notifier, never `null`. `sessionCloseNotifierResolver` answers the one
+	 * registered; a second refuses boot at the end of stage 4.
+	 */
+	readonly sessionCloseNotifiers?: NameKeyedCollector<SessionCloseNotifier>;
 	/**
 	 * Collector for `federationTypes` contributions, by type: each
 	 * package's declaration, its factories bound to the module's deps, which
@@ -1343,6 +1351,7 @@ export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
 	readonly kind:
 		| "rateLimitBudgets"
+		| "sessionCloseNotifiers"
 		| "federationTypes"
 		| "admissionActions"
 		| "auditHooks"
@@ -1368,14 +1377,19 @@ export interface ContributionKindGuardedDetails {
  * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
  * carries it — or names an `Object.prototype` member, a `federationTypes`
  * declaration that is not an object with a Zod `entrySchema` and a
- * `factory`, or an `admissionActions` entry whose name, declaration or grade
- * registration refuses. `problem` says which.
+ * `factory`, an `admissionActions` entry whose name, declaration or grade
+ * registration refuses, or a `sessionCloseNotifiers` container that is a list
+ * (as normalisation read it) — `name` then absent. `problem` says which.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
 	readonly module: string;
-	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions";
-	/** The prefix, type or action name; absent when the container itself is refused. */
+	readonly kind:
+		| "rateLimitBudgets"
+		| "federationTypes"
+		| "admissionActions"
+		| "sessionCloseNotifiers";
+	/** The prefix, type, action name or notifier name; absent when the container itself is refused. */
 	readonly name?: string;
 	readonly channel: "contributes" | "overrides";
 	readonly problem: string;

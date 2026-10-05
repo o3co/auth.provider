@@ -16,6 +16,7 @@
 
 import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { SessionRequirementResolver } from "../../session-admission/requirement.mjs";
+import type { SessionCloseNotifier } from "../../session-lifecycle/notifier.mjs";
 import type {
 	ExchangeTokenValidator,
 	FederationProvider,
@@ -64,6 +65,15 @@ export interface RateLimitBudgetResolver {
 	readonly entries: () => IterableIterator<readonly [string, RateLimitSpec]>;
 }
 
+/**
+ * Read-only projection of the boot planner's `sessionCloseNotifiers`
+ * collector: the one contributed notifier, or `undefined` when none is. Read
+ * when a close runs; a read while the `provides` factories run throws.
+ */
+export interface SessionCloseNotifierResolver {
+	readonly get: () => SessionCloseNotifier | undefined;
+}
+
 /** Re-export for consumers that name the `federationProviders` slot's value type. */
 export type { FederationProvider };
 
@@ -95,6 +105,7 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"mfaFactorResolver",
 		"sessionRequirementResolver",
 		"rateLimitBudgetResolver",
+		"sessionCloseNotifierResolver",
 		// Boot-planner-owned (createApp pre-seeds it). A consumer-supplied
 		// registrar would diverge silently: the planner drains its own while
 		// builders register cleanups on the consumer's.
@@ -153,5 +164,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly sessionRequirementResolver?: SessionRequirementResolver;
 		/** Every module's rate-limit budget by prefix, read by a limiter at request time. */
 		readonly rateLimitBudgetResolver?: RateLimitBudgetResolver;
+		/** The contributed session-close notifier, read by the session lifecycle when a close runs. */
+		readonly sessionCloseNotifierResolver?: SessionCloseNotifierResolver;
 	}
 }

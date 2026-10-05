@@ -17,15 +17,17 @@
 /**
  * The module that fills the `sessionLifecycle` slot: the lifecycle service
  * over the session stores, and the sweep that resumes pending closes when
- * `core.sessionLifecycle.sweepIntervalSeconds` is written. It refuses to
- * boot where relying parties are served (the `clientRepository` slot is
- * filled) and no `sessionCloseNotifier` is wired, since a closed session's
- * relying parties would then never be told.
+ * `core.sessionLifecycle.sweepIntervalSeconds` is written.
  *
- * Boot orders modules, not components, so the module that fills
- * `sessionCloseNotifier` must not itself require `sessionLifecycle`; and the
- * refresh-token lifetime is read from the configuration, not from the oauth
- * module's slot, for the same reason.
+ * The notifier is a contribution (`sessionCloseNotifiers`), read through the
+ * synthetic `sessionCloseNotifierResolver` when a close runs, never while
+ * modules are built: so the module contributing it is not ordered before
+ * this one, and may read slots of a module that requires `sessionLifecycle`.
+ * Boot refuses, at the end of the contributions, a composition that serves
+ * relying parties (the `clientRepository` slot is filled) and contributes no
+ * notifier (`SESSION_LIFECYCLE_NOTIFIER_MISSING`). Boot orders modules, not
+ * components, so the refresh-token lifetime is read from the configuration,
+ * not from the oauth module's slot.
  */
 
 import {
@@ -85,8 +87,20 @@ const closingRetainMs = (config: unknown): number => {
 	);
 };
 
+export const SESSION_LIFECYCLE_MODULE = "core-session-lifecycle";
+
+/**
+ * Why boot refuses a composition that serves relying parties (the
+ * `clientRepository` slot is filled) and contributes no notifier: judged at
+ * the end of the contributions, once the notifier would have registered.
+ */
+export const SESSION_LIFECYCLE_NOTIFIER_MISSING =
+	"core-session-lifecycle: relying parties are served (the clientRepository slot is filled) " +
+	"and no sessionCloseNotifier is wired, so a closed session's relying parties would never " +
+	"be told. Install a module that contributes a sessionCloseNotifiers entry.";
+
 export const sessionLifecycleModule = defineModule({
-	name: "core-session-lifecycle",
+	name: SESSION_LIFECYCLE_MODULE,
 	requires: [
 		"sessionLifecycleStore",
 		"userSessionStore",
@@ -96,26 +110,15 @@ export const sessionLifecycleModule = defineModule({
 		"refreshTokenFamilyRevocation",
 		"federationTokenStore",
 		"config",
+		// Synthetic: the contributed notifier, read when a close runs.
+		"sessionCloseNotifierResolver",
 	] as const,
-	optional: [
-		"subjectSessionIndex",
-		"sessionCloseNotifier",
-		"clientRepository",
-		"logger",
-		"lifecycleRegistrar",
-	] as const,
+	optional: ["subjectSessionIndex", "logger", "lifecycleRegistrar"] as const,
 	// Eager: installed, the module refuses a composition without a notifier
 	// and starts its sweep at boot, whether or not anything requires the slot.
 	lifecycle: { sessionLifecycle: { eager: true } },
 	provides: {
 		sessionLifecycle: (deps) => {
-			if (deps.clientRepository !== undefined && deps.sessionCloseNotifier === undefined) {
-				throw new Error(
-					"core-session-lifecycle: relying parties are served (the clientRepository slot is filled) " +
-						"and no sessionCloseNotifier is wired, so a closed session's relying parties would never " +
-						"be told. Install the module that provides sessionCloseNotifier.",
-				);
-			}
 			const intervalMs = readSessionLifecycleSweepIntervalMs(deps.config);
 			const logger = deps.logger ?? consoleLogger;
 			const lifecycle = createSessionLifecycle({
@@ -126,7 +129,7 @@ export const sessionLifecycleModule = defineModule({
 				...(deps.subjectSessionIndex === undefined
 					? {}
 					: { subjectSessionIndex: deps.subjectSessionIndex }),
-				...(deps.sessionCloseNotifier === undefined ? {} : { notifier: deps.sessionCloseNotifier }),
+				notifier: () => deps.sessionCloseNotifierResolver.get(),
 				sessionRPRegistry: deps.sessionRPRegistry,
 				sessionFamilyIndex: deps.sessionFamilyIndex,
 				sessionFederationIndex: deps.sessionFederationIndex,

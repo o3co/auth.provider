@@ -10,7 +10,7 @@ store and the callers' switch follow in the order below
 - Written against: `develop` at `72ba648aa`.
 - Amended 2026-10-05: the service, its answers, the close work, resumption,
   the cause policy, the relying-party notifier, the bridge and where the
-  service lives (D8–D15).
+  service lives (D8–D15); and how the notifier is wired (D16).
   Written against `develop` at `5871ff698`.
 
 ## Context
@@ -212,14 +212,14 @@ relying parties; `expiry` tells none, as natural expiry never has. Without a
 notifier no relying-party item is saved.
 
 **D13. The relying-party notifier.** `SessionCloseNotifier`
-(`src/session-lifecycle/notifier.mts`, the `sessionCloseNotifier`
-slot) is core's contract; the module that issues to relying parties
+(`src/session-lifecycle/notifier.mts`; how it is wired is D16) is core's
+contract; the module that issues to relying parties
 implements it. `notify` resolves once a notice is settled — delivered, or
 given up by its own policy — and rejects only to be tried again; it may be
-called more than once for one notice. `sessionLifecycleModule` refuses to
-boot where the `clientRepository` slot is filled and no notifier is. Boot
-orders modules, not components, so the module that fills the notifier must
-not itself require `sessionLifecycle`, and the closing record's `retainMs` —
+called more than once for one notice. With `sessionLifecycleModule`
+installed, boot refuses a composition where the `clientRepository` slot is
+filled and no notifier is (D16). Boot
+orders modules, not components, so the closing record's `retainMs` —
 `oauth.refreshToken.expiresIn` plus `DEFAULT_CLOCK_SKEW_MS`, within the
 port's year, and 0 without a refresh-token lifetime — is read from the
 configuration, not from the oauth module's slot. That read is a known
@@ -279,7 +279,37 @@ record admission makes, so no new site reads a session outside admission;
 and since `session-admission/` imports values from `user-sessions/`, the
 service inside `user-sessions/` would close a value cycle between the two.
 `session-lifecycle/` imports `session-admission/` and `user-sessions/`, and
-nothing in core imports it. So admission's own `not_live` read, when it
+neither of those imports it. So admission's own `not_live` read, when it
 learns the lifecycle state, reads the port in `user-sessions/`, never the
 service. The token-side liveness reads move to `liveness` as their callers
 switch.
+
+**D16. The notifier is a contribution, read when a close runs.** The module
+that tells relying parties (the oauth module) is also the one that, once its
+logout route switches, requires `sessionLifecycle`. Boot orders modules by
+what they `require` and take `optional`, so a notifier filled in a slot the
+lifecycle module reads at construction would order the notifier's module
+before the lifecycle's, and that module could read nothing of a module
+requiring the lifecycle — the issuer in `oauthTokenSettings` among it —
+without a cycle. So the notifier is contributed under the
+`sessionCloseNotifiers` contribution kind, at most one per composition,
+and the service reads it through the synthetic `sessionCloseNotifierResolver`
+when a close runs, never while modules are built, as other contributions are
+read through their resolvers. A contribution kind rather than a getter handed
+to the service: core has no lazily readable channel but a synthetic resolver
+over contributions, so a getter would need the same plumbing. The notifier is
+its contributor's, switched off only by not installing its module: a factory
+answering anything but a notifier fails its contribution (never `null`), and
+at stage 1 a container that is no record is refused
+(`contribution-malformed`), any override of the kind is refused
+(`contribution-kind-guarded`, channel `overrides`), and so is a second
+notifier under any name (`duplicate-contribute`); a host may not supply the
+collector (`contribution-kind-guarded`). The rule that a composition serving
+relying parties needs a notifier is judged at the end of the contributions,
+once the notifier would have registered, and only where
+`sessionLifecycleModule` built the `sessionLifecycle` slot — a value the host
+filled it with is the host's. It is refused as before, as that module's
+provider failing (`provides-factory-failed`, naming
+`core-session-lifecycle`), its remedy now naming the contribution: install a
+module that contributes a `sessionCloseNotifiers` entry, as `oauthModule` is
+to.

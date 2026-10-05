@@ -32,6 +32,7 @@ import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
 	RateLimitBudgetResolver,
+	SessionCloseNotifierResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
@@ -46,6 +47,11 @@ import {
 	sealRegisteredReach,
 	secondFactorAuthorities,
 } from "../session-admission/requirement.mjs";
+import {
+	SESSION_LIFECYCLE_MODULE,
+	SESSION_LIFECYCLE_NOTIFIER_MISSING,
+} from "../session-lifecycle/module.mjs";
+import type { SessionCloseNotifier } from "../session-lifecycle/notifier.mjs";
 import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { buildDispatchedFederation } from "./federation-entries.mjs";
@@ -252,6 +258,20 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
 }
 
 /**
+ * The read side of the `sessionCloseNotifiers` collector: the one notifier
+ * registered, read through at call time. At most one is: a second refuses
+ * boot at stage 1 (`one-session-close-notifier`).
+ * @internal
+ */
+function makeSessionCloseNotifierResolver(
+	collector: NameKeyedCollector<SessionCloseNotifier>,
+): SessionCloseNotifierResolver {
+	return {
+		get: () => collector.entries().next().value?.[1],
+	};
+}
+
+/**
  * Instantiate a stable read-side `RateLimitBudgetResolver` over the
  * `rateLimitBudgets` collector. A prefix whose factory answered
  * `null` — switched off by its module's settings — is registered in the
@@ -387,6 +407,7 @@ export function prepareSyntheticProjections(
 		sessionRequirements,
 		rateLimitBudgets,
 		admissionActions,
+		sessionCloseNotifiers,
 	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () => makeGrantHandlerResolver(grants));
@@ -418,6 +439,11 @@ export function prepareSyntheticProjections(
 	}
 	if (rateLimitBudgets !== undefined) {
 		inject("rateLimitBudgetResolver", () => makeRateLimitBudgetResolver(rateLimitBudgets));
+	}
+	if (sessionCloseNotifiers !== undefined) {
+		inject("sessionCloseNotifierResolver", () =>
+			makeSessionCloseNotifierResolver(sessionCloseNotifiers),
+		);
 	}
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
@@ -528,6 +554,19 @@ function checkNameKeyedValue(
 			amrValues: snapshot,
 			addsMfa: (value as { addsMfa?: unknown }).addsMfa === true,
 		});
+		return value;
+	}
+	if (kind === "sessionCloseNotifiers") {
+		// Never `null`: a notifier is switched off by not installing its module.
+		const notify =
+			typeof value === "object" && value !== null
+				? (value as { notify?: unknown }).notify
+				: undefined;
+		if (typeof notify !== "function") {
+			throw new RangeError(
+				`sessionCloseNotifiers "${name}": the factory must answer a notifier, an object whose notify is a function`,
+			);
+		}
 		return value;
 	}
 	if (kind === "rateLimitBudgets") {
@@ -1054,6 +1093,46 @@ async function checkSessionRequirements(
  * via `declare module` augmentation) are handled too.
  * @internal
  */
+/**
+ * The rule that a composition serving relying parties (the `clientRepository`
+ * slot filled) contributes a session-close notifier, judged once every
+ * name-keyed contribution has registered, and only where core's session
+ * lifecycle module built the `sessionLifecycle` slot: a value the host filled
+ * it with is the host's. Refused as that module's provider failing, with its
+ * text. At most one notifier is stage 1's rule (`one-session-close-notifier`).
+ * @internal
+ */
+async function checkSessionCloseNotifier(
+	material: ComponentWorld,
+	components: Record<string, unknown>,
+	collector: NameKeyedCollector<SessionCloseNotifier> | undefined,
+): Promise<void> {
+	const built =
+		!material.externalKeys.has("sessionLifecycle") &&
+		material.plan.providerActivations.some(
+			(activation) =>
+				activation.module === SESSION_LIFECYCLE_MODULE &&
+				activation.componentKey === "sessionLifecycle",
+		);
+	const contributed = collector !== undefined && !collector.entries().next().done;
+	if (!built || contributed || components.clientRepository === undefined) return;
+	const thrownValue = new Error(SESSION_LIFECYCLE_NOTIFIER_MISSING);
+	const cleanupErrors = await runCleanupsReverse(material.cleanups);
+	throw new BootError({
+		message: `Module "${SESSION_LIFECYCLE_MODULE}" provider factory for "sessionLifecycle" failed: ${failureSummary(thrownValue)}`,
+		reason: "provides-factory-failed",
+		stage: "applyContributions",
+		details: {
+			reason: "provides-factory-failed",
+			module: SESSION_LIFECYCLE_MODULE,
+			componentKey: "sessionLifecycle",
+			originalError: thrownValue,
+			...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+		},
+		cause: thrownValue,
+	});
+}
+
 function collectorFor(
 	contributionKinds: ContributionCollectorMap,
 	kind: string,
@@ -1360,9 +1439,10 @@ export async function applyContributions(
 	openFederationProjections(components);
 
 	// ---------------------------------------------------------------------------
-	// Step 2b: the session-requirement checks and the boot line, once every
-	// name-keyed contribution has registered and before a list-shaped factory
-	// reads a requirement's reach.
+	// Step 2b: the session-requirement checks (`checkSessionRequirements`), the
+	// session-close notifier's rule (`checkSessionCloseNotifier`) and the boot
+	// lines, once every name-keyed contribution has registered and before a
+	// list-shaped factory reads a requirement's reach.
 	// ---------------------------------------------------------------------------
 
 	await checkSessionRequirements(
@@ -1371,6 +1451,7 @@ export async function applyContributions(
 		contributionKinds.sessionRequirements,
 		contributionKinds.admissionActions,
 	);
+	await checkSessionCloseNotifier(material, components, contributionKinds.sessionCloseNotifiers);
 	logRateLimitBudgets(material, components, contributionKinds.rateLimitBudgets);
 	logAdmissionActions(material, components, contributionKinds.admissionActions);
 
