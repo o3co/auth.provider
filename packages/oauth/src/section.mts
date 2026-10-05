@@ -39,6 +39,7 @@
 
 import {
 	type AccessTokenConfig,
+	checkAcrValueName,
 	checkCanonicalIssuer,
 	coerceBooleanFromEnv,
 	describeIssuerRejection,
@@ -173,6 +174,24 @@ const refreshTokenSchema = z
 const acrAlternativeSchema = z.array(z.string().min(1)).min(1);
 const acrRequirementSchema = z.union([acrAlternativeSchema, z.array(acrAlternativeSchema).min(1)]);
 
+/**
+ * `oauth.authorize.acrValues`: each key an acr value a request can name, held
+ * to core's `checkAcrValueName` and refused under the key in its words. The
+ * keys are judged whenever the table is a record, beside any entry refused
+ * for its value, so one boot names every key to fix.
+ */
+const acrValuesSchema = z.record(z.string().min(1), acrRequirementSchema).superRefine(
+	(table, ctx) => {
+		for (const name of Object.keys(table)) {
+			const refusal = checkAcrValueName(name);
+			if (refusal !== null) ctx.addIssue({ code: "custom", message: refusal, path: [name] });
+		}
+	},
+	{
+		when: ({ value }) => typeof value === "object" && value !== null && !Array.isArray(value),
+	},
+);
+
 /** `oauth.authorize`: the acr table. */
 const authorizeSchema = z
 	.object({
@@ -180,8 +199,7 @@ const authorizeSchema = z
 		// for, each mapped to the RFC 8176 `amr` values that satisfy it.
 		// `/authorize` answers `acr_values` from this table alone, and discovery
 		// advertises its keys, less the entries nothing installed can satisfy.
-		// Each key is an acr value, so the table holds any.
-		acrValues: z.record(z.string().min(1), acrRequirementSchema).optional(),
+		acrValues: acrValuesSchema.optional(),
 	})
 	.strict()
 	.optional();
@@ -232,9 +250,19 @@ export const oauthSectionSchema = z
 		/**
 		 * The deployment-owned page a client that is not first-party is sent to
 		 * with `?challenge=<id>`: a path or an absolute URL, which may carry a
-		 * query of its own.
+		 * query of its own. Never empty: an empty url would send the browser to
+		 * `?challenge=<id>` relative to `/oauth/authorize`, and an exported but
+		 * empty variable is a mistake to name, not an unset one to default.
 		 */
-		consentPage: z.object({ url: z.string() }).strict().optional(),
+		consentPage: z
+			.object({
+				url: z.string().min(1, {
+					message:
+						'oauth.consentPage.url must not be empty: an exported-but-empty OAUTH_CONSENT_PAGE_URL reads as ""; unset it to keep the default, /consent, or set it to the consent page',
+				}),
+			})
+			.strict()
+			.optional(),
 		/**
 		 * A `client_id` that is the https URL of the client's own registration
 		 * (draft-ietf-oauth-client-id-metadata-document). Off by default. The

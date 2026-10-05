@@ -210,6 +210,17 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `oauth.authorize.acrValues.<key>`), naming the key, every such key in one
   boot. Rename the entry to a value a client can send, such as a URN
   (`urn:example:acr:mfa`), and tell the relying parties that asked for it.
+  Core's schema and the oauth module's (`oauthSectionSchema`) refuse the
+  same keys with the same message, so a section parsed with either alone —
+  a composition root's own check, a test — is refused as boot refuses it.
+- **BREAKING: an empty `oauth.consentPage.url` refuses the boot (#728).** An
+  `OAUTH_CONSENT_PAGE_URL` exported empty (`OAUTH_CONSENT_PAGE_URL=` in a
+  `.env`, a compose file or a ConfigMap) used to boot, and every client that
+  is not first-party was then redirected to `?challenge=<id>` relative to
+  `/oauth/authorize` — a page that is not there. It now refuses the boot
+  (`config-validation-failed` at `oauth.consentPage.url`), as an empty
+  `session.loginPage.url` already did. Unset the variable to keep the
+  default, `/consent`, or set it to your consent page.
 - **BREAKING: `oauth {}` refuses a key it does not declare, at every level
   (#728).** Wherever the oauth module is installed (the standalone template
   installs it), a key under `oauth` that its schema does not declare — a

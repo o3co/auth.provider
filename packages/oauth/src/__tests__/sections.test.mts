@@ -509,6 +509,23 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		expect(err.message).toContain('"urll"');
 	});
 
+	it("refuses an empty oauth.consentPage.url, naming the path", async () => {
+		const err = await refusal((config) => oauthWith(config, { consentPage: { url: "" } }));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("oauth.consentPage.url must not be empty");
+	});
+
+	it("refuses OAUTH_CONSENT_PAGE_URL exported empty rather than reading it as unset", () => {
+		const tree = parseFile(fileURLToPath(REFERENCE), {
+			env: { OAUTH_JWT_ISSUER: "https://auth.test", OAUTH_CONSENT_PAGE_URL: "" },
+		}).toObject() as { oauth: { consentPage: unknown } };
+		expect(tree.oauth.consentPage).toEqual({ url: "" });
+
+		const result = oauthSectionSchema.shape.consentPage.safeParse(tree.oauth.consentPage);
+		expect(result.success).toBe(false);
+	});
+
 	it("refuses a key oauth.clientIdMetadataDocuments does not declare, naming it", async () => {
 		const err = await refusal((config) =>
 			oauthWith(config, {

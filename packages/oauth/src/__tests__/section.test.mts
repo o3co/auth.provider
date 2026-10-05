@@ -21,7 +21,11 @@
  * refused at its path, never dropped.
  */
 
-import { MAX_DURATION_SECONDS, resolveAccessTokenLifetime } from "@o3co/auth-provider-core";
+import {
+	checkAcrValueName,
+	MAX_DURATION_SECONDS,
+	resolveAccessTokenLifetime,
+} from "@o3co/auth-provider-core";
 import { parseString } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { oauthSectionSchema } from "#/section.mjs";
@@ -405,6 +409,63 @@ describe("oauth.authorize", () => {
 		expect(oauthSectionSchema.safeParse(withValue("authorize.acrValues", "urn:x")).success).toBe(
 			false,
 		);
+	});
+
+	it.each([
+		["a space", "urn:x pwd"],
+		["a tab", "urn:x\tpwd"],
+		["a newline", "urn:x\n"],
+		["a double quote", 'urn:"x"'],
+		["a backslash", "urn:x\\y"],
+		["a non-ASCII character", "urn:é"],
+	])("refuses a key holding %s at the key, in core's words", (_what, key) => {
+		expect(issuesOf(withValue("authorize.acrValues", { [key]: ["pwd"] }))).toEqual([
+			{ path: `authorize.acrValues.${key}`, message: checkAcrValueName(key), code: "custom" },
+		]);
+	});
+
+	it("refuses every unusable key, beside a usable one and an entry refused for its value", () => {
+		const paths = issuesOf(
+			withValue("authorize.acrValues", {
+				"urn:x pwd": ["pwd"],
+				"urn:y\tz": ["pwd"],
+				"urn:ok": ["pwd"],
+				"urn:none": [],
+			}),
+		).map((issue) => issue.path);
+		expect(paths).toEqual(
+			expect.arrayContaining([
+				"authorize.acrValues.urn:x pwd",
+				"authorize.acrValues.urn:y\tz",
+				"authorize.acrValues.urn:none",
+			]),
+		);
+		expect(paths.some((path) => path.includes("urn:ok"))).toBe(false);
+	});
+
+	it("accepts a key of any printable ASCII but the space, the double quote and the backslash", () => {
+		const key = "urn:!#$%&'()*+,-./:;<=>?@[]^_`{|}~";
+		expect(issuesOf(withValue("authorize.acrValues", { [key]: ["pwd"] }))).toEqual([]);
+	});
+});
+
+describe("oauth.consentPage", () => {
+	it.each(["/consent", "/consent/page?tenant=acme", "https://consent.example.com/page"])(
+		"accepts url = %j",
+		(url) => {
+			expect(issuesOf(withValue("consentPage.url", url))).toEqual([]);
+		},
+	);
+
+	it("refuses an empty url, naming the path and its variable", () => {
+		expect(issuesOf(withValue("consentPage.url", ""))).toEqual([
+			{
+				path: "consentPage.url",
+				message:
+					'oauth.consentPage.url must not be empty: an exported-but-empty OAUTH_CONSENT_PAGE_URL reads as ""; unset it to keep the default, /consent, or set it to the consent page',
+				code: "too_small",
+			},
+		]);
 	});
 });
 
