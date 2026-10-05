@@ -195,19 +195,30 @@ earlier one has not durably done:
 3. `remove_session_indexes` (the per-session stores the bridge steps read);
 4. `delete_user_session`, last.
 
-Each item that ran is recorded with `completeIf` at the generation read; a
-conflict re-reads the record and goes on with what is still pending, so two
-closes of one session and the sweep may overlap. A failed item, or one whose
-completion could not be recorded, stays pending and the record stays
-`closing`; the other items of its phase still run.
+The items of a phase run together, and one close run makes at most eight
+notices and family revocations at once (`CLOSE_CONCURRENCY`), those of the
+record's participants and those a bridge step reaches sharing the eight
+places; an item or a bridge step holds no place itself. A notice waits on
+its relying party, so relying parties that do not answer hold a close for
+about one notifier timeout per eight, not one each. Each item that ran is
+recorded with `completeIf` at the generation read, one at a time once its
+phase's run has settled; a conflict re-reads the record and goes on with
+what is still pending, so two closes of one session and the sweep may
+overlap. A run that overlaps another, or one that stops before it records,
+may so run a whole phase's items again, which every item allows and the
+notifier allows for a notice (D13). A failed item, or one whose completion
+could not be recorded, stays pending and the record stays `closing`; the
+other items of its phase still run.
 
 **D11. Resumption.** A later close of the same sid resumes the saved work,
 whatever its cause (the first cause is kept). A sweep owned by core,
 `resumePending`, pages `listClosing` by its `after` cursor every
 `core.sessionLifecycle.sweepIntervalSeconds` — whole seconds, read through
 `configuredNumber`, refused at boot naming the key otherwise — one sweep at a
-time, stopped on dispose. Unwritten, there is no sweep: a deployment without
-relying parties leaves it so.
+time, stopped on dispose. Core's `reference.conf` ships 60, and a
+configuration without it reads 60 too; 0 turns the sweep off. A close
+left pending once its user session is gone has no later close to resume it,
+so without the sweep it would stay pending until the record lapses.
 
 **D12. The cause policy.** Every cause runs the work of D10. `rp_logout`,
 `session_logout`, `subject_revocation` and `operator_reset` also tell the

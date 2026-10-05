@@ -943,6 +943,11 @@ modules fills them.
   `@o3co/auth-provider-core/testing` (#786, #796).
 - **Shutdown.** A cleanup registers the allowance it needs; the template's
   `installGracefulShutdown` takes `cleanupAllowanceMs` (#797).
+- **The session lifecycle sweeps unless told not to.** Installing
+  `sessionLifecycleModule` starts a sweep that resumes the closes left
+  pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
+  sets another interval, and `0` turns it off. It is stopped on dispose,
+  and its timer never keeps the process alive.
 
 ### Exports removed, and signatures changed
 
