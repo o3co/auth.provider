@@ -24,16 +24,16 @@
  */
 
 import {
-	admitSession,
 	type AuditSink,
+	admitSession,
 	checkResolver,
 	consoleLogger,
 	establishWithoutAsking,
 	type FederationProvider,
 	type FederationSettings,
 	type FederationTokenStore,
-	loggableError,
 	type Logger,
+	loggableError,
 	readUserSnapshot,
 	type SessionClaim,
 	type SessionFederationIndex,
