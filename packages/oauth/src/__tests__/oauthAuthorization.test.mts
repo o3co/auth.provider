@@ -480,7 +480,7 @@ describe("oauthAuthorizationGrantsModule — the authorization_code grant needs 
  * watermark wired and no session store, the grant would open families no
  * credential change can reach, so the composition is refused.
  */
-describe("oauthAuthorizationModule — the authorization_code grant with subject revocation needs a session store", () => {
+describe("oauthAuthorizationGrantsModule — the authorization_code grant with subject revocation needs a session store", () => {
 	const subjectRevocationModule = defineModule({
 		name: "test:subject-revocation",
 		provides: {
@@ -494,14 +494,18 @@ describe("oauthAuthorizationModule — the authorization_code grant with subject
 	const boot = (config: AppConfig, modules: readonly Module[]) =>
 		createTestApp({
 			modules: [
-				oauthAuthorizationModule({ config }),
+				oauthAuthorizationGrantsModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
 				...familyStoreModules,
 				...modules,
 			],
-			bootstrapComponents: { config: captured(config), pathResolver: (s: string) => s },
+			bootstrapComponents: {
+				config: captured(config),
+				pathResolver: (s: string) => s,
+				oauthTokenSettings,
+			},
 		});
 	const authorizationCodeOn = () => withGrants(makeValidAppConfig(), { authorizationCode: true });
 
