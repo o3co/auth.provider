@@ -55,7 +55,7 @@ const config = {
 	oauth: {
 		jwt: { secret: SECRET },
 		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject" },
+		refreshToken: { expiresIn: 86400 },
 		grants: { refresh_token: { enabled: true } },
 	},
 } as unknown as AppConfig;
@@ -100,7 +100,6 @@ const makeGrant = (opts: {
 		opts.family?.rotation.rotate ?? (async () => ({ outcome: "rotated" as const })),
 	);
 	const handler = createRefreshTokenGrant({
-		config,
 		...grantSettingsFrom(config),
 		keyStore: createSymmetricKeyStore(SECRET),
 		refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate },

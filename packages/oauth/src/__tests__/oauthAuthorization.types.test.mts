@@ -42,7 +42,6 @@ import {
 // negative assertions from executing.
 
 const REQUIRES = [
-	"config",
 	"clientRepository",
 	"keyStore",
 	"sessionRequirementResolver",
@@ -139,8 +138,9 @@ describe("the grant factories declare the slots they read", () => {
 		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<SessionDeps>().not.toHaveProperty("codeRepository");
-		// No grant but the refresh grant reads the whole configuration: the
-		// others read their settings from slots.
+		// No grant reads the whole configuration: each reads its settings from
+		// slots, and the refresh grant its unknown-family policy from the section.
+		expectTypeOf<RefreshDeps>().not.toHaveProperty("config");
 		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("config");
 		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("config");
 		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("config");
@@ -158,7 +158,11 @@ describe("the grant factories declare the slots they read", () => {
 		// alone lets a grant read an optional slot its module never declared
 		// and see `undefined` forever. The key sets close that gap.
 		expectTypeOf<keyof AuthorizationDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
-		expectTypeOf<keyof RefreshDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
+		// The refresh grant's one key beyond the slots is the section's policy,
+		// which the module hands over itself.
+		expectTypeOf<Exclude<keyof RefreshDeps, "unknownFamilyPolicy">>().toMatchTypeOf<
+			keyof OAuthAuthorizationModuleDeps
+		>();
 		expectTypeOf<keyof JwtBearerDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
 		expectTypeOf<keyof ClientCredentialsDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
 		expect(true).toBe(true);
@@ -180,8 +184,10 @@ describe("the grant factories declare the slots they read", () => {
 		expectTypeOf<ClientCredentialsDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
 		expectTypeOf<AuthorizationDeps["tokenBindingSettings"]>().toEqualTypeOf<TokenBindingSettings>();
 		expectTypeOf<RefreshDeps["tokenBindingSettings"]>().toEqualTypeOf<TokenBindingSettings>();
-		// The refresh grant reads `oauth.refreshToken.unknownFamilyPolicy`, which no slot carries.
-		expectTypeOf<RefreshDeps>().toHaveProperty("config");
+		// The refresh grant's unknown-family policy, as the module's section parses it.
+		expectTypeOf<RefreshDeps["unknownFamilyPolicy"]>().toEqualTypeOf<
+			"accept" | "reject" | undefined
+		>();
 		expect(true).toBe(true);
 	});
 });

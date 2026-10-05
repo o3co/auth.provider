@@ -57,7 +57,7 @@ const REFUSED: ReadonlyArray<unknown> = [
 const REQUIRED = {
 	jwt: { issuer: "https://auth.test" },
 	accessToken: { expiresIn: 3600 },
-	refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+	refreshToken: { expiresIn: 86400 },
 	oidcMode: "oidc-required",
 };
 

@@ -65,6 +65,7 @@ import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
 import {
 	FACTORS,
+	FIRST_BINDING_MARK,
 	factorRecord,
 	factorStoreHolding,
 	NOT_ENROLLED_FACTS,
@@ -138,6 +139,7 @@ function build(
 		sessionEmailProofAt: (subject, sid, nowMs) =>
 			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
 		firstBindingAt: (subject, nowMs) => transactionStore.firstBindingAt(subject, nowMs),
+		firstBindingMark: FIRST_BINDING_MARK,
 		sealing: suiteSealing(),
 	});
 	return { requirement, transactionStore };

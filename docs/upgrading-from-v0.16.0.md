@@ -144,6 +144,7 @@ sections that still accept one.
 | `dpop {}`, `mtls {}`, `device-grant {}` and `oauth-token-exchange {}` at the top level, camelCase; `OAUTH_DPOP_NONCE_*` → `DPOP_NONCE_*` (#804) | each package's README |
 | Each in-process and Redis store's settings, and `federationGrants` → `federation-grants {}`, under their modules' names, with eight renamed variables (`RATE_LIMIT_FAIL_MODE` → `REDIS_RATE_LIMITER_FAIL_MODE` among them) (#811) | the [redis README](../packages/redis/README.md), the [federation-grants README](../packages/federation-grants/README.md) |
 | The oauth and session settings: the grant switches, `oauth-session`, `session-store {}`, the login and consent pages, `OAUTH_CIMD_*` → `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`; the PKCE key retired (#827) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 5 |
+| The refresh grant's unknown-family policy: `oauth.refreshToken.unknownFamilyPolicy` → `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` → `OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` (#728) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 2; the [oauth README](../packages/oauth/README.md#refresh_token) |
 | The template's own settings, the adapter selections (`adapters.<slot>`), the repositories, `audit-sink`, `core.federations`, `key-store`, `redis-clients`, `LOG_LEVEL` → `LOGGING_LEVEL` (#853) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 6 |
 | Module names are kebab-case, as their sections are (#738): boot error details and anything that finds a module by name see the new names | — |
 
@@ -153,6 +154,17 @@ or `" true "`, which used to leave it off, now turns it on (runbook §7,
 step 5). And **unset `CLIENT_CODE_ENDPOINT_URI` and `CLIENT_CODE_PASSWORD`
 first**: both were removed, and set at all they refuse the boot, even beside
 the new names (step 6).
+
+**Move the unknown-family policy rather than delete it.** The grant issues
+for a refresh token whose family no record holds only under `"accept"`;
+anything else, an absent key included, reads as `"reject"`. Dropping an
+`"accept"` line instead of moving it therefore falls back to `"reject"` and
+signs out, at that moment, every holder of a family-less chain. A composition
+with `oauthAuthorizationGrantsModule` and without the oauth module behaves
+the same: the grants module declares the same `reference.conf`, which sets
+the default and binds the variable. A root that builds its configuration
+without layering that file — core's `reference.conf` alone — carries neither:
+the policy reads `"reject"`, whatever the variable says.
 
 ### Keys removed
 
@@ -181,10 +193,15 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   per 60 s to the limiter's `defaultLimit`, 60 per 60 s in both bundled
   `reference.conf` files. To keep the old bound, set
   `limits.webauthn-authentication-options { limit = 30, windowSeconds = 60 }`
-  in the limiter's section.
+  in the limiter's section. In code, `AppConfig["webauthn"]["rateLimit"]` is
+  now `unknown`: core keeps the key only so the refusal still sees it.
 - `oauth.grants.authorization_code.pkce.*` and
   `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` refuse the boot; S256
   is mandatory regardless (#827).
+- `oauth.refreshToken.legacyRtPolicy`, at any value, refuses the boot
+  wherever `oauthEndpointsModule` is installed (#728): a refresh token
+  lacking `jti` or `family_id` while family rotation is wired is always
+  refused. Delete the key.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
 
@@ -945,8 +962,12 @@ modules fills them.
   for the missing component. The id_token's `iss` is the slot's issuer, so
   an id_token is issued whenever `openid` is granted and a session is read;
   before, a configuration built by hand without `oauth.jwt.issuer` got none.
-  The refresh grant still reads `oauth.refreshToken.unknownFamilyPolicy` from
-  `config`, so the module still requires `config`. A deps object handed to
+  The module requires no `config`: the refresh grant's unknown-family policy
+  is the module's own section's
+  (`oauth-authorization.grants.refreshToken.unknownFamilyPolicy`), and
+  `createRefreshTokenGrant` takes it as `unknownFamilyPolicy` in place of
+  `config`, issuing for an unknown family only under `"accept"`. A deps
+  object handed to
   the module's grant factories carries `section`, `oauthTokenSettings` and
   `tokenBindingSettings`; a factory refuses a missing or broken
   `oauthTokenSettings` with a `RangeError` naming it, and a
@@ -1092,15 +1113,16 @@ modules fills them.
   configuration (#728).** A composition that provides the `oauthTokenSettings`
   slot itself calls `oauthTokenSettingsFrom(config.oauth)` where it called
   `oauthTokenSettingsFrom(config)`.
-- **`oauth.refreshToken.unknownFamilyPolicy` and `legacyRtPolicy` are
-  optional in `AppConfig` and `CoreConfig` (#728).** Core's schema holds
-  their shape, the same enums, and no default; core's `reference.conf` no
-  longer sets them or binds `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`. The
-  oauth package's reference sets both to `"reject"` and binds the variable,
-  and the oauth module's section still requires both, so a composition with
-  the oauth module behaves as before. Code that reads either key off
+- **BREAKING: `OAuthSection` loses `refreshToken.unknownFamilyPolicy` and
+  `refreshToken.legacyRtPolicy`; both are optional in `AppConfig` and
+  `CoreConfig` (#728).** The oauth module's section declares neither, and
+  boot refuses either set ([Paths and variables that
+  moved](#paths-and-variables-that-moved), [Keys removed](#keys-removed)).
+  Core's schema holds their shape, the same enums, and no default, and
+  core's `reference.conf` no longer sets them or binds
+  `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`. Code that reads either key off
   `AppConfig` or `CoreConfig` handles `undefined`; a configuration built by
-  hand for core's schema alone may leave both out.
+  hand drops both.
 - **The oauth module is one value, `oauthEndpointsModule` (#728).** Compose it
   where you composed `oauthModule({ config })`. `oauthModule` is deprecated:
   it answers `oauthEndpointsModule` whatever it is handed, and never read its
@@ -1428,7 +1450,8 @@ detail; what a mixed fleet of v0.16.0 and this release does:
   under `MFA_MODE` (template) / `mfa.mode` `required` it is refused at its
   first refresh. A deployment for which that matters revokes the families
   issued during the roll, or calls `revokeAllForSubject`, once the fleet is
-  upgraded. Under `oauth.refreshToken.unknownFamilyPolicy = "accept"` a
+  upgraded. Under
+  `oauth-authorization.grants.refreshToken.unknownFamilyPolicy = "accept"` a
   token with no family record has no such bound.
 - **Do not turn `MFA_MODE` (template) / `mfa.mode` on until no v0.16.0
   replica remains** — with the template's default, keep `MFA_MODE=off` set
