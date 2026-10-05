@@ -20,7 +20,7 @@ e-mail choice, the scope translation), the logout URL, and the schema of a
 
 **Does not own:** the contract (core); the `core.federations` map, the keys
 core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
-`callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier
+`callbackMeetsFreshness`, `callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier
 generation, the redirect-allowlist rules and claim precedence
 ([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
 Store); the logout routes that call this adapter
@@ -95,7 +95,8 @@ its own GitHub client, so two entries of type `github` — say `github-work` and
 federations, and one GitHub user signs in to them as two identities.
 
 An entry is flat, and its schema is strict: the keys core owns (`enabled`,
-`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+`type`, `trustUpstreamAmr`, `callbackMeetsFreshness`, `callbackURL`) and the keys
+below, nothing else.
 The schema is `githubEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
 does not name — a typo, or a nested `github { ... }` section — refuses boot with `config-validation-failed` at `core.federations.<name>`,
 naming the key; a missing or malformed key is refused at
@@ -123,7 +124,10 @@ read by the provider and the redirect policy; the schema fills in no default.
 
 - **Authorization request:** scope `read:user user:email` and PKCE S256. The
   `nonce` the session router mints is ignored — GitHub issues no id_token to bind
-  it to.
+  it to. A freshness ask (`prompt=login`, `max_age`) is ignored too: GitHub's
+  OAuth authorization has no `prompt=login` and no `max_age` (its `prompt`
+  takes only `select_account`), and with no id_token there is no `auth_time`,
+  so the profile never carries `authTime`.
 - **Code exchange:** at GitHub's token endpoint, the client secret in the
   request body (`client_secret_post`, `openid-client`'s default), with the PKCE
   verifier.

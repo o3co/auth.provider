@@ -16,8 +16,8 @@
 
 /**
  * The module that fills the `sessionLifecycle` slot: the lifecycle service
- * over the session stores, and the sweep that resumes pending closes when
- * `core.sessionLifecycle.sweepIntervalSeconds` is written.
+ * over the session stores, and the sweep that resumes pending closes every
+ * `core.sessionLifecycle.sweepIntervalSeconds` unless that is 0.
  *
  * The notifier is a contribution (`sessionCloseNotifiers`), read through the
  * synthetic `sessionCloseNotifierResolver` when a close runs, never while
@@ -44,33 +44,44 @@ import { startSessionLifecycleSweeper } from "./sweeper.mjs";
 
 const SWEEP_KEY = "core.sessionLifecycle.sweepIntervalSeconds";
 
+/**
+ * The sweep interval when `core.sessionLifecycle.sweepIntervalSeconds` is not
+ * written, in whole seconds: a close left pending, its user session already
+ * gone, waits at most this long for no later close to resume it.
+ */
+export const DEFAULT_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS = 60;
+
 /** The longest sweep interval, in whole seconds: the longest delay a timer takes. */
 export const MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS = Math.floor(2_147_483_647 / 1000);
 
 /**
  * `core.sessionLifecycle.sweepIntervalSeconds` in milliseconds, read as
- * core's numbers are (`configuredNumber`); `undefined` when it is not
- * written, which turns the sweep off. Anything but a whole number of
- * seconds from 1 to {@link MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS} is
- * a RangeError naming the key.
+ * core's numbers are (`configuredNumber`):
+ * {@link DEFAULT_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS} when it is not
+ * written, and `undefined` for 0, which turns the sweep off. Anything but a
+ * whole number of seconds from 0 to
+ * {@link MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS} is a RangeError naming
+ * the key.
  */
 export function readSessionLifecycleSweepIntervalMs(config: unknown): number | undefined {
 	const value = (
 		config as { core?: { sessionLifecycle?: { sweepIntervalSeconds?: unknown } } } | undefined
 	)?.core?.sessionLifecycle?.sweepIntervalSeconds;
-	if (value === undefined) return undefined;
+	// Core's reference.conf ships the default; a configuration not layered on
+	// it, such as a test's fixture, reads the same.
+	if (value === undefined) return DEFAULT_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS * 1000;
 	const seconds = configuredNumber(value);
 	if (
 		seconds === undefined ||
 		!Number.isInteger(seconds) ||
-		seconds < 1 ||
+		seconds < 0 ||
 		seconds > MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS
 	) {
 		throw new RangeError(
-			`${SWEEP_KEY} must be a whole number of seconds from 1 to ${MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS} (got ${shownConfigValue(value)})`,
+			`${SWEEP_KEY} must be a whole number of seconds from 0 (no sweep) to ${MAX_SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS} (got ${shownConfigValue(value)})`,
 		);
 	}
-	return seconds * 1000;
+	return seconds === 0 ? undefined : seconds * 1000;
 }
 
 /**

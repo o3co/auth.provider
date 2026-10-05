@@ -24,6 +24,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
@@ -912,6 +913,41 @@ describe("establishWithoutAsking — a federated login's establishment, from the
 				mfaAt: undefined,
 			},
 		});
+	});
+
+	it("records the upstream's instant through federatedSessionAuthentication, null when it showed none and the callback does not meet a freshness ask", () => {
+		const upstreamAuthTime = new Date(NOW.getTime() - 600_000);
+		expect(
+			establishWithoutAsking({ ...federated, upstreamAuthTime, callbackMeetsFreshness: false })
+				.primary.recorded.authentication.upstreamAuthTime,
+		).toEqual(upstreamAuthTime);
+		expect(
+			establishWithoutAsking({ ...federated, callbackMeetsFreshness: false }).primary.recorded
+				.authentication.upstreamAuthTime,
+		).toBeNull();
+		for (const extra of [{ callbackMeetsFreshness: true }, {}]) {
+			expect(
+				Object.hasOwn(
+					establishWithoutAsking({ ...federated, ...extra }).primary.recorded.authentication,
+					"upstreamAuthTime",
+				),
+			).toBe(false);
+		}
+	});
+
+	it("refuses an upstream instant that is not a valid date, and a freshness switch that is not a boolean", () => {
+		for (const bad of [
+			{ ...federated, upstreamAuthTime: "2026-09-28T11:50:00Z" },
+			{ ...federated, upstreamAuthTime: new Date(Number.NaN) },
+			{ ...federated, upstreamAuthTime: null },
+			// Further ahead than hosts' clocks drift: refused here, before any
+			// code is spent, rather than by the store that would record it.
+			{ ...federated, upstreamAuthTime: new Date(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000) },
+			{ ...federated, callbackMeetsFreshness: "false" },
+			{ ...federated, callbackMeetsFreshness: null },
+		]) {
+			expect(() => establishWithoutAsking(bad as never), JSON.stringify(bad)).toThrow(RangeError);
+		}
 	});
 
 	it("takes no primary: an amr, an mfaAt or a recorded handed in is not a federation's fact", () => {

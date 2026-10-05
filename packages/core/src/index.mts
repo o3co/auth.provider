@@ -391,6 +391,7 @@ export type {
 	DelegatedTokens,
 	EndSessionRequest,
 	EndSessionResult,
+	FederationAsk,
 	FederationProfile,
 	MappedClaims,
 	RefreshedTokens,
@@ -409,6 +410,7 @@ export {
 	supportsLogout,
 	supportsRefresh,
 } from "./federations/types.mjs";
+export { readUpstreamAuthTime } from "./federations/upstream-auth-time.mjs";
 // The authentication claims a token may carry
 export {
 	authTimeAt,
@@ -1250,9 +1252,11 @@ export type { OAuthTokenSettings } from "./token-settings/types.mjs";
 // How a session was established and what this provider vouches for, read one
 // way by every consumer of a session.
 export {
+	authenticationFreshness,
 	checkSecondFactorEvent,
 	expectsRenewalNonce,
 	federatedSessionAuthentication,
+	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	type RecordedAuthentication,
@@ -1264,6 +1268,7 @@ export {
 	requirementSessionFromAmr,
 	sessionAfterSecondFactor,
 	sessionAuthentication,
+	sessionFreshness,
 	vouchedAmr,
 } from "./user-sessions/authentication.mjs";
 // What a session's enrollment facts may hold, read one way by every store.
