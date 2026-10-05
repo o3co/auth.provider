@@ -515,12 +515,13 @@ const FEDERATION_TYPE_REQUIRED =
 
 /**
  * One federation in `core.federations`. Core owns `enabled`, `type`,
- * `trustUpstreamAmr` and `callbackURL`, and boot strips them before the
- * schema of the entry's type sees the entry; every other key is the type's,
- * kept as written here, beside them: an entry is flat. Every entry names its
- * `type`, enabled or not: the module registering that type under
- * `federationTypes` is the one that handles it. `callbackURL` is not declared
- * here: boot requires it of an entry it dispatches by type.
+ * `trustUpstreamAmr`, `callbackMeetsFreshness` and `callbackURL`, and boot
+ * strips them before the schema of the entry's type sees the entry; every
+ * other key is the type's, kept as written here, beside them: an entry is
+ * flat. Every entry names its `type`, enabled or not: the module registering
+ * that type under `federationTypes` is the one that handles it.
+ * `callbackURL` is not declared here: boot requires it of an entry it
+ * dispatches by type.
  */
 const federationEntrySchema = z
 	.object({
@@ -533,6 +534,10 @@ const federationEntrySchema = z
 		// matched for `acr`. Absent is `false`: the values are kept apart
 		// (`authentication.upstreamAmr`).
 		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
+		// Whether this federation's callback alone meets a freshness ask
+		// (`prompt=login`, `max_age`) when the upstream shows no `auth_time`.
+		// Read by `federationCallbackMeetsFreshness`, which supplies the default.
+		callbackMeetsFreshness: coerceBooleanFromEnv.optional(),
 	})
 	.passthrough();
 

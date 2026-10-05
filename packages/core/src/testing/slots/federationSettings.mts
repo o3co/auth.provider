@@ -41,6 +41,7 @@ const MEMBERS: ReadonlySet<string> = new Set<keyof ConfiguredFederation>([
 	"type",
 	"enabled",
 	"trustsUpstreamAmr",
+	"callbackMeetsFreshness",
 	"callbackURL",
 	"issuer",
 	"clientId",
@@ -90,6 +91,21 @@ export function federationSettingsContract(
 					assert.ok(
 						entry.enabled === true || entry.trustsUpstreamAmr === false,
 						`${name}.trustsUpstreamAmr is true beside a disabled entry: a disabled federation signs nobody in, so its upstream amr counts for nothing`,
+					);
+				}
+			},
+		},
+		{
+			name: "callbackMeetsFreshness is a boolean, true only for an enabled entry",
+			run: async () => {
+				for (const [name, entry] of entriesOf(build())) {
+					assert.ok(
+						typeof entry.callbackMeetsFreshness === "boolean",
+						`${name}.callbackMeetsFreshness is not a boolean: absence reads as core's default, never undefined`,
+					);
+					assert.ok(
+						entry.enabled === true || entry.callbackMeetsFreshness === false,
+						`${name}.callbackMeetsFreshness is true beside a disabled entry: a disabled federation signs nobody in`,
 					);
 				}
 			},
@@ -159,7 +175,8 @@ export type TestFederationEntry = Pick<ConfiguredFederation, "type"> &
 /**
  * The settings for the entries a test names, in its order, frozen and
  * inheriting nothing; `{}` when it names none. An entry is enabled unless it
- * says otherwise, its upstream `amr` does not count unless it says so, and an
+ * says otherwise, its upstream `amr` does not count unless it says so, its
+ * callback alone meets no freshness ask unless it says so, and an
  * enabled one without a `callbackURL` gets
  * `https://auth.test/session/oauth/federation/<name>/callback`; `issuer` and
  * `clientId` only when given. Only the members of `ConfiguredFederation` are
@@ -178,6 +195,7 @@ export function createTestFederationSettings(
 			type: entry.type,
 			enabled,
 			trustsUpstreamAmr: entry.trustsUpstreamAmr ?? false,
+			callbackMeetsFreshness: entry.callbackMeetsFreshness ?? false,
 			...(callbackURL === undefined ? {} : { callbackURL }),
 			...(entry.issuer === undefined ? {} : { issuer: entry.issuer }),
 			...(entry.clientId === undefined ? {} : { clientId: entry.clientId }),

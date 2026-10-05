@@ -20,8 +20,9 @@
  * `/authorize`, which records it on the code `/token` stamps, and the
  * `session` grant through `vouchedAmr`), beside what each
  * login path records (`passwordSessionAuthentication`,
- * `federatedSessionAuthentication`, `federationTrustsUpstreamAmr`), so the
- * write and the read are one design. See ADR
+ * `federatedSessionAuthentication`, `federationTrustsUpstreamAmr`,
+ * `federationCallbackMeetsFreshness`), so the write and the read are one
+ * design. See ADR
  * 2026-09-25-multi-factor-authentication.
  *
  * A session carrying `authentication` holds in `amr` only what this
@@ -562,17 +563,57 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
  * read this one function, so they cannot disagree.
  */
 export function federationTrustsUpstreamAmr(config: unknown, name: string): boolean {
+	return enabledFederationSwitch(config, name, "trustUpstreamAmr", false);
+}
+
+/**
+ * What an absent `callbackMeetsFreshness` reads as: `false`, so a federation
+ * whose upstream shows no `auth_time` meets no freshness ask until an
+ * operator says its callback does.
+ */
+const CALLBACK_MEETS_FRESHNESS_DEFAULT = false;
+
+/**
+ * Whether federation `name`'s callback alone meets a freshness ask
+ * (`prompt=login`, `max_age`) when its upstream shows no `auth_time`:
+ * `core.federations.<name>.callbackMeetsFreshness`, absent read as
+ * `CALLBACK_MEETS_FRESHNESS_DEFAULT`, and `false` unless `enabled: true`.
+ * The federation callback decides with it what a session records, so the
+ * readers of a session's freshness never read configuration. A non-boolean
+ * value is a `RangeError`, as for `federationTrustsUpstreamAmr`.
+ */
+export function federationCallbackMeetsFreshness(config: unknown, name: string): boolean {
+	return enabledFederationSwitch(
+		config,
+		name,
+		"callbackMeetsFreshness",
+		CALLBACK_MEETS_FRESHNESS_DEFAULT,
+	);
+}
+
+/**
+ * A boolean switch of federation `name`'s entry, read as an own key of the
+ * flat entry: `absent` when not written, and `false` unless the entry is
+ * enabled. A written value that is not a boolean is a `RangeError` naming
+ * the key and quoting nothing of the value, enabled or not.
+ */
+function enabledFederationSwitch(
+	config: unknown,
+	name: string,
+	key: string,
+	absent: boolean,
+): boolean {
 	const federations = federationsOf(config);
 	if (!Object.hasOwn(federations, name)) return false;
 	const section = federations[name];
 	if (typeof section !== "object" || section === null) return false;
-	const trust = Object.hasOwn(section, "trustUpstreamAmr")
-		? (section as { trustUpstreamAmr?: unknown }).trustUpstreamAmr
+	const value = Object.hasOwn(section, key)
+		? (section as Readonly<Record<string, unknown>>)[key]
 		: undefined;
-	if (trust !== undefined && typeof trust !== "boolean") {
-		throw new RangeError(`core.federations.${name}.trustUpstreamAmr must be true or false`);
+	if (value !== undefined && typeof value !== "boolean") {
+		throw new RangeError(`core.federations.${name}.${key} must be true or false`);
 	}
 	const enabled =
 		Object.hasOwn(section, "enabled") && (section as { enabled?: unknown }).enabled === true;
-	return enabled && trust === true;
+	return enabled && (value ?? absent);
 }

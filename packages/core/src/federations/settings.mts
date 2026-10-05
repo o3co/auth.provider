@@ -34,6 +34,12 @@ export interface ConfiguredFederation {
 	 */
 	readonly trustsUpstreamAmr: boolean;
 	/**
+	 * Whether its callback alone meets a freshness ask when the upstream shows
+	 * no `auth_time`, as `federationCallbackMeetsFreshness` answers: `true`
+	 * only beside `enabled`.
+	 */
+	readonly callbackMeetsFreshness: boolean;
+	/**
 	 * Where its upstream redirects back to, as written. Every enabled entry has
 	 * one, since boot refuses one without; a disabled entry has one only when
 	 * it writes a non-empty string.

@@ -35,11 +35,15 @@ import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { federationTypeForTests } from "#/testing/fixtures/federationType.mjs";
 import { coreConfigForTests, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { createTestFederationSettings, federationSettingsContract } from "#/testing/index.mjs";
-import { federationTrustsUpstreamAmr } from "#/user-sessions/authentication.mjs";
+import {
+	federationCallbackMeetsFreshness,
+	federationTrustsUpstreamAmr,
+} from "#/user-sessions/authentication.mjs";
 
 const RULES = [
 	"every entry names its type",
 	"enabled and trustsUpstreamAmr are booleans, and an upstream amr counts only for an enabled entry",
+	"callbackMeetsFreshness is a boolean, true only for an enabled entry",
 	"callbackURL, issuer and clientId are non-empty strings where present, and an enabled entry has a callbackURL",
 	"an entry carries only what core reads of it",
 	"the settings inherit no member",
@@ -76,6 +80,7 @@ const ON = {
 	type: "oidc",
 	enabled: true,
 	trustsUpstreamAmr: false,
+	callbackMeetsFreshness: false,
 	callbackURL: "https://auth.example/session/oauth/federation/okta/callback",
 	issuer: "https://okta.example",
 	clientId: "okta-client",
@@ -97,7 +102,13 @@ describe("the federationSettings slot", () => {
 
 	it("carries no secret of an entry in its type", () => {
 		expectTypeOf<keyof ConfiguredFederation>().toEqualTypeOf<
-			"type" | "enabled" | "trustsUpstreamAmr" | "callbackURL" | "issuer" | "clientId"
+			| "type"
+			| "enabled"
+			| "trustsUpstreamAmr"
+			| "callbackMeetsFreshness"
+			| "callbackURL"
+			| "issuer"
+			| "clientId"
 		>();
 		expect(true).toBe(true);
 	});
@@ -119,8 +130,14 @@ describe("federationSettingsContract", () => {
 			await failing(
 				settingsOf({
 					okta: ON,
-					google: { type: "google", enabled: false, trustsUpstreamAmr: false },
+					google: {
+						type: "google",
+						enabled: false,
+						trustsUpstreamAmr: false,
+						callbackMeetsFreshness: false,
+					},
 					trusted: { ...ON, trustsUpstreamAmr: true },
+					meets: { ...ON, callbackMeetsFreshness: true },
 				}),
 			),
 		).toEqual([]);
@@ -137,45 +154,65 @@ describe("federationSettingsContract", () => {
 			{ ...ON, enabled: "true" },
 			{ ...ON, enabled: undefined },
 			{ ...ON, trustsUpstreamAmr: 1 },
-			{ type: "oidc", enabled: false, trustsUpstreamAmr: true },
+			{ type: "oidc", enabled: false, trustsUpstreamAmr: true, callbackMeetsFreshness: false },
 		]) {
 			expect(await failing(settingsOf({ okta: entry }))).toEqual([RULES[1]]);
 		}
 	});
 
-	it("fails the third for an empty or non-string URL or identity, or an enabled entry without a callbackURL", async () => {
+	it("fails the third for a freshness switch that is absent or not a boolean, or true beside a disabled entry", async () => {
+		const { callbackMeetsFreshness: _omitted, ...without } = ON;
 		for (const entry of [
-			{ ...ON, callbackURL: "" },
-			{ ...ON, issuer: 1 },
-			{ ...ON, clientId: "" },
-			{ type: "oidc", enabled: true, trustsUpstreamAmr: false },
+			without,
+			{ ...ON, callbackMeetsFreshness: "true" },
+			{ ...ON, callbackMeetsFreshness: undefined },
+			{ type: "oidc", enabled: false, trustsUpstreamAmr: false, callbackMeetsFreshness: true },
 		]) {
 			expect(await failing(settingsOf({ okta: entry }))).toEqual([RULES[2]]);
 		}
 	});
 
-	it("fails the fourth for a member core does not read, a secret above all", async () => {
-		for (const extra of [{ clientSecret: "s3cret" }, { privateKey: "pem" }, { scopes: "openid" }]) {
-			expect(await failing(settingsOf({ okta: { ...ON, ...extra } }))).toEqual([RULES[3]]);
+	it("fails the fourth for an empty or non-string URL or identity, or an enabled entry without a callbackURL", async () => {
+		for (const entry of [
+			{ ...ON, callbackURL: "" },
+			{ ...ON, issuer: 1 },
+			{ ...ON, clientId: "" },
+			{ type: "oidc", enabled: true, trustsUpstreamAmr: false, callbackMeetsFreshness: false },
+		]) {
+			expect(await failing(settingsOf({ okta: entry }))).toEqual([RULES[3]]);
 		}
 	});
 
-	it("fails the fifth for a map with a prototype, where a name like constructor would read as an entry", async () => {
-		expect(await failing(Object.freeze({ okta: Object.freeze({ ...ON }) }))).toEqual([RULES[4]]);
+	it("fails the fifth for a member core does not read, a secret above all", async () => {
+		for (const extra of [{ clientSecret: "s3cret" }, { privateKey: "pem" }, { scopes: "openid" }]) {
+			expect(await failing(settingsOf({ okta: { ...ON, ...extra } }))).toEqual([RULES[4]]);
+		}
+	});
+
+	it("fails the sixth for a map with a prototype, where a name like constructor would read as an entry", async () => {
+		expect(await failing(Object.freeze({ okta: Object.freeze({ ...ON }) }))).toEqual([RULES[5]]);
 	});
 
 	it("fails the last for settings a reader could change", async () => {
 		const map = Object.assign(Object.create(null) as object, { okta: Object.freeze({ ...ON }) });
-		expect(await failing(map)).toEqual([RULES[5]]);
+		expect(await failing(map)).toEqual([RULES[6]]);
 		expect(
 			await failing(
 				Object.freeze(Object.assign(Object.create(null) as object, { okta: { ...ON } })),
 			),
-		).toEqual([RULES[5]]);
+		).toEqual([RULES[6]]);
 	});
 });
 
 describe("createTestFederationSettings", () => {
+	it("keeps a freshness switch a test sets on an enabled entry", async () => {
+		const settings = createTestFederationSettings({
+			okta: { type: "oidc", callbackMeetsFreshness: true },
+		});
+		expect(settings.okta?.callbackMeetsFreshness).toBe(true);
+		expect(await failing(settings)).toEqual([]);
+	});
+
 	it("answers an empty map unless told otherwise, keeping the contract", async () => {
 		const settings = createTestFederationSettings();
 		expect(Object.keys(settings)).toEqual([]);
@@ -191,11 +228,17 @@ describe("createTestFederationSettings", () => {
 			type: "oidc",
 			enabled: true,
 			trustsUpstreamAmr: false,
+			callbackMeetsFreshness: false,
 			callbackURL: "https://auth.test/session/oauth/federation/okta/callback",
 			issuer: "https://okta.example",
 			clientId: "okta-client",
 		});
-		expect(settings.google).toEqual({ type: "google", enabled: false, trustsUpstreamAmr: false });
+		expect(settings.google).toEqual({
+			type: "google",
+			enabled: false,
+			trustsUpstreamAmr: false,
+			callbackMeetsFreshness: false,
+		});
 		expect(await failing(settings)).toEqual([]);
 	});
 });
@@ -277,6 +320,7 @@ const OIDC_ENTRY = {
 	privateKey: "-----BEGIN PRIVATE KEY-----",
 	scopes: ["openid", "email"],
 	trustUpstreamAmr: true,
+	callbackMeetsFreshness: true,
 };
 
 /** Every federation an operator can write, as core's schema accepts it, and what the slot holds of it. */
@@ -298,6 +342,7 @@ const ACCEPTED: readonly (readonly [
 				clientId: "google-client",
 				clientSecret: "google-secret-value",
 				trustUpstreamAmr: true,
+				callbackMeetsFreshness: true,
 			},
 		},
 		{
@@ -305,6 +350,7 @@ const ACCEPTED: readonly (readonly [
 				type: "google",
 				enabled: false,
 				trustsUpstreamAmr: false,
+				callbackMeetsFreshness: false,
 				clientId: "google-client",
 			},
 		},
@@ -327,6 +373,7 @@ const ACCEPTED: readonly (readonly [
 				type: "oidc",
 				enabled: true,
 				trustsUpstreamAmr: true,
+				callbackMeetsFreshness: true,
 				callbackURL: "https://auth.example/session/oauth/federation/okta/callback",
 				issuer: "https://okta.example",
 				clientId: "okta-client",
@@ -335,6 +382,7 @@ const ACCEPTED: readonly (readonly [
 				type: "oidc",
 				enabled: false,
 				trustsUpstreamAmr: false,
+				callbackMeetsFreshness: false,
 				callbackURL: "https://auth.example/session/oauth/federation/legacy/callback",
 				issuer: "https://legacy.example",
 			},
@@ -343,12 +391,20 @@ const ACCEPTED: readonly (readonly [
 	[
 		"an enabled entry as an environment variable spells its switches",
 		[federationTypeForTests("oidc"), federationStores],
-		{ okta: { ...OIDC_ENTRY, enabled: "1", trustUpstreamAmr: "false" } },
+		{
+			okta: {
+				...OIDC_ENTRY,
+				enabled: "1",
+				trustUpstreamAmr: "false",
+				callbackMeetsFreshness: "false",
+			},
+		},
 		{
 			okta: {
 				type: "oidc",
 				enabled: true,
 				trustsUpstreamAmr: false,
+				callbackMeetsFreshness: false,
 				callbackURL: "https://auth.example/session/oauth/federation/okta/callback",
 				issuer: "https://okta.example",
 				clientId: "okta-client",
@@ -383,6 +439,9 @@ describe("core fills federationSettings from the configuration's core.federation
 					expect(filled[name]?.enabled).toBe(written.enabled === true);
 					expect(filled[name]?.type).toBe(written.type);
 					expect(filled[name]?.trustsUpstreamAmr).toBe(federationTrustsUpstreamAmr(config, name));
+					expect(filled[name]?.callbackMeetsFreshness).toBe(
+						federationCallbackMeetsFreshness(config, name),
+					);
 				}
 			} finally {
 				await handle.dispose();

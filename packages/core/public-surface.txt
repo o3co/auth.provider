@@ -200,6 +200,7 @@
 . FederatedIdentityLookupResult type
 . FederatedIdentityRegistration type
 . FederatedLogin type
+. FederationAsk type
 . FederationClientSecret type
 . FederationGrant type
 . FederationGrantAcquisitionConnection type
@@ -901,6 +902,7 @@
 . extractConfirmation value
 . extractResourceParam value
 . federatedSessionAuthentication value
+. federationCallbackMeetsFreshness value
 . federationGrantAccessToken value
 . federationGrantAllowlist value
 . federationGrantAuditMetadata value
@@ -1072,6 +1074,7 @@
 . readSpaceDelimitedParameter value
 . readTargetParameter value
 . readTransitionalConfig value
+. readUpstreamAuthTime value
 . readUpstreamTokenLifetime value
 . readUserSnapshot value
 . readVersioned value

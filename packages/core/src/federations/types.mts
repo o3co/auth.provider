@@ -75,8 +75,28 @@ export interface FederationProfile {
 	readonly scope?: string;
 	/** `token_type` as the adapter's library reports it — oauth4webapi lower-cases it. */
 	readonly tokenType?: string;
+	/**
+	 * When the upstream last authenticated the user: the VERIFIED id_token's
+	 * `auth_time` (OIDC Core §2), read by `readUpstreamAuthTime`, and nothing
+	 * else — never UserInfo, never a callback parameter. Absent when the
+	 * id_token carried none, or the adapter has no id_token.
+	 */
+	readonly authTime?: Date;
 	/** Provider-specific extension claims (e.g. Google `hd`, Microsoft `tid`). */
 	readonly [key: string]: unknown;
+}
+
+/**
+ * How fresh an authentication the login asks the upstream for. An adapter
+ * forwards what its upstream documents and ignores the rest; whether the
+ * session meets the ask is judged later, from `FederationProfile.authTime`,
+ * never from what was forwarded.
+ */
+export interface FederationAsk {
+	/** Ask the upstream to authenticate the user again (OIDC `prompt=login`). */
+	readonly login?: true;
+	/** The oldest authentication acceptable, in seconds (OIDC `max_age`). */
+	readonly maxAgeSeconds?: number;
 }
 
 /**
@@ -121,12 +141,15 @@ export interface FederationProvider {
 	 * OIDC providers MUST forward `nonce` as the upstream `nonce` parameter so
 	 * `exchangeCode`'s `expectedNonce` check binds the id_token to this session
 	 * (OIDC Core §3.1.3.7). OAuth-only providers ignore it.
+	 *
+	 * `ask` is a freshness ask ({@link FederationAsk}); absent asks nothing.
 	 */
 	buildAuthorizationUrl(params: {
 		readonly redirectUri: string;
 		readonly state: string;
 		readonly codeVerifier: string;
 		readonly nonce?: string;
+		readonly ask?: FederationAsk;
 	}): URL;
 
 	/**
