@@ -847,3 +847,60 @@ describe("id_token signature verification is switched on", () => {
 		expect(configuration[hoisted.customFetchSym]).toBe(fetchImpl);
 	});
 });
+
+describe("createAppleProvider — the freshness ask and the upstream's authentication instant", () => {
+	const sentWith = (
+		ask: { readonly login?: true; readonly maxAgeSeconds?: number } | undefined,
+	): Record<string, string> => {
+		mockBuildAuthorizationUrl.mockReturnValueOnce(
+			new URL("https://appleid.apple.com/auth/authorize"),
+		);
+		createAppleProvider(baseConfig).buildAuthorizationUrl({
+			redirectUri: CALLBACK_URL,
+			state: "abc",
+			codeVerifier: "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef",
+			nonce: "fixture-nonce",
+			...(ask === undefined ? {} : { ask }),
+		});
+		const [, params] = mockBuildAuthorizationUrl.mock.calls.at(-1) as [
+			unknown,
+			Record<string, string>,
+		];
+		return params;
+	};
+
+	it("ignores an ask: Apple's authorization request has neither prompt nor max_age", () => {
+		const asked = sentWith({ login: true, maxAgeSeconds: 0 });
+		expect(asked).toEqual(sentWith(undefined));
+		expect(asked).not.toHaveProperty("prompt");
+		expect(asked).not.toHaveProperty("max_age");
+	});
+
+	const exchangeWith = (claims: Record<string, unknown>) => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce(appleTokenResponse(claims));
+		return createAppleProvider(baseConfig).exchangeCode({
+			code: "auth-code",
+			codeVerifier: "v",
+			redirectUri: CALLBACK_URL,
+			nonce: "fixture-nonce",
+		});
+	};
+
+	it("reports the verified id_token's auth_time as authTime when Apple sends one", async () => {
+		const authTime = Math.floor(Date.now() / 1000) - 120;
+		expect((await exchangeWith({ auth_time: authTime })).authTime).toEqual(
+			new Date(authTime * 1000),
+		);
+	});
+
+	it("reports no authTime when the id_token carries none", async () => {
+		expect(await exchangeWith({})).not.toHaveProperty("authTime");
+	});
+
+	it("fails the exchange on an auth_time that is not a usable instant", async () => {
+		await expect(exchangeWith({ auth_time: Math.floor(Date.now() / 1000) + 3600 })).rejects.toThrow(
+			/auth_time/,
+		);
+		await expect(exchangeWith({ auth_time: "1700000000" })).rejects.toThrow(/auth_time/);
+	});
+});
