@@ -17,10 +17,11 @@
 /**
  * The defaults of `oauth {}` and the environment variables bound to its keys
  * live in this package's `config/reference.conf`, read by the module's schema.
- * Core's `reference.conf` still sets the same paths, to the same values and
- * with the same variables, until core stops declaring `oauth {}`: the two are
- * held equal here, so the order a composition layers them in decides nothing.
- * Core's alone keeps the tombstone of a key it retired.
+ * Core's `reference.conf` still sets most of the same paths, to the same values
+ * and with the same variables, until core stops declaring `oauth {}`: every
+ * path it sets is held equal here, so the order a composition layers them in
+ * decides nothing. Core's alone keeps the tombstone of a key it retired, and
+ * this package's alone sets the refresh-token family policy keys.
  */
 
 import { readFileSync } from "node:fs";
@@ -69,6 +70,24 @@ function oauthBindings(file: string): string[] {
 const oauthOf = (file: string, env: Record<string, string> = {}): Record<string, unknown> =>
 	(parseFile(file, { env }).toObject() as { oauth: Record<string, unknown> }).oauth;
 
+const isSection = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" &&
+	value !== null &&
+	!Array.isArray(value) &&
+	Object.keys(value).length > 0;
+
+/** Every leaf of `tree` as `[path, value]`; an empty table is a leaf. */
+function leavesOf(tree: Record<string, unknown>, prefix = ""): [string, unknown][] {
+	return Object.entries(tree).flatMap(([key, value]): [string, unknown][] => {
+		const path = prefix === "" ? key : `${prefix}.${key}`;
+		return isSection(value) ? leavesOf(value, path) : [[path, value]];
+	});
+}
+
+/** The value at a dotted `path` of `tree`, or `undefined`. */
+const valueAt = (tree: unknown, path: string): unknown =>
+	path.split(".").reduce<unknown>((node, key) => (isSection(node) ? node[key] : undefined), tree);
+
 describe("the package's reference binds every variable of oauth {} at its path", () => {
 	it.each([
 		["OAUTH_JWT_ISSUER", "oauth.jwt.issuer"],
@@ -98,18 +117,21 @@ describe("the package's reference binds every variable of oauth {} at its path",
 			"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS at oauth.authorize.allowUnmarkedClients";
 		const core = oauthBindings(CORE_REFERENCE);
 		expect(core).toContain(tombstone);
-		expect(core.length).toBeGreaterThanOrEqual(15);
+		expect(core.length).toBeGreaterThanOrEqual(14);
 		expect(oauthBindings(REFERENCE)).toEqual(
 			expect.arrayContaining(core.filter((binding) => binding !== tombstone)),
 		);
 		expect(oauthBindings(REFERENCE)).not.toContain(tombstone);
 	});
 
-	it("sets every default core's reference sets under oauth {}, to the same value", () => {
+	it("sets every default core's reference sets under oauth {}, leaf by leaf, to the same value", () => {
 		for (const env of [{}, { OAUTH_JWT_ISSUER: "https://auth.test" }] as Record<string, string>[]) {
-			const core = oauthOf(CORE_REFERENCE, env);
+			const core = leavesOf(oauthOf(CORE_REFERENCE, env));
 			const own = oauthOf(REFERENCE, env);
-			expect(Object.fromEntries(Object.keys(core).map((key) => [key, own[key]]))).toEqual(core);
+			expect(core.length).toBeGreaterThan(0);
+			expect(Object.fromEntries(core.map(([path]) => [path, valueAt(own, path)]))).toEqual(
+				Object.fromEntries(core),
+			);
 		}
 	});
 

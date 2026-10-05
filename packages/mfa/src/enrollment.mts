@@ -101,11 +101,14 @@
  *   the outcome says so, and the binding stands.
  * - The factor's answers — its enrollment's start and end — are read once,
  *   field by field, however the factor holds them (a getter, a class's
- *   instance). The state and data in them are taken as their plain copy
- *   (`copyFactorValue`) where the answer is read, and that one copy is what
- *   `amrFor` and the seal act on; a state or data that is not plain
- *   JSON-shaped is the factor's failure (`503`), nothing kept or bound. The
- *   start's `response` must be a plain object: it is answered as built.
+ *   instance). The state, data and response in them are taken as their
+ *   plain copy (`copyFactorValue`) where the answer is read, and that one
+ *   copy is what `amrFor`, the seal and the page act on; one that is not
+ *   plain JSON-shaped is the factor's failure (`503`), nothing kept or bound.
+ *   A mail the start asks for is read there too (`copyAskedMail`). A
+ *   completion is a binding only when its `ok` is `true` and a refusal only
+ *   when it is `false` with a reason its type names: anything else is the
+ *   factor's failure.
  */
 
 import { randomBytes } from "node:crypto";
@@ -139,7 +142,14 @@ import {
 	recordsAfterFirstBinding,
 	reopenedEnrollment,
 } from "./firstBinding.mjs";
-import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
+import {
+	copyAskedMail,
+	keptState,
+	mailedAnswer,
+	mailRefusalOf,
+	readKeptState,
+	sendMfaMail,
+} from "./mail.mjs";
 import { issueRecoveryCodes, writeRecoveryCodes } from "./recovery/issue.mjs";
 import { copyFactorValue } from "./sealing.mjs";
 
@@ -201,6 +211,16 @@ const signedInBy = (tx: MfaTransaction, call: MfaCeremonyCall): "password" | "fe
 /** The authentication a binding on `tx` rests on: the login's primary, or the sign-in of the session `call` was admitted in. */
 const authTimeOf = (tx: MfaTransaction, call: MfaCeremonyCall): number | undefined =>
 	tx.purpose === "login" ? tx.continuation?.primary.authTimeMs : call.session?.authTimeMs;
+
+/** The reasons an enrollment's completion may refuse with: any other is the factor's failure. */
+const ENROLLMENT_REFUSALS: Readonly<
+	Record<Extract<MfaEnrollmentCompletion, { readonly ok: false }>["reason"], true>
+> = {
+	invalid: true,
+	expired: true,
+	malformed: true,
+	duplicate: true,
+};
 
 /** An enrollment over the coordinator's `kit` (see this file's header). */
 export function createMfaEnrollment(kit: MfaCeremonyKit): {
@@ -424,8 +444,8 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			});
 			let started: {
 				readonly state: MfaEnrollmentStart["state"];
-				readonly response: MfaEnrollmentStart["response"];
-				readonly mail: MfaEnrollmentStart["mail"] | undefined;
+				readonly response: Readonly<Record<string, unknown>>;
+				readonly mail: unknown;
 			};
 			try {
 				const answer = await factor.beginEnrollment({
@@ -438,24 +458,19 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					factors: isFirstBinding(tx) ? [] : enrolledOfKind(tx.subject, factor.kind, records),
 				});
 				// The factor's answer, each field read once, however it holds them; its
-				// state as the plain copy that is sealed (`copyFactorValue`). The response
-				// is answered as the factor built it.
+				// state as the plain copy that is sealed, its response as the plain copy
+				// the page is answered (`copyFactorValue`).
 				started = {
 					state: copyFactorValue(answer?.state),
-					response: answer?.response,
-					mail: answer?.mail,
+					response: copyFactorValue(answer?.response),
+					mail: copyAskedMail(answer?.mail),
 				};
-				if (!kit.answerable(started.response)) {
-					throw new TypeError(
-						"the factor's enrollment answered a response that is not a plain object",
-					);
-				}
 			} catch (cause) {
 				return failed(cause);
 			}
 			const begun: MfaEnrollmentBeginOutcome = {
 				outcome: "begun",
-				response: started.response as object,
+				response: started.response,
 				...(tx.purpose === "enroll"
 					? {
 							transaction: {
@@ -626,10 +641,21 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				});
 				// The factor's answer, each field read once, however it holds them; its
 				// data as the plain copy that is sealed (`copyFactorValue`) and that
-				// `amrFor` is handed.
-				completion = answer.ok
-					? { ok: true, data: copyFactorValue(answer.data), label: answer.label }
-					: { ok: false, reason: answer.reason };
+				// `amrFor` is handed. An `ok` neither `true` nor `false`, or a refusal's
+				// reason outside the contract's, is the factor's failure.
+				const ok: unknown = answer.ok;
+				if (ok === true) {
+					const { data, label } = answer as Extract<MfaEnrollmentCompletion, { readonly ok: true }>;
+					completion = { ok: true, data: copyFactorValue(data), label };
+				} else if (ok === false) {
+					const { reason } = answer as Extract<MfaEnrollmentCompletion, { readonly ok: false }>;
+					if (typeof reason !== "string" || !Object.hasOwn(ENROLLMENT_REFUSALS, reason)) {
+						throw new TypeError("the factor's enrollment refused with a reason it may not");
+					}
+					completion = { ok: false, reason };
+				} else {
+					throw new TypeError("the factor's enrollment answered an ok that is not a boolean");
+				}
 				if (completion.ok) amr = kit.declaredAmr(factor, completion.data);
 			} catch (cause) {
 				return unreadable("enrollment", { cause });

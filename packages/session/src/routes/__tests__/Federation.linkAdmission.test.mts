@@ -31,10 +31,12 @@ import {
 	type AuditEvent,
 	type AuditSink,
 	codeChallenge,
+	createInMemorySessionLifecycleStore,
 	type FederationProvider,
 	type Logger,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type SubjectRevocation,
 	type UserRepository,
@@ -181,6 +183,7 @@ const recorder = () => {
 interface Setup {
 	readonly requirement?: SessionRequirement;
 	readonly subjectRevocation?: SubjectRevocation;
+	readonly sessionLifecycleStore?: SessionLifecycleStore;
 	readonly repo?: LinkableRepo;
 	readonly logger?: Logger;
 	readonly auditSink?: AuditSink;
@@ -199,6 +202,9 @@ function setup(options: Setup = {}): HarnessApp & { repo: LinkableRepo } {
 			actions: SESSION_ADMISSION_ACTIONS,
 		}),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
+		...(options.sessionLifecycleStore
+			? { sessionLifecycleStore: options.sessionLifecycleStore }
+			: {}),
 		...(options.logger ? { logger: options.logger } : {}),
 		...(options.auditSink ? { auditSink: options.auditSink } : {}),
 	});
@@ -352,6 +358,23 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("login_required");
 		expect(boundary.revokedBefore).toHaveBeenCalledWith(SUBJECT);
+		expect(recordedLink(harness)).toBeUndefined();
+	});
+
+	it("refuses a session whose lifecycle record is closing, when sessionLifecycleStore is wired", async () => {
+		const lifecycle = createInMemorySessionLifecycleStore();
+		await lifecycle.open(SID, SUBJECT, new Date(Date.now() + 3_600_000));
+		await lifecycle.beginClose(SID, {
+			cause: "rp_logout",
+			steps: ["tokens"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+		const harness = setup({ sessionLifecycleStore: lifecycle });
+		plant(harness, SIGNED_IN);
+		const res = await start(harness);
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
 		expect(recordedLink(harness)).toBeUndefined();
 	});
 

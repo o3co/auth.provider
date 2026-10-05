@@ -186,6 +186,9 @@ const OPTIONAL = [
 	// The subject's sessions boundary: read by the verification endpoint
 	// (a session it covers) and the grant (an approval it covers).
 	"subjectRevocation",
+	// The session lifecycle port the verification endpoint's admission reads
+	// after a live record: a session closing or closed approves nothing.
+	"sessionLifecycleStore",
 	// The session module's CSRF policy, run on the whole verification route.
 	// Required once the grant is enabled (`requireCsrfMiddleware`).
 	"csrfGuard",
@@ -615,6 +618,7 @@ export const deviceAuthorizationGrantModule = defineModule<
 						// The sessions boundary admission reads, when the
 						// composition wires one.
 						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
+						sessionLifecycleStore: deps.sessionLifecycleStore,
 						settings: {
 							verificationUri: requireVerificationUri(slice),
 							verificationUriComplete: slice.verificationUriComplete,

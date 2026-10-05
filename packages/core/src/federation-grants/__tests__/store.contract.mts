@@ -110,9 +110,11 @@ const credentials = (tag: string): FederationGrantCredentialsInput => ({
 	accessToken: {
 		value: `at-${tag}`,
 		tokenType: "Bearer",
-		obtainedAt: at(2 * MIN),
+		// Sub-second, as a refresh's own clock reads them: a store keeps the
+		// millisecond, which retrieval compares to tell its own write.
+		obtainedAt: at(2 * MIN + 123),
 		issuedLifetime: 3600,
-		effectiveExpiresAt: at(62 * MIN),
+		effectiveExpiresAt: at(62 * MIN + 123),
 		scopes: [...SCOPES],
 	},
 });

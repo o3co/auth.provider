@@ -31,6 +31,7 @@ import { isWellFormedErrorCode } from "../errors/envelope.mjs";
 import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
+import type { SessionLifecycleStore } from "../user-sessions/lifecycle/types.mjs";
 import type {
 	SessionAuthentication,
 	SessionEnrollmentFacts,
@@ -51,6 +52,7 @@ import type { AdmissionAction } from "./actions.mjs";
 export const ADMISSION_INFRASTRUCTURE_STORES = Object.freeze([
 	"user_session",
 	"revocation_boundary",
+	"session_lifecycle",
 ] as const);
 
 /** A store admission reads itself, by the name its outage is given. */
@@ -66,6 +68,7 @@ export const isAdmissionInfrastructureStore = (
 const INFRASTRUCTURE_OUTAGES: Readonly<Record<AdmissionInfrastructureStore, string>> = {
 	user_session: "session store unavailable",
 	revocation_boundary: "revocation store unavailable",
+	session_lifecycle: "session lifecycle store unavailable",
 };
 
 /**
@@ -137,6 +140,12 @@ export interface AdmissionRequest {
 export interface AdmissionDeps {
 	readonly userSessionStore: UserSessionStore | undefined;
 	readonly subjectRevocation: SubjectRevocation | undefined;
+	/**
+	 * The consumer's `sessionLifecycleStore` slot, read after a live record:
+	 * its record closing or closed is `not_live` (`closing`). Absent, or no
+	 * record for the sid, the session is read as it was without one.
+	 */
+	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 	/** The synthetic key `sessionRequirementResolver`; only the boot planner and `resolverForTests` build one. */
 	readonly requirements: SessionRequirementResolver;
 	/** The vouchable table; empty when the consumer has none. */
@@ -330,7 +339,7 @@ export interface RequirementInput {
 	readonly carrier: SessionClaim["carrier"];
 	/** The record's `sub` when one was read, else the claim's subject: `undefined` only on the code record's first read. */
 	readonly subject: string | undefined;
-	/** The action by its effective grade: an undeclared `remediation` arrives as `credential_change`. */
+	/** The action as registered, frozen; never a `remediation`, which no requirement is asked about. */
 	readonly action: AdmissionAction;
 	readonly asks: AdmissionAsks | undefined;
 	readonly now: Date;
@@ -571,6 +580,10 @@ const actionsByCopy = new WeakMap<
  * the registered copy, which carries none of them, so a consumer holding
  * the resolver cannot obtain a `remediation` action. `undefined` for an
  * object that was never registered, a copy of one, or the registered copy.
+ * A requirement object is registered once, and its actions are read in the
+ * boot that registered it: registering the same object again (the last
+ * registration wins) issues it new ones, which the earlier boot's resolver
+ * refuses.
  */
 export function issuedRemediationActions(
 	requirement: SessionRequirement,
@@ -840,12 +853,30 @@ export type Admission =
 			/** Admission's view of the record, equal to what the requirements are handed; `null` without a record. */
 			readonly view: SessionView | null;
 			readonly acr: string | undefined;
+			/**
+			 * The record's renewal nonce as admission read it, absent when the record
+			 * holds none or a value that is not a nonce: what a consumer writing the
+			 * record next expects of it
+			 * (`recordSecondFactor`'s `expectedRenewalNonce`). When present for a
+			 * cookie carrier, the cookie session presented the same one; a cookie
+			 * session's nonce over a record without one is not carried.
+			 */
+			readonly renewalNonce?: string;
 	  }
 	| { readonly outcome: "unauthenticated" }
 	| {
 			readonly outcome: "not_live";
-			/** `renewed`: the record is bound to another cookie session, one a renewal moved it to. */
-			readonly reason: "no_subject" | "no_sid" | "gone" | "subject_mismatch" | "renewed";
+			/**
+			 * `renewed`: the record is bound to another cookie session, one a renewal moved it to.
+			 * `closing`: the session's lifecycle record is closing or closed.
+			 */
+			readonly reason:
+				| "no_subject"
+				| "no_sid"
+				| "gone"
+				| "subject_mismatch"
+				| "renewed"
+				| "closing";
 	  }
 	| { readonly outcome: "revoked" }
 	| {

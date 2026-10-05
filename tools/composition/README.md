@@ -75,10 +75,10 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   passkey, answering the handle its registration options named, signs it in
   ([`webauthn-grant-user-handle.test.mts`](src/__tests__/webauthn-grant-user-handle.test.mts)).
 - **The budget in force for each prefix a package owns, on both bundled
-  limiters.** `webauthn-authentication-options` and `mfa` — each the budget
-  its owning module contributes — and `token`, `login` and
-  `device_verification`, which their owners claim with no budget of their own
-  (`null`; the last two are counted on the attempt counter), so they fall to the limiter's `defaultLimit`, asked of the limiter
+  limiters.** `mfa` — the budget its owning module contributes — and `token`,
+  `webauthn-authentication-options`, `login` and `device_verification`, which
+  their owners claim with no budget of their own (`null`; the last two are
+  counted on the attempt counter), so they fall to the limiter's `defaultLimit`, asked of the limiter
   the full set hands a consumer, on the in-process limiter and on the Redis
   one: with the shipped configuration, with each owner's own key set, with the
   limiter's own `limits` declaring every prefix but `login` and

@@ -43,6 +43,7 @@ import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -93,7 +94,7 @@ const makeApp = async (opts: { requireEmailVerified: boolean; user: Record<strin
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
-		config: makeConfig(opts.requireEmailVerified),
+		...routerInputsOf(makeConfig(opts.requireEmailVerified)),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),

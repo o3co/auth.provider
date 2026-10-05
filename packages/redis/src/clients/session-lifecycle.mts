@@ -30,7 +30,14 @@
  *   the server's clock, epoch ms) and `nw` (how many work items are pending);
  * - `p:<kind>:<id>`, one per participant, its value the participant's `data`
  *   as a JSON string;
+ * - `o:<kind>:<id>`, one per participant, its join ordinal (1, 2, …), written
+ *   when it first joins and kept by a repeat join: the order participants are
+ *   answered in. A participant with no ordinal is answered after those with
+ *   one, by its item's bytes;
  * - `w:<item>`, one per pending work item, its value `1`.
+ *
+ * The reader refuses a record with any other field, so a new field needs a
+ * reader that tolerates it deployed before any writer that writes it.
  *
  * A shard's closing index is a sorted set of the sids of its closing records,
  * every score 0, so it orders them by their bytes. Integers are written in

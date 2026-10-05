@@ -184,13 +184,14 @@ export const createRouter = (
 	const router = express.Router();
 
 	/**
-	 * What the login hands `admitPrimary`. The revocation boundary concerns
-	 * sessions that already exist, and the acr table is empty since nothing is
-	 * selected.
+	 * What the login hands `admitPrimary`. The revocation boundary and the
+	 * session lifecycle concern sessions that already exist, and the acr table
+	 * is empty since nothing is selected.
 	 */
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore,
 		subjectRevocation: undefined,
+		sessionLifecycleStore: undefined,
 		requirements,
 		acrTable: NO_ACR_TABLE,
 		logger,
