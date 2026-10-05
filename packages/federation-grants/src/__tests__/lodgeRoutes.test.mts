@@ -24,6 +24,7 @@
  * audit to what core decides, and decides nothing core has not.
  */
 
+import type { RateLimitContext, RateLimitDecision, RateLimiter } from "@o3co/auth-provider-core";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import {
@@ -453,5 +454,100 @@ describe("lodging and renewing, when the drain has begun or something fails", ()
 		expect((await renew(h)).status).toBe(410);
 		expect((await h.store.find(GRANT_ID, h.world.now))?.status).toBe("revoked");
 		await h.background.drain();
+	});
+});
+
+describe("POST /oauth/federation-grants — the deployment's limiter, keyed on the authenticated client", () => {
+	/**
+	 * A limiter that records every key it is asked, and answers a client key
+	 * with `client`: what the deployment's limiter decides for it.
+	 */
+	const clientLimiter = (
+		client: (key: string) => Promise<RateLimitDecision>,
+		failMode?: "open" | "closed",
+	) => {
+		const asked: { readonly key: string; readonly ctx: RateLimitContext }[] = [];
+		const limiter: RateLimiter = {
+			kind: "client-recording",
+			...(failMode === undefined ? {} : { failMode }),
+			check: async (key, ctx) => {
+				asked.push({ key, ctx });
+				return key.includes(":client:") ? client(key) : { allowed: true };
+			},
+		};
+		return { limiter, asked };
+	};
+
+	it("asks the deployment's limiter under the authenticated client's key, after the IP's, with the client in the context", async () => {
+		const { limiter, asked } = clientLimiter(async () => ({ allowed: true }));
+		const h = harness({ rateLimiter: limiter });
+
+		expect((await lodge(h)).status).toBe(201);
+
+		expect(asked.map(({ key }) => key)).toEqual([
+			expect.stringMatching(/^federation_grants:ip:/),
+			`federation_grants:client:${CLIENT_ID}`,
+		]);
+		expect(asked[1]?.ctx).toMatchObject({ clientId: CLIENT_ID });
+	});
+
+	it("asks no client key before a client is authenticated, nor on the routes that lodge nothing new", async () => {
+		const { limiter, asked } = clientLimiter(async () => ({ allowed: true }));
+		const h = harness({ rateLimiter: limiter });
+		await h.seed();
+
+		const unauthenticated = await request(h.app)
+			.post("/oauth/federation-grants")
+			.set("Authorization", basic(CLIENT_ID, "wrong"))
+			.send({ connection: connection.name, sub: SUBJECT, redirect_uri: REDIRECT_URI, state: "s" });
+		expect(unauthenticated.status).toBe(401);
+		await renew(h);
+		await request(h.app)
+			.post(`/oauth/federation-grants/${GRANT_ID}/token`)
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+
+		expect(asked.filter(({ key }) => key.includes(":client:"))).toEqual([]);
+	});
+
+	it("answers the client's spent budget 429 rate_limited/provider with Retry-After, lodges nothing, and audits it", async () => {
+		const { limiter } = clientLimiter(async () => ({
+			allowed: false,
+			resetAt: new Date(Date.now() + 30_000),
+			reason: "limit:federation_grants",
+		}));
+		const h = harness({ rateLimiter: limiter });
+
+		const response = await lodge(h);
+
+		expect(response.status).toBe(429);
+		expect(response.body).toEqual({ error: "rate_limited", error_description: "provider" });
+		expect(Number(response.headers["retry-after"])).toBeGreaterThan(0);
+		expect(h.intents.size).toBe(0);
+		expect(h.store.size).toBe(0);
+		await h.background.drain();
+		expect(h.events.find((e) => e.type === "federation.grant.request.denied")).toMatchObject({
+			details: { outcome: "rate_limited/provider" },
+		});
+	});
+
+	it("applies the limiter's own failMode when it cannot answer for the client: 503 closed, lodging nothing; through when open", async () => {
+		const down = async (): Promise<RateLimitDecision> => {
+			throw new Error("the limiter is down");
+		};
+		const closed = harness({ rateLimiter: clientLimiter(down, "closed").limiter });
+		const refused = await lodge(closed);
+		expect(refused.status).toBe(503);
+		expect(refused.body).toEqual({
+			error: "service_unavailable",
+			error_description: "Rate limiter temporarily unavailable",
+		});
+		expect(closed.intents.size).toBe(0);
+		expect(closed.lines.map((line) => String(line.args[1]))).toContain(
+			"rate_limiter_failed_closed",
+		);
+
+		const open = harness({ rateLimiter: clientLimiter(down, "open").limiter });
+		expect((await lodge(open)).status).toBe(201);
 	});
 });
