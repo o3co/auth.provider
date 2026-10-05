@@ -17,9 +17,11 @@
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import {
 	type AppConfig,
+	BootError,
 	type DeploymentMode,
 	defineModule,
 	type FederationTokenStore,
+	memoryRateLimiterModule,
 	type SessionFederationIndex,
 	type SessionRequirement,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
@@ -344,6 +346,11 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		});
 	});
 
+	it("takes sessionLifecycleStore as an optional slot: the lifecycle port the link routes' admission reads", () => {
+		expect(sessionModule.optional).toContain("sessionLifecycleStore");
+		expect(sessionModule.requires).not.toContain("sessionLifecycleStore");
+	});
+
 	it("takes subjectRevocation as an optional slot, under the one subject-revocation policy it attaches for subjectSessionIndex", () => {
 		expect(sessionModule.optional).toContain("subjectRevocation");
 		expect(sessionModule.requires).not.toContain("subjectRevocation");
@@ -611,6 +618,33 @@ describe("sessionModule — the login's attempt limit reads the deploymentMode s
 			expect.objectContaining({ tag: "login" }),
 			"attempt_counter_not_shared",
 		);
+	});
+
+	it("through createApp, refuses a limiter section's limits.login, naming session.rateLimit.login", async () => {
+		// The login's attempt limit is the module's own setting; the module's
+		// claim declares it, so no limiter's limits may loosen it.
+		const base = makeValidAppConfig();
+		const err = await createTestApp({
+			modules: [...baseTestModules, memoryRateLimiterModule],
+			bootstrapComponents: {
+				config: withSessionCaptures({
+					...base,
+					[memoryRateLimiterModule.name]: {
+						limits: { login: { limit: 50, windowSeconds: 60 } },
+						defaultLimit: { limit: 60, windowSeconds: 60 },
+						maxBuckets: 100,
+					},
+				}),
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			() => undefined,
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain(`${memoryRateLimiterModule.name}.limits.login`);
+		expect((err as BootError).message).toContain("set session.rateLimit.login instead");
 	});
 
 	it("through createApp, boots under core.deployment.mode = multi on the attemptCounter slot's counter, without a warning", async () => {

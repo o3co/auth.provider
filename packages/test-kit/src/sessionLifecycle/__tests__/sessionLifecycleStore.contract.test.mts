@@ -28,6 +28,7 @@ import {
 	type SessionLifecycleRecord,
 	type SessionLifecycleStore,
 	type SessionParticipant,
+	sessionCloseItemOf,
 	type Versioned,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
@@ -140,6 +141,7 @@ const CASE = {
 	reopen: named("a repeated open"),
 	lateOpen: named("an open whose expiresAt"),
 	join: named("a join while active"),
+	order: named("participants are answered in the order each first joined"),
 	missing: named("a join, a close or a completion of a sid with no record"),
 	close: named("a close moves the record to closing in one commit"),
 	afterClose: named("no join lands once the close has committed"),
@@ -223,6 +225,44 @@ describe("sessionLifecycleStoreContract refuses a broken store", () => {
 			},
 		}));
 		expect(repeats).toContain(CASE.join);
+	});
+
+	it("refuses a store that answers participants by their bytes, or moves one joined again to the end", async () => {
+		/** `store`'s read, its participants put in the order `compare` gives their items in. */
+		const reordered =
+			(store: SessionLifecycleStore, compare: (sid: string, a: string, b: string) => number) =>
+			async (sid: string) => {
+				const read = await store.read(sid);
+				if (read === null) return read;
+				const participants = [...read.value.participants].sort((a, b) =>
+					compare(sid, sessionCloseItemOf(a), sessionCloseItemOf(b)),
+				);
+				return { ...read, value: { ...read.value, participants } };
+			};
+		const byBytes = await refusedBy((store) => ({
+			...store,
+			read: reordered(store, (_sid, a, b) =>
+				Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
+			),
+		}));
+		expect(byBytes).toContain(CASE.order);
+		const reinserts = await refusedBy((store) => {
+			const lastJoined = new Map<string, string[]>();
+			return {
+				...store,
+				join: async (sid, participant) => {
+					const answer = await store.join(sid, participant);
+					const item = sessionCloseItemOf(participant);
+					lastJoined.set(sid, [...(lastJoined.get(sid) ?? []).filter((i) => i !== item), item]);
+					return answer;
+				},
+				read: reordered(store, (sid, a, b) => {
+					const order = lastJoined.get(sid) ?? [];
+					return order.indexOf(a) - order.indexOf(b);
+				}),
+			};
+		});
+		expect(reinserts).toContain(CASE.order);
 	});
 
 	it("refuses an open that answers opened over another record, or for an end already past", async () => {

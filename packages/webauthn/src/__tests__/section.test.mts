@@ -137,7 +137,6 @@ describe("the webauthn section", () => {
 			challengeTtlMs: 120_000,
 			attestationPreference: "none",
 			userVerification: "preferred",
-			rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
 		});
 	});
 
@@ -152,37 +151,16 @@ describe("the webauthn section", () => {
 				issue.path.map(String).join("."),
 			);
 		expect(refusedPaths(shippedSection(undefined, { typo: 1 }))).toEqual([""]);
-		expect(
-			refusedPaths(
-				shippedSection(undefined, {
-					rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 }, typo: 1 },
-				}),
-			),
-		).toEqual(["rateLimit"]);
-		expect(
-			refusedPaths(
-				shippedSection(undefined, {
-					rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60, burst: 5 } },
-				}),
-			),
-		).toEqual(["rateLimit.authenticationOptions"]);
 	});
 
-	it.each([
-		["webauthn", { typo: 1 }],
-		[
-			"webauthn.rateLimit",
-			{ rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 }, typo: 1 } },
-		],
-		[
-			"webauthn.rateLimit.authenticationOptions",
-			{ rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60, burst: 5 } } },
-		],
-	])("refuses the boot for an unknown key at %s, naming the path", async (path, overrides) => {
-		const error = await refusal(boot(shippedSection(undefined, overrides)));
-		expect(error.reason).toBe("config-validation-failed");
-		expect(error.message).toContain(path);
-	});
+	it.each([["webauthn", { typo: 1 }]])(
+		"refuses the boot for an unknown key at %s, naming the path",
+		async (path, overrides) => {
+			const error = await refusal(boot(shippedSection(undefined, overrides)));
+			expect(error.reason).toBe("config-validation-failed");
+			expect(error.message).toContain(path);
+		},
+	);
 
 	it("refuses the boot without a relying party, naming each key the reference cannot default", async () => {
 		const error = await refusal(boot(shippedSection({})));

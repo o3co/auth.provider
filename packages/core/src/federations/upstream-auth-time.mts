@@ -20,23 +20,30 @@
  * from the default clock.
  */
 
-import { isWholeEpochSeconds } from "../jwt/numericDate.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 
 /**
  * A verified id_token's `auth_time` as an instant: `undefined` when the claim
- * is absent; `"invalid"` when it is not whole seconds since the epoch, or lies
- * more than `DEFAULT_CLOCK_SKEW_MS` ahead of `nowMs`, which would read as
- * fresher than any ask. An adapter fails the login on `"invalid"`. Throws a
- * `RangeError` only for a clock that is not a finite number.
+ * is absent; its whole seconds since the epoch, a fraction floored — OIDC
+ * allows one, and flooring never answers an instant later than the claim;
+ * `"invalid"` for a value that is not a finite number, is negative, or lies
+ * more than `aheadToleranceMs` (default `DEFAULT_CLOCK_SKEW_MS`) ahead of
+ * `nowMs`, which would read as fresher than any ask. An adapter whose library
+ * tolerates more clock skew passes its own tolerance. An adapter fails the
+ * login on `"invalid"`. Throws a `RangeError` only for a clock that is not a
+ * finite number or a tolerance that is not a finite duration ≥ 0.
  */
 export function readUpstreamAuthTime(
 	claim: unknown,
 	nowMs: number = Date.now(),
+	aheadToleranceMs: number = DEFAULT_CLOCK_SKEW_MS,
 ): Date | undefined | "invalid" {
 	if (!Number.isFinite(nowMs)) throw new RangeError("nowMs must be a finite epoch ms");
+	if (!Number.isFinite(aheadToleranceMs) || aheadToleranceMs < 0) {
+		throw new RangeError("aheadToleranceMs must be a finite number of ms, at least 0");
+	}
 	if (claim === undefined) return undefined;
-	if (!isWholeEpochSeconds(claim)) return "invalid";
-	const instantMs = claim * 1000;
-	return instantMs <= nowMs + DEFAULT_CLOCK_SKEW_MS ? new Date(instantMs) : "invalid";
+	if (typeof claim !== "number" || !Number.isFinite(claim) || claim < 0) return "invalid";
+	const instantMs = Math.floor(claim) * 1000;
+	return instantMs <= nowMs + aheadToleranceMs ? new Date(instantMs) : "invalid";
 }

@@ -23,7 +23,6 @@
 
 import {
 	type AccessTokenDenylist,
-	type AppConfig,
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
@@ -33,6 +32,7 @@ import {
 	createRateLimitGuard,
 	emitAuditEvent,
 	type FederationProvider,
+	type FederationSettings,
 	type FederationTokenStore,
 	formatObject,
 	type GrantHandlerResolver,
@@ -50,6 +50,7 @@ import {
 	readAccessTokenRevocationMode,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SessionRPRegistry,
 	type SubjectRevocation,
@@ -367,8 +368,8 @@ export const createOAuthRouter = async (
 	},
 	{
 		registry,
-		config,
 		section,
+		federationSettings,
 		clientRepository: registeredClients,
 		codeRepository,
 		keyStore,
@@ -379,6 +380,7 @@ export const createOAuthRouter = async (
 		accessTokenDenylist,
 		subjectRevocation,
 		userSessionStore,
+		sessionLifecycleStore,
 		sessionRPRegistry,
 		sessionFamilyIndex,
 		sessionFederationIndex,
@@ -404,19 +406,22 @@ export const createOAuthRouter = async (
 		 */
 		registry: Pick<GrantHandlerResolver, "get">;
 		/**
-		 * The configuration, for what the router reads beyond `oauth {}`: which
-		 * installed federation trusts its upstream IdP's `amr`. Without
-		 * `section`, its `oauth {}` too.
-		 */
-		config: AppConfig;
-		/**
 		 * `oauth {}` as the oauth module's schema parsed it: every `oauth.*`
 		 * setting the router reads — the issuer, the switches, the acr table,
 		 * the consent page, the Client ID Metadata Documents, what revocation
-		 * promises. `oauthModule` passes its own section; a router built by hand
-		 * without one reads the `oauth {}` its `config` carries.
+		 * promises. `oauthEndpointsModule` passes its own section; a router
+		 * built by hand without one is refused.
 		 */
-		section?: OAuthSection;
+		section: OAuthSection;
+		/**
+		 * Core's view of `core.federations` (the `federationSettings` slot),
+		 * for what the router reads beyond `oauth {}`: which installed
+		 * federation trusts its upstream IdP's `amr`, which decides the acr
+		 * entries `/authorize` can satisfy. `oauthEndpointsModule` passes the
+		 * slot; a router built by hand without one is refused. Tests build one
+		 * with core's `createTestFederationSettings`.
+		 */
+		federationSettings: FederationSettings;
 		clientRepository: ClientRepository;
 		/**
 		 * Where `/authorize` issues its codes. Required when `registry` holds
@@ -441,6 +446,8 @@ export const createOAuthRouter = async (
 		 */
 		subjectRevocation?: SubjectRevocation;
 		userSessionStore?: UserSessionStore;
+		/** The session lifecycle's record, which admission reads after a live session. */
+		sessionLifecycleStore?: SessionLifecycleStore;
 		sessionRPRegistry?: SessionRPRegistry;
 		sessionFamilyIndex?: SessionFamilyIndex;
 		sessionFederationIndex?: SessionFederationIndex;
@@ -506,6 +513,16 @@ export const createOAuthRouter = async (
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
 	checkResolver(requirements, "createOAuthRouter");
+	if (!section) {
+		throw new RangeError(
+			"createOAuthRouter: section is required — oauth {} as the oauth module's schema parsed it (the module passes its own)",
+		);
+	}
+	if (!federationSettings) {
+		throw new RangeError(
+			"createOAuthRouter: federationSettings is required — core's view of core.federations (the module passes the slot), or createTestFederationSettings from @o3co/auth-provider-core/testing in a test",
+		);
+	}
 	// `/authorize` issues the codes the authorization_code grant redeems, so it
 	// is mounted exactly when that grant is registered — the registry
 	// `/oauth/token` dispatches against — and needs the code repository then.
@@ -516,13 +533,11 @@ export const createOAuthRouter = async (
 		);
 	}
 	const router = express.Router();
-	// Every `oauth.*` setting below is read from here, and from nowhere else.
-	const oauth: unknown = section ?? config.oauth;
-
+	// Every `oauth.*` setting below is read from `section`, and from nowhere else.
 	const { options, acrTable, canonicalIssuer, authorizationResponse, clientRepository } =
 		resolveRouterSettings({
-			section: oauth,
-			config,
+			section,
+			federationSettings,
 			authorizationEndpoint,
 			requirements,
 			getFederationProviders,
@@ -586,9 +601,10 @@ export const createOAuthRouter = async (
 					login: requireLoginEntry(loginEntry),
 					// The consent page, `oauth.consentPage.url`, read per request. The
 					// default lives in the package's reference.conf; a hand-built section
-					// without the key falls back the same way.
+					// without the key falls back the same way. An empty or blank url is
+					// the section schema's to refuse.
 					consentUrl: () =>
-						(oauth as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
+						(section as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
 						"/consent",
 					consentStore,
 					pendingConsentStore,
@@ -598,6 +614,7 @@ export const createOAuthRouter = async (
 					// composition without session-backed login wires none), the
 					// subject-revocation boundary (applied when wired) and the resolver.
 					userSessionStore,
+					sessionLifecycleStore,
 					subjectRevocation,
 					requirements,
 				})
@@ -799,7 +816,7 @@ export const createOAuthRouter = async (
 			keyStore,
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
-			accessTokenRevocation: readAccessTokenRevocationMode({ oauth }),
+			accessTokenRevocation: readAccessTokenRevocationMode({ oauth: section }),
 			logger,
 			issuer: canonicalIssuer,
 			// private_key_jwt at /oauth/revoke, verified as at /oauth/token.
@@ -834,6 +851,7 @@ export const createOAuthRouter = async (
 				// The same reading `/authorize` makes, through admission with the
 				// same slots.
 				userSessionStore,
+				sessionLifecycleStore,
 				subjectRevocation,
 				requirements,
 			}),

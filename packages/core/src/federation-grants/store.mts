@@ -185,7 +185,9 @@ export interface FederationGrantStore {
 	 * this write records. Refused: an invalid date, a non-integer version, a non-finite
 	 * issued lifetime or `judgedAgainst`, and a credential the store's own clock
 	 * already reclaimed (else the write would land beside a record the caller
-	 * next reads as `absent`).
+	 * next reads as `absent`). The credentials read back exactly as written, each
+	 * instant to the millisecond: after a write that threw, retrieval tells its
+	 * own landed write from another's by them.
 	 */
 	replaceCredentials(input: {
 		readonly grantId: string;

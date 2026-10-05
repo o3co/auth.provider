@@ -95,7 +95,11 @@ export interface FederationProfile {
 export interface FederationAsk {
 	/** Ask the upstream to authenticate the user again (OIDC `prompt=login`). */
 	readonly login?: true;
-	/** The oldest authentication acceptable, in seconds (OIDC `max_age`). */
+	/**
+	 * The oldest authentication acceptable (OIDC `max_age`): a non-negative
+	 * whole number of seconds; the caller holds it to that, and an adapter
+	 * forwards it as is.
+	 */
 	readonly maxAgeSeconds?: number;
 }
 
