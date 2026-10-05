@@ -80,7 +80,7 @@ export function createSessionStoresBridge(stores: SessionStoresBridgeStores): Se
 	return {
 		async join(sid, join, expiresAt, adopting) {
 			const marks = supportsSessionEnd(sessionFamilyIndex);
-			// The mark is read only through the family's add.
+			// The mark is read only through the family's add: a join without one is not fenced by it.
 			if (adopting && marks && join.familyId === undefined) return "refused";
 			if (join.rp !== undefined) await sessionRPRegistry.registerRP(sid, join.rp, expiresAt);
 			if (join.familyId !== undefined) {

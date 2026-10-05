@@ -311,6 +311,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		if (item.startsWith(RP_ITEM)) return tell(sid, record, item.slice(RP_ITEM.length));
 		switch (item) {
 			case REVOKE_BRIDGED_FAMILIES: {
+				// What the old stores hold now: entries lapsed at the session's end are not revoked here.
 				// The record's own participants have items of their own.
 				const own = new Set(idsOf(record, "family"));
 				for (const familyId of await bridge.families(sid, record.expiresAt)) {

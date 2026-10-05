@@ -253,6 +253,24 @@ mark is present". Liveness of a session with no record reads its user
 session alone. The bridge and adoption go with the old stores; an absent
 record then reads as closed.
 
+Two known limitations of the bridge are accepted as interim. It exists only
+between this amendment and the removal of the bridge and adoption, which
+lands in the same release
+([#1030](https://github.com/o3co/auth.provider/issues/1030)), so neither
+reaches a released version, and closing either would change a store
+contract for a component that is removed:
+- **Bridged targets lapse with the old stores.** The bridge steps read the
+  per-session stores when they run, and those lapse at the session's
+  `expiresAt`, before the closing record does. A bridge step that fails
+  until then finds nothing left and is recorded done: those families are
+  not revoked by it (refresh needs a live session, which they no longer
+  have), and those relying parties are not told.
+- **A join without a family is not fenced by the old end mark.** The mark is
+  read only through `addFamilyIdUnlessEnded`, so on a record that already
+  exists such a join (a federation link) lands while a close begun through
+  the old stores is under way; tokens attached for it are then outside that
+  close's cleanup.
+
 **D15. Where the service lives.** The service, its module, the bridge, the
 notifier contract and the sweep are in `src/session-lifecycle/`, apart from
 the port in `src/user-sessions/lifecycle/`. The service reads a session
