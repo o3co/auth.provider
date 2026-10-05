@@ -752,6 +752,7 @@
 . canonicalChallengeKey value
 . canonicalScope value
 . canonicalTokenType value
+. checkAcrValueName value
 . checkAssertionIssuerEntry value
 . checkCanonicalIssuer value
 . checkConfiguredMfaLockoutPolicy value

@@ -222,6 +222,9 @@ export type {
 	NavigationVerdict,
 	SessionCookiePolicy,
 } from "./browser-session/types.mjs";
+// What an `oauth.authorize.acrValues` key may be, and the one wording of its
+// refusal, for every schema that declares the table.
+export { checkAcrValueName } from "./config/acr-values.mjs";
 // Configuration
 export {
 	type AccessTokenConfig,

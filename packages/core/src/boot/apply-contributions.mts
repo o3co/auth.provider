@@ -235,8 +235,9 @@ function makeFederationRedirectPolicyResolver(
  * Instantiate a stable read-side `MfaFactorResolver` over the `mfaFactors`
  * collector. A kind whose factory answered `null` — the factor switched off
  * by its configuration — is registered in the collector, so a second
- * contribution of it is still a duplicate, and is absent from what the
- * resolver answers. Reads through at call time, like the other resolvers.
+ * contribution of it is still a duplicate and an override of it is refused,
+ * and is absent from what the resolver answers. Reads through at call time,
+ * like the other resolvers.
  * @internal
  */
 function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>): MfaFactorResolver {
@@ -564,6 +565,20 @@ function checkNameKeyedValue(
 	}
 	return value;
 }
+
+/**
+ * The name-keyed kinds whose `null` switches an entry off, each with what the
+ * refusal of an override of a switched-off entry says: the pre-scan refuses
+ * one as `override-target-missing`, so an override never switches on what its
+ * owner's settings switched off. `rateLimitBudgets` takes `null` too and is
+ * not here: stage 1 refuses every override of a prefix
+ * (`contribution-kind-guarded`), so none reaches the pre-scan.
+ * @internal
+ */
+const SWITCHED_OFF_OVERRIDE_TARGETS: ReadonlyMap<string, string> = new Map([
+	["grants", "the grant is switched off, so there is no handler to override"],
+	["mfaFactors", "the factor is switched off, so there is no factor to override"],
+]);
 
 /** The wired limiter's kind and the outage policy the guard applies for it. */
 function limiterInForce(
@@ -1219,24 +1234,15 @@ export async function applyContributions(
 			if (collector === undefined) continue;
 			const name = entry.key as string;
 			const target = collector.get(name);
-			if (target === undefined) {
+			// A switched-off entry has nothing to replace: an override of it would
+			// switch on what its owner's settings switched off.
+			const switchedOff =
+				target === null ? SWITCHED_OFF_OVERRIDE_TARGETS.get(entry.kind) : undefined;
+			if (target === undefined || switchedOff !== undefined) {
 				throw new BootError({
-					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".`,
-					reason: "override-target-missing",
-					stage: "applyContributions",
-					details: {
-						reason: "override-target-missing",
-						kind: entry.kind,
-						name,
-						overridingModule: moduleName,
-					},
-				});
-			}
-			// A switched-off grant has no handler to replace: an override of it
-			// would switch on what its owner's settings switched off.
-			if (entry.kind === "grants" && target === null) {
-				throw new BootError({
-					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}". Its contributor answered null: the grant is switched off, so there is no handler to override.`,
+					message:
+						`Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".` +
+						(switchedOff === undefined ? "" : ` Its contributor answered null: ${switchedOff}.`),
 					reason: "override-target-missing",
 					stage: "applyContributions",
 					details: {

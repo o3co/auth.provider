@@ -169,7 +169,10 @@ export type ExchangeTokenValidatorFactory<Deps> = (
 /**
  * An `mfaFactors` entry. `null` when the factor is switched off by config: the
  * kind is then absent from `mfaFactorResolver` yet still claimed, so a second
- * contribution of it is a duplicate.
+ * contribution of it is a duplicate. It is no override target: an override of
+ * it refuses boot (`override-target-missing`), so nothing switches on what its
+ * owner switched off. An override may answer `null`, which switches off the
+ * factor it replaces.
  */
 export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor | null>;
 /**
