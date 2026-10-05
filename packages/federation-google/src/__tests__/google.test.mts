@@ -516,3 +516,88 @@ describe("id_token signature verification is switched on", () => {
 		expect(configuration[hoisted.customFetchSym]).toBe(fetchImpl);
 	});
 });
+
+describe("the freshness ask and the upstream's authentication instant", () => {
+	const config = {
+		clientId: "client-id",
+		clientSecret: "client-secret",
+		callbackURL: "https://app.example.com/session/oauth/federation/google/callback",
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	const sentWith = (
+		ask: { readonly login?: true; readonly maxAgeSeconds?: number } | undefined,
+		over: Record<string, unknown> = {},
+	): Record<string, string> => {
+		mockBuildAuthorizationUrl.mockReturnValueOnce(
+			new URL("https://accounts.google.com/o/oauth2/v2/auth"),
+		);
+		createGoogleProvider({ ...config, ...over }).buildAuthorizationUrl({
+			redirectUri: config.callbackURL,
+			state: "abc",
+			codeVerifier: "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef",
+			nonce: "fixture-nonce",
+			...(ask === undefined ? {} : { ask }),
+		});
+		const [, params] = mockBuildAuthorizationUrl.mock.calls.at(-1) as [
+			unknown,
+			Record<string, string>,
+		];
+		return params;
+	};
+
+	it("ignores an ask: Google documents prompt as none, consent or select_account, and no max_age", () => {
+		const asked = sentWith({ login: true, maxAgeSeconds: 0 });
+		expect(asked).toEqual(sentWith(undefined));
+		expect(asked).not.toHaveProperty("max_age");
+		// Offline access's consent prompt is kept, never replaced by login.
+		expect(asked.prompt).toBe("consent");
+		const online = sentWith({ login: true, maxAgeSeconds: 0 }, { accessType: "online" });
+		expect(online).not.toHaveProperty("prompt");
+		expect(online).not.toHaveProperty("max_age");
+	});
+
+	const exchangeWith = async (claims: Record<string, unknown>, userInfo = {}) => {
+		const { jwt, sub } = await makeTestGoogleIdToken({ sub: "g-123" });
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({
+			access_token: "at",
+			id_token: jwt,
+			expires_in: 3600,
+			claims: () => ({
+				sub,
+				iss: "https://accounts.google.com",
+				aud: "client-id",
+				...claims,
+			}),
+		});
+		mockFetchUserInfo.mockResolvedValueOnce({ sub: "g-123", ...userInfo });
+		return createGoogleProvider(config).exchangeCode({
+			code: "auth-code",
+			codeVerifier: "v",
+			redirectUri: config.callbackURL,
+			nonce: "fixture-nonce",
+		});
+	};
+
+	it("reports the verified id_token's auth_time as authTime when Google sends one", async () => {
+		const authTime = Math.floor(Date.now() / 1000) - 120;
+		expect((await exchangeWith({ auth_time: authTime })).authTime).toEqual(
+			new Date(authTime * 1000),
+		);
+	});
+
+	it("reports no authTime when the id_token carries none, whatever UserInfo says", async () => {
+		const profile = await exchangeWith({}, { auth_time: Math.floor(Date.now() / 1000) });
+		expect(profile).not.toHaveProperty("authTime");
+	});
+
+	it("fails the exchange on an auth_time that is not a usable instant", async () => {
+		await expect(exchangeWith({ auth_time: Math.floor(Date.now() / 1000) + 3600 })).rejects.toThrow(
+			/auth_time/,
+		);
+		await expect(exchangeWith({ auth_time: -1 })).rejects.toThrow(/auth_time/);
+	});
+});

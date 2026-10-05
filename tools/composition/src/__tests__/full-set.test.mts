@@ -417,7 +417,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 			"dpop.iatWindowSeconds",
 			"mtls.fullPki.maxChainDepth",
 			"oauth-token-exchange.maxActorChainDepth",
-			"webauthn.rateLimit.authenticationOptions.limit",
+			"webauthn.challengeTtlMs",
 			"webauthn-mfa-factor.userVerification",
 			"mfa-totp-factor.enabled",
 		]) {

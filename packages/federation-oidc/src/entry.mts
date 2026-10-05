@@ -17,7 +17,7 @@
 /**
  * The one reading of a `core.federations` entry of type `oidc`: the keys it
  * carries beside the ones core owns (`enabled`, `type`, `trustUpstreamAmr`,
- * `callbackURL`), as a strict, flat schema. A key written `null` reads as
+ * `callbackMeetsFreshness`, `callbackURL`), as a strict, flat schema. A key written `null` reads as
  * absent, and an absent key stays absent: what it means — the default scopes,
  * discovery on, UserInfo when the issuer publishes it — is the provider's
  * reading (`oidc.mts`), never a default filled in here.

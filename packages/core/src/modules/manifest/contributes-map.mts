@@ -148,8 +148,8 @@ export interface FederationTypeContribution<Deps, E = unknown> {
 	/**
 	 * The schema of an entry of this type: the keys the adapter reads. The keys
 	 * core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
-	 * `callbackURL`) are stripped first, so a strict schema names only the
-	 * type's keys.
+	 * `callbackMeetsFreshness`, `callbackURL`) are stripped first, so a strict
+	 * schema names only the type's keys.
 	 */
 	readonly entrySchema: z.ZodType<E>;
 	/**

@@ -30,7 +30,9 @@
  * `enrollmentFacts` and `renewalNonce` alone are optional: a session without
  * one — written before the key, or by a store that drops it — says nothing,
  * and its reader decides what that means; the contract suite holds a store to
- * round-tripping each.
+ * round-tripping each. `SessionAuthentication.upstreamAuthTime` is optional
+ * for the same reason: absent says nothing, and `authenticationFreshness`
+ * reads it as no fresher than `authTime`.
  *
  * Asserted with conditional types rather than `@ts-expect-error`. This file
  * proves anything only under the TypeScript checker; `user-sessions/__tests__`
@@ -77,8 +79,11 @@ describe("UserSession — what a session store answers with", () => {
 });
 
 describe("SessionAuthentication — how a session was established", () => {
-	it("has no optional key: a copy names every field", () => {
-		expectTypeOf<OptionalKeys<SessionAuthentication>>().toEqualTypeOf<never>();
+	it("has no optional key but upstreamAuthTime: a copy names every other field", () => {
+		expectTypeOf<OptionalKeys<SessionAuthentication>>().toEqualTypeOf<"upstreamAuthTime">();
+		expectTypeOf<SessionAuthentication["upstreamAuthTime"]>().toEqualTypeOf<
+			Date | null | undefined
+		>();
 	});
 });
 

@@ -208,7 +208,13 @@ Each one implements a port core declares; the slot name is in parentheses.
   a first binding) as a key of its own, left out when the session recorded
   none: an envelope without it reads as a session with none, a malformed one
   is refused as corrupt, and a release before this one ignores the key. A
-  step-up keeps it as it was. The `SessionFamilyIndex` has the session-end
+  step-up keeps it as it was. Inside `authentication`, a federated session's
+  `upstreamAuthTime` is stored as `upstreamAuthTimeMs`: epoch milliseconds,
+  or `null` when the upstream showed no time, left out when none was
+  recorded. Any other value reads the envelope as corrupt. A release before
+  this one reads it as none recorded, and its step-up keeps it.
+
+  The `SessionFamilyIndex` has the session-end
   capability (core's `SupportsSessionEnd`) when it is given an
   `endedKeyPrefix` and a `SessionFamilyIndexClient` with `writeEndedMark` and
   `hasEndedMark`, which `makeIoredisClients` provides, and which the module
@@ -1317,7 +1323,10 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   admits reads back as written. Each participant's join ordinal is kept beside
   it, written in the join's script when it first joins and kept by a repeat
   join, so participants are answered in the order each first joined, as the
-  port promises.
+  port promises; a participant with no ordinal is answered after those with
+  one, by its item's bytes. The reader refuses a record with a field outside
+  that list, so a new field needs a reader that tolerates it deployed before
+  any writer that writes it.
 - **Sixteen fixed shards.** A record lives at
   `${keyPrefix}{lc:<shard>}:s:<sid>` (`ss:lc:` by default; `<sid>` is base64url
   of its JSON), where `<shard>` is the 32-bit FNV-1a hash of the sid's UTF-8

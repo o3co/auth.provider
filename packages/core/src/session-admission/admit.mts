@@ -27,6 +27,7 @@ import {
 	PASSWORD_AMR,
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
@@ -326,8 +327,8 @@ const copyView = (view: SessionView): SessionView =>
  *    steps 1 to 4 again, on a fresh clock reading and with the claim's
  *    subject held to the first reading's, whatever step 7 answered. An
  *    answer they give is the admission's; else step 7's stands, carrying the
- *    first reading's session and view. A requirement that throws has already
- *    answered `unavailable`.
+ *    first reading's session, view and renewal nonce. A requirement that
+ *    throws has already answered `unavailable`.
  */
 export async function admitSession(
 	deps: AdmissionDeps,
@@ -347,19 +348,19 @@ export async function admitSession(
 	// Steps 1 to 4: the claim, the live read, the subject and the renewal nonce, the revocation boundary.
 	const read = await readLiveSession(checked, unavailable);
 	if ("answer" in read) return read.answer;
-	const { session, storeRecords } = read;
+	const { session, storeRecords, renewalNonce } = read;
 	// The record is read into one view; each requirement is handed its own
 	// copy of it, so what one does to its Dates reaches neither the next nor
 	// the consumer. Whether a second factor can be recorded on the session is
 	// decided here, in the view, once: the requirements, the merge and the
 	// consumer all read it there.
 	const live: LiveRecord | null =
-		session === null ? null : { session, view: viewOf(session, storeRecords) };
+		session === null ? null : { session, view: viewOf(session, storeRecords), renewalNonce };
 
 	// Step 5: the requirements, by the action's effective grade: only the
 	// issued remediation keeps its grade and skips them.
 	const requirements = [...resolver.entries()];
-	const effective = effectiveAction(requirements, checked.action, logger);
+	const effective = effectiveAction(checked.action);
 	// A token carrier's authentication is the token's own, whether or not a
 	// record was read: the record is only the view. Each reading is a frozen
 	// copy of its own: the merge's here, and each requirement's below, so what
@@ -377,11 +378,12 @@ export async function admitSession(
 			subject: session === null ? presented.subject : session.sub,
 			action: effective,
 			asks,
-			now,
 		};
 		for (const [name, requirement] of requirements) {
 			const input: RequirementInput = Object.freeze({
 				...shared,
+				// Its own copy: a requirement that moves its clock moves no other's.
+				now: new Date(now.getTime()),
 				authentication:
 					presented.carrier === "token"
 						? requirementSessionFromAmr(presented.tokenAmr)
@@ -691,6 +693,14 @@ export interface FederatedLogin {
 	readonly upstreamAmr: readonly string[];
 	/** Whether that federation's upstream `amr` counts (`federationTrustsUpstreamAmr`). */
 	readonly trusted: boolean;
+	/** When the upstream last authenticated the user (`FederationProfile.authTime`), when it showed one. */
+	readonly upstreamAuthTime?: Date;
+	/**
+	 * Whether that federation's callback alone meets a freshness ask
+	 * (`federationCallbackMeetsFreshness`); decides what is recorded when the
+	 * upstream showed no instant (`federatedSessionAuthentication`).
+	 */
+	readonly callbackMeetsFreshness?: boolean;
 	readonly authTime: Date;
 	readonly redirectTo: string | undefined;
 	readonly request: { readonly ip?: string; readonly userAgent?: string };
@@ -726,10 +736,33 @@ export function establishWithoutAsking(
 	if (typeof login.trusted !== "boolean") {
 		throw new RangeError("establishWithoutAsking: trusted must be true or false");
 	}
+	const { upstreamAuthTime, callbackMeetsFreshness } = login;
+	// Refused here, before the callback spends anything, rather than by the
+	// store's `create`: an instant further ahead than hosts' clocks drift is
+	// no upstream clock's reading.
+	if (
+		upstreamAuthTime !== undefined &&
+		!(
+			upstreamAuthTime instanceof Date &&
+			Number.isFinite(upstreamAuthTime.getTime()) &&
+			upstreamAuthTime.getTime() <= Date.now() + DEFAULT_CLOCK_SKEW_MS
+		)
+	) {
+		throw new RangeError(
+			"establishWithoutAsking: upstreamAuthTime must be a valid date no further ahead than hosts' clocks drift, or absent",
+		);
+	}
+	if (callbackMeetsFreshness !== undefined && typeof callbackMeetsFreshness !== "boolean") {
+		throw new RangeError(
+			"establishWithoutAsking: callbackMeetsFreshness must be true, false or absent",
+		);
+	}
 	const recorded = federatedSessionAuthentication({
 		federation: login.federation,
 		upstreamAmr: login.upstreamAmr,
 		trusted: login.trusted,
+		...(upstreamAuthTime === undefined ? {} : { upstreamAuthTime }),
+		...(callbackMeetsFreshness === undefined ? {} : { callbackMeetsFreshness }),
 	});
 	const primary = checkPrimaryAuthentication({
 		subject: login.subject,

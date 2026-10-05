@@ -935,6 +935,32 @@ describe("step 4 — the revocation boundary", () => {
 		}
 	});
 
+	it("judges a federated session by when it was established, not by its upstream's older authentication", async () => {
+		// The upstream authenticated the user before the boundary; this provider
+		// established the session after it. Revocation reads establishment, so
+		// the session is not revoked at birth.
+		const record = session({
+			authTime: minutesAgo(5),
+			amr: ["fed"],
+			authentication: {
+				primary: "fed",
+				federation: "google",
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+				upstreamAuthTime: minutesAgo(30),
+			},
+		});
+		expect(
+			await admitSession(
+				deps({
+					userSessionStore: holding(record),
+					subjectRevocation: revocationOf(async () => minutesAgo(10)),
+				}),
+				request(),
+			),
+		).toMatchObject({ outcome: "admitted" });
+	});
+
 	it("reads the boundary for the record's subject", async () => {
 		const asked: string[] = [];
 		await admitSession(
@@ -1239,39 +1265,109 @@ describe("step 5 — the requirements", () => {
 		expect(seen).toEqual([]);
 	});
 
-	it("asks every requirement, as credential_change, about a remediation core issued to a requirement it does not hold, said once per process per name", async () => {
+	it("refuses, as a RangeError and asking no requirement, a remediation core issued to a requirement these do not hold", async () => {
 		const { logger, lines } = recordingLogger();
 		const seen: string[] = [];
 		const watching = (name: string) =>
 			met(name, {
 				admit: async ({ action }) => {
-					seen.push(`${name}:${action.name}:${action.grade}`);
+					seen.push(`${name}:${action.name}`);
 					return { outcome: "met" };
 				},
 			});
-		// Registered elsewhere — another composition's — so issued, but not to these.
+		// Registered elsewhere — another composition's, or another boot's — so issued, but not to these.
 		const elsewhere = met("elsewhere", { remediations: ["elsewhere.step_up"] });
 		resolverForTests([elsewhere], { actions: TEST_ACTIONS });
 		const undeclared = issuedRemediationActions(elsewhere)?.step_up as IssuedRemediationAction;
-		const first = deps({
+		const here = deps({
 			requirements: resolverForTests([watching("one"), watching("two")], { actions: TEST_ACTIONS }),
 			logger,
 		});
-		await admitSession(first, request({ action: undeclared }));
-		await admitSession(first, request({ action: undeclared }));
-		expect(seen).toEqual([
-			"one:elsewhere.step_up:credential_change",
-			"two:elsewhere.step_up:credential_change",
-			"one:elsewhere.step_up:credential_change",
-			"two:elsewhere.step_up:credential_change",
-		]);
-		expect(lines).toEqual([
-			{
-				level: "warn",
-				message: "session_admission_remediation_undeclared",
-				fields: { action: "elsewhere.step_up" },
+
+		await expect(admitSession(here, request({ action: undeclared }))).rejects.toThrow(RangeError);
+
+		expect(seen).toEqual([]);
+		expect(lines).toEqual([]);
+	});
+
+	it("issues a requirement object registered again new actions, which the earlier boot's resolver refuses: the last registration wins", async () => {
+		const requirement = met("again", { remediations: ["again.step_up"] });
+		const firstBoot = resolverForTests([requirement], { actions: TEST_ACTIONS });
+		const first = issuedRemediationActions(requirement)?.step_up as IssuedRemediationAction;
+		const secondBoot = resolverForTests([requirement], { actions: TEST_ACTIONS });
+		const second = issuedRemediationActions(requirement)?.step_up as IssuedRemediationAction;
+		expect(second).not.toBe(first);
+
+		// Each boot admits the action it issued.
+		expect(
+			await admitSession(deps({ requirements: firstBoot }), request({ action: first })),
+		).toMatchObject({ outcome: "admitted" });
+		expect(
+			await admitSession(deps({ requirements: secondBoot }), request({ action: second })),
+		).toMatchObject({ outcome: "admitted" });
+		// And refuses the other's.
+		await expect(
+			admitSession(deps({ requirements: firstBoot }), request({ action: second })),
+		).rejects.toThrow(RangeError);
+		await expect(
+			admitSession(deps({ requirements: secondBoot }), request({ action: first })),
+		).rejects.toThrow(RangeError);
+	});
+
+	it("hands each requirement its own clock, so one that moves it moves no other's", async () => {
+		const seen: number[] = [];
+		const moving = met("first", {
+			admit: async ({ now }) => {
+				seen.push(now.getTime());
+				now.setTime(0);
+				return { outcome: "met" };
 			},
-		]);
+		});
+		const reading = met("second", {
+			admit: async ({ now }) => {
+				seen.push(now.getTime());
+				return { outcome: "met" };
+			},
+		});
+
+		await admitSession(
+			deps({ requirements: resolverForTests([moving, reading], { actions: TEST_ACTIONS }) }),
+			request({ action: "test.use" }),
+		);
+
+		expect(seen).toHaveLength(2);
+		expect(seen[1]).toBe(seen[0]);
+		expect(seen[1]).not.toBe(0);
+	});
+
+	it("hands every requirement the same frozen action, so one cannot change the grade the next reads", async () => {
+		const seen: string[] = [];
+		const rewriting = met("first", {
+			admit: async ({ action }) => {
+				expect(Object.isFrozen(action)).toBe(true);
+				try {
+					(action as { grade: string }).grade = "use";
+				} catch {
+					// A frozen object refuses the write in strict mode.
+				}
+				return { outcome: "met" };
+			},
+		});
+		const reading = met("second", {
+			admit: async ({ action }) => {
+				seen.push(action.grade);
+				return { outcome: "met" };
+			},
+		});
+
+		await admitSession(
+			deps({
+				requirements: resolverForTests([rewriting, reading], { actions: TEST_ACTIONS }),
+			}),
+			request({ action: "test.change" }),
+		);
+
+		expect(seen).toEqual(["credential_change"]);
 	});
 
 	it("answers unavailable (the requirement's name) when a requirement throws, logged once: a requirement is never trusted to fail open", async () => {
@@ -1855,28 +1951,6 @@ describe("an action a consumer registered, passed by its name", () => {
 	});
 });
 
-describe("the undeclared-remediation line is capped", () => {
-	it("says each name once up to 256 names, then once for all", async () => {
-		const { logger, lines } = recordingLogger();
-		const with_ = deps({ logger });
-		for (let i = 0; i < 300; i++) {
-			// Issued to a requirement registered elsewhere, not to this resolver's.
-			const elsewhere = met(`route${i}`, { remediations: [`route${i}.step_up`] });
-			resolverForTests([elsewhere], { actions: TEST_ACTIONS });
-			await admitSession(
-				with_,
-				request({
-					action: issuedRemediationActions(elsewhere)?.step_up as IssuedRemediationAction,
-				}),
-			);
-		}
-		expect(lines.length).toBeLessThanOrEqual(257);
-		expect(lines.every((line) => typeof line.fields.action === "string")).toBe(true);
-		expect(lines.filter((line) => line.fields.overflow === true)).toHaveLength(1);
-		expect(lines[lines.length - 1]?.fields.overflow).toBe(true);
-	});
-});
-
 describe("step 6 — acr_values, with the reach of what is registered", () => {
 	const table = readAcrTable({ "urn:o3co:acr:mfa": ["mfa"], "urn:example:pwd": ["pwd"] });
 
@@ -2029,7 +2103,7 @@ describe("the caller's faults admitSession names, each driven", () => {
 		);
 	});
 
-	it("takes an action another resolver's requirement was issued as credential_change: an issued action is its own requirement's", async () => {
+	it("refuses an action another resolver's requirement was issued: an issued action is its own requirement's", async () => {
 		const owner = met("mfa", { remediations: ["mfa.step_up"] });
 		resolverForTests([owner], { actions: TEST_ACTIONS });
 		const seen: string[] = [];
@@ -2039,10 +2113,12 @@ describe("the caller's faults admitSession names, each driven", () => {
 				return { outcome: "met" };
 			},
 		});
-		await admitSession(
-			deps({ requirements: resolverForTests([other], { actions: TEST_ACTIONS }) }),
-			request({ action: issuedRemediationActions(owner)?.step_up as IssuedRemediationAction }),
-		);
-		expect(seen).toEqual(["credential_change"]);
+		await expect(
+			admitSession(
+				deps({ requirements: resolverForTests([other], { actions: TEST_ACTIONS }) }),
+				request({ action: issuedRemediationActions(owner)?.step_up as IssuedRemediationAction }),
+			),
+		).rejects.toThrow(RangeError);
+		expect(seen).toEqual([]);
 	});
 });
