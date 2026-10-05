@@ -22,13 +22,13 @@ The OAuth 2.0 / OpenID Connect authorization-server endpoints of [auth.provider]
 
 - the ports and records (`ClientRepository`, `CodeRepository`, `KeyStore`, `UserSessionStore`, the `Client` record …), token minting and verification (`generateToken`, `verifyJwt`), the grant contract and the registry `/oauth/token` dispatches against, the discovery document itself and `jwks_uri` — core;
 - whether a session may proceed — the live read, the subject, the subject-revocation boundary, the registered session requirements and the `acr` selection — core's session admission (`admitSession`, [`session-admission/`](../core/src/session-admission/README.md)); this package names its actions and maps the outcomes;
-- login, the browser session and the federation login routes — `@o3co/auth-provider-session` (`POST /session/logout` is there too, and does not run this package's cascade: see [Logout](#logout));
+- login, the browser session and the federation login routes — `@o3co/auth-provider-session` (`POST /session/logout` is there too, and does not run this package's cascade: see [Logout](#logout); where core's session lifecycle is installed, it closes the session through the lifecycle, as `/oauth/logout` does, and this package's notifier tells the relying parties);
 - the other grant types — token exchange, device code, WebAuthn — which their own packages contribute to the same `/oauth/token`;
 - offline delegation of upstream tokens (`/oauth/federation-grants`) — `@o3co/auth-provider-federation-grants`;
 - proving a DPoP key or a client certificate — `@o3co/auth-provider-dpop` / `@o3co/auth-provider-mtls`. This package reads the binding they establish and stamps it as `cnf`;
 - store adapters (Redis and others) and the user Store.
 
-**Why a separate package.** Core holds the contracts every package shares, and the adapter and grant packages — Redis, token exchange, WebAuthn — depend on core and not on this package; keeping the HTTP surface here, with Express and express-session as its peers, means none of them pulls it in. Login and the browser session are a package of their own because an API-only deployment issues tokens without them; this package is the one every token-issuing deployment installs. The two are siblings over core and neither imports the other, which is why `POST /session/logout` cannot run this package's cascade.
+**Why a separate package.** Core holds the contracts every package shares, and the adapter and grant packages — Redis, token exchange, WebAuthn — depend on core and not on this package; keeping the HTTP surface here, with Express and express-session as its peers, means none of them pulls it in. Login and the browser session are a package of their own because an API-only deployment issues tokens without them; this package is the one every token-issuing deployment installs. The two are siblings over core and neither imports the other, which is why `POST /session/logout` cannot run this package's cascade; where core's session lifecycle is installed, both close the session through it instead.
 
 **Why four modules.** The package installs as four separate modules, each with only the requirements its own code reads, because they are needed in different compositions:
 
@@ -575,7 +575,10 @@ The OIDC logout endpoints are mounted when the six session-cascade slots are all
 > the liveness checks elsewhere in this README do bite — but it revokes **no
 > refresh-token families**, because `cascadeLogout` is not reachable across the
 > package boundary. `POST /oauth/logout` is the only endpoint that runs the full
-> cascade. If a session holds a refresh token, that is the one to call. See
+> cascade. If a session holds a refresh token, that is the one to call. All
+> of this is without core's session lifecycle: where it is installed,
+> `POST /session/logout` closes the session through it as `/oauth/logout`
+> does, revoking the families and telling the relying parties. See
 > [the session package README](../session/README.md#what-post-sessionlogout-invalidates).
 
 ### The session-close notifier

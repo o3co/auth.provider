@@ -629,8 +629,9 @@ This provider has **two** logout endpoints and they do not invalidate the same
 things. Pick by what the session holds.
 
 `POST /session/logout` — the browser's own logout, and the one a BFF /
-`auth.proxy` injection topology calls. It answers `200 {"message": "Logged out
-successfully"}` and invalidates:
+`auth.proxy` injection topology calls. Without core's session lifecycle, it
+answers `200 {"message": "Logged out successfully"}` and invalidates the
+following (with the lifecycle, see below):
 
 | What | Effect |
 |------|--------|
@@ -640,7 +641,7 @@ successfully"}` and invalidates:
 | `federationTokenStore` + `sessionFederationIndex` entries for the `sid` | removed, so upstream-IdP tokens are not left at rest |
 | **refresh-token families bound to the `sid`** | **not revoked** |
 
-That last row is the one to read twice. A browser that logged in here and then
+That last row is the one to read twice — without the lifecycle. A browser that logged in here and then
 completed an `/authorize` → `authorization_code` flow holds a refresh token
 whose family this endpoint does **not** revoke; the refresh token keeps working
 until it expires. Use `POST /oauth/logout` with an `id_token_hint` for that
@@ -657,6 +658,13 @@ The `session` grant issues no refresh token, so a deployment whose tokens all
 come from that grant has no family to revoke and `/session/logout` is
 sufficient on its own.
 
+**Where core's session lifecycle is installed** (`sessionLifecycleModule` fills the `sessionLifecycle` slot), the logout closes the session with `sessionLifecycle.close(sid, "session_logout")` instead of the table above. The close runs as `/oauth/logout`'s does, in order: it revokes the session's refresh-token families and removes its federation tokens, then tells its relying parties back-channel (through the notifier `oauthEndpointsModule` contributes), then removes the per-session indexes, then deletes the `UserSession`, and removes the subject-index entry last, so a close still pending keeps the sid where a subject-wide revocation finds it.
+- A close that committed answers the same `200` and destroys the express session, whether its work is `done` or still `pending`: from the commit on, no liveness read answers the session live, and a later close or the lifecycle's sweep resumes what is left. A `pending` close is audited as `logout.close_pending` (`subject`, `sid`), as `/oauth/logout` audits it.
+- A logout whose `UserSession` already lapsed has nothing to close: it answers `done` and destroys the express session, and the session's leftovers lapse with their TTL, as at `/oauth/logout`.
+- A close that did not commit, or a lifecycle that threw, answers `503 temporarily_unavailable` and keeps the express session for a retry. That includes a close whose commit found no live record (the session's end had passed on the store's clock) and whose work, run at once with no record to save it in, failed: a retry runs it again. It is logged once as `session_logout_store_unavailable` (error, `store: "session_lifecycle"`, `step: "close"`, `sid`), carrying the error's projection only when the lifecycle threw; the lifecycle logs its own outage as `session_lifecycle_unavailable`.
+- A `sid` the lifecycle cannot hold names no session of its own: the logout destroys the express session and answers `200`, said once at warn as `session_logout_sid_not_closable`.
+- A step of the close work that fails is core's `session_close_item_failed` (warn, with the `item`), and the close stays pending; alert on `item: "delete_user_session"` as the counterpart of `logout_user_session_delete_failed` below.
+
 **A copy the record was renewed away from.** Before it invalidates anything,
 the logout asks core's `cookieRenewedAway`: when the record the cookie names
 carries a renewal nonce this cookie session does not hold — an old cookie, or
@@ -666,7 +674,7 @@ the same `200`. The renewed session stays live. When the record cannot be
 read, that is logged as `logout_user_session_read_failed` and the logout
 invalidates as above.
 
-**Failure modes.** Every records step in the table above is best-effort and
+**Failure modes, without core's session lifecycle.** Every records step in the table above is best-effort and
 logged, never propagated: an outage of those stores must not turn a logout
 into a `5xx` that leaves the user holding a live cookie. The `UserSession` delete runs **first**, before the
 express session is destroyed and before the best-effort hygiene, so a

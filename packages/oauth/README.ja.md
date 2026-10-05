@@ -22,13 +22,13 @@
 
 - ポートとレコード（`ClientRepository`、`CodeRepository`、`KeyStore`、`UserSessionStore`、`Client` レコード …）、トークンの発行と検証（`generateToken`、`verifyJwt`）、グラントの契約と `/oauth/token` が振り分けに使うレジストリ、ディスカバリードキュメント本体と `jwks_uri` — core;
 - セッションが先へ進んでよいかどうか — 生存確認の読み取り、サブジェクト、サブジェクト失効の境界、登録済みのセッション要件、`acr` の選択 — core のセッションアドミッション（`admitSession`、[`session-admission/`](../core/src/session-admission/README.md)）。このパッケージはアクションを名指し、結果を対応付ける;
-- ログイン、ブラウザーセッション、フェデレーションのログインルート — `@o3co/auth-provider-session`（`POST /session/logout` もそちらにあり、このパッケージのカスケードは走らせない: [ログアウト](#ログアウト)を参照）;
+- ログイン、ブラウザーセッション、フェデレーションのログインルート — `@o3co/auth-provider-session`（`POST /session/logout` もそちらにあり、このパッケージのカスケードは走らせない: [ログアウト](#ログアウト)を参照。core のセッションライフサイクルが入っているときは、`/oauth/logout` と同じくライフサイクルを通してセッションを終了し、このパッケージの通知器が relying party に知らせる）;
 - その他のグラントタイプ — token exchange、device code、WebAuthn — それぞれのパッケージが同じ `/oauth/token` に提供する;
 - 上流トークンのオフライン委譲（`/oauth/federation-grants`） — `@o3co/auth-provider-federation-grants`;
 - DPoP 鍵やクライアント証明書の証明 — `@o3co/auth-provider-dpop` / `@o3co/auth-provider-mtls`。このパッケージはそれらが確立したバインディングを読み、`cnf` として刻む;
 - ストアアダプター（Redis など）とユーザーの Store。
 
-**なぜ別パッケージか。** core はすべてのパッケージが共有する契約を持ち、アダプターやグラントのパッケージ — Redis、token exchange、WebAuthn — は core に依存し、このパッケージには依存しない。Express と express-session を peer とする HTTP 面をここに置くことで、それらのどれもそれを引き込まない。ログインとブラウザーセッションがさらに別パッケージなのは、API 専用のデプロイはそれ無しでトークンを発行するからで、このパッケージはトークンを発行するすべてのデプロイがインストールするものである。両者は core の上の兄弟でどちらも相手を import しない。`POST /session/logout` がこのパッケージのカスケードを走らせられないのはそのためである。
+**なぜ別パッケージか。** core はすべてのパッケージが共有する契約を持ち、アダプターやグラントのパッケージ — Redis、token exchange、WebAuthn — は core に依存し、このパッケージには依存しない。Express と express-session を peer とする HTTP 面をここに置くことで、それらのどれもそれを引き込まない。ログインとブラウザーセッションがさらに別パッケージなのは、API 専用のデプロイはそれ無しでトークンを発行するからで、このパッケージはトークンを発行するすべてのデプロイがインストールするものである。両者は core の上の兄弟でどちらも相手を import しない。`POST /session/logout` がこのパッケージのカスケードを走らせられないのはそのためである。core のセッションライフサイクルが入っているときは、両方ともそれを通してセッションを終了する。
 
 **なぜ 4 つのモジュールか。** このパッケージは 4 つの別々のモジュールとしてインストールされ、それぞれ自分のコードが読むものだけを要求する。必要になる構成が異なるからである:
 
@@ -565,7 +565,10 @@ OIDC のログアウトエンドポイントは、セッションカスケード
 > この README の他の箇所にある生存確認は効く — が、`cascadeLogout` にはパッケージの
 > 境界を越えて届かないので、**リフレッシュトークンファミリーは 1 つも失効させない**。
 > 完全なカスケードを走らせるのは `POST /oauth/logout` だけである。セッションが
-> リフレッシュトークンを持つなら、呼ぶべきはこちらである。
+> リフレッシュトークンを持つなら、呼ぶべきはこちらである。以上は core の
+> セッションライフサイクルがないときの話で、それが入っているときは
+> `POST /session/logout` も `/oauth/logout` と同じくそれを通してセッションを
+> 終了し、ファミリーを失効させ relying party に知らせる。
 > [session パッケージの README](../session/README.md#what-post-sessionlogout-invalidates) を参照。
 
 ### セッション終了の通知器
