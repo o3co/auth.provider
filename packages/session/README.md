@@ -282,7 +282,7 @@ What holds:
   it at boot by name with the other offenders, warns when
   `core.deployment.mode` is unset, and says nothing under `"single"`.
   `sessionStoreModuleFor(config)` is the same module declaring the same from
-  `config`, read when it is built; boot then never sees the section it parses,
+  `config`, read when it is built, not from the section boot parses,
   so list `sessionStoreModule`. The route factory refuses the combination too
   when it runs (`replica-unsafe-adapter`), for a module built from a config
   other than the one booted. Both forms require core's `deploymentMode`

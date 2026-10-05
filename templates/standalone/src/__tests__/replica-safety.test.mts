@@ -416,6 +416,12 @@ describe("express-session's store declares its replica safety from its own secti
 								},
 					);
 				}
+				if (storage === "the variable it was renamed from, SESSION_STORAGE_TYPE=memory") {
+					// Refused as renamed before the replica-safety guard reads anything.
+					expect(outcome).toEqual({
+						refused: expect.objectContaining({ reason: "environment-variable-renamed" }),
+					});
+				}
 			});
 		}
 	}

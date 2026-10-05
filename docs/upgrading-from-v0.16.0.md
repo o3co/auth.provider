@@ -776,7 +776,11 @@ modules fills them.
   `sessionStoreModule` in place of `sessionStoreModuleFor(config)`; boot
   answers it for the section it parses. `replicaUnsafeReason(sessionStoreModule)`
   with no section, and `checkReplicaSafety` without its `sections`, now throw
-  a `TypeError` naming `session-store`: pass the parsed section.
+  a `TypeError` naming `session-store`: pass the parsed section. A
+  composition that already listed `sessionStoreModule` (which declared
+  nothing) now sees memory storage under `multi` refused while manifests are
+  validated, as `replica-unsafe-adapter`, where the route factory used to
+  refuse it (`contribute-factory-failed`); and an unset mode now warns.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name
