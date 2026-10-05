@@ -735,7 +735,8 @@ Every session carries `authTime`, `amr` — RFC 8176 values naming how the user
 authenticated, as far as this provider vouches for it — and `authentication`,
 how the session was established (the MFA ADR's D9: the primary, which
 federation, what an untrusted upstream IdP asserted, when a second factor was
-verified). So `/authorize` can honour `max_age`, `prompt=login` and
+verified, and for a federated login when the upstream last authenticated the
+user, `upstreamAuthTime`). So `/authorize` can honour `max_age`, `prompt=login` and
 `acr_values`, and the id_token can say `auth_time`, `amr` and `acr` (the whole
 picture is in the [oauth package README](../oauth/README.md)). Core composes
 both for each login path (`passwordSessionAuthentication`,
@@ -744,7 +745,7 @@ both for each login path (`passwordSessionAuthentication`,
 | login path | `amr` | `authentication` |
 | --- | --- | --- |
 | `POST /session/login` | `["pwd"]` (core's `PASSWORD_AMR`) | primary `pwd` |
-| federation callback | `["fed"]` — `fed` is the deployment-defined marker for "through a federation", core's `FEDERATED_AMR`, which this package re-exports; RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. For a federation with `trustUpstreamAmr = true`, the upstream IdP's `amr` beside it | primary `fed`, the federation's name, and — unless the federation trusts its IdP — the IdP's `amr` as `upstreamAmr` |
+| federation callback | `["fed"]` — `fed` is the deployment-defined marker for "through a federation", core's `FEDERATED_AMR`, which this package re-exports; RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. For a federation with `trustUpstreamAmr = true`, the upstream IdP's `amr` beside it | primary `fed`, the federation's name, and — unless the federation trusts its IdP — the IdP's `amr` as `upstreamAmr`; `upstreamAuthTime`, the `auth_time` the adapter reports, or `null` when it reports none and the federation's `callbackMeetsFreshness` is `false` (the default), or nothing when that is `true` |
 | account linking (`?link=1`) | unchanged — a link is not a login | unchanged |
 
 **What an upstream IdP asserted counts only for a federation that trusts it**
@@ -785,8 +786,27 @@ offline lives until its `exp`. `revokeAllForSubject` needs
 has the procedure.
 
 Re-authentication is a *new* session: `POST /session/login` and the federation
-callback always create one with a fresh `authTime`, which is what `max_age` and
-`prompt=login` measure. A login page that bounces an already-authenticated
+callback always create one with a fresh `authTime`. What `max_age` and
+`prompt=login` measure is the session's freshness (core's `sessionFreshness`):
+`authTime`, or for a federated login the earlier of that and the upstream's
+recorded authentication. The federation start
+(`GET /session/oauth/federation/:name`) takes optional `prompt` and `max_age`
+hints — a space list in which only `login` counts, and a non-negative integer
+no larger than 2^53−1; anything else is `400 invalid_request` — and passes them to the adapter as its
+`ask`, which forwards only what its upstream documents. A start from a
+browser that already holds an application session, and is not a link, is a
+re-authentication and asks for a new login (`login: true`) whatever the hints
+say, so an upstream that honours it (the OIDC adapter forwards `prompt=login`)
+prompts the user again rather than answering from its own single sign-on —
+the cost is that a signed-in user who starts a federated login again sees the
+IdP's sign-in prompt. The callback records
+the upstream's `auth_time` the adapter reports (`authentication.upstreamAuthTime`)
+when it is an instant at or after the epoch no further ahead than
+`DEFAULT_CLOCK_SKEW_MS`; any other value the adapter reports is a failed
+exchange (`502 exchange_failed`, `federation_callback_exchange_failed`);
+when it reports none, a federation with `core.federations.<name>.callbackMeetsFreshness`
+`false` (the default) records `null`, never fresh, and one with `true` records
+nothing, so the session is as fresh as its `authTime`. A login page that bounces an already-authenticated
 browser straight back to `/authorize` is answered `login_required` there, not
 looped.
 
