@@ -46,6 +46,7 @@ import {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./revokeAllForSubject.mjs";
+import { stampSubjectBoundary } from "./stampSubjectBoundary.mjs";
 import {
 	type SubjectRevocation,
 	type SubjectSessionIndex,
@@ -214,8 +215,10 @@ export function createSubjectRevocationService(
 /**
  * Sessions and tokens end; established grants stay. Same order as the full
  * revocation, for the same reason: the boundary is written before anything
- * is enumerated. Only the sessions boundary moves (`revokeSessionsBefore`),
- * so a grant covered by an earlier full revocation stays covered.
+ * is enumerated, and stamped again once that write has taken effect
+ * (`stampSubjectBoundary`). Only the sessions boundary moves
+ * (`revokeSessionsBefore`), so a grant covered by an earlier full revocation
+ * stays covered.
  */
 async function keep(
 	deps: SubjectRevocationServiceDeps,
@@ -227,16 +230,14 @@ async function keep(
 ): Promise<Omit<SubjectRevocationReport, "federationGrants">> {
 	const failures: RevokeAllForSubjectFailure[] = [];
 	const unavailable: RevokeAllForSubjectCapability[] = [];
-	const at = now();
-	let tokensRevoked = false;
-	try {
-		await revocation.revokeSessionsBefore(
-			subject,
-			new Date(at),
-			new Date(at + deps.watermarkTtlMs),
-		);
-		tokensRevoked = true;
-	} catch (error) {
+	const stamped = await stampSubjectBoundary(
+		(before, expiresAt) => revocation.revokeSessionsBefore(subject, before, expiresAt),
+		now,
+		deps.watermarkTtlMs,
+	);
+	const tokensRevoked = stamped.written;
+	if (stamped.failure !== undefined) {
+		const { error } = stamped.failure;
 		failures.push({
 			capability: "subjectRevocation",
 			operation: "revokeSessionsBefore",

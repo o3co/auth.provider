@@ -25,6 +25,7 @@ import type { FederationGrant } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
+import { stampSubjectBoundary } from "./stampSubjectBoundary.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
 /**
@@ -109,7 +110,11 @@ export interface RevokeAllForSubjectResult {
 	readonly sessionsRevoked: readonly string[];
 	/** Session ids whose cascade failed — still live, safe to retry. */
 	readonly sessionsFailed: readonly string[];
-	/** Whether the access-token watermark was written. */
+	/**
+	 * Whether the access-token watermark was written. It is written twice, the
+	 * second time once the first has taken effect; a second write that threw
+	 * is in `failures`, and `complete` is then `false`.
+	 */
 	readonly tokensRevoked: boolean;
 	/**
 	 * Whether a grant store was supplied, and the grant pass therefore ran.
@@ -161,6 +166,10 @@ export interface RevokeAllForSubjectResult {
  *     perhaps alive": a live session with no usable token can be cleaned up
  *     on retry; a live token is the thing being revoked.
  *
+ * It is stamped again once that write has taken effect
+ * (`stampSubjectBoundary`), so it also covers a token minted while the write
+ * was in flight.
+ *
  * **This never throws.** The caller has already written the new credential
  * and has no undo, so an exception would replace a partial result it could
  * act on (retry these sids, alert on that outage) with nothing. Every store
@@ -182,15 +191,15 @@ export async function revokeAllForSubject(
 	if (opts.subjectRevocation === undefined) {
 		unavailable.push("subjectRevocation");
 	} else {
-		const at = now();
-		try {
-			await opts.subjectRevocation.revokeBefore(
-				opts.subject,
-				new Date(at),
-				new Date(at + opts.watermarkTtlMs),
-			);
-			tokensRevoked = true;
-		} catch (error) {
+		const revocation = opts.subjectRevocation;
+		const stamped = await stampSubjectBoundary(
+			(before, expiresAt) => revocation.revokeBefore(opts.subject, before, expiresAt),
+			now,
+			opts.watermarkTtlMs,
+		);
+		tokensRevoked = stamped.written;
+		if (stamped.failure !== undefined) {
+			const { error } = stamped.failure;
 			// Reported, not thrown, and the cascade below still runs: a watermark
 			// that could not be written does not make the subject's sessions any
 			// less worth killing, and returning here would revoke nothing at all.
