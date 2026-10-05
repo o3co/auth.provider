@@ -427,6 +427,21 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				// The read awaited: an assertion that lapsed meanwhile is refused,
 				// as one that had lapsed before it.
 				if (expiresAt !== undefined && !(remainingAt(Date.now() / 1000) > 0)) return lapsed();
+				// Nor is a token signed whose own lifetime the read used up: the
+				// assertion still stands, so the caller is told to retry.
+				if (!(issuedAt + expiresIn > Date.now() / 1000)) {
+					deps.logger?.warn(
+						{ kind: assertionVerifier.kind, expiresIn },
+						"jwt_bearer_issuance_outlasted_token_lifetime",
+					);
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "token issuance took longer than the token's lifetime",
+						},
+					};
+				}
 			}
 
 			const accessToken = await generateToken(

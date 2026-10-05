@@ -244,6 +244,37 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 		}
 	});
 
+	it("answers 503 rather than sign a token whose lifetime ran out during the boundary read", async () => {
+		const now = Date.now();
+		const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+		try {
+			const grant = createJwtBearerGrant({
+				config: {
+					oauth: {
+						jwt: { issuer: "https://auth.example" },
+						accessToken: { defaultExpiresIn: 5, maxExpiresIn: 5 },
+					},
+				} as unknown as AppConfig,
+				keyStore,
+				assertionVerifier: verifierFor({
+					issuedAt: BOUNDARY_SECOND + 60,
+					expiresAt: Math.floor(now / 1000) + 3600,
+				}),
+				userRepository,
+				subjectRevocation: {
+					revokedBefore: async () => {
+						clock.mockReturnValue(now + 6_000);
+						return null;
+					},
+				},
+			} as never);
+			const { result } = await grant.handle(ctx());
+			expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	it("reads the boundary after the grant policy has answered", async () => {
 		// A revocation stamped while the policy is evaluated is seen.
 		let boundary: Date | null = null;
