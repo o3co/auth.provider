@@ -20,6 +20,7 @@ import {
 	createFederationTokenStoreFactory,
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
 	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
@@ -328,6 +329,9 @@ export const inMemorySessionStoresModule: Module = defineModule({
 		// other store on this branch.
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
 		subjectRevocation: () => createInMemorySubjectRevocation(),
+		// The session lifecycle's record, as the Redis branch provides it; read
+		// only where core's session lifecycle module is installed.
+		sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 	},
 });
 

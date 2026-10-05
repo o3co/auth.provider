@@ -182,7 +182,7 @@ Each directory under `src/` has one kind of responsibility; what a single file d
 | [`routes/`](./src/routes) | One router or handler per endpoint family (for `/authorize`, the handler and the stage files it runs) — authorize, consent, logout, federation token (the handler and the stage files it runs; the caller's standing stays in `routes/federationToken.mts`, where core's drift guard pins its session read), revoke, token (the `/oauth/token` dispatch), introspect (who may ask, and the answers when a store it needs is down; the answer on the token itself stays in `routes.mts`, where core's drift guards pin its session and `amr` reads), userinfo. Routes may use `grants/`, `logout/`, `middleware/` and `clients/`; none of those imports a route. `routes/authorizeRequest.mts` also reads one grant helper, the per-client PKCE method rules, because `/authorize` validates PKCE the way `/token` does. The RFC 8707 `resource` rules both read are core's ([`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)), shared with the WebAuthn grant. |
 | [`grants/`](./src/grants) | The grant handlers: pure request-to-token decisions over core's grant contract, with no HTTP. |
 | [`middleware/`](./src/middleware) | Client authentication, reused by sibling packages. |
-| [`logout/`](./src/logout) | The ordered session cascade (`cascadeLogout`), the outbound back-channel POSTs to relying parties, the front-channel page, and the module that wires the subject revocation service. |
+| [`logout/`](./src/logout) | The ordered session cascade (`cascadeLogout`), the outbound back-channel POSTs to relying parties, the session-close notifier the module contributes to core's session lifecycle, the front-channel page, and the module that wires the subject revocation service. |
 | [`clients/`](./src/clients) | Client ID Metadata Document resolution: fetching a client's registration from the URL it names, behind the SSRF guard, and caching it. |
 | [`types/`](./src/types) | The introspection response contract. |
 | [`testing/`](./src/testing) | The testing entry, `@o3co/auth-provider-oauth/testing`: what a test builds this package's configuration with. |
@@ -573,6 +573,14 @@ The OIDC logout endpoints are mounted when the six session-cascade slots are all
 > package boundary. `POST /oauth/logout` is the only endpoint that runs the full
 > cascade. If a session holds a refresh token, that is the one to call. See
 > [the session package README](../session/README.md#what-post-sessionlogout-invalidates).
+
+### The session-close notifier
+
+`oauthModule` contributes core's session-close notifier (`sessionCloseNotifiers`, under `oauth`), which core's session lifecycle calls once per relying party of a closing session, for each cause that tells them (every cause but `expiry`) — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts). Nothing closes a session through the lifecycle yet; the logout routes below still run their own cascade.
+
+- It posts one OIDC Back-Channel Logout 1.0 `logout_token` to the relying party's `backchannelLogoutUri` as its registration reads when the notice is sent, over the same sender and outbound path as the logout routes' broadcast. The token is signed by the key store, its `iss` the module's issuer (`oauth.jwt.issuer`).
+- A session's token carries its `sid` unless the relying party declined one (`backchannelLogoutSessionRequired: false`). A subject revocation's token is `sub`-scoped: it carries the `sid` only for a relying party registered with `backchannelLogoutSessionRequired: true`.
+- The notice is settled — it resolves — once delivered, when there is nowhere to send it (no URI, or the client is no longer registered), or when the relying party refuses it for good (any other 4xx, said at warn as `logout_backchannel_rejected`). It rejects only when sending again is worth it — the client registry or the key store could not answer, the request did not complete within its deadline, or the answer was 408, 429 or a 5xx — and the lifecycle then keeps that relying party's work pending for a later close or its sweep.
 
 ### `POST /oauth/logout` and `GET /oauth/logout`
 
