@@ -29,6 +29,7 @@ import { prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { auditSlotFor } from "./audit-fan-out.mjs";
 import { clientRecordSlotFor } from "./client-record-slot.mjs";
 import { failureSummary } from "./failure-summary.mjs";
+import { federationSettingsOf } from "./federation-settings.mjs";
 import { tokenSettingsSlotFor } from "./token-settings-slot.mjs";
 import type {
 	BootPlan,
@@ -118,8 +119,9 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 /**
  * Stage 3 of the boot planner. Seeds `bootstrapComponents`, applies
  * `overrideComponents`, fills `deploymentMode` from the configuration's
- * `core.deployment.mode` and `tokenBindingSettings` from its
- * `core.tokenBinding`, injects the synthetic projections of
+ * `core.deployment.mode`, `tokenBindingSettings` from its
+ * `core.tokenBinding` and `federationSettings` from its `core.federations`,
+ * injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
  * provider factory in `plan.providerActivations` order. The `auditSink`
@@ -180,6 +182,10 @@ export async function materializeComponents(
 	// core's one reader of the section — what boot's dispatch policy is too.
 	// Stage 1 refuses the key from every other source.
 	components.tokenBindingSettings = resolveTokenBindingSettings(bootstrapComponents.config);
+	// Core's view of the federations, frozen, from the same configuration with
+	// core's readings of `core.federations` — the map stage 1 dispatched by.
+	// Stage 1 refuses the key from every other source.
+	components.federationSettings = federationSettingsOf(bootstrapComponents.config);
 
 	// Synthetic projections are stable read-through views of the collectors
 	// stage 4 fills, so a provider that requires one gets the object the world

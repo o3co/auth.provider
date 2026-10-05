@@ -533,8 +533,8 @@ function checkAuthoritativeOverrides(
 
 /**
  * What a `synthetic-key-collision` message adds for `key`: for a key boot
- * fills from the configuration (`deploymentMode`, `tokenBindingSettings`),
- * where to state its value instead.
+ * fills from the configuration (`deploymentMode`, `tokenBindingSettings`,
+ * `federationSettings`), where to state its value instead.
  */
 const SYNTHETIC_KEY_REMEDIES: ReadonlyMap<string, string> = new Map([
 	[
@@ -544,6 +544,10 @@ const SYNTHETIC_KEY_REMEDIES: ReadonlyMap<string, string> = new Map([
 	[
 		"tokenBindingSettings",
 		" Set core.tokenBinding in the configuration instead: boot fills tokenBindingSettings from it.",
+	],
+	[
+		"federationSettings",
+		" Set core.federations in the configuration instead: boot fills federationSettings from it.",
 	],
 ]);
 const syntheticKeyRemedy = (key: string): string => SYNTHETIC_KEY_REMEDIES.get(key) ?? "";

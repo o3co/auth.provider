@@ -139,6 +139,12 @@ export {
 	deploymentModeContract,
 } from "./slots/deploymentMode.mjs";
 export {
+	createTestFederationSettings,
+	type FederationSettingsContractInput,
+	federationSettingsContract,
+	type TestFederationEntry,
+} from "./slots/federationSettings.mjs";
+export {
 	createTestHttpSettings,
 	type HttpSettingsContractInput,
 	httpSettingsContract,
