@@ -295,6 +295,25 @@ describe("createWebAuthnGrant — the auth_time it stamps", () => {
 		expect(decodePayload(access).auth_time).toBe(seconds(T0 + 5_000));
 	});
 
+	it("takes the reported expiry as given: a ceremony that reports one late moves auth_time by as much, up to the redemption", async () => {
+		// The bound is `ChallengeStore.find`'s contract (never later than the
+		// issued expiry); the grant applies no correction of its own, so an
+		// adapter that broke it would show here first.
+		const LATE_MS = 20_000;
+		const h = await arrange({
+			challengeIssuedAtMs: T0,
+			redeemedAtMs: T0 + 30_000,
+			ceremony: {
+				consume: async () => ({ outcome: "consumed", expiresAtMs: T0 + TTL_MS + LATE_MS }),
+			},
+		});
+
+		const { access, refresh } = tokensOf(await h.run());
+
+		expect(decodePayload(access).auth_time).toBe(seconds(T0 + LATE_MS));
+		expect(decodePayload(refresh).auth_time).toBe(seconds(T0 + LATE_MS));
+	});
+
 	for (const [label, expiresAtMs] of [
 		["reports no expiry", undefined],
 		["reports an expiry that is not a number", Number.NaN],
