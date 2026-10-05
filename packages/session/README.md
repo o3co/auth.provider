@@ -798,7 +798,13 @@ recorded authentication. The federation start
 (`GET /session/oauth/federation/:name`) takes optional `prompt` and `max_age`
 hints — a space list in which only `login` counts, and a non-negative integer;
 anything else is `400 invalid_request` — and passes them to the adapter as its
-`ask`, which forwards only what its upstream documents. The callback records
+`ask`, which forwards only what its upstream documents. A start from a
+browser that already holds an application session, and is not a link, is a
+re-authentication and asks for a new login (`login: true`) whatever the hints
+say, so an upstream that honours it (the OIDC adapter forwards `prompt=login`)
+prompts the user again rather than answering from its own single sign-on —
+the cost is that a signed-in user who starts a federated login again sees the
+IdP's sign-in prompt. The callback records
 the upstream's `auth_time` the adapter reports (`authentication.upstreamAuthTime`);
 when it reports none, a federation with `core.federations.<name>.callbackMeetsFreshness`
 `false` (the default) records `null`, never fresh, and one with `true` records

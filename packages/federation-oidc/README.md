@@ -253,7 +253,10 @@ forwarded `max_age` with `auth_time` (OIDC Core §3.1.2.1), so it meets those
 asks when it re-authenticates the user. An IdP whose id_token carries no
 `auth_time` meets none of them while `core.federations.<name>.callbackMeetsFreshness`
 is `false`, the default; set it to `true` for such an IdP to count the callback
-itself as the authentication, which is the behaviour before 0.17.0.
+itself as the authentication, which is the behaviour before 0.17.0. A login
+started from a browser that is already signed in is a re-authentication, so
+the session routes ask for `prompt=login` and the IdP prompts the user again
+rather than answering from its own single sign-on.
 
 ### Optional capabilities
 
