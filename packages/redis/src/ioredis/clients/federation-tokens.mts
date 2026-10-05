@@ -85,8 +85,17 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 		// Atomic compare-and-delete (advisory-lock release).
 		compareAndDelete: async (key, expectedValue) =>
 			(await runScript(io, COMPARE_AND_DELETE, [key], [expectedValue])) === 1,
-		readVersioned: async (key, candidate) => {
-			const reply = await runScript(io, FT_READ_VERSIONED, [key], [candidate]);
+		readVersioned: async (key, input) => {
+			const reply = await runScript(
+				io,
+				FT_READ_VERSIONED,
+				[key, input.replayKey],
+				[
+					input.candidate,
+					String(input.deadlineMs),
+					String(input.deadlineMs + input.clockSkewMs + 1),
+				],
+			);
 			if (reply === null) return null;
 			if (
 				!Array.isArray(reply) ||

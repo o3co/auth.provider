@@ -21,7 +21,7 @@
  * instead of being read as some other number.
  */
 
-import { MAX_DURATION_MS } from "@o3co/auth-provider-core";
+import { MAX_ATTEMPT_WINDOW_SECONDS, MAX_DURATION_MS } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { MAX_CSRF_TTL_SECONDS } from "#/csrf.mjs";
@@ -63,7 +63,7 @@ const KEYS: ReadonlyArray<
 	[
 		"rateLimit.login.windowMs",
 		(value) => parseSession({ rateLimit: { login: { windowMs: value, limit: 20 } } }),
-		upTo(MAX_DURATION_MS),
+		upTo(MAX_ATTEMPT_WINDOW_SECONDS * 1000),
 	],
 	[
 		"rateLimit.login.limit",
@@ -125,7 +125,8 @@ describe("session {} and session-store {} read each number setting in decimal di
 
 	it.each([
 		["csrf.ttlSeconds", MAX_CSRF_TTL_SECONDS],
-		["rateLimit.login.windowMs", MAX_DURATION_MS],
+		// The longest window an attempt counter takes.
+		["rateLimit.login.windowMs", MAX_ATTEMPT_WINDOW_SECONDS * 1000],
 		["maxAge", MAX_DURATION_MS],
 	] as const)("refuses %s above %d", (path, max) => {
 		const [, parse, message] = KEYS.find(([key]) => key === path) ?? [];

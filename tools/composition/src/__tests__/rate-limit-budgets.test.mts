@@ -27,20 +27,30 @@
  * - configured: each owner's own key set by an operator
  *   (`session.rateLimit.login`, `device-grant.rateLimit`,
  *   `webauthn.rateLimit.authenticationOptions`);
- * - declared: the same, and every prefix also declared in the limiter's own
- *   `limits`, which wins;
+ * - declared: the same, and every prefix but a verifier's also declared in
+ *   the limiter's own `limits`, which wins; `login` and `device_verification`
+ *   stay their owners', since a limiter's `limits` may not name them;
  * - off: the owners switched off — the device grant disabled, WebAuthn and
- *   the MFA package not installed. The session module is the template's and
- *   always installed, and its reference ships `session.rateLimit.login`;
+ *   the MFA package not installed;
  * - off, keys set: the same, with each owner's key set. A key whose owner is
  *   not installed, or installed and switched off (the device grant), sets no
  *   budget.
  *
  * `token` has no owner, and `mfa`'s owner claims it with no budget: the
- * limiter's `defaultLimit`, or its own `limits` entry.
+ * limiter's `defaultLimit`, or its own `limits` entry. `login` and
+ * `device_verification` are claimed with no budget: their
+ * owners count attempts on the attempt counter, against
+ * `session.rateLimit.login` and `device-grant.rateLimit`, so the limiter
+ * holds only its `defaultLimit` for each prefix, whatever the owner's key
+ * says.
  */
 
-import { BootError, defineModule, type RateLimiter } from "@o3co/auth-provider-core";
+import {
+	BootError,
+	defineModule,
+	type RateLimiter,
+	verifierLimitClaim,
+} from "@o3co/auth-provider-core";
 import {
 	compose,
 	login,
@@ -77,17 +87,16 @@ const spec = (limit: number, windowSeconds: number): Applied => ({ limit, window
 /** What each prefix is limited by, per configuration: the same on both limiters. */
 const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 	login: {
-		shipped: spec(20, 900),
-		configured: spec(7, 60),
-		declared: spec(4, 45),
-		off: spec(20, 900),
-		offConfigured: spec(7, 60),
+		shipped: spec(60, 60),
+		configured: spec(60, 60),
+		declared: spec(60, 60),
+		off: spec(60, 60),
+		offConfigured: spec(60, 60),
 	},
 	device_verification: {
-		shipped: spec(5, 300),
-		configured: spec(3, 120),
-		declared: spec(2, 90),
-		// Disabled, the grant registers nothing: the limiter's default applies.
+		shipped: spec(60, 60),
+		configured: spec(60, 60),
+		declared: spec(60, 60),
 		off: spec(60, 60),
 		offConfigured: spec(60, 60),
 	},
@@ -121,11 +130,13 @@ device-grant.rateLimit { limit = 3, windowSeconds = 120 }
 webauthn.rateLimit.authenticationOptions { limit = 11, windowSeconds = 30 }
 `;
 
-/** Every prefix in the limiter's own section, beside the owners' keys. */
+/** The limiter's own section's name. */
+const limiterSection = (adapter: Adapter): string =>
+	adapter === "redis" ? "redis-rate-limiter" : "core-rate-limiter-memory";
+
+/** Every prefix but a verifier's in the limiter's own section, beside the owners' keys. */
 const declaredLimits = (adapter: Adapter): string => `
-${adapter === "redis" ? "redis-rate-limiter" : "core-rate-limiter-memory"}.limits {
-  login { limit = 4, windowSeconds = 45 }
-  device_verification { limit = 2, windowSeconds = 90 }
+${limiterSection(adapter)}.limits {
   webauthn-authentication-options { limit = 9, windowSeconds = 15 }
   mfa { limit = 6, windowSeconds = 75 }
   token { limit = 17, windowSeconds = 20 }
@@ -199,6 +210,56 @@ describe.each<Adapter>(["memory", "redis"])("the %s limiter", (adapter) => {
 	);
 });
 
+describe.each<Adapter>(["memory", "redis"])("the %s limiter's own limits", (adapter) => {
+	it.each([
+		["login", "session.rateLimit.login"],
+		["device_verification", "device-grant.rateLimit"],
+	])(
+		"refuses the boot on an entry for %s, a verifier's own limit, naming the key and %s",
+		async (prefix, setting) => {
+			const err = await composeFullSet({
+				env: envFor(adapter),
+				operatorHocon: `${limiterSection(adapter)}.limits { ${prefix} { limit = 1000, windowSeconds = 1 } }`,
+			}).then(
+				(composition) => composition.handle.dispose().then(() => undefined),
+				(caught: unknown) => caught,
+			);
+
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe("config-validation-failed");
+			expect((err as BootError).message).toContain(`${limiterSection(adapter)}.limits.${prefix}`);
+			expect((err as BootError).message).toContain(setting);
+		},
+	);
+
+	it("refuses the boot on an entry for a prefix a module declares a verifier's, naming its setting", async () => {
+		const declarer = defineModule({
+			name: "test:verifier-declarer",
+			contributes: {
+				rateLimitBudgets: {
+					"test-verifier": verifierLimitClaim({ setting: "test-verifier.attempts" }),
+				},
+			},
+		});
+		const options = await fullSetOptions({
+			env: envFor(adapter),
+			operatorHocon: `${limiterSection(adapter)}.limits { test-verifier { limit = 1000, windowSeconds = 1 } }`,
+		});
+		const err = await compose({
+			...options,
+			extraModules: (config) => [...(options.extraModules?.(config) ?? []), declarer],
+		}).then(
+			(composition) => composition.handle.dispose().then(() => undefined),
+			(caught: unknown) => caught,
+		);
+
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain(`${limiterSection(adapter)}.limits.test-verifier`);
+		expect((err as BootError).message).toContain("set test-verifier.attempts instead");
+	});
+});
+
 /** Every prefix a package keys a limiter under, with the module that owns it. */
 const KEYED = [
 	["token", "oauth"],
@@ -244,15 +305,37 @@ describe("a prefix is its owner's", () => {
 	);
 });
 
-describe("the login budget at /session/login", () => {
-	it("advertises session.rateLimit.login's limit on a shared in-process limiter", async () => {
+describe("the login's attempt limit at /session/login", () => {
+	it("is session.rateLimit.login, counted per IP, and advertises nothing of it", async () => {
 		const composition = await composeFullSet({
-			operatorHocon: "session.rateLimit.login { windowMs = 60000, limit = 7 }",
+			operatorHocon: "session.rateLimit.login { windowMs = 60000, limit = 2 }",
 		});
 		try {
+			expect((await login(composition.app)).res.status).toBe(200);
+			expect((await login(composition.app)).res.status).toBe(200);
 			const { res } = await login(composition.app);
-			expect(res.status).toBe(200);
-			expect(res.headers["ratelimit-limit"]).toBe("7");
+			expect(res.status).toBe(429);
+			expect(res.body.error).toBe("rate_limited");
+			expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
+			expect(Object.keys(res.headers).filter((h) => h.startsWith("ratelimit-"))).toEqual([]);
+		} finally {
+			await composition.handle.dispose();
+		}
+	});
+
+	it("holds on the Redis counter, whatever the Redis limiter's failMode", async () => {
+		const composition = await composeFullSet({
+			env: {
+				...envFor("redis"),
+				ADAPTERS_ATTEMPT_COUNTER: "redis",
+				REDIS_RATE_LIMITER_FAIL_MODE: "open",
+			},
+			operatorHocon: "session.rateLimit.login { windowMs = 60000, limit = 1 }",
+		});
+		try {
+			expect(composition.handle.components.attemptCounter).toBeDefined();
+			expect((await login(composition.app)).res.status).toBe(200);
+			expect((await login(composition.app)).res.status).toBe(429);
 		} finally {
 			await composition.handle.dispose();
 		}

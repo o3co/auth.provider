@@ -83,7 +83,7 @@ export type JwtBearerGrantDeps = Pick<
 export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => {
 	const { config, keyStore, assertionVerifier, userRepository } = deps;
 	// Resolved once at construction; `resolveOAuthOptions` owns the defensive read.
-	const { requireEmailVerified } = resolveOAuthOptions(config);
+	const { requireEmailVerified } = resolveOAuthOptions(config.oauth);
 	// Read once at construction, so an invalid hand-built configuration is
 	// refused before any request rather than after the verifier has recorded
 	// an ID-JAG's `jti`.

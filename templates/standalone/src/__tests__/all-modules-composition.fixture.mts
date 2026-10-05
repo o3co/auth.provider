@@ -70,6 +70,7 @@ import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import {
+	configDefaultsFor,
 	type OwnLayers,
 	readOwnLayers,
 	readSwitches,
@@ -110,6 +111,7 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_STORAGE_TYPE: "memory",
 	ADAPTERS_USER_SESSION_STORES: "memory",
 	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_ATTEMPT_COUNTER: "memory",
 	ADAPTERS_CODE_REPOSITORY: "memory",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
 	ADAPTERS_REPLAY_SEEN_SET: "memory",
@@ -151,6 +153,8 @@ export const MULTI_ENV: Readonly<Record<string, string>> = {
 	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	ADAPTERS_USER_SESSION_STORES: "redis",
 	ADAPTERS_RATE_LIMITER: "redis",
+	// The login's attempt counter, shared: per process, `multi` refuses the login.
+	ADAPTERS_ATTEMPT_COUNTER: "redis",
 	ADAPTERS_CODE_REPOSITORY: "redis",
 	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
 	ADAPTERS_REPLAY_SEEN_SET: "redis",
@@ -664,12 +668,13 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
-	// reference.conf, which createApp parses once.
+	// reference.conf, which createApp parses once, and its defaults.
 	const resolved = adjust(resolveForBoot(own, modules, config));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
 			config: resolved,
+			configDefaults: configDefaultsFor(modules),
 			pathResolver: (s) => s,
 			logger,
 		},

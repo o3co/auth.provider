@@ -41,10 +41,13 @@ import {
 	createMemoryWebAuthnCredentialStore,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type TokenBinding,
 	type WebAuthnCredential,
 } from "@o3co/auth-provider-core";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+} from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -112,15 +115,15 @@ function makeConsumedCeremony(): ChallengeCeremony {
 	};
 }
 
-function makeConfig(): GrantDependencies["config"] {
-	return {
-		oauth: {
-			jwt: { issuer: ISSUER },
-			accessToken: { expiresIn: ACCESS_TOKEN_TTL },
-			refreshToken: { expiresIn: REFRESH_TOKEN_TTL },
-		},
-	} as unknown as GrantDependencies["config"];
-}
+/** The slot the grant mints with: this file's issuer and lifetimes. */
+const tokenSettings = (
+	accessTokenLifetime = { defaultExpiresIn: ACCESS_TOKEN_TTL, maxExpiresIn: ACCESS_TOKEN_TTL },
+) =>
+	createTestOAuthTokenSettings({
+		issuer: ISSUER,
+		accessTokenLifetime,
+		refreshTokenExpiresIn: REFRESH_TOKEN_TTL,
+	});
 
 type WebAuthnDeps = Parameters<typeof createWebAuthnGrant>[0];
 
@@ -128,7 +131,8 @@ async function makeDeps(): Promise<WebAuthnDeps> {
 	const credentialStore = createMemoryWebAuthnCredentialStore();
 	await credentialStore.registerCredential(makeCredential());
 	return {
-		config: makeConfig(),
+		tokenBindingSettings: createTestTokenBindingSettings(),
+		oauthTokenSettings: tokenSettings(),
 		keyStore,
 		webauthnCredentialStore: credentialStore,
 		challengeCeremony: makeConsumedCeremony(),
@@ -286,19 +290,12 @@ describe("createWebAuthnGrant — unbound requests", () => {
 		expect(tokens.expires_in).toBe(ACCESS_TOKEN_TTL);
 	});
 
-	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
-		// Only the new keys: a grant still reading the deprecated `expiresIn`
-		// would mint an access token with no `exp` claim at all.
+	it("mints the slot's default lifetime and ignores an expires_in request parameter", async () => {
 		const deps = await makeDeps();
 		const tokens = await issue(
 			{
 				...deps,
-				config: {
-					oauth: {
-						...deps.config.oauth,
-						accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
-					},
-				} as unknown as GrantDependencies["config"],
+				oauthTokenSettings: tokenSettings({ defaultExpiresIn: 600, maxExpiresIn: 7200 }),
 			},
 			makeCtx(makeClient({ allowedGrantTypes: [WEBAUTHN_GRANT_TYPE] }), {
 				body: { expires_in: "7200" },

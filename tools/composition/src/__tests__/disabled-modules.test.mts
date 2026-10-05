@@ -31,7 +31,7 @@ import {
 	makeValidCoreConfig,
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
-import { deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import { deviceAuthorizationGrantModule } from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { federationGrantsModule } from "@o3co/auth-provider-federation-grants";
 import {
@@ -45,7 +45,7 @@ import {
 	mfaTotpFactorConfigForTests,
 } from "@o3co/auth-provider-mfa/testing";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
-import { oauthSessionModule } from "@o3co/auth-provider-oauth";
+import { oauthSessionGrantModule } from "@o3co/auth-provider-oauth";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 
@@ -72,14 +72,10 @@ const CASES: readonly Case[] = [
 	["mtls", () => shipped(mtlsModule), () => mtlsModule],
 	[
 		"device-grant",
-		() => shipped(deviceGrantModule({ config: makeValidCoreConfig() as never })),
-		(config) => deviceGrantModule({ config: config as never }),
+		() => shipped(deviceAuthorizationGrantModule),
+		() => deviceAuthorizationGrantModule,
 	],
-	[
-		"oauth-session",
-		() => shipped(oauthSessionModule({ config: makeValidCoreConfig() as never })),
-		(config) => oauthSessionModule({ config: config as never }),
-	],
+	["oauth-session", () => shipped(oauthSessionGrantModule), () => oauthSessionGrantModule],
 	["federation-grants", () => shipped(federationGrantsModule), () => federationGrantsModule],
 	[
 		"mfa-totp-factor",

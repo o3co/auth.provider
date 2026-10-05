@@ -27,14 +27,9 @@
  * guard".
  */
 
-import type {
-	AppConfig,
-	ClientRepository,
-	Logger,
-	UserSessionStore,
-} from "@o3co/auth-provider-core";
-import { createMemoryDeviceCodeStore, createMemoryRateLimiter } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import type { ClientRepository, Logger, UserSessionStore } from "@o3co/auth-provider-core";
+import { createMemoryDeviceCodeStore } from "@o3co/auth-provider-core";
+import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import {
 	createCsrfProtectionFromConfig,
 	createSessionCsrfGuard,
@@ -44,7 +39,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
-import { deviceGrantConfigSchema, deviceGrantModule } from "#/module.mjs";
+import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
 import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
 const CLIENT_ID = "tv-app";
@@ -103,36 +98,21 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 		logger: logger as unknown as Logger,
 	});
 	const deps = {
-		config: {
-			oauth: {
-				jwt: { issuer: `https://${SERVER_HOST}` },
-				accessToken: { expiresIn: 300 },
-			},
-			"device-grant": {
-				enabled: true,
-				verificationUri: "https://example.test/device",
-				verificationUriComplete: false,
-				codeLifetimeSeconds: 600,
-				pollingIntervalSeconds: 5,
-				// Present because the module refuses to mount without it, and
-				// the contributed budget below agrees with it.
-				rateLimit: { limit: 50, windowSeconds: 300 },
-			},
-			rateLimit: { failMode: "open" },
-		},
+		// The module's section, as boot parses it.
+		section: deviceGrantConfigSchema.parse({
+			enabled: true,
+			verificationUri: "https://example.test/device",
+			verificationUriComplete: false,
+			codeLifetimeSeconds: 600,
+			pollingIntervalSeconds: 5,
+			rateLimit: { limit: 50, windowSeconds: 300 },
+		}),
+		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: `https://${SERVER_HOST}` }),
 		clientRepository,
 		deviceCodeStore: store,
 		userSessionStore: sessionsAuthenticatedBeforeNow(),
 		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
-		rateLimitBudgetResolver: {
-			get: (prefix: string) =>
-				prefix === "device_verification" ? { limit: 50, windowSeconds: 300 } : undefined,
-			entries: () => new Map().entries(),
-		},
-		rateLimiter: createMemoryRateLimiter({
-			limits: { device_verification: { limit: 50, windowSeconds: 300 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-		}),
+		deploymentMode: "single",
 		logger,
 		...("csrfGuard" in overrides
 			? overrides.csrfGuard === undefined
@@ -143,28 +123,17 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 	return { deps, store, logger };
 };
 
-/**
- * The verification route of the module built for `deps.config`, as `createApp`
- * would call it: handed the module's section as boot parses it.
- */
-const verificationRouteFor = (deps: { readonly config: unknown }) => {
-	const factory = deviceGrantModule({ config: deps.config as AppConfig }).contributes
-		?.routes?.[1] as (d: unknown) => {
-		mountPath: string;
-		handler: express.RequestHandler;
-	};
-	return (d: { readonly config: unknown }) =>
-		factory({
-			...d,
-			section: deviceGrantConfigSchema.parse(
-				(d.config as { "device-grant"?: unknown })["device-grant"],
-			),
-		});
+/** The module's verification route, as `createApp` would call it with `deps`. */
+const verificationRoute = deviceAuthorizationGrantModule.contributes?.routes?.[1] as (
+	d: unknown,
+) => {
+	mountPath: string;
+	handler: express.RequestHandler;
 };
 
 /** Mount the module's contributed verification route behind a fixed session. */
-const mountVerification = (deps: { readonly config: unknown }) => {
-	const route = verificationRouteFor(deps)(deps);
+const mountVerification = (deps: unknown) => {
+	const route = verificationRoute(deps);
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: unknown }).session = liveCookieSession();
@@ -337,7 +306,6 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		// cookie: fail where the operator can see it, not on the first forged
 		// approval.
 		const { deps } = makeDeps({ csrfGuard: undefined });
-		const factory = verificationRouteFor(deps);
-		expect(() => factory(deps)).toThrow(/requires a csrfGuard component/);
+		expect(() => verificationRoute(deps)).toThrow(/requires a csrfGuard component/);
 	});
 });

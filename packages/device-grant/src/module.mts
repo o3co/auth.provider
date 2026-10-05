@@ -15,33 +15,42 @@
  */
 
 /**
- * Module factory for the RFC 8628 device authorization grant. Enabled, it
+ * The module of the RFC 8628 device authorization grant. Enabled, it
  * contributes the `urn:ietf:params:oauth:grant-type:device_code` grant,
  * `POST /oauth/device_authorization` (where a device starts),
  * `POST /oauth/device/verification` (where the user answers),
  * `device_authorization_endpoint` in discovery (RFC 8628 §4), and the three
  * actions verification admits (`DEVICE_GRANT_ADMISSION_ACTIONS`).
  *
- * Off by default. The switch, `device-grant.enabled`, is read from the config
- * handed to `deviceGrantModule({ config })`; disabled, the module registers
- * nothing — no grant (so `grant_types_supported` does not name it), action,
- * route, discovery field, budget, requirement or absence policy — and its
- * section alone is declared. Routes and discovery use the module's own
- * section, `device-grant {}`, as boot parsed it, and boot is refused if the
- * two disagree, in either direction. A key still written at
+ * One module, built from nothing, switched by its own section: the switch,
+ * `device-grant.enabled`, is read from `device-grant {}` as boot parsed it
+ * (`section.isEnabled`), and an absent section or key is off. Off, the
+ * module registers nothing — no grant (so `grant_types_supported` does not
+ * name it), action, route, discovery field, budget, requirement or absence
+ * policy — and requires nothing. The section's defaults live in the
+ * package's `config/reference.conf` alone. A key still written at
  * `oauth.deviceAuthorization`, the section's old path, refuses boot naming
  * the new one.
  *
+ * It reads no whole configuration. What it needs of `oauth {}` — the issuer,
+ * the access-token lifetime and `requireEmailVerified` — it reads from the
+ * `oauthTokenSettings` slot, required while the grant is on: the oauth
+ * module provides it, and a composition without that module fills it.
+ *
  * Enabled, boot is refused without each setting and slot the grant needs to
- * be safe; the `require*` helpers below say why. The verification endpoint
- * authorises on the session cookie, which makes it a CSRF target (RFC 8628
- * §5.4 remote phishing: a foreign page auto-submits `approve` for the
- * attacker's `user_code`), so it accepts JSON only — a form POST needs no
- * preflight — and runs the session module's `csrfGuard` on the whole route.
+ * be safe; the `require*` helpers below say why. The user code's attempt
+ * limit, `device-grant.rateLimit`, is counted by core's attempt guard on the
+ * `attemptCounter` slot, never by a rate limiter; the `rateLimiter` slot,
+ * when wired, throttles `/oauth/device_authorization` alone.
+ *
+ * The verification endpoint authorises on the session cookie, which makes it
+ * a CSRF target (RFC 8628 §5.4 remote phishing: a foreign page auto-submits
+ * `approve` for the attacker's `user_code`), so it accepts JSON only — a form
+ * POST needs no preflight — and runs the session module's `csrfGuard` on the
+ * whole route.
  */
 
 import {
-	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
@@ -51,10 +60,9 @@ import {
 	defineModule,
 	guardedRead,
 	loggableError,
-	MAX_DURATION_SECONDS,
-	type Module,
+	MAX_ATTEMPT_WINDOW_SECONDS,
 	type ProviderDeps,
-	resolveAccessTokenLifetime,
+	verifierLimitClaim,
 	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
@@ -69,39 +77,35 @@ import {
 import { createDeviceCodeGrant } from "./grant.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import {
-	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
-	readVerificationRateLimitBudget,
-} from "./verificationBudget.mjs";
+	DEVICE_VERIFICATION_ATTEMPT_TAG,
+	readVerificationAttemptSpec,
+} from "./verificationAttempts.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 /**
- * `device-grant.rateLimit` — the budget RFC 8628 §5.1 sizes the user code
- * against. The floor of 1 is load-bearing: a zero budget locks every user out.
+ * `device-grant.rateLimit` — the attempts RFC 8628 §5.1 sizes the user code
+ * against. The floor of 1 is load-bearing: a zero limit locks every user out.
+ * The window is at most a day, the longest an attempt counter takes.
  */
 const rateLimitSpecSchema = z
 	.object({
 		limit: wholeNumberInRangeFromEnv(1),
-		// One year at most, as core's schema holds every duration an operator
-		// writes: a window past the Date range is one the limiter refuses anyway.
-		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
+		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_ATTEMPT_WINDOW_SECONDS),
 	})
 	.strict();
-
-/** §5.1's worked example: "only allow 5 attempts"; five minutes is half the default code lifetime. */
-const DEFAULT_VERIFICATION_RATE_LIMIT = { limit: 5, windowSeconds: 300 } as const;
-
-/** `device-grant.enabled`: off unless the operator says so. */
-const ENABLED = coerceBooleanFromEnv.default(false);
 
 /**
  * The schema of `device-grant {}`, the module's own section. Strict at every
  * level: a key it does not declare refuses boot. Each scalar leaf reads the
- * string an environment variable carries.
+ * string an environment variable carries. It fills no default: the package's
+ * `config/reference.conf` ships every value, so a key a composition leaves
+ * out of a section it writes refuses boot, naming the key. Absent, the
+ * section is `undefined`, which the switch reads as off.
  */
 export const deviceGrantConfigSchema = z
 	.object({
-		/** When false (the default), the module registers nothing. */
-		enabled: ENABLED,
+		/** The module's switch: on only when true; absent is off. */
+		enabled: coerceBooleanFromEnv.optional(),
 		/**
 		 * The page where the end user types the code. No default: the page
 		 * belongs to the deployment, and a guessed URL is one the device would
@@ -109,12 +113,12 @@ export const deviceGrantConfigSchema = z
 		 */
 		verificationUri: z.string().url().optional(),
 		/**
-		 * Emit `verification_uri_complete` (RFC 8628 §3.3.1). Off by default —
+		 * Emit `verification_uri_complete` (RFC 8628 §3.3.1). Shipped off —
 		 * §5.4 warns that removing the typing step removes the proof that the
 		 * device is in the user's possession, which is what makes remote
 		 * phishing hard.
 		 */
-		verificationUriComplete: coerceBooleanFromEnv.default(false),
+		verificationUriComplete: coerceBooleanFromEnv,
 		/**
 		 * §5.4: "long enough lifetime to be useable ... but sufficiently short
 		 * to limit the usability of a code obtained for phishing".
@@ -122,18 +126,18 @@ export const deviceGrantConfigSchema = z
 		codeLifetimeSeconds: wholeNumberInRangeFromEnv(
 			DEVICE_CODE_LIFETIME_SECONDS.min,
 			DEVICE_CODE_LIFETIME_SECONDS.max,
-		).default(600),
+		),
 		/** Advertised as `interval`; also what the store enforces. */
 		pollingIntervalSeconds: wholeNumberInRangeFromEnv(
 			DEVICE_POLLING_INTERVAL_SECONDS.min,
 			DEVICE_POLLING_INTERVAL_SECONDS.max,
-		).default(5),
+		),
 		/**
-		 * The verification endpoint's budget per authenticated subject, which
-		 * the module contributes as the `device_verification` budget every
-		 * limiter reads (a limiter's own `limits.device_verification` wins).
+		 * The verification endpoint's attempt limit per authenticated subject,
+		 * counted on the `attemptCounter` slot's counter, never a rate
+		 * limiter's.
 		 */
-		rateLimit: rateLimitSpecSchema.default(DEFAULT_VERIFICATION_RATE_LIMIT),
+		rateLimit: rateLimitSpecSchema,
 		/**
 		 * Declared absence for the `deviceCodeStore` slot. `"unsupported"` is
 		 * the only value; anything else is a typo that would otherwise read as a
@@ -142,33 +146,35 @@ export const deviceGrantConfigSchema = z
 		store: z.literal("unsupported").optional(),
 	})
 	.strict()
-	.default(() => ({
-		enabled: false,
-		verificationUriComplete: false,
-		codeLifetimeSeconds: 600,
-		pollingIntervalSeconds: 5,
-		rateLimit: DEFAULT_VERIFICATION_RATE_LIMIT,
-	}));
+	.optional();
 
-/** The `device-grant` section as its schema leaves it. */
-type DeviceAuthorizationConfigSlice = z.output<typeof deviceGrantConfigSchema>;
+/** The `device-grant` section as its schema leaves it, when it is written. */
+type DeviceAuthorizationConfigSlice = NonNullable<z.output<typeof deviceGrantConfigSchema>>;
 
 const REQUIRES = [
-	"config",
 	"clientRepository",
 	"keyStore",
 	// Session admission's synthetic key: the verification endpoint admits
 	// each action through it. The planner always fills it.
 	"sessionRequirementResolver",
-	// The contributed budgets; the verification route holds its own to its
-	// configuration. The planner always fills it.
-	"rateLimitBudgetResolver",
+	// Counting verification attempts per process is refused under `multi`, so
+	// a mode read as absent must not lift that. Boot always fills it.
+	"deploymentMode",
+	// What the oauth module provides of `oauth {}`: the issuer, the
+	// access-token lifetime and `requireEmailVerified`. A composition without
+	// that module fills it.
+	"oauthTokenSettings",
 ] as const;
 // `replaySeenSet` records a client assertion's single-use `jti`. Optional as
 // on the OAuth router: without it a `private_key_jwt` request is
 // `server_error`, never an assertion accepted unchecked.
 const OPTIONAL = [
 	"deviceCodeStore",
+	// The counter the verification's attempt limit runs on. Without one it is
+	// counted per process, where the deployment mode allows it.
+	"attemptCounter",
+	// The deployment's abuse control on `/oauth/device_authorization`. Core
+	// attaches its absence policy: unfilled, `core.declaredAbsent` lists it.
 	"rateLimiter",
 	"replaySeenSet",
 	"logger",
@@ -183,104 +189,48 @@ const OPTIONAL = [
 	// The session module's CSRF policy, run on the whole verification route.
 	// Required once the grant is enabled (`requireCsrfMiddleware`).
 	"csrfGuard",
-	// What the oauth module provides of `oauth {}`: the issuer, the
-	// access-token lifetime and `requireEmailVerified`. Optional: another token
-	// endpoint may dispatch through core's grant registry, and then they are
-	// read from the configuration (`tokenSettings`).
-	"oauthTokenSettings",
 	// Consulted by the grant at the poll, when wired.
 	"grantPolicy",
 ] as const;
 
 /**
- * The deps every contribution of {@link deviceGrantModule} receives: exactly
- * its `requires` / `optional`, typed.
+ * The deps every contribution of {@link deviceAuthorizationGrantModule}
+ * receives: exactly its `requires` / `optional`, typed.
  */
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
 export type DeviceGrantModuleDeps = ProviderDeps<Requires, Optional>;
 
-/** What every factory reading the module's own section receives. */
-type DeviceGrantSectionDeps = DeviceGrantModuleDeps & {
-	readonly section: DeviceAuthorizationConfigSlice;
-};
+/**
+ * What this module reads of `oauth {}`: the `oauthTokenSettings` slot, held
+ * to its contract by `checkOAuthTokenSettings`. Boot holds the slot to it
+ * before any reader; the check here refuses a value a direct caller hands
+ * in, naming the member it lacks.
+ */
+const tokenSettings = (deps: DeviceGrantModuleDeps) =>
+	checkOAuthTokenSettings(deps.oauthTokenSettings);
 
 /**
- * What this module reads of `oauth {}`: the `oauthTokenSettings` slot when a
- * module provides it (checked whole by `checkOAuthTokenSettings`), otherwise
- * the configuration. Each value is resolved only where it is needed.
+ * The section a factory is handed. Boot runs a factory only while the
+ * switch answers true, which an absent section does not; a factory called
+ * directly with none is refused, naming the section.
  */
-const tokenSettings = (deps: DeviceGrantModuleDeps) => {
-	const held = () =>
-		deps.oauthTokenSettings === undefined
-			? undefined
-			: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config);
-	return {
-		issuer: (): string => {
-			const settings = held();
-			return settings === undefined ? deps.config.oauth.jwt.issuer : settings.issuer;
-		},
-		accessTokenDefaultExpiresIn: (): number => {
-			const settings = held();
-			return (
-				settings === undefined
-					? resolveAccessTokenLifetime(deps.config)
-					: settings.accessTokenLifetime
-			).defaultExpiresIn;
-		},
-		requireEmailVerified: (): boolean => {
-			const settings = held();
-			return settings === undefined
-				? deps.config.oauth?.requireEmailVerified === true
-				: settings.requireEmailVerified;
-		},
-	};
-};
-
-/**
- * The factory's decision: whether the grant is on in the config the
- * composition root read before boot, `device-grant.enabled` read as the
- * section's schema reads it — an environment variable's `"true"` is on, as it
- * is at boot. Anything the schema refuses is off, the secure default, and boot
- * then refuses the value.
- */
-const isEnabled = (config: unknown): boolean => {
-	const written = (config as { "device-grant"?: { enabled?: unknown } } | undefined)?.[
-		"device-grant"
-	]?.enabled;
-	const read = ENABLED.safeParse(written);
-	return read.success && read.data;
-};
-
-/** Why a disagreement between the factory's decision and boot's parse refuses boot. */
-const disagreement = (built: "on" | "off"): string => {
-	const booted = built === "on" ? "off" : "on";
-	return (
-		`deviceGrantModule: built from a configuration with the grant ${built}, but the ` +
-		`configuration createApp parsed has device-grant.enabled ${booted}. ` +
-		"Whether the module registers anything is decided from the first — the configuration " +
-		"read before boot — and its routes and discovery field from the second. " +
-		"Hand deviceGrantModule the configuration read from the same files and " +
-		"environment as the one createApp is handed."
-	);
-};
-
-/**
- * The settings slice from the config `createApp` parsed, held to the
- * factory's decision that the grant is on. A disagreement refuses boot;
- * otherwise half a grant would run — advertised with no way to start it, or
- * startable while the token endpoint refuses it.
- */
-const settingsFor = (deps: DeviceGrantSectionDeps): DeviceAuthorizationConfigSlice => {
-	if (!deps.section.enabled) throw new Error(disagreement("on"));
-	return deps.section;
+const enabledSection = (
+	section: DeviceAuthorizationConfigSlice | undefined,
+): DeviceAuthorizationConfigSlice => {
+	if (section === undefined) {
+		throw new Error(
+			"deviceAuthorizationGrantModule: a factory ran with no device-grant section; the grant is off without one.",
+		);
+	}
+	return section;
 };
 
 const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string => {
 	const uri = slice.verificationUri;
 	if (typeof uri !== "string" || uri === "") {
 		throw new Error(
-			"deviceGrantModule: device-grant.enabled = true requires " +
+			"deviceAuthorizationGrantModule: device-grant.enabled = true requires " +
 				"device-grant.verificationUri. It is the page this " +
 				"deployment serves for entering the code, and the device displays it " +
 				"verbatim — there is nothing sensible to default it to.",
@@ -400,7 +350,7 @@ const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 	const guard = deps.csrfGuard;
 	if (guard === undefined) {
 		throw new Error(
-			"deviceGrantModule: device-grant.enabled = true requires a " +
+			"deviceAuthorizationGrantModule: device-grant.enabled = true requires a " +
 				"csrfGuard component. POST /oauth/device/verification runs inside the end-user " +
 				"session and is guarded by the same CSRF policy as /session/login — a signed " +
 				"double-submit token, and an Origin/Referer check against " +
@@ -420,34 +370,21 @@ const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 		// more as an error handler.
 		usable = typeof middleware === "function" && middleware.length <= 3;
 	} catch (cause) {
-		throw new Error(`deviceGrantModule: csrfGuard.middleware could not be read. ${install}`, {
-			cause,
-		});
+		throw new Error(
+			`deviceAuthorizationGrantModule: csrfGuard.middleware could not be read. ${install}`,
+			{
+				cause,
+			},
+		);
 	}
 	if (!usable) {
 		throw new Error(
-			"deviceGrantModule: csrfGuard.middleware is not a request handler. " +
+			"deviceAuthorizationGrantModule: csrfGuard.middleware is not a request handler. " +
 				"POST /oauth/device/verification mounts it in front of the whole route. " +
 				install,
 		);
 	}
 	return middleware as RequestHandler;
-};
-
-const requireRateLimiter = (
-	deps: DeviceGrantModuleDeps,
-): NonNullable<DeviceGrantModuleDeps["rateLimiter"]> => {
-	if (deps.rateLimiter === undefined) {
-		throw new Error(
-			"deviceGrantModule: device-grant.enabled = true requires a " +
-				"rateLimiter component. RFC 8628 §5.1 sizes the user code's entropy " +
-				"against a rate limit — 8 base-20 characters is ~34.5 bits, which is " +
-				"sufficient only because an attacker gets a handful of attempts. " +
-				"Without a limiter that argument does not hold, so this refuses to " +
-				"boot rather than serving a code that looks strong and is not.",
-		);
-	}
-	return deps.rateLimiter;
 };
 
 /**
@@ -460,7 +397,7 @@ const requireDeviceCodeStore = (
 ): NonNullable<DeviceGrantModuleDeps["deviceCodeStore"]> => {
 	if (deps.deviceCodeStore === undefined) {
 		throw new Error(
-			"deviceGrantModule: device-grant.enabled = true requires a " +
+			"deviceAuthorizationGrantModule: device-grant.enabled = true requires a " +
 				"deviceCodeStore component. The grant has nowhere to record a pending " +
 				"authorization, so no device could ever be authorized; declaring the store " +
 				'absent (device-grant.store = "unsupported") says why it is ' +
@@ -482,7 +419,7 @@ const requireUserSessionStore = (
 ): NonNullable<DeviceGrantModuleDeps["userSessionStore"]> => {
 	if (deps.userSessionStore === undefined) {
 		throw new Error(
-			"deviceGrantModule: device-grant.enabled = true requires a " +
+			"deviceAuthorizationGrantModule: device-grant.enabled = true requires a " +
 				"userSessionStore component. POST /oauth/device/verification approves only from " +
 				"the live UserSession behind the cookie's sid: the device token an approval leads " +
 				"to carries no sid and no family_id, so no logout reaches it afterwards, and a " +
@@ -495,50 +432,9 @@ const requireUserSessionStore = (
 };
 
 /**
- * The contributed `device_verification` budget (`rateLimitBudgetResolver`,
- * after any override) must be `device-grant.rateLimit`, the
- * budget the `rateLimiter` requirement's RFC 8628 §5.1 argument rests on; boot
- * is refused otherwise. A limiter's own `limits.device_verification` wins over
- * it and is not compared.
- */
-const requireContributedVerificationBudget = (
-	slice: DeviceAuthorizationConfigSlice,
-	deps: Pick<DeviceGrantModuleDeps, "rateLimitBudgetResolver">,
-): void => {
-	const configured = readVerificationRateLimitBudget(slice);
-	if (configured === null) {
-		throw new Error(
-			"deviceGrantModule: device-grant.enabled = true requires " +
-				"device-grant.rateLimit { limit, windowSeconds }. It is the budget " +
-				"RFC 8628 §5.1 sizes the user code against and the `device_verification` budget " +
-				"this module contributes; without it POST /oauth/device/verification would run " +
-				"on the limiter's default budget, which is not the number the rateLimiter " +
-				"requirement reasons from.",
-		);
-	}
-	const contributed = deps.rateLimitBudgetResolver.get(DEVICE_VERIFICATION_RATE_LIMIT_PREFIX);
-	if (
-		contributed?.limit !== configured.limit ||
-		contributed.windowSeconds !== configured.windowSeconds
-	) {
-		const shown =
-			contributed === undefined
-				? "none"
-				: `limit ${contributed.limit}, windowSeconds ${contributed.windowSeconds}`;
-		throw new Error(
-			`deviceGrantModule: the contributed device_verification budget (${shown}) is not ` +
-				`device-grant.rateLimit (limit ${configured.limit}, windowSeconds ` +
-				`${configured.windowSeconds}): another module has overridden it. RFC 8628 §5.1 sizes the ` +
-				"user code against the configured budget; change device-grant.rateLimit " +
-				"instead.",
-		);
-	}
-};
-
-/**
  * The module's section. The package's `config/reference.conf` holds its
  * defaults. No variable binds a key of it, so the refusal of an old path
- * names none. Declared whether or not the grant is on, so a setting still
+ * names none. Parsed whether or not the grant is on, so a setting still
  * written at the old path refuses boot rather than reading as off.
  */
 const SECTION = {
@@ -563,206 +459,200 @@ const SECTION = {
 			environmentVariable: null,
 		},
 	},
+	// The module's switch: on only when the section says so.
+	isEnabled: (section: z.output<typeof deviceGrantConfigSchema>) => section?.enabled === true,
 } as const;
 
-/** The section of a module built with the grant off, held to that decision. */
-const sectionHeldOff = {
-	...SECTION,
-	schema: deviceGrantConfigSchema.superRefine((section, ctx) => {
-		if (section.enabled)
-			ctx.addIssue({ code: "custom", path: ["enabled"], message: disagreement("off") });
-	}),
-};
-
 /**
- * The device grant, built for one config — see the file header for what
- * `device-grant.enabled` decides here.
- *
- * Hand it the config the composition root boots with, as `oauthModule({ config })`
- * and `oauthAuthorizationModule({ config })` take theirs.
+ * The device grant — see the file header for what `device-grant.enabled`
+ * decides. List it as it is: it is built from nothing, and reads its switch
+ * and its settings from the configuration boot parses.
  */
-export const deviceGrantModule = (params: { config: AppConfig }): Module => {
-	if (!isEnabled(params.config)) {
-		return defineModule({ name: "device-grant", section: sectionHeldOff });
-	}
-	return defineModule<Requires, Optional, typeof deviceGrantConfigSchema>({
-		name: "device-grant",
-		section: SECTION,
-		requires: REQUIRES,
-		optional: OPTIONAL,
-		// Optional to wire, not optional to decide. A composition with no
-		// sink discards every device approval — a consent event — with no
-		// symptom, so it has to list `auditSink` in `core.declaredAbsent` to say so.
-		absencePolicies: {
-			deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY,
-			auditSink: AUDIT_SINK_ABSENCE_POLICY,
+export const deviceAuthorizationGrantModule = defineModule<
+	Requires,
+	Optional,
+	typeof deviceGrantConfigSchema
+>({
+	name: "device-grant",
+	section: SECTION,
+	requires: REQUIRES,
+	optional: OPTIONAL,
+	// Optional to wire, not optional to decide. A composition with no
+	// sink discards every device approval — a consent event — with no
+	// symptom, so it has to list `auditSink` in `core.declaredAbsent` to say so.
+	absencePolicies: {
+		deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY,
+		auditSink: AUDIT_SINK_ABSENCE_POLICY,
+	},
+	contributes: {
+		// Both prefixes are claimed with no budget: no limiter decides the
+		// verification's limit, which the attempt guard counts at the declared
+		// setting, and the device_authorization guard runs on the limiter's own limits.
+		rateLimitBudgets: {
+			[DEVICE_VERIFICATION_ATTEMPT_TAG]: verifierLimitClaim({ setting: "device-grant.rateLimit" }),
+			[DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX]: () => null,
 		},
-		contributes: {
-			// The verification endpoint's budget, for every limiter to read.
-			rateLimitBudgets: {
-				[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX]: (deps) =>
-					readVerificationRateLimitBudget(deps.section),
-				// Keyed by the device_authorization guard, with no budget of its own.
-				[DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX]: () => null,
+		// Absent while the grant is off — see the file header — `/oauth/token`
+		// answers `unsupported_grant_type` for an unregistered grant, and
+		// `grant_types_supported`, read off the same resolver, does not name
+		// it: the document and the endpoint say the same thing.
+		admissionActions: DEVICE_GRANT_ADMISSION_ACTIONS,
+		grants: {
+			[DEVICE_CODE_GRANT_TYPE]: (deps) => {
+				return createDeviceCodeGrant({
+					store: requireDeviceCodeStore(deps),
+					keyStore: deps.keyStore,
+					accessTokenExpiresIn: tokenSettings(deps).accessTokenLifetime.defaultExpiresIn,
+					logger: deps.logger,
+					grantPolicy: deps.grantPolicy,
+					// An approval a later sessions boundary covers is refused
+					// at the poll (see grant.mts).
+					...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
+				});
 			},
-			// Absent while the grant is off — see the file header — `/oauth/token`
-			// answers `unsupported_grant_type` for an unregistered grant, and
-			// `grant_types_supported`, read off the same resolver, does not name
-			// it: the document and the endpoint say the same thing.
-			admissionActions: DEVICE_GRANT_ADMISSION_ACTIONS,
-			grants: {
-				[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantSectionDeps) => {
-					// Name-keyed contributions run before the routes, so the
-					// disagreement check comes first here too — ahead of the
-					// store the booted config may rightly say it lacks.
-					settingsFor(deps);
-					return createDeviceCodeGrant({
-						store: requireDeviceCodeStore(deps),
-						keyStore: deps.keyStore,
-						accessTokenExpiresIn: tokenSettings(deps).accessTokenDefaultExpiresIn(),
-						logger: deps.logger,
-						grantPolicy: deps.grantPolicy,
-						// An approval a later sessions boundary covers is refused
-						// at the poll (see grant.mts).
-						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
-					});
-				},
-			},
-			routes: [
-				(deps: DeviceGrantSectionDeps) => {
-					const slice = settingsFor(deps);
-					const router = express.Router();
-					// Every middleware on both device routes is a route on `/` — the
-					// endpoint's own path — not `router.use`: core mounts this router on
-					// its path by prefix, so a `use` mount would run for a later module's
-					// `/oauth/device_authorization/custom` too, throttling, parsing and
-					// refusing a request that is not this endpoint's. The error handlers
-					// stay `router.use`: Express skips routes while an error is pending, and
-					// an error here can only come from this router's own layers.
-					router.all("/", noStore);
-					// Throttled ahead of client authentication, as at the token
-					// endpoint, so unauthenticated hits are bounded before any
-					// repository lookup and a public client cannot fill the
-					// device-code store; ahead of the size check too, so an
-					// oversized request spends an attempt. Keyed
-					// `device_authorization:ip:<ip>`.
+		},
+		routes: [
+			(deps) => {
+				const slice = enabledSection(deps.section);
+				const router = express.Router();
+				// Every middleware on both device routes is a route on `/` — the
+				// endpoint's own path — not `router.use`: core mounts this router on
+				// its path by prefix, so a `use` mount would run for a later module's
+				// `/oauth/device_authorization/custom` too, throttling, parsing and
+				// refusing a request that is not this endpoint's. The error handlers
+				// stay `router.use`: Express skips routes while an error is pending, and
+				// an error here can only come from this router's own layers.
+				router.all("/", noStore);
+				// With a limiter wired, throttled ahead of client authentication,
+				// as at the token endpoint, so unauthenticated hits are bounded
+				// before any repository lookup and a public client cannot fill the
+				// device-code store; ahead of the size check too, so an oversized
+				// request spends an attempt. Keyed `device_authorization:ip:<ip>`.
+				// Without one, a declared absence, requests pass through.
+				if (deps.rateLimiter !== undefined) {
 					router.all(
 						"/",
 						createRateLimitGuard({
-							limiter: requireRateLimiter(deps),
+							limiter: deps.rateLimiter,
 							tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
 							...(deps.logger ? { logger: deps.logger } : {}),
 							auditSink: deps.auditSink,
 						}),
 					);
-					// Router-level body parsing, matching `oauthModule` and the
-					// WebAuthn routes: `createApp` installs no global parser. A
-					// declared oversized body is refused before it is read.
-					router.all("/", withinBodyLimit);
-					router.all("/", express.json({ limit: BODY_LIMIT }));
-					router.all("/", express.urlencoded({ extended: false, limit: BODY_LIMIT }));
-					router.use(parserRefusals);
-					// RFC 8628 §3.1 / §5.6: the client authentication `/oauth/token`
-					// uses, with public clients identified by `client_id` alone.
-					router.all(
-						"/",
-						createClientAuthMiddleware(deps.clientRepository, {
-							issuer: tokenSettings(deps).issuer(),
-							allowPublicClients: true,
-							// Records a `private_key_jwt` assertion's `jti`; without it
-							// such clients get `server_error`. The accepted `aud` is
-							// derived from `issuer`, as at `/oauth/revoke`.
-							...(deps.replaySeenSet ? { replaySeenSet: deps.replaySeenSet } : {}),
-							...(deps.logger ? { logger: deps.logger } : {}),
-						}),
-					);
-					router.post(
-						"/",
-						createDeviceAuthorizationHandler({
-							store: requireDeviceCodeStore(deps),
-							settings: {
-								verificationUri: requireVerificationUri(slice),
-								verificationUriComplete: slice.verificationUriComplete,
-								codeLifetimeSeconds: slice.codeLifetimeSeconds,
-								pollingIntervalSeconds: slice.pollingIntervalSeconds,
-							},
-							logger: deps.logger,
-						}),
-					);
-					router.use(unexpectedErrors(deps.logger));
-					return {
-						id: "device-authorization",
-						mountPath: "/oauth/device_authorization",
-						handler: router,
-					};
-				},
-				(deps: DeviceGrantSectionDeps) => {
-					const slice = settingsFor(deps);
-					const router = express.Router();
-					router.all("/", noStore);
-					// JSON only — see the file header. No form parser is mounted, and
-					// the handler also refuses other media types itself (415): the
-					// rule belongs to the endpoint, not to what is mounted around it.
-					router.all("/", withinBodyLimit);
-					router.all("/", express.json({ limit: BODY_LIMIT }));
-					router.use(parserRefusals);
-					// The session module's CSRF guard, on the whole route rather than
-					// on `approve` / `deny` alone, so no future action can forget it.
-					const csrfMiddleware = requireCsrfMiddleware(deps);
-					// The `rateLimiter` requirement means the configured budget only
-					// while that budget is the one contributed.
-					requireContributedVerificationBudget(slice, deps);
-					const userSessionStore = requireUserSessionStore(deps);
-					router.post(
-						"/",
-						csrfMiddleware,
-						createDeviceVerificationHandler({
-							store: requireDeviceCodeStore(deps),
-							// The handler keys its budget on the subject, so it runs the
-							// guard's check itself, with the limiter's own outage policy,
-							// rather than the guard as middleware.
-							rateLimiter: requireRateLimiter(deps),
-							// What session admission reads for every action: the
-							// live session, and the requirements registered.
-							userSessionStore,
-							requirements: deps.sessionRequirementResolver,
-							// Read as `/authorize` reads it: `=== true`, so a
-							// hand-built config that never passed the schema is off.
-							requireEmailVerified: tokenSettings(deps).requireEmailVerified(),
-							// The sessions boundary admission reads, when the
-							// composition wires one.
-							...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
-							settings: {
-								verificationUri: requireVerificationUri(slice),
-								verificationUriComplete: slice.verificationUriComplete,
-								codeLifetimeSeconds: slice.codeLifetimeSeconds,
-								pollingIntervalSeconds: slice.pollingIntervalSeconds,
-							},
-							logger: deps.logger,
-							auditSink: deps.auditSink,
-						}),
-					);
-					router.use(unexpectedErrors(deps.logger));
-					return {
-						id: "device-verification",
-						mountPath: "/oauth/device/verification",
-						handler: router,
-					};
-				},
-			],
-			discoveryMetadata: [
-				(deps: DeviceGrantSectionDeps) => {
-					settingsFor(deps);
-					// RFC 8628 §4: a client that cannot discover this endpoint cannot
-					// start the flow. An issuer-relative path under `endpoints`, which
-					// core prefixes and validates (it refuses `*_endpoint` under
-					// `metadata`). The grant type is advertised via the grant
-					// resolver, not here.
-					return {
-						endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
-					};
-				},
-			],
-		},
-	});
-};
+				}
+				// Router-level body parsing, matching `oauthModule` and the
+				// WebAuthn routes: `createApp` installs no global parser. A
+				// declared oversized body is refused before it is read.
+				router.all("/", withinBodyLimit);
+				router.all("/", express.json({ limit: BODY_LIMIT }));
+				router.all("/", express.urlencoded({ extended: false, limit: BODY_LIMIT }));
+				router.use(parserRefusals);
+				// RFC 8628 §3.1 / §5.6: the client authentication `/oauth/token`
+				// uses, with public clients identified by `client_id` alone.
+				router.all(
+					"/",
+					createClientAuthMiddleware(deps.clientRepository, {
+						issuer: tokenSettings(deps).issuer,
+						allowPublicClients: true,
+						// Records a `private_key_jwt` assertion's `jti`; without it
+						// such clients get `server_error`. The accepted `aud` is
+						// derived from `issuer`, as at `/oauth/revoke`.
+						...(deps.replaySeenSet ? { replaySeenSet: deps.replaySeenSet } : {}),
+						...(deps.logger ? { logger: deps.logger } : {}),
+					}),
+				);
+				router.post(
+					"/",
+					createDeviceAuthorizationHandler({
+						store: requireDeviceCodeStore(deps),
+						settings: {
+							verificationUri: requireVerificationUri(slice),
+							verificationUriComplete: slice.verificationUriComplete,
+							codeLifetimeSeconds: slice.codeLifetimeSeconds,
+							pollingIntervalSeconds: slice.pollingIntervalSeconds,
+						},
+						logger: deps.logger,
+					}),
+				);
+				router.use(unexpectedErrors(deps.logger));
+				return {
+					id: "device-authorization",
+					mountPath: "/oauth/device_authorization",
+					handler: router,
+				};
+			},
+			(deps) => {
+				const slice = enabledSection(deps.section);
+				const router = express.Router();
+				router.all("/", noStore);
+				// JSON only — see the file header. No form parser is mounted, and
+				// the handler also refuses other media types itself (415): the
+				// rule belongs to the endpoint, not to what is mounted around it.
+				router.all("/", withinBodyLimit);
+				router.all("/", express.json({ limit: BODY_LIMIT }));
+				router.use(parserRefusals);
+				// The session module's CSRF guard, on the whole route rather than
+				// on `approve` / `deny` alone, so no future action can forget it.
+				const csrfMiddleware = requireCsrfMiddleware(deps);
+				const userSessionStore = requireUserSessionStore(deps);
+				router.post(
+					"/",
+					csrfMiddleware,
+					createDeviceVerificationHandler({
+						store: requireDeviceCodeStore(deps),
+						// The attempts RFC 8628 §5.1 sizes the user code against,
+						// counted per subject on the slot's counter.
+						attemptLimit: readVerificationAttemptSpec(slice),
+						...(deps.attemptCounter ? { attemptCounter: deps.attemptCounter } : {}),
+						deploymentMode: deps.deploymentMode,
+						// What session admission reads for every action: the
+						// live session, and the requirements registered.
+						userSessionStore,
+						requirements: deps.sessionRequirementResolver,
+						// The deployment's flag, as `/authorize` reads it: from
+						// the oauth module's settings.
+						requireEmailVerified: tokenSettings(deps).requireEmailVerified,
+						// The sessions boundary admission reads, when the
+						// composition wires one.
+						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
+						settings: {
+							verificationUri: requireVerificationUri(slice),
+							verificationUriComplete: slice.verificationUriComplete,
+							codeLifetimeSeconds: slice.codeLifetimeSeconds,
+							pollingIntervalSeconds: slice.pollingIntervalSeconds,
+						},
+						logger: deps.logger,
+						auditSink: deps.auditSink,
+					}),
+				);
+				router.use(unexpectedErrors(deps.logger));
+				return {
+					id: "device-verification",
+					mountPath: "/oauth/device/verification",
+					handler: router,
+				};
+			},
+		],
+		discoveryMetadata: [
+			() => {
+				// RFC 8628 §4: a client that cannot discover this endpoint cannot
+				// start the flow. An issuer-relative path under `endpoints`, which
+				// core prefixes and validates (it refuses `*_endpoint` under
+				// `metadata`). The grant type is advertised via the grant
+				// resolver, not here.
+				return {
+					endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
+				};
+			},
+		],
+	},
+});
+
+/**
+ * Returns {@link deviceAuthorizationGrantModule}; the argument is ignored.
+ *
+ * @deprecated List {@link deviceAuthorizationGrantModule} instead.
+ */
+export const deviceGrantModule = (_params?: {
+	readonly config?: unknown;
+}): typeof deviceAuthorizationGrantModule => deviceAuthorizationGrantModule;

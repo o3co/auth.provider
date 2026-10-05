@@ -110,6 +110,7 @@
 . ConfigPathRelocatedDetails type
 . ConfigSchema type
 . ConfigValidationFailedDetails type
+. ConfiguredFederation type
 . Confirmation type
 . ConfirmationMatch type
 . ConfirmationMember type
@@ -143,6 +144,8 @@
 . DEFAULT_FEDERATION_RESPONSE_MODE value
 . DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES value
 . DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES value
+. DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_ENTRIES value
+. DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS value
 . DEFAULT_MFA_SUBJECT_LEASE_MS value
 . DEFAULT_SIGNING_ALGORITHM value
 . DEFAULT_SUBJECT_REVOCATION_SKEW_MS value
@@ -266,6 +269,7 @@
 . FederationRefreshErrorClassification type
 . FederationRefreshErrorReason type
 . FederationResponseMode type
+. FederationSettings type
 . FederationTokenResponse type
 . FederationTokenSnapshot type
 . FederationTokenStore type
@@ -277,6 +281,7 @@
 . GenerateIdTokenOptions type
 . GenerateLogoutTokenOptions type
 . GenerateTokenOptions type
+. GrantCollector type
 . GrantContext type
 . GrantDependencies type
 . GrantError type
@@ -306,6 +311,7 @@
 . ID_JAG_TYP value
 . InMemoryClientRepository value
 . InMemoryCodeRepository value
+. InMemorySessionLifecycleStoreOptions type
 . InMemoryUserRepository value
 . InterruptAdmission type
 . InterruptionAnswer type
@@ -503,6 +509,7 @@
 . ProviderDeps type
 . ProvidesFactoryFailedDetails type
 . PublicClient type
+. RATE_LIMITER_ABSENCE_POLICY value
 . RECOVERY_CODE_AMR value
 . RENEWAL_NONCE_BYTES value
 . REPLICA_UNSAFE_MODULES value
@@ -588,6 +595,12 @@
 . RunReadinessOptions type
 . SEALING_KEY_BYTES value
 . SECOND_FACTOR_AMR value
+. SESSION_CLOSE_CAUSES value
+. SESSION_LIFECYCLE_MAX_KEY_LENGTH value
+. SESSION_LIFECYCLE_MAX_LISTING value
+. SESSION_LIFECYCLE_STATES value
+. SESSION_PARTICIPANT_KINDS value
+. SESSION_PARTICIPANT_MAX_DATA_LENGTH value
 . SOFTWARE_KEY_AMR value
 . SUBJECT_REVOCATION_ABSENCE_POLICY value
 . SUBJECT_REVOCATION_MIN_RETENTION_MS value
@@ -604,6 +617,10 @@
 . SerializedOriginRejection type
 . SessionAuthentication type
 . SessionClaim type
+. SessionClose type
+. SessionCloseAnswer type
+. SessionCloseCause type
+. SessionCloseRequest type
 . SessionCookiePolicy type
 . SessionData type
 . SessionEmailProof type
@@ -612,7 +629,14 @@
 . SessionFamilyIndexFactory type
 . SessionFederationIndex type
 . SessionFederationIndexFactory type
+. SessionJoinAnswer type
+. SessionLifecycleRecord type
+. SessionLifecycleState type
+. SessionLifecycleStore type
 . SessionMutation type
+. SessionOpenAnswer type
+. SessionParticipant type
+. SessionParticipantKind type
 . SessionRPRegistry type
 . SessionRPRegistryFactory type
 . SessionRenewalCall type
@@ -684,6 +708,7 @@
 . ValidatedToken type
 . VerificationUnavailableReason type
 . VerifiedJwt type
+. VerifierLimitDeclaration type
 . VerifyRevocation type
 . Versioned type
 . VersionedSet type
@@ -732,8 +757,10 @@
 . checkSealingKeyRing value
 . checkSecondFactorEvent value
 . checkSerializedOrigin value
+. checkSessionCloseRequest value
 . checkSessionEmailProof value
 . checkSessionEmailProofQuestion value
+. checkSessionParticipant value
 . checkStepUpPage value
 . checkSubjectLeaseRelease value
 . checkSubjectLeaseRequest value
@@ -778,6 +805,7 @@
 . createHealthcheckRouter value
 . createInMemorySessionFamilyIndex value
 . createInMemorySessionFederationIndex value
+. createInMemorySessionLifecycleStore value
 . createInMemorySessionRPRegistry value
 . createInMemorySubjectRevocation value
 . createInMemorySubjectSessionIndex value
@@ -1016,19 +1044,25 @@
 . readMfaSubjectLeaseAnswer value
 . readMfaSubjectRecoveryAnswer value
 . readRenewalNonces value
+. readSessionCloseAnswer value
 . readSessionEmailProof value
+. readSessionJoinAnswer value
+. readSessionLifecycleListing value
+. readSessionOpenAnswer value
 . readSpaceDelimitedParameter value
 . readTargetParameter value
 . readTransitionalConfig value
 . readUpstreamTokenLifetime value
 . readUserSnapshot value
 . readVersioned value
+. readVersionedSessionLifecycle value
 . readVersionedSet value
 . recordAuditEvent value
 . recordableAuthTime value
 . recordableDeviceApproval value
 . recordableEnrollmentFacts value
 . recordableSessionAuthentication value
+. refuseVerifierLimitEntries value
 . registerBuiltinAccessTokenDenylists value
 . registerBuiltinAuditSinks value
 . registerBuiltinChallengeStores value
@@ -1071,6 +1105,7 @@
 . selectIdentityClaims value
 . sessionAfterSecondFactor value
 . sessionAuthentication value
+. sessionCloseItemOf value
 . sessionEmailProofAnswer value
 . shownConfigValue value
 . stepUpReach value
@@ -1095,6 +1130,7 @@
 . tokenTypeForConfirmation value
 . unrepresentedResources value
 . validatedClientRepository value
+. verifierLimitClaim value
 . verifyJwt value
 . vouchableAcrTable value
 . vouchedAmr value
@@ -1152,6 +1188,7 @@
 ./modules/manifest SessionRequirementFactory type
 ./modules/manifest TokenBindingMechanismFactory type
 ./modules/manifest TokenExchangeValidatorResolver type
+./modules/manifest VerifierLimitDeclaration type
 ./modules/manifest defineFederationType value
 ./modules/manifest defineModule value
 ./modules/manifest describeAbsenceDeclaration value
@@ -1169,6 +1206,7 @@
 ./testing FakeIdpRequest type
 ./testing FederationEntryForTests type
 ./testing FederationForTests type
+./testing FederationSettingsContractInput type
 ./testing FederationTypeForTestsOptions type
 ./testing GrantRegistry value
 ./testing GrantRegistryError value
@@ -1203,6 +1241,7 @@
 ./testing SessionCookiePolicyContractInput type
 ./testing TestAppHandle type
 ./testing TestCsrfGuardOptions type
+./testing TestFederationEntry type
 ./testing TestHttpSettingsOverrides type
 ./testing TestInspect type
 ./testing TestMfaDigestsOptions type
@@ -1210,6 +1249,7 @@
 ./testing TestOAuthTokenSettingsOverrides type
 ./testing TestRateLimiter type
 ./testing TestRateLimiterOptions type
+./testing TokenBindingSettingsContractInput type
 ./testing auditHooksModule value
 ./testing clientEntries value
 ./testing coreConfigForTests value
@@ -1221,6 +1261,7 @@
 ./testing createTestApp value
 ./testing createTestCsrfGuard value
 ./testing createTestCsrfTokenSigner value
+./testing createTestFederationSettings value
 ./testing createTestHttpSettings value
 ./testing createTestLoginEntry value
 ./testing createTestMfaDigests value
@@ -1228,9 +1269,11 @@
 ./testing createTestOAuthTokenSettings value
 ./testing createTestRateLimiter value
 ./testing createTestSessionCookiePolicy value
+./testing createTestTokenBindingSettings value
 ./testing csrfGuardContract value
 ./testing csrfTokenSignerContract value
 ./testing deploymentModeContract value
+./testing federationSettingsContract value
 ./testing federationTypeForTests value
 ./testing httpSettingsContract value
 ./testing loginCompletionContract value
@@ -1250,6 +1293,7 @@
 ./testing sessionCookiePolicyContract value
 ./testing sessionRequirementContract value
 ./testing testMfaFactorProofs value
+./testing tokenBindingSettingsContract value
 ./testing unreadableModuleLeaves value
 ./testing userRepositoryHttpOf value
 ./testing withFederation value

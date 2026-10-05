@@ -694,7 +694,7 @@ describe("the MFA routes' flood guard", () => {
 				...configFor("required"),
 				...coreConfigForTests({
 					expected: ["mfa"],
-					declaredAbsent: ["auditSink"],
+					declaredAbsent: ["auditSink", "rateLimiter"],
 					...(deploymentMode === undefined ? {} : { deploymentMode }),
 				}),
 			};

@@ -91,7 +91,10 @@ function configWith(federations: Record<string, unknown>): AppConfig {
 		...base,
 		// supertest speaks plain http; a Secure cookie would never come back.
 		"session-store": { ...base["session-store"], name: "auth.sid", secure: false },
-		...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
+		...coreConfigForTests({
+			declaredAbsent: ["auditSink", "rateLimiter"],
+			federations: federations as never,
+		}),
 	} as unknown as AppConfig;
 }
 

@@ -28,6 +28,7 @@ import type {
 	ClientRepository,
 	FederationProvider,
 	LoginEntry,
+	RateLimiter,
 } from "@o3co/auth-provider-core";
 import {
 	BootError,
@@ -44,6 +45,8 @@ import {
 	federationTypeForTests,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
+import express from "express";
+import request from "supertest";
 import { describe, expect, it } from "vitest";
 import {
 	createFederationGrantBackground,
@@ -56,6 +59,7 @@ import {
 	callbackUrlFor,
 	sessionMiddlewareModule,
 } from "./acquisitionFixture.mjs";
+import { refusingLimiter } from "./harness.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -195,6 +199,10 @@ interface Setup {
 	/** What ends a grant a user withdrew on a replica that never saw the withdrawal. */
 	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
+	/** The limiter wired in place of the memory one. */
+	readonly limiter?: RateLimiter;
+	/** Lists `rateLimiter` in `core.declaredAbsent`. */
+	readonly declareLimiterAbsent?: boolean;
 	readonly withAudit?: boolean;
 	/** Also writes `audit.sink.type = "none"`, the path the audit sink's declared absence moved from. */
 	readonly oldAuditDeclaration?: boolean;
@@ -296,7 +304,10 @@ const boot = (setup: Setup) => {
 									},
 								},
 							}),
-					...(setup.withAudit === false ? {} : { declaredAbsent: ["auditSink"] }),
+					declaredAbsent: [
+						...(setup.withAudit === false ? [] : ["auditSink"]),
+						...(setup.declareLimiterAbsent === true ? ["rateLimiter"] : []),
+					],
 				}),
 				rateLimit: { failMode: "closed" },
 				...(setup.oldAuditDeclaration === true ? { audit: { sink: { type: "none" } } } : {}),
@@ -360,10 +371,12 @@ const boot = (setup: Setup) => {
 			...(setup.withLimiter === false
 				? {}
 				: {
-						rateLimiter: createMemoryRateLimiter({
-							limits: {},
-							defaultLimit: { limit: 60, windowSeconds: 60 },
-						}),
+						rateLimiter:
+							setup.limiter ??
+							createMemoryRateLimiter({
+								limits: {},
+								defaultLimit: { limit: 60, windowSeconds: 60 },
+							}),
 					}),
 		} as unknown as BootstrapMap,
 	});
@@ -443,8 +456,55 @@ describe("enabling the feature", () => {
 		await expect(boot({ store: "durable" })).rejects.toThrow(/outlive the process/);
 	});
 
-	it("refuses to boot with no throttle in front of an opaque grant id", async () => {
-		await expect(boot({ withLimiter: false })).rejects.toThrow(/rateLimiter/);
+	it("refuses to boot with no limiter and no declaration, by core's absence policy", async () => {
+		const error = await boot({ withLimiter: false }).then(
+			() => undefined,
+			(thrown: unknown) => thrown,
+		);
+		expect(error).toBeInstanceOf(BootError);
+		expect(error).toMatchObject({
+			reason: "component-absence-undeclared",
+			details: { componentKey: "rateLimiter", absentValue: "rateLimiter" },
+		});
+		expect((error as BootError).details).toHaveProperty(
+			"consumedBy",
+			expect.arrayContaining(["federation-grants"]),
+		);
+	});
+
+	it("boots with no limiter declared absent, and both halves let requests through", async () => {
+		const handle = await boot({ withLimiter: false, declareLimiterAbsent: true });
+		try {
+			const app = express().use(handle.router);
+			// The client routes reach client authentication, unthrottled.
+			const token = await request(app)
+				.post("/oauth/federation-grants/g-1/token")
+				.send({ sub: "alice" });
+			expect(token.status).toBe(401);
+			expect(token.headers["ratelimit-limit"]).toBeUndefined();
+			// The browser half reaches connect, which reads the link.
+			const connect = await request(app).get("/session/federation-grants/connect");
+			expect(connect.status).toBe(400);
+			expect(connect.text).toBe("This link is not valid.");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("throttles both halves with a limiter wired", async () => {
+		const handle = await boot({ limiter: refusingLimiter });
+		try {
+			const app = express().use(handle.router);
+			const token = await request(app)
+				.post("/oauth/federation-grants/g-1/token")
+				.send({ sub: "alice" });
+			expect(token.status).toBe(429);
+			expect(token.body).toEqual({ error: "rate_limited", error_description: "provider" });
+			const connect = await request(app).get("/session/federation-grants/connect");
+			expect(connect.status).toBe(429);
+		} finally {
+			await handle.dispose();
+		}
 	});
 
 	it("refuses a retrieval limit the promises cannot be kept under", async () => {
@@ -701,8 +761,10 @@ describe("what creating a grant needs", () => {
 	});
 
 	it("refuses a deployment with no durable sessions for the connect flow to re-read", async () => {
+		// A userSessionStore slot holding undefined is unwired: core's federation
+		// store guard refuses it before the module is built.
 		await expect(boot({ withUserSessionStore: false })).rejects.toThrow(
-			/federationGrantsModule: federation grants are enabled and no userSessionStore/,
+			/required federation stores are missing: userSessionStore/,
 		);
 	});
 

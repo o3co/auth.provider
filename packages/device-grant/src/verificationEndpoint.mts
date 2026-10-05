@@ -20,17 +20,17 @@
  * `verification_uri` belongs to the deployment.
  *
  * - `lookup`, `approve` and `deny` share one route: each takes a `user_code`
- *   and is the same brute-force oracle, so one route means one limiter call.
- * - The limiter is required: RFC 8628 §5.1's ~34.5-bit code is safe only with
- *   about 5 attempts. The budget is keyed on the authenticated subject, so an
- *   attacker burns their own account's budget; that is why this runs
- *   `checkWithFailMode` itself instead of the IP-keyed guard middleware.
+ *   and is the same brute-force oracle, so each counts one attempt.
+ * - RFC 8628 §5.1's ~34.5-bit code is safe only with about 5 attempts:
+ *   `attemptLimit` (`device-grant.rateLimit`), counted by core's attempt guard
+ *   per authenticated subject (`device_verification:user:<subject>`), so an
+ *   attacker burns their own account's attempts. No rate limiter takes part.
  * - Order: JSON media type (415), the body's `action` (400), session
  *   admission, what an approval records (401, below; `approve` only), the
- *   email gate (`approve` only), the budget, the code's shape (a malformed
- *   code is 404), then the store's answers, on a clock read after the budget:
- *   a code that expires while the limiter answers is expired. Refusals before
- *   the budget spend no attempt and read no code.
+ *   email gate (`approve` only), the attempt, the code's shape (a malformed
+ *   code is 404), then the store's answers, on a clock read after the
+ *   attempt: a code that expires while the counter answers is expired.
+ *   Refusals before the attempt spend none and read no code.
  * - Admission (`admitSession`; see the session-admission ADR) reads the live
  *   `UserSession` behind the cookie's `sid`, not the cookie's claim: the
  *   device token carries no `sid` or `family_id`, so no later logout reaches
@@ -39,17 +39,17 @@
  *   which the device token carries. One the store would refuse to record
  *   (core's `recordableDeviceApproval`: an `authTime` further ahead of the
  *   approval's clock than the skew, or before the epoch) is refused
- *   `401 login_required` before the email gate, the budget and the store are
+ *   `401 login_required` before the email gate, the attempt and the store are
  *   asked, so no attempt is spent on it; and again on the clock the store is
  *   handed, so a store error stays an outage.
- * - Outages fail closed as 503 (a limiter outage follows the limiter's own
- *   `failMode`), never as `login_required`.
+ * - Outages fail closed as 503 (an attempt counter outage too, whatever any
+ *   rate limiter's `failMode`), never as `login_required`.
  * - A record the store answers is read through core's
  *   `readDeviceAuthorization` before any of it is used, and the decision's
  *   answer around it through `readDecisionOutcome`. One either refuses is
  *   answered as an outage (503), logged at error; on a decision, it is
  *   audited as an unknown outcome, as a lost reply is.
- * - Decisions and budget exhaustion are audit events; none carries the user
+ * - Decisions and a refused attempt are audit events; none carries the user
  *   code (the brute-force target) or the device code (a bearer credential).
  * - JSON only, checked here whatever parsed the body: a form POST is a CORS
  *   "simple" request sent cross-site with the cookie and no preflight
@@ -61,11 +61,11 @@ import type {
 	Admission,
 	AdmissionDeps,
 	ApproveDeviceAuthorizationInput,
+	AttemptCounter,
+	AttemptSpec,
 	CookieCarrier,
+	DeploymentMode,
 	Logger,
-	RateLimitContext,
-	RateLimiter,
-	RateLimitOutageLogger,
 	SessionRequirementResolver,
 	SubjectRevocation,
 	UserSessionStore,
@@ -73,15 +73,13 @@ import type {
 import {
 	admitSession,
 	checkResolver,
-	checkWithFailMode,
 	consoleLogger,
 	cookieClaim,
-	createRateLimitPolicy,
+	createAttemptGuard,
 	describeAdmissionOutage,
 	emitAuditEvent,
 	isEmailVerified,
 	normaliseUserCode,
-	rateLimiterUnavailableEnvelope,
 	readDeviceAuthorization,
 	recordableDeviceApproval,
 	vouchedAmr,
@@ -96,7 +94,8 @@ import {
 	reportDeviceCodeStoreOutage,
 	reportUnreadableDeviceAuthorization,
 } from "./storeOutage.mjs";
-import { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX, type DeviceGrantDependencies } from "./types.mjs";
+import type { DeviceGrantDependencies } from "./types.mjs";
+import { DEVICE_VERIFICATION_ATTEMPT_TAG } from "./verificationAttempts.mjs";
 
 type Action = "lookup" | "approve" | "deny";
 
@@ -127,39 +126,21 @@ const respond = (res: Response, status: number, body: Record<string, unknown>): 
 const cookieUserOf = (req: Request): unknown =>
 	(req as { session?: { user?: unknown } | null }).session?.user;
 
-/**
- * The check context: the subject the budget is keyed on, plus the request
- * details the outage report carries (`rate_limit.unavailable` names the `ip`
- * and `userAgent`, as the guard's does).
- */
-const contextOf = (req: Request, subject: string): RateLimitContext => {
-	const userAgent = req.get("user-agent");
-	return {
-		userId: subject,
-		...(req.ip === undefined ? {} : { ip: req.ip }),
-		...(userAgent === undefined ? {} : { userAgent }),
-	};
-};
-
-/**
- * The dependency's logger is a duck type with `warn` required and the rest
- * optional; the outage line is written through `error`. A logger without one
- * is left out so the shared check falls back to core's console logger rather
- * than losing the line.
- */
+/** Whether the dependency's duck-typed logger has the `error` it may leave out. */
 const hasErrorChannel = (
-	logger: DeviceGrantDependencies["logger"],
-): logger is NonNullable<DeviceGrantDependencies["logger"]> & RateLimitOutageLogger =>
-	typeof logger?.error === "function";
+	logger: NonNullable<DeviceGrantDependencies["logger"]>,
+): logger is NonNullable<DeviceGrantDependencies["logger"]> & {
+	error(obj: Record<string, unknown>, msg: string): void;
+} => typeof logger.error === "function";
 
 /**
- * The dependency's logger as the `Logger` admission writes through: its
- * `warn`, and its `error` — core's console logger's when it has none, as the
- * rate-limit check falls back — or core's console logger outright when none
- * is wired. Admission writes object-first lines at `warn` and `error`
- * alone; the other levels go where `error` or nowhere goes.
+ * The dependency's logger as the `Logger` admission and the attempt guard
+ * write through: its `warn`, and its `error` — core's console logger's when
+ * it has none — or core's console logger outright when none is wired. Both
+ * write object-first lines at `warn` and `error` alone; the other levels go
+ * where `error` or nowhere goes.
  */
-const admissionLogger = (logger: DeviceGrantDependencies["logger"]): Logger => {
+const coreLogger = (logger: DeviceGrantDependencies["logger"]): Logger => {
 	if (logger === undefined) return consoleLogger;
 	const errors = hasErrorChannel(logger) ? logger : consoleLogger;
 	const line =
@@ -239,11 +220,23 @@ const refusalOf = (
 
 export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencies {
 	/**
-	 * Required: RFC 8628 §5.1 sizes the user code's entropy against a limit,
-	 * so without one it is 34.5 bits and no ceiling. Its own `failMode` is the
-	 * policy for its backend's outage.
+	 * Required: the attempts per subject RFC 8628 §5.1 sizes the user code's
+	 * entropy against (`device-grant.rateLimit`); without a limit it is 34.5
+	 * bits and no ceiling.
 	 */
-	readonly rateLimiter: RateLimiter;
+	readonly attemptLimit: AttemptSpec;
+	/**
+	 * The `attemptCounter` slot's counter, so the limit holds across
+	 * replicas. Omitted, the attempt guard counts per process where
+	 * `deploymentMode` allows it.
+	 */
+	readonly attemptCounter?: AttemptCounter;
+	/**
+	 * The replica count, as core's `deploymentMode` slot holds it: what
+	 * counting attempts per process, with no `attemptCounter`, is refused,
+	 * warned about or silent by.
+	 */
+	readonly deploymentMode: DeploymentMode;
 	/**
 	 * Required: where admission reads the `UserSession` behind the cookie's
 	 * `sid`. Without it an approval would rest on the cookie's word alone.
@@ -292,20 +285,22 @@ export const createDeviceVerificationHandler = (
 		subjectRevocation: options.subjectRevocation,
 		requirements,
 		acrTable: NO_ACR_TABLE,
-		logger: admissionLogger(options.logger),
+		logger: coreLogger(options.logger),
 		auditSink: options.auditSink,
 		now: () => new Date(now()),
 	};
-	// The guard's check with its outage policy attached — see the file header.
-	const policy = createRateLimitPolicy(
-		{
-			limiter: options.rateLimiter,
-			tag: DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
-			...(hasErrorChannel(options.logger) ? { logger: options.logger } : {}),
-			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
-		},
-		"createDeviceVerificationHandler",
-	);
+	// The attempt limit, whatever limiter the deployment wires: the guard owns
+	// the per-process fallback, failing closed and the headers.
+	const attempts = createAttemptGuard({
+		...(options.attemptCounter === undefined ? {} : { counter: options.attemptCounter }),
+		deploymentMode: options.deploymentMode,
+		tag: DEVICE_VERIFICATION_ATTEMPT_TAG,
+		spec: options.attemptLimit,
+		logger: admissionDeps.logger,
+		...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+		refused: { error: "slow_down", description: "too many device code attempts" },
+		now,
+	});
 
 	return async (req: Request, res: Response): Promise<void> => {
 		// JSON only — see the file header. Checked on the request's media
@@ -364,10 +359,10 @@ export const createDeviceVerificationHandler = (
 				return true;
 			}
 		};
-		// Before the email gate, the budget and the code — see the file header.
+		// Before the email gate, the attempt and the code — see the file header.
 		if (action === "approve" && refusedToRecord(now())) return;
 
-		// Before the budget and the code — see the file header.
+		// Before the attempt and the code — see the file header.
 		if (
 			action === "approve" &&
 			options.requireEmailVerified &&
@@ -383,39 +378,26 @@ export const createDeviceVerificationHandler = (
 		// Counted before the code is even parsed. A malformed code is still an
 		// attempt, and excluding it would hand an attacker an unmetered way to
 		// probe which shapes the endpoint accepts.
-		const budget = await checkWithFailMode(
-			policy,
-			`${DEVICE_VERIFICATION_RATE_LIMIT_PREFIX}:user:${subject}`,
-			contextOf(req, subject),
-		);
-		if (budget.status === "unavailable") {
-			// The limiter had no answer, so its own `failMode` decides. The
-			// shared check already logged and audited the outage; `open`
-			// serves the request exactly as the guard would.
-			if (budget.failMode === "closed") {
-				respond(res, 503, { ...rateLimiterUnavailableEnvelope() });
-				return;
+		const counted = await attempts.attempt(req, res, `user:${subject}`);
+		if (counted.verdict !== "allowed") {
+			// The guard has answered. A counter that answered "no" is the signal
+			// that an account is guessing codes; an outage is not, and the guard
+			// has already logged and audited it.
+			if (counted.verdict === "refused") {
+				const { remaining } = counted.count;
+				(options.logger ?? consoleLogger).warn(
+					{ subject, action, remaining },
+					"device_verification_rate_limited",
+				);
+				emitAuditEvent(options.auditSink, {
+					timestamp: new Date(),
+					type: "device.rate_limited",
+					subject,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { action, remaining },
+				});
 			}
-		} else if (!budget.decision.allowed) {
-			// A limiter that answered "no" is not an outage: this is the signal
-			// that an account is guessing codes, under either fail mode.
-			const { decision } = budget;
-			(options.logger ?? consoleLogger).warn(
-				{ subject, action, remaining: decision.remaining },
-				"device_verification_rate_limited",
-			);
-			emitAuditEvent(options.auditSink, {
-				timestamp: new Date(),
-				type: "device.rate_limited",
-				subject,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { action, remaining: decision.remaining },
-			});
-			respond(res, 429, {
-				error: "slow_down",
-				error_description: "too many device code attempts",
-			});
 			return;
 		}
 
@@ -433,7 +415,7 @@ export const createDeviceVerificationHandler = (
 		}
 
 		// The store judges the code's expiry by this instant, so it is taken after
-		// the budget, which may wait on its backend.
+		// the attempt, which may wait on its counter.
 		const nowMs = now();
 
 		/**

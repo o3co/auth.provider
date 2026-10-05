@@ -24,7 +24,9 @@
  *
  * The references are disjoint — no path is set by two of them — so the order
  * a composition layers them in decides nothing; each package that ships one
- * checks it in its own tests with `packageReferenceProblems`.
+ * checks it in its own tests with `packageReferenceProblems`. The one
+ * exception is `SHARED_WITH_OAUTH`: the paths of `oauth {}` core's reference
+ * still sets beside the oauth package's, which holds the two equal.
  */
 
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -49,6 +51,37 @@ function shippedReferenceConfs(dir: string, found: string[] = []): string[] {
 }
 
 const REFERENCES = shippedReferenceConfs(PACKAGES);
+
+/**
+ * The paths of `oauth {}` set by both core's reference and the oauth
+ * package's, to the same values with the same variables (the oauth package's
+ * `section.reference.test.mts` holds them equal). Core's schema still declares
+ * `oauth {}`, so core's reference keeps its copy; the list goes, with that
+ * copy, when core's schema stops declaring the section. Only these paths, and
+ * only between these two files.
+ */
+const SHARED_WITH_OAUTH: ReadonlySet<string> = new Set([
+	"oauth.accessToken.defaultExpiresIn",
+	"oauth.accessToken.expiresIn",
+	"oauth.accessToken.maxExpiresIn",
+	"oauth.authorize.acrValues",
+	"oauth.jwt.issuer",
+	"oauth.jwt.legacyTypAccept",
+	"oauth.nonce.maxLength",
+	"oauth.oidcMode",
+	"oauth.refreshToken.expiresIn",
+	"oauth.refreshToken.legacyRtPolicy",
+	"oauth.refreshToken.unknownFamilyPolicy",
+	"oauth.requireEmailVerified",
+	"oauth.requireGrantTypeAllowlist",
+	"oauth.resourceIndicator.enabled",
+	"oauth.revocation.accessToken",
+	"oauth.revocation.subject",
+]);
+
+/** How an overlap `overlapsAmong` names reads for a path both core and oauth set. */
+const sharedWithOauth = (path: string): string =>
+	`${path}: set by packages/core/config/reference.conf and packages/oauth/config/reference.conf`;
 
 /**
  * Every path the reference at `file` sets, parsed on its own as a composition
@@ -166,7 +199,16 @@ describe("the shipped references are disjoint, and each package checks its own",
 	});
 
 	it("sets no leaf in two references, and no value where another sets keys: the order they are layered in decides nothing", () => {
-		expect(overlapsAmong(files, label)).toEqual([]);
+		const shared = new Set([...SHARED_WITH_OAUTH].map(sharedWithOauth));
+		expect(overlapsAmong(files, label).filter((overlap) => !shared.has(overlap))).toEqual([]);
+	});
+
+	it("shares with the oauth package's reference exactly the paths SHARED_WITH_OAUTH lists, and no other file shares them", () => {
+		// An entry neither file still sets goes, and a path one stops setting
+		// leaves the other the only one.
+		expect(overlapsAmong(files, label).filter((overlap) => overlap.startsWith("oauth."))).toEqual(
+			[...SHARED_WITH_OAUTH].map(sharedWithOauth).sort(),
+		);
 	});
 
 	describe("finds an overlap between two references", () => {

@@ -56,7 +56,7 @@ function buildConfig(): AppConfig {
 		// supertest speaks plain http; a Secure cookie would never come back.
 		"session-store": { ...base["session-store"], name: "auth.sid", secure: false },
 		...coreConfigForTests({
-			declaredAbsent: ["auditSink"],
+			declaredAbsent: ["auditSink", "rateLimiter"],
 			federations: {
 				"idp-a": {
 					enabled: true,

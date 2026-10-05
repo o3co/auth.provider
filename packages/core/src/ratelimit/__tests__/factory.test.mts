@@ -115,6 +115,18 @@ describe("memory rate limiter — a spec it cannot apply as written", () => {
 	});
 });
 
+describe("memory rate limiter — the builder reads no contributed budget", () => {
+	it("takes a limits entry for a verifier's prefix as given, since no owner's budget would replace it", async () => {
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		const limiter = await factory.create({
+			type: "memory",
+			limits: { login: { limit: 3, windowSeconds: 60 } },
+		});
+		expect((await limiter.check("login:ip:192.0.2.1", {})).limit).toBe(3);
+	});
+});
+
 describe("memory rate limiter — what it is built with", () => {
 	const SANE = { limit: 60, windowSeconds: 60 };
 

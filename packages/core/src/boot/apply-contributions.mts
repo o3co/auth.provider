@@ -27,7 +27,7 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
-import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
+import type { GrantHandler, MfaFactor } from "../modules/manifest/contributes-map.mjs";
 import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
@@ -36,7 +36,7 @@ import type {
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
 import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
-import { isBoundedRateLimitSpec, isUsableRateLimitSpec } from "../ratelimit/usableSpec.mjs";
+import { isBoundedRateLimitSpec } from "../ratelimit/usableSpec.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
@@ -56,6 +56,7 @@ import type {
 	ComponentWorld,
 	ContributionCollectorMap,
 	ContributionKind,
+	GrantCollector,
 	ListCollector,
 	NameKeyedCollector,
 	RegistryWorld,
@@ -71,9 +72,10 @@ import { BootError } from "./types.mjs";
  * Build a typed deps object for a module from the working component map,
  * using the module's DepsBlueprint from the plan.
  *
- * A missing `requires` key means an earlier stage (validate-manifests or
- * planBoot's activation closure) broke an invariant, so it throws a plain
- * Error, not a BootError; this mirrors materialize-components.buildDeps as
+ * A `requires` key missing or holding `undefined` means an earlier stage
+ * (validate-manifests, planBoot's activation closure, or
+ * materializeComponents) broke an invariant, so it throws a plain Error, not
+ * a BootError; this mirrors materialize-components.buildDeps as
  * defence in depth. `optional` keys may be absent and are included as
  * `undefined`. `deps.section`, the module's own configuration section parsed
  * at stage 1, is set only when the module declares one.
@@ -87,9 +89,9 @@ function buildDeps(
 ): Record<string, unknown> {
 	const deps: Record<string, unknown> = {};
 	for (const key of requires) {
-		if (!Object.hasOwn(components, key)) {
+		if (!Object.hasOwn(components, key) || components[key as string] === undefined) {
 			throw new Error(
-				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/2 should have caught this`,
+				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/3 should have caught this`,
 			);
 		}
 		deps[key as string] = components[key as string];
@@ -130,15 +132,21 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 
 /**
  * Instantiate a stable read-side `GrantHandlerResolver` backed by the given
- * `NameKeyedCollector`. `get` / `entries` read through at call time, so a
- * factory that captures the resolver before the collector is populated sees
- * the full view at request time.
+ * `NameKeyedCollector`. A grant type whose factory answered `null` — the
+ * grant switched off by its module's settings — is absent from what it
+ * answers, as a grant type no module contributes is. `get` / `entries` read
+ * through at call time, so a factory that captures the resolver before the
+ * collector is populated sees the full view at request time.
  * @internal
  */
-function makeGrantHandlerResolver(collector: NameKeyedCollector<unknown>): GrantHandlerResolver {
+function makeGrantHandlerResolver(collector: GrantCollector): GrantHandlerResolver {
 	return {
-		get: (grantType: string) => collector.get(grantType) as ReturnType<GrantHandlerResolver["get"]>,
-		entries: () => collector.entries() as ReturnType<GrantHandlerResolver["entries"]>,
+		get: (grantType: string) => collector.get(grantType) ?? undefined,
+		entries: function* (): IterableIterator<readonly [string, GrantHandler]> {
+			for (const [grantType, handler] of collector.entries()) {
+				if (handler !== null) yield [grantType, handler] as const;
+			}
+		},
 	};
 }
 
@@ -380,9 +388,7 @@ export function prepareSyntheticProjections(
 		admissionActions,
 	} = contributionKinds;
 	if (grants !== undefined) {
-		inject("grantHandlerResolver", () =>
-			makeGrantHandlerResolver(grants as NameKeyedCollector<unknown>),
-		);
+		inject("grantHandlerResolver", () => makeGrantHandlerResolver(grants));
 	}
 	if (tokenExchangeValidators !== undefined) {
 		inject("tokenExchangeValidatorResolver", () =>
@@ -458,11 +464,11 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  *   is the copy `registeredRequirement` makes, its page held to the issuer's
  *   origin; its `reach` is read later (`checkSessionRequirements`);
  * - a `rateLimitBudgets` budget no limiter can apply as written
- *   (`isUsableRateLimitSpec`). What registers is the frozen copy that was
+ *   (`isBoundedRateLimitSpec`). What registers is the frozen copy that was
  *   validated.
  *
- * `null` (switched off by configuration) passes for `mfaFactors` and
- * `rateLimitBudgets` and keeps the name claimed.
+ * `null` (switched off by configuration) passes for `grants`, `mfaFactors`
+ * and `rateLimitBudgets` and keeps the name claimed.
  * @internal
  */
 function checkNameKeyedValue(
@@ -472,6 +478,7 @@ function checkNameKeyedValue(
 	issuer: string | undefined,
 ): unknown {
 	if (kind === "grants") {
+		if (value === null) return value;
 		// What `/oauth/token` dispatches to, calling `handle`, and what the
 		// resolver lists as registered: one answer to both only when the value
 		// is a handler.
@@ -481,7 +488,7 @@ function checkNameKeyedValue(
 				: undefined;
 		if (typeof handle !== "function") {
 			throw new RangeError(
-				`grants "${name}": the factory must answer a grant handler, an object whose handle is a function`,
+				`grants "${name}": the factory must answer a grant handler, an object whose handle is a function, or null to switch the grant off`,
 			);
 		}
 		return value;
@@ -558,40 +565,6 @@ function checkNameKeyedValue(
 	return value;
 }
 
-/** A budget as a refusal shows it. */
-const describedBudget = (spec: RateLimitSpec): string =>
-	`limit ${spec.limit}, windowSeconds ${spec.windowSeconds}`;
-
-/**
- * Refuses a `rateLimitBudgets` override that loosens the budget it replaces:
- * a higher `limit` or a shorter `windowSeconds`. A `null` side counts as the
- * wired limiter's `defaultLimit`; without one it cannot be compared, and is
- * refused.
- * @internal
- */
-function checkBudgetOverride(
-	name: string,
-	replaced: RateLimitSpec | null,
-	overriding: RateLimitSpec | null,
-	limiter: unknown,
-): void {
-	if (replaced === null && overriding === null) return;
-	const declared = (limiter as { readonly defaultLimit?: unknown } | undefined)?.defaultLimit;
-	const defaultLimit = isUsableRateLimitSpec(declared) ? declared : undefined;
-	const from = replaced ?? defaultLimit;
-	const to = overriding ?? defaultLimit;
-	if (from === undefined || to === undefined) {
-		throw new RangeError(
-			`rateLimitBudgets "${name}": an override may only tighten the budget it replaces, and a switched-off budget counts as the wired limiter's defaultLimit, which no wired limiter declares`,
-		);
-	}
-	if (to.limit > from.limit || to.windowSeconds < from.windowSeconds) {
-		throw new RangeError(
-			`rateLimitBudgets "${name}": an override may only tighten the budget it replaces — limit no higher and windowSeconds no shorter than ${describedBudget(from)}${replaced === null ? ", the limiter's defaultLimit" : ""} (got ${describedBudget(to)}${overriding === null ? ", the limiter's defaultLimit" : ""})`,
-		);
-	}
-}
-
 /** The wired limiter's kind and the outage policy the guard applies for it. */
 function limiterInForce(
 	limiter: RateLimiter | undefined,
@@ -609,7 +582,7 @@ function limiterInForce(
 /**
  * Logs `rate_limit_budgets_registered` at info — the wired limiter's kind and
  * outage policy, and each prefix with its contributed budget and the module
- * that set it; a limiter's own `limits` entry wins over that budget and is
+ * that claimed it; a limiter's own `limits` entry wins over that budget and is
  * not shown — and `rate_limit_fail_mode_not_applied` at warn when
  * `rateLimit.failMode` says `open` and the wired limiter applies another
  * policy: the path `redis-rate-limiter.failMode` moved from, which only the
@@ -622,34 +595,28 @@ function logRateLimitBudgets(
 	components: Record<string, unknown>,
 	collector: NameKeyedCollector<RateLimitSpec | null> | undefined,
 ): void {
-	const setters = new Map<string, { module: string; by: "contribution" | "override" }>();
+	const claimants = new Map<string, string>();
 	for (const moduleName of material.plan.initOrder) {
 		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
 		const normalised = material.plan.validated.byName.get(moduleName)!.normalised;
-		for (const [entries, by] of [
-			[normalised.contributesEntries, "contribution"],
-			[normalised.overridesEntries, "override"],
-		] as const) {
-			for (const entry of entries) {
-				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
-				setters.set(entry.key, { module: moduleName, by });
-			}
+		for (const entry of normalised.contributesEntries) {
+			if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+			claimants.set(entry.key, moduleName);
 		}
 	}
 	const limiter = limiterInForce(components.rateLimiter as RateLimiter | undefined);
-	if (setters.size === 0 && limiter === null) return;
+	if (claimants.size === 0 && limiter === null) return;
 	const logger = (components.logger as Logger | undefined) ?? consoleLogger;
 	logger.info(
 		{
 			limiter,
-			budgets: [...setters].map(([prefix, { module, by }]) => {
+			budgets: [...claimants].map(([prefix, module]) => {
 				const budget = collector?.get(prefix) ?? null;
 				return {
 					prefix,
 					budget:
 						budget === null ? null : { limit: budget.limit, windowSeconds: budget.windowSeconds },
 					module,
-					by,
 				};
 			}),
 		},
@@ -1251,9 +1218,25 @@ export async function applyContributions(
 				| undefined;
 			if (collector === undefined) continue;
 			const name = entry.key as string;
-			if (collector.get(name) === undefined) {
+			const target = collector.get(name);
+			if (target === undefined) {
 				throw new BootError({
 					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".`,
+					reason: "override-target-missing",
+					stage: "applyContributions",
+					details: {
+						reason: "override-target-missing",
+						kind: entry.kind,
+						name,
+						overridingModule: moduleName,
+					},
+				});
+			}
+			// A switched-off grant has no handler to replace: an override of it
+			// would switch on what its owner's settings switched off.
+			if (entry.kind === "grants" && target === null) {
+				throw new BootError({
+					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}". Its contributor answered null: the grant is switched off, so there is no handler to override.`,
 					reason: "override-target-missing",
 					stage: "applyContributions",
 					details: {
@@ -1313,14 +1296,6 @@ export async function applyContributions(
 			let value: unknown;
 			try {
 				value = checkNameKeyedValue(entry.kind, name, await factory(deps), issuerOf(components));
-				if (entry.kind === "rateLimitBudgets") {
-					checkBudgetOverride(
-						name,
-						collector.get(name) as RateLimitSpec | null,
-						value as RateLimitSpec | null,
-						components.rateLimiter,
-					);
-				}
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({

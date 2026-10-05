@@ -21,6 +21,11 @@
  */
 
 import type {
+	AttemptCounterClient,
+	AttemptCounterConsumeInput,
+	AttemptCounterConsumeReply,
+} from "./clients/attempt-counter.mjs";
+import type {
 	ConsentRecordFields,
 	ConsentStoreClient,
 	GrantConsentInput,
@@ -60,6 +65,7 @@ import type {
 } from "./clients/federation-grant-intent.mjs";
 import type {
 	FederationTokenAttachInput,
+	FederationTokenReadInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
@@ -121,6 +127,9 @@ export type {
 	ActivateFederationGrantInput,
 	ApplyMfaSubjectRecoveryInput,
 	ApplyMfaSubjectRecoveryReply,
+	AttemptCounterClient,
+	AttemptCounterConsumeInput,
+	AttemptCounterConsumeReply,
 	AuthorizeMfaSubjectRecoveryInput,
 	AuthorizeMfaSubjectRecoveryReply,
 	ChallengeStoreClient,
@@ -143,6 +152,7 @@ export type {
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
 	FederationTokenAttachInput,
+	FederationTokenReadInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
@@ -212,6 +222,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly subjectRevocationClient?: SubjectRevocationClient;
 		readonly federationTokenStoreClient?: FederationTokenStoreClient;
 		readonly rateLimiterClient?: RateLimiterClient;
+		readonly attemptCounterClient?: AttemptCounterClient;
 		readonly codeRepositoryClient?: CodeRepositoryClient;
 		readonly deviceCodeStoreClient?: DeviceCodeStoreClient;
 		readonly consentStoreClient?: ConsentStoreClient;

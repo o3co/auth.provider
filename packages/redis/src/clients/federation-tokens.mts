@@ -45,6 +45,24 @@ export interface FederationTokenAttachInput {
 	readonly clockSkewMs: number;
 }
 
+/**
+ * What `readVersioned` may mint into a value written without a generation, the
+ * deadline at or after which it mints nothing, and where it keeps its mint.
+ */
+export interface FederationTokenReadInput {
+	/** A fresh generation, minted only into a value written without one. */
+	readonly candidate: string;
+	/** Epoch ms on the server's clock at or after which the read mints nothing. */
+	readonly deadlineMs: number;
+	/**
+	 * Where a read that mints keeps that it did, as `attachRecord` keeps its
+	 * answer: a copy of the read that reaches the server before then mints
+	 * nothing.
+	 */
+	readonly replayKey: string;
+	readonly clockSkewMs: number;
+}
+
 /** What `replaceIfGeneration` writes, as `attachRecord` does, and the generation it requires. */
 export interface FederationTokenReplaceIfInput extends FederationTokenAttachInput {
 	/** The generation the stored value must carry: its wrapper's `g`. */
@@ -148,13 +166,17 @@ export interface FederationTokenStoreClient {
 	/**
 	 * The stored value at `key` and the generation its wrapper carries, read in
 	 * one atomic step: `null` when there is no key. A value the store's format
-	 * wrote without a generation is given `candidate` in the same step, its TTL
-	 * kept. Any other value is answered with the generation `""`. Implementations
-	 * MUST be atomic (`makeIoredisClients()` runs one script).
+	 * wrote without a generation is given `input.candidate` in the same step,
+	 * its TTL kept, only before `input.deadlineMs` on the server's clock and
+	 * only by the first copy of the read: the mint is kept under
+	 * `input.replayKey` as `attachRecord` keeps its answer. Any other value, and
+	 * a value without a generation that this copy may not mint into, is
+	 * answered with the generation `""`. Implementations MUST be atomic
+	 * (`makeIoredisClients()` runs one script).
 	 */
 	readVersioned(
 		key: string,
-		candidate: string,
+		input: FederationTokenReadInput,
 	): Promise<{ raw: string; generation: string } | null>;
 	/**
 	 * Write `input.value` at `key` (`PX input.ttlMs`) whatever it holds, as one

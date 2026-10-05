@@ -189,6 +189,29 @@ describe("GrantRegistry.entries (what boot's grants collector lists)", () => {
 	});
 });
 
+describe("GrantRegistry — a grant registered switched off (null)", () => {
+	it("claims the grant type, and is absent from get and entries", () => {
+		const registry = new GrantRegistry();
+		const bar = makeHandler("bar");
+		registry.register("foo", null);
+		registry.register("bar", bar);
+		expect(registry.has("foo")).toBe(true);
+		expect(registry.has("absent")).toBe(false);
+		expect(registry.get("foo")).toBeUndefined();
+		expect([...registry.entries()]).toEqual([["bar", bar]]);
+		expect(() => registry.register("foo", makeHandler("duplicate"))).toThrow(GrantRegistryError);
+	});
+
+	it("switches a handler off when replaced by null, keeping the grant type claimed", () => {
+		const registry = new GrantRegistry();
+		registry.register("foo", makeHandler("foo"));
+		registry.replace("foo", null);
+		expect(registry.has("foo")).toBe(true);
+		expect(registry.get("foo")).toBeUndefined();
+		expect([...registry.entries()]).toEqual([]);
+	});
+});
+
 describe("GrantRegistryError (error class shape)", () => {
 	it("carries reason, grantType, and registered snapshot", () => {
 		const err = new GrantRegistryError({

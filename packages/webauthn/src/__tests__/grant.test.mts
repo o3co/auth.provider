@@ -34,6 +34,10 @@ import {
 	type GrantDependencies,
 	type WebAuthnCredential,
 } from "@o3co/auth-provider-core";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+} from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -55,7 +59,7 @@ vi.mock("../internal/verification.mjs", () => ({
 
 import type { WebAuthnConfig } from "#/config.mjs";
 import { createTestWebAuthnConfig } from "#/testing/index.mjs";
-import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
+import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE, type WebAuthnGrantDeps } from "../grant.mjs";
 import { verifyWebAuthnAssertion } from "../internal/verification.mjs";
 import { webauthnModule } from "../module.mjs";
 
@@ -103,23 +107,17 @@ function makeCredential(overrides?: Partial<WebAuthnCredential>): WebAuthnCreden
 	};
 }
 
-/** Build a minimal GrantDependencies for webauthn grant. */
+/** Build minimal deps for the webauthn grant. */
 function makeBaseDeps(
 	credentialStore = createMemoryWebAuthnCredentialStore(),
 	ceremony: ChallengeCeremony = makeConsumedCeremony(),
-): GrantDependencies & {
+): WebAuthnGrantDeps & {
 	webauthnCredentialStore: ReturnType<typeof createMemoryWebAuthnCredentialStore>;
-	challengeCeremony: ChallengeCeremony;
 	webauthnConfig: WebAuthnConfig;
 } {
 	return {
-		config: {
-			oauth: {
-				jwt: { issuer: "https://test.example" },
-				accessToken: { expiresIn: 3600 },
-				refreshToken: { expiresIn: 86400 },
-			},
-		} as unknown as GrantDependencies["config"],
+		tokenBindingSettings: createTestTokenBindingSettings(),
+		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://test.example" }),
 		keyStore,
 		webauthnCredentialStore: credentialStore,
 		challengeCeremony: ceremony,
@@ -636,14 +634,8 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		const evaluateSpy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const depsWithPolicy = {
 			...makeBaseDeps(store),
-			config: {
-				oauth: {
-					jwt: { issuer: "https://test.example" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-					// resourceIndicator absent = flag-off
-				},
-			} as unknown as GrantDependencies["config"],
+			// resourceIndicatorEnabled false = flag-off
+			oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://test.example" }),
 			grantPolicy: {
 				kind: "test",
 				evaluate: evaluateSpy,
@@ -674,14 +666,10 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		const evaluateSpy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const depsWithPolicy = {
 			...makeBaseDeps(store),
-			config: {
-				oauth: {
-					jwt: { issuer: "https://test.example" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-					resourceIndicator: { enabled: true },
-				},
-			} as unknown as GrantDependencies["config"],
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				issuer: "https://test.example",
+				resourceIndicatorEnabled: true,
+			}),
 			grantPolicy: {
 				kind: "test",
 				evaluate: evaluateSpy,
@@ -708,14 +696,10 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const handler = createWebAuthnGrant({
 			...makeBaseDeps(store),
-			config: {
-				oauth: {
-					jwt: { issuer: "https://test.example" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-					resourceIndicator: { enabled: false },
-				},
-			} as unknown as GrantDependencies["config"],
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				issuer: "https://test.example",
+				resourceIndicatorEnabled: false,
+			}),
 			grantPolicy: {
 				kind: "test",
 				evaluate: policySpy,
@@ -781,14 +765,10 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		});
 		const handler = createWebAuthnGrant({
 			...makeBaseDeps(store),
-			config: {
-				oauth: {
-					jwt: { issuer: "https://test.example" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-					resourceIndicator: { enabled: false },
-				},
-			} as unknown as GrantDependencies["config"],
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				issuer: "https://test.example",
+				resourceIndicatorEnabled: false,
+			}),
 			grantPolicy: {
 				kind: "test",
 				evaluate: policySpy,
@@ -809,14 +789,10 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const handler = createWebAuthnGrant({
 			...makeBaseDeps(store),
-			config: {
-				oauth: {
-					jwt: { issuer: "https://test.example" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-					resourceIndicator: { enabled: false },
-				},
-			} as unknown as GrantDependencies["config"],
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				issuer: "https://test.example",
+				resourceIndicatorEnabled: false,
+			}),
 			grantPolicy: {
 				kind: "test",
 				evaluate: policySpy,
@@ -839,14 +815,10 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const handler = createWebAuthnGrant({
 			...makeBaseDeps(store),
-			config: {
-				oauth: {
-					jwt: { issuer: "https://test.example" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-					resourceIndicator: { enabled: true },
-				},
-			} as unknown as GrantDependencies["config"],
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				issuer: "https://test.example",
+				resourceIndicatorEnabled: true,
+			}),
 			grantPolicy: {
 				kind: "test",
 				evaluate: policySpy,
@@ -952,14 +924,10 @@ describe("createWebAuthnGrant — grantPolicy", () => {
 			store,
 			deps: {
 				...makeBaseDeps(store),
-				config: {
-					oauth: {
-						jwt: { issuer: "https://test.example" },
-						accessToken: { expiresIn: 3600 },
-						refreshToken: { expiresIn: 86400 },
-						resourceIndicator: { enabled: true },
-					},
-				} as unknown as GrantDependencies["config"],
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					issuer: "https://test.example",
+					resourceIndicatorEnabled: true,
+				}),
 				grantPolicy: {
 					kind: "test",
 					evaluate: evaluateFn as unknown as GrantDependencies["grantPolicy"],
@@ -1172,10 +1140,12 @@ describe("the configured top origins reach the verifier", () => {
 		const factory = webauthnModule.contributes?.grants?.[WEBAUTHN_GRANT_TYPE] as (
 			deps: Record<string, unknown>,
 		) => ReturnType<typeof createWebAuthnGrant>;
+		const { webauthnConfig: _slot, ...deps } = makeBaseDeps(store);
 		return factory({
-			...makeBaseDeps(store),
+			...deps,
 			grantPolicy: { kind: "allow", evaluate: async () => ({ outcome: "allow" as const }) },
-			webauthnConfig,
+			// The module hands the grant its own section as the relying party.
+			section: webauthnConfig,
 		});
 	};
 

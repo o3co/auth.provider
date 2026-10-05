@@ -81,7 +81,18 @@ export type GrantPolicyHookContribution = GrantPolicyHook;
 
 // Per-kind factory types: each is `(deps: Deps) => Value`.
 
-export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler>;
+/**
+ * A `grants` entry, keyed by grant type. `null` when the grant is switched off
+ * by the module's settings: it is then absent from `grantHandlerResolver` —
+ * so from the token endpoint's dispatch and discovery's
+ * `grant_types_supported` — as a grant type no module contributes is, yet
+ * still claimed, so a second contribution of it is a duplicate. It is no
+ * override target: an override of it refuses boot
+ * (`override-target-missing`), so nothing switches on what its owner switched
+ * off. An override may answer `null`, which switches off the grant it
+ * replaces.
+ */
+export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler | null>;
 
 /**
  * One configured federation as a type's factories receive it: the operator's
@@ -211,8 +222,21 @@ export type TokenBindingMechanismFactory<Deps> = (
  * switched off by the module's settings: absent from `rateLimitBudgetResolver`,
  * yet a second contribution is a duplicate. Absent is not unlimited: keys fall
  * to the limiter's `defaultLimit`. A module claims every prefix it keys.
+ *
+ * `verifier`, read once at stage 1, declares the prefix a verifier's own
+ * attempt limit, counted on the attempt counter and never by a limiter: a
+ * limiter module's own `limits` may not name it. Build the claim with
+ * `verifierLimitClaim`.
  */
-export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimitSpec | null>;
+export type RateLimitBudgetFactory<Deps> = ((deps: Deps) => Contributed<RateLimitSpec | null>) & {
+	readonly verifier?: VerifierLimitDeclaration;
+};
+
+/** What a verifier's claim of a rate-limit prefix declares. */
+export interface VerifierLimitDeclaration {
+	/** The setting the limit is made at, which a refusal names (`session.rateLimit.login`). */
+	readonly setting: string;
+}
 
 /**
  * Declaration-merged map of contribution kinds. Packages and consumer plugins
@@ -269,9 +293,8 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * time. A prefix contributed twice refuses boot (`duplicate-contribute`); an
 	 * empty prefix, one holding `:` or one naming an `Object.prototype` member
 	 * refuses it at stage 1 (`contribution-malformed`); an unusable budget fails
-	 * its contribution, and so does an override that loosens the budget it
-	 * replaces (a `null` side counts as the wired limiter's `defaultLimit`); a
-	 * host may not supply the collector (`contribution-kind-guarded`).
+	 * its contribution; a prefix is its claimant's, so an override of one, and a
+	 * host's own collector, are refused (`contribution-kind-guarded`).
 	 */
 	readonly rateLimitBudgets?: {
 		readonly [prefix: string]: RateLimitBudgetFactory<Deps>;

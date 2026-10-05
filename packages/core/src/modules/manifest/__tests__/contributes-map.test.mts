@@ -1,6 +1,7 @@
 import { expect, expectTypeOf, test } from "vitest";
 import type { z } from "zod";
 import type { RateLimitSpec } from "../../../ratelimit/types.mjs";
+import type { verifierLimitClaim } from "../../../ratelimit/verifierLimits.mjs";
 import type { Contributed } from "../contributed.mjs";
 import type {
 	AuditHookFactory,
@@ -8,7 +9,9 @@ import type {
 	FederationInstance,
 	FederationTypeContribution,
 	GrantFactory,
+	GrantHandler,
 	RateLimitBudgetFactory,
+	VerifierLimitDeclaration,
 } from "../contributes-map.mjs";
 import type { ProviderDeps } from "../provider.mjs";
 
@@ -48,6 +51,12 @@ test("List-shaped kinds are readonly arrays", () => {
 	expectTypeOf<AuditField>().toMatchTypeOf<readonly AuditHookFactory<LocalDeps>[]>();
 });
 
+test("A grant factory answers a grant handler, or null to switch the grant off", () => {
+	expectTypeOf<GrantFactory<LocalDeps>>().toEqualTypeOf<
+		(deps: LocalDeps) => Contributed<GrantHandler | null>
+	>();
+});
+
 test("Name-keyed kinds are readonly records", () => {
 	type GrantsField = NonNullable<ContributesMap<LocalDeps>["grants"]>;
 	expectTypeOf<GrantsField>().toMatchTypeOf<{
@@ -83,13 +92,21 @@ test("grantMiddleware is list-shaped (factory array)", () => {
 // it handles
 // ---------------------------------------------------------------------------
 
-test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget or null", () => {
+test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget or null, a verifier's claim declaring its setting", () => {
 	type Field = NonNullable<ContributesMap<LocalDeps>["rateLimitBudgets"]>;
 	expectTypeOf<Field>().toEqualTypeOf<{
 		readonly [prefix: string]: RateLimitBudgetFactory<LocalDeps>;
 	}>();
 	expectTypeOf<RateLimitBudgetFactory<LocalDeps>>().toEqualTypeOf<
-		(deps: LocalDeps) => Contributed<RateLimitSpec | null>
+		((deps: LocalDeps) => Contributed<RateLimitSpec | null>) & {
+			readonly verifier?: VerifierLimitDeclaration;
+		}
+	>();
+	expectTypeOf<VerifierLimitDeclaration>().toEqualTypeOf<{ readonly setting: string }>();
+	// A plain factory is still one, and the claim core builds is one too.
+	expectTypeOf<() => null>().toExtend<RateLimitBudgetFactory<LocalDeps>>();
+	expectTypeOf<ReturnType<typeof verifierLimitClaim>>().toExtend<
+		RateLimitBudgetFactory<LocalDeps>
 	>();
 });
 

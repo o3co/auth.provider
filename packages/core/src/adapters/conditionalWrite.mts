@@ -133,11 +133,12 @@ export type ConditionalSetRemoveAnswer =
  * `null` is meant) is a TypeError naming the field, never a value. The caller
  * treats that as the store's outage: never as a write that happened, and
  * never as one that did not. A RangeError stays reserved for a caller's own
- * input.
+ * input. The field readers below are shared with the other readers of a
+ * conditional port's answers in core; the root entry does not export them.
  */
 
 /** `answer[key]`, read once; a TypeError when `answer` is no object or the read throws. */
-const field = (answer: unknown, key: string, what: string): unknown => {
+export const field = (answer: unknown, key: string, what: string): unknown => {
 	if (typeof answer !== "object" || answer === null) throw new TypeError(`${what}: not an object`);
 	try {
 		return (answer as Record<string, unknown>)[key];
@@ -147,14 +148,18 @@ const field = (answer: unknown, key: string, what: string): unknown => {
 };
 
 /** `answer.generation`, read once and required to be a well-formed generation. */
-const generationOf = (answer: unknown, what: string): StoreGeneration => {
+export const generationOf = (answer: unknown, what: string): StoreGeneration => {
 	const generation = field(answer, "generation", what);
 	if (!isStoreGeneration(generation)) throw new TypeError(`${what}: generation is malformed`);
 	return generation;
 };
 
 /** `answer.outcome`, read once and required to be one of `outcomes`. */
-const outcomeOf = <O extends string>(answer: unknown, outcomes: readonly O[], what: string): O => {
+export const outcomeOf = <O extends string>(
+	answer: unknown,
+	outcomes: readonly O[],
+	what: string,
+): O => {
 	const outcome = field(answer, "outcome", what);
 	if (!(outcomes as readonly unknown[]).includes(outcome)) {
 		throw new TypeError(`${what}: outcome is not one of ${outcomes.join(", ")}`);
@@ -187,7 +192,7 @@ export function readVersioned<T>(answer: Versioned<T> | null): Versioned<T> | nu
  * `items` copied by one read of its length and one read of each index, so
  * neither an iterator nor a changing length decides what is copied.
  */
-const copyItems = <T,>(items: readonly T[], what: string): T[] => {
+export const copyItems = <T,>(items: readonly T[], what: string): T[] => {
 	try {
 		const length = items.length;
 		if (!Number.isSafeInteger(length) || length < 0) throw new TypeError("length");

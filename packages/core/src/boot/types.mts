@@ -30,6 +30,7 @@ import type { AppConfig } from "../config/application.schema.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
+import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	AuditHook,
@@ -190,6 +191,20 @@ export interface ValidatedManifests {
 	 * order: what stage 4 builds a provider and a redirect policy from.
 	 */
 	readonly dispatchedFederations: readonly DispatchedFederation[];
+	/**
+	 * Each slot an absence policy governs whose absence the configuration does
+	 * not declare. Every one is planned (stage 1 refuses otherwise); stage 3
+	 * refuses any that holds `undefined` once its sources have answered.
+	 */
+	readonly undeclaredAbsenceSlots: readonly UndeclaredAbsenceSlot[];
+}
+
+/** A slot that must hold a value: its absence policy is in force and undeclared. */
+export interface UndeclaredAbsenceSlot {
+	readonly componentKey: ComponentKey;
+	/** Modules naming the key in `requires` / `optional`, in input order. */
+	readonly consumedBy: readonly string[];
+	readonly policy: AbsencePolicy;
 }
 
 /**
@@ -381,6 +396,27 @@ export interface NameKeyedCollector<V> {
 }
 
 /**
+ * Collector for the `grants` kind: a `NameKeyedCollector` whose values are a
+ * grant handler or `null`, a grant its module's settings switched off, which
+ * claims the grant type. Its mutators are function-valued properties, so
+ * their parameter is checked strictly: a collector that takes handlers only
+ * is not one, since boot hands it `null`.
+ */
+export interface GrantCollector {
+	readonly kind: "name-keyed";
+	/** Register a handler, or `null` for a switched-off grant, by grant type. Throws on duplicate. */
+	readonly register: (name: string, value: GrantHandler | null) => void;
+	/** Replace a registered grant type's value. Throws if the grant type is unknown. */
+	readonly replace: (name: string, value: GrantHandler | null) => void;
+	/** Optional activation boundary — throws further mutation attempts when defined. */
+	readonly freeze?: () => void;
+	/** The handler, `null` for a switched-off grant type, `undefined` for an unregistered one. */
+	get(name: string): GrantHandler | null | undefined;
+	/** The registered grant types; a switched-off one may be listed with `null`. */
+	entries(): IterableIterator<readonly [string, GrantHandler | null]>;
+}
+
+/**
  * Collector for list-shaped contribution kinds (auditHooks,
  * grantPolicyHooks). Same-instance values are deduplicated.
  */
@@ -410,7 +446,12 @@ export interface RouteCollector {
  * built-in kinds; consumers add custom kinds via `declare module` augmentation.
  */
 export interface ContributionCollectorMap {
-	readonly grants?: NameKeyedCollector<GrantHandler>;
+	/**
+	 * Collector for `grants` contributions, by grant type. A `null` entry is a
+	 * grant its module's settings switched off: it claims the grant type, and
+	 * `grantHandlerResolver` leaves it out. It is no override target.
+	 */
+	readonly grants?: GrantCollector;
 	/**
 	 * Collector for `federations`, by name: the provider stage 4 builds for
 	 * each `core.federations` entry stage 1 dispatched to its type. Boot
@@ -791,11 +832,11 @@ export type BootstrapComponentCollisionDetails =
 
 /**
  * A synthetic ComponentMap key (`SYNTHETIC_COMPONENT_KEYS`: the resolvers,
- * the two registrars, `deploymentMode`) appeared in a module's `provides`,
+ * the two registrars, `deploymentMode`, `tokenBindingSettings`,
+ * `federationSettings`) appeared in a module's `provides`,
  * `bootstrapComponents` or `overrideComponents`; only the boot planner
- * produces these keys. `source:
- * "module-provides"` carries `module`; the other two sources are
- * composition-root data and carry no module name.
+ * produces these keys. `source: "module-provides"` carries `module`; the
+ * other two sources are composition-root data and carry no module name.
  */
 export type SyntheticKeyCollisionDetails =
 	| {
@@ -1212,7 +1253,7 @@ export interface FederationStoresIncompleteDetails {
 	readonly reason: "federation-stores-incomplete";
 	/** The federation name whose enabled flag triggered the check. */
 	readonly federationName: string;
-	/** The store keys that are absent from the planned component set. */
+	/** The store keys no source plans, or whose slot holds `undefined`. */
 	readonly missing: readonly string[];
 }
 
@@ -1292,7 +1333,8 @@ export interface ComponentAbsenceUndeclaredDetails {
  * `core.federations` entries. Refused in `createApp`, before the kinds are
  * merged. Also, at stage 1, naming the module and the channel: a module's
  * `overrides.admissionActions` entry, naming the action (an action's grade is
- * its registrant's), and a module's `contributes` or `overrides` of
+ * its registrant's), a module's `overrides.rateLimitBudgets` entry, naming
+ * the prefix (a prefix is its claimant's), and a module's `contributes` or `overrides` of
  * `federations` or `federationRedirectPolicies` whatever it holds, the module
  * switched on or not (a federation registers through its type alone), naming
  * the container's first entry only when the container is a record with one.
@@ -1310,9 +1352,10 @@ export interface ContributionKindGuardedDetails {
 	readonly channel?: "contributes" | "overrides";
 	readonly module?: string;
 	/**
-	 * The entry refused: the action of an `admissionActions` override, or the
-	 * first entry of a federation kind's container when it is a record with
-	 * one; absent otherwise.
+	 * The entry refused: the action of an `admissionActions` override, the
+	 * prefix of a `rateLimitBudgets` override, or the first entry of a
+	 * federation kind's container when it is a record with one; absent
+	 * otherwise.
 	 */
 	readonly name?: string;
 }

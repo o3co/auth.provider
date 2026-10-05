@@ -37,12 +37,16 @@ import {
 	type Module,
 	moduleReferences,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
+import {
+	makeValidAppConfig,
+	packageReferenceProblems,
+	sectionStrictnessProblems,
+} from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { oauthModule, oauthSectionSchema } from "#/module.mjs";
+import { oauthEndpointsModule, oauthSectionSchema } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
-import { oauthSessionModule } from "#/oauthSession.mjs";
+import { oauthSessionConfigSchema, oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { capturing, type GrantSwitches, withGrants } from "./_helpers/sections.mjs";
 
 /** The package's defaults, as a composition root finds them. */
@@ -86,11 +90,7 @@ const everyModule = (): Module[] => {
 		clientCredentials: true,
 		jwtBearer: true,
 	}) as AppConfig;
-	return [
-		oauthModule({ config }),
-		oauthSessionModule({ config }),
-		oauthAuthorizationModule({ config }),
-	];
+	return [oauthEndpointsModule, oauthSessionGrantModule, oauthAuthorizationModule({ config })];
 };
 
 /** The package's reference, resolved with no variable set. */
@@ -110,14 +110,15 @@ describe("the package's config/reference.conf", () => {
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
+		// The issuer has no default: a deployment sets it, as here.
 		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
-			parseFile(path, { env: { ...env } }).toObject();
+			parseFile(path, { env: { OAUTH_JWT_ISSUER: "https://auth.test", ...env } }).toObject();
 		// Built from the reference itself, as a root that layers it builds them:
 		// each module's section holds the switches to what it was built with.
 		const config = { ...makeValidAppConfig(), ...defaults() } as AppConfig;
 		const modules = [
-			oauthModule({ config }),
-			oauthSessionModule({ config }),
+			oauthEndpointsModule,
+			oauthSessionGrantModule,
 			oauthAuthorizationModule({ config }),
 		];
 		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
@@ -195,17 +196,13 @@ describe("the paths the settings moved from, on the manifests", () => {
 		expect(Object.keys(section?.renamedVariables ?? {})).toHaveLength(13);
 	});
 
-	it("oauth-session: the switch from oauth.grants.session, declared whether the grant is on or off", () => {
-		const on = withGrants(makeValidAppConfig(), { session: true }) as AppConfig;
-		const off = withGrants(makeValidAppConfig(), { session: false }) as AppConfig;
-		for (const config of [on, off]) {
-			const section = oauthSessionModule({ config }).section;
-			expect(section?.relocatedFrom).toEqual({ "oauth.grants.session": "" });
-			expect(section?.renamedVariables).toEqual({
-				OAUTH_GRANTS_SESSION_ENABLED: "oauth.grants.session.enabled",
-			});
-			expect(section?.reference?.href).toBe(REFERENCE.href);
-		}
+	it("oauth-session: the switch from oauth.grants.session", () => {
+		const section = oauthSessionGrantModule.section;
+		expect(section?.relocatedFrom).toEqual({ "oauth.grants.session": "" });
+		expect(section?.renamedVariables).toEqual({
+			OAUTH_GRANTS_SESSION_ENABLED: "oauth.grants.session.enabled",
+		});
+		expect(section?.reference?.href).toBe(REFERENCE.href);
 	});
 
 	it("oauth-authorization: each grant's switch from oauth.grants.<grant>, and the authorization-code grant's pkce block removed", () => {
@@ -240,38 +237,61 @@ describe("the oauth module's section, as an environment variable carries it", ()
 		["a list written in configuration, as written", ["a.example"], ["a.example"]],
 	] as const)("reads clientIdMetadataDocuments.allowedHosts from %s", (_what, written, read) => {
 		const parsed = oauthSectionSchema.parse({
+			...makeValidAppConfig().oauth,
 			clientIdMetadataDocuments: { enabled: "true", allowedHosts: written },
 		});
 		expect(parsed.clientIdMetadataDocuments?.allowedHosts).toEqual(read);
 	});
 });
 
+describe("the oauth-session section, and the switch read from it as boot parses it", () => {
+	/** Whether the module is on for `section`, read as boot reads it. */
+	const isEnabled = (section: unknown): unknown =>
+		oauthSessionGrantModule.section?.isEnabled?.(oauthSessionConfigSchema.parse(section));
+
+	it.each([
+		[true, true],
+		["true", true],
+		["1", true],
+		["TRUE", true],
+		[false, false],
+		["false", false],
+		["", false],
+	] as const)("oauth-session.enabled = %j is on: %j", (enabled, on) => {
+		expect(isEnabled({ enabled })).toBe(on);
+	});
+
+	it("reads an absent section, and a section without enabled, as off", () => {
+		expect(oauthSessionConfigSchema.parse(undefined)).toBeUndefined();
+		expect(isEnabled(undefined)).toBe(false);
+		expect(isEnabled({})).toBe(false);
+	});
+
+	it("resolves its default from the package's reference.conf alone, and holds none of its own", () => {
+		expect(oauthSessionConfigSchema.parse(defaults()["oauth-session"])).toStrictEqual({
+			enabled: false,
+		});
+		expect(oauthSessionConfigSchema.parse({})).toStrictEqual({});
+	});
+
+	it("refuses an unknown key in the section, at the section's root", () => {
+		expect(
+			sectionStrictnessProblems([oauthSessionGrantModule], {
+				tree: defaults(),
+				samples: { "oauth-session": [{ enabled: true }] },
+			}),
+		).toEqual([]);
+		expect(
+			oauthSessionConfigSchema
+				.safeParse({ enabled: true, typo: 1 })
+				.error?.issues.map((issue) => issue.path.join(".")),
+		).toEqual([""]);
+	});
+});
+
 describe("the grant switches, read from the configuration handed to the module", () => {
 	/** The grant types a module contributes. */
 	const grantsOf = (module: Module): string[] => Object.keys(module.contributes?.grants ?? {});
-
-	it.each([
-		[true, ["session"]],
-		["true", ["session"]],
-		["1", ["session"]],
-		["TRUE", ["session"]],
-		[false, []],
-		["false", []],
-		["", []],
-	] as const)("oauth-session.enabled = %j registers %j", (enabled, grants) => {
-		const config = withGrants(makeValidAppConfig(), { session: enabled }) as AppConfig;
-		expect(grantsOf(oauthSessionModule({ config }))).toEqual(grants);
-	});
-
-	it("registers no session grant for the switch at its old path alone", () => {
-		const base = makeValidAppConfig();
-		const { "oauth-session": _moved, ...rest } = base;
-		const config = {
-			...rest,
-			oauth: { ...base.oauth, grants: { session: { enabled: true } } },
-		} as unknown as AppConfig;
-		expect(grantsOf(oauthSessionModule({ config }))).toEqual([]);
-	});
 
 	it.each([
 		["authorizationCode", "authorization_code"],
@@ -299,8 +319,8 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	const composition = (change: (config: Record<string, unknown>) => Record<string, unknown>) => {
 		const config = change(makeValidAppConfig() as unknown as Record<string, unknown>);
 		const modules = [
-			oauthModule({ config: config as AppConfig }),
-			oauthSessionModule({ config: config as AppConfig }),
+			oauthEndpointsModule,
+			oauthSessionGrantModule,
 			oauthAuthorizationModule({ config: config as AppConfig }),
 		];
 		// What the modules require besides their sections, so a refusal names the configuration.
@@ -529,10 +549,7 @@ describe("the switches the modules were built with, held to the ones boot parses
 	async function refusedBuiltFrom(built: GrantSwitches, booted: GrantSwitches): Promise<BootError> {
 		const base = makeValidAppConfig();
 		const builtConfig = withGrants(base, switches(built)) as AppConfig;
-		const modules = [
-			oauthSessionModule({ config: builtConfig }),
-			oauthAuthorizationModule({ config: builtConfig }),
-		];
+		const modules = [oauthSessionGrantModule, oauthAuthorizationModule({ config: builtConfig })];
 		// What the grants require besides their sections, so a refusal names the configuration.
 		const slots = defineModule({
 			name: "test:slots",
@@ -556,21 +573,6 @@ describe("the switches the modules were built with, held to the ones boot parses
 		}
 		return expect.fail("boot should have been refused");
 	}
-
-	it.each([
-		["off, and boot parses it on", { session: false }, { session: true }, "off", "on"],
-		["on, and boot parses it off", { session: true }, { session: false }, "on", "off"],
-	] as const)(
-		"oauth-session: built with the session grant %s: refused, naming oauth-session.enabled",
-		async (_what, built, booted, decided, parsed) => {
-			const err = await refusedBuiltFrom(built, booted);
-
-			expect(err.reason).toBe("config-validation-failed");
-			expect(err.message).toContain(
-				`built from a configuration with the session grant ${decided}, but the configuration createApp parsed has oauth-session.enabled ${parsed}`,
-			);
-		},
-	);
 
 	it.each([
 		[
