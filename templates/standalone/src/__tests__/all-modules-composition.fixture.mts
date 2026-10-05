@@ -70,6 +70,7 @@ import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import {
+	configDefaultsFor,
 	type OwnLayers,
 	readOwnLayers,
 	readSwitches,
@@ -667,12 +668,13 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
-	// reference.conf, which createApp parses once.
+	// reference.conf, which createApp parses once, and its defaults.
 	const resolved = adjust(resolveForBoot(own, modules, config));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
 			config: resolved,
+			configDefaults: configDefaultsFor(modules),
 			pathResolver: (s) => s,
 			logger,
 		},

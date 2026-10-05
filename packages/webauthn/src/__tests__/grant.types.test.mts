@@ -19,6 +19,7 @@ import type {
 	GrantPolicyHook,
 	ProviderDeps,
 	RefreshTokenFamilyRotation,
+	TokenBindingSettings,
 	WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -37,7 +38,6 @@ const REQUIRES = [
 	"webauthnCredentialStore",
 	"challengeStore",
 	"challengeCeremony",
-	"config",
 	"keyStore",
 	// The replica count the authentication/options route's fallback limiter is
 	// refused or warned about by; the grant does not read it.
@@ -47,6 +47,8 @@ const REQUIRES = [
 	"rateLimitBudgetResolver",
 	// What the grant reads of `oauth {}`.
 	"oauthTokenSettings",
+	// What the grant reads of `core.tokenBinding`, which core fills.
+	"tokenBindingSettings",
 ] as const;
 const OPTIONAL = [
 	"grantPolicy",
@@ -83,6 +85,9 @@ describe("the webauthn grant declares the slots it reads", () => {
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("sessionFederationIndex");
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("subjectRevocation");
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("refreshTokenFamilyRevocation");
+		// The binding rule comes from core's `tokenBindingSettings` slot, the lifetimes from
+		// `oauthTokenSettings`: nothing is read from the whole configuration.
+		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("config");
 		// The module's logger is read by the grant too, for the one line a
 		// policy that cannot answer writes (`grant_policy_unavailable`).
 		expectTypeOf<WebAuthnGrantDeps>().toHaveProperty("logger");
@@ -104,13 +109,14 @@ describe("the webauthn grant declares the slots it reads", () => {
 	});
 
 	it("still carries every slot the grant does read, typed as its ComponentMap slot", () => {
-		expectTypeOf<WebAuthnGrantDeps>().toHaveProperty("config");
 		expectTypeOf<WebAuthnGrantDeps>().toHaveProperty("keyStore");
 		expectTypeOf<WebAuthnGrantDeps>().toHaveProperty("webauthnConfig");
 		expectTypeOf<
 			WebAuthnGrantDeps["webauthnCredentialStore"]
 		>().toEqualTypeOf<WebAuthnCredentialStore>();
 		expectTypeOf<WebAuthnGrantDeps["challengeCeremony"]>().toEqualTypeOf<ChallengeCeremony>();
+		// Required: the module requires the slot, so the grant is always handed it.
+		expectTypeOf<WebAuthnGrantDeps["tokenBindingSettings"]>().toEqualTypeOf<TokenBindingSettings>();
 		expectTypeOf<WebAuthnGrantDeps["grantPolicy"]>().toEqualTypeOf<GrantPolicyHook | undefined>();
 		expectTypeOf<WebAuthnGrantDeps["refreshTokenFamilyRotation"]>().toEqualTypeOf<
 			RefreshTokenFamilyRotation | undefined

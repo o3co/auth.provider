@@ -322,6 +322,12 @@ const copyView = (view: SessionView): SessionView =>
  *    record `canRecordSecondFactor` refuses): the answer is a new login
  *    (`reauthenticate`, `acr`). The requirements of step 5 were handed the
  *    same answer, on their copy of the view.
+ * 8. the last reading, once a requirement was asked about a live record:
+ *    steps 1 to 4 again, on a fresh clock reading and with the claim's
+ *    subject held to the first reading's, whatever step 7 answered. An
+ *    answer they give is the admission's; else step 7's stands, carrying the
+ *    first reading's session and view. A requirement that throws has already
+ *    answered `unavailable`.
  */
 export async function admitSession(
 	deps: AdmissionDeps,
@@ -363,6 +369,7 @@ export async function admitSession(
 			? requirementSessionFromAmr(presented.tokenAmr)
 			: requirementSession(session);
 	let verdict: RequirementOutcome = { outcome: "met" };
+	let asked = false;
 	if (effective.grade !== "remediation") {
 		const shared = {
 			carrier: presented.carrier,
@@ -382,6 +389,7 @@ export async function admitSession(
 				session: live === null ? null : copyView(live.view),
 			});
 			let answer: unknown;
+			asked = true;
 			try {
 				// Copied before it is checked, in the guarded step: a getter cannot
 				// answer one outcome to the check and another to the merge, and one
@@ -425,7 +433,7 @@ export async function admitSession(
 		requested.length > 0 && requested.every((acr: string) => !Object.hasOwn(checked.acrTable, acr));
 
 	// Step 7: the merge.
-	return merge(verdict, selection, {
+	const answer = merge(verdict, selection, {
 		live,
 		noneConfigured,
 		requirements,
@@ -433,6 +441,21 @@ export async function admitSession(
 		held: authentication?.amr ?? [],
 		table: checked.acrTable,
 	});
+
+	// Step 8: the last reading. Nothing is awaited after it, so the record and
+	// the boundary the answer stands on are the ones read last.
+	if (asked && session !== null) {
+		const last = await readLiveSession(
+			{
+				...checked,
+				claim: Object.freeze({ ...presented, subject: session.sub }),
+				now: checked.clock(),
+			},
+			unavailable,
+		);
+		if ("answer" in last) return last.answer;
+	}
+	return answer;
 }
 
 // ---------------------------------------------------------------------------
