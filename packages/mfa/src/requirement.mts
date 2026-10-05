@@ -79,6 +79,7 @@ import {
 	type AdmissionAction,
 	type AdmissionGrade,
 	type AuditSink,
+	authenticationFreshness,
 	DEFAULT_CLOCK_SKEW_MS,
 	emitAuditEvent,
 	FEDERATED_AMR,
@@ -439,16 +440,20 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	 * A first binding in `session`, whose subject holds no record that may
 	 * count: what the session recorded of its login's `User` — none is a new
 	 * login; a witness other than `not_enrolled` is a new login for a
-	 * password session, and recorded and thrown for any other — then a recent primary, then the subject's first-binding mark —
+	 * password session, and recorded and thrown for any other — then a recent primary, read over the
+	 * session's freshness (`authenticationFreshness`: for a federated login, the earlier of the
+	 * callback and the upstream's authentication, none when the upstream showed no time), then
+	 * the subject's first-binding mark, read against when the session was established —
 	 * a session it distrusts is a new login — then the gate, a proof asked
 	 * for admitted only while one given in this session stands.
 	 */
 	const firstBindingIn = async (
 		session: SessionView,
-		primary: string,
+		recorded: SessionAuthentication,
 		action: AdmissionAction,
 		nowMs: number,
 	): Promise<RequirementVerdict> => {
+		const { primary } = recorded;
 		const facts = session.enrollmentFacts;
 		if (facts === undefined) return REAUTHENTICATE;
 		if (facts.witness !== "not_enrolled") {
@@ -457,12 +462,15 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			if (primary === PASSWORD_AMR) return REAUTHENTICATE;
 			inconsistent(session.sub, facts.witness, { purpose: "session", action: action.name });
 		}
-		const recentPrimary = isRecentMfa(
-			{ authTime: session.authTime, mfaAt: undefined },
-			{ holdsCountingFactor: false },
-			recentMfaMaxAgeSeconds,
-			nowMs,
-		);
+		const freshness = authenticationFreshness(session.authTime, recorded);
+		const recentPrimary =
+			freshness !== undefined &&
+			isRecentMfa(
+				{ authTime: freshness, mfaAt: undefined },
+				{ holdsCountingFactor: false },
+				recentMfaMaxAgeSeconds,
+				nowMs,
+			);
 		if (!recentPrimary) return REAUTHENTICATE;
 		const mark = readFirstBindingMark(await firstBindingAt(session.sub, nowMs), nowMs);
 		if (distrustedByFirstBinding(session.authTime.getTime(), mark)) {
@@ -489,7 +497,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			return REAUTHENTICATE;
 		}
 		if (!(await mayHoldCountingFactor(session.sub))) {
-			return firstBindingIn(session, recorded.primary, action, nowMs);
+			return firstBindingIn(session, recorded, action, nowMs);
 		}
 		const recentMfa = isRecentMfa(
 			{ authTime: session.authTime, mfaAt: recorded.mfaAt },
