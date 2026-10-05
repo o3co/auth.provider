@@ -1377,8 +1377,9 @@ export interface ContributionKindGuardedDetails {
  * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
  * carries it — or names an `Object.prototype` member, a `federationTypes`
  * declaration that is not an object with a Zod `entrySchema` and a
- * `factory`, or an `admissionActions` entry whose name, declaration or grade
- * registration refuses. `problem` says which.
+ * `factory`, an `admissionActions` entry whose name, declaration or grade
+ * registration refuses, or a `sessionCloseNotifiers` container that is a list
+ * (as normalisation read it) — `name` then absent. `problem` says which.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";

@@ -1007,7 +1007,8 @@ const containerShape = (container: unknown): string =>
  *   (`contribution-kind-guarded`);
  * - a `sessionCloseNotifiers` container is a record keyed by name, and no
  *   module overrides the kind (`contribution-kind-guarded`): the notifier is
- *   its contributor's, switched off only by not installing it.
+ *   its contributor's, switched off only by not installing it. Both read off
+ *   the entries normalisation captured, which stage 4 applies.
  *
  * Throws `contribution-malformed`; `name` is absent for a container.
  * @internal
@@ -1041,24 +1042,10 @@ function checkContributionShapes(
 	rawModules.forEach((m, index) => {
 		for (const channel of ["contributes", "overrides"] as const) {
 			const map = m[channel] as Readonly<Record<string, unknown>> | undefined;
-			if (channel === "overrides" && map?.sessionCloseNotifiers !== undefined) {
-				throw new BootError({
-					message: `Module "${m.name}" overrides sessionCloseNotifiers, which no module may: the notifier is its contributor's, switched off only by not installing it.`,
-					reason: "contribution-kind-guarded",
-					stage: "validateManifests",
-					details: {
-						reason: "contribution-kind-guarded",
-						kind: "sessionCloseNotifiers",
-						channel: "overrides",
-						module: m.name,
-					},
-				});
-			}
 			for (const [kind, keyedBy] of [
 				["rateLimitBudgets", "prefix"],
 				["federationTypes", "type"],
 				["admissionActions", "action name"],
-				["sessionCloseNotifiers", "name"],
 			] as const) {
 				const container = map?.[kind];
 				if (container === undefined) continue;
@@ -1096,6 +1083,32 @@ function checkContributionShapes(
 			const entries =
 				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
 			// Read off the entries normalisation captured, which stage 4 applies.
+			for (const entry of entries ?? []) {
+				if (entry.kind !== "sessionCloseNotifiers") continue;
+				if (channel === "overrides") {
+					throw new BootError({
+						message: `Module "${m.name}" overrides sessionCloseNotifiers, which no module may: the notifier is its contributor's, switched off only by not installing it.`,
+						reason: "contribution-kind-guarded",
+						stage: "validateManifests",
+						details: {
+							reason: "contribution-kind-guarded",
+							kind: "sessionCloseNotifiers",
+							channel: "overrides",
+							module: m.name,
+						},
+					});
+				}
+				// Normalisation files a list under Symbol keys.
+				if (typeof entry.key !== "string") {
+					refuse(
+						m,
+						"sessionCloseNotifiers",
+						undefined,
+						channel,
+						"the kind takes a record keyed by name, not a list",
+					);
+				}
+			}
 			for (const entry of entries ?? []) {
 				if (
 					channel !== "overrides" ||

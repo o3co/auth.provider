@@ -103,6 +103,36 @@ describe("sessionCloseNotifiers", () => {
 		});
 	});
 
+	it("refuses an override a manifest answers to one read and not to the next", async () => {
+		let reads = 0;
+		const flipping = {
+			name: "flipping",
+			get overrides() {
+				reads += 1;
+				return reads === 1 ? { sessionCloseNotifiers: { "tell-a": () => notifier } } : {};
+			},
+		};
+		await expect(boot([contributing("tell-a"), flipping as never])).rejects.toMatchObject({
+			reason: "contribution-kind-guarded",
+			details: { kind: "sessionCloseNotifiers", channel: "overrides", module: "flipping" },
+		});
+	});
+
+	it("refuses a list a manifest answers to one read and not to the next", async () => {
+		let reads = 0;
+		const flipping = {
+			name: "flipping",
+			get contributes() {
+				reads += 1;
+				return reads === 1 ? { sessionCloseNotifiers: [() => notifier] } : {};
+			},
+		};
+		await expect(boot([flipping as never])).rejects.toMatchObject({
+			reason: "contribution-malformed",
+			details: { kind: "sessionCloseNotifiers", channel: "contributes", module: "flipping" },
+		});
+	});
+
 	it("leaves a sessionLifecycle the host filled to the host: no notifier rule applies", async () => {
 		const handle = await createApp({
 			modules: LIFECYCLE,
