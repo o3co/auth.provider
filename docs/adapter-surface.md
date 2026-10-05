@@ -191,6 +191,16 @@ wired limiter, never from the key.
 
 ## Component slots
 
+A slot holding `undefined` is unfilled, whatever put it there: a
+`bootstrapComponents` or `overrideComponents` entry given as `undefined`, or a
+provider resolving to it. Boot refuses a slot an active module `requires`
+(`missing-required-component`), before a provider requiring it runs; a slot
+with an absence policy and no declaration (below); and a store an enabled
+federation needs (`federation-stores-incomplete`). It does this once the
+providers have run and before anything serves. An `overrideComponents` entry
+given as `undefined` replaces the slot's provider as any override does, so the
+provider does not run and the slot is left unfilled.
+
 | Slot | Type | Wiring | Declared in | Purpose |
 | --- | --- | --- | --- | --- |
 | `accessTokenDenylist` | `AccessTokenDenylist` | optional | `core/access-token-denylist/types.mts` | RFC 7009 access-token revocation by `jti`. Absence must be declared (#375). |
