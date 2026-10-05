@@ -253,39 +253,21 @@ const enrollmentSchema = z.strictObject(
 	{ error: sectionError },
 );
 
-/**
- * `mfa.rateLimit`: `routes`, the budget every `/session/mfa` POST limits
- * under, `{ limit, windowSeconds }`. The schema holds its shape alone: the MFA
- * module's contribution reads the two values as core's
- * `requireUsableConfiguredRateLimitSpec` does — a number, or a string of
- * decimal digits — and refuses a budget no limiter can apply, naming the key.
- */
-const rateLimitSchema = z.strictObject(
-	{
-		routes: z
-			.strictObject({ limit: z.unknown(), windowSeconds: z.unknown() }, { error: sectionError })
-			.optional(),
-	},
-	{ error: sectionError },
-);
-
 /** `mfa.storeTimeoutMs`'s range: from 1000 ms; the most a lease allows is `factorSet.mts`'s to refuse. */
 const MFA_STORE_TIMEOUT_MS = { min: 1_000, max: 2_147_483_647 } as const;
 
 /**
  * The MFA module's section, `mfa`: its mode, the page's shape, the key ring,
- * a transaction's life and attempts, the subject lock, the routes' budget,
- * recent MFA's window, the first binding's proof and the records a subject
- * may hold, with their ranges. Strict at every level: a key the section does
+ * a transaction's life and attempts, the subject lock, recent MFA's window,
+ * the first binding's proof and the records a subject may hold, with their
+ * ranges. Strict at every level: a key the section does
  * not know is refused by its name. Every number also reads the decimal digits
  * an environment variable carries. The page may be left out, and an empty url
- * is allowed: the module refuses either as unset; so may the routes' budget,
- * which leaves the routes to a wired limiter. The ring's refusals (a key that
- * is not 32 bytes, an empty ring, a duplicate id), the sample key's, how the
- * lock's fields relate and whether the routes' budget is one a limiter can
- * apply are not the schema's: `readMfaSettings` and the module make them,
- * where the keys are decoded, the environment is known and core's rules are
- * applied.
+ * is allowed: the module refuses either as unset. The ring's refusals (a key
+ * that is not 32 bytes, an empty ring, a duplicate id), the sample key's and
+ * how the lock's fields relate are not the schema's: `readMfaSettings` and the
+ * module make them, where the keys are decoded, the environment is known and
+ * core's rules are applied.
  */
 export const mfaConfigSchema = z.strictObject(
 	{
@@ -312,7 +294,6 @@ export const mfaConfigSchema = z.strictObject(
 			"",
 		),
 		lockout: lockoutSchema,
-		rateLimit: rateLimitSchema.optional(),
 		manage: manageSchema,
 		enrollment: enrollmentSchema,
 		maxFactorsPerSubject: environmentWholeNumber(
@@ -570,9 +551,9 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
  * and attempts, recent MFA's window, the first binding's proof, the records
  * a subject may hold, and the subject lock — held to core's
  * `checkConfiguredMfaLockoutPolicy` under `mfa.lockout`. The whole section is
- * held to its schema, as the module's section schema holds it; not the mode,
- * the page or the routes' budget, which the module reads from its section,
- * and no factor's section: the TOTP factor's is {@link readMfaTotpSettings}'s. `options.environment` is the name the
+ * held to its schema, as the module's section schema holds it; not the mode
+ * or the page, which the module reads from its section, and no factor's
+ * section: the TOTP factor's is {@link readMfaTotpSettings}'s. `options.environment` is the name the
  * composition root selected its configuration by, and
  * `options.deploymentMode` the `deploymentMode` slot's value. A refusal is a
  * `RangeError` that names the key and quotes no key material.
