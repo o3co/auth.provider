@@ -27,8 +27,9 @@ import {
 	sessionLifecycleModule,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { compose, ISSUER, WEB, webTokens } from "./all-modules-composition.fixture.mjs";
+import { basic, compose, ISSUER, WEB, webTokens } from "./all-modules-composition.fixture.mjs";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -127,6 +128,34 @@ describe("the template with the session lifecycle module", () => {
 				`rp:${WEB.id}`,
 				`family:${String(claims.family_id)}`,
 			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("closes the session through the lifecycle at /oauth/logout: the record closed, the session and its refresh token gone", async () => {
+		const { app, handle } = await compose({ extraModules: () => [sessionLifecycleModule] });
+		try {
+			const tokens = await webTokens(app);
+			const sid = String(claimsOf(tokens.refresh_token ?? "").sid);
+			const components = handle.components as Record<string, unknown>;
+
+			const res = await request(app)
+				.post("/oauth/logout")
+				.type("form")
+				.send({ id_token_hint: tokens.id_token });
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ logged_out: true });
+			const store = components.sessionLifecycleStore as SessionLifecycleStore;
+			expect(readVersionedSessionLifecycle(await store.read(sid))?.value.state).toBe("closed");
+			expect(await (components.userSessionStore as UserSessionStore).get(sid)).toBeNull();
+			const refreshed = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(WEB))
+				.type("form")
+				.send({ grant_type: "refresh_token", refresh_token: tokens.refresh_token });
+			expect(refreshed.status).toBe(400);
 		} finally {
 			await handle.dispose();
 		}

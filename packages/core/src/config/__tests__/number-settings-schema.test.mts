@@ -63,20 +63,6 @@ const APP_CONFIG_KEYS: ReadonlyArray<
 		(base, value) => ({ ...base, oauth: { ...base.oauth, nonce: { maxLength: value } } }),
 	],
 	["webauthn.challengeTtlMs", (base, value) => ({ ...base, webauthn: { challengeTtlMs: value } })],
-	[
-		"webauthn.rateLimit.authenticationOptions.limit",
-		(base, value) => ({
-			...base,
-			webauthn: { rateLimit: { authenticationOptions: { limit: value, windowSeconds: 60 } } },
-		}),
-	],
-	[
-		"webauthn.rateLimit.authenticationOptions.windowSeconds",
-		(base, value) => ({
-			...base,
-			webauthn: { rateLimit: { authenticationOptions: { limit: 5, windowSeconds: value } } },
-		}),
-	],
 ];
 
 /** Each key the memory rate limiter's section reads a number at, with the section that sets it. */

@@ -150,13 +150,6 @@ export const wholeNumberInRangeFromEnv = (min: number, max?: number) => {
 	return wholeNumberFromEnv(max === undefined ? bounds : bounds.max(max, { error }));
 };
 
-const rateLimitSpecSchema = z.object({
-	limit: wholeNumberInRangeFromEnv(1),
-	// One year at most, the ceiling of every duration here: a window past the
-	// Date range is one the limiter adapters refuse when they are built.
-	windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
-});
-
 const jwtSchemaBase = z.object({
 	// Required: the issuer belongs to the deployment, never to a request. An
 	// `iss` derived from the Host header is caller-controlled behind a trusted
@@ -706,8 +699,8 @@ export const CoreConfigSchema = z.object({
 			// registration or a request supplies; its shape is the policy's own
 			// (`net/outbound-policy.mts`).
 			outbound: OutboundSectionSchema.optional(),
-			// The session lifecycle's sweep of pending closes, off unless
-			// written. Read by `readSessionLifecycleSweepIntervalMs` alone, as
+			// The session lifecycle's sweep of pending closes: every 60 seconds
+			// unless written, 0 turning it off. Read by `readSessionLifecycleSweepIntervalMs` alone, as
 			// core's numbers are read.
 			sessionLifecycle: z
 				.object({ sweepIntervalSeconds: z.unknown().optional() })
@@ -874,14 +867,10 @@ export const fullSectionsSchema = z.object({
 			challengeTtlMs: wholeNumberInRangeFromEnv(1).optional(),
 			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
 			userVerification: z.enum(["required", "preferred", "discouraged"]).optional(),
-			// Presence-only: a removed key, kept so a root that parses with
-			// `AppConfigSchema` before boot still hands it to the removed-key refusal.
+			// Presence-only: removed keys, kept so a root that parses with
+			// `AppConfigSchema` before boot still hands them to the removed-key refusal.
 			allowCredentialsForKnownUser: z.unknown().optional(),
-			rateLimit: z
-				.object({
-					authenticationOptions: rateLimitSpecSchema.optional(),
-				})
-				.optional(),
+			rateLimit: z.unknown().optional(),
 		})
 		.optional(),
 	// Presence-only: the path the audit sink's selection (the composition

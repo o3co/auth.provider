@@ -181,7 +181,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   per 60 s to the limiter's `defaultLimit`, 60 per 60 s in both bundled
   `reference.conf` files. To keep the old bound, set
   `limits.webauthn-authentication-options { limit = 30, windowSeconds = 60 }`
-  in the limiter's section.
+  in the limiter's section. In code, `AppConfig["webauthn"]["rateLimit"]` is
+  now `unknown`: core keeps the key only so the refusal still sees it.
 - `oauth.grants.authorization_code.pkce.*` and
   `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` refuse the boot; S256
   is mandatory regardless (#827).
@@ -943,6 +944,11 @@ modules fills them.
   `@o3co/auth-provider-core/testing` (#786, #796).
 - **Shutdown.** A cleanup registers the allowance it needs; the template's
   `installGracefulShutdown` takes `cleanupAllowanceMs` (#797).
+- **The session lifecycle sweeps unless told not to.** Installing
+  `sessionLifecycleModule` starts a sweep that resumes the closes left
+  pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
+  sets another interval, and `0` turns it off. It is stopped on dispose,
+  and its timer never keeps the process alive.
 
 ### Exports removed, and signatures changed
 

@@ -18,6 +18,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import {
 	callbackUrlForExchange,
 	codeChallenge,
+	DEFAULT_CLOCK_SKEW_MS,
 	type DelegatedAuthorizationRequest,
 	type DelegatedAuthorizationResult,
 	type DelegatedCodeExchangeRequest,
@@ -25,6 +26,7 @@ import {
 	type DelegatedTokens,
 	type EndSessionRequest,
 	type EndSessionResult,
+	type FederationAsk,
 	type FederationClientSecret,
 	type FederationProfile,
 	type FederationProvider,
@@ -34,6 +36,7 @@ import {
 	type MappedClaims,
 	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
 	type RefreshedTokens,
+	readUpstreamAuthTime,
 	type SupportsClaimMapping,
 	type SupportsDelegatedAuthorization,
 	type SupportsLogout,
@@ -292,12 +295,40 @@ async function resolveServerMetadata(
 	return metadata;
 }
 
+/**
+ * A freshness ask as OIDC Core §3.1.2.1 parameters: `prompt=login` and
+ * `max_age`. A `login` that is not `true` or absent, or a `maxAgeSeconds`
+ * that is not a whole number of seconds, at least 0, is a `RangeError`.
+ */
+function askParameters(label: string, ask: FederationAsk | undefined): Record<string, string> {
+	if (ask === undefined) return {};
+	const { login, maxAgeSeconds } = ask;
+	if (login !== undefined && login !== true) {
+		throw new RangeError(`${label}: login must be true or absent`);
+	}
+	if (maxAgeSeconds !== undefined && !(Number.isSafeInteger(maxAgeSeconds) && maxAgeSeconds >= 0)) {
+		throw new RangeError(`${label}: maxAgeSeconds must be a whole number of seconds, at least 0`);
+	}
+	return {
+		...(login === true ? { prompt: "login" } : {}),
+		...(maxAgeSeconds === undefined ? {} : { max_age: String(maxAgeSeconds) }),
+	};
+}
+
 export async function createOidcProvider(
 	name: string,
 	config: OidcProviderConfig,
 ): Promise<OidcProvider> {
 	checkFederationName(name);
 	const label = `OIDC federation "${name}"`;
+	// How far ahead an id_token's `auth_time` may be: core's skew, or the
+	// operator's clock tolerance when that is wider.
+	const authTimeToleranceMs = Math.max(
+		DEFAULT_CLOCK_SKEW_MS,
+		Number.isFinite(config.clockToleranceSeconds)
+			? (config.clockToleranceSeconds as number) * 1000
+			: 0,
+	);
 	const issuerUrl = parseIssuer(label, config.issuer);
 	const insecure = issuerUrl.protocol === "http:";
 	if (typeof config.clientId !== "string" || config.clientId.length === 0) {
@@ -578,6 +609,7 @@ export async function createOidcProvider(
 				code_challenge: codeChallenge(params.codeVerifier),
 				code_challenge_method: "S256",
 				nonce,
+				...askParameters(label, params.ask),
 			});
 		},
 
@@ -616,6 +648,15 @@ export async function createOidcProvider(
 			if (claims.at_hash !== undefined) {
 				verifyAtHash(label, tokens.id_token ?? "", tokens.access_token, claims.at_hash);
 			}
+			// From the verified id_token alone, never UserInfo: OIDC Core §3.1.2.1
+			// makes it REQUIRED once `max_age` was sent. Whether a session meets an
+			// ask is core's judgement, so the library is not given `maxAge`, which
+			// would refuse a missing one. Judged ahead by the wider of core's skew
+			// and the clock tolerance the library applies to the token.
+			const authTime = readUpstreamAuthTime(claims.auth_time, Date.now(), authTimeToleranceMs);
+			if (authTime === "invalid") {
+				throw new Error(`${label}: id_token auth_time is not a usable instant (OIDC Core §2)`);
+			}
 
 			const info = useUserInfo
 				? await oidc.fetchUserInfo(configuration, tokens.access_token, sub)
@@ -636,6 +677,7 @@ export async function createOidcProvider(
 				// or none, the scope as sent (an empty one kept), the type.
 				...federationTokenSnapshot(tokens, obtainedAt),
 				...(groups ? { groups } : {}),
+				...(authTime === undefined ? {} : { authTime }),
 			};
 		},
 

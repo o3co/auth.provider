@@ -81,6 +81,10 @@ const OPTIONAL = [
 	// the one ends the other. Optional as it is on `oauthModule`: without a
 	// store no surface judges a `sid`.
 	"userSessionStore",
+	// Core's session lifecycle: where installed, the same check reads its
+	// `liveness`, so a session closing or closed is refused from the closing
+	// commit on.
+	"sessionLifecycle",
 ] as const;
 
 type Requires = (typeof REQUIRES)[number];

@@ -476,6 +476,7 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 
 - **リフレッシュトークンファミリー。** `family_id` を持つトークンは、`refreshTokenFamilyRevocation` が配線されていれば `isFamilyRevoked` で確認される: 失効済みのファミリーは `active: false` を返して `introspect.family_revoked` を出す。答えられないストアは `503 temporarily_unavailable`（"refresh token store unavailable"）で、`introspect.store_unavailable` として監査し `introspect_store_unavailable` としてログに出す — 上と同じ理由で障害である。`family_id` の無いトークンは署名と失効ストアだけで検証される。失効したファミリーは、それが発行し得た最後のアクセストークンが受け入れられなくなるまで記憶されるので、ファミリー自身のリフレッシュトークンが期限切れになっても答えは戻らない（core の `refresh-token-family/retention.mts`）。
 - **セッションの生存。** `sid` クレーム — またはトークン交換の結果が subject トークンのセッションへの生存確認専用のつながりとして持つ `liveness_sid`（core の `grants/sessionClaims.mts`） — を持つトークンは `UserSessionStore` で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `503 temporarily_unavailable`（"session store unavailable"）で、ファミリーストアと同じく監査しログに出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、`userSessionStore` を配線しない構成も払わない。
+- **core のセッションライフサイクルを通して。** `sessionLifecycleModule` が `sessionLifecycle` スロットを埋めるとき、イントロスペクション、`/oauth/userinfo`、`POST /oauth/federation/:name/token` は `UserSessionStore` を読む代わりにそれに尋ねる（`sessionLifecycle.liveness`）。終了がコミットされたセッションは、そのコミットから live ではない — ユーザーセッションがまだ残っていても（たとえば relying party への通知が失敗した終了）。終了したセッションと同じく答える（`active: false` / `introspect.session_invalid`、`401 invalid_token` `session_invalid`、`401 invalid_token` "session not found"）。subject がトークンの `sub` と異なる live なセッションも同じく答える。障害は同じ `503`（"session store unavailable"）で、ライフサイクルが `session_lifecycle_unavailable` として、ルートが `introspect_store_unavailable` / `userinfo_store_unavailable`（`store: "session_lifecycle"`）または `federation_token_store_unavailable`（`store: "session_lifecycle"`、`step: "liveness"`）としてログに出し、どれもエラーを持たない。イントロスペクションは `introspect.store_unavailable`（`sid`、`cause` なし）も監査する。例外を投げるライフサイクル（ホストがスロットに入れたもの）も同じ障害で、その行とイベントはエラーの射影を持つ。
 
 これらは問い合わせる呼び出し元にしか効かない: JWT を署名と `exp` だけでオフライン検証するリソースサーバーは失効を見ず、期限まで受け入れ続ける。
 
@@ -568,7 +569,7 @@ OIDC のログアウトエンドポイントは、セッションカスケード
 
 ### セッション終了の通知器
 
-`oauthModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。まだライフサイクルを通してセッションを終了するものはなく、以下のログアウトルートは今も自分のカスケードを走らせる。
+`oauthModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。ライフサイクルが入っているとき、`/oauth/logout` はそれを通してセッションを終了し（下記）、その relying party へのバックチャネルの通知はこの通知器が行う。`POST /oauth/federation/:name/logout` は今も自分の手順を走らせる。
 
 - 通知を送る時点の登録で読んだ relying party の `backchannelLogoutUri` へ、OIDC Back-Channel Logout 1.0 の `logout_token` を 1 つ POST する。送り手と外向きの経路はログアウトルートのブロードキャストと同じである。トークンはキーストアが署名し、`iss` はモジュールの issuer（`oauth.jwt.issuer`）である。
 - トークンは、relying party が断っていない限り（`backchannelLogoutSessionRequired: false`）、何がセッションを終了させたかにかかわらず、そのセッションの `sid` を含む。
@@ -594,6 +595,14 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 - 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
+
+**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、セッションは上の開始・ブロードキャスト・カスケードではなく `sessionLifecycle.close(sid, "rp_logout")` で終了する。セッションを読んだ後のフロー: セッションが参加したフェデレーションを読み（`sessionLifecycle.federations`）、その最初のもののプロバイダーが `SupportsLogout` を実装していれば、保存済みの id_token をベストエフォートで読む — 終了がそれを運ぶフェデレーショントークンを削除するので、終了より前に読む → 終了 → 上と同じく応答する。残りは終了の答えで決まる:
+
+- `done` — 終了の作業がすべて済んだ。ファミリーの失効、フェデレーショントークンとセッションのインデックスの削除、relying party への通知、`UserSession` の削除。
+- `pending` — 終了はコミットされ、作業の一部が残っている。セッションは終了している — 何も参加できず、どの liveness の読み取りも live と答えない — ので、ログアウトは成功として答え、`logout.success` と並べて `logout.close_pending`（`sid`）を監査する。そのセッションの後の終了か、ライフサイクルの巡回が作業を再開する。
+- `unavailable` — 終了がコミットされなかったか、されたかを読めなかった: `503 temporarily_unavailable`（"session store unavailable"）。ライフサイクルが `session_lifecycle_unavailable` として、ルートが `logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`）としてログに出し、`logout.cascade_failed`（`sid`、`store: "session_lifecycle"`）を監査する。この経路でのこのイベントは「終了をコミットできなかった（状態は変わっていないことがある）」という意味で、状態が残されたという意味ではない。ブラウザーのセッションは再試行のために残り、上流では何も終了しない。半分終了した状態になる場合が 1 つある: ライフサイクルは終了のコミットの前にセッションごとのストアの終了の印を書くので、印を書いた後にコミットが失敗すると、ログアウトの再試行が終了を完了するか印が失効するまで、そのセッションのコード交換は拒否される。
+
+ルートは自分ではバックチャネルの `logout_token` を送らない。ライフサイクルが [セッション終了の通知器](#セッション終了の通知器) を通して各 relying party に通知 1 件につき 1 回知らせる。フロントチャネルのページは、終了が答えた relying party ごとに、そのクライアント登録（`clientRepository.findById`）から読んだ iframe を持ち、HTML で答えるときだけ読む。登録が読めなければその relying party の iframe だけを落とし、`client_repository_unavailable`（`site: "logout"`）として 1 回ログに出す。上流の end-session 呼び出しは終了が答えた最初のフェデレーションに送り、終了の前に読んだ id_token は同じフェデレーションのために読んだときだけ添える。読み取りの後に参加したフェデレーションは、ヒントなしで上流で終了する。フェデレーションの一覧が読めなければ、ヒントなしで進む。既に消えたセッションは下と同じ `200` の no-op で、何も終了しない。
 
 **カスケード**は [`cascadeLogout`](./src/logout/cascadeLogout.mts) で、決まった順序の 4 ステップからなる。その doc コメントが完全な契約で、[`cascadeLogout.test.mts`](./src/logout/__tests__/cascadeLogout.test.mts) がそれを固定している:
 
