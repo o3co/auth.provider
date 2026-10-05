@@ -38,7 +38,8 @@ export interface RedisChallengeStoreOptions {
  *   - issue:   SET <prefix><key> "1" PX <ttlMs> NX  → "OK" | null. `PX` takes
  *              whole milliseconds, so a fractional remaining life is rounded
  *              up; a non-finite expiry is refused before Redis is asked.
- *   - find:    PTTL <prefix><key>                   → -2 absent, -1 no-TTL, ≥0 ms
+ *   - find:    PTTL <prefix><key>                   → -2 absent, -1 no-TTL, ≥0 ms;
+ *              the expiry is the instant find asked plus that remaining life
  *   - consume: DEL <prefix><key>                    → count deleted
  *
  * No Lua, no MULTI/EXEC: the contract is split into primitives so that no
@@ -70,12 +71,15 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
 		},
 
 		async find(scope, value): Promise<Challenge | null> {
+			// Read before asking: PTTL is the life left when Redis answered, so the
+			// expiry rebuilt from this instant is never later than the key's.
+			const askedAtMs = Date.now();
 			const pttl = await client.pttl(fullKey(scope, value));
 			if (pttl <= 0) {
 				// -2 absent, -1 no-TTL, 0 expired exactly now → all treated as null.
 				return null;
 			}
-			return { expiresAtMs: Date.now() + pttl };
+			return { expiresAtMs: askedAtMs + pttl };
 		},
 
 		async consume(scope, value) {
