@@ -164,9 +164,10 @@ const isRefusal = (err: unknown): boolean =>
  * assertion claiming issuer B is verified against B's keys only. `exp` is
  * mandatory (RFC 7523 §3 item 4), and `exp` / `nbf` / `iat` must be
  * NumericDates: jose only checks for a number, so `exp: 1e400` would never
- * expire. The result carries the entry's scope and audience ceilings, `iat`
- * as `issuedAt` when the assertion carries one, and `exp` as `expiresAt`,
- * which caps the issued token.
+ * expire. An `iat` further ahead of this server's clock than the entry's
+ * clock tolerance is refused. The result carries the entry's scope and
+ * audience ceilings, `iat` as `issuedAt` when the assertion carries one, and
+ * `exp` as `expiresAt`, which caps the issued token.
  *
  * An entry with `profile: "id-jag"` accepts the Identity Assertion JWT
  * Authorization Grant (draft-ietf-oauth-identity-assertion-authz-grant) and
@@ -334,6 +335,14 @@ export function createRegistryAssertionVerifier(
 			if (malformedClaim !== undefined) {
 				return refused(entry, { reason: "numeric_date", claim: malformedClaim });
 			}
+			// Read before any claims reader runs, so the issue time reported is
+			// the one verified. One beyond this server's clock plus the tolerance
+			// is refused, as `verifyJwt` refuses it: reported, it would read as
+			// later than any boundary it is compared with.
+			const issuedAt = claims.iat;
+			if (issuedAt !== undefined && issuedAt > Math.floor(Date.now() / 1000) + clockTolerance) {
+				return null;
+			}
 
 			if (idJag) {
 				// ID-JAG §3: aud is one issuer identifier, as a string or a
@@ -410,8 +419,7 @@ export function createRegistryAssertionVerifier(
 				issuer: entry.issuer,
 				...(scope === undefined ? {} : { scope }),
 				...(audienceCeiling === undefined ? {} : { audience: audienceCeiling }),
-				// NumericDate-checked above when present; reported as claimed.
-				...(claims.iat === undefined ? {} : { issuedAt: claims.iat as number }),
+				...(issuedAt === undefined ? {} : { issuedAt }),
 				// NumericDate-checked above. Kept as claimed: one already past
 				// within the clock tolerance is refused by the grant, not here.
 				expiresAt: claims.exp as number,
