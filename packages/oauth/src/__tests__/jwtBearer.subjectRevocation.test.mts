@@ -130,32 +130,49 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 		expect(result.status).toBe(200);
 	});
 
-	it("refuses an assertion without an issue time while a boundary is in force", async () => {
+	it("refuses an assertion without an issue time whenever subjectRevocation is wired, boundary or not, before asking the Store", async () => {
+		for (const boundary of [BOUNDARY, null]) {
+			const info = vi.fn();
+			const authenticateByToken = vi.fn(async () => ({ id: "user-42" }));
+			const subjectRevocation = revocationAt(() => boundary);
+			const { result } = await build({
+				subjectRevocation,
+				userRepository: { authenticate: async () => null, authenticateByToken } as never,
+				logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
+			}).handle(ctx());
+			expect(result).toEqual(refused);
+			expect(info).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: "stub" }),
+				"jwt_bearer_assertion_issued_at_missing",
+			);
+			expect(authenticateByToken).not.toHaveBeenCalled();
+			expect(subjectRevocation.calls).toEqual([]);
+		}
+	});
+
+	it("refuses an issue time that is not a usable date whenever subjectRevocation is wired", async () => {
+		for (const boundary of [BOUNDARY, null]) {
+			for (const issuedAt of [Number.NaN, Number.POSITIVE_INFINITY, 1e300, "1700000000"]) {
+				const { result } = await build({
+					issuedAt: issuedAt as number,
+					subjectRevocation: revocationAt(() => boundary),
+				}).handle(ctx());
+				expect(result).toEqual(refused);
+			}
+		}
+	});
+
+	it("logs a covered assertion as revoked", async () => {
 		const info = vi.fn();
-		const { result } = await build({
+		await build({
+			issuedAt: BOUNDARY_SECOND - 60,
 			subjectRevocation: revocationAt(() => BOUNDARY),
 			logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
 		}).handle(ctx());
-		expect(result).toEqual(refused);
 		expect(info).toHaveBeenCalledWith(
 			expect.objectContaining({ kind: "stub" }),
 			"jwt_bearer_assertion_revoked",
 		);
-	});
-
-	it("accepts an assertion without an issue time while no boundary is in force", async () => {
-		const { result } = await build({ subjectRevocation: revocationAt(() => null) }).handle(ctx());
-		expect(result.status).toBe(200);
-	});
-
-	it("refuses an issue time that is not a usable date while a boundary is in force", async () => {
-		for (const issuedAt of [Number.NaN, Number.POSITIVE_INFINITY, 1e300, "1700000000"]) {
-			const { result } = await build({
-				issuedAt: issuedAt as number,
-				subjectRevocation: revocationAt(() => BOUNDARY),
-			}).handle(ctx());
-			expect(result).toEqual(refused);
-		}
 	});
 
 	it("answers 503 when the boundary cannot be read, and logs it", async () => {
@@ -193,8 +210,9 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 		}
 	});
 
-	it("answers 503 for a boundary that is not a valid date, whether or not the assertion reports an issue time", async () => {
+	it("answers 503 for a boundary that is not a valid date, even for an issue time long before it", async () => {
 		const { result } = await build({
+			issuedAt: 1,
 			subjectRevocation: revocationAt(() => new Date(Number.NaN)),
 		}).handle(ctx());
 		expect(result.status).toBe(503);

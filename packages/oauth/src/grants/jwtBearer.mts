@@ -26,8 +26,6 @@ import type {
 import {
 	auditErrorText,
 	boundPolicyAudience,
-	coveredByRevocationBoundary,
-	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	deriveAudienceFromResources,
 	evaluateGrantPolicy,
 	extractResourceParam,
@@ -39,6 +37,7 @@ import {
 	ownedConfirmation,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
+	subjectBoundaryCovers,
 	unrepresentedResources,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 } from "@o3co/auth-provider-core";
@@ -72,11 +71,14 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *   ceiling) → `500 server_error`;
  * - a `resource` the final `aud` cannot represent → `invalid_target`;
  * - client and assertion issuer admit no common audience → `invalid_grant`;
- * - with `subjectRevocation` wired, an assertion whose `issuedAt` is at or
- *   before the resolved subject's revocation boundary (`verifyJwt`'s rule and
- *   allowance), or that reports none while a boundary is in force → the same
- *   uniform `invalid_grant`; an unreadable boundary → `503
+ * - with `subjectRevocation` wired, an assertion that reports no usable
+ *   `issuedAt`, or whose `issuedAt` the resolved subject's revocation
+ *   boundary covers (core's `subjectBoundaryCovers`, `verifyJwt`'s rule) →
+ *   the same uniform `invalid_grant`; an unreadable boundary → `503
  *   temporarily_unavailable`. The boundary is the last read before signing.
+ *   `iat` is required whether or not a boundary is in force: an issuer
+ *   entry's lifetime ceiling is measured from it, and only that ceiling
+ *   keeps an assertion from outliving the boundary that covers it.
  */
 /**
  * What the jwt-bearer grant reads. The verifier and repository are required
@@ -140,6 +142,21 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				};
 			}
 			if (verified === null) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "assertion did not verify",
+					},
+				};
+			}
+			// See the header: with a revocation boundary to honour, an assertion
+			// must say when it was issued. Refused before the Store is asked.
+			if (deps.subjectRevocation !== undefined && !isNumericDate(verified.issuedAt)) {
+				deps.logger?.info(
+					{ kind: assertionVerifier.kind, issuer: verified.issuer },
+					"jwt_bearer_assertion_issued_at_missing",
+				);
 				return {
 					result: {
 						status: 400,
@@ -378,27 +395,10 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			// revocation stamped while the Store or the policy answered is seen.
 			const revocation = deps.subjectRevocation;
 			if (revocation !== undefined) {
-				let revoked: boolean;
-				try {
-					const boundary = await revocation.revokedBefore(subject);
-					if (
-						boundary !== null &&
-						!(boundary instanceof Date && Number.isFinite(boundary.getTime()))
-					) {
-						throw new TypeError("the sessions boundary is neither a valid date nor null");
-					}
-					const { issuedAt: assertionIssuedAt } = verified;
-					revoked =
-						boundary !== null &&
-						(!isNumericDate(assertionIssuedAt) ||
-							coveredByRevocationBoundary(
-								new Date(assertionIssuedAt * 1000),
-								boundary,
-								DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
-							));
-				} catch (err) {
+				const boundary = await subjectBoundaryCovers(revocation, subject, verified.issuedAt);
+				if (boundary.answer === "unavailable") {
 					deps.logger?.error(
-						{ store: "revocation_boundary", err: loggableError(err) },
+						{ store: "revocation_boundary", err: loggableError(boundary.cause) },
 						"jwt_bearer_revocation_boundary_unavailable",
 					);
 					return {
@@ -409,7 +409,7 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 						},
 					};
 				}
-				if (revoked) {
+				if (boundary.answer === "covered") {
 					// The uniform answer: a distinct one would reveal that the
 					// handle resolves to an account with a revocation in force.
 					deps.logger?.info(
