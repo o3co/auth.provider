@@ -313,8 +313,9 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * name it passes `admitSession` (`acme.export`), each declaring one of
 	 * core's grades. A declaration, not a factory: boot reads each once, at
 	 * stage 1. A name outside the grammar, a grade outside the grades (or
-	 * `remediation`, a requirement's), a container that is not a record and an
-	 * override refuse it there (`contribution-malformed`); a name two modules
+	 * `remediation`, a requirement's) and a container that is not a record
+	 * refuse it there (`contribution-malformed`), and an override too
+	 * (`contribution-kind-guarded`); a name two modules
 	 * register refuses it too (`duplicate-contribute`); a host may not supply
 	 * the collector (`contribution-kind-guarded`).
 	 */
