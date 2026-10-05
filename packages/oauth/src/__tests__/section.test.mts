@@ -25,6 +25,7 @@ import {
 	checkAcrValueName,
 	MAX_DURATION_SECONDS,
 	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { parseString } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
@@ -164,9 +165,21 @@ describe("every level refuses a key it does not declare, at its path", () => {
 			"legacyTokenCompat",
 		],
 		[
+			"oauth.refreshToken.legacyTokenCompat",
+			"refreshToken.legacyTokenCompat",
+			true,
+			"legacyTokenCompat",
+		],
+		[
 			"oauth.authorize.allowUnmarkedClients",
 			"authorize.allowUnmarkedClients",
 			false,
+			"allowUnmarkedClients",
+		],
+		[
+			"oauth.authorize.allowUnmarkedClients",
+			"authorize.allowUnmarkedClients",
+			true,
 			"allowUnmarkedClients",
 		],
 	])(
@@ -320,6 +333,15 @@ describe("oauth.accessToken", () => {
 		}
 	});
 
+	it.each([0, -1])(
+		"refuses the deprecated expiresIn = %j standing alone at that key, and nothing built on it",
+		(expiresIn) => {
+			expect(issuesOf(withValue("accessToken", { expiresIn })).map((issue) => issue.path)).toEqual([
+				"accessToken.expiresIn",
+			]);
+		},
+	);
+
 	for (const key of ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const) {
 		for (const bad of [0, -1, MAX_DURATION_SECONDS + 1, ""]) {
 			it(`refuses ${key} = ${JSON.stringify(bad)} at that key, and nothing built on it`, () => {
@@ -335,10 +357,45 @@ describe("oauth.accessToken", () => {
 });
 
 describe("oauth.refreshToken", () => {
+	it("reads a refreshToken carrying its lifetime alone as given", () => {
+		const parsed = oauthSectionSchema.parse(withValue("refreshToken", { expiresIn: 86400 })) as {
+			refreshToken: unknown;
+		};
+		expect(parsed.refreshToken).toEqual({ expiresIn: 86400 });
+	});
+
+	it("requires expiresIn", () => {
+		expect(issuesOf(withValue("refreshToken", {})).map((issue) => issue.path)).toEqual([
+			"refreshToken.expiresIn",
+		]);
+	});
+
+	it.each([1, 86_400, MAX_DURATION_SECONDS])(
+		"accepts expiresIn = %j, from one second to the ceiling",
+		(expiresIn) => {
+			expect(issuesOf(withValue("refreshToken.expiresIn", expiresIn))).toEqual([]);
+		},
+	);
+
+	// The rule is core's resolver's, which every grant that mints a refresh
+	// token reads the lifetime through: a hand-built configuration meets it
+	// there.
+	it.each([1, 86_400, MAX_DURATION_SECONDS, 0, -1, 1.5, Number.NaN, MAX_DURATION_SECONDS + 1])(
+		"judges expiresIn = %j as resolveRefreshTokenLifetime does",
+		(expiresIn) => {
+			const refused = issuesOf(withValue("refreshToken.expiresIn", expiresIn)).length > 0;
+			const resolve = () => resolveRefreshTokenLifetime({ oauth: { refreshToken: { expiresIn } } });
+			if (refused) expect(resolve).toThrow(RangeError);
+			else expect(resolve()).toBe(expiresIn);
+		},
+	);
+
 	it.each([
 		["unknownFamilyPolicy", "reject"],
 		["unknownFamilyPolicy", "accept"],
+		["unknownFamilyPolicy", "warn"],
 		["legacyRtPolicy", "reject"],
+		["legacyRtPolicy", "accept-with-warning"],
 	])("refuses %s = %j: a key the section no longer declares", (key, value) => {
 		const issues = issuesOf(withValue(`refreshToken.${key}`, value));
 		expect(issues.map((issue) => issue.path)).toEqual(["refreshToken"]);
@@ -415,6 +472,18 @@ describe("oauth.authorize", () => {
 		]);
 	});
 
+	it.each(["urn:x pwd", "urn:x\tpwd", 'urn:"x"', "urn:é"])(
+		"names %j at its full path in the refusal",
+		(key) => {
+			expect(
+				messagesAt(
+					withValue("authorize.acrValues", { [key]: ["pwd"] }),
+					`authorize.acrValues.${key}`,
+				),
+			).toEqual([expect.stringContaining(`oauth.authorize.acrValues key ${JSON.stringify(key)}`)]);
+		},
+	);
+
 	it("refuses every unusable key, beside a usable one and an entry refused for its value", () => {
 		const paths = issuesOf(
 			withValue("authorize.acrValues", {
@@ -437,6 +506,22 @@ describe("oauth.authorize", () => {
 	it("accepts a key of any printable ASCII but the space, the double quote and the backslash", () => {
 		const key = "urn:!#$%&'()*+,-./:;<=>?@[]^_`{|}~";
 		expect(issuesOf(withValue("authorize.acrValues", { [key]: ["pwd"] }))).toEqual([]);
+	});
+});
+
+describe("oauth.resourceIndicator", () => {
+	it("is absent when omitted: the schema invents no default", () => {
+		const parsed = oauthSectionSchema.parse(withValue("resourceIndicator", undefined)) as Record<
+			string,
+			unknown
+		>;
+		expect(parsed).not.toHaveProperty("resourceIndicator");
+	});
+
+	it("requires enabled once the level is set", () => {
+		expect(issuesOf(withValue("resourceIndicator", {})).map((issue) => issue.path)).toEqual([
+			"resourceIndicator.enabled",
+		]);
 	});
 });
 
@@ -536,6 +621,13 @@ describe("every boolean reads the string an environment variable carries", () =>
 			unknown
 		>;
 		expect(parsed.requireEmailVerified).toBeUndefined();
+	});
+
+	it("leaves an omitted jwt.legacyTypAccept undefined rather than defaulting it", () => {
+		const parsed = oauthSectionSchema.parse(withValue("jwt.legacyTypAccept", undefined)) as {
+			jwt: Record<string, unknown>;
+		};
+		expect(parsed.jwt.legacyTypAccept).toBeUndefined();
 	});
 });
 
