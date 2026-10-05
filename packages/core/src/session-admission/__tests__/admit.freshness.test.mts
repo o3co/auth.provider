@@ -383,6 +383,37 @@ describe("admission reads the record and the boundary again after its requiremen
 		expect(w.gets).toBe(2);
 		expect(w.boundaryReads).toBe(0);
 	});
+
+	it("reads again after the last requirement asked, when an earlier one answered met", async () => {
+		const w = world();
+		const slow = pending("second");
+		const admission = admitSession(depsOver(w, [met("first"), slow.requirement]), {
+			claim: cookie(),
+			action: "test.use",
+		});
+		await slow.asked;
+		w.boundary = NOW;
+		slow.answer({ outcome: "met" });
+		expect(await admission).toEqual({ outcome: "revoked" });
+		expect([w.gets, w.boundaryReads]).toEqual([2, 2]);
+	});
+
+	it("rejects, as at the check, when the clock throws on the last reading", async () => {
+		const w = world();
+		let readings = 0;
+		const clock = () => {
+			readings++;
+			if (readings > 1) throw new Error("clock down");
+			return NOW;
+		};
+		await expect(
+			admitSession(depsOver(w, [met("a")], { now: clock }), {
+				claim: cookie(),
+				action: "test.use",
+			}),
+		).rejects.toThrow("clock down");
+		expect(w.gets).toBe(1);
+	});
 });
 
 describe("an outage on the second reading is admission's unavailable, as on the first", () => {
@@ -438,6 +469,52 @@ describe("an outage on the second reading is admission's unavailable, as on the 
 		expect(w.gets).toBe(1);
 		expect(w.boundaryReads).toBe(1);
 		expect(lines).toHaveLength(1);
+	});
+
+	it("answers unavailable (the requirement's name) at once for an answer that is not a verdict, with no second reading, whatever the stores hold by then", async () => {
+		const w = world();
+		const slow = pending();
+		const admission = admitSession(depsOver(w, [slow.requirement]), {
+			claim: cookie(),
+			action: "test.use",
+		});
+		await slow.asked;
+		w.record = null;
+		slow.answer({ outcome: "garbage" } as never);
+		expect(await admission).toEqual({ outcome: "unavailable", store: "slow" });
+		expect([w.gets, w.boundaryReads]).toEqual([1, 1]);
+	});
+
+	it("answers unavailable (revocation_boundary) when the second boundary read answers neither a date nor null", async () => {
+		const w = world();
+		const slow = pending();
+		const admission = admitSession(depsOver(w, [slow.requirement]), {
+			claim: cookie(),
+			action: "test.use",
+		});
+		await slow.asked;
+		w.boundary = new Date(Number.NaN);
+		slow.answer({ outcome: "met" });
+		expect(await admission).toEqual({ outcome: "unavailable", store: "revocation_boundary" });
+	});
+
+	it("keeps the subject mismatch on the last reading when the audit sink cannot be read", async () => {
+		const w = world();
+		const slow = pending();
+		const base = depsOver(w, [slow.requirement]);
+		const admission = admitSession(
+			{
+				...base,
+				get auditSink(): AuditSink {
+					throw new Error("sink down");
+				},
+			},
+			{ claim: cookie(), action: "test.use" },
+		);
+		await slow.asked;
+		w.record = session({ sub: "user-2" });
+		slow.answer({ outcome: "met" });
+		expect(await admission).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
 	});
 });
 
