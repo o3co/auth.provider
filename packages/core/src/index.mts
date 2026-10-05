@@ -1311,10 +1311,13 @@ export {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./user-sessions/revokeAllForSubject.mjs";
-// How a SubjectRevocation store reads its arguments, and bounds a boundary by its clock.
+// How a SubjectRevocation store reads its arguments, and bounds a boundary by
+// its clock; and the one check a grant makes of a claim against the boundary.
 export {
 	checkSubjectRevocationInstant,
 	clampSubjectRevocationBoundary,
+	type SubjectBoundaryAnswer,
+	subjectBoundaryCovers,
 } from "./user-sessions/subjectRevocationBoundary.mjs";
 export {
 	createSubjectRevocationService,
