@@ -161,8 +161,8 @@ export async function readLiveSession(
 	// Step 4: the revocation boundary, against a live record; a token's is
 	// verifyJwt's, so the two readings do not double up. The boundary is read
 	// off `deps` once, in the same guarded section as its answer. Compared in
-	// whole seconds by verifyJwt's rule, as the `auth_time` the session's
-	// tokens carry is: a session admitted here is one whose tokens verify.
+	// whole seconds by verifyJwt's rule at the default allowance, as the
+	// `auth_time` a token from this session carries is compared.
 	if (session !== null && presented.carrier !== "token") {
 		try {
 			const subjectRevocation = checked.readSubjectRevocation();
