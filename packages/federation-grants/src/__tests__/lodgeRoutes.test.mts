@@ -472,7 +472,9 @@ describe("POST /oauth/federation-grants — the deployment's limiter, keyed on t
 			...(failMode === undefined ? {} : { failMode }),
 			check: async (key, ctx) => {
 				asked.push({ key, ctx });
-				return key.includes(":client:") ? client(key) : { allowed: true };
+				return key.includes(":client:")
+					? client(key)
+					: { allowed: true, limit: 10, remaining: 9, resetAt: new Date(Date.now() + 60_000) };
 			},
 		};
 		return { limiter, asked };
@@ -482,7 +484,10 @@ describe("POST /oauth/federation-grants — the deployment's limiter, keyed on t
 		const { limiter, asked } = clientLimiter(async () => ({ allowed: true }));
 		const h = harness({ rateLimiter: limiter });
 
-		expect((await lodge(h)).status).toBe(201);
+		const response = await lodge(h);
+		expect(response.status).toBe(201);
+		// An allowed lodging keeps the IP key's headers.
+		expect(response.headers["ratelimit-remaining"]).toBe("9");
 
 		expect(asked.map(({ key }) => key)).toEqual([
 			expect.stringMatching(/^federation_grants:ip:/),
@@ -523,6 +528,10 @@ describe("POST /oauth/federation-grants — the deployment's limiter, keyed on t
 		expect(response.status).toBe(429);
 		expect(response.body).toEqual({ error: "rate_limited", error_description: "provider" });
 		expect(Number(response.headers["retry-after"])).toBeGreaterThan(0);
+		// The IP key's headers say the request is allowed: not on the client's refusal.
+		for (const header of ["ratelimit-limit", "ratelimit-remaining", "ratelimit-reset"]) {
+			expect(response.headers[header], header).toBeUndefined();
+		}
 		expect(h.intents.size).toBe(0);
 		expect(h.store.size).toBe(0);
 		await h.background.drain();
@@ -543,6 +552,7 @@ describe("POST /oauth/federation-grants — the deployment's limiter, keyed on t
 			error_description: "Rate limiter temporarily unavailable",
 		});
 		expect(closed.intents.size).toBe(0);
+		expect(refused.headers["ratelimit-remaining"]).toBeUndefined();
 		expect(closed.lines.map((line) => String(line.args[1]))).toContain(
 			"rate_limiter_failed_closed",
 		);

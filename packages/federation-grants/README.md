@@ -201,7 +201,9 @@ say what each one means and what to do.
   and a first-time lodging (`POST /oauth/federation-grants`) also under
   `federation_grants:client:<client_id>` after it: a lodging writes records
   for any subject the client names, so one client's lodgings are counted
-  across every address it calls from. While the feature is on,
+  across every address it calls from. Its refusal (`429` or `503`) carries
+  none of the IP throttle's `RateLimit-*` headers, which describe a budget
+  that allowed the request. While the feature is on,
   the module claims both prefixes with no budget of its own
   (`rateLimitBudgets`): the limiter's `limits` entry or its default applies,
   and no other module can set a budget for them. Request volume is the

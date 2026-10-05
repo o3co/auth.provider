@@ -53,7 +53,12 @@ import {
 	rateLimiterUnavailableEnvelope,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
-import express, { type ErrorRequestHandler, type RequestHandler, type Router } from "express";
+import express, {
+	type ErrorRequestHandler,
+	type RequestHandler,
+	type Response,
+	type Router,
+} from "express";
 import { createRouteDenialAudit } from "./denialAudit.mjs";
 import {
 	createFederationGrantCreateHandler,
@@ -119,9 +124,16 @@ export const notFound: RequestHandler = (_req, res) => {
  * The limiter asked under `federation_grants:client:<client_id>` once the
  * client is authenticated. The budget is the limiter's, the outage policy
  * core's; a refusal is answered as the IP throttle's, `rate_limited` /
- * `provider`. A request with no authenticated client passes, for the handler
- * to refuse.
+ * `provider`. A refusal, 429 or 503, drops the IP throttle's `RateLimit-*`
+ * headers, which describe a budget that allowed the request. A request with
+ * no authenticated client passes, for the handler to refuse.
  */
+const withoutIpBudgetHeaders = (res: Response): void => {
+	for (const header of ["RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"]) {
+		res.removeHeader(header);
+	}
+};
+
 const clientThrottle =
 	(policy: RateLimitPolicy): RequestHandler =>
 	async (req, res, next) => {
@@ -137,11 +149,13 @@ const clientThrottle =
 		);
 		if (outcome.status === "unavailable") {
 			if (outcome.failMode === "open") return next();
+			withoutIpBudgetHeaders(res);
 			res.status(503).json(rateLimiterUnavailableEnvelope());
 			return;
 		}
 		const { decision } = outcome;
 		if (decision.allowed) return next();
+		withoutIpBudgetHeaders(res);
 		const resetMs = decision.resetAt?.getTime();
 		if (resetMs !== undefined && Number.isFinite(resetMs)) {
 			res.setHeader("Retry-After", String(Math.max(0, Math.ceil((resetMs - Date.now()) / 1000))));
