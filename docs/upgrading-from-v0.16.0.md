@@ -580,6 +580,12 @@ modules fills them.
   is on provides the slot itself, or the boot is refused
   (`missing-required-component`, naming `oauthTokenSettings`). A factor
   switched off by `mfa-totp-factor.enabled = false` requires nothing.
+- **BREAKING: an enabled `authorization_code` grant with `subjectRevocation`
+  wired requires `userSessionStore`.** Without one the boot is refused
+  (`contribute-factory-failed`, naming both slots): wire a
+  `userSessionStore` (core's `memorySessionStoresModule` or
+  `redisSessionStoresModule`, which fill both), or remove
+  `subjectRevocation`. The standalone template wires both.
 - **The federation projections.** A name-keyed contribution factory (a
   `grants` or `mfaFactors` entry, say) that reads `federationProviders` or
   `federationRedirectPolicyResolver` while it runs refuses the boot
