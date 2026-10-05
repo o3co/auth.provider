@@ -30,7 +30,9 @@
  * through a record that left the store. A close repeated after the
  * eviction, or `federations`, then answers no snapshot, as after the
  * record's retention. An active or closing record is never evicted: that
- * would drop a live session's fence, or leave its close work undone.
+ * would drop a live session's fence, or leave its close work undone; so a
+ * loop whose closes stay pending still fills the store until their
+ * retention. An `open` at capacity scans the store once.
  */
 
 import {

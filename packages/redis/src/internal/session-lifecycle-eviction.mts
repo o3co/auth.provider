@@ -16,9 +16,9 @@
 
 /**
  * The session lifecycle store's boot check of its server's eviction policy.
- * Every key the store writes must stay until it expires: an evicted record
- * lets a closed session be opened and joined again, or loses a close's
- * pending work; an evicted replay key lets a resent write apply again; and
+ * Every key the store writes must stay until it expires: an evicted active
+ * or closing record drops a live session's fence or loses its pending work;
+ * an evicted replay key lets a resent write apply again; and
  * the closing index carries no TTL, so an evicted index hides a closing
  * record from the listing. So every eviction policy refuses the boot. A
  * policy that could not be read, one the check does not know, or a server

@@ -343,8 +343,8 @@ Module-level messages that arrive wrapped in a factory failure:
   (`checkSessionLifecycleEviction`). A `volatile-*` or `allkeys-*` policy is
   refused with a `RedisStoreEvictableError` `cause` whose `reason` is
   `session-lifecycle-store-evictable` and whose message names the policy: an
-  evicted record lets a closed session be opened and joined again, an evicted
-  replay key lets a resent write apply again, and an evicted closing index
+  evicted active or closing record drops a live session's fence or loses its
+  pending work, an evicted replay key lets a resent write apply again, and an evicted closing index
   hides a closing session from the work that resumes it. Set
   `maxmemory-policy` `noeviction`, or give the store a Redis of its own
   (`packages/redis/src/internal/session-lifecycle-eviction.mts`). A policy it

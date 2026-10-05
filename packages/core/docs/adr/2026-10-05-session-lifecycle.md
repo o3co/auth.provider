@@ -14,6 +14,7 @@ store and the callers' switch follow in the order below
   Written against `develop` at `5871ff698`.
 - Amended 2026-10-05: the service opens a record where a session is
   established (D8).
+- Amended 2026-10-06: the memory store, full, evicts a closed record.
 
 ## Context
 
@@ -108,7 +109,8 @@ the work, so every work item is safe to run more than once.
 - The memory store (`createInMemorySessionLifecycleStore`) runs each member as
   one synchronous step, holds at most `maxEntries` records and
   `maxParticipants` per record, and when full refuses rather than evicts: an
-  evicted record would let a closed session be joined again.
+  evicted record would let a closed session be joined again (superseded by
+  the 2026-10-06 amendment).
 - `sessionLifecycleStoreContract` in `@o3co/auth-provider-test-kit` holds a
   store to the rules a suite can observe; a Redis store runs it on two
   connections.
@@ -381,11 +383,12 @@ close commits with work still pending is audited as `logout.close_pending`.
 
 ## Amendment 2026-10-06 — the memory store, full, evicts a closed record
 
-The memory store no longer only refuses when full. It drops lapsed records
+The memory store no longer only rejects when full. It drops lapsed records
 and, if that makes no room, evicts the `closed` record whose retention ends
-first; it refuses when there is none. A login and logout loop on one
+first; it rejects when there is none. A login and logout loop on one
 account would otherwise fill it with closed records and refuse every login
-until they lapsed.
+until they lapsed. Closing records are never evicted, so a loop whose
+closes stay pending still fills the store until their retention.
 
 A closed record may so go before its retention. What makes that safe is
 the service's re-check on a join that adopts a session (#1468): the service
@@ -395,4 +398,7 @@ read first is still there, so a closed session is not joined again through
 a record that left the store. A repeated close or `federations` then
 answers no snapshot, as after the record's retention. An active or closing
 record is never evicted: that would drop a live session's fence, or leave
-its close work undone. The port and its contract are unchanged.
+its close work undone. A close run overlapping one that completed may
+answer `pending` once the closed record has left the store, as after its
+retention; a subject revocation may then report that sid not revoked until
+a retry. The port and its contract are unchanged.

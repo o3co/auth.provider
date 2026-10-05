@@ -126,7 +126,11 @@ export type SessionJoinOutcome =
  * parties (`client_id`) and federations the session joined: the call that
  * made the closing commit answers, while the per-session stores are read
  * elsewhere, those they listed first, then the snapshot's, each once — the
- * federations in the order they joined; a later call answers the snapshot's.
+ * federations in the order they joined; a later call answers the snapshot's
+ * while the record is held. A run overlapping a close that completed may
+ * answer `pending` once the closed record has left the store (evicted, as
+ * after its retention); a subject revocation may then report that sid not
+ * revoked until a retry.
  * `unavailable`: the closing commit did not land, or whether it did could
  * not be read; or, where the commit found no live record (the session's end
  * passed on the store's clock), an item of the close work, run with no
