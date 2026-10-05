@@ -92,7 +92,6 @@ import {
 	createRecordingMailSender,
 	type FakeIdp,
 	type RecordingMailSender,
-	withUserRepositoryHttp,
 } from "@o3co/auth-provider-core/testing";
 import {
 	DEVICE_CODE_GRANT_TYPE,
@@ -288,6 +287,19 @@ export function browser() {
 
 /** Which store backs each added feature: memory on one replica, Redis on several. */
 export type Stores = "memory" | "redis";
+
+/**
+ * A copy of `config` whose user repository settings, the template's
+ * `repositories.user.http`, are `http`, every other key kept.
+ */
+function withUserHttp<C extends object>(config: C, http: Readonly<Record<string, unknown>>): C {
+	const repositories = (config as { repositories?: { user?: Readonly<Record<string, unknown>> } })
+		.repositories;
+	return {
+		...config,
+		repositories: { ...repositories, user: { ...repositories?.user, http: { ...http } } },
+	};
+}
 
 /** The settings with no default, laid over the resolved config for `features`. */
 function withFeatures<C extends AppConfig>(config: C, features: Features): C {
@@ -926,7 +938,7 @@ export async function fullSetOptions(
 				options.mfaFactorStoreAt === undefined
 					? featured
 					: { ...featured, ...foundationMfaFactorStoreConfig(options.mfaFactorStoreAt) };
-			const users = userHttp === undefined ? stored : withUserRepositoryHttp(stored, userHttp);
+			const users = userHttp === undefined ? stored : withUserHttp(stored, userHttp);
 			return options.adjust ? options.adjust(users) : users;
 		},
 		// The Store-backed factor store is handed the user repository's
