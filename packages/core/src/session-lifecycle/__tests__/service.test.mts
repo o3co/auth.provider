@@ -399,6 +399,21 @@ describe("open", () => {
 		expect(await h.read()).toEqual(closing);
 	});
 
+	it("refuses a repeat for the same subject with another end, and a closed record, writing nothing", async () => {
+		const h = harness();
+		const expiresAt = await h.establish();
+		const before = await h.read();
+		expect(
+			await h.lifecycle.open(SID, { sub: SUB, expiresAt: new Date(expiresAt.getTime() + 1) }),
+		).toEqual({ outcome: "refused" });
+		expect(await h.read()).toEqual(before);
+		expect((await h.lifecycle.close(SID, "session_logout")).outcome).toBe("done");
+		const closed = await h.read();
+		expect(closed?.value.state).toBe("closed");
+		expect(await h.lifecycle.open(SID, { sub: SUB, expiresAt })).toEqual({ outcome: "refused" });
+		expect(await h.read()).toEqual(closed);
+	});
+
 	it("refuses an end already past and writes nothing", async () => {
 		const h = harness();
 		expect(

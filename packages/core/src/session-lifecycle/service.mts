@@ -80,6 +80,7 @@ import type { SessionCloseNotifier } from "./notifier.mjs";
 /** The session a record is opened for: its subject and its own end. */
 export interface SessionOpenRequest {
 	readonly sub: string;
+	/** The end the user session will carry. */
 	readonly expiresAt: Date;
 }
 
@@ -162,7 +163,7 @@ export interface SessionResumeReport {
 
 /** The session lifecycle, filled in the `sessionLifecycle` slot. */
 export interface SessionLifecycle {
-	/** Opens the lifecycle of the session `sid` as it is established. Idempotent. */
+	/** Opens the lifecycle of the session `sid` as it is established. Idempotent for the same subject and end. */
 	open(sid: string, request: SessionOpenRequest): Promise<SessionOpenOutcome>;
 	/** Adds what `request` names to the live session `sid`, only while it is not closing. */
 	join(sid: string, request: SessionJoinRequest): Promise<SessionJoinOutcome>;
@@ -601,9 +602,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		async open(sid, { sub, expiresAt }) {
 			checkSessionLifecycleKey(sid, "sid");
 			checkSessionLifecycleKey(sub, "sub");
-			checkSessionExpiresAt(expiresAt);
+			const end = checkSessionExpiresAt(expiresAt);
 			try {
-				return readSessionOpenAnswer(await store.open(sid, sub, expiresAt));
+				return readSessionOpenAnswer(await store.open(sid, sub, end));
 			} catch (error) {
 				unavailable("open", sid, error);
 				return { outcome: "unavailable" };

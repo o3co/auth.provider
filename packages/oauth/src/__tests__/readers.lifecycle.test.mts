@@ -87,6 +87,7 @@ async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<str
 /** A lifecycle answering `answer` for liveness; every member a spy. */
 function lifecycleAnswering(answer: SessionLiveness) {
 	return {
+		open: vi.fn<SessionLifecycle["open"]>(async () => ({ outcome: "opened" })),
 		join: vi.fn<SessionLifecycle["join"]>(async () => ({ outcome: "joined" })),
 		close: vi.fn<SessionLifecycle["close"]>(async () => ({
 			outcome: "done",
