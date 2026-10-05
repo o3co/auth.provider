@@ -1245,6 +1245,7 @@
 ./testing TestOAuthTokenSettingsOverrides type
 ./testing TestRateLimiter type
 ./testing TestRateLimiterOptions type
+./testing TokenBindingSettingsContractInput type
 ./testing auditHooksModule value
 ./testing clientEntries value
 ./testing coreConfigForTests value
@@ -1263,6 +1264,7 @@
 ./testing createTestOAuthTokenSettings value
 ./testing createTestRateLimiter value
 ./testing createTestSessionCookiePolicy value
+./testing createTestTokenBindingSettings value
 ./testing csrfGuardContract value
 ./testing csrfTokenSignerContract value
 ./testing deploymentModeContract value
@@ -1285,6 +1287,7 @@
 ./testing sessionCookiePolicyContract value
 ./testing sessionRequirementContract value
 ./testing testMfaFactorProofs value
+./testing tokenBindingSettingsContract value
 ./testing unreadableModuleLeaves value
 ./testing userRepositoryHttpOf value
 ./testing withFederation value

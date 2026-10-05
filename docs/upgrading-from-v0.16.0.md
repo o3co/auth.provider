@@ -222,12 +222,12 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   boot (`config-validation-failed`), naming the section or block that holds it
   and the key, where it used to be ignored. Before you upgrade, check every
   key you set against the module's README, and correct or delete the ones it
-  does not list. The sections that still accept an unknown key are `oauth`
-  (the section and its nested blocks) and `session-store.storage`. `mfa`, at
-  every level, and `mfa-totp-factor` refuse one too (#1329): an empty
-  `mfa.factors` block an older configuration leaves behind (the TOTP factor's
-  old path, its variables unset) is such a key — delete it. So does
-  `webauthn`, at every level (#1336). The keys under `audit-sink` are the
+  does not list. `session-store.storage` holds `type` and the `redis` block
+  alone, so a block for another storage type (`memory {}`, say) is refused —
+  delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
+  too (#1329): an empty `mfa.factors` block an older configuration leaves
+  behind (the TOTP factor's old path, its variables unset) is such a key —
+  delete it. So does `webauthn`, at every level (#1336). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token

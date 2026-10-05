@@ -23,6 +23,7 @@
  */
 
 import { deploymentModeOf } from "../deployment/mode.mjs";
+import { resolveTokenBindingSettings } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import { prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { auditSlotFor } from "./audit-fan-out.mjs";
@@ -37,6 +38,7 @@ import type {
 	ContributionCollectorMap,
 } from "./types.mjs";
 import { BootError } from "./types.mjs";
+import { undeclaredAbsenceRefusal } from "./validate-manifests.mjs";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -116,7 +118,8 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 /**
  * Stage 3 of the boot planner. Seeds `bootstrapComponents`, applies
  * `overrideComponents`, fills `deploymentMode` from the configuration's
- * `core.deployment.mode`, injects the synthetic projections of
+ * `core.deployment.mode` and `tokenBindingSettings` from its
+ * `core.tokenBinding`, injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
  * provider factory in `plan.providerActivations` order. The `auditSink`
@@ -134,6 +137,11 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * provided `oauthTokenSettings` the slot refuses is reported the same way,
  * after the provider's own cleanup too, unless the refusal is already a
  * BootError (a lifetime beyond the configuration's), which is thrown as it is.
+ *
+ * Once every provider has run, a slot in `undeclaredAbsenceSlots` filled with
+ * `undefined` (an override or bootstrap value given as `undefined`, or a
+ * factory resolving to it) is refused with `component-absence-undeclared`,
+ * after the cleanups of what is materialised.
  */
 export async function materializeComponents(
 	plan: BootPlan,
@@ -168,6 +176,10 @@ export async function materializeComponents(
 	// replica-safety guard decided by. Stage 1 refuses the key from every
 	// other source.
 	components.deploymentMode = deploymentModeOf(bootstrapComponents.config);
+	// Core's token-binding settings, frozen, from the same configuration with
+	// core's one reader of the section — what boot's dispatch policy is too.
+	// Stage 1 refuses the key from every other source.
+	components.tokenBindingSettings = resolveTokenBindingSettings(bootstrapComponents.config);
 
 	// Synthetic projections are stable read-through views of the collectors
 	// stage 4 fills, so a provider that requires one gets the object the world
@@ -270,6 +282,19 @@ export async function materializeComponents(
 			componentKey,
 			auditSlot.provided(componentKey, held),
 		);
+	}
+
+	// A slot whose absence is undeclared must hold a value, whichever source
+	// filled it: one answering `undefined` is as unfilled as one nothing plans.
+	// A provider no active module reads is not run, and its slot stays unset.
+	const unfilled = plan.validated.undeclaredAbsenceSlots.find(
+		(slot) =>
+			Object.hasOwn(components, slot.componentKey) &&
+			components[slot.componentKey as string] === undefined,
+	);
+	if (unfilled !== undefined) {
+		await runCleanupsReverse(cleanups);
+		throw undeclaredAbsenceRefusal(unfilled, "materializeComponents");
 	}
 
 	return {

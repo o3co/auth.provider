@@ -402,6 +402,7 @@ describe("a key a section does not declare", () => {
 		["session.rateLimit.login.windowSeconds = 60", "windowSeconds"],
 		['session-store.storag.type = "memory"', "storag"],
 		['session-store.storage.redis.passwd = "p"', "passwd"],
+		["session-store.storage.memory.max = 100", "memory"],
 	])("%s: refused, naming %s", async (hocon, key) => {
 		const err = await refused({ operatorHocon: `${hocon}\n` });
 

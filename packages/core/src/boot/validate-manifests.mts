@@ -81,11 +81,13 @@ import {
 import { frozenSection, parseSection } from "./parsed-values.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
+	BootStage,
 	BootstrapMap,
 	ContributionEntry,
 	ContributionKind,
 	ContributionKindMap,
 	NormalisedModule,
+	UndeclaredAbsenceSlot,
 	ValidatedManifests,
 	ValidatedModule,
 } from "./types.mjs";
@@ -530,14 +532,21 @@ function checkAuthoritativeOverrides(
 // ---------------------------------------------------------------------------
 
 /**
- * What a `synthetic-key-collision` message adds for `key`: for
- * `deploymentMode`, which boot fills from the configuration, where to state
- * the mode instead.
+ * What a `synthetic-key-collision` message adds for `key`: for a key boot
+ * fills from the configuration (`deploymentMode`, `tokenBindingSettings`),
+ * where to state its value instead.
  */
-const syntheticKeyRemedy = (key: string): string =>
-	key === "deploymentMode"
-		? " Set core.deployment.mode in the configuration instead: boot fills deploymentMode from it."
-		: "";
+const SYNTHETIC_KEY_REMEDIES: ReadonlyMap<string, string> = new Map([
+	[
+		"deploymentMode",
+		" Set core.deployment.mode in the configuration instead: boot fills deploymentMode from it.",
+	],
+	[
+		"tokenBindingSettings",
+		" Set core.tokenBinding in the configuration instead: boot fills tokenBindingSettings from it.",
+	],
+]);
+const syntheticKeyRemedy = (key: string): string => SYNTHETIC_KEY_REMEDIES.get(key) ?? "";
 
 /**
  * Step 3: Check bootstrap/overrideComponents/synthetic-key constraints.
@@ -1537,34 +1546,25 @@ const CORE_SLOT_ABSENCE_POLICIES: Readonly<Record<string, AbsencePolicy>> = {
 const CORE_POLICY_OWNER = "core";
 
 /**
- * Enforces `ModuleSpec.absencePolicies`, and the policies core attaches to its
- * own slots (`CORE_SLOT_ABSENCE_POLICIES`): every optional key carrying a
- * policy must be filled from one of the three component sources, or the config
- * must carry the policy's declared-absent value. Otherwise boot refuses with
- * `component-absence-undeclared`: a capability slot (token revocation, an
- * audit sink, a rate limiter) must never be a silent no-op.
- *
- * Two modules attaching different policies to one key are refused even when
- * the absence is declared, so the advice does not depend on module order;
- * the bundled modules share one policy constant per key
+ * The slots `ModuleSpec.absencePolicies`, and the policies core attaches to
+ * its own slots (`CORE_SLOT_ABSENCE_POLICIES`), govern, in the order the
+ * policies are met, with the modules that read each. Refuses, with
+ * `component-absence-undeclared`, a policy on a key its module does not read,
+ * and two modules attaching different policies to one key even when the
+ * absence is declared, so the advice does not depend on module order; the
+ * bundled modules share one policy constant per key
  * (`AUDIT_SINK_ABSENCE_POLICY`) so this cannot happen by accident.
  *
  * `consumedBy` is every module naming the key in `requires` / `optional`, the
  * evidence that the slot is part of this app's surface. New absence rules
  * attach an `AbsencePolicy` rather than adding a bespoke check.
  */
-function checkDeclaredAbsence(
+function absenceGovernedSlots(
 	modules: readonly NormalisedModule[],
 	rawModules: readonly Module[],
-	config: unknown,
-	plannedKeys: ReadonlySet<string>,
-): void {
+): UndeclaredAbsenceSlot[] {
 	interface Collected {
-		readonly policy: {
-			readonly configKey: readonly string[];
-			readonly absentValue: string;
-			readonly hint: string;
-		};
+		readonly policy: AbsencePolicy;
 		readonly declaredBy: string[];
 	}
 	const byKey = new Map<string, Collected>();
@@ -1649,30 +1649,70 @@ function checkDeclaredAbsence(
 		}
 	}
 
-	for (const [key, { policy }] of byKey) {
-		if (plannedKeys.has(key)) continue;
-		if (isAbsenceDeclared(config, policy)) continue;
+	return [...byKey].map(([key, { policy }]) => ({
+		componentKey: key as ComponentKey,
+		consumedBy: readersOf(key),
+		policy,
+	}));
+}
 
-		const consumedBy = readersOf(key);
-		const configKeyDotted = policy.configKey.join(".");
+/**
+ * The governed slots whose absence `config` does not declare: each must hold
+ * a value, from one of the three component sources.
+ */
+function undeclaredAbsenceSlotsOf(
+	modules: readonly NormalisedModule[],
+	rawModules: readonly Module[],
+	config: unknown,
+): UndeclaredAbsenceSlot[] {
+	return absenceGovernedSlots(modules, rawModules).filter(
+		(slot) => !isAbsenceDeclared(config, slot.policy),
+	);
+}
 
-		throw new BootError({
-			message:
-				`Component "${key}" is read by ` +
-				`${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
-				"but nothing provides it, and its absence is not declared. " +
-				`Wire a provider, or ${describeAbsenceDeclaration(policy)} to declare ` +
-				`the capability absent on purpose. ${policy.hint}`,
+/**
+ * The refusal of `slot` holding no value: a capability slot (token
+ * revocation, an audit sink, a rate limiter) must never be a silent no-op.
+ * @internal
+ */
+export function undeclaredAbsenceRefusal(slot: UndeclaredAbsenceSlot, stage: BootStage): BootError {
+	const { componentKey: key, consumedBy, policy } = slot;
+	return new BootError({
+		message:
+			`Component "${key}" is read by ` +
+			`${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
+			"but nothing provides it, and its absence is not declared. " +
+			`Wire a provider, or ${describeAbsenceDeclaration(policy)} to declare ` +
+			`the capability absent on purpose. ${policy.hint}`,
+		reason: "component-absence-undeclared",
+		stage,
+		details: {
 			reason: "component-absence-undeclared",
-			stage: "validateManifests",
-			details: {
-				reason: "component-absence-undeclared",
-				componentKey: key as ComponentKey,
-				consumedBy,
-				configKey: configKeyDotted,
-				absentValue: policy.absentValue,
-			},
-		});
+			componentKey: key,
+			consumedBy,
+			configKey: policy.configKey.join("."),
+			absentValue: policy.absentValue,
+		},
+	});
+}
+
+/**
+ * Enforces the absence policies at stage 1: every governed slot must be
+ * planned from one of the three component sources, or the config must carry
+ * the policy's declared-absent value. A planned slot that holds `undefined`
+ * once its sources have answered is refused at stage 3, from
+ * `ValidatedManifests.undeclaredAbsenceSlots`.
+ */
+function checkDeclaredAbsence(
+	modules: readonly NormalisedModule[],
+	rawModules: readonly Module[],
+	config: unknown,
+	plannedKeys: ReadonlySet<string>,
+): void {
+	for (const slot of undeclaredAbsenceSlotsOf(modules, rawModules, config)) {
+		if (!plannedKeys.has(slot.componentKey)) {
+			throw undeclaredAbsenceRefusal(slot, "validateManifests");
+		}
 	}
 }
 
@@ -3525,5 +3565,10 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		usedKinds: usedKindsSet,
 		bootstrapComponents: substitutedBootstrap,
 		dispatchedFederations,
+		undeclaredAbsenceSlots: undeclaredAbsenceSlotsOf(
+			switchedOnNormalised,
+			switchedOn,
+			parsedConfig,
+		),
 	};
 }

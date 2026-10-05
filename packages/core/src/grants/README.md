@@ -1,6 +1,6 @@
 # grants
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 ## Responsibility
 
@@ -26,6 +26,7 @@ It is separate because every grant package — `oauth`, `device-grant`, `oauth-t
 - `generateToken` signs through `KeyStore.sign`, so `alg` and `kid` are the key store's; `cnf` is emitted only when a `confirmation` is given; `jti` and `issuedAt` may be reserved by the caller (#449) and are otherwise minted here.
 - The optional `GrantDependencies` stores are absence-tolerant: no `sid`, no `subjectRevocation`, no logger is "nothing to bind to", never an error.
 - `GrantDependencies.oauthTokenSettings` is the oauth module's settings slot, optional: a grant reads the issuer, lifetimes and switches from it, held with `checkOAuthTokenSettings`, rather than from `config` — [`../boot/__tests__/grant-token-settings.test.mts`](../boot/__tests__/grant-token-settings.test.mts).
+- `GrantDependencies.tokenBindingSettings` is core's token-binding settings slot, which boot fills in every composition: a grant whose module requires it reads whether a confidential client's refresh token is bound from it rather than from `config` — [`../middleware/__tests__/tokenBindingSettings.test.mts`](../middleware/__tests__/tokenBindingSettings.test.mts).
 
 ## Dependencies
 

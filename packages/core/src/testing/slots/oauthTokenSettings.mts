@@ -90,7 +90,7 @@ export function oauthTokenSettingsContract(
 				]) {
 					assert.ok(
 						!(member in settings),
-						`the settings carry ${member}: the token-binding settings are core's, the owner of the token-binding extension point, which reads them from its own configuration with resolveTokenBindingSettings — a slot that carried one would be a second source`,
+						`the settings carry ${member}: the token-binding settings are core's, the owner of the token-binding extension point, which reads them from its own configuration with resolveTokenBindingSettings and fills its tokenBindingSettings slot with them — this slot carrying one would be a second source`,
 					);
 				}
 			},
