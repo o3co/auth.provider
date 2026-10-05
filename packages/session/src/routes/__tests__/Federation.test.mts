@@ -665,6 +665,24 @@ describe("account linking across federations", () => {
 			expect(JSON.parse(inspect.text).federation.link).toEqual({ sid: "s-1", subject: "user-1" });
 		});
 
+		it("asks the upstream for no new login on a link start: a link is not a login", async () => {
+			const linking = makeFakeProvider();
+			const buildSpy = vi.spyOn(linking, "buildAuthorizationUrl");
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", linking]]),
+				federation: {},
+				sessionSeed: seed,
+				userRepository: linkableRepo(),
+				userSessionStore: liveStore(),
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await agent
+				.get("/oauth/federation/test?link=1")
+				.set("Sec-Fetch-Site", "same-origin");
+			expect(res.status).toBe(302);
+			expect(buildSpy.mock.calls[0]?.[0]).not.toHaveProperty("ask");
+		});
+
 		describe("a link start must come from this deployment's own pages", () => {
 			// The start is a GET and the session cookie is SameSite=Lax, which a
 			// top-level cross-site navigation carries: any page could send a
@@ -3538,6 +3556,35 @@ describe("GET /oauth/federation/:name — a freshness hint for the upstream", ()
 		expect((await startWith("?prompt=consent")).params).not.toHaveProperty("ask");
 		// Empty reads as omitted, as /authorize reads it (RFC 6749 §3.1).
 		expect((await startWith("?prompt=&max_age=")).params).not.toHaveProperty("ask");
+	});
+
+	it("asks the upstream for a new login when a signed-in browser starts a login: it is a re-authentication", async () => {
+		const provider = makeFakeProvider();
+		const buildSpy = vi.spyOn(provider, "buildAuthorizationUrl");
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", provider]]),
+			federation: {},
+			sessionSeed: { sid: "s-1", isAuthenticated: true, user: { id: "user-1" } },
+		});
+		const agent = await plantAndGetAgent(app);
+		expect((await agent.get("/oauth/federation/test")).status).toBe(302);
+		expect(buildSpy.mock.calls[0]?.[0].ask).toEqual({ login: true });
+		// A hint the login page forwards rides along.
+		await agent.get("/oauth/federation/test?max_age=60");
+		expect(buildSpy.mock.calls[1]?.[0].ask).toEqual({ maxAgeSeconds: 60, login: true });
+	});
+
+	it("asks nothing of the upstream for a browser that is not signed in", async () => {
+		const provider = makeFakeProvider();
+		const buildSpy = vi.spyOn(provider, "buildAuthorizationUrl");
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", provider]]),
+			federation: {},
+			sessionSeed: { isAuthenticated: false },
+		});
+		const agent = await plantAndGetAgent(app);
+		expect((await agent.get("/oauth/federation/test")).status).toBe(302);
+		expect(buildSpy.mock.calls[0]?.[0]).not.toHaveProperty("ask");
 	});
 
 	it.each([

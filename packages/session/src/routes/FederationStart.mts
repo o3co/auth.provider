@@ -16,7 +16,8 @@
 
 /**
  * The start leg, `GET /oauth/federation/:name`: the `redirect_to`, a
- * freshness hint (`prompt`, `max_age`) and a link start checked, then the
+ * freshness hint (`prompt`, `max_age`) and a link start checked — a login
+ * started from a signed-in browser asks the upstream for a new login — then the
  * state, PKCE verifier and nonce minted and kept —
  * in the session, or a `form_post` federation's transaction and its cookie —
  * before the browser is sent to the IdP. The browser is sent to the IdP only
@@ -122,8 +123,8 @@ export const createStartHandler =
 			redirectTo = redirect_to;
 		}
 
-		const ask = readFreshnessHint(req.query);
-		if (ask === null) {
+		const hint = readFreshnessHint(req.query);
+		if (hint === null) {
 			return res
 				.status(400)
 				.json(
@@ -145,6 +146,15 @@ export const createStartHandler =
 			if (intent === null) return;
 			link = intent;
 		}
+
+		// A login started while this browser already holds an application
+		// session is a re-authentication — nothing else sends a signed-in user
+		// to sign in again — so the upstream is asked for a new login rather
+		// than answering from its own single sign-on. A link is not a login.
+		const reauthenticating =
+			link === undefined &&
+			(req.session as { isAuthenticated?: unknown } | undefined)?.isAuthenticated === true;
+		const ask: FederationAsk | undefined = reauthenticating ? { ...hint, login: true } : hint;
 
 		const responseMode = resolveFederationResponseMode(provider);
 
