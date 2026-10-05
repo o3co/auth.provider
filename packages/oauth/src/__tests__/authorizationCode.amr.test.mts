@@ -49,6 +49,7 @@ import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 const ISSUER = "https://issuer.test";
 const SECRET = "code-amr-test-secret-32-bytes-long!!";
@@ -116,7 +117,7 @@ const world = async (
 		"authorization_code",
 		createAuthorizationGrant({
 			sessionRequirementResolver: requirements,
-			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			clientRepository,
 			codeRepository,
@@ -129,6 +130,7 @@ const world = async (
 		"refresh_token",
 		createRefreshTokenGrant({
 			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
 			sessionRequirementResolver: requirements,

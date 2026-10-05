@@ -37,11 +37,9 @@ import {
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
 	defineModule,
-	describeAbsenceDeclaration,
 	durationFromEnv,
 	type FederationGrantConnection,
 	type FederationGrantRefresher,
-	isAbsenceDeclared,
 	type ProviderDeps,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantAcquisitionLimits,
@@ -137,19 +135,29 @@ export const federationGrantsConfigSchema = z
 const unbound = (to: string) => ({ to, environmentVariable: null }) as const;
 
 const REQUIRES = [
-	"config",
 	"federationGrantBackground",
 	"clientRepository",
 	// The synthetic key every consumer of session admission takes: the browser
 	// half admits the browser's session through it at every step. Always
 	// present — the planner fills it.
 	"sessionRequirementResolver",
+	// What the oauth module provides of `oauth {}`: the issuer every route
+	// and the acquisition settings are built on. A composition without that
+	// module fills it.
+	"oauthTokenSettings",
+	// Core's view of `core.federations`, which boot fills: whether the
+	// federation a connection names is configured and on, and the issuer and
+	// client id a grant's identity is pinned to.
+	"federationSettings",
 ] as const;
 const OPTIONAL = [
 	"federationGrantStore",
 	"rateLimiter",
 	"auditSink",
 	"subjectRevocation",
+	// The session lifecycle port the browser flow's admission reads after a
+	// live record: a session closing or closed connects nothing.
+	"sessionLifecycleStore",
 	"replaySeenSet",
 	"logger",
 	"federationProviders",
@@ -163,10 +171,6 @@ const OPTIONAL = [
 	// session module provides: required once grants are enabled
 	// (`requireCsrfGuard`).
 	"csrfGuard",
-	// What the oauth module provides of `oauth {}`: the issuer every route
-	// and the acquisition settings are built on. Read from the configuration
-	// when no module provides it.
-	"oauthTokenSettings",
 	// Where an enabled deployment registers the drain's tail.
 	"lifecycleRegistrar",
 ] as const;
@@ -186,14 +190,10 @@ export type FederationGrantsModuleDeps = ProviderDeps<
 
 /**
  * The issuer the routes and the acquisition settings are built on: the
- * `oauthTokenSettings` slot's when the composition holds it, the slot
- * read whole and checked first, otherwise `oauth.jwt.issuer` as the
- * configuration carries it.
+ * `oauthTokenSettings` slot's, the slot read whole and checked first.
  */
 const issuerOf = (deps: FederationGrantsModuleDeps): string =>
-	deps.oauthTokenSettings === undefined
-		? deps.config.oauth.jwt.issuer
-		: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).issuer;
+	checkOAuthTokenSettings(deps.oauthTokenSettings).issuer;
 
 /**
  * An enabled deployment with nowhere to keep grants would
@@ -288,22 +288,6 @@ const requireDelegatedCapability = (
 			);
 		}
 	}
-};
-
-/**
- * The audit sink is optional to wire, not optional to decide — here for the
- * events an operator needs most: every disclosure of a credential that works
- * while nobody is watching. The message is built from the shared policy so it
- * cannot drift from every other module's for the same slot.
- */
-const requireAuditDecision = (deps: FederationGrantsModuleDeps): void => {
-	if (deps.auditSink !== undefined) return;
-	if (isAbsenceDeclared(deps.config, AUDIT_SINK_ABSENCE_POLICY)) return;
-	throw new Error(
-		"federationGrantsModule: federation-grants.enabled = true with no auditSink component. " +
-			`Wire one, or ${describeAbsenceDeclaration(AUDIT_SINK_ABSENCE_POLICY)} to declare the ` +
-			`capability absent on purpose. ${AUDIT_SINK_ABSENCE_POLICY.hint}`,
-	);
 };
 
 /** The authorizer the connect flow sends a user upstream with: the connection's provider's. */
@@ -460,6 +444,11 @@ export const federationGrantsModule = defineModule<
 	},
 	requires: REQUIRES,
 	optional: OPTIONAL,
+	// The audit sink is optional to wire, not optional to decide — here for
+	// the events an operator needs most: every disclosure of a credential that
+	// works while nobody is watching. Core's declared-absence guard enforces
+	// it while the module is on; switched off, it attaches nothing.
+	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 	contributes: {
 		// What the browser half admits.
 		admissionActions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
@@ -486,9 +475,11 @@ export const federationGrantsModule = defineModule<
 					federationGrantStore: store,
 				});
 				const limits = resolveFederationGrantRetrievalLimits(deps.section);
-				const connections = resolveFederationGrantConnections(deps.section, deps.config);
+				const connections = resolveFederationGrantConnections(
+					deps.section,
+					deps.federationSettings,
+				);
 				requireDelegatedCapability(deps, connections);
-				requireAuditDecision(deps);
 				// What creating a grant needs, refused here rather than at the end
 				// of somebody's consent: the consent page, a callback per connection
 				// on the provider's own origin, somewhere to lodge an intent, and —
@@ -555,7 +546,10 @@ export const federationGrantsModule = defineModule<
 					subjectRevocation: deps.subjectRevocation,
 					federationGrantStore: store,
 				});
-				const connections = resolveFederationGrantConnections(deps.section, deps.config);
+				const connections = resolveFederationGrantConnections(
+					deps.section,
+					deps.federationSettings,
+				);
 				const acquisition = resolveFederationGrantAcquisitionSettings(
 					deps.section,
 					connections,
@@ -577,6 +571,7 @@ export const federationGrantsModule = defineModule<
 						// requirements it asks. Not the grants boundary, which the
 						// callback reads through `grantsBoundary`.
 						subjectRevocation: revocation,
+						sessionLifecycleStore: deps.sessionLifecycleStore,
 						requirements: deps.sessionRequirementResolver,
 						revocationSkewMs: limits.revocationSkewMs,
 						connections: acquisition.connections,

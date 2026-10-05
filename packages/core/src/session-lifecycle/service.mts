@@ -15,7 +15,8 @@
  */
 
 /**
- * The session lifecycle service, the one caller of `SessionLifecycleStore`:
+ * The session lifecycle service, the one writer of `SessionLifecycleStore`
+ * (session admission reads a record's state):
  * joins a session, closes it and runs the close work, says whether it is
  * live, and resumes closes left pending. Its callers see `joined` /
  * `refused`, `done` / `pending`, `live` / `not_live` and `unavailable`;
@@ -98,10 +99,12 @@ export type SessionJoinOutcome =
  * `pending`: the closing commit has landed — no liveness read answers `live`
  * from it on and nothing joins — while work is still outstanding; a later
  * close of the session or the sweep resumes it. Both carry the relying
- * parties (`client_id`) and federations of the snapshot, in no promised
- * order, and, from the call that made the closing commit, those the
- * per-session stores listed. `unavailable`: the closing commit did not land, or whether it did
- * could not be read.
+ * parties (`client_id`) and federations the session joined: the call that
+ * made the closing commit answers, while the per-session stores are read
+ * elsewhere, those they listed first, then the snapshot's, each once — the
+ * federations in the order they joined; a later call answers the snapshot's.
+ * `unavailable`: the closing commit did not land, or whether it did could
+ * not be read.
  */
 export type SessionCloseOutcome =
 	| {
@@ -109,6 +112,17 @@ export type SessionCloseOutcome =
 			readonly rps: readonly string[];
 			readonly federations: readonly string[];
 	  }
+	| { readonly outcome: "unavailable" };
+
+/**
+ * `listed`: the federations a session joined, in the order they joined:
+ * while the per-session stores are read elsewhere, those of their index in
+ * the order they were added (every join writes the index before the record),
+ * then the record's, each once — the union and order the close that makes the
+ * closing commit answers. `unavailable`: a store could not answer.
+ */
+export type SessionFederations =
+	| { readonly outcome: "listed"; readonly federations: readonly string[] }
 	| { readonly outcome: "unavailable" };
 
 /** `live`, with the user session; `not_live` from the closing commit on, or once the user session is gone. */
@@ -132,6 +146,11 @@ export interface SessionLifecycle {
 	close(sid: string, cause: SessionCloseCause): Promise<SessionCloseOutcome>;
 	/** Whether `sid` is live. */
 	liveness(sid: string): Promise<SessionLiveness>;
+	/**
+	 * The federations `sid` joined, before it is closed: what a logout reads to
+	 * end the first one upstream with the tokens a close removes.
+	 */
+	federations(sid: string): Promise<SessionFederations>;
 	/** Runs the close work of every closing session. Rejects when the closing listing cannot be read. */
 	resumePending(): Promise<SessionResumeReport>;
 }
@@ -460,6 +479,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		participants: readonly SessionParticipant[],
 	): Promise<boolean> => {
 		const read = readVersionedSessionLifecycle(await store.read(sid));
+		// A record that exists is not compared with the user session's subject:
+		// the caller admitted the session first, and admission refuses a claim
+		// whose subject is not the record's.
 		if (read !== null && read.value.state !== "active") return false;
 		const session = await userSessionOf(sid);
 		if (session === null) return false;
@@ -534,8 +556,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 				return { outcome: "unavailable" };
 			}
 			const outcome = closing.value.state === "closed" ? "done" : await finish(sid, closing);
+			// What the per-session stores listed first: every join writes them
+			// before the record, so their order is the order of joining.
 			const union = (own: readonly string[], listed: readonly string[]): string[] => [
-				...new Set([...own, ...listed]),
+				...new Set([...listed, ...own]),
 			];
 			return {
 				outcome,
@@ -544,10 +568,29 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			};
 		},
 
+		async federations(sid) {
+			checkSessionLifecycleKey(sid, "sid");
+			try {
+				const read = readVersionedSessionLifecycle(await store.read(sid));
+				const own = read === null ? [] : idsOf(read.value, "federation");
+				// The index first: every join writes it before the record.
+				return {
+					outcome: "listed",
+					federations: [...new Set([...(await bridge.federations(sid)), ...own])],
+				};
+			} catch (error) {
+				unavailable("federations", sid, error);
+				return { outcome: "unavailable" };
+			}
+		},
+
 		async liveness(sid) {
 			checkSessionLifecycleKey(sid, "sid");
 			try {
 				const read = readVersionedSessionLifecycle(await store.read(sid));
+				// A logout through the per-session stores alone leaves a record
+				// active until it lapses; such a session is not live once its user
+				// session is deleted, which the read below answers.
 				if (read !== null && read.value.state !== "active") return { outcome: "not_live" };
 				const session = await userSessionOf(sid);
 				return session === null ? { outcome: "not_live" } : { outcome: "live", session };

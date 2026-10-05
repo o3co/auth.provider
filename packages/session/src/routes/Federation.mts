@@ -37,6 +37,7 @@ import {
 	readUserSnapshot,
 	type SessionClaim,
 	type SessionFederationIndex,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type SubjectSessionIndex,
@@ -126,6 +127,7 @@ export const createRouter = (
 		userSessionStore,
 		subjectSessionIndex,
 		subjectRevocation,
+		sessionLifecycleStore,
 		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
@@ -162,6 +164,8 @@ export const createRouter = (
 		 * sessions were revoked can link until it expires.
 		 */
 		subjectRevocation?: SubjectRevocation;
+		/** The session lifecycle port the link routes' admission reads after a live record, when wired. */
+		sessionLifecycleStore?: SessionLifecycleStore | undefined;
 		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
@@ -213,6 +217,7 @@ export const createRouter = (
 			{
 				userSessionStore,
 				subjectRevocation,
+				sessionLifecycleStore,
 				requirements,
 				acrTable: NO_ACR_TABLE,
 				logger: log,

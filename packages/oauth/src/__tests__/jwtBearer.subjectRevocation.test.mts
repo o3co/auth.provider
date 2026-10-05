@@ -33,11 +33,12 @@ import {
 	type SubjectRevocation,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "#/grants/jwtBearer.mjs";
-import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 const config = {
@@ -81,7 +82,7 @@ const build = (opts: {
 	expiresAt?: number | null;
 }) =>
 	createJwtBearerGrant({
-		config,
+		...grantSettingsFrom(config),
 		keyStore,
 		assertionVerifier: verifierFor({
 			...(opts.issuedAt === undefined ? {} : { issuedAt: opts.issuedAt }),
@@ -232,7 +233,7 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 		const clock = vi.spyOn(Date, "now").mockReturnValue(now);
 		try {
 			const grant = createJwtBearerGrant({
-				config,
+				...grantSettingsFrom(config),
 				keyStore,
 				assertionVerifier: verifierFor({
 					issuedAt: BOUNDARY_SECOND + 60,
@@ -258,12 +259,12 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 		const clock = vi.spyOn(Date, "now").mockReturnValue(now);
 		try {
 			const grant = createJwtBearerGrant({
-				config: {
+				...grantSettingsFrom({
 					oauth: {
 						jwt: { issuer: "https://auth.example" },
 						accessToken: { defaultExpiresIn: 5, maxExpiresIn: 5 },
 					},
-				} as unknown as AppConfig,
+				}),
 				keyStore,
 				assertionVerifier: verifierFor({
 					issuedAt: BOUNDARY_SECOND + 60,
@@ -486,19 +487,15 @@ describe("jwt-bearer grant — the subject revocation boundary", () => {
 	});
 
 	it("gets the slot through the module", async () => {
-		const moduleConfig = {
-			...(makeValidAppConfig() as unknown as Record<string, unknown>),
-			"oauth-authorization": { grants: { jwtBearer: { enabled: true } } },
-		} as never;
-		const grants = (oauthAuthorizationModule({ config: moduleConfig }).contributes?.grants ??
-			{}) as Record<
+		const grants = (oauthAuthorizationGrantsModule.contributes?.grants ?? {}) as Record<
 			string,
-			(deps: unknown) => { handle(c: GrantContext): Promise<{ result: unknown }> }
+			(deps: unknown) => { handle(c: GrantContext): Promise<{ result: unknown }> } | null
 		>;
 		const factory = grants[JWT_BEARER_GRANT_TYPE];
 		expect(factory).toBeDefined();
 		const grant = factory?.({
-			config: moduleConfig,
+			section: { grants: { jwtBearer: { enabled: true } } },
+			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			assertionVerifier: verifierFor({
 				issuedAt: BOUNDARY_SECOND - 60,

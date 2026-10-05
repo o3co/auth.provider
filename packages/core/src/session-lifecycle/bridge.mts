@@ -71,6 +71,8 @@ export interface SessionStoresBridge {
 	families(sid: string, expiresAt: Date): Promise<readonly string[]>;
 	/** The relying parties the old registry lists, by `client_id`. */
 	relyingParties(sid: string): Promise<readonly string[]>;
+	/** The federations the old index lists, in the order they were added. */
+	federations(sid: string): Promise<readonly string[]>;
 	/** Removes the session's entries from the old stores; the end mark stays. */
 	remove(sid: string): Promise<void>;
 }
@@ -119,6 +121,10 @@ export function createSessionStoresBridge(stores: SessionStoresBridgeStores): Se
 
 		async relyingParties(sid) {
 			return (await sessionRPRegistry.listRPs(sid)).map((rp) => rp.clientId);
+		},
+
+		federations(sid) {
+			return sessionFederationIndex.listFederations(sid);
 		},
 
 		async remove(sid) {

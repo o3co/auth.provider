@@ -605,6 +605,58 @@ describe("readGrantPolicyDecision", () => {
 		expect(logger.error).toHaveBeenCalledWith(site, "grant_policy_decision_invalid");
 	});
 
+	it.each([
+		["a Symbol", Symbol("scope")],
+		["an object with no prototype", Object.create(null)],
+		[
+			"an object whose toString throws",
+			{
+				toString: () => {
+					throw new Error("no");
+				},
+			},
+		],
+		["a number", 7],
+		["undefined", undefined],
+	])(
+		"reads an allow whose granted elements include %s as invalid, without throwing",
+		(_label, value) => {
+			for (const field of ["grantedScope", "grantedAudience"]) {
+				const logger = { error: vi.fn() };
+				const decision = { outcome: "allow", [field]: ["read", value] };
+				expect(() => readGrantPolicyDecision(decision, logger, site)).not.toThrow();
+				expect(readGrantPolicyDecision(decision, logger, site), field).toEqual({
+					verdict: "invalid",
+					result: DECISION_INVALID,
+				});
+				expect(logger.error).toHaveBeenCalledWith(site, "grant_policy_decision_invalid");
+			}
+		},
+	);
+
+	it("reads each element of a granted array once, and judges the copy", () => {
+		let reads = 0;
+		const grantedScope = new Proxy(["read", "write"], {
+			get(target, key, receiver) {
+				if (key === "1") {
+					reads += 1;
+					return reads === 1 ? "write" : Symbol("later");
+				}
+				return Reflect.get(target, key, receiver);
+			},
+		});
+		const reading = readGrantPolicyDecision(
+			{ outcome: "allow", grantedScope },
+			{ error: vi.fn() },
+			site,
+		);
+		expect(reading).toEqual({
+			verdict: "allow",
+			decision: { outcome: "allow", grantedScope: ["read", "write"] },
+		});
+		expect(reads).toBe(1);
+	});
+
 	it("names the caller's site in the log line when it has one", () => {
 		const logger = { error: vi.fn() };
 		readGrantPolicyDecision({}, logger, { ...site, site: "authorize" });

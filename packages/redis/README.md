@@ -1314,7 +1314,10 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   whole. The hash's fields are listed in
   [`src/clients/session-lifecycle.mts`](src/clients/session-lifecycle.mts); a
   participant's data is kept as a JSON string, so every string the port
-  admits reads back as written.
+  admits reads back as written. Each participant's join ordinal is kept beside
+  it, written in the join's script when it first joins and kept by a repeat
+  join, so participants are answered in the order each first joined, as the
+  port promises.
 - **Sixteen fixed shards.** A record lives at
   `${keyPrefix}{lc:<shard>}:s:<sid>` (`ss:lc:` by default; `<sid>` is base64url
   of its JSON), where `<shard>` is the 32-bit FNV-1a hash of the sid's UTF-8

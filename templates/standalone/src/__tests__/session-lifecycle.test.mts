@@ -21,12 +21,14 @@
  */
 
 import {
+	readVersionedSessionLifecycle,
 	type SessionLifecycle,
+	type SessionLifecycleStore,
 	sessionLifecycleModule,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { compose, ISSUER } from "./all-modules-composition.fixture.mjs";
+import { compose, ISSUER, WEB, webTokens } from "./all-modules-composition.fixture.mjs";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -106,6 +108,25 @@ describe("the template with the session lifecycle module", () => {
 				sub: "u-bc",
 				sid: "sid-bc",
 			});
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("joins a code exchange's relying party and family to the session's lifecycle record", async () => {
+		const { app, handle } = await compose({ extraModules: () => [sessionLifecycleModule] });
+		try {
+			const tokens = await webTokens(app);
+			const claims = claimsOf(tokens.refresh_token ?? "");
+			const sid = String(claims.sid);
+			const store = (handle.components as Record<string, unknown>)
+				.sessionLifecycleStore as SessionLifecycleStore;
+			const record = readVersionedSessionLifecycle(await store.read(sid));
+			expect(record?.value.state).toBe("active");
+			expect(record?.value.participants.map((p) => `${p.kind}:${p.id}`)).toEqual([
+				`rp:${WEB.id}`,
+				`family:${String(claims.family_id)}`,
+			]);
 		} finally {
 			await handle.dispose();
 		}

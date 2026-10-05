@@ -1086,10 +1086,12 @@ function reportUndatedStamps(
 
 /**
  * Whether the record holds what this call tried to store: the credentials,
- * and the marker beside them. Two replicas can come to store the very same
- * credentials — an IdP that does not rotate, an answer that brought no access
- * token — and the marker, which is dated, is what tells theirs from this
- * call's. Waited for no longer than `budgetMs`: the lock is sized for ONE
+ * the access token's per-write facts, and the marker beside them. Two
+ * replicas can come to store the very same token strings — an IdP that does
+ * not rotate, an answer that brought no access token — and what each write
+ * dates (`obtainedAt`, the call's start; `issuedLifetime`; and
+ * `effectiveExpiresAt` when the record carries it, which a store may leave
+ * out) and the marker tell theirs from this call's. Waited for no longer than `budgetMs`: the lock is sized for ONE
  * persist budget after the hard deadline, and this look is spent of the same
  * one.
  */
@@ -1110,8 +1112,31 @@ async function isStored(
 	return (
 		held.state === "ok" &&
 		held.value.refreshToken === credentials.refreshToken &&
-		held.value.accessToken?.value === credentials.accessToken?.value &&
+		sameAccessTokenWrite(held.value.accessToken, credentials.accessToken) &&
 		markerInstant(marker) === markerInstant(ineligible ?? undefined)
+	);
+}
+
+/**
+ * Whether a stored access token is the one this call wrote: its value and
+ * the facts the write dated. An instant that holds none is never the same.
+ * `effectiveExpiresAt` is compared only when the stored token carries it.
+ */
+function sameAccessTokenWrite(
+	held: FederationGrantCredentials["accessToken"],
+	written: FederationGrantCredentials["accessToken"],
+): boolean {
+	if (held === undefined || written === undefined) return held === written;
+	const sameInstant = (a: Date | undefined, b: Date | undefined): boolean => {
+		const at = instantOf(a);
+		return at !== undefined && at === instantOf(b);
+	};
+	return (
+		held.value === written.value &&
+		sameInstant(held.obtainedAt, written.obtainedAt) &&
+		held.issuedLifetime === written.issuedLifetime &&
+		(held.effectiveExpiresAt === undefined ||
+			sameInstant(held.effectiveExpiresAt, written.effectiveExpiresAt))
 	);
 }
 

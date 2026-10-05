@@ -1227,6 +1227,7 @@ export type {
 export {
 	createSessionLifecycle,
 	type SessionCloseOutcome,
+	type SessionFederations,
 	type SessionJoinOutcome,
 	type SessionJoinRequest,
 	type SessionLifecycle,

@@ -86,7 +86,7 @@ const app = await createApp({
         memoryReplaySeenSetModule,
         grantPolicyModule,                     // required — see SECURITY — scope authorization
         // ... rest of your auth-provider stack (the oauth module, which provides
-        // oauthTokenSettings; oauthAuthorizationModule, keyStore, etc.)
+        // oauthTokenSettings; oauthAuthorizationGrantsModule, keyStore, etc.)
     ],
     bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });

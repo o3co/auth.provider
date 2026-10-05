@@ -40,8 +40,9 @@ export interface GrantPolicyContext {
  * any other value, or a value that is not such a record, is an invalid
  * decision, answered `500 server_error` and never allowed
  * (`readGrantPolicyDecision`). Each field is read once, into a plain copy
- * the provider acts on; a field that throws when read makes the decision
- * invalid.
+ * the provider acts on; a field that throws when read, or an element of
+ * `grantedScope` or `grantedAudience` that is not a string, makes the
+ * decision invalid.
  */
 export type GrantPolicyDecision =
 	| {
