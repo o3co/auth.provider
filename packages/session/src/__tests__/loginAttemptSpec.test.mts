@@ -95,6 +95,11 @@ describe("the session module and the rate limiter", () => {
 		).toBeNull();
 	});
 
+	it("declares the prefix a verifier's own limit, made at session.rateLimit.login", () => {
+		const claim = sessionModule.contributes?.rateLimitBudgets?.[LOGIN_ATTEMPT_TAG];
+		expect(claim?.verifier).toEqual({ setting: "session.rateLimit.login" });
+	});
+
 	it("reads the attemptCounter slot, and no rateLimiter", () => {
 		expect(sessionModule.optional).toContain("attemptCounter");
 		expect(sessionModule.optional).not.toContain("rateLimiter");
