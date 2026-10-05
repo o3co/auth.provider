@@ -31,6 +31,7 @@ import {
 	type CodeRepository,
 	createMemoryAccessTokenDenylist,
 	createMemoryReplaySeenSet,
+	createOutboundFetch,
 	createSymmetricKeyStore,
 	type GrantHandler,
 	type PublicClient,
@@ -299,6 +300,7 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 				logger,
 				allowPublicClients: true,
 				replaySeenSet: createMemoryReplaySeenSet(),
+				fetch: createOutboundFetch({ config: {}, source: "registration" }),
 			}),
 			(req, res) => {
 				res.status(200).json({
@@ -339,10 +341,17 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 		const server = express();
 		server.use(express.urlencoded({ extended: false }));
 		let set: PublicClient | undefined;
-		server.post("/token", createClientAuthMiddleware(boundary, { issuer: ISSUER }), (req, res) => {
-			set = req.oauthClient;
-			res.status(200).end();
-		});
+		server.post(
+			"/token",
+			createClientAuthMiddleware(boundary, {
+				issuer: ISSUER,
+				fetch: createOutboundFetch({ config: {}, source: "registration" }),
+			}),
+			(req, res) => {
+				set = req.oauthClient;
+				res.status(200).end();
+			},
+		);
 		const res = await basic("/token", server, {});
 		expect(res.status).toBe(200);
 		expect(authenticate).toHaveBeenCalledTimes(1);
