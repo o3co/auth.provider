@@ -107,6 +107,7 @@ describe("createMemoryAssertionIssuerRegistry — the admin surface", () => {
 				"expiresAt",
 				"issuer",
 				"keys",
+				"maxLifetimeSeconds",
 				"profile",
 			].sort(),
 		);
@@ -125,6 +126,7 @@ describe("createMemoryAssertionIssuerRegistry — the admin surface", () => {
 			expiresAt: undefined,
 			profile: undefined,
 			clockToleranceSeconds: undefined,
+			maxLifetimeSeconds: undefined,
 		};
 		expect(found).toStrictEqual(whole);
 		expect(await registry.list()).toStrictEqual([whole]);

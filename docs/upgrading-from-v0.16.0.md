@@ -767,6 +767,20 @@ modules fills them.
   and throws for a declaration made from the section when no section is
   given. A composition root that runs `checkReplicaSafety` itself hands it
   the parsed sections (`sections`) once any module declares from its section.
+- **The session package's `sessionStoreModule` declares its replica safety
+  from its own section** (#1381, #728): replica-unsafe when
+  `session-store.storage.type = "memory"`, nothing for any other type. So the
+  replica-safety guard refuses it by name under `core.deployment.mode = "multi"`,
+  warns when the mode is unset, and says nothing under `"single"` — what
+  `sessionStoreModuleFor(config)` declared from `config`. List
+  `sessionStoreModule` in place of `sessionStoreModuleFor(config)`; boot
+  answers it for the section it parses. `replicaUnsafeReason(sessionStoreModule)`
+  with no section, and `checkReplicaSafety` without its `sections`, now throw
+  a `TypeError` naming `session-store`: pass the parsed section. A
+  composition that already listed `sessionStoreModule` (which declared
+  nothing) now sees memory storage under `multi` refused while manifests are
+  validated, as `replica-unsafe-adapter`, where the route factory used to
+  refuse it (`contribute-factory-failed`); and an unset mode now warns.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name

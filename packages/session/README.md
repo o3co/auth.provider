@@ -30,10 +30,11 @@ responsibilities:
    rules it is built from. The helpers an adapter builds its upstream requests
    with — `codeChallenge`, `callbackUrlForExchange`, `FederationClientSecret` /
    `resolveClientSecret` — are core's.
-3. **The browser session store** — `sessionStoreModule` / `sessionStoreModuleFor`
-   and `createSessionStoreFactory` / `registerBuiltinSessionStores`: the
-   express-session middleware, its cookie and its store (memory, or Redis through
-   `connect-redis`).
+3. **The browser session store** — `sessionStoreModule` (and
+   `sessionStoreModuleFor(config)`, the same module declaring its replica safety
+   from `config`) and `createSessionStoreFactory` / `registerBuiltinSessionStores`:
+   the express-session middleware, its cookie and its store (memory, or Redis
+   through `connect-redis`).
 
 **Owns:**
 
@@ -153,14 +154,14 @@ fails naming it and the install command.
 
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config), // first, so every module after it can read req.session; provides csrfTokenSigner too
-    sessionModule,                 // a const Module, not a factory
-    googleFederationTypeModule(),  // handles every core.federations entry of type "google"
+    sessionStoreModule,           // first, so every module after it can read req.session; provides csrfTokenSigner too
+    sessionModule,                // a const Module, not a factory
+    googleFederationTypeModule(), // handles every core.federations entry of type "google"
     // ... modules providing userRepository, userSessionStore, federationTokenStore,
     //     sessionFederationIndex
   ],
@@ -237,8 +238,7 @@ value than the new one; set to the same value, both boot.
 
 ## Browser session store
 
-`sessionStoreModuleFor(config)` — or the static `sessionStoreModule` — contributes
-one route, `session-middleware`, mounted at `/`: express-session with its cookie
+`sessionStoreModule` contributes one route, `session-middleware`, mounted at `/`: express-session with its cookie
 built from `session-store.*` (`HttpOnly`, `Path=/`, `session-store.secure`,
 `session-store.sameSite`, `session-store.domain`, `Max-Age` = `session-store.maxAge`) and its store
 built from `session-store.storage.*`. Every `req.session` in a deployment is this one.
@@ -276,14 +276,16 @@ What holds:
 - **`memory` is refused under `core.deployment.mode = "multi"`.** express-session's
   `MemoryStore` forks per replica: a login served by one replica is unknown to
   the others, logout clears only the replica it lands on, and a restart loses
-  every session. `sessionStoreModuleFor(config)` reads the storage type and
-  declares the module replica-unsafe when it is `memory`, so core's
-  replica-safety guard refuses it at boot by name with the other offenders,
-  warns when `core.deployment.mode` is unset, and says nothing under `"single"`. The
-  static `sessionStoreModule` cannot know the type, so the guard cannot name it;
-  its route factory refuses the same combination when it runs
-  (`replica-unsafe-adapter`) and never warns. Prefer `sessionStoreModuleFor`
-  wherever the config is in hand. Both forms require core's `deploymentMode`
+  every session. `sessionStoreModule` declares its replica safety from its own
+  parsed section: replica-unsafe when `session-store.storage.type` is
+  `memory`, nothing for any other type. So core's replica-safety guard refuses
+  it at boot by name with the other offenders, warns when
+  `core.deployment.mode` is unset, and says nothing under `"single"`.
+  `sessionStoreModuleFor(config)` is the same module declaring the same from
+  `config`, read when it is built, not from the section boot parses,
+  so list `sessionStoreModule`. The route factory refuses the combination too
+  when it runs (`replica-unsafe-adapter`), for a module built from a config
+  other than the one booted. Both forms require core's `deploymentMode`
   slot, which core fills from `core.deployment.mode`, and read nothing of
   `deployment` themselves; a slot value that is none of `single`, `multi`,
   `unset` is a TypeError.

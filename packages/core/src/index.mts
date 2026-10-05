@@ -79,10 +79,14 @@ export type {
 } from "./assertions/jwtAssertionVerifier.mjs";
 export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
 export {
+	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
 	type AssertionLifetime,
 	assertionLifetime,
+	DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS,
 	describeInvalidAssertionClockTolerance,
+	describeInvalidAssertionMaxLifetime,
 	isValidAssertionClockTolerance,
+	isValidAssertionMaxLifetime,
 	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	MAX_ASSERTION_LIFETIME_SECONDS,
 } from "./assertions/lifetime.mjs";
@@ -1210,6 +1214,21 @@ export {
 	type SessionView,
 	type StepUpPage,
 } from "./session-admission/requirement.mjs";
+export { sessionLifecycleModule } from "./session-lifecycle/module.mjs";
+export type {
+	SessionCloseNotice,
+	SessionCloseNotifier,
+} from "./session-lifecycle/notifier.mjs";
+export {
+	createSessionLifecycle,
+	type SessionCloseOutcome,
+	type SessionJoinOutcome,
+	type SessionJoinRequest,
+	type SessionLifecycle,
+	type SessionLifecycleOptions,
+	type SessionLiveness,
+	type SessionResumeReport,
+} from "./session-lifecycle/service.mjs";
 // The token-exchange validator port. `ExchangeTokenValidator` is
 // exported with the manifest types below, as the contribution value type.
 export type {
@@ -1250,8 +1269,9 @@ export {
 	createSessionRPRegistryFactory,
 	createUserSessionStoreFactory,
 } from "./user-sessions/factory.mjs";
-// The session lifecycle port (active → closing → closed), its readers and
-// its in-process store. Nothing reads the slot yet.
+// The session lifecycle (active → closing → closed): the port, its readers
+// and its in-process store; the service, its module and the relying-party
+// notifier contract. Nothing installs the module yet.
 export {
 	createInMemorySessionLifecycleStore,
 	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_ENTRIES,

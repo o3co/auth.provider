@@ -24,8 +24,11 @@ import { isWellFormedIdentifier } from "../security/identifier.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
 import {
 	assertionLifetime,
+	DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS,
 	describeInvalidAssertionClockTolerance,
+	describeInvalidAssertionMaxLifetime,
 	isValidAssertionClockTolerance,
+	isValidAssertionMaxLifetime,
 	MAX_ASSERTION_LIFETIME_SECONDS,
 } from "./lifetime.mjs";
 import { createRemoteKeySetCache } from "./remoteKeySet.mjs";
@@ -164,7 +167,8 @@ const isRefusal = (err: unknown): boolean =>
  * assertion claiming issuer B is verified against B's keys only. `exp` is
  * mandatory (RFC 7523 §3 item 4), and `exp` / `nbf` / `iat` must be
  * NumericDates: jose only checks for a number, so `exp: 1e400` would never
- * expire. An `iat` further ahead of this server's clock than the entry's
+ * expire. A plain RFC 7523 assertion's `exp − iat` must be at most the
+ * entry's `maxLifetimeSeconds` (an hour by default, a day at most). An `iat` further ahead of this server's clock than the entry's
  * clock tolerance is refused. The result carries the entry's scope and
  * audience ceilings, `iat` as `issuedAt` when the assertion carries one, and
  * `exp` as `expiresAt`, which caps the issued token.
@@ -308,6 +312,14 @@ export function createRegistryAssertionVerifier(
 					`createRegistryAssertionVerifier: entry ${entry.issuer}: ${describeInvalidAssertionClockTolerance(clockTolerance)}.`,
 				);
 			}
+			// The same for the lifetime ceiling: one past the limit would outlive
+			// the revocation boundary that covers it.
+			const maxLifetimeSeconds = entry.maxLifetimeSeconds ?? DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS;
+			if (!isValidAssertionMaxLifetime(maxLifetimeSeconds)) {
+				throw new Error(
+					`createRegistryAssertionVerifier: entry ${entry.issuer}: ${describeInvalidAssertionMaxLifetime(maxLifetimeSeconds)}.`,
+				);
+			}
 			let claims: JWTPayload;
 			try {
 				({ payload: claims } = await jwtVerify(assertion, keyFor(entry) as never, {
@@ -342,6 +354,20 @@ export function createRegistryAssertionVerifier(
 			const issuedAt = claims.iat;
 			if (issuedAt !== undefined && issuedAt > Math.floor(Date.now() / 1000) + clockTolerance) {
 				return null;
+			}
+			// The entry's lifetime ceiling, measured from the claims alone. With
+			// no `iat` there is no lifetime to measure; a grant that holds the
+			// assertion to a revocation boundary requires `iat`. An ID-JAG is
+			// held to its own hour below instead.
+			if (!idJag && issuedAt !== undefined) {
+				const lifetimeSeconds = (claims.exp as number) - issuedAt;
+				if (!(lifetimeSeconds <= maxLifetimeSeconds)) {
+					return refused(entry, {
+						reason: "lifetime",
+						lifetimeSeconds,
+						maxLifetimeSeconds,
+					});
+				}
 			}
 
 			if (idJag) {

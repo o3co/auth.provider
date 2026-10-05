@@ -142,9 +142,15 @@ const ALL_ON_REDIS_MODULES = [
 
 describe('every module on, every shared store on Redis, core.deployment.mode = "multi"', () => {
 	it("lists every module, none declaring replica-unsafe state, and boots", async () => {
-		const modules = composedModules(resolveConfig(MULTI_ENV), MULTI);
+		const config = resolveConfig(MULTI_ENV);
+		const modules = composedModules(config, MULTI);
 		expect(modules.map((m) => m.name)).toEqual(ALL_ON_REDIS_MODULES);
-		for (const module of modules) expect(replicaUnsafeReason(module), module.name).toBeUndefined();
+		// Each module's section at its name: a declaration made from the
+		// section is answered for it.
+		const sections = config as unknown as Record<string, unknown>;
+		for (const module of modules) {
+			expect(replicaUnsafeReason(module, sections[module.name]), module.name).toBeUndefined();
+		}
 		current = await compose(MULTI);
 		expect(current.handle.readinessProbes.map((p) => p.name)).toContain("redis");
 	});

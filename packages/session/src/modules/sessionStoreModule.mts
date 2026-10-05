@@ -154,6 +154,14 @@ export interface SessionStoreModuleConfig {
 const storageTypeOf = (config: SessionStoreModuleConfig | undefined): unknown =>
 	config?.["session-store"]?.storage?.type;
 
+/**
+ * The module's replica safety, from its parsed section: express-session's
+ * per-process `MemoryStore` for `storage.type = "memory"`; nothing for every
+ * other type, each a shared store.
+ */
+const replicaSafetyOf = (section: SessionStoreSection): ReplicaSafetyDeclaration | undefined =>
+	section.storage.type === "memory" ? MEMORY_STORE_REPLICA_SAFETY : undefined;
+
 /** One policy per `session-store` section: the route mounts the cookie the slot holds. */
 const policies = new WeakMap<SessionCookieConfigSlice, SessionCookiePolicy>();
 
@@ -166,7 +174,12 @@ function sessionCookieOf(session: SessionCookieConfigSlice): SessionCookiePolicy
 	return policy;
 }
 
-function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undefined) {
+function buildSessionStoreModule(
+	replicaSafety:
+		| ReplicaSafetyDeclaration
+		| ((section: SessionStoreSection) => ReplicaSafetyDeclaration | undefined)
+		| undefined,
+) {
 	// Written type arguments infer nothing, so the section schema (none) and
 	// the provided keys `authoritative` is typed against are written too.
 	return defineModule<
@@ -217,11 +230,11 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					const factory = createSessionStoreFactory(ctx);
 					registerBuiltinSessionStores(factory);
 					const storageSlice = section.storage as { type: string } & Record<string, unknown>;
-					// The static `sessionStoreModule` declares no `replicaSafety`
-					// (the storage type is config), so it told the stage-1 guard
-					// nothing: refuse the combination here, with the same reason,
-					// rather than mount a per-process store. With
-					// `sessionStoreModuleFor(config)` the guard refused before this.
+					// The stage-1 guard refused this combination already when the
+					// module declared from the section it was booted with. A module
+					// `sessionStoreModuleFor` built from another config told the
+					// guard nothing: refuse it here, with the same reason, rather
+					// than mount a per-process store.
 					if (storageSlice.type === "memory" && replicas === "multi") {
 						throw new BootError({
 							stage: "applyContributions",
@@ -268,18 +281,13 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 }
 
 /**
- * The session-store module built for one config.
- *
- * `session-store.storage.type = "memory"` is express-session's per-process
- * `MemoryStore`, the same shape as every memory store the replica-safety guard
- * refuses under `core.deployment.mode = "multi"`, but the type is config, so a
- * static manifest cannot carry the declaration. This declares `replicaSafety`
- * when the configured store is in memory, so the guard refuses it by name
- * under `"multi"`, warns when the mode is unset, and says nothing under
- * `"single"`. Every other adapter is a shared store and declares nothing.
- *
- * Prefer this over {@link sessionStoreModule} wherever the config is in hand
- * at composition time, as in the standalone's `buildModules(config)`.
+ * The session-store module built for one config: {@link sessionStoreModule},
+ * with its replica safety declared from `config` rather than from the section
+ * boot parses. It declares `replicaSafety` when the configured
+ * `session-store.storage.type` is `"memory"`, and nothing for every other
+ * type, which is what {@link sessionStoreModule} answers for the same
+ * section. List {@link sessionStoreModule} instead: it needs no config at
+ * composition time.
  */
 export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
 	return buildSessionStoreModule(
@@ -288,7 +296,7 @@ export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
 }
 
 /**
- * The static session-store manifest: the express-session middleware as a
+ * The session-store manifest: the express-session middleware as a
  * route at `mountPath: "/"`, built in the boot planner's DI graph so the
  * store's client receives a `BuilderContext.lifecycle` and can register
  * `client.quit()` for disposal.
@@ -300,10 +308,13 @@ export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
  * composition root MUST list this module ahead of every session-consuming
  * module in `buildModules(config)` (README, "Browser session store").
  *
- * It does not know the storage type, so it declares no `replicaSafety` and the
- * stage-1 guard cannot name it. The route factory still refuses `memory` when
- * the `deploymentMode` slot is `multi`, but a composition root that has its
- * config should use {@link sessionStoreModuleFor} and get the refusal at stage
- * 1, listed with the other offenders.
+ * **Replica safety**: declared from its parsed section.
+ * `session-store.storage.type = "memory"` is express-session's per-process
+ * `MemoryStore`, the same shape as every memory store the replica-safety
+ * guard refuses, so the module declares `replicaSafety` for it: the guard
+ * refuses it by name under `core.deployment.mode = "multi"`, listed with the
+ * other offenders, warns when the mode is unset, and says nothing under
+ * `"single"`. Every other storage type is a shared store and declares
+ * nothing.
  */
-export const sessionStoreModule = buildSessionStoreModule(undefined);
+export const sessionStoreModule = buildSessionStoreModule(replicaSafetyOf);

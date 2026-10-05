@@ -52,7 +52,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createSessionCsrfTokenSigner } from "#/csrf-token-signer.mjs";
 import { sessionModule } from "#/module.mjs";
-import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { createRouter as createSessionRouter } from "#/routes/Session.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
@@ -206,7 +206,7 @@ describe("the session store module provides csrfTokenSigner", () => {
 		const config = configWith(VECTOR.secret);
 		const handle = await createTestApp({
 			modules: [
-				sessionStoreModuleFor(config),
+				sessionStoreModule,
 				defineModule({
 					name: "test:csrf-token-signer-consumer",
 					requires: ["csrfTokenSigner"],
@@ -581,10 +581,7 @@ describe("the session module reads no session-store.secret", () => {
 describe("a token signed under session-store.secret verifies through the session store's signer", () => {
 	it("passes POST /session/logout and the csrfGuard slot in a composition with the session store's module", async () => {
 		const config = configWith(VECTOR.secret);
-		const app = await bootApp(
-			[sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
-			config,
-		);
+		const app = await bootApp([sessionStoreModule, sessionModule, ...stores(), probe()], config);
 		const token = secretSignedToken();
 		expect((await withToken(request(app).post("/session/logout"), token).send({})).status).toBe(
 			200,
@@ -594,10 +591,7 @@ describe("a token signed under session-store.secret verifies through the session
 
 	it("is refused by both when the session secret is another", async () => {
 		const config = configWith(OTHER_SECRET);
-		const app = await bootApp(
-			[sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
-			config,
-		);
+		const app = await bootApp([sessionStoreModule, sessionModule, ...stores(), probe()], config);
 		const token = secretSignedToken();
 		expect((await withToken(request(app).post("/session/logout"), token).send({})).status).toBe(
 			403,
@@ -615,7 +609,7 @@ describe("a composition may put its own signer in the slot beside the session st
 		const config = configWith(VECTOR.secret);
 		const override = createTestCsrfTokenSigner();
 		const handle = await createTestApp({
-			modules: [sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
+			modules: [sessionStoreModule, sessionModule, ...stores(), probe()],
 			bootstrapComponents: { config, pathResolver: (s: string) => s },
 			overrideComponents: { csrfTokenSigner: override },
 		});

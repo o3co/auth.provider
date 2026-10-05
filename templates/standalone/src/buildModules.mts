@@ -49,7 +49,7 @@ import {
 	redisReplaySeenSetModule,
 	redisSessionStoresModule,
 } from "@o3co/auth-provider-redis";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import {
 	standardDevelopmentMailSenderModule,
 	standardSmtpMailSenderModule,
@@ -341,9 +341,9 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 	return [
 		// MUST stay first: it declares no `before`/`after`, so this position is
 		// what mounts express-session ahead of every session-consuming module.
-		// Built from `config` so that `session-store.storage.type = "memory"` declares
-		// itself replica-unsafe and `core.deployment.mode = "multi"` refuses it.
-		sessionStoreModuleFor(config),
+		// It declares `session-store.storage.type = "memory"` replica-unsafe from
+		// its own section, so `core.deployment.mode = "multi"` refuses it.
+		sessionStoreModule,
 		// Under `/oauth` beside `oauthModule`, each parsing its own requests, so
 		// their relative order does not matter; the browser half orders itself
 		// after the session middleware by its own `after`.
