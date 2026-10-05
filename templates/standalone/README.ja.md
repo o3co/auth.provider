@@ -310,7 +310,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED` | `false` | client credentials グラントタイプを有効化 |
 | `OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED` | `false` | jwt-bearer グラントタイプ（RFC 7523）を有効化 |
 
-スイッチはそれぞれモジュールのキー — `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — で、テンプレートはモジュールを選ぶために boot の前に自分のファイルと環境変数からこれを読む。旧名の `OAUTH_GRANTS_<GRANT>_ENABLED` は、単独で、または新名と違う値で設定されていると boot を拒否し、同じ値なら boot する。
+スイッチはそれぞれモジュールのキー — `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — である。session グラントのモジュールは常に読み込まれ、自分のスイッチを boot で読む。ほかのスイッチは、テンプレートがモジュールを選ぶために boot の前に自分のファイルと環境変数から読む。旧名の `OAUTH_GRANTS_<GRANT>_ENABLED` は、単独で、または新名と違う値で設定されていると boot を拒否し、同じ値なら boot する。
 
 ### Session
 

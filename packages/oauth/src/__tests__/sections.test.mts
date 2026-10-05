@@ -274,7 +274,7 @@ describe("the oauth-session section, and the switch read from it as boot parses 
 		expect(oauthSessionConfigSchema.parse({})).toStrictEqual({});
 	});
 
-	it("refuses an unknown key in the section, naming its path", () => {
+	it("refuses an unknown key in the section, at the section's root", () => {
 		expect(
 			sectionStrictnessProblems([oauthSessionGrantModule], {
 				tree: defaults(),

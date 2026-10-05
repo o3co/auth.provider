@@ -481,9 +481,10 @@ other grant ignores it and mints the default.
 | `OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED` | `false` | Enable the jwt-bearer grant type (RFC 7523) |
 
 Each switch is its module's key — `oauth-session.enabled`, and
-`oauth-authorization.grants.<grant>.enabled` for the others — which the
-template reads before boot, from its own files and the environment, to choose
-the modules. `OAUTH_GRANTS_<GRANT>_ENABLED`, the old names, refuse boot set
+`oauth-authorization.grants.<grant>.enabled` for the others. The session
+grant's module is always loaded and reads its switch at boot; the template
+reads the others before boot, from its own files and the environment, to
+choose the modules. `OAUTH_GRANTS_<GRANT>_ENABLED`, the old names, refuse boot set
 alone or beside the new name at a different value; beside it at the same value,
 they boot.
 
