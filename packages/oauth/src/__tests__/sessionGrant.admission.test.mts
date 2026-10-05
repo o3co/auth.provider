@@ -42,7 +42,11 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
@@ -130,7 +134,7 @@ const grant = (opts: {
 	grantPolicy?: GrantPolicyHook;
 }) =>
 	createSessionGrant({
-		config,
+		oauthTokenSettings: createTestOAuthTokenSettings(),
 		keyStore,
 		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
 			issuer: "https://issuer.test",
@@ -528,7 +532,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 			"session",
 			grant ??
 				createSessionGrant({
-					config,
+					oauthTokenSettings: createTestOAuthTokenSettings(),
 					keyStore,
 					userSessionStore: store,
 					sessionRequirementResolver: resolverForTests(requirements, {

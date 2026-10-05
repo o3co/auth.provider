@@ -55,7 +55,7 @@ import type { ChallengeCeremony, ChallengeCeremonyOutcome } from "../types.mjs";
 describe("ChallengeCeremony type contract", () => {
 	it("ChallengeCeremonyOutcome is a discriminated union of three outcomes", () => {
 		type Want =
-			| { readonly outcome: "consumed" }
+			| { readonly outcome: "consumed"; readonly expiresAtMs?: number }
 			| { readonly outcome: "replayed" }
 			| { readonly outcome: "unknown" };
 		expectTypeOf<ChallengeCeremonyOutcome>().toEqualTypeOf<Want>();

@@ -115,7 +115,7 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-mfa":
 		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule) and mfaResetModule, under MFA_MODE (mfa-switch.test.mts)",
 	"@o3co/auth-provider-oauth":
-		"oauthModule, oauthSessionModule, oauthAuthorizationModule, subjectRevocationServiceModule",
+		"oauthModule, oauthSessionGrantModule, oauthAuthorizationModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
 	"@o3co/auth-provider-session": "sessionModule, sessionStoreModuleFor",
 	"@o3co/auth-provider-standard":

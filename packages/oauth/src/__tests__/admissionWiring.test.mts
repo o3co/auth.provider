@@ -40,6 +40,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestLoginEntry,
+	createTestOAuthTokenSettings,
 	GrantRegistry,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -50,7 +51,7 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
-import { oauthSessionModule } from "#/oauthSession.mjs";
+import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 
 const config = {
@@ -85,6 +86,9 @@ const codeRepository: CodeRepository = {
 
 /** The grant factories' shared slots, without `requirements`. */
 const grantDeps = { config, keyStore } as unknown as GrantDependencies;
+
+/** The session grant's slots, without `requirements`: it reads the token settings from their slot. */
+const sessionGrantDeps = { keyStore, oauthTokenSettings: createTestOAuthTokenSettings() };
 
 describe("the consumers' factories refuse to build without the requirements resolver", () => {
 	it("createOAuthRouter throws, naming the option", async () => {
@@ -145,9 +149,9 @@ describe("the consumers' factories refuse to build without the requirements reso
 
 	it("createSessionGrant throws, naming the option", () => {
 		// @ts-expect-error — the option is required; the refusal at runtime is the test.
-		expect(() => createSessionGrant(grantDeps)).toThrow(/requirements/);
+		expect(() => createSessionGrant(sessionGrantDeps)).toThrow(/requirements/);
 		expect(() =>
-			createSessionGrant({ ...grantDeps, sessionRequirementResolver: resolverForTests([]) }),
+			createSessionGrant({ ...sessionGrantDeps, sessionRequirementResolver: resolverForTests([]) }),
 		).not.toThrow();
 	});
 
@@ -188,9 +192,9 @@ describe("the consumers' factories refuse to build without the requirements reso
 				requirements: forged,
 			}),
 		).rejects.toThrow(refusal("createOAuthRouter"));
-		expect(() => createSessionGrant({ ...grantDeps, sessionRequirementResolver: forged })).toThrow(
-			refusal("createSessionGrant"),
-		);
+		expect(() =>
+			createSessionGrant({ ...sessionGrantDeps, sessionRequirementResolver: forged }),
+		).toThrow(refusal("createSessionGrant"));
 		expect(() =>
 			createAuthorizationGrant({
 				...grantDeps,
@@ -206,8 +210,8 @@ describe("the consumers' factories refuse to build without the requirements reso
 });
 
 describe("the grant manifests declare what admission reads", () => {
-	it("oauthSessionModule requires sessionRequirementResolver and lists the slots admission reads", () => {
-		const module = oauthSessionModule({ config });
+	it("oauthSessionGrantModule requires sessionRequirementResolver and lists the slots admission reads", () => {
+		const module = oauthSessionGrantModule;
 		expect(module.requires).toContain("sessionRequirementResolver");
 		expect(module.optional).toContain("userSessionStore");
 		expect(module.optional).toContain("subjectRevocation");
@@ -219,10 +223,9 @@ describe("the grant manifests declare what admission reads", () => {
 		expect(module.absencePolicies?.auditSink).toBe(AUDIT_SINK_ABSENCE_POLICY);
 	});
 
-	it("oauthSessionModule declares nothing when the grant is off", () => {
-		const off = { ...config, "oauth-session": { enabled: false } } as unknown as AppConfig;
-		const module = oauthSessionModule({ config: off });
-		expect(module.requires ?? []).not.toContain("sessionRequirementResolver");
+	it("oauthSessionGrantModule is off, registering nothing it declares, when its section says so", () => {
+		expect(oauthSessionGrantModule.section?.isEnabled?.({ enabled: false })).toBe(false);
+		expect(oauthSessionGrantModule.section?.isEnabled?.(undefined)).toBe(false);
 	});
 
 	it("oauthAuthorizationModule requires sessionRequirementResolver and lists the slots admission reads", () => {

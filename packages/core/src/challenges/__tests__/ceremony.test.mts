@@ -8,6 +8,7 @@ import { createMemoryReplaySeenSet } from "../../replay-seen-set/adapters/memory
 import type { ReplaySeenSet } from "../../replay-seen-set/types.mjs";
 import { createMemoryChallengeStore } from "../adapters/memory.mjs";
 import { createChallengeCeremony } from "../ceremony.mjs";
+import type { ChallengeStore } from "../types.mjs";
 
 const future = (): number => Date.now() + 60_000;
 
@@ -30,9 +31,10 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 
 	it("issued + first consume → outcome 'consumed'; replaySeenSet records the entry; outcome object is frozen", async () => {
 		const { store, set, ceremony } = makeCeremonyWithMemoryBackends();
-		await store.issue("scope-A", "v", future());
+		const expiresAtMs = future();
+		await store.issue("scope-A", "v", expiresAtMs);
 		const result = await ceremony.consume("scope-A", "v");
-		expect(result).toEqual({ outcome: "consumed" });
+		expect(result).toEqual({ outcome: "consumed", expiresAtMs });
 		expect(await set.contains("scope-A", "v")).toBe(true);
 		// Anchor the runtime-freeze contract: a future refactor that drops
 		// Object.freeze while keeping `as const` would still type-check but
@@ -46,6 +48,52 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 		await ceremony.consume("scope-A", "v"); // outcome consumed
 		const result = await ceremony.consume("scope-A", "v");
 		expect(result).toEqual({ outcome: "replayed" });
+	});
+
+	it("'consumed' carries the expiry find answered for that challenge", async () => {
+		const set = createMemoryReplaySeenSet();
+		const answeredExpiry = future() + 5_000;
+		const store: ChallengeStore = {
+			kind: "stub",
+			issue: vi.fn(async () => undefined),
+			find: vi.fn(async () => Object.freeze({ expiresAtMs: answeredExpiry })),
+			consume: vi.fn(async () => true),
+		};
+		const ceremony = createChallengeCeremony({ challengeStore: store, replaySeenSet: set });
+		const result = await ceremony.consume("scope-A", "v");
+		expect(result).toEqual({ outcome: "consumed", expiresAtMs: answeredExpiry });
+		expect(Object.isFrozen(result)).toBe(true);
+	});
+
+	it("'replayed' and 'unknown' carry no expiry", async () => {
+		const { store, ceremony } = makeCeremonyWithMemoryBackends();
+		const unknown = await ceremony.consume("scope-A", "never-existed");
+		await store.issue("scope-A", "v", future());
+		await ceremony.consume("scope-A", "v");
+		const replayed = await ceremony.consume("scope-A", "v");
+		for (const result of [unknown, replayed]) {
+			expect(Object.keys(result)).toEqual(["outcome"]);
+			expect(Object.isFrozen(result)).toBe(true);
+		}
+		expect(unknown.outcome).toBe("unknown");
+		expect(replayed.outcome).toBe("replayed");
+	});
+
+	it("race-loss 'replayed' (find answered, consume lost) carries no expiry", async () => {
+		const store: ChallengeStore = {
+			kind: "stub",
+			issue: vi.fn(async () => undefined),
+			find: vi.fn(async () => Object.freeze({ expiresAtMs: future() })),
+			consume: vi.fn(async () => false),
+		};
+		const ceremony = createChallengeCeremony({
+			challengeStore: store,
+			replaySeenSet: createMemoryReplaySeenSet(),
+		});
+		const result = await ceremony.consume("scope-A", "v");
+		expect(Object.keys(result)).toEqual(["outcome"]);
+		expect(result.outcome).toBe("replayed");
+		expect(Object.isFrozen(result)).toBe(true);
 	});
 
 	it("race-loss path: 2 concurrent consume on one issued challenge → 1 'consumed' + 1 'replayed'", async () => {
@@ -78,9 +126,10 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 			contains: vi.fn(async () => false),
 		};
 		const ceremony = createChallengeCeremony({ challengeStore: store, replaySeenSet: set });
-		await store.issue("scope-A", "race-ttl", future());
+		const expiresAtMs = future();
+		await store.issue("scope-A", "race-ttl", expiresAtMs);
 		const result = await ceremony.consume("scope-A", "race-ttl");
-		expect(result).toEqual({ outcome: "consumed" });
+		expect(result).toEqual({ outcome: "consumed", expiresAtMs });
 		expect(set.markSeen).toHaveBeenCalledOnce();
 	});
 
