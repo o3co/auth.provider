@@ -906,6 +906,13 @@ The access token's lifetime is `min(oauth.accessToken.defaultExpiresIn, exp − 
 - **An assertion with no whole second left is refused** with `invalid_grant` / `assertion did not verify` — the answer every failed verification gets, so it tells a caller nothing about the handle behind it — and logged for the operator as `jwt_bearer_assertion_expired`. That covers an assertion past its `exp` that the entry's `clockToleranceSeconds` (default 60) still let verify: the tolerance absorbs clock skew for verification, but leaves no lifetime for a token to inherit. A steady rate of that line from one issuer is a clock out of step with this server's, or clients presenting assertions at the last moment.
 - **A custom `AssertionVerifier` reports `expiresAt`** whenever its credential expires. The field is optional, but omitting it asserts a credential with **no expiry**, and the configured lifetime then stands uncapped. Present, it must be a finite number: a numeric string, `null`, `NaN` or `Infinity` is refused as `invalid_grant`, never read as an expiry or as none. `createRegistryAssertionVerifier` and `createJwtAssertionVerifier` always report it, from the `exp` they require.
 
+### A subject revocation reaches assertions issued before it
+
+With `subjectRevocation` wired, the grant reads the resolved subject's revocation boundary as its last read before signing. It refuses an assertion whose `issuedAt` (the verifier's report of its `iat`) is at or before that boundary, using the rule and allowance `verifyJwt` applies to a token's `iat`. While a boundary is in force, it also refuses an assertion whose verifier reports no `issuedAt`. Both answers are the uniform `invalid_grant` / `assertion did not verify`, logged as `jwt_bearer_assertion_revoked`. A boundary that cannot be read is `503 temporarily_unavailable` (`jwt_bearer_revocation_boundary_unavailable`). Without `subjectRevocation`, nothing changes.
+
+- **A custom `AssertionVerifier` reports `issuedAt`** for every credential that carries an issue time. Otherwise the grant refuses each of its assertions for a subject whose sessions were revoked. `createRegistryAssertionVerifier` and `createJwtAssertionVerifier` report it whenever the assertion carries `iat`.
+- A subject revocation does not revoke the upstream issuer's credential. An assertion that issuer signs after the revocation is fresh authentication, and it is accepted.
+
 ## Tests
 
 The invariants above are pinned where they are implemented; a starting set:

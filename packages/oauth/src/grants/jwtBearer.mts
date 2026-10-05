@@ -26,17 +26,21 @@ import type {
 import {
 	auditErrorText,
 	boundPolicyAudience,
+	coveredByRevocationBoundary,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	deriveAudienceFromResources,
 	evaluateGrantPolicy,
 	extractResourceParam,
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	isNumericDate,
 	loggableError,
 	ownedConfirmation,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
+	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
@@ -67,7 +71,12 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * - a policy that exceeds its authority (widened scope, audience outside the
  *   ceiling) → `500 server_error`;
  * - a `resource` the final `aud` cannot represent → `invalid_target`;
- * - client and assertion issuer admit no common audience → `invalid_grant`.
+ * - client and assertion issuer admit no common audience → `invalid_grant`;
+ * - with `subjectRevocation` wired, an assertion whose `issuedAt` is at or
+ *   before the resolved subject's revocation boundary (`verifyJwt`'s rule and
+ *   allowance), or that reports none while a boundary is in force → the same
+ *   uniform `invalid_grant`; an unreadable boundary → `503
+ *   temporarily_unavailable`. The boundary is the last read before signing.
  */
 /**
  * What the jwt-bearer grant reads. The verifier and repository are required
@@ -76,7 +85,7 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  */
 export type JwtBearerGrantDeps = Pick<
 	GrantDependencies,
-	"config" | "keyStore" | "grantPolicy" | "logger"
+	"config" | "keyStore" | "grantPolicy" | "subjectRevocation" | "logger"
 > &
 	ProviderDeps<"assertionVerifier" | "userRepository">;
 
@@ -362,6 +371,55 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			// No `expiresAt` leaves the configured lifetime standing: the
 			// verifier is asserting a credential with no expiry, not declining
 			// to say (see `AssertionVerificationResult.expiresAt`).
+
+			// See the header: read after the issuance instant is fixed, so a
+			// revocation stamped while the Store or the policy answered is seen.
+			const revocation = deps.subjectRevocation;
+			if (revocation !== undefined) {
+				let revoked: boolean;
+				try {
+					const boundary = await revocation.revokedBefore(subject);
+					if (boundary !== null && !(boundary instanceof Date)) {
+						throw new TypeError("the sessions boundary is neither a date nor null");
+					}
+					const { issuedAt: assertionIssuedAt } = verified;
+					revoked =
+						boundary !== null &&
+						(!isNumericDate(assertionIssuedAt) ||
+							coveredByRevocationBoundary(
+								new Date(assertionIssuedAt * 1000),
+								boundary,
+								DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+							));
+				} catch (err) {
+					deps.logger?.error(
+						{ store: "revocation_boundary", err: loggableError(err) },
+						"jwt_bearer_revocation_boundary_unavailable",
+					);
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: VERIFICATION_UNAVAILABLE_DESCRIPTION.revocation_unavailable,
+						},
+					};
+				}
+				if (revoked) {
+					// The uniform answer: a distinct one would reveal that the
+					// handle resolves to an account with a revocation in force.
+					deps.logger?.info(
+						{ kind: assertionVerifier.kind, issuer: verified.issuer },
+						"jwt_bearer_assertion_revoked",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "assertion did not verify",
+						},
+					};
+				}
+			}
 
 			const accessToken = await generateToken(
 				{ ...(clientId ? { client_id: clientId } : {}) },
