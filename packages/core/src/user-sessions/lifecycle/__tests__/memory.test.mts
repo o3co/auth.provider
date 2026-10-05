@@ -180,6 +180,116 @@ describe("createInMemorySessionLifecycleStore", () => {
 			expect(DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_PARTICIPANTS).toBe(1_000);
 		});
 
+		/** `sid` opened, closed and its one work item completed, kept `retainMs` from now. */
+		const closed = async (store: SessionLifecycleStore, sid: string, retainMs: number) => {
+			await store.open(sid, "u", new Date(START + HOUR));
+			const answer = readSessionCloseAnswer(await store.beginClose(sid, { ...CLOSE, retainMs }));
+			if (answer.outcome !== "closing") throw new Error("not closing");
+			const done = readConditionalReplaceAnswer(
+				await store.completeIf(sid, answer.generation, "user_session"),
+			);
+			expect(done.outcome).toBe("updated");
+		};
+
+		/** Opens `sid` to end `expiresInMs` from the clock's now, answering the outcome. */
+		const openFor = async (
+			store: SessionLifecycleStore,
+			time: ReturnType<typeof clock>,
+			sid: string,
+			expiresInMs = 10 * HOUR,
+		) => (await store.open(sid, "u", new Date(time.now() + expiresInMs))).outcome;
+
+		it("full, evicts the closed record of an ended session whose retention ends first", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 3 });
+			await closed(store, "closed-long", 10 * HOUR);
+			await closed(store, "closed-short", 5 * HOUR);
+			await openFor(store, time, "active");
+			time.advance(2 * HOUR);
+			expect(await openFor(store, time, "new")).toBe("opened");
+			expect(await read(store, "closed-short")).toBeNull();
+			expect((await read(store, "closed-long"))?.value.state).toBe("closed");
+			expect((await read(store, "active"))?.value.state).toBe("active");
+			expect((await read(store, "new"))?.value.state).toBe("active");
+		});
+
+		it("full, evicts a closed record whose session has not ended", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });
+			await closed(store, "closed", 5 * HOUR);
+			await openFor(store, time, "active");
+			expect(await openFor(store, time, "new")).toBe("opened");
+			expect(await read(store, "closed")).toBeNull();
+			expect((await read(store, "active"))?.value.state).toBe("active");
+		});
+
+		it("full of a login and logout loop's closed records, still opens a new login's", async () => {
+			const time = clock();
+			const maxEntries = 50;
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries });
+			for (let i = 0; i < maxEntries; i++) {
+				expect(await openFor(store, time, `login-${i}`, 24 * HOUR)).toBe("opened");
+				const answer = readSessionCloseAnswer(
+					await store.beginClose(`login-${i}`, { ...CLOSE, retainMs: 24 * HOUR }),
+				);
+				if (answer.outcome !== "closing") throw new Error("not closing");
+				await store.completeIf(`login-${i}`, answer.generation, "user_session");
+				time.advance(1);
+			}
+			for (let i = 0; i < 3; i++) {
+				expect(await openFor(store, time, `next-${i}`, 24 * HOUR)).toBe("opened");
+				expect(await read(store, `login-${i}`)).toBeNull();
+			}
+			expect((await read(store, `login-${maxEntries - 1}`))?.value.state).toBe("closed");
+		});
+
+		it("full, drops lapsed records first and evicts nothing when that makes room", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });
+			await openFor(store, time, "lapsing", HOUR);
+			await closed(store, "closed", 5 * HOUR);
+			time.advance(HOUR + DEFAULT_CLOCK_SKEW_MS);
+			expect(await openFor(store, time, "new")).toBe("opened");
+			expect(await read(store, "lapsing")).toBeNull();
+			expect((await read(store, "closed"))?.value.state).toBe("closed");
+		});
+
+		it("full of a closing and a closed record, evicts the closed one and keeps the closing one", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });
+			await openFor(store, time, "closing", HOUR);
+			await store.beginClose("closing", { ...CLOSE, retainMs: 10 * HOUR });
+			await closed(store, "closed", 10 * HOUR);
+			time.advance(2 * HOUR);
+			expect(await openFor(store, time, "new")).toBe("opened");
+			expect(await read(store, "closed")).toBeNull();
+			expect((await read(store, "closing"))?.value.state).toBe("closing");
+		});
+
+		it("full of closed records whose retention ends at the same time, evicts one, the first held", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });
+			await closed(store, "first", 5 * HOUR);
+			await closed(store, "second", 5 * HOUR);
+			time.advance(2 * HOUR);
+			expect(await openFor(store, time, "new")).toBe("opened");
+			expect(await read(store, "first")).toBeNull();
+			expect((await read(store, "second"))?.value.state).toBe("closed");
+		});
+
+		it("full of records not closed, rejects and evicts nothing: active and closing records are kept", async () => {
+			const time = clock();
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });
+			await openFor(store, time, "active");
+			await openFor(store, time, "closing", HOUR);
+			await store.beginClose("closing", { ...CLOSE, retainMs: 10 * HOUR });
+			time.advance(2 * HOUR);
+			await expect(openFor(store, time, "new")).rejects.toThrow(/full/);
+			expect(await read(store, "new")).toBeNull();
+			expect((await read(store, "active"))?.value.state).toBe("active");
+			expect((await read(store, "closing"))?.value.state).toBe("closing");
+		});
+
 		it("full, drops lapsed records to open another, and otherwise rejects, evicting nothing", async () => {
 			const time = clock();
 			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });

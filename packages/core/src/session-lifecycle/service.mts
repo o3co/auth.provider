@@ -126,7 +126,11 @@ export type SessionJoinOutcome =
  * parties (`client_id`) and federations the session joined: the call that
  * made the closing commit answers, while the per-session stores are read
  * elsewhere, those they listed first, then the snapshot's, each once — the
- * federations in the order they joined; a later call answers the snapshot's.
+ * federations in the order they joined; a later call answers the snapshot's
+ * while the record is held. A run overlapping a close that completed may
+ * answer `pending` once the closed record has left the store (evicted, as
+ * after its retention); a subject revocation may then report that sid not
+ * revoked until a retry.
  * `unavailable`: the closing commit did not land, or whether it did could
  * not be read; or, where the commit found no live record (the session's end
  * passed on the store's clock), an item of the close work, run with no
@@ -612,8 +616,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	 * Runs the work of `record`, which no store holds, in its phases: each
 	 * phase only once every item of the earlier ones has run. Throws when an
 	 * item fails, leaving the later phases unrun. Nothing records what ran, so
-	 * a retry runs it all again only while the user session, deleted in the
-	 * phase before the last, is still there.
+	 * a retry runs it all again only while the user session, deleted in its
+	 * phase, before the subject's entry where one is kept, is still there.
 	 */
 	const runUnsaved = async (sid: string, record: SessionLifecycleRecord): Promise<void> => {
 		const limit = callLimit(CLOSE_CONCURRENCY);
@@ -667,7 +671,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		// since the read above, and whose closed record then left the store,
 		// let the open land. The close deletes the user session before it
 		// closes the record, so the session read first, still read now, was
-		// never closed; one gone, or another created under the sid since, was.
+		// not closed before the join landed; one gone, or another created
+		// under the sid since, was. A join refused here leaves the record it
+		// opened active, with what it joined, until the record lapses; the
+		// withdraw revokes the family and removes the federation's tokens.
 		if (read === null) {
 			const again = await userSessionOf(sid);
 			if (again === null || !sameSession(again, session)) return false;

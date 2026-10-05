@@ -1356,8 +1356,9 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   own step: an entry whose record is no longer closing (it lapsed while
   closing, say) is dropped there. The cursor is a plain sid.
 - **Assumptions.** Acknowledged writes are not rolled back, and the server
-  runs `maxmemory-policy` `noeviction`. An evicted record lets a closed
-  session be opened and joined again; an evicted replay key lets a resent
+  runs `maxmemory-policy` `noeviction`. An evicted active or closing record
+  drops a live session's fence or loses its pending work; an evicted replay
+  key lets a resent
   write apply again; an evicted index hides a closing record. The boot check,
   `checkSessionLifecycleEviction` in
   [`src/internal/session-lifecycle-eviction.mts`](src/internal/session-lifecycle-eviction.mts),

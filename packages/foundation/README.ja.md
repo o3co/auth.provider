@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-最終更新: 2026-10-03
+最終更新: 2026-10-06
 
 auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答え、MFA の登録の証人を書く。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。このパッケージはまた、Store の MFA エンドポイント — Store が主体の第二要素と登録の証人を保持する場所 — の契約を、それを名指す設定セクションと、その失敗が投げるものとともに定める。`HttpMfaFactorStore` は要素のエンドポイントの上に core の `MfaFactorStore` を実装し、`foundationMfaFactorStoreModule` がそれを組み込む。
 
@@ -273,7 +273,7 @@ URL が無ければ何も書かれず、プロバイダーは Store が返す `m
 - `foundationMfaFactorStoreModule`・`FoundationMfaFactorStoreModuleOptions` — そのモジュール（[`src/mfa/module.mts`](src/mfa/module.mts)）。
 - `MfaStoreError`・`MfaStoreFailure`・`MfaStoreOperation` — MFA エンドポイントの失敗が投げるもの。`name`・`reason`・`operation`・`storeStatus` は契約の一部で、`status` は持たない（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）。アダプターが投げるときに通す関数と、`foundation-mfa-factor-store` セクションのスキーマと読み取り（[`src/mfa/section.mts`](src/mfa/section.mts)）はパッケージ内部のもの。
 
-[`src/testing/index.mts`](src/testing/index.mts) から `@o3co/auth-provider-foundation/testing` として、テストコードのためだけに export される: `foundationMfaFactorStoreConfig(urls, extra?)` — テストの設定に重ねる設定の断片としての `foundation-mfa-factor-store` セクション。`urls` が持つ四つの URL（偽の Store の `urls` も。その他のエンドポイントは残す）と、`extra` をそのまま持つ。そして `foundationUserRepositoryHttpConfig(urls, extra?)` — ユーザーリポジトリの `http` ブロック。`urls` が持つもののうち `"http"` ビルダーが読む Store の URL（MFA 要素のエンドポイントは残す）と、`extra` をそのまま持ち、組み立て側が core の `withUserRepositoryHttp` で置く。
+[`src/testing/index.mts`](src/testing/index.mts) から `@o3co/auth-provider-foundation/testing` として、テストコードのためだけに export される: `foundationMfaFactorStoreConfig(urls, extra?)` — テストの設定に重ねる設定の断片としての `foundation-mfa-factor-store` セクション。`urls` が持つ四つの URL（偽の Store の `urls` も。その他のエンドポイントは残す）と、`extra` をそのまま持つ。そして `foundationUserRepositoryHttpConfig(urls, extra?)` — ユーザーリポジトリの `http` ブロック。`urls` が持つもののうち `"http"` ビルダーが読む Store の URL（MFA 要素のエンドポイントは残す）と、`extra` をそのまま持ち、テストが `"http"` ビルダーに、または `foundationMfaFactorStoreModule` に `storeTransport` として渡す。
 
 ## テスト
 

@@ -77,7 +77,6 @@ export {
 	withFederation,
 	withInsecureSessionCookie,
 } from "./fixtures/sessionConfig.mjs";
-export { userRepositoryHttpOf, withUserRepositoryHttp } from "./fixtures/userRepository.mjs";
 export {
 	type CoreConfigForTestsOptions,
 	coreConfigForTests,
