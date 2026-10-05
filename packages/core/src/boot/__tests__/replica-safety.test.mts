@@ -22,6 +22,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
 	checkReplicaSafety,
 	REPLICA_UNSAFE_MODULES,
@@ -421,5 +422,186 @@ describe("checkReplicaSafety — wired into boot", () => {
 			}),
 			"replica_unsafe_adapters",
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A declaration made from the module's own section
+// ---------------------------------------------------------------------------
+
+describe("replicaSafety declared from the module's own section", () => {
+	// A module whose storage is configuration declares the replica safety of
+	// the store its section selects: unsafe for one value, nothing for another.
+	const StoreSection = z.object({ enabled: z.boolean().optional(), store: z.string() }).strict();
+	const MEMORY_REASON =
+		"the store is in this process's memory — a value written on one replica is unknown to the others";
+
+	const selecting = (
+		replicaSafety: (
+			section: z.output<typeof StoreSection>,
+		) => { readonly unsafe: true; readonly reason: string } | undefined = (section) =>
+			section.store === "memory" ? { unsafe: true, reason: MEMORY_REASON } : undefined,
+	) =>
+		defineModule({
+			name: "section-store",
+			section: {
+				schema: StoreSection,
+				isEnabled: (section) => section.enabled !== false,
+			},
+			replicaSafety,
+		});
+
+	const bootWith = (
+		section: Record<string, unknown>,
+		mode?: "single" | "multi",
+		logger?: unknown,
+	): BootstrapMap =>
+		({
+			config: {
+				...makeValidCoreConfig(),
+				...(mode === undefined ? {} : { core: { deployment: { mode } } }),
+				"section-store": section,
+			} as never,
+			pathResolver: (s: string) => s,
+			...(logger === undefined ? {} : { logger }),
+		}) satisfies Record<string, unknown> as BootstrapMap;
+
+	const bootLogger = (warn: ReturnType<typeof vi.fn>) => ({
+		warn,
+		info: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn(),
+		trace: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	});
+
+	it("refuses boot in multi mode for the section value it declares unsafe, quoting its reason", async () => {
+		await expect(
+			createApp({
+				modules: [selecting()],
+				bootstrapComponents: bootWith({ store: "memory" }, "multi"),
+			}),
+		).rejects.toMatchObject({
+			reason: "replica-unsafe-adapter",
+			details: { modules: ["section-store"] },
+			message: expect.stringContaining(`section-store: ${MEMORY_REASON}`),
+		});
+	});
+
+	it("boots in multi mode for the section value it declares nothing for", async () => {
+		const handle = await createApp({
+			modules: [selecting()],
+			bootstrapComponents: bootWith({ store: "shared" }, "multi"),
+		});
+		await handle.dispose();
+	});
+
+	it("warns, as a static declaration does, when the mode is unset", async () => {
+		const warn = vi.fn();
+		const handle = await createApp({
+			modules: [selecting()],
+			bootstrapComponents: bootWith({ store: "memory" }, undefined, bootLogger(warn)),
+		});
+		expect(warn).toHaveBeenCalledWith(
+			{ modules: ["section-store"], reasons: [`section-store: ${MEMORY_REASON}`] },
+			"replica_unsafe_adapters",
+		);
+		await handle.dispose();
+	});
+
+	it("is silent, as a static declaration is, in single mode", async () => {
+		const warn = vi.fn();
+		const handle = await createApp({
+			modules: [selecting()],
+			bootstrapComponents: bootWith({ store: "memory" }, "single", bootLogger(warn)),
+		});
+		expect(warn).not.toHaveBeenCalledWith(expect.anything(), "replica_unsafe_adapters");
+		await handle.dispose();
+	});
+
+	it("is handed the parsed section, once", async () => {
+		const declare = vi.fn((_section: z.output<typeof StoreSection>) => undefined);
+		const handle = await createApp({
+			modules: [selecting(declare)],
+			bootstrapComponents: bootWith({ store: "shared" }, "multi"),
+		});
+		expect(declare).toHaveBeenCalledOnce();
+		expect(declare).toHaveBeenCalledWith({ store: "shared" });
+		await handle.dispose();
+	});
+
+	it("is not called for a module its section switches off", async () => {
+		const declare = vi.fn((_section: z.output<typeof StoreSection>) => ({
+			unsafe: true as const,
+			reason: MEMORY_REASON,
+		}));
+		const handle = await createApp({
+			modules: [selecting(declare)],
+			bootstrapComponents: bootWith({ enabled: false, store: "memory" }, "multi"),
+		});
+		expect(declare).not.toHaveBeenCalled();
+		await handle.dispose();
+	});
+
+	it("refuses boot naming the module when it throws, in any mode", async () => {
+		for (const mode of ["single", "multi", undefined] as const) {
+			await expect(
+				createApp({
+					modules: [
+						selecting(() => {
+							throw new Error("cannot tell");
+						}),
+					],
+					bootstrapComponents: bootWith({ store: "memory" }, mode),
+				}),
+			).rejects.toMatchObject({
+				reason: "config-validation-failed",
+				details: { modules: [{ module: "section-store", schemaPath: "section-store" }] },
+				message: expect.stringMatching(
+					/module "section-store"'s replicaSafety .*it threw: .*cannot tell/,
+				),
+			});
+		}
+	});
+
+	it.each([
+		["a string", "unsafe"],
+		["null", null],
+		["no reason", { unsafe: true }],
+		["an empty reason", { unsafe: true, reason: "" }],
+		["unsafe false", { unsafe: false, reason: MEMORY_REASON }],
+	])("refuses boot naming the module when it answers %s", async (_label, answer) => {
+		await expect(
+			createApp({
+				modules: [selecting(() => answer as never)],
+				bootstrapComponents: bootWith({ store: "memory" }, "single"),
+			}),
+		).rejects.toMatchObject({
+			reason: "config-validation-failed",
+			details: { modules: [{ module: "section-store", schemaPath: "section-store" }] },
+			message: expect.stringContaining(`module "section-store"'s replicaSafety`),
+		});
+	});
+
+	it("types the function's section as the schema's output", () => {
+		defineModule({
+			name: "section-store-typed",
+			section: { schema: StoreSection },
+			replicaSafety: (section) =>
+				section.store === "memory" ? { unsafe: true, reason: MEMORY_REASON } : undefined,
+		});
+		defineModule({
+			name: "section-store-mistyped",
+			section: { schema: StoreSection },
+			// @ts-expect-error -- the section has no `storage` key
+			replicaSafety: (section) => (section.storage === "memory" ? undefined : undefined),
+		});
+	});
+
+	it("replicaUnsafeReason answers for the section it is handed", () => {
+		const module = selecting();
+		expect(replicaUnsafeReason(module, { store: "memory" })).toBe(MEMORY_REASON);
+		expect(replicaUnsafeReason(module, { store: "shared" })).toBeUndefined();
 	});
 });
