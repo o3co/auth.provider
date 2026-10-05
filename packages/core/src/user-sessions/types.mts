@@ -133,8 +133,8 @@ export type MailAddressFact = "none" | "address" | "unreadable";
  * federation, what an untrusted upstream IdP asserted, and when a second
  * factor was last verified. Read through `sessionAuthentication`
  * (`./authentication.mts`), which answers the same shape for older sessions.
- * Every field is a required key, holding `undefined` where there is nothing
- * to say, so a copy names each one.
+ * Every field but `upstreamAuthTime` is a required key, holding `undefined`
+ * where there is nothing to say, so a copy names each one.
  */
 export interface SessionAuthentication {
 	/** How the session was established: `"pwd"` (`POST /session/login`), `"fed"` (a federation callback). */
@@ -151,6 +151,15 @@ export interface SessionAuthentication {
 	readonly upstreamAmr: readonly string[] | undefined;
 	/** When a second factor was last verified, or bound, in this session. */
 	readonly mfaAt: Date | undefined;
+	/**
+	 * For `"fed"`: when the upstream last authenticated the user, its verified
+	 * id_token's `auth_time`. `null`: it showed none, and the federation's
+	 * callback does not meet a freshness ask, so the session is never fresh.
+	 * Absent: nothing to say — a password login, a session written before the
+	 * key, or a federation whose callback meets a freshness ask — so the
+	 * session is as fresh as `authTime`. Read through `authenticationFreshness`.
+	 */
+	readonly upstreamAuthTime?: Date | null;
 }
 
 /**
@@ -477,11 +486,12 @@ export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
  * change must invalidate outstanding tokens whose jtis are not enumerable, so
  * the watermark names the moment before which none count.
  *
- * Compared inclusively against `iat` (`iat <= watermark` is revoked): `iat`
- * is second-truncated and replica clocks differ, so a token minted just
- * before the reset often shares the watermark's second. Killing one minted
- * just after costs a retry; letting one from just before survive is the
- * vulnerability this closes.
+ * Compared inclusively against `iat`, and against `auth_time` when a token
+ * carries one (either at or before the watermark is revoked;
+ * `claimCoveredByRevocationBoundary`): `iat` is second-truncated and replica
+ * clocks differ, so a token minted just before the reset often shares the
+ * watermark's second. Killing one minted just after costs a retry; letting
+ * one from just before survive is the vulnerability this closes.
  *
  * `revokeBefore`'s `expiresAt` MUST reach at least as far as the
  * longest-lived credential the watermark must refuse, since it is the
@@ -513,7 +523,16 @@ export interface SubjectRevocation {
 	 * time (`checkSubjectRevocationInstant`).
 	 */
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
-	/** The sessions watermark, or `null` when this subject has none in force. */
+	/**
+	 * The sessions watermark, or `null` when this subject has none in force.
+	 *
+	 * A read sees every write of this store that has resolved: once
+	 * `revokeBefore` (or `revokeSessionsBefore`) resolves, every read
+	 * answers that boundary or a later one. An adapter does not answer from a
+	 * replica that may lag its writes: a revocation stamps its boundary again
+	 * once the first write resolves, and a read that misses either lets
+	 * through what they cover.
+	 */
 	revokedBefore(subject: string): Promise<Date | null>;
 }
 

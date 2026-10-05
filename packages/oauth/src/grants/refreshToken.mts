@@ -20,6 +20,7 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	boundPolicyAudience,
+	checkOAuthTokenSettings,
 	checkResolver,
 	deriveAudienceFromResources,
 	describeAdmissionOutage,
@@ -39,9 +40,6 @@ import {
 	type ProviderDeps,
 	readIssuedScope,
 	readSpaceDelimitedParameter,
-	resolveAccessTokenLifetime,
-	resolveRefreshTokenLifetime,
-	resolveTokenBindingSettings,
 	tokenClaim,
 	unrepresentedResources,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
@@ -53,6 +51,7 @@ import {
 import type { JWTPayload } from "jose";
 import { stepUpRefusal } from "../admission.mjs";
 import type { REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
+import { bindConfidentialClientRefreshTokensFrom } from "./tokenBindingRule.mjs";
 
 /**
  * Subtracted from the family ceiling a rotation reports before the refresh
@@ -65,7 +64,11 @@ const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
 /**
  * What the refresh grant reads. `sessionRequirementResolver` and `auditSink`
  * feed admission of the token's session; the resolver is required, and a
- * factory built without one is refused.
+ * factory built without one is refused. The lifetimes, `legacyTypAccept` and
+ * the resource-indicator switch come from the `oauthTokenSettings` slot, and
+ * the refresh-token binding rule from core's `tokenBindingSettings`. Of the
+ * whole configuration it reads `oauth.refreshToken.unknownFamilyPolicy`
+ * alone, which no slot carries.
  */
 export type RefreshTokenGrantDeps = Pick<
 	GrantDependencies,
@@ -78,7 +81,10 @@ export type RefreshTokenGrantDeps = Pick<
 	| "subjectRevocation"
 	| "userSessionStore"
 > &
-	ProviderDeps<"sessionRequirementResolver", "auditSink">;
+	ProviderDeps<
+		"sessionRequirementResolver" | "oauthTokenSettings" | "tokenBindingSettings",
+		"auditSink" | "sessionLifecycleStore"
+	>;
 
 /**
  * The token endpoint's answer to an admission that does not refresh, or
@@ -122,17 +128,111 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 	// refresh asks for no acr.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		subjectRevocation,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createRefreshTokenGrant"),
 		acrTable: {},
 		logger,
 		auditSink: deps.auditSink,
 	};
-	// Read once at construction, so an invalid hand-built configuration is
-	// refused before any request — not after client authentication and the
-	// rotation have spent the presented token.
-	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
-	const requestedRefreshExpiresIn = resolveRefreshTokenLifetime(config);
+	// The token settings are read once, here, from the `oauthTokenSettings`
+	// slot alone, checked whole first: a hand-built value the check refuses,
+	// or none, fails at composition, naming the slot, before any request —
+	// not after client authentication and the rotation have spent the
+	// presented token.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
+	const requestedRefreshExpiresIn = tokenSettings.refreshTokenExpiresIn;
+	const { legacyTypAccept, resourceIndicatorEnabled } = tokenSettings;
+	// The refresh-token binding rule, read once from core's
+	// `tokenBindingSettings` slot.
+	const bindConfidentialClients = bindConfidentialClientRefreshTokensFrom(
+		deps.tokenBindingSettings,
+		"createRefreshTokenGrant",
+	);
+
+	/**
+	 * The presented token's verification, with its refusal as the token
+	 * endpoint answers it. Run again after each slow await before signing,
+	 * so the subject's revocation watermark is read anew without depending
+	 * on a session.
+	 */
+	const verifyPresented = async (
+		refreshTokenValue: string,
+		issuer: string | undefined,
+	): Promise<
+		| { readonly ok: true; readonly payload: JWTPayload; readonly typ: string | undefined }
+		| { readonly ok: false; readonly result: GrantError }
+	> => {
+		try {
+			// The verifier pins alg / iss / typ and the signature. aud/azp are
+			// checked by the grant instead, for a more specific error and to
+			// accept tokens that carry `aud` but no `azp`.
+			const verified = await verifyJwt(refreshTokenValue, keyStore, {
+				type: "refresh_token",
+				expectedIssuer: issuer ?? "",
+				legacyTypAccept,
+				// No access-token jti denylist: refresh tokens are revoked through
+				// the family store. The subject watermark is the backstop for a
+				// partial revocation cascade; a rotated token carries a fresh
+				// `iat`, so only tokens minted before the credential change are
+				// refused.
+				revocation: { subjectRevocation },
+				logger,
+			});
+			return { ok: true, payload: verified.payload, typ: verified.header.typ };
+		} catch (err) {
+			// A dependency the verifier could not consult (revocation store,
+			// keystore) is an outage: `503`, not `invalid_grant`, which tells
+			// the client to discard its refresh token (RFC 6749 §5.2) and would
+			// log out everyone who refreshed during a blip. The verifier still
+			// fails closed. Every other failure stays `invalid_grant`.
+			if (isVerificationUnavailable(err)) {
+				// The verifier's own closed vocabulary, not text a store wrote.
+				const { reason } = err;
+				logger?.error(
+					{ site: "refresh_token", reason, err: loggableError(err) },
+					"token_verification_unavailable",
+				);
+				return {
+					ok: false,
+					result: {
+						status: 503,
+						error: "temporarily_unavailable",
+						errorDescription: VERIFICATION_UNAVAILABLE_DESCRIPTION[reason],
+					},
+				};
+			}
+			return {
+				ok: false,
+				result: { status: 400, error: "invalid_grant", errorDescription: "invalid refresh_token" },
+			};
+		}
+	};
+
+	/**
+	 * Revokes a family whose rotation committed but whose tokens are not
+	 * signed. Without the revocation dep, or when it fails (logged), the
+	 * family is still left unusable: its newest token was never issued, and
+	 * the spent one replays as a revocation.
+	 */
+	const revokeRotatedFamily = async (familyId: string, clientId: string): Promise<void> => {
+		if (!deps.refreshTokenFamilyRevocation) return;
+		try {
+			await deps.refreshTokenFamilyRevocation.revokeFamily(familyId);
+		} catch (err) {
+			logger?.error(
+				{
+					store: "refresh_token_family",
+					step: "revoke",
+					familyId,
+					clientId,
+					err: loggableError(err),
+				},
+				"refresh_token_store_unavailable",
+			);
+		}
+	};
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -167,55 +267,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			}
 			const authenticatedClientId = ctx.authenticatedClient.clientId;
 
-			let tokenPayload: JWTPayload;
-			let typ: string | undefined;
-			try {
-				// The verifier pins alg / iss / typ and the signature. aud/azp are
-				// checked below instead, for a more specific error and to accept
-				// tokens that carry `aud` but no `azp`.
-				const verified = await verifyJwt(refreshTokenValue, keyStore, {
-					type: "refresh_token",
-					expectedIssuer: issuer ?? "",
-					legacyTypAccept: config.oauth.jwt.legacyTypAccept ?? false,
-					// No access-token jti denylist: refresh tokens are revoked through
-					// the family store (below). The subject watermark is the backstop
-					// for a partial revocation cascade; a rotated token carries a
-					// fresh `iat`, so only tokens minted before the credential change
-					// are refused.
-					revocation: { subjectRevocation },
-					logger,
-				});
-				tokenPayload = verified.payload;
-				typ = verified.header.typ;
-			} catch (err) {
-				// A dependency the verifier could not consult (revocation store,
-				// keystore) is an outage: `503`, not `invalid_grant`, which tells
-				// the client to discard its refresh token (RFC 6749 §5.2) and would
-				// log out everyone who refreshed during a blip. The verifier still
-				// fails closed. Every other failure stays `invalid_grant`.
-				if (isVerificationUnavailable(err)) {
-					// The verifier's own closed vocabulary, not text a store wrote.
-					const { reason } = err;
-					logger?.error(
-						{ site: "refresh_token", reason, err: loggableError(err) },
-						"token_verification_unavailable",
-					);
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: VERIFICATION_UNAVAILABLE_DESCRIPTION[reason],
-						},
-					};
-				}
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription: "invalid refresh_token",
-					},
-				};
-			}
+			const verified = await verifyPresented(refreshTokenValue, issuer);
+			if (!verified.ok) return { result: verified.result };
+			const { payload: tokenPayload, typ } = verified;
 
 			// Defends against an access token presented as a refresh token. The
 			// verifier refuses any `typ` but `rt+jwt`, yet under `legacyTypAccept`
@@ -383,7 +437,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 
 			// Read under the flag alone: with no policy wired, issuing the client
 			// id in answer to a `resource` request would violate RFC 8707 §2.
-			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
 			const requestedResource = resourceIndicatorEnabled
 				? extractResourceParam(body as Record<string, unknown>)
 				: null;
@@ -463,17 +516,27 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				typeof tokenPayloadClaims.jti === "string" ? tokenPayloadClaims.jti : null;
 			const newFamilyId = familyId ?? randomUUID();
 
-			// Admit the token's session before the rotation spends the presented
-			// token: the live session by `sid` (skipped without a `sid` or a
-			// store), fail-closed, with requirements judged on the token's own
-			// `amr`. Subject revocation was verifyJwt's; admission skips it for a
-			// token carrier.
-			const admission = await admitSession(admissionDeps, {
-				// `subjectStr` was refused above when the token carries no `sub`.
-				claim: tokenClaim({ sid, sub: subjectStr, amr: carriedAmr }),
-				action: "oauth.refresh" satisfies keyof typeof REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS,
-			});
-			const refusal = refusalFor(admission);
+			// Admit the token's session, after the policy and before the rotation
+			// spends the presented token: the live session by `sid` (skipped
+			// without a `sid` or a store), fail-closed, with requirements judged
+			// on the token's own `amr`. Admission skips the revocation boundary for
+			// a token carrier, so the presented token is verified again after it:
+			// the subject's watermark is the last read, independent of any session,
+			// and a revocation that landed during the policy or the requirements
+			// mints nothing. Each refusal is answered as its first check.
+			const recheck = async (): Promise<GrantError | undefined> => {
+				const refusal = refusalFor(
+					await admitSession(admissionDeps, {
+						// `subjectStr` was refused above when the token carries no `sub`.
+						claim: tokenClaim({ sid, sub: subjectStr, amr: carriedAmr }),
+						action: "oauth.refresh" satisfies keyof typeof REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS,
+					}),
+				);
+				if (refusal !== undefined) return refusal;
+				const reverified = await verifyPresented(refreshTokenValue, issuer);
+				return reverified.ok ? undefined : reverified.result;
+			};
+			const refusal = await recheck();
 			if (refusal !== undefined) return { result: refusal };
 
 			// With rotation wired, a refresh token must carry `jti` and
@@ -519,8 +582,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// environment variable). Off by default because a bound token pins
 			// the client to one key or certificate for its lifetime, so rotating
 			// it mid-lifetime breaks refresh.
-			const bindConfidentialClients =
-				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 			const bindNewRefreshToken =
 				(bindingIsDpop || bindingIsMtls) &&
 				presentedConfirmation !== undefined &&
@@ -597,23 +658,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 								requestedRefreshExpiresIn,
 								Math.floor((capped - CAPPED_EXPIRY_DRIFT_MARGIN_MS) / 1000) - issuedAt,
 							);
-						}
-						// `issuedAt` was reserved before the store call, so measure what
-						// is left against the clock now: a cap at the end of the family's
-						// life, or a store slow enough to spend it, leaves a token that
-						// would be signed already expired.
-						if (issuedAt + refreshExpiresIn <= Math.floor(Date.now() / 1000)) {
-							logger?.info(
-								{ familyId: newFamilyId, clientId: authenticatedClientId },
-								"refresh_token_family_lifetime_exhausted",
-							);
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "refresh token family has reached its lifetime",
-								},
-							};
 						}
 						break;
 					}
@@ -734,6 +778,35 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						const _exhaustive: never = rotateResult;
 						throw new Error(`unhandled rotation outcome: ${JSON.stringify(_exhaustive)}`);
 					}
+				}
+
+				// The session's admission and the watermark again, after the
+				// rotation's await and before signing: a revocation or a session
+				// end that landed meanwhile mints nothing.
+				const refusalAfter = await recheck();
+				if (refusalAfter !== undefined) {
+					// A committed rotation spent the presented token and reserved one
+					// never signed; the family is revoked so nothing rotates it on.
+					if (rotationCommitted) await revokeRotatedFamily(newFamilyId, authenticatedClientId);
+					return { result: refusalAfter };
+				}
+
+				// `issuedAt` was reserved before the store call, so measure what is
+				// left against the clock now, after every await: a cap at the end of
+				// the family's life, or a store slow enough to spend it, leaves a
+				// token that would be signed already expired.
+				if (rotationCommitted && issuedAt + refreshExpiresIn <= Math.floor(Date.now() / 1000)) {
+					logger?.info(
+						{ familyId: newFamilyId, clientId: authenticatedClientId },
+						"refresh_token_family_lifetime_exhausted",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "refresh token family has reached its lifetime",
+						},
+					};
 				}
 			}
 

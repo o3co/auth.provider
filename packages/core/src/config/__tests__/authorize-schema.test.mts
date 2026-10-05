@@ -10,6 +10,7 @@
 
 import { parseString } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
+import { checkAcrValueName } from "../acr-values.mjs";
 import { CoreConfigSchema } from "../application.schema.mjs";
 
 /**
@@ -111,5 +112,47 @@ describe("oauth.authorize.acrValues — any-of entries", () => {
 	])("refuses %s", (_label, entry) => {
 		// Each would vouch for every session, or name nothing a session can carry.
 		expect(authorizeSchema.safeParse({ acrValues: { "urn:x": entry } }).success).toBe(false);
+	});
+});
+
+describe("oauth.authorize.acrValues — a key is one value an acr_values request can name", () => {
+	it.each([
+		["a space", "urn:x pwd"],
+		["a tab", "urn:x\tpwd"],
+		["a newline", "urn:x\n"],
+		["a double quote", 'urn:"x"'],
+		["a backslash", "urn:x\\y"],
+		["a non-ASCII character", "urn:é"],
+	])("refuses a key holding %s, naming the key and the path", (_label, key) => {
+		const result = authorizeSchema.safeParse({ acrValues: { [key]: ["pwd"] } });
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues).toEqual([
+			expect.objectContaining({ path: ["acrValues", key], message: checkAcrValueName(key) }),
+		]);
+		expect(result.error.issues[0]?.message).toContain(
+			`oauth.authorize.acrValues key ${JSON.stringify(key)}`,
+		);
+	});
+
+	it("refuses every unusable key, beside a usable one and an entry refused for its value", () => {
+		const result = authorizeSchema.safeParse({
+			acrValues: { "urn:x pwd": ["pwd"], "urn:y\tz": ["pwd"], "urn:ok": ["pwd"], "urn:none": [] },
+		});
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues.map((issue) => issue.path)).toEqual(
+			expect.arrayContaining([
+				["acrValues", "urn:x pwd"],
+				["acrValues", "urn:y\tz"],
+				["acrValues", "urn:none"],
+			]),
+		);
+		expect(result.error.issues.some((issue) => issue.path.includes("urn:ok"))).toBe(false);
+	});
+
+	it("accepts a key of any printable ASCII but the space, the double quote and the backslash", () => {
+		const key = "urn:!#$%&'()*+,-./:;<=>?@[]^_`{|}~";
+		expect(authorizeSchema.safeParse({ acrValues: { [key]: ["pwd"] } }).success).toBe(true);
 	});
 });

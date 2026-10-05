@@ -28,6 +28,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createSymmetricKeyStore,
 	type GrantContext,
@@ -37,6 +38,7 @@ import {
 	type GrantResult,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type SubjectRevocation,
 	type UserSession,
@@ -56,6 +58,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SID = "sid-1";
 const SUBJECT = "user-1";
@@ -110,6 +113,8 @@ const storeWith = (session: UserSession | null) =>
 
 const fixture = (
 	verdict: () => RequirementVerdict,
+	/** Runs before the verdict is answered, as a slow requirement's own reads would. */
+	answering: () => Promise<void> = async () => {},
 ): SessionRequirement & { readonly inputs: RequirementInput[] } => {
 	const inputs: RequirementInput[] = [];
 	return {
@@ -121,6 +126,7 @@ const fixture = (
 		inputs,
 		async admit(input) {
 			inputs.push(input);
+			await answering();
 			return verdict();
 		},
 	};
@@ -129,6 +135,7 @@ const fixture = (
 const grant = (opts: {
 	userSessionStore?: UserSessionStore;
 	subjectRevocation?: SubjectRevocation;
+	sessionLifecycleStore?: SessionLifecycleStore;
 	requirements?: readonly SessionRequirement[];
 	logger?: MockLogger;
 	grantPolicy?: GrantPolicyHook;
@@ -142,6 +149,7 @@ const grant = (opts: {
 		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
+		...(opts.sessionLifecycleStore ? { sessionLifecycleStore: opts.sessionLifecycleStore } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 	});
@@ -166,6 +174,27 @@ const refused = async (
 };
 
 describe("the session grant on admission — what the session and its record decide", () => {
+	it("a session whose lifecycle record is closing is 400 invalid_grant session_invalid, its user session still there", async () => {
+		const store = createInMemorySessionLifecycleStore();
+		const live = record();
+		expect((await store.open(SID, SUBJECT, live.expiresAt)).outcome).toBe("opened");
+		const closing = await store.beginClose(SID, {
+			cause: "rp_logout",
+			steps: ["held_open"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+		expect(closing.outcome).toBe("closing");
+		const result = await refused(
+			grant({ userSessionStore: storeWith(live), sessionLifecycleStore: store }),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+	});
+
 	it("the subject-revocation boundary applies when subjectRevocation is wired: 400 invalid_grant", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
@@ -369,6 +398,60 @@ describe("the session grant — admission is read again after the policy", () =>
 	});
 });
 
+describe("the session grant — a boundary stamped while a requirement answers", () => {
+	/** A requirement that stamps the subject's boundary before answering `met` on its `stampOn`th call. */
+	const stamping = (revocation: SubjectRevocation, stampOn: number) => {
+		let calls = 0;
+		return fixture(
+			() => ({ outcome: "met" }),
+			async () => {
+				calls += 1;
+				if (calls === stampOn) {
+					await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
+				}
+			},
+		);
+	};
+	const allow: GrantPolicyHook = { kind: "allow", evaluate: async () => ({ outcome: "allow" }) };
+
+	it("mints nothing: 400 invalid_grant", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const requirement = stamping(revocation, 1);
+		const result = await refused(
+			grant({
+				userSessionStore: storeWith(record()),
+				subjectRevocation: revocation,
+				requirements: [requirement],
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(requirement.inputs).toHaveLength(1);
+	});
+
+	it("on the admission read again after the policy, mints nothing: 400 invalid_grant", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const requirement = stamping(revocation, 2);
+		const result = await refused(
+			grant({
+				userSessionStore: storeWith(record()),
+				subjectRevocation: revocation,
+				requirements: [requirement],
+				grantPolicy: allow,
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(requirement.inputs).toHaveLength(2);
+	});
+});
+
 describe("the session grant — the auth_time it stamps", () => {
 	/** A wall clock that steps back two seconds at every read, as one an operator or NTP moves back would. */
 	const steppingBack = () => {
@@ -543,7 +626,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 		);
 		const { router } = await createOAuthRouter(express, {
 			registry,
-			config,
+			...routerInputsOf(config),
 			keyStore,
 			codeRepository,
 			clientRepository,

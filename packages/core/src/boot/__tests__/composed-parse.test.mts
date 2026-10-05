@@ -124,13 +124,9 @@ describe("one composed parse over the transitional base", () => {
 	it("coerces a section core mirrors that no loaded module owns, and keeps it", async () => {
 		const config = await bootAndRead(
 			[],
-			resolved({
-				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
-			}),
+			resolved({ webauthn: { challengeTtlMs: "120000", rpId: "example.com" } }),
 		);
-		expect(config.webauthn).toEqual({
-			rateLimit: { authenticationOptions: { limit: 120, windowSeconds: 60 } },
-		});
+		expect(config.webauthn).toEqual({ challengeTtlMs: 120000, rpId: "example.com" });
 	});
 
 	it("refuses a value a mirrored section's schema refuses, naming the operator's path", async () => {
@@ -213,14 +209,12 @@ describe("one composed parse over the transitional base", () => {
 		const err = await bootRefused(
 			[],
 			resolved({
-				webauthn: {
-					rateLimit: { authenticationOptions: { limit: "not-a-limit", windowSeconds: 0 } },
-				},
+				webauthn: { challengeTtlMs: "not-a-lifetime", attestationPreference: "several" },
 			}),
 		);
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/webauthn\.rateLimit\.authenticationOptions\.limit: /);
-		expect(err.message).toMatch(/webauthn\.rateLimit\.authenticationOptions\.windowSeconds: /);
+		expect(err.message).toMatch(/webauthn\.challengeTtlMs: /);
+		expect(err.message).toMatch(/webauthn\.attestationPreference: /);
 	});
 
 	it("keeps a key no schema declares under a section core declares", async () => {

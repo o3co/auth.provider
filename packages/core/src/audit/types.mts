@@ -70,6 +70,9 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"introspect.session_invalid",
 	"introspect.store_unavailable",
 	"logout.cascade_failed",
+	// A logout whose session's close committed with its work still pending:
+	// answered as done, the lifecycle finishing the work.
+	"logout.close_pending",
 	"logout.family_revoked",
 	"logout.success",
 	// Multi-factor authentication (the MFA ADR's D28), the MFA package's;

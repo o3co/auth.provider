@@ -22,6 +22,7 @@
  */
 
 import type {
+	ExchangeTokenValidator,
 	GrantContext,
 	GrantDependencies,
 	GrantHandler,
@@ -49,11 +50,13 @@ import { authenticateClient } from "./clientAuthentication.mjs";
 import { delegationRefusal } from "./delegation.mjs";
 import { GRANT_TYPE } from "./grantType.mjs";
 import { issueAccessToken } from "./issuance.mjs";
+import { liveSessionSubject } from "./sessionLiveness.mjs";
 import { issuedTarget, type RequestTargets, requestTargets } from "./targetCeilings.mjs";
 import { readTokenRequest, type TokenRequest } from "./tokenRequest.mjs";
 import {
 	type ReportedBindings,
 	resolveValidators,
+	revalidate,
 	validateActor,
 	validateSubject,
 } from "./tokenValidation.mjs";
@@ -68,7 +71,7 @@ export interface TokenExchangeDependencies
 			GrantDependencies,
 			"keyStore" | "logger" | "grantPolicy" | "refreshTokenFamilyRevocation" | "userSessionStore"
 		>,
-		ProviderDeps<"clientRepository"> {
+		ProviderDeps<"clientRepository", "sessionLifecycle"> {
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
 	/**
 	 * What the oauth module provides of `oauth {}`: the access-token lifetimes
@@ -114,41 +117,31 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 
 			const validators = resolveValidators(tokenExchangeValidatorResolver, request);
 			if (isRefusal(validators)) return validators;
+			// The issued token's `iat`, fixed before the presented tokens are validated,
+			// so a subject revocation recorded after any watermark read here covers it.
+			const issuedAt = Math.floor(Date.now() / 1000);
 			const subject = await validateSubject(deps, ctx, request, validators.subjectValidator);
 			if (isRefusal(subject)) return subject;
 			const { subjectValidated, subjectBindings, issuedConfirmation } = subject;
 
-			// The refresh-token family rule — this grant's, not the validator's;
-			// see `familyRefusal`. After the sender-constraint matrices, so a cheap
-			// refusal still short-circuits ahead of the store read.
-			const subjectFamilyRefusal = await familyRefusal(deps, "subject", subjectBindings);
-			if (subjectFamilyRefusal) return subjectFamilyRefusal;
-			// The session rule, beside it: see `sessionRefusal`.
-			const subjectSessionRefusal = await sessionRefusal(
+			// After the sender-constraint matrices, so a cheap refusal still
+			// short-circuits ahead of the store reads.
+			const subjectStanding = await standingRefusal(
 				deps,
 				"subject",
 				subjectValidated,
 				subjectBindings,
 			);
-			if (subjectSessionRefusal) return subjectSessionRefusal;
+			if (subjectStanding) return subjectStanding;
 
 			const actor = await validateActor(deps, ctx, request, validators.actorValidator);
 			if (isRefusal(actor)) return actor;
 			const { actorValidated, actorBindings } = actor;
 			if (actorValidated && actorBindings) {
-				// The subject's family rule, applied to the actor: a revoked actor credential
-				// must not be recorded in `act` as a live delegation.
-				const actorFamilyRefusal = await familyRefusal(deps, "actor", actorBindings);
-				if (actorFamilyRefusal) return actorFamilyRefusal;
-				// And the session rule: an actor whose session a logout ended is
-				// not a live delegation either.
-				const actorSessionRefusal = await sessionRefusal(
-					deps,
-					"actor",
-					actorValidated,
-					actorBindings,
-				);
-				if (actorSessionRefusal) return actorSessionRefusal;
+				// A revoked or logged-out actor credential must not be recorded in
+				// `act` as a live delegation.
+				const actorStanding = await standingRefusal(deps, "actor", actorValidated, actorBindings);
+				if (actorStanding) return actorStanding;
 			}
 			const delegationRefused = delegationRefusal(deps, client, subjectValidated, actorValidated);
 			if (delegationRefused) return delegationRefused;
@@ -172,11 +165,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (isRefusal(issued)) return issued;
 			const { audienceForToken } = issued;
 
+			// The last check before minting: the token is minted only from presented
+			// tokens that still pass after the policy.
+			const presentedAgain = await presentedTokensRefusal(
+				deps,
+				request,
+				validators,
+				{ subjectValidated, subjectBindings },
+				{ actorValidated, actorBindings },
+			);
+			if (presentedAgain) return presentedAgain;
+
 			const issuedToken = await issueAccessToken(
 				deps,
 				ctx,
 				{ defaultExpiresIn, maxExpiresIn },
 				{
+					issuedAt,
 					client,
 					subjectValidated,
 					subjectBindings,
@@ -189,7 +194,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			);
 			if (isRefusal(issuedToken)) return issuedToken;
 
-			return tokenAnswer(issuedToken.accessToken);
+			return tokenAnswer(issuedToken.accessToken, issuedToken.expiresIn);
 		},
 	};
 }
@@ -336,6 +341,63 @@ async function applyGrantPolicy(
 }
 
 /**
+ * The presented tokens held again, at the end of the exchange, to what can change
+ * while it runs: each token's validator (its denylist and watermark, when it
+ * reads them), then its family and session rules over the bindings the first
+ * validation read, which are the ones minted. In the first check's order, with
+ * its refusals and outages; `null` when both tokens still pass.
+ */
+async function presentedTokensRefusal(
+	deps: TokenExchangeDependencies,
+	{ subjectToken, actorToken }: Pick<TokenRequest, "subjectToken" | "actorToken">,
+	{
+		subjectValidator,
+		actorValidator,
+	}: {
+		readonly subjectValidator: ExchangeTokenValidator;
+		readonly actorValidator: ExchangeTokenValidator | null | undefined;
+	},
+	subject: {
+		readonly subjectValidated: ValidatedToken;
+		readonly subjectBindings: ReportedBindings;
+	},
+	actor: {
+		readonly actorValidated: ValidatedToken | null;
+		readonly actorBindings: ReportedBindings | null;
+	},
+): Promise<GrantHandlerResult | null> {
+	const subjectRefused =
+		(await revalidate(deps, "subject", subjectToken, subjectValidator)) ??
+		(await standingRefusal(deps, "subject", subject.subjectValidated, subject.subjectBindings));
+	if (subjectRefused) return subjectRefused;
+	const { actorValidated, actorBindings } = actor;
+	if (actorToken === null || !actorValidator || !actorValidated || !actorBindings) return null;
+	return (
+		(await revalidate(deps, "actor", actorToken, actorValidator)) ??
+		(await standingRefusal(deps, "actor", actorValidated, actorBindings))
+	);
+}
+
+/**
+ * A validated token's standing with this grant: the family rule, then the
+ * session rule. The refusal, or `null` when the token passes both.
+ */
+async function standingRefusal(
+	deps: Pick<
+		TokenExchangeDependencies,
+		"refreshTokenFamilyRevocation" | "userSessionStore" | "sessionLifecycle" | "logger"
+	>,
+	role: "subject" | "actor",
+	validated: ValidatedToken,
+	bindings: ReportedBindings,
+): Promise<GrantHandlerResult | null> {
+	return (
+		(await familyRefusal(deps, role, bindings)) ??
+		(await sessionRefusal(deps, role, validated, bindings))
+	);
+}
+
+/**
  * The refresh-token family rule for a `subject_token` or `actor_token`: the
  * refusal, or `null` when the token passes. This grant owns it (the built-in
  * validator does not read `refreshTokenFamilyRevocation`), so a revoked family
@@ -397,33 +459,38 @@ async function familyRefusal(
  * the same rule, keyed on the validator's `ValidatedToken.sid` (never
  * `claims.sid`, which a foreign issuer's token may carry).
  *
- * - No `sid`, or no `userSessionStore`: nothing to check (introspection passes
- *   the token too).
- * - No session under the `sid`, or one for another subject: `session_invalid`
- *   (`actor_token session_invalid` for the actor), as `invalid_request`.
- * - The store throws: `503 temporarily_unavailable`, logged once as
+ * - No `sid`, or neither `sessionLifecycle` nor `userSessionStore`: nothing to
+ *   check (introspection passes the token too).
+ * - With `sessionLifecycle` installed, its `liveness` decides, so a session
+ *   closing or closed is refused from the closing commit on; otherwise the
+ *   `userSessionStore` record does.
+ * - No live session under the `sid`, or one for another subject:
+ *   `session_invalid` (`actor_token session_invalid` for the actor), as
+ *   `invalid_request`.
+ * - A read that throws, or a lifecycle that cannot answer: `503
+ *   temporarily_unavailable`, logged once as
  *   `token_exchange_session_store_unavailable`; an outage is never read as an
  *   ended or a live session.
  */
 async function sessionRefusal(
-	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "logger">,
+	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "sessionLifecycle" | "logger">,
 	role: "subject" | "actor",
 	validated: ValidatedToken,
 	{ sid }: ReportedBindings,
 ): Promise<GrantHandlerResult | null> {
+	if (sid === undefined) return null;
+	const lifecycle = deps.sessionLifecycle;
 	const store = deps.userSessionStore;
-	if (sid === undefined || store === undefined) return null;
-	let live: boolean;
-	try {
-		// The session grant's rule: the record must be this token's
-		// subject's. A token naming another subject's session is not tied to
-		// it, and that session's liveness says nothing about this subject.
-		live = (await store.get(sid))?.sub === validated.sub;
-	} catch (err) {
-		(deps.logger ?? consoleLogger).error(
-			{ store: "user_session", step: "get", role, err: loggableError(err) },
-			"token_exchange_session_store_unavailable",
-		);
+	const outage = (where: Readonly<Record<string, unknown>>, err?: unknown): GrantHandlerResult => {
+		const logger = deps.logger ?? consoleLogger;
+		if (err === undefined) {
+			logger.error({ ...where, role }, "token_exchange_session_store_unavailable");
+		} else {
+			logger.error(
+				{ ...where, role, err: loggableError(err) },
+				"token_exchange_session_store_unavailable",
+			);
+		}
 		return {
 			result: {
 				status: 503,
@@ -431,6 +498,29 @@ async function sessionRefusal(
 				errorDescription: forRole(role, "session store unavailable"),
 			},
 		};
+	};
+	// The session grant's rule: the session must be this token's subject's. A
+	// token naming another subject's session is not tied to it, and that
+	// session's liveness says nothing about this subject.
+	let live: boolean;
+	if (lifecycle !== undefined) {
+		const where = { store: "session_lifecycle", step: "liveness" };
+		let session: Awaited<ReturnType<typeof liveSessionSubject>>;
+		try {
+			session = await liveSessionSubject(lifecycle, sid);
+		} catch (err) {
+			return outage(where, err);
+		}
+		if (session === "unavailable") return outage(where);
+		live = session !== "not_live" && session.subject === validated.sub;
+	} else if (store !== undefined) {
+		try {
+			live = (await store.get(sid))?.sub === validated.sub;
+		} catch (err) {
+			return outage({ store: "user_session", step: "get" }, err);
+		}
+	} else {
+		return null;
 	}
 	if (live) return null;
 	return invalidRequest(forRole(role, "session_invalid"));

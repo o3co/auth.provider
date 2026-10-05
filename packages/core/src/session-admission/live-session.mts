@@ -16,9 +16,11 @@
 
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
- * read, the subject, the renewal nonce and the revocation boundary, then the
+ * read, the subject, the renewal nonce, the session's lifecycle and the
+ * revocation boundary, then the
  * store's step-up capability over the live record. The session store, the
- * boundary and the audit sink are read here and nowhere else in admission,
+ * lifecycle store, the boundary and the audit sink are read here and nowhere
+ * else in admission,
  * each off `deps` once; an outage, a read of either store off `deps` that
  * throws, or a store that throws when its capability is read, is answered
  * through admission's `unavailable`, which logs it. The sink is read only
@@ -28,8 +30,11 @@
 
 import { emitAuditEvent } from "../audit/factory.mjs";
 import type { AuditSink } from "../audit/types.mjs";
-import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
-import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
+import {
+	claimCoveredByRevocationBoundary,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+} from "../jwt/verify.mjs";
+import { readVersionedSessionLifecycle } from "../user-sessions/lifecycle/readers.mjs";
 import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
 import {
 	supportsSecondFactorUpdate,
@@ -52,7 +57,12 @@ const isValidDate = (value: unknown): value is Date =>
  */
 export type LiveSession =
 	| { readonly answer: Admission }
-	| { readonly session: UserSession | null; readonly storeRecords: boolean };
+	| {
+			readonly session: UserSession | null;
+			readonly storeRecords: boolean;
+			/** The record's renewal nonce, read once; `undefined` without a record or one that holds none. */
+			readonly renewalNonce: string | undefined;
+	  };
 
 /**
  * Whether a record bound to `bound` — its renewal nonce, read once by the
@@ -147,18 +157,48 @@ export async function readLiveSession(
 	// id a concurrent request saved back after the renewal holds another or
 	// none. A record without one is bound to nothing; other carriers hold no
 	// cookie session to compare.
+	// Read once: a store's accessor cannot answer one value to the check, and
+	// another to the comparison or to the consumer.
+	const bound: unknown = session === null ? undefined : session.renewalNonce;
 	if (session !== null && presented.carrier === "cookie") {
-		// Read once: a store's accessor cannot answer one value to the check
-		// and another to the comparison. A value that is not a nonce binds the
-		// record to no cookie session, whatever the cookie session holds.
-		if (renewedAway(session.renewalNonce, presented.renewalNonce)) {
+		// A value that is not a nonce binds the record to no cookie session,
+		// whatever the cookie session holds.
+		if (renewedAway(bound, presented.renewalNonce)) {
 			return { answer: { outcome: "not_live", reason: "renewed" } };
+		}
+	}
+
+	// Step 3c: the session's lifecycle, after the subject and the renewal
+	// nonce. Closing or closed from its closing commit on is not live; no
+	// record, or no store, reads as before. The store is read off `deps` once,
+	// in the same guarded section as its answer, which core's reader holds to
+	// the port's types; a record of another subject is no answer for this
+	// session, refused as malformed.
+	if (session !== null && presented.sid !== undefined) {
+		try {
+			const lifecycleStore = checked.readSessionLifecycleStore();
+			const lifecycle =
+				lifecycleStore === undefined
+					? null
+					: readVersionedSessionLifecycle(await lifecycleStore.read(presented.sid));
+			if (lifecycle !== null && lifecycle.value.sub !== session.sub) {
+				throw new TypeError("the session lifecycle record names another subject");
+			}
+			if (lifecycle !== null && lifecycle.value.state !== "active") {
+				return { answer: { outcome: "not_live", reason: "closing" } };
+			}
+		} catch (err) {
+			return {
+				answer: unavailable("session_lifecycle" satisfies AdmissionInfrastructureStore, err),
+			};
 		}
 	}
 
 	// Step 4: the revocation boundary, against a live record; a token's is
 	// verifyJwt's, so the two readings do not double up. The boundary is read
-	// off `deps` once, in the same guarded section as its answer.
+	// off `deps` once, in the same guarded section as its answer. Compared in
+	// whole seconds by verifyJwt's rule at the default allowance, as the
+	// `auth_time` a token from this session carries is compared.
 	if (session !== null && presented.carrier !== "token") {
 		try {
 			const subjectRevocation = checked.readSubjectRevocation();
@@ -168,7 +208,11 @@ export async function readLiveSession(
 				throw new TypeError("the sessions boundary is neither a date nor null");
 			}
 			if (
-				coveredByRevocationBoundary(session.authTime, boundary, DEFAULT_SUBJECT_REVOCATION_SKEW_MS)
+				claimCoveredByRevocationBoundary(
+					Math.floor(session.authTime.getTime() / 1000),
+					boundary,
+					DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+				)
 			) {
 				return { answer: { outcome: "revoked" } };
 			}
@@ -190,5 +234,5 @@ export async function readLiveSession(
 		}
 	}
 
-	return { session, storeRecords };
+	return { session, storeRecords, renewalNonce: isRenewalNonce(bound) ? bound : undefined };
 }

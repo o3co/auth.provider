@@ -17,7 +17,8 @@
 /**
  * The outbound fetch: a `fetch` for every URL a client registration or a
  * request supplies, which only reaches what `core.outbound` admits. It reads
- * the section (the one reader of `core.outbound`), resolves the host once,
+ * the section (the one reader of `core.outbound`), or takes the policy that
+ * reader answered (the `outboundPolicy` slot), resolves the host once,
  * checks every address (`outbound-policy.mts`), connects only to the checked
  * addresses (`outbound-transport.mts`), refuses redirects and encoded
  * answers, reads a 2xx body under a cap, and holds the whole exchange to one
@@ -47,9 +48,8 @@ import {
 
 export type { OutboundUrlSource } from "./outbound-policy.mjs";
 
-export interface OutboundFetchOptions {
-	/** The composition's configuration; `core.outbound` is read from it. Absent → the defaults. */
-	readonly config?: unknown;
+/** What a fetch is built for, beside the policy it follows. */
+interface OutboundFetchUse {
 	/**
 	 * Where the URLs this fetch is handed come from: `"registration"` (a
 	 * client registration) may use `core.outbound.internalHosts`;
@@ -61,6 +61,18 @@ export interface OutboundFetchOptions {
 	/** This use's cap on a 2xx body in bytes, at most `core.outbound.maxResponseBytes` (the smaller applies). */
 	readonly maxResponseBytes?: number;
 }
+
+/**
+ * The policy a fetch follows, given exactly one way: `config`, the
+ * composition's configuration, whose `core.outbound` is read (an absent
+ * section reads as the defaults), or `policy`, the policy core read from it
+ * (the `outboundPolicy` slot).
+ */
+export type OutboundFetchOptions = OutboundFetchUse &
+	(
+		| { readonly config: unknown; readonly policy?: undefined }
+		| { readonly policy: OutboundPolicy; readonly config?: undefined }
+	);
 
 /** The seams below the policy: name resolution and the exchange. */
 export interface OutboundFetchSeams {
@@ -81,14 +93,14 @@ const patterns = (entries: readonly string[] | undefined) =>
 			const pattern = readHostEntry(entry);
 			// The schema has refused every entry this would not read.
 			if (pattern === undefined) throw new Error(`core.outbound: unreadable host entry`);
-			return pattern;
+			return Object.freeze(pattern);
 		}),
 	);
 
 /**
  * The policy `config` states in `core.outbound`: an absent section (or no
  * configuration) reads as the defaults; a present one is validated and
- * refused, naming the key, when it does not parse.
+ * refused, naming the key, when it does not parse. Frozen all the way down.
  */
 export function outboundPolicyOf(config: unknown): OutboundPolicy {
 	const core = (config as { core?: unknown } | null | undefined)?.core;
@@ -315,6 +327,57 @@ const errorCode = (err: unknown): string | undefined => {
 	return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : undefined;
 };
 
+/** Whether `value` is a list of host patterns, as the reader answers one. */
+const isPatternList = (value: unknown): boolean =>
+	Array.isArray(value) &&
+	value.every((pattern: unknown) => {
+		const { host, suffix } = (pattern ?? {}) as { host?: unknown; suffix?: unknown };
+		return typeof host === "string" && host.length > 0 && typeof suffix === "boolean";
+	});
+
+/**
+ * The member of `policy` that breaks the shape `outboundPolicyOf` answers,
+ * or `undefined` when none does: a broken limit would lift the deadline or
+ * the body cap rather than apply it.
+ */
+function brokenPolicyMember(policy: Readonly<Record<string, unknown>>): string | undefined {
+	for (const list of ["allowedHosts", "deniedHosts", "internalHosts"]) {
+		if (!isPatternList(policy[list])) return list;
+	}
+	const { timeoutMs, maxResponseBytes, egress } = policy;
+	if (
+		!Number.isSafeInteger(timeoutMs) ||
+		(timeoutMs as number) < 1 ||
+		(timeoutMs as number) > MAX_TIMEOUT_MS
+	) {
+		return "timeoutMs";
+	}
+	if (!Number.isSafeInteger(maxResponseBytes) || (maxResponseBytes as number) < 1) {
+		return "maxResponseBytes";
+	}
+	if (egress !== undefined && egress !== "direct") return "egress";
+	return undefined;
+}
+
+/** The policy `options` gives, by exactly one of `config` and `policy`; a `TypeError` otherwise. */
+function policyFrom(options: OutboundFetchOptions): OutboundPolicy {
+	const { config, policy } = options as { config?: unknown; policy?: unknown };
+	if ((config === undefined) === (policy === undefined)) {
+		throw new TypeError("createOutboundFetch: give exactly one of config and policy");
+	}
+	if (policy === undefined) return outboundPolicyOf(config);
+	if (typeof policy !== "object" || policy === null) {
+		throw new TypeError("createOutboundFetch: policy must be an OutboundPolicy");
+	}
+	const broken = brokenPolicyMember(policy as Readonly<Record<string, unknown>>);
+	if (broken !== undefined) {
+		throw new TypeError(
+			`createOutboundFetch: policy.${broken} is not as outboundPolicyOf answers it`,
+		);
+	}
+	return policy as OutboundPolicy;
+}
+
 /**
  * The outbound fetch over `seams`. The public factory passes the system
  * resolver and Node's transport; the testing entry passes its own.
@@ -327,7 +390,7 @@ export function buildOutboundFetch(
 	if (source !== "registration" && source !== "request") {
 		throw new TypeError('createOutboundFetch: source must be "registration" or "request"');
 	}
-	const policy = outboundPolicyOf(options.config);
+	const policy = policyFrom(options);
 	const proxy = configuredProxy();
 	if (proxy !== undefined && policy.egress !== "direct") {
 		throw new Error(
@@ -405,7 +468,9 @@ export function buildOutboundFetch(
 
 /**
  * A `fetch` that only reaches destinations `core.outbound` admits, for URLs
- * from `options.source`. Throws when `core.outbound` is malformed, and when
+ * from `options.source`, read from `options.config` or given as
+ * `options.policy`. Throws a `TypeError` unless exactly one of the two is
+ * given, an `Error` when `core.outbound` is malformed, and when
  * `HTTPS_PROXY` or `HTTP_PROXY` is set without `core.outbound.egress = "direct"`.
  *
  * It takes a string or `URL` (a `Request` is a `TypeError`), `GET` or

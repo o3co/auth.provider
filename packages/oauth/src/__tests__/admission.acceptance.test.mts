@@ -46,6 +46,8 @@ import { createSessionGrant } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const ISSUER = "https://issuer.test";
 const SECRET = "acceptance-test-secret-32-bytes-long!";
@@ -158,6 +160,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 		"refresh_token",
 		createRefreshTokenGrant({
 			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
 			sessionRequirementResolver: requirements,
@@ -166,7 +169,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
 		registry,
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore,

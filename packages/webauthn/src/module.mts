@@ -27,14 +27,9 @@
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
-	BootError,
-	checkDeploymentMode,
 	consoleLogger,
-	createMemoryRateLimiter,
 	createRateLimitGuard,
 	defineModule,
-	type RateLimiter,
-	type RateLimitSpec,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { webauthnConfigSchema } from "./config.mjs";
@@ -58,24 +53,27 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
  * slot, both of which it requires; it reads nothing of the whole configuration. Each route has
  * its own id for collision detection and ordering.
  *
- * `POST /oauth/webauthn/authentication/options` is rate-limited by the module itself: core's
- * `createRateLimitGuard` under the `webauthn-authentication-options` tag, on the wired
- * `rateLimiter` or else a per-process memory limiter, which the `deploymentMode` slot decides
- * about (refused under `multi`, a warning when `unset`). The module contributes
- * `webauthn.rateLimit.authenticationOptions` as the tag's budget, which a wired limiter applies;
- * the fallback limiter applies the same key. The outage policy is the limiter's own `failMode`,
- * as for the OAuth endpoints and the MFA routes.
+ * `POST /oauth/webauthn/authentication/options` is guarded by the deployment's `rateLimiter` when
+ * one is wired: core's `createRateLimitGuard` under the `webauthn-authentication-options` tag,
+ * which the module claims with no budget, so the limiter's own `limits` entry for it, else its
+ * `defaultLimit`, applies. The outage policy is the limiter's own `failMode`, as for the OAuth
+ * endpoints. With no limiter wired (`core.declaredAbsent` lists it), nothing in the module
+ * throttles the route. `webauthn.rateLimit` is removed: a configuration setting a key under it,
+ * or an environment setting one of its variables, refuses boot.
  */
 export const webauthnModule = defineModule<
 	| "webauthnCredentialStore"
 	| "challengeStore"
 	| "challengeCeremony"
 	| "keyStore"
-	| "deploymentMode"
-	| "rateLimitBudgetResolver"
 	| "oauthTokenSettings"
 	| "tokenBindingSettings",
-	"grantPolicy" | "rateLimiter" | "auditSink" | "logger" | "refreshTokenFamilyRotation",
+	| "grantPolicy"
+	| "rateLimiter"
+	| "auditSink"
+	| "logger"
+	| "refreshTokenFamilyRotation"
+	| "subjectRevocation",
 	typeof webauthnConfigSchema,
 	"webauthnConfig"
 >({
@@ -86,12 +84,20 @@ export const webauthnModule = defineModule<
 		// Not a setting: authentication/options never lists a user's credentials, so no ceremony
 		// identifies the user and every assertion carries a user handle (WebAuthn §7.2 step 6).
 		// The key at any value, and its variable set at all, refuse boot.
-		relocatedFrom: { "webauthn.allowCredentialsForKnownUser": null },
-		// The two rate-limit variables, named after the paths they set, and the removed key's; the
-		// reference captures every name.
+		// Not a setting either: the options route's limit is the deployment's `rateLimiter`'s.
+		relocatedFrom: {
+			"webauthn.allowCredentialsForKnownUser": null,
+			"webauthn.rateLimit": null,
+		},
+		// The removed keys' variables, the older rate-limit names included: each set at all refuses
+		// boot. The reference captures every name.
 		renamedVariables: {
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT: "webauthn.rateLimit.authenticationOptions.limit",
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS:
+				"webauthn.rateLimit.authenticationOptions.windowSeconds",
+			WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT:
+				"webauthn.rateLimit.authenticationOptions.limit",
+			WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS:
 				"webauthn.rateLimit.authenticationOptions.windowSeconds",
 			WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER: "webauthn.allowCredentialsForKnownUser",
 		},
@@ -101,11 +107,6 @@ export const webauthnModule = defineModule<
 		"challengeStore",
 		"challengeCeremony",
 		"keyStore",
-		// The replica count core fills: the authentication/options route's per-process fallback
-		// is refused under `multi`. Required, so a mode read as absent cannot lift that refusal.
-		"deploymentMode",
-		// The contributed budgets, which the mismatch warning compares with the section's.
-		"rateLimitBudgetResolver",
 		// The token lifetimes and the resource-indicator switch, which the grant reads; the oauth
 		// module provides it, and a composition without that module fills it itself.
 		"oauthTokenSettings",
@@ -117,17 +118,20 @@ export const webauthnModule = defineModule<
 		// Required by the grant factory, which throws at boot without it; optional here only so
 		// the manifest composes with modules that need no policy.
 		"grantPolicy",
-		// Optional so a composition without a limiter boots; the authentication/options route
-		// then falls back to a per-process limiter rather than going unguarded.
+		// The deployment's limiter, which guards the authentication/options route; core attaches
+		// its absence policy, so a composition without one lists it in `core.declaredAbsent`.
 		"rateLimiter",
 		// `rate_limit.unavailable` events during a limiter outage; none when absent.
 		"auditSink",
-		// Store and limiter outages, and the fallback-limiter warning (`consoleLogger` if unset).
+		// Store and limiter outages (`consoleLogger` if unset).
 		"logger",
 		// The refresh-token family the grant opens, the component the authorization_code grant
 		// uses. Optional for compositions that issue no refresh tokens; when wired, a store
 		// outage fails closed.
 		"refreshTokenFamilyRotation",
+		// The subject's revocation boundary, which the grant reads before minting; unread when
+		// absent. An unreadable boundary is 503.
+		"subjectRevocation",
 	],
 	// The relying party and the rest of the section, for the package's other readers (the
 	// WebAuthn second factor): the section as boot parsed it, deeply frozen.
@@ -144,12 +148,10 @@ export const webauthnModule = defineModule<
 	// auditSink listed in core.declaredAbsent or boot refuses (the policy the oauth and session modules share).
 	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 	contributes: {
-		// The options route's budget, for every limiter to read; an operator's
-		// `limits.webauthn-authentication-options` on the limiter wins.
+		// The options route's tag, claimed with no budget: the limiter's own
+		// `limits.webauthn-authentication-options`, else its `defaultLimit`, applies.
 		rateLimitBudgets: {
-			[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: ({ section }) => ({
-				...section.rateLimit.authenticationOptions,
-			}),
+			[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: () => null,
 		},
 		grants: {
 			[WEBAUTHN_GRANT_TYPE]: (deps) => {
@@ -233,89 +235,25 @@ export const webauthnModule = defineModule<
 			},
 			// POST /oauth/webauthn/authentication/options
 			// express.json() on the route's own path, as above. The route is unauthenticated and
-			// writes a challenge per request, so the module mounts its rate limit here.
+			// writes a challenge per request, so the deployment's limiter, when wired, guards it.
 			(deps) => {
 				const router = express.Router();
 				router.all("/", express.json({ limit: "100kb" }));
-
 				const logger = deps.logger ?? consoleLogger;
-				const deploymentMode = checkDeploymentMode(deps.deploymentMode, "webauthn: deploymentMode");
-				const spec: RateLimitSpec = {
-					limit: deps.section.rateLimit.authenticationOptions.limit,
-					windowSeconds: deps.section.rateLimit.authenticationOptions.windowSeconds,
-				};
-				if (deps.rateLimiter === undefined) {
-					// The per-process fallback below is replica-unsafe state, built here where the
-					// boot guard does not see it, so it asks the `deploymentMode` slot itself:
-					// "multi" refuses (the budget would multiply by the replica count), "single"
-					// is silent, "unset" warns. The planner wraps the throw as
-					// `contribute-factory-failed`, with this error as its `cause`.
-					if (deploymentMode === "multi") {
-						throw new BootError({
-							stage: "applyContributions",
-							reason: "replica-unsafe-adapter",
-							message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /oauth/webauthn/authentication/options: the route would fall back to a per-process limiter, so the configured ${spec.limit} / ${spec.windowSeconds}s is really ${spec.limit} × replicas and resets on every deploy. Wire a rateLimiter (adapters.rateLimiter = "redis" in the standalone template), or set core.deployment.mode = "single".`,
-							details: { reason: "replica-unsafe-adapter", modules: ["webauthn"] },
-						});
-					}
-					if (deploymentMode !== "single") {
-						logger.warn(
-							{
-								limit: spec.limit,
-								windowSeconds: spec.windowSeconds,
-								tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
-							},
-							"webauthn_authentication_options_rate_limiter_not_shared",
-						);
-					}
-				} else {
-					// A shared limiter applies the budget registered for the tag: the one this
-					// module contributes from its section, since boot refuses an override of
-					// it. Boot warns once if the two ever differ. A limiter's own `limits`
-					// entry for the tag overrides both and is not visible here.
-					const contributed = deps.rateLimitBudgetResolver.get(
-						WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
-					);
-					if (
-						contributed?.limit !== spec.limit ||
-						contributed.windowSeconds !== spec.windowSeconds
-					) {
-						logger.warn(
-							{
-								key: "webauthn.rateLimit.authenticationOptions",
-								contributed: contributed === undefined ? null : { ...contributed },
-								webauthnConfig: spec,
-							},
-							"webauthn_authentication_options_budget_mismatch",
-						);
-					}
-				}
-				// Fall back rather than leave the route unguarded: this is the credential-store flood
-				// and enumeration surface, and a per-process bucket is weak protection, not none.
-				// The warning above states which one is in force.
-				const limiter: RateLimiter =
-					deps.rateLimiter ??
-					createMemoryRateLimiter({
-						limits: { [WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: spec },
-						defaultLimit: spec,
-					});
-
 				router.post(
 					"/",
-					// The outage policy is the limiter's own `failMode`, the one the
-					// OAuth endpoints and the MFA routes apply on the same limiter:
-					// an outage must not mean "shed load" on one surface and "let
-					// everything through" on another.
-					createRateLimitGuard({
-						limiter,
-						tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
-						logger,
-						auditSink: deps.auditSink,
-						// This endpoint HAS a documented per-endpoint spec, so the
-						// RateLimit-* headers are backed by it when a custom adapter
-						// reports no applied limit of its own.
-						headerFallback: spec,
-					}),
+					// The outage policy is the limiter's own `failMode`, the one the OAuth
+					// endpoints apply on the same limiter.
+					...(deps.rateLimiter === undefined
+						? []
+						: [
+								createRateLimitGuard({
+									limiter: deps.rateLimiter,
+									tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
+									logger,
+									auditSink: deps.auditSink,
+								}),
+							]),
 					createAuthenticationOptionsHandler({
 						config: deps.section,
 						challengeStore: deps.challengeStore,

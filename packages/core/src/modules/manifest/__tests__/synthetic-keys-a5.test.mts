@@ -16,12 +16,20 @@
 import { expect, test } from "vitest";
 import { SYNTHETIC_COMPONENT_KEYS } from "../synthetic-keys.mjs";
 
-test("SYNTHETIC_COMPONENT_KEYS has 12 members", () => {
+test("SYNTHETIC_COMPONENT_KEYS has 14 members", () => {
 	// 4 federation and grant keys + lifecycleRegistrar + readinessRegistrar +
 	// mfaFactorResolver (the MFA ADR's D3) + sessionRequirementResolver (the
 	// session-admission ADR's D3) + rateLimitBudgetResolver + deploymentMode +
-	// tokenBindingSettings + federationSettings = 12.
-	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(12);
+	// tokenBindingSettings + federationSettings + outboundPolicy +
+	// sessionCloseNotifierResolver = 14.
+	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(14);
+});
+
+test("SYNTHETIC_COMPONENT_KEYS includes outboundPolicy", () => {
+	// Core fills it from the configuration's core.outbound: a module or host
+	// that set it would be a second statement of the outbound policy, beside
+	// the one a fetch built from the configuration reads.
+	expect(SYNTHETIC_COMPONENT_KEYS.has("outboundPolicy")).toBe(true);
 });
 
 test("SYNTHETIC_COMPONENT_KEYS includes federationSettings", () => {

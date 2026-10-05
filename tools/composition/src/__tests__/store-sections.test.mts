@@ -758,59 +758,22 @@ describe("a store variable renamed with the move, through the template's reading
 	);
 });
 
-describe("a WebAuthn rate-limit variable renamed to the name its path derives, through the template's reading", () => {
-	/** Each renamed variable: its old name, its new name, the path the new one binds, a value. */
-	const ROWS = [
-		{
-			from: "WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT",
-			to: "WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT",
-			path: "webauthn.rateLimit.authenticationOptions.limit",
-			value: "12",
-		},
-		{
-			from: "WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS",
-			to: "WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS",
-			path: "webauthn.rateLimit.authenticationOptions.windowSeconds",
-			value: "120",
-		},
+describe("a removed WebAuthn rate-limit variable, through the template's reading", () => {
+	/** The removed `webauthn.rateLimit`'s variables: its current names and their older ones. */
+	const VARIABLES = [
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT",
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS",
 	] as const;
 
-	it.each(ROWS)(
-		"$from set alone: refused, naming $to and $path",
-		async ({ from, to, path, value }) => {
-			const err = await refused({ env: { ...SINGLE_ENV, [from]: value } });
+	it.each(VARIABLES)("%s set at all: refused, naming it, and no value", async (from) => {
+		const err = await refused({ env: { ...SINGLE_ENV, [from]: "31" } });
 
-			expect(err.details).toEqual({
-				reason: "environment-variable-renamed",
-				renamed: [{ module: "webauthn", from, to, path, state: "unset" }],
-			});
-		},
-	);
-
-	it.each(ROWS)(
-		"$from set beside $to at a different value: refused, naming neither value",
-		async ({ from, to }) => {
-			const err = await refused({ env: { ...SINGLE_ENV, [from]: "31", [to]: "47" } });
-
-			expect(err.details).toMatchObject({ renamed: [{ from, to, state: "different" }] });
-			for (const value of ["31", "47"]) {
-				expect(JSON.stringify(err.details)).not.toContain(`"${value}"`);
-			}
-		},
-	);
-
-	it.each(ROWS)(
-		"$from set beside $to at the same value: boots, the value at $path",
-		async ({ from, to, path, value }) => {
-			const composition = await boot({ env: { ...SINGLE_ENV, [from]: value, [to]: value } });
-
-			const key = path.split(".").at(-1) as string;
-			const options = (
-				sectionOf(composition, "webauthn") as {
-					rateLimit: { authenticationOptions: Record<string, unknown> };
-				}
-			).rateLimit.authenticationOptions;
-			expect(String(options[key])).toBe(value);
-		},
-	);
+		expect(err.details).toEqual({
+			reason: "environment-variable-renamed",
+			renamed: [{ module: "webauthn", from, to: null, path: null, state: "removed" }],
+		});
+		expect(JSON.stringify(err.details)).not.toContain('"31"');
+	});
 });

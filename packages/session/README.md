@@ -30,10 +30,11 @@ responsibilities:
    rules it is built from. The helpers an adapter builds its upstream requests
    with — `codeChallenge`, `callbackUrlForExchange`, `FederationClientSecret` /
    `resolveClientSecret` — are core's.
-3. **The browser session store** — `sessionStoreModule` / `sessionStoreModuleFor`
-   and `createSessionStoreFactory` / `registerBuiltinSessionStores`: the
-   express-session middleware, its cookie and its store (memory, or Redis through
-   `connect-redis`).
+3. **The browser session store** — `sessionStoreModule` (and
+   `sessionStoreModuleFor(config)`, the same module declaring its replica safety
+   from `config`) and `createSessionStoreFactory` / `registerBuiltinSessionStores`:
+   the express-session middleware, its cookie and its store (memory, or Redis
+   through `connect-redis`).
 
 **Owns:**
 
@@ -98,8 +99,9 @@ package's store module. What the split costs is stated in
   type is what a federation type's `redirectPolicy` answers — and its router
   consumes. It is the router's, which is why every adapter
   package takes this package as a peer dependency. A federation's entry is not
-  read here: core's `federationsOf` and `enabledFederationsOf` are the one
-  reading of `core.federations`, the router's callback URLs included. The pure
+  read here: core reads `core.federations` and hands the module what it reads
+  of each entry through the `federationSettings` slot, the router's callback
+  URLs included. The pure
   request helpers are not here: the router uses none of them, so they live in
   core beside the contract that tells adapters to use them.
 - The store: it is what `req.session` is, and the routes here are what write it;
@@ -152,14 +154,14 @@ fails naming it and the install command.
 
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config), // first, so every module after it can read req.session; provides csrfTokenSigner too
-    sessionModule,                 // a const Module, not a factory
-    googleFederationTypeModule(),  // handles every core.federations entry of type "google"
+    sessionStoreModule,           // first, so every module after it can read req.session; provides csrfTokenSigner too
+    sessionModule,                // a const Module, not a factory
+    googleFederationTypeModule(), // handles every core.federations entry of type "google"
     // ... modules providing userRepository, userSessionStore, federationTokenStore,
     //     sessionFederationIndex
   ],
@@ -202,7 +204,9 @@ store's module provides `csrfTokenSigner` with `createSessionCsrfTokenSigner`
 
 ## Configuration
 
-Each module reads its own section. The defaults and the environment variables
+Each module reads its own section, and nothing else of the configuration:
+what `sessionModule` needs of `core.federations` comes from core's
+`federationSettings` slot. The defaults and the environment variables
 are in the package's [`config/reference.conf`](config/reference.conf), which a
 composition root layers because the modules declare it.
 
@@ -234,8 +238,7 @@ value than the new one; set to the same value, both boot.
 
 ## Browser session store
 
-`sessionStoreModuleFor(config)` — or the static `sessionStoreModule` — contributes
-one route, `session-middleware`, mounted at `/`: express-session with its cookie
+`sessionStoreModule` contributes one route, `session-middleware`, mounted at `/`: express-session with its cookie
 built from `session-store.*` (`HttpOnly`, `Path=/`, `session-store.secure`,
 `session-store.sameSite`, `session-store.domain`, `Max-Age` = `session-store.maxAge`) and its store
 built from `session-store.storage.*`. Every `req.session` in a deployment is this one.
@@ -273,14 +276,16 @@ What holds:
 - **`memory` is refused under `core.deployment.mode = "multi"`.** express-session's
   `MemoryStore` forks per replica: a login served by one replica is unknown to
   the others, logout clears only the replica it lands on, and a restart loses
-  every session. `sessionStoreModuleFor(config)` reads the storage type and
-  declares the module replica-unsafe when it is `memory`, so core's
-  replica-safety guard refuses it at boot by name with the other offenders,
-  warns when `core.deployment.mode` is unset, and says nothing under `"single"`. The
-  static `sessionStoreModule` cannot know the type, so the guard cannot name it;
-  its route factory refuses the same combination when it runs
-  (`replica-unsafe-adapter`) and never warns. Prefer `sessionStoreModuleFor`
-  wherever the config is in hand. Both forms require core's `deploymentMode`
+  every session. `sessionStoreModule` declares its replica safety from its own
+  parsed section: replica-unsafe when `session-store.storage.type` is
+  `memory`, nothing for any other type. So core's replica-safety guard refuses
+  it at boot by name with the other offenders, warns when
+  `core.deployment.mode` is unset, and says nothing under `"single"`.
+  `sessionStoreModuleFor(config)` is the same module declaring the same from
+  `config`, read when it is built, not from the section boot parses,
+  so list `sessionStoreModule`. The route factory refuses the combination too
+  when it runs (`replica-unsafe-adapter`), for a module built from a config
+  other than the one booted. Both forms require core's `deploymentMode`
   slot, which core fills from `core.deployment.mode`, and read nothing of
   `deployment` themselves; a slot value that is none of `single`, `multi`,
   `unset` is a TypeError.
@@ -364,10 +369,13 @@ registers is `404`.
 
 The manifest ([`src/module.mts`](src/module.mts)):
 
-- `requires`: `config`, `userRepository`, `userSessionStore`,
+- `requires`: `userRepository`, `userSessionStore`,
   `federationTokenStore`, `sessionFederationIndex`, `csrfTokenSigner` (what the
   CSRF token is signed and checked with; the session store's module provides
-  it), and the synthetic
+  it), core's `federationSettings` — its view of `core.federations`, which
+  core fills in every composition: each enabled entry's callback URL, and
+  whether an installed federation's upstream `amr` counts; the module reads
+  nothing of the configuration but its own section — and the synthetic
   `federationProviders` and `federationRedirectPolicyResolver`, which core
   builds from the federations it dispatches by type — for each enabled
   `core.federations` entry, the provider and the redirect policy the module
@@ -386,10 +394,20 @@ The manifest ([`src/module.mts`](src/module.mts)):
   router built by hand also takes the signer as the required `csrfTokenSigner`
   option, and throws without it, and the mode as the required `deploymentMode`
   option, where a value that is none of the three, absence included, is a
-  TypeError at construction. `sessionRPRegistry` and `sessionFamilyIndex`, the
-  other two session stores, are `oauth`'s.
+  TypeError at construction. The federation router built by hand takes
+  core's view of the federations as the required `federationSettings` option,
+  the transaction cookie's name as the required
+  `federationTransactionCookieName` (the module names it after the
+  `sessionCookiePolicy` slot's cookie), and where a link may start from as
+  `linkTrustedOrigins` (the module passes `session.csrf.trustedOrigins`; absent,
+  only this site's own pages), and throws without the first two.
+  `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
+  are `oauth`'s.
 - `optional`: `logger`, `attemptCounter`, `auditSink`, `subjectSessionIndex`,
-  `subjectRevocation` (the boundary the linking routes' admission reads).
+  `subjectRevocation` (the boundary the linking routes' admission reads),
+  `sessionLifecycleStore` (core's session lifecycle port, which the linking
+  routes' admission reads after a live record: a session closing or closed
+  links nothing).
   `auditSink` unwired must be declared with `core.declaredAbsent = ["auditSink"]`, and
   `subjectSessionIndex` and `subjectRevocation` unwired with
   `oauth.revocation.subject = "unsupported"`, or boot refuses.
@@ -440,7 +458,10 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `session.rateLimit.login` by core's attempt guard (`createAttemptGuard`) on
   the `attemptCounter` slot's counter. No rate limiter takes part: a limiter's
   `limits`, `defaultLimit` and `failMode` neither loosen nor replace it, and
-  the module claims the `login` prefix with no budget. A refused attempt is
+  the module claims the `login` prefix with core's
+  `verifierLimitClaim({ setting: "session.rateLimit.login" })`: no budget, so
+  no other module can set one, and the bundled limiter modules refuse a
+  `limits.login` entry, naming this key. A refused attempt is
   `429 rate_limited` with `Retry-After` and `Cache-Control: no-store`, and no
   `RateLimit-*` headers, which would tell a guesser how many guesses are left.
   A counter that throws, does not answer within two seconds, or answers
@@ -741,11 +762,12 @@ string array; none of the bundled adapters does). By default it is kept in
 provider's. `trustUpstreamAmr = true`, beside `enabled` in the federation's
 entry, records it beside `fed`, where it counts, as every federation's did
 before the switch existed. The routes read each installed federation's switch
-once, when they are built, through core's `federationTrustsUpstreamAmr` — the
-reading `@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session
-records and what `/authorize` advertises agree; a switch that is neither
-`true` nor `false` refuses the composition (`RangeError`), and the schema
-coerces the spellings an environment variable delivers. Each federation's
+once, when they are built, from core's `federationSettings` slot, whose
+`trustsUpstreamAmr` is core's `federationTrustsUpstreamAmr` — the reading
+`@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session records and
+what `/authorize` advertises agree; a switch that is neither `true` nor
+`false` refuses the boot, and the schema coerces the spellings an environment
+variable delivers. Each federation's
 switch is kept by the name it is installed under, and a login takes the switch
 of the name its callback came in on, which is also the federation
 `authentication.federation` names. The decision is written into the session
@@ -781,7 +803,7 @@ A federated identity is `<provider>:<sub>` — the federation's name and the IdP
 An account gains a second identity through an explicit, authenticated action:
 
 1. The browser already holds a session (`isAuthenticated`, a live `UserSession`).
-2. It starts the federation with `?link=1`: `GET /session/oauth/federation/<name>?link=1`, **from a link or a form on the deployment's own pages**. The start is a GET and the session cookie is `SameSite=Lax`, so without a check any page could send a signed-in user there, and paired with a login CSRF at the IdP the attacker's identity would be linked to the victim's account. The start therefore needs positive evidence: `Sec-Fetch-Site: same-origin`, or `none` (a typed URL or bookmark). `cross-site` is refused. `same-site` is not enough on its own — it covers every host on the registrable domain, including a user-controlled `blog.example.com` — so it, and a request with no `Sec-Fetch-Site` (an older browser), must name this origin or one on `session.csrf.trustedOrigins` in its `Referer`; a missing `Referer` is refused, because the navigating page picks its own referrer policy. An account page on a sibling host is therefore listed in `session.csrf.trustedOrigins`, and must not send `Referrer-Policy: no-referrer`. A refusal is `403 link_requires_trusted_origin`. Next, when the Store's repository does not implement `linkFederatedIdentity`, the start is `400 link_unsupported` — a fault of the composition, answered before the session is read, so it is the same whatever the session store is doing. The start then reads the session through core's [session admission](../core/src/session-admission/README.md) as `session.link`, graded `credential_change` — a linked identity is a new way into the account, so a registered requirement decides its recent-authentication rule here, where a step-up has a page to return to: a cookie that is not authenticated, carries no `sid` or no `user.id`, or whose `UserSession` is gone, past its `expiresAt`, another subject's, or covered by the subject-revocation boundary (when `subjectRevocation` is wired), and a requirement's `reauthenticate` or `unmet`, are `401 login_required`; a requirement's step-up is `403 step_up_required` with `error_description`, `requirement` and `page`, the requirement's registered step-up page as one absolute URL string — see [When the start answers a step-up](#when-the-start-answers-a-step-up); an outage of the session store, the boundary or a requirement is `503 temporarily_unavailable`, described by what failed (core's `describeAdmissionOutage`: "session store unavailable", "revocation store unavailable" or "session requirement unavailable"), logged once by admission (`session_admission_unavailable`, `action: "session.link"`). All of these come before the browser is sent anywhere.
+2. It starts the federation with `?link=1`: `GET /session/oauth/federation/<name>?link=1`, **from a link or a form on the deployment's own pages**. The start is a GET and the session cookie is `SameSite=Lax`, so without a check any page could send a signed-in user there, and paired with a login CSRF at the IdP the attacker's identity would be linked to the victim's account. The start therefore needs positive evidence: `Sec-Fetch-Site: same-origin`, or `none` (a typed URL or bookmark). `cross-site` is refused. `same-site` is not enough on its own — it covers every host on the registrable domain, including a user-controlled `blog.example.com` — so it, and a request with no `Sec-Fetch-Site` (an older browser), must name this origin or one on `session.csrf.trustedOrigins` in its `Referer`; a missing `Referer` is refused, because the navigating page picks its own referrer policy. An account page on a sibling host is therefore listed in `session.csrf.trustedOrigins`, and must not send `Referrer-Policy: no-referrer`. A refusal is `403 link_requires_trusted_origin`. Next, when the Store's repository does not implement `linkFederatedIdentity`, the start is `400 link_unsupported` — a fault of the composition, answered before the session is read, so it is the same whatever the session store is doing. The start then reads the session through core's [session admission](../core/src/session-admission/README.md) as `session.link`, graded `credential_change` — a linked identity is a new way into the account, so a registered requirement decides its recent-authentication rule here, where a step-up has a page to return to: a cookie that is not authenticated, carries no `sid` or no `user.id`, or whose `UserSession` is gone, past its `expiresAt`, another subject's, or covered by the subject-revocation boundary (when `subjectRevocation` is wired), and a requirement's `reauthenticate` or `unmet`, are `401 login_required`; a requirement's step-up is `403 step_up_required` with `error_description`, `requirement` and `page`, the requirement's registered step-up page as one absolute URL string — see [When the start answers a step-up](#when-the-start-answers-a-step-up); an outage of the session store, the session lifecycle store, the boundary or a requirement is `503 temporarily_unavailable`, described by what failed (core's `describeAdmissionOutage`: "session store unavailable", "session lifecycle store unavailable", "revocation store unavailable" or "session requirement unavailable"), logged once by admission (`session_admission_unavailable`, `action: "session.link"`). All of these come before the browser is sent anywhere.
 3. On the callback, after `state`, PKCE and `nonce` are checked exactly as for a login, the identity is resolved:
    - **nobody** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`. `ok` links it; the Store's `refused` is `403 link_refused`, its `conflict` is `409 identity_conflict`, each with the Store's `description` when it gives one, sent within RFC 6749's characters (`?` for any other).
    - **another account** → `409 identity_conflict`; the Store is not asked. Linking never merges accounts.

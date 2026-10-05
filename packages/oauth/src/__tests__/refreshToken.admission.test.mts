@@ -29,9 +29,14 @@ import { createSecretKey } from "node:crypto";
 import {
 	type AppConfig,
 	createInMemorySubjectRevocation,
+	createMemoryRefreshTokenFamilyStore,
+	createRefreshTokenFamilyRevocation,
+	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantError,
+	type GrantPolicyHook,
+	type RefreshTokenFamilyRevocation,
 	type RefreshTokenFamilyRotation,
 	type RequirementInput,
 	type RequirementVerdict,
@@ -45,6 +50,7 @@ import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -133,16 +139,28 @@ const makeGrant = (opts: {
 	subjectRevocation?: SubjectRevocation;
 	requirements?: readonly SessionRequirement[];
 	logger?: MockLogger;
+	grantPolicy?: GrantPolicyHook;
+	/** `revocation: null` wires no `refreshTokenFamilyRevocation`. */
+	family?: {
+		readonly rotation: RefreshTokenFamilyRotation;
+		readonly revocation: RefreshTokenFamilyRevocation | null;
+	};
+	config?: AppConfig;
 }) => {
-	const rotation = {
-		register: vi.fn(async () => {}),
-		rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-	} as unknown as RefreshTokenFamilyRotation & { rotate: ReturnType<typeof vi.fn> };
+	const rotation = vi.fn(
+		opts.family?.rotation.rotate ?? (async () => ({ outcome: "rotated" as const })),
+	);
+	const familyRevocation =
+		opts.family?.revocation === undefined
+			? ({ revokeFamily: vi.fn(async () => {}) } as never)
+			: opts.family.revocation;
 	const handler = createRefreshTokenGrant({
-		config,
+		config: opts.config ?? config,
+		...grantSettingsFrom(opts.config ?? config),
 		keyStore: createSymmetricKeyStore(SECRET),
-		refreshTokenFamilyRotation: rotation,
-		refreshTokenFamilyRevocation: { revokeFamily: vi.fn(async () => {}) } as never,
+		refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate: rotation },
+		...(familyRevocation === null ? {} : { refreshTokenFamilyRevocation: familyRevocation }),
+		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
 			issuer: "https://issuer.test",
 			actions: OAUTH_ADMISSION_ACTIONS,
@@ -151,7 +169,7 @@ const makeGrant = (opts: {
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 	});
-	return { handler, rotation };
+	return { handler, rotation: { rotate: rotation } };
 };
 
 const ctx = (token: string): GrantContext => ({
@@ -172,12 +190,12 @@ const refused = async (
 };
 
 describe("the refresh grant on admission — no requirement registered", () => {
-	it("refreshes a token whose sid names a live session, reading it once", async () => {
+	it("refreshes a token whose sid names a live session, reading it before and after the rotation", async () => {
 		const store = storeWith(record());
 		const { handler } = makeGrant({ userSessionStore: store });
 		const { result } = await handler.handle(ctx(await refreshToken()));
 		expect(result.status).toBe(200);
-		expect(store.get).toHaveBeenCalledTimes(1);
+		expect(store.get).toHaveBeenCalledTimes(2);
 		if (!("tokens" in result)) throw new Error("expected tokens");
 		expect(decodeJwt(result.tokens.access_token).sid).toBe(SID);
 	});
@@ -247,7 +265,8 @@ describe("the refresh grant on admission — a requirement's verdicts", () => {
 		expect(
 			(await handler.handle(ctx(await refreshToken({ amr: ["pwd", "otp"] })))).result.status,
 		).toBe(200);
-		expect(requirement.inputs).toHaveLength(1);
+		// Asked before the rotation and again after it.
+		expect(requirement.inputs).toHaveLength(2);
 		const [input] = requirement.inputs;
 		expect(input?.carrier).toBe("token");
 		// The action the refresh grant registers, with its grade.
@@ -341,5 +360,350 @@ describe("the refresh grant on admission — no requirement registered: the reco
 
 	it("refuses a record whose sub is not the token's", async () => {
 		await refusedBeforeTheRotation(record({ sub: "someone-else" }));
+	});
+});
+
+describe("the refresh grant — the subject's revocation and the session are read again before signing", () => {
+	const allowAfter = (onEvaluate: () => Promise<void>): GrantPolicyHook => ({
+		kind: "slow",
+		evaluate: async () => {
+			await onEvaluate();
+			return { outcome: "allow" };
+		},
+	});
+	const revokeNow = (revocation: SubjectRevocation) =>
+		revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
+	const INVALID_REFRESH_TOKEN = {
+		status: 400,
+		error: "invalid_grant",
+		errorDescription: "invalid refresh_token",
+	};
+	const SESSION_INVALID = {
+		status: 400,
+		error: "invalid_grant",
+		errorDescription: "session_invalid",
+	};
+
+	/** The memory family store with "fam-1" registered at "jti-1", as the authorization_code grant leaves it. */
+	const registeredFamily = async () => {
+		const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore,
+			accessTokenHorizonMs: 3_600_000,
+		});
+		const revocation = createRefreshTokenFamilyRevocation({
+			refreshTokenFamilyStore,
+			accessTokenHorizonMs: 3_600_000,
+		});
+		await rotation.register("jti-1", "fam-1", Date.now() + 86_400_000);
+		return { rotation, revocation };
+	};
+
+	/** The family after a refused refresh: revoked, so the spent token rotates nothing. */
+	const expectNoUsableFamily = async (family: Awaited<ReturnType<typeof registeredFamily>>) => {
+		expect(await family.revocation.isFamilyRevoked("fam-1")).toBe(true);
+		expect(await family.rotation.rotate("jti-1", "jti-x", "fam-1", Date.now() + 60_000)).toEqual({
+			outcome: "revoked",
+		});
+	};
+
+	it("a subject revocation landing while the policy evaluates mints nothing, without a store or a sid", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const { handler, rotation } = makeGrant({
+			subjectRevocation: revocation,
+			grantPolicy: allowAfter(() => revokeNow(revocation)),
+		});
+		const token = await refreshToken({ sid: undefined });
+		const during = await refused(handler, token);
+		expect(during).toEqual(INVALID_REFRESH_TOKEN);
+		expect(rotation.rotate).not.toHaveBeenCalled();
+		// The same request once the revocation has landed is refused the same way.
+		expect(during).toEqual(
+			await refused(makeGrant({ subjectRevocation: revocation }).handler, token),
+		);
+	});
+
+	it("a subject revocation landing while the policy evaluates mints nothing for a token with a sid and a live session", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const { handler, rotation } = makeGrant({
+			userSessionStore: storeWith(record()),
+			subjectRevocation: revocation,
+			grantPolicy: allowAfter(() => revokeNow(revocation)),
+		});
+		expect(await refused(handler, await refreshToken())).toEqual(INVALID_REFRESH_TOKEN);
+		expect(rotation.rotate).not.toHaveBeenCalled();
+	});
+
+	it("a session deleted during the rotation mints nothing and leaves no usable family", async () => {
+		const family = await registeredFamily();
+		let live: UserSession | null = record();
+		const { handler } = makeGrant({
+			userSessionStore: storeAnswering(async (sid) => (sid === SID ? live : null)),
+			family: {
+				rotation: {
+					register: family.rotation.register,
+					rotate: async (...args) => {
+						const outcome = await family.rotation.rotate(...args);
+						live = null;
+						return outcome;
+					},
+				},
+				revocation: family.revocation,
+			},
+		});
+		expect(await refused(handler, await refreshToken())).toEqual(SESSION_INVALID);
+		await expectNoUsableFamily(family);
+	});
+
+	it("a subject revocation landing during the rotation mints nothing and leaves no usable family, without a store or a sid", async () => {
+		const family = await registeredFamily();
+		const revocation = createInMemorySubjectRevocation();
+		const { handler } = makeGrant({
+			subjectRevocation: revocation,
+			family: {
+				rotation: {
+					register: family.rotation.register,
+					rotate: async (...args) => {
+						const outcome = await family.rotation.rotate(...args);
+						await revokeNow(revocation);
+						return outcome;
+					},
+				},
+				revocation: family.revocation,
+			},
+		});
+		expect(await refused(handler, await refreshToken({ sid: undefined }))).toEqual(
+			INVALID_REFRESH_TOKEN,
+		);
+		await expectNoUsableFamily(family);
+	});
+
+	it("an outage on the revocation read after the policy is 503, mapped as on the first read, before the rotation", async () => {
+		const failingOn = (failing: number): SubjectRevocation => {
+			let reads = 0;
+			return {
+				kind: "flaky",
+				revokeBefore: async () => {},
+				revokedBefore: async () => {
+					reads += 1;
+					if (reads >= failing) throw new Error("redis down");
+					return null;
+				},
+			};
+		};
+		const policy = allowAfter(async () => {});
+		const second = makeGrant({ subjectRevocation: failingOn(2), grantPolicy: policy });
+		const first = makeGrant({ subjectRevocation: failingOn(1), grantPolicy: policy });
+		const token = await refreshToken({ sid: undefined });
+		const during = await refused(second.handler, token);
+		expect(during).toEqual(await refused(first.handler, token));
+		expect(during).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "revocation store unavailable",
+		});
+		expect(second.rotation.rotate).not.toHaveBeenCalled();
+	});
+
+	it("an outage on the session read after the rotation is 503, mapped as on the first read, and leaves no usable family", async () => {
+		const family = await registeredFamily();
+		let reads = 0;
+		const { handler } = makeGrant({
+			userSessionStore: storeAnswering(async (sid) => {
+				reads += 1;
+				if (reads > 1) throw new Error("redis down");
+				return sid === SID ? record() : null;
+			}),
+			family: { rotation: family.rotation, revocation: family.revocation },
+		});
+		expect(await refused(handler, await refreshToken())).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session store unavailable",
+		});
+		expect(reads).toBe(2);
+		await expectNoUsableFamily(family);
+	});
+
+	it("an outage on the revocation read after the rotation is 503, mapped as on the first read", async () => {
+		let reads = 0;
+		const revocation: SubjectRevocation = {
+			kind: "flaky",
+			revokeBefore: async () => {},
+			revokedBefore: async () => {
+				reads += 1;
+				// Read at verification, after the admission, and after the rotation.
+				if (reads > 2) throw new Error("redis down");
+				return null;
+			},
+		};
+		const { handler, rotation } = makeGrant({ subjectRevocation: revocation });
+		expect(await refused(handler, await refreshToken({ sid: undefined }))).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "revocation store unavailable",
+		});
+		expect(rotation.rotate).toHaveBeenCalledTimes(1);
+	});
+
+	it("a subject revocation landing while a requirement evaluates mints nothing, before or after the rotation", async () => {
+		for (const revokingCall of [1, 2]) {
+			const family = await registeredFamily();
+			const revocation = createInMemorySubjectRevocation();
+			let calls = 0;
+			const requirement = fixture(() => ({ outcome: "met" }));
+			const { handler } = makeGrant({
+				subjectRevocation: revocation,
+				requirements: [
+					{
+						...requirement,
+						async admit(input) {
+							calls += 1;
+							if (calls === revokingCall) await revokeNow(revocation);
+							return requirement.admit(input);
+						},
+					},
+				],
+				family: { rotation: family.rotation, revocation: family.revocation },
+			});
+			expect(await refused(handler, await refreshToken({ sid: undefined }))).toEqual(
+				INVALID_REFRESH_TOKEN,
+			);
+			// Before the rotation the family is untouched; after it, revoked.
+			expect(await family.revocation.isFamilyRevoked("fam-1")).toBe(revokingCall === 2);
+		}
+	});
+
+	/** A store whose session is deleted while `rotate` runs, and that rotation. */
+	const endedDuringRotation = (
+		rotate: RefreshTokenFamilyRotation["rotate"],
+	): { store: UserSessionStore; rotation: RefreshTokenFamilyRotation } => {
+		let live: UserSession | null = record();
+		return {
+			store: storeAnswering(async (sid) => (sid === SID ? live : null)),
+			rotation: {
+				register: async () => {},
+				rotate: async (...args) => {
+					const outcome = await rotate(...args);
+					live = null;
+					return outcome;
+				},
+			},
+		};
+	};
+
+	it("a refusal after a committed rotation is still answered without a family revocation wired", async () => {
+		const family = await registeredFamily();
+		const ended = endedDuringRotation(family.rotation.rotate);
+		const { handler } = makeGrant({
+			userSessionStore: ended.store,
+			family: { rotation: ended.rotation, revocation: null },
+		});
+		expect(await refused(handler, await refreshToken())).toEqual(SESSION_INVALID);
+		// The spent token rotates nothing on: it reads as a replay.
+		expect(await family.rotation.rotate("jti-1", "jti-x", "fam-1", Date.now() + 60_000)).toEqual(
+			expect.objectContaining({ outcome: "replayed" }),
+		);
+	});
+
+	it("a family revocation that fails after a committed rotation is logged, and the refusal still answered", async () => {
+		const family = await registeredFamily();
+		const ended = endedDuringRotation(family.rotation.rotate);
+		const logger = createMockLogger();
+		const { handler } = makeGrant({
+			logger,
+			userSessionStore: ended.store,
+			family: {
+				rotation: ended.rotation,
+				revocation: {
+					revokeFamily: async () => {
+						throw new Error("redis down");
+					},
+					isFamilyRevoked: async () => false,
+				},
+			},
+		});
+		expect(await refused(handler, await refreshToken())).toEqual(SESSION_INVALID);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				store: "refresh_token_family",
+				step: "revoke",
+				familyId: "fam-1",
+				clientId: CLIENT_ID,
+				err: expect.anything(),
+			}),
+			"refresh_token_store_unavailable",
+		);
+	});
+
+	it("a refusal after an unknown family was accepted revokes nothing, since nothing was committed", async () => {
+		const revokeFamily = vi.fn(async () => {});
+		const ended = endedDuringRotation(async () => ({ outcome: "unknown_family" }));
+		const { handler } = makeGrant({
+			config: {
+				...config,
+				oauth: {
+					...config.oauth,
+					refreshToken: { ...config.oauth.refreshToken, unknownFamilyPolicy: "accept" },
+				},
+			} as AppConfig,
+			userSessionStore: ended.store,
+			family: {
+				rotation: ended.rotation,
+				revocation: { revokeFamily, isFamilyRevoked: async () => false },
+			},
+		});
+		expect(await refused(handler, await refreshToken())).toEqual(SESSION_INVALID);
+		expect(revokeFamily).not.toHaveBeenCalled();
+	});
+
+	it("a family lifetime the re-checks spend mints nothing", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			let reads = 0;
+			const { handler } = makeGrant({
+				userSessionStore: storeAnswering(async () => {
+					reads += 1;
+					// The read after the rotation outlasts what the family has left.
+					if (reads === 2) vi.setSystemTime(Date.now() + 10_000);
+					return record();
+				}),
+				family: {
+					rotation: {
+						register: async () => {},
+						rotate: async () => ({ outcome: "rotated", cappedExpiresAtMs: Date.now() + 3_000 }),
+					},
+					revocation: { revokeFamily: async () => {}, isFamilyRevoked: async () => false },
+				},
+			});
+			expect(await refused(handler, await refreshToken())).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "refresh token family has reached its lifetime",
+			});
+			expect(reads).toBe(2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("a refresh nothing revoked still mints, reading the revocation after the policy and after the rotation", async () => {
+		const family = await registeredFamily();
+		const revocation = createInMemorySubjectRevocation();
+		const revokedBefore = vi.spyOn(revocation, "revokedBefore");
+		const store = storeWith(record());
+		const { handler } = makeGrant({
+			userSessionStore: store,
+			subjectRevocation: revocation,
+			grantPolicy: allowAfter(async () => {}),
+			family: { rotation: family.rotation, revocation: family.revocation },
+		});
+		const { result } = await handler.handle(ctx(await refreshToken()));
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		expect(decodeJwt(result.tokens.access_token).sid).toBe(SID);
+		expect(revokedBefore).toHaveBeenCalledTimes(3);
+		expect(store.get).toHaveBeenCalledTimes(2);
+		expect(await family.revocation.isFamilyRevoked("fam-1")).toBe(false);
 	});
 });

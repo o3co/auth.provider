@@ -26,6 +26,7 @@ import type { GrantPolicyHook } from "../../policy/types.mjs";
 import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { AdmissionActionDeclaration } from "../../session-admission/actions.mjs";
 import type { SessionRequirement as ConcreteSessionRequirement } from "../../session-admission/requirement.mjs";
+import type { SessionCloseNotifier } from "../../session-lifecycle/notifier.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
 import type { Contributed } from "./contributed.mjs";
 import type { ProviderDeps } from "./provider.mjs";
@@ -147,8 +148,8 @@ export interface FederationTypeContribution<Deps, E = unknown> {
 	/**
 	 * The schema of an entry of this type: the keys the adapter reads. The keys
 	 * core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
-	 * `callbackURL`) are stripped first, so a strict schema names only the
-	 * type's keys.
+	 * `callbackMeetsFreshness`, `callbackURL`) are stripped first, so a strict
+	 * schema names only the type's keys.
 	 */
 	readonly entrySchema: z.ZodType<E>;
 	/**
@@ -169,7 +170,10 @@ export type ExchangeTokenValidatorFactory<Deps> = (
 /**
  * An `mfaFactors` entry. `null` when the factor is switched off by config: the
  * kind is then absent from `mfaFactorResolver` yet still claimed, so a second
- * contribution of it is a duplicate.
+ * contribution of it is a duplicate. It is no override target: an override of
+ * it refuses boot (`override-target-missing`), so nothing switches on what its
+ * owner switched off. An override may answer `null`, which switches off the
+ * factor it replaces.
  */
 export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor | null>;
 /**
@@ -180,6 +184,11 @@ export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor | nul
  * pass, never at registration.
  */
 export type SessionRequirementFactory<Deps> = (deps: Deps) => Contributed<SessionRequirement>;
+/**
+ * A `sessionCloseNotifiers` entry: how a closed session's relying parties are
+ * told. Never `null`: a notifier is switched off by not installing its module.
+ */
+export type SessionCloseNotifierFactory<Deps> = (deps: Deps) => Contributed<SessionCloseNotifier>;
 export type AuditHookFactory<Deps> = (deps: Deps) => Contributed<AuditHook>;
 export type GrantPolicyHookFactory<Deps> = (deps: Deps) => Contributed<GrantPolicyHookContribution>;
 
@@ -304,13 +313,28 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * name it passes `admitSession` (`acme.export`), each declaring one of
 	 * core's grades. A declaration, not a factory: boot reads each once, at
 	 * stage 1. A name outside the grammar, a grade outside the grades (or
-	 * `remediation`, a requirement's), a container that is not a record and an
-	 * override refuse it there (`contribution-malformed`); a name two modules
+	 * `remediation`, a requirement's) and a container that is not a record
+	 * refuse it there (`contribution-malformed`), and an override too
+	 * (`contribution-kind-guarded`); a name two modules
 	 * register refuses it too (`duplicate-contribute`); a host may not supply
 	 * the collector (`contribution-kind-guarded`).
 	 */
 	readonly admissionActions?: {
 		readonly [name: string]: AdmissionActionDeclaration;
+	};
+	/**
+	 * The session-close notifier, keyed by a name of its contributor's
+	 * choosing: at most one per composition, read by the session lifecycle
+	 * through the synthetic key `sessionCloseNotifierResolver` when a close
+	 * runs, never while modules are built, so the module contributing it may
+	 * read slots of modules that require the lifecycle. A second, under any
+	 * name, refuses boot at stage 1 (`duplicate-contribute`), and so does an
+	 * override of the kind or a host's own collector
+	 * (`contribution-kind-guarded`); a factory answering anything but a
+	 * notifier fails its contribution.
+	 */
+	readonly sessionCloseNotifiers?: {
+		readonly [name: string]: SessionCloseNotifierFactory<Deps>;
 	};
 	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
 	readonly routes?: readonly RouteContributionEntry<Deps>[];

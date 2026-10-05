@@ -79,10 +79,15 @@ import {
 	parseFederationEntries,
 } from "./federation-entries.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
-import { checkReplicaSafety } from "./replica-safety.mjs";
+import {
+	checkReplicaSafety,
+	type ReplicaSafetyModuleRef,
+	readReplicaSafety,
+} from "./replica-safety.mjs";
 import type {
 	BootStage,
 	BootstrapMap,
+	ContributionContainer,
 	ContributionEntry,
 	ContributionKind,
 	ContributionKindMap,
@@ -207,12 +212,65 @@ function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
 	return federationTypeRegistration(value);
 }
 
+/** What a kind's container was read as, and how a refusal names it. */
+function containerAsRead(container: unknown): Pick<ContributionContainer, "shape" | "given"> {
+	if (Array.isArray(container)) return { shape: "list", given: "an array" };
+	if (isPlainConfigObject(container)) return { shape: "record", given: "a record" };
+	if (typeof container === "object" && container !== null) {
+		// A record is a plain object: an instance, a Map or an object with
+		// another prototype reads as one only through what it inherits.
+		return { shape: "other", given: `${describeValue(container)}, not a plain object` };
+	}
+	return { shape: "other", given: describeValue(container) };
+}
+
+/**
+ * One channel of a manifest — its `contributes` or `overrides`, read once by
+ * the caller — flattened: each kind's container as read, and its entries. An
+ * array files its entries under Symbol keys, an object under its names;
+ * whether either is the kind's shape is `checkContributionContainers`'s to
+ * judge, off `containers`.
+ */
+function normaliseChannel(
+	m: Module,
+	channel: "contributes" | "overrides",
+	map: unknown,
+): { readonly entries: ContributionEntry[]; readonly containers: ContributionContainer[] } {
+	const entries: ContributionEntry[] = [];
+	const containers: ContributionContainer[] = [];
+	for (const [kind, container] of Object.entries(map ?? {})) {
+		if (container === undefined) continue;
+		containers.push({ kind: kind as ContributionKind, channel, ...containerAsRead(container) });
+		if (Array.isArray(container)) {
+			for (const factory of container) {
+				entries.push({
+					kind: kind as ContributionKind,
+					key: Symbol(kind),
+					factory,
+					contributedBy: m.name,
+				});
+			}
+		} else if (container !== null && typeof container === "object") {
+			for (const [name, value] of Object.entries(container as Record<string, unknown>)) {
+				entries.push({
+					kind: kind as ContributionKind,
+					key: name,
+					factory: nameKeyedFactory(kind, name, value),
+					contributedBy: m.name,
+				});
+			}
+		}
+	}
+	return { entries, containers };
+}
+
 /**
  * Flatten a raw Module manifest into a NormalisedModule for fast lookup
  * by subsequent checks. Collects:
  * - `requires` / `optional` key arrays
  * - `providesKeys` from `Object.keys(module.provides ?? {})`
- * - `contributesEntries` / `overridesEntries` as flat ContributionEntry[]
+ * - `contributesEntries` / `overridesEntries` as flat ContributionEntry[],
+ *   and `containers`, each kind's container as read
  * - `lifecycleKeys` from `Object.keys(module.lifecycle ?? {})`
  *
  * @internal
@@ -227,53 +285,8 @@ function normaliseModule(m: Module): NormalisedModule {
 		? [...(authoritativeDeclared as readonly ComponentKey[])]
 		: [];
 
-	const contributesEntries: ContributionEntry[] = [];
-	for (const [kind, kindMap] of Object.entries(m.contributes ?? {})) {
-		if (Array.isArray(kindMap)) {
-			// List-shaped kinds: auditHooks, routes, grantPolicyHooks, grantMiddleware
-			for (const factory of kindMap) {
-				contributesEntries.push({
-					kind: kind as ContributionKind,
-					key: Symbol(kind),
-					factory,
-					contributedBy: m.name,
-				});
-			}
-		} else if (kindMap !== null && typeof kindMap === "object") {
-			// Name-keyed kinds: grants, tokenExchangeValidators, mfaFactors, …
-			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
-				contributesEntries.push({
-					kind: kind as ContributionKind,
-					key: name,
-					factory: nameKeyedFactory(kind, name, value),
-					contributedBy: m.name,
-				});
-			}
-		}
-	}
-
-	const overridesEntries: ContributionEntry[] = [];
-	for (const [kind, kindMap] of Object.entries(m.overrides ?? {})) {
-		if (Array.isArray(kindMap)) {
-			for (const factory of kindMap) {
-				overridesEntries.push({
-					kind: kind as ContributionKind,
-					key: Symbol(kind),
-					factory,
-					contributedBy: m.name,
-				});
-			}
-		} else if (kindMap !== null && typeof kindMap === "object") {
-			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
-				overridesEntries.push({
-					kind: kind as ContributionKind,
-					key: name,
-					factory: nameKeyedFactory(kind, name, value),
-					contributedBy: m.name,
-				});
-			}
-		}
-	}
+	const contributes = normaliseChannel(m, "contributes", m.contributes);
+	const overrides = normaliseChannel(m, "overrides", m.overrides);
 
 	const lifecycleKeys = Object.keys(m.lifecycle ?? {}) as ComponentKey[];
 
@@ -284,8 +297,9 @@ function normaliseModule(m: Module): NormalisedModule {
 		providesKeys,
 		authoritativeDeclared,
 		authoritativeKeys,
-		contributesEntries,
-		overridesEntries,
+		contributesEntries: contributes.entries,
+		overridesEntries: overrides.entries,
+		containers: [...contributes.containers, ...overrides.containers],
 		lifecycleKeys,
 	};
 }
@@ -294,22 +308,29 @@ function normaliseModule(m: Module): NormalisedModule {
 // Built-in contribution kinds — auto-wired by core; no collector required
 // ---------------------------------------------------------------------------
 
-const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
-	"grants",
-	"federations",
-	"federationRedirectPolicies",
-	"tokenExchangeValidators",
-	"mfaFactors",
-	"sessionRequirements",
-	"auditHooks",
-	"routes",
-	"grantPolicyHooks",
-	"grantMiddleware",
-	"tokenBindingMechanisms",
-	"discoveryMetadata",
-	"rateLimitBudgets",
-	"federationTypes",
-	"admissionActions",
+/**
+ * Core's contribution kinds, each with the container it takes: a record for
+ * a name-keyed kind, a list for a list-shaped one — the shapes of the
+ * collectors `createApp` seeds.
+ * @internal Exported for its test.
+ */
+export const BUILTIN_CONTRIBUTION_KINDS: ReadonlyMap<string, "record" | "list"> = new Map([
+	["grants", "record"],
+	["federations", "record"],
+	["federationRedirectPolicies", "record"],
+	["tokenExchangeValidators", "record"],
+	["mfaFactors", "record"],
+	["sessionRequirements", "record"],
+	["auditHooks", "list"],
+	["routes", "list"],
+	["grantPolicyHooks", "list"],
+	["grantMiddleware", "list"],
+	["tokenBindingMechanisms", "list"],
+	["discoveryMetadata", "list"],
+	["rateLimitBudgets", "record"],
+	["federationTypes", "record"],
+	["admissionActions", "record"],
+	["sessionCloseNotifiers", "record"],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -534,7 +555,7 @@ function checkAuthoritativeOverrides(
 /**
  * What a `synthetic-key-collision` message adds for `key`: for a key boot
  * fills from the configuration (`deploymentMode`, `tokenBindingSettings`,
- * `federationSettings`), where to state its value instead.
+ * `federationSettings`, `outboundPolicy`), where to state its value instead.
  */
 const SYNTHETIC_KEY_REMEDIES: ReadonlyMap<string, string> = new Map([
 	[
@@ -548,6 +569,10 @@ const SYNTHETIC_KEY_REMEDIES: ReadonlyMap<string, string> = new Map([
 	[
 		"federationSettings",
 		" Set core.federations in the configuration instead: boot fills federationSettings from it.",
+	],
+	[
+		"outboundPolicy",
+		" Set core.outbound in the configuration instead: boot fills outboundPolicy from it.",
 	],
 ]);
 const syntheticKeyRemedy = (key: string): string => SYNTHETIC_KEY_REMEDIES.get(key) ?? "";
@@ -808,6 +833,7 @@ const FEDERATION_KINDS_REGISTERED =
  */
 const PLANNER_OWNED_KINDS = [
 	"rateLimitBudgets",
+	"sessionCloseNotifiers",
 	"federationTypes",
 	"admissionActions",
 	"auditHooks",
@@ -825,6 +851,8 @@ const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string
 		case "admissionActions":
 		case "rateLimitBudgets":
 			return "the modules that own its entries contribute them, and no module overrides one";
+		case "sessionCloseNotifiers":
+			return "the module that tells relying parties contributes its notifier, which the session lifecycle reads, and no module overrides one";
 		default:
 			return "the modules that own its entries contribute them, and a module may override one";
 	}
@@ -965,18 +993,13 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	}
 }
 
-/** What a container that is not a record is called in a refusal. */
-const containerShape = (container: unknown): string =>
-	container === null ? "null" : Array.isArray(container) ? "an array" : `a ${typeof container}`;
-
 /**
- * What a `rateLimitBudgets`, `federationTypes` or `admissionActions`
- * contribution or override must be, read off the manifest before any factory
- * runs:
+ * What a `rateLimitBudgets`, `federationTypes`, `admissionActions` or
+ * `sessionCloseNotifiers` contribution or override holds, read off the
+ * entries normalisation captured, which stage 4 applies, before any factory
+ * runs; each container is already its kind's shape
+ * (`checkContributionContainers`):
  *
- * - its container is a record keyed by prefix, type or action name
- *   (normalisation would file an array as list-shaped under Symbol keys, and
- *   skip a function or `null`);
  * - a prefix is not empty and holds no `:`, since a limiter key carries it
  *   before its first `:`, whatever the budget's factory answers;
  * - a prefix names no `Object.prototype` member (`constructor`, `__proto__`),
@@ -992,58 +1015,36 @@ const containerShape = (container: unknown): string =>
  *   (`admissionActionSnapshots`), are what registration admits
  *   (`admissionActionProblem`); an action is registered by the module that
  *   admits it, so an override of one is refused as the kind guarded
- *   (`contribution-kind-guarded`).
+ *   (`contribution-kind-guarded`);
+ * - no module overrides `sessionCloseNotifiers` (`contribution-kind-guarded`):
+ *   the notifier is its contributor's, switched off only by not installing
+ *   it.
  *
- * Throws `contribution-malformed`; `name` is absent for a container.
+ * Throws `contribution-malformed`, naming the entry.
  * @internal
  */
-function checkContributionShapes(
-	rawModules: readonly Module[],
-	modules: readonly NormalisedModule[],
-): void {
+function checkContributionShapes(modules: readonly NormalisedModule[]): void {
 	const refuse = (
-		m: Module,
+		m: NormalisedModule,
 		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions",
-		name: string | undefined,
+		name: string,
 		channel: "contributes" | "overrides",
 		problem: string,
 	): never => {
 		throw new BootError({
-			message: `Module "${m.name}" ${channel} ${kind}${name === undefined ? "" : ` "${name}"`}: ${problem}.`,
+			message: `Module "${m.name}" ${channel} ${kind} "${name}": ${problem}.`,
 			reason: "contribution-malformed",
 			stage: "validateManifests",
-			details: {
-				reason: "contribution-malformed",
-				module: m.name,
-				kind,
-				...(name === undefined ? {} : { name }),
-				channel,
-				problem,
-			},
+			details: { reason: "contribution-malformed", module: m.name, kind, name, channel, problem },
 		});
 	};
 	const declaredVerifiers = declaredVerifierLimits(modules);
-	rawModules.forEach((m, index) => {
+	for (const m of modules) {
 		for (const channel of ["contributes", "overrides"] as const) {
-			const map = m[channel] as Readonly<Record<string, unknown>> | undefined;
-			for (const [kind, keyedBy] of [
-				["rateLimitBudgets", "prefix"],
-				["federationTypes", "type"],
-				["admissionActions", "action name"],
-			] as const) {
-				const container = map?.[kind];
-				if (container === undefined) continue;
-				if (typeof container !== "object" || container === null || Array.isArray(container)) {
-					refuse(
-						m,
-						kind,
-						undefined,
-						channel,
-						`the kind takes a record keyed by ${keyedBy}, not ${containerShape(container)}`,
-					);
-				}
-			}
-			for (const prefix of Object.keys(m[channel]?.rateLimitBudgets ?? {})) {
+			const entries = channel === "contributes" ? m.contributesEntries : m.overridesEntries;
+			for (const entry of entries) {
+				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+				const prefix = entry.key;
 				if (prefix.length === 0 || prefix.includes(":")) {
 					refuse(
 						m,
@@ -1063,11 +1064,23 @@ function checkContributionShapes(
 					);
 				}
 			}
-			const normalised = modules[index];
-			const entries =
-				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
-			// Read off the entries normalisation captured, which stage 4 applies.
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
+				if (entry.kind !== "sessionCloseNotifiers") continue;
+				if (channel === "overrides") {
+					throw new BootError({
+						message: `Module "${m.name}" overrides sessionCloseNotifiers, which no module may: the notifier is its contributor's, switched off only by not installing it.`,
+						reason: "contribution-kind-guarded",
+						stage: "validateManifests",
+						details: {
+							reason: "contribution-kind-guarded",
+							kind: "sessionCloseNotifiers",
+							channel: "overrides",
+							module: m.name,
+						},
+					});
+				}
+			}
+			for (const entry of entries) {
 				if (
 					channel !== "overrides" ||
 					entry.kind !== "rateLimitBudgets" ||
@@ -1093,13 +1106,13 @@ function checkContributionShapes(
 					},
 				});
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
 				const snapshot = verifierClaimSnapshots.get(entry.factory as object);
 				const problem = snapshot === undefined ? undefined : verifierClaimProblem(snapshot);
 				if (problem !== undefined) refuse(m, "rateLimitBudgets", entry.key, channel, problem);
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
 				if (channel === "overrides") {
 					throw new BootError({
@@ -1119,7 +1132,7 @@ function checkContributionShapes(
 				const problem = admissionActionProblem(entry.key, snapshot ?? entry.factory);
 				if (problem !== undefined) refuse(m, "admissionActions", entry.key, channel, problem);
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "federationTypes" || typeof entry.key !== "string") continue;
 				const snapshot = federationTypeSnapshot(entry.factory);
 				if (snapshot === undefined) {
@@ -1143,7 +1156,7 @@ function checkContributionShapes(
 				}
 			}
 		}
-	});
+	}
 }
 
 /**
@@ -1239,6 +1252,67 @@ function checkContributionKindCoverage(
 	}
 }
 
+/**
+ * The container `kind` takes: a record when its collector is name-keyed, a
+ * list when it is list-shaped — the collector's own `kind`, as stage 4
+ * dispatches on it, so a consumer's kinds are held to the same rule — or, for
+ * one of core's kinds with no collector in `contributionKinds`, its built-in
+ * shape. `undefined` for a kind nothing names a shape for.
+ */
+function containerTaken(
+	kind: string,
+	contributionKinds: ContributionKindMap | undefined,
+): "record" | "list" | undefined {
+	const collector =
+		contributionKinds !== undefined && Object.hasOwn(contributionKinds, kind)
+			? ((contributionKinds as Record<string, unknown>)[kind] as { kind?: unknown } | undefined)
+			: undefined;
+	switch (collector?.kind) {
+		case "name-keyed":
+			return "record";
+		case "list":
+		case "list-routes":
+			return "list";
+		default:
+			return BUILTIN_CONTRIBUTION_KINDS.get(kind);
+	}
+}
+
+/**
+ * Every kind's container, in `contributes` and in `overrides`, is the shape
+ * its kind takes (`containerTaken`): a record — a plain object — for a
+ * name-keyed kind, an array for a list-shaped one. Anything else is
+ * `contribution-malformed`, naming the module, the kind, the channel and
+ * what it was given: an array under a name-keyed kind would file its entries
+ * under Symbol keys no name-keyed check reads and no reader reaches, and a
+ * record under a list-shaped kind holds no list to append. Read off the
+ * containers normalisation read, once — the ones its entries came from. A
+ * kind no shape is known for has no container rule: the coverage check
+ * refuses its entries, if it has any.
+ * @internal
+ */
+function checkContributionContainers(
+	modules: readonly NormalisedModule[],
+	contributionKinds: ContributionKindMap | undefined,
+): void {
+	for (const m of modules) {
+		for (const { kind, channel, shape, given } of m.containers) {
+			const taken = containerTaken(kind, contributionKinds);
+			if (taken === undefined || taken === shape) continue;
+			const problem =
+				taken === "record"
+					? `the kind takes a record keyed by name, not ${given}`
+					: `the kind takes a list, not ${given}`;
+			throw new BootError({
+				message: `Module "${m.name}" ${channel} ${kind}: ${problem}.`,
+				reason: "contribution-malformed",
+				stage: "validateManifests",
+				details: { reason: "contribution-malformed", module: m.name, kind, channel, problem },
+			});
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Step 6 — Per-kind duplicate contributes check (name-keyed kinds)
 // ---------------------------------------------------------------------------
@@ -1289,6 +1363,35 @@ function checkPerKindContributeDuplicates(
 			seen.set(compoundKey, m.name);
 		}
 	}
+}
+
+/**
+ * At most one session-close notifier per composition, read off the
+ * manifests: two contributions, under any names, refuse boot
+ * (`duplicate-contribute`), since the session lifecycle tells relying parties
+ * through one.
+ * @internal
+ */
+function checkOneSessionCloseNotifier(modules: readonly NormalisedModule[]): void {
+	const contributions = modules.flatMap((m) =>
+		m.contributesEntries
+			.filter((entry) => entry.kind === "sessionCloseNotifiers")
+			.map((entry) => ({ module: m.name, name: String(entry.key) })),
+	);
+	const [first, second] = contributions;
+	if (first === undefined || second === undefined) return;
+	throw new BootError({
+		message: `sessionCloseNotifiers is contributed more than once — "${first.name}" by module "${first.module}" and "${second.name}" by module "${second.module}"; a composition tells relying parties through one notifier.`,
+		reason: "duplicate-contribute",
+		stage: "validateManifests",
+		details: {
+			reason: "duplicate-contribute",
+			kind: "sessionCloseNotifiers",
+			identity: second.name,
+			identityKind: "name",
+			modules: [first.module, second.module],
+		},
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -1492,6 +1595,14 @@ const FEDERATION_REQUIRED_STORES = [
 ] as const;
 
 /**
+ * The stores an enabled federation needs: all six when any
+ * `core.federations` entry is enabled, else none.
+ */
+function federationStoreSlotsOf(config: AppConfig): readonly ComponentKey[] {
+	return enabledFederationsOf(config).length > 0 ? FEDERATION_REQUIRED_STORES : [];
+}
+
+/**
  * If any `core.federations.<name>.enabled === true`, all six session,
  * federation and refresh-token-family slots must be wired. A missing one
  * makes federation routes either fail at runtime with an opaque 503 (the
@@ -1499,7 +1610,8 @@ const FEDERATION_REQUIRED_STORES = [
  * unexpected 404s (refreshTokenFamilyRevocation, per the `logoutSupported` /
  * `federationTokenSupported` gates in `packages/oauth/src/routes.mts`).
  * Refusing at boot makes both visible. Stage 1 counts a planned slot as
- * wired; stage 3 refuses one that holds `undefined`.
+ * wired; stage 2 builds every provider of one (`federationStoreSlots`), read
+ * or not; stage 3 refuses one that holds `undefined`.
  */
 export function checkFederationStoresWiring(
 	config: AppConfig,
@@ -2259,19 +2371,7 @@ function parseModuleSections(
 	}[] = [];
 	const issues: z.ZodIssue[] = [];
 	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
-	const refuse = () => {
-		const named = issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`);
-		return new BootError({
-			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: {
-				reason: "config-validation-failed",
-				issues,
-				modules: refused,
-			},
-		});
-	};
+	const refuse = () => moduleSectionsRefusal(issues, refused);
 
 	for (const m of modules) {
 		if (m.section === undefined) continue;
@@ -2352,15 +2452,67 @@ function switchedOffModules(
 		} as z.ZodIssue);
 		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
 	}
-	if (issues.length > 0) {
-		throw new BootError({
-			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`).join("; ")}.`,
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: { reason: "config-validation-failed", issues, modules: refused },
-		});
-	}
+	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
 	return off;
+}
+
+/**
+ * Each module's replica-safety declaration as the guard reads it
+ * (`readReplicaSafety`): a static one as written, one made from the section
+ * answered once for the section the module is handed. A declaration that
+ * throws or answers a malformed value is one more issue — at its section's
+ * path, or naming the module alone when it has no section — all of them
+ * refused together as `config-validation-failed`.
+ * @internal
+ */
+function replicaSafetyAsRead(
+	modules: readonly Module[],
+	sections: ReadonlyMap<string, { readonly value: unknown }>,
+): readonly ReplicaSafetyModuleRef[] {
+	const read: ReplicaSafetyModuleRef[] = [];
+	const issues: z.ZodIssue[] = [];
+	const refused: { readonly module: string; readonly schemaPath?: string }[] = [];
+	for (const m of modules) {
+		const answer = readReplicaSafety(m, sections.get(m.name));
+		if ("declaration" in answer) {
+			read.push({
+				name: m.name,
+				...(answer.declaration === undefined ? {} : { replicaSafety: answer.declaration }),
+			});
+			continue;
+		}
+		const sectioned = m.section !== undefined;
+		issues.push({
+			code: "custom",
+			path: sectioned ? [...sectionSegmentsOf(m)] : [],
+			message: `module "${m.name}"'s replicaSafety did not answer what ${sectioned ? "its section holds" : "it holds"} per replica: ${answer.problem}`,
+		} as z.ZodIssue);
+		refused.push(sectioned ? { module: m.name, schemaPath: sectionPathOf(m) } : { module: m.name });
+	}
+	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
+	return read;
+}
+
+/**
+ * The one refusal of what module sections answered — a section's parse, a
+ * switch, a replica-safety declaration made from the section: every issue
+ * together, each at its path (an issue with no path names its module
+ * itself), as `config-validation-failed`.
+ * @internal
+ */
+function moduleSectionsRefusal(
+	issues: readonly z.ZodIssue[],
+	refused: readonly { readonly module: string; readonly schemaPath?: string }[],
+): BootError {
+	const named = issues.map((issue) =>
+		issue.path.length === 0 ? issue.message : `${operatorPath(issue.path)}: ${issue.message}`,
+	);
+	return new BootError({
+		message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
+		reason: "config-validation-failed",
+		stage: "validateManifests",
+		details: { reason: "config-validation-failed", issues: [...issues], modules: [...refused] },
+	});
 }
 
 /**
@@ -3164,6 +3316,11 @@ interface StageOneContext {
 	 */
 	readonly relocating: readonly Module[];
 	readonly parsedConfig: unknown;
+	/**
+	 * Each switched-on module's replica-safety declaration as stage 1 read it,
+	 * once, right after the switches; empty before the parse.
+	 */
+	readonly replicaSafety: readonly ReplicaSafetyModuleRef[];
 	/** The modules their section switches off; empty before the parse. */
 	readonly switchedOff: ReadonlySet<string>;
 	/**
@@ -3337,14 +3494,24 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		run: (ctx) => checkContributionKindCoverage(ctx.modules, ctx.contributionKinds),
 	},
 	{
+		id: "contribution-containers",
+		spec: "A2-β §5.1 step 5 (each kind's container is its collector's shape)",
+		run: (ctx) => checkContributionContainers(ctx.modules, ctx.contributionKinds),
+	},
+	{
 		id: "contribution-shapes",
 		spec: "issue #728 (a rate-limit prefix; a federation type's declaration)",
-		run: (ctx) => checkContributionShapes(ctx.rawModules, ctx.modules),
+		run: (ctx) => checkContributionShapes(ctx.modules),
 	},
 	{
 		id: "per-kind-contribute-duplicates",
 		spec: "A2-β §5.1 step 6",
 		run: (ctx) => checkPerKindContributeDuplicates(ctx.modules, ctx.contributionKinds ?? {}),
+	},
+	{
+		id: "one-session-close-notifier",
+		spec: "issue #1030 (one session-close notifier; ADR 2026-10-05-session-lifecycle D16)",
+		run: (ctx) => checkOneSessionCloseNotifier(ctx.modules),
 	},
 	{
 		id: "route-collisions",
@@ -3411,13 +3578,14 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		// the warning is worthless if it goes somewhere the operator is not
 		// reading.
 		//
-		// `rawModules`, not the normalised view: the guard reads each manifest's
-		// own `replicaSafety` declaration, which normalisation does not carry.
-		// A switched-off module holds no state, whatever its name.
+		// The declarations are each manifest's own, which normalisation does not
+		// carry, read right after the switches (made from the section where a
+		// module declares so): a switched-off module holds no state, whatever
+		// its name, and its declaration is not read.
 		run: (ctx) => {
 			const bootLogger = warningLogger(ctx.bootstrapComponents);
 			checkReplicaSafety({
-				modules: ctx.rawModules.filter((m) => !ctx.switchedOff.has(m.name)),
+				modules: ctx.replicaSafety,
 				config: ctx.parsedConfig,
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});
@@ -3448,7 +3616,8 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * Stage 1 of the boot planner: runs {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then
  * step 13 (`validateAndComposeConfig`, the one composed parse, and
  * `parseModuleSections`, which writes each module's section back into the
- * parsed config), then reads each module's switch (`section.isEnabled`), then
+ * parsed config), then reads each module's switch (`section.isEnabled`) and
+ * each switched-on module's replica-safety declaration, then
  * runs {@link STAGE_ONE_POST_CONFIG_CHECKS} over the modules switched on: a
  * module switched off is, from there on, its name and its section alone, so
  * it registers nothing. Last, it parses each enabled `core.federations` entry
@@ -3484,6 +3653,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		contributionKinds,
 		relocating: withCoreRelocations(modules, input.core ?? CORE_RELOCATIONS),
 		parsedConfig: undefined,
+		replicaSafety: [],
 		switchedOff: new Set<string>(),
 		plannedKeys: plannedKeysOf(normalisedModules),
 	};
@@ -3530,6 +3700,13 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// A module its section switches off stays its name and its section: what
 	// it would register is out of every row below and every later stage.
 	const off = switchedOffModules(modules, sections);
+	// Each switched-on module's replica-safety declaration, read once here, so
+	// one that cannot answer is refused with what the sections answered,
+	// before any wiring row.
+	const replicaSafety = replicaSafetyAsRead(
+		modules.filter((m) => !off.has(m.name)),
+		sections,
+	);
 	const switchedOn = modules.map((m) => (off.has(m.name) ? switchedOff(m) : m));
 	const switchedOnNormalised = normalisedModules.map((normalised, i) =>
 		off.has(normalised.name) ? normaliseModule(switchedOn[i] as Module) : normalised,
@@ -3540,6 +3717,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		rawModules: switchedOn,
 		modules: switchedOnNormalised,
 		parsedConfig,
+		replicaSafety,
 		switchedOff: off,
 		plannedKeys: plannedKeysOf(switchedOnNormalised),
 	};
@@ -3594,5 +3772,6 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 			switchedOn,
 			parsedConfig,
 		),
+		federationStoreSlots: federationStoreSlotsOf(parsedConfig as AppConfig),
 	};
 }

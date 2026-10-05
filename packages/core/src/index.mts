@@ -79,10 +79,14 @@ export type {
 } from "./assertions/jwtAssertionVerifier.mjs";
 export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
 export {
+	ASSERTION_MAX_LIFETIME_LIMIT_SECONDS,
 	type AssertionLifetime,
 	assertionLifetime,
+	DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS,
 	describeInvalidAssertionClockTolerance,
+	describeInvalidAssertionMaxLifetime,
 	isValidAssertionClockTolerance,
+	isValidAssertionMaxLifetime,
 	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	MAX_ASSERTION_LIFETIME_SECONDS,
 } from "./assertions/lifetime.mjs";
@@ -180,9 +184,12 @@ export type {
 	UnknownContributionKindDetails,
 } from "./boot/index.mjs";
 // Boot planner — BootError catalogue, and the replica-safety guard, exported so
-// a custom composition root can run the same check. `replicaUnsafeReason` reads
-// a module's own `replicaSafety` declaration, so a deployment asserts on its
-// manifests rather than on the core-only name list.
+// a custom composition root can run the same check, handing it each module's
+// parsed section (`sections`) for a declaration made from the section.
+// `replicaUnsafeReason(module, section)` reads a module's own `replicaSafety`
+// declaration as boot does, so a deployment asserts on its manifests rather
+// than on the core-only name list; a declaration made from the section is
+// refused, not guessed, when no section is given.
 export {
 	BootError,
 	type CheckReplicaSafetyInput,
@@ -215,6 +222,9 @@ export type {
 	NavigationVerdict,
 	SessionCookiePolicy,
 } from "./browser-session/types.mjs";
+// What an `oauth.authorize.acrValues` key may be, and the one wording of its
+// refusal, for every schema that declares the table.
+export { checkAcrValueName } from "./config/acr-values.mjs";
 // Configuration
 export {
 	type AccessTokenConfig,
@@ -381,6 +391,7 @@ export type {
 	DelegatedTokens,
 	EndSessionRequest,
 	EndSessionResult,
+	FederationAsk,
 	FederationProfile,
 	MappedClaims,
 	RefreshedTokens,
@@ -399,6 +410,7 @@ export {
 	supportsLogout,
 	supportsRefresh,
 } from "./federations/types.mjs";
+export { readUpstreamAuthTime } from "./federations/upstream-auth-time.mjs";
 // The authentication claims a token may carry
 export {
 	authTimeAt,
@@ -534,6 +546,7 @@ export type {
 	VerifyRevocation,
 } from "./jwt/verify.mjs";
 export {
+	claimCoveredByRevocationBoundary,
 	isVerificationUnavailable,
 	JwtVerificationError,
 	REVOCATION_RETENTION_ALLOWANCE_MS,
@@ -842,6 +855,8 @@ export type {
 	RouteHandler,
 	SectionDeps,
 	SectionSchema,
+	SessionCloseNotifierFactory,
+	SessionCloseNotifierResolver,
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,
@@ -891,8 +906,15 @@ export {
 	type OutboundUrlSource,
 	outboundLimitsOf,
 } from "./net/outbound-fetch.mjs";
-// The host-list grammar's public readers, for a list of the same form kept elsewhere.
-export { type HostPattern, matchesHostList, readHostEntry } from "./net/outbound-policy.mjs";
+// The host-list grammar's public readers, for a list of the same form kept
+// elsewhere, and the policy the `outboundPolicy` slot holds, which a module
+// builds its outbound fetch from rather than from `config`.
+export {
+	type HostPattern,
+	matchesHostList,
+	type OutboundPolicy,
+	readHostEntry,
+} from "./net/outbound-policy.mjs";
 // The registered-redirect-URI shape vocabulary, the query's parameter names
 // included — enforced by ClientEntrySchema at boot; exported so a custom
 // ClientRepository, which bypasses that schema by design, can hold its
@@ -1199,6 +1221,24 @@ export {
 	type SessionView,
 	type StepUpPage,
 } from "./session-admission/requirement.mjs";
+export { sessionLifecycleModule } from "./session-lifecycle/module.mjs";
+export type {
+	SessionCloseNotice,
+	SessionCloseNotifier,
+} from "./session-lifecycle/notifier.mjs";
+export {
+	createSessionLifecycle,
+	type SessionCloseOutcome,
+	type SessionFederations,
+	type SessionJoinOutcome,
+	type SessionJoinRequest,
+	type SessionLifecycle,
+	type SessionLifecycleOptions,
+	type SessionLiveness,
+	type SessionOpenOutcome,
+	type SessionOpenRequest,
+	type SessionResumeReport,
+} from "./session-lifecycle/service.mjs";
 // The token-exchange validator port. `ExchangeTokenValidator` is
 // exported with the manifest types below, as the contribution value type.
 export type {
@@ -1212,9 +1252,11 @@ export type { OAuthTokenSettings } from "./token-settings/types.mjs";
 // How a session was established and what this provider vouches for, read one
 // way by every consumer of a session.
 export {
+	authenticationFreshness,
 	checkSecondFactorEvent,
 	expectsRenewalNonce,
 	federatedSessionAuthentication,
+	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	type RecordedAuthentication,
@@ -1226,6 +1268,7 @@ export {
 	requirementSessionFromAmr,
 	sessionAfterSecondFactor,
 	sessionAuthentication,
+	sessionFreshness,
 	vouchedAmr,
 } from "./user-sessions/authentication.mjs";
 // What a session's enrollment facts may hold, read one way by every store.
@@ -1239,8 +1282,9 @@ export {
 	createSessionRPRegistryFactory,
 	createUserSessionStoreFactory,
 } from "./user-sessions/factory.mjs";
-// The session lifecycle port (active → closing → closed), its readers and
-// its in-process store. Nothing reads the slot yet.
+// The session lifecycle (active → closing → closed): the port, its readers
+// and its in-process store; the service, its module and the relying-party
+// notifier contract. Nothing installs the module yet.
 export {
 	createInMemorySessionLifecycleStore,
 	DEFAULT_MEMORY_SESSION_LIFECYCLE_MAX_ENTRIES,
@@ -1300,10 +1344,13 @@ export {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./user-sessions/revokeAllForSubject.mjs";
-// How a SubjectRevocation store reads its arguments, and bounds a boundary by its clock.
+// How a SubjectRevocation store reads its arguments, and bounds a boundary by
+// its clock; and the one check a grant makes of a claim against the boundary.
 export {
 	checkSubjectRevocationInstant,
 	clampSubjectRevocationBoundary,
+	type SubjectBoundaryAnswer,
+	subjectBoundaryCovers,
 } from "./user-sessions/subjectRevocationBoundary.mjs";
 export {
 	createSubjectRevocationService,
@@ -1584,6 +1631,13 @@ export {
 	memoryFederationGrantIntentStoreModule,
 	memoryFederationGrantStoreModule,
 } from "./federation-grants/module.mjs";
+// What modules outside the federation-grants module read of its section —
+// the switch and the keep policy — through the `federationGrantPolicy` slot,
+// and the check a reader holds the slot to.
+export {
+	checkFederationGrantPolicy,
+	type FederationGrantPolicy,
+} from "./federation-grants/policy.mjs";
 export {
 	assertFederationGrantRetrievalLimits,
 	type FederationGrantAuditEvent,
@@ -1703,6 +1757,12 @@ export {
 	type SealingKey,
 	type SealingKeyRing,
 } from "./sealing/keyRing.mjs";
+
+// ===========================================================================
+// Plain JSON — the one rule for a value JSON gives back as it is, and its copy
+// ===========================================================================
+
+export { copyPlainJson, type PlainJsonCopy } from "./json/plainJson.mjs";
 
 // ===========================================================================
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628)

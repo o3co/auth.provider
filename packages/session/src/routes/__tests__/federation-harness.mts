@@ -29,13 +29,14 @@ import type {
 	FederationTokenStore,
 	Logger,
 	SessionFederationIndex,
+	SessionLifecycleStore,
 	SessionRequirementResolver,
 	SubjectRevocation,
 	SubjectSessionIndex,
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { vi } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
@@ -56,9 +57,9 @@ type StoredSession = {
 export type HarnessSessionStore = Map<string, StoredSession>;
 
 /**
- * The transaction cookie these harness apps issue. Named from a session cookie
- * name the harness picks, and passed to the router explicitly, so a test never
- * has to guess at the router's own fallback.
+ * The transaction cookie these harness apps issue, named from a session
+ * cookie name the harness picks, as the session module names it from the
+ * deployment's: the router is handed its name and has none of its own.
  */
 export const HARNESS_SESSION_COOKIE_NAME = "harness.session";
 export const HARNESS_TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookieName(
@@ -276,6 +277,7 @@ export function buildFederationApp({
 	subjectSessionIndex,
 	requirements,
 	subjectRevocation,
+	sessionLifecycleStore,
 	auditSink,
 	logger,
 }: {
@@ -286,6 +288,7 @@ export function buildFederationApp({
 	/** The session requirements the link routes admit through; none by default. */
 	requirements?: SessionRequirementResolver;
 	subjectRevocation?: SubjectRevocation;
+	sessionLifecycleStore?: SessionLifecycleStore;
 	auditSink?: AuditSink;
 	logger?: Logger;
 }): HarnessApp {
@@ -298,7 +301,7 @@ export function buildFederationApp({
 
 	app.use(
 		createRouter(express, {
-			config: {} as never,
+			federationSettings: createTestFederationSettings(),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map(
 				[...providers.keys()].map((name) => [name, makePermissivePolicy()]),
@@ -309,6 +312,7 @@ export function buildFederationApp({
 			sessionFederationIndex,
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			...(subjectRevocation ? { subjectRevocation } : {}),
+			...(sessionLifecycleStore ? { sessionLifecycleStore } : {}),
 			federationTokenStore,
 			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
 			requirements: requirements ?? resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),

@@ -27,6 +27,7 @@
  * `amr` sees one answer per authentication.
  */
 
+import { isWholeEpochSeconds } from "../jwt/numericDate.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 
 /** A password login (RFC 8176 `pwd`): what `POST /session/login` records. */
@@ -94,7 +95,7 @@ export function wellFormedAcr(value: unknown): string | undefined {
 
 /** `auth_time` as a token may carry it — whole seconds since the epoch, not negative — else undefined. */
 export function wellFormedAuthTime(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+	return isWholeEpochSeconds(value) ? value : undefined;
 }
 
 /**

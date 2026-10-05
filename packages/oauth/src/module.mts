@@ -30,6 +30,7 @@ import {
 import express from "express";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
+import { createSessionCloseNotifier } from "./logout/sessionCloseNotifier.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
 import { createOAuthRouter } from "./routes.mjs";
@@ -80,8 +81,10 @@ const SECTION = {
 /**
  * Declarative manifest for the OAuth 2.0 endpoint suite: one module value,
  * `oauth`, which owns `oauth {}`. Every dependency flows through the typed DI
- * graph (`requires` / `optional`), and every `oauth.*` setting it reads comes
- * from its own section (`deps.section`).
+ * graph (`requires` / `optional`), every `oauth.*` setting it reads comes
+ * from its own section (`deps.section`), and what it reads of the
+ * federations from core's `federationSettings` slot; it reads nothing else of
+ * the configuration.
  *
  * Contributes one route, "oauth-endpoints" at `/oauth`, and a
  * `discoveryMetadata` slice (its issuer-relative endpoints and capability
@@ -94,7 +97,7 @@ const SECTION = {
  * userinfo, the logout cascade and federation-token.
  */
 export const oauthEndpointsModule: Module = defineModule<
-	| "config"
+	| "federationSettings"
 	| "clientRepository"
 	| "keyStore"
 	| "grantHandlerResolver"
@@ -107,10 +110,12 @@ export const oauthEndpointsModule: Module = defineModule<
 	| "accessTokenDenylist"
 	| "subjectRevocation"
 	| "userSessionStore"
+	| "sessionLifecycleStore"
 	| "sessionRPRegistry"
 	| "sessionFamilyIndex"
 	| "sessionFederationIndex"
 	| "federationTokenStore"
+	| "sessionLifecycle"
 	| "consentStore"
 	| "pendingConsentStore"
 	| "federationProviders"
@@ -123,7 +128,7 @@ export const oauthEndpointsModule: Module = defineModule<
 	name: "oauth",
 	section: SECTION,
 	requires: [
-		"config", // the acr table reads which installed federation trusts its upstream amr; every oauth.* setting is read from the section
+		"federationSettings", // core's view of core.federations: the acr table reads which installed federation trusts its upstream amr; every oauth.* setting is read from the section
 		"clientRepository",
 		"keyStore",
 		"grantHandlerResolver", // synthetic, auto-injected by boot planner
@@ -137,11 +142,13 @@ export const oauthEndpointsModule: Module = defineModule<
 		"refreshTokenFamilyRevocation", // introspect/userinfo/logout cascade family-revocation check
 		"accessTokenDenylist", // RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
 		"subjectRevocation", // per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
-		"userSessionStore", // this and the next three: the four session stores
+		"userSessionStore", // the four session stores: this, sessionRPRegistry, sessionFamilyIndex, sessionFederationIndex
 		"sessionRPRegistry",
 		"sessionFamilyIndex",
 		"sessionFederationIndex",
+		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step
 		"federationTokenStore", // federation-token routes
+		"sessionLifecycle", // core's session lifecycle: where installed, introspection, userinfo and the federation-token route ask it whether a session is live
 		"consentStore", // the consent step for clients that are not first-party; such clients are refused without it
 		"pendingConsentStore", // where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 		"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
@@ -180,6 +187,18 @@ export const oauthEndpointsModule: Module = defineModule<
 	contributes: {
 		// What the router's /authorize and consent step admit.
 		admissionActions: OAUTH_ROUTER_ADMISSION_ACTIONS,
+		// How core's session lifecycle tells the relying parties of a closed
+		// session. A contribution, read when a close runs: this module is free
+		// to require the lifecycle without a cycle.
+		sessionCloseNotifiers: {
+			oauth: (deps) =>
+				createSessionCloseNotifier({
+					clientRepository: deps.clientRepository,
+					keyStore: deps.keyStore,
+					issuer: oauthTokenSettingsFrom(deps.section).issuer,
+					logger: deps.logger ?? consoleLogger,
+				}),
+		},
 		// The prefixes the endpoints limit under, claimed with no budget of
 		// their own: the limiter's `limits` entry or its default applies.
 		rateLimitBudgets: Object.fromEntries(
@@ -195,8 +214,8 @@ export const oauthEndpointsModule: Module = defineModule<
 				const registry = deps.grantHandlerResolver;
 				const { router } = await createOAuthRouter(express, {
 					registry,
-					config: deps.config,
 					section: deps.section,
+					federationSettings: deps.federationSettings,
 					clientRepository: deps.clientRepository,
 					codeRepository: deps.codeRepository,
 					keyStore: deps.keyStore,
@@ -207,10 +226,12 @@ export const oauthEndpointsModule: Module = defineModule<
 					accessTokenDenylist: deps.accessTokenDenylist,
 					subjectRevocation: deps.subjectRevocation,
 					userSessionStore: deps.userSessionStore,
+					sessionLifecycleStore: deps.sessionLifecycleStore,
 					sessionRPRegistry: deps.sessionRPRegistry,
 					sessionFamilyIndex: deps.sessionFamilyIndex,
 					sessionFederationIndex: deps.sessionFederationIndex,
 					federationTokenStore: deps.federationTokenStore,
+					sessionLifecycle: deps.sessionLifecycle,
 					replaySeenSet: deps.replaySeenSet,
 					consentStore: deps.consentStore,
 					pendingConsentStore: deps.pendingConsentStore,
@@ -242,7 +263,7 @@ export const oauthEndpointsModule: Module = defineModule<
 		discoveryMetadata: [
 			(
 				deps: ProviderDeps<
-					| "config"
+					| "federationSettings"
 					| "clientRepository"
 					| "keyStore"
 					| "grantHandlerResolver"
@@ -347,7 +368,7 @@ export const oauthEndpointsModule: Module = defineModule<
 							vouchableAcrValues(
 								readAcrTable(deps.section.authorize?.acrValues),
 								deps.federationProviders,
-								deps.config,
+								deps.federationSettings,
 								stepUpReach(Array.from(deps.sessionRequirementResolver.entries(), ([, r]) => r)),
 							).table,
 						);

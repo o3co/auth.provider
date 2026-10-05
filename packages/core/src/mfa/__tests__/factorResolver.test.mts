@@ -337,6 +337,66 @@ describe("mfaFactorResolver", () => {
 		);
 	});
 
+	it("is no override target when switched off: an override of it is refused as override-target-missing", async () => {
+		// An override would switch on a factor its owner's settings switched off.
+		let ran = false;
+		const off = defineModule({
+			name: "test:mfa-totp-off",
+			contributes: { mfaFactors: { totp: () => null } },
+		});
+		const overrider = defineModule({
+			name: "test:mfa-totp-overrider",
+			overrides: {
+				mfaFactors: {
+					totp: () => {
+						ran = true;
+						return factor("totp");
+					},
+				},
+			},
+		});
+		const err = await createApp({ modules: [off, overrider], bootstrapComponents }).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("override-target-missing");
+		expect((err as BootError).details).toEqual({
+			reason: "override-target-missing",
+			kind: "mfaFactors",
+			name: "totp",
+			overridingModule: "test:mfa-totp-overrider",
+		});
+		expect((err as BootError).message).toContain("switched off");
+		expect(ran).toBe(false);
+	});
+
+	it("lets an override answer null, which switches off the factor it replaces", async () => {
+		const seen: { resolver?: MfaFactorResolver } = {};
+		const handle = await createApp({
+			modules: [
+				defineModule({
+					name: "test:mfa-totp",
+					contributes: { mfaFactors: { totp: () => factor("totp") } },
+				}),
+				defineModule({
+					name: "test:mfa-totp-switcher",
+					overrides: { mfaFactors: { totp: () => null } },
+				}),
+				reader(seen),
+			],
+			bootstrapComponents,
+		});
+
+		expect(seen.resolver?.get("totp")).toBeUndefined();
+		expect([...(seen.resolver?.entries() ?? [])]).toEqual([]);
+
+		await handle.dispose();
+	});
+
 	it("is a synthetic key: a module providing it is refused", async () => {
 		const providing = defineModule({
 			name: "test:provides-mfa-factor-resolver",

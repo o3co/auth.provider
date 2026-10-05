@@ -49,6 +49,7 @@ import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
+import type { SessionCloseNotifier } from "../session-lifecycle/notifier.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap bootstrap slots
@@ -109,6 +110,7 @@ export type ContributionKind =
 	| "rateLimitBudgets"
 	| "federationTypes"
 	| "admissionActions"
+	| "sessionCloseNotifiers"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -146,7 +148,26 @@ export interface NormalisedModule {
 	readonly authoritativeKeys: readonly ComponentKey[];
 	readonly contributesEntries: readonly ContributionEntry[];
 	readonly overridesEntries: readonly ContributionEntry[];
+	/**
+	 * Each kind's container in `contributes` and `overrides`, as it was read,
+	 * once: stage 1 holds it to its kind's shape. A container that is
+	 * `undefined` is not listed.
+	 */
+	readonly containers: readonly ContributionContainer[];
 	readonly lifecycleKeys: readonly ComponentKey[];
+}
+
+/**
+ * What a kind's container in a module's `contributes` or `overrides` was read
+ * as: `record` for a plain object, `list` for an array, `other` for anything
+ * else, and `given`, how a refusal names it (`a record`, `an array`, `null`,
+ * `a function`, `a Map`, …).
+ */
+export interface ContributionContainer {
+	readonly kind: ContributionKind;
+	readonly channel: "contributes" | "overrides";
+	readonly shape: "record" | "list" | "other";
+	readonly given: string;
 }
 
 /**
@@ -197,6 +218,12 @@ export interface ValidatedManifests {
 	 * refuses any that holds `undefined` once its sources have answered.
 	 */
 	readonly undeclaredAbsenceSlots: readonly UndeclaredAbsenceSlot[];
+	/**
+	 * The stores an enabled `core.federations` entry needs, or none when no
+	 * entry is enabled. Stage 2 builds the provider of each that no host map
+	 * fills, read or not; stage 3 refuses any that holds no value.
+	 */
+	readonly federationStoreSlots: readonly ComponentKey[];
 }
 
 /** A slot that must hold a value: its absence policy is in force and undeclared. */
@@ -243,12 +270,25 @@ export interface ProviderActivation {
 	readonly module: string;
 	readonly componentKey: ComponentKey;
 	/**
-	 * True when this entry is in the activation closure only as a seed:
-	 * `lifecycle[componentKey].eager === true`, or a slot core reads. Used by
-	 * diagnostics; does not change runtime behaviour.
+	 * True when this entry is in the activation closure only as an eager or
+	 * core-read seed (`seededBy` is `eager` or `core-read`):
+	 * `lifecycle[componentKey].eager === true`, or a slot core reads. A
+	 * `federation-store` seed is left out on purpose: its provider is built
+	 * because the configuration needs the slot, not as an eager component.
+	 * Used by diagnostics; does not change runtime behaviour.
 	 */
 	readonly eager: boolean;
+	/**
+	 * Why a provider no active module reads is built, when that is the only
+	 * reason: `eager` (`lifecycle[componentKey].eager`), `core-read` (a slot
+	 * core reads), `federation-store` (a store an enabled federation needs).
+	 * Absent for a provider an active module reads. Diagnostics only.
+	 */
+	readonly seededBy?: ActivationSeed;
 }
+
+/** What put a provider into the activation closure without a reader. */
+export type ActivationSeed = "eager" | "core-read" | "federation-store";
 
 /**
  * Output of stage 2 (planBoot). The intermediate representation carrying
@@ -488,6 +528,12 @@ export interface ContributionCollectorMap {
 	 * `rateLimitBudgetResolver` leaves out.
 	 */
 	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
+	/**
+	 * Collector for `sessionCloseNotifiers` contributions, by name: each
+	 * notifier, never `null`. `sessionCloseNotifierResolver` answers the one
+	 * registered; a second refuses boot at the end of stage 4.
+	 */
+	readonly sessionCloseNotifiers?: NameKeyedCollector<SessionCloseNotifier>;
 	/**
 	 * Collector for `federationTypes` contributions, by type: each
 	 * package's declaration, its factories bound to the module's deps, which
@@ -833,7 +879,7 @@ export type BootstrapComponentCollisionDetails =
 /**
  * A synthetic ComponentMap key (`SYNTHETIC_COMPONENT_KEYS`: the resolvers,
  * the two registrars, `deploymentMode`, `tokenBindingSettings`,
- * `federationSettings`) appeared in a module's `provides`,
+ * `federationSettings`, `outboundPolicy`) appeared in a module's `provides`,
  * `bootstrapComponents` or `overrideComponents`; only the boot planner
  * produces these keys. `source: "module-provides"` carries `module`; the
  * other two sources are composition-root data and carry no module name.
@@ -1343,6 +1389,7 @@ export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
 	readonly kind:
 		| "rateLimitBudgets"
+		| "sessionCloseNotifiers"
 		| "federationTypes"
 		| "admissionActions"
 		| "auditHooks"
@@ -1362,19 +1409,20 @@ export interface ContributionKindGuardedDetails {
 
 /**
  * A contribution whose container, key or value its kind cannot take, found on
- * the manifest at stage 1, before any factory runs: a
- * `rateLimitBudgets`, `federationTypes` or `admissionActions` container that
- * is not a record (an array, a function, `null`) — `name` then absent — a
- * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
- * carries it — or names an `Object.prototype` member, a `federationTypes`
- * declaration that is not an object with a Zod `entrySchema` and a
- * `factory`, or an `admissionActions` entry whose name, declaration or grade
- * registration refuses. `problem` says which.
+ * the manifest at stage 1, before any factory runs: a container that is not
+ * its kind's shape — a record for a kind whose collector is name-keyed, an
+ * array for a list-shaped one, core's kinds and a consumer's alike, as
+ * normalisation read it — `name` then absent; a `rateLimitBudgets` prefix
+ * that is empty or holds `:` — no limiter key carries it — or names an
+ * `Object.prototype` member, a `federationTypes` declaration that is not an
+ * object with a Zod `entrySchema`, a `factory` and a `redirectPolicy`, or an `admissionActions`
+ * entry whose name, declaration or grade registration refuses. `problem`
+ * says which, and for a container what it was given.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
 	readonly module: string;
-	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions";
+	readonly kind: ContributionKind;
 	/** The prefix, type or action name; absent when the container itself is refused. */
 	readonly name?: string;
 	readonly channel: "contributes" | "overrides";

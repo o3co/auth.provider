@@ -139,6 +139,11 @@ export {
 	deploymentModeContract,
 } from "./slots/deploymentMode.mjs";
 export {
+	createTestFederationGrantPolicy,
+	type FederationGrantPolicyContractInput,
+	federationGrantPolicyContract,
+} from "./slots/federationGrantPolicy.mjs";
+export {
 	createTestFederationSettings,
 	type FederationSettingsContractInput,
 	federationSettingsContract,
@@ -168,6 +173,11 @@ export {
 	oauthTokenSettingsContract,
 	type TestOAuthTokenSettingsOverrides,
 } from "./slots/oauthTokenSettings.mjs";
+export {
+	createTestOutboundPolicy,
+	type OutboundPolicyContractInput,
+	outboundPolicyContract,
+} from "./slots/outboundPolicy.mjs";
 export {
 	createTestRateLimiter,
 	type RateLimiterContractInput,

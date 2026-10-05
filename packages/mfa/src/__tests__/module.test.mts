@@ -127,6 +127,7 @@ describe("mfaModules", () => {
 			"logger",
 			"mailSender",
 			"rateLimiter",
+			"sessionLifecycleStore",
 			"subjectRevocation",
 			"userRepository",
 		]);

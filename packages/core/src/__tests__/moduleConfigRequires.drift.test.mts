@@ -64,11 +64,7 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../..");
 const CONFIG_REQUIRERS: readonly string[] = [
 	// Each reads a section of its own that is not yet under its name, and some
 	// a key of another module's section beside it.
-	"packages/federation-grants -> federation-grants",
-	"packages/oauth -> oauth",
 	"packages/oauth -> oauth-authorization",
-	"packages/oauth -> subject-revocation-service",
-	"packages/session -> session",
 	// The standalone template's deprecated `stores` bundle.
 	"templates/standalone -> stores",
 ];

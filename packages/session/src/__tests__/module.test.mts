@@ -17,9 +17,11 @@
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import {
 	type AppConfig,
+	BootError,
 	type DeploymentMode,
 	defineModule,
 	type FederationTokenStore,
+	memoryRateLimiterModule,
 	type SessionFederationIndex,
 	type SessionRequirement,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
@@ -31,6 +33,7 @@ import {
 	coreConfigForTests,
 	createTestApp,
 	createTestCsrfTokenSigner,
+	createTestFederationSettings,
 	createTestSessionCookiePolicy,
 	federationTypeForTests,
 	makeValidAppConfig,
@@ -182,10 +185,17 @@ describe("sessionModule (static manifest)", () => {
 		expect(sessionModule.name).toBe("session");
 	});
 
+	it("reads its own section and core's federationSettings, never the whole configuration", () => {
+		expect(sessionModule.requires).toContain("federationSettings");
+		expect(sessionModule.requires).not.toContain("config");
+		expect(sessionModule.optional ?? []).not.toContain("config");
+		expect(sessionModule.configSchema).toBeUndefined();
+	});
+
 	it("declares its dep set in `requires`, without the oauth package's sessionRPRegistry, sessionFamilyIndex or refreshTokenFamilyRevocation", () => {
 		expect(sessionModule.requires).toEqual(
 			expect.arrayContaining([
-				"config",
+				"federationSettings",
 				"userRepository",
 				"userSessionStore",
 				"federationTokenStore",
@@ -336,6 +346,11 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		});
 	});
 
+	it("takes sessionLifecycleStore as an optional slot: the lifecycle port the link routes' admission reads", () => {
+		expect(sessionModule.optional).toContain("sessionLifecycleStore");
+		expect(sessionModule.requires).not.toContain("sessionLifecycleStore");
+	});
+
 	it("takes subjectRevocation as an optional slot, under the one subject-revocation policy it attaches for subjectSessionIndex", () => {
 		expect(sessionModule.optional).toContain("subjectRevocation");
 		expect(sessionModule.requires).not.toContain("subjectRevocation");
@@ -360,21 +375,6 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		requirements?: readonly SessionRequirement[];
 	}): Promise<request.Response> {
 		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			...coreConfigForTests({
-				declaredAbsent: ["auditSink"],
-				federations: {
-					stub: {
-						enabled: true,
-						type: "stub",
-						clientId: "id",
-						clientSecret: "secret",
-						callbackURL: "https://example.com/session/oauth/federation/stub/callback",
-					},
-				},
-			}),
-		} as unknown as AppConfig;
 		const record = {
 			sid: "s-1",
 			sub: "user-1",
@@ -390,7 +390,12 @@ describe("sessionModule — the link routes are a consumer of session admission"
 			handler: express.RequestHandler;
 		};
 		const contribution = factory({
-			config,
+			federationSettings: createTestFederationSettings({
+				stub: {
+					type: "stub",
+					callbackURL: "https://example.com/session/oauth/federation/stub/callback",
+				},
+			}),
 			section: base.session,
 			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			federationProviders: new Map([["stub", stubFederationProvider]]),
@@ -481,13 +486,11 @@ describe("sessionModule — the password login is a consumer of session admissio
 	 */
 	async function passwordLogin(requirements: readonly SessionRequirement[]) {
 		const base = makeValidAppConfig();
-		const config = { ...base } as unknown as AppConfig;
 		const factory = sessionModule.contributes?.routes?.[0] as unknown as (deps: unknown) => {
 			id: string;
 			handler: express.RequestHandler;
 		};
 		const contribution = factory({
-			config,
 			section: base.session,
 			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			deploymentMode: "single",
@@ -615,6 +618,33 @@ describe("sessionModule — the login's attempt limit reads the deploymentMode s
 			expect.objectContaining({ tag: "login" }),
 			"attempt_counter_not_shared",
 		);
+	});
+
+	it("through createApp, refuses a limiter section's limits.login, naming session.rateLimit.login", async () => {
+		// The login's attempt limit is the module's own setting; the module's
+		// claim declares it, so no limiter's limits may loosen it.
+		const base = makeValidAppConfig();
+		const err = await createTestApp({
+			modules: [...baseTestModules, memoryRateLimiterModule],
+			bootstrapComponents: {
+				config: withSessionCaptures({
+					...base,
+					[memoryRateLimiterModule.name]: {
+						limits: { login: { limit: 50, windowSeconds: 60 } },
+						defaultLimit: { limit: 60, windowSeconds: 60 },
+						maxBuckets: 100,
+					},
+				}),
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			() => undefined,
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain(`${memoryRateLimiterModule.name}.limits.login`);
+		expect((err as BootError).message).toContain("set session.rateLimit.login instead");
 	});
 
 	it("through createApp, boots under core.deployment.mode = multi on the attemptCounter slot's counter, without a warning", async () => {

@@ -64,6 +64,11 @@ export interface JwtAssertionVerifierOptions {
 	 * refuses it: no lifetime is left for a token to inherit.
 	 */
 	readonly clockToleranceSeconds?: number;
+	/**
+	 * How long an assertion may live, `exp − iat`, in seconds: the issuer
+	 * entry's `maxLifetimeSeconds`. Default an hour, at most a day.
+	 */
+	readonly maxLifetimeSeconds?: number;
 	/** Defaults to reading `sub`. */
 	readonly readSubjectHandle?: SubjectHandleReader;
 	/** Reads `scope` (space-delimited, per RFC 8693 §2.1) by default. */
@@ -84,7 +89,8 @@ export interface JwtAssertionVerifierOptions {
  * `alg: none` and every unlisted algorithm are refused.
  *
  * `exp` is the only lifetime bound: it is reported as `expiresAt` and the
- * jwt-bearer grant caps its token there. Replay within `exp` is not detected
+ * jwt-bearer grant caps its token there. `iat`, when present, is reported as
+ * `issuedAt`. Replay within `exp` is not detected
  * (no `jti` tracking, RFC 7523 §3 item 7), so authorities should mint
  * short-lived assertions. Verification here is local and never fails to be
  * attempted; a vendor-backed verifier throws instead and the grant answers 503.
@@ -92,8 +98,16 @@ export interface JwtAssertionVerifierOptions {
 export function createJwtAssertionVerifier(
 	options: JwtAssertionVerifierOptions,
 ): AssertionVerifier {
-	const { key, issuer, audience, algorithms, clockToleranceSeconds, readSubjectHandle, readScope } =
-		options;
+	const {
+		key,
+		issuer,
+		audience,
+		algorithms,
+		clockToleranceSeconds,
+		maxLifetimeSeconds,
+		readSubjectHandle,
+		readScope,
+	} = options;
 
 	if (issuer.length === 0 || audience.length === 0) {
 		throw new Error(
@@ -123,6 +137,7 @@ export function createJwtAssertionVerifier(
 				keys: { type: "key", key },
 				algorithms,
 				...(clockToleranceSeconds === undefined ? {} : { clockToleranceSeconds }),
+				...(maxLifetimeSeconds === undefined ? {} : { maxLifetimeSeconds }),
 			},
 		]),
 		readersFor: () => readers,

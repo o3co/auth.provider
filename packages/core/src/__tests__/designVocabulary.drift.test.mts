@@ -273,6 +273,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+readAcrTable\b/,
 	},
 	{
+		concept:
+			"an oauth.authorize.acrValues key an acr_values request can name, and the one wording of its refusal",
+		home: "packages/core/src/config/acr-values.mts",
+		definition: /(?:function|const)\s+checkAcrValueName\b/,
+	},
+	{
 		concept: "D15's selection of an acr over what a session vouches for",
 		home: "packages/core/src/session-admission/acr.mts",
 		definition: /(?:function|const)\s+selectAcr\b/,
@@ -696,6 +702,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		concept: "core.deployment.mode as core reads it — the check a reader holds the slot's value to",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+checkDeploymentMode\b/,
+	},
+	{
+		concept:
+			"the federation grants' switch and keep policy as a reader outside the module holds it — the check of the federationGrantPolicy slot",
+		home: "packages/core/src/federation-grants/policy.mts",
+		definition: /(?:function|const)\s+checkFederationGrantPolicy\b/,
 	},
 	{
 		concept: "a control character in configured text — C0, DEL or C1, but those a rule allows",

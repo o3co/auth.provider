@@ -104,11 +104,13 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 	const { subjectFor } = options;
 	return defineModule<
 		"sessionRequirementResolver" | "userSessionStore",
-		"subjectRevocation" | "auditSink" | "logger"
+		"subjectRevocation" | "sessionLifecycleStore" | "auditSink" | "logger"
 	>({
 		name: "webauthn-session-subject",
 		requires: ["sessionRequirementResolver", "userSessionStore"],
-		optional: ["subjectRevocation", "auditSink", "logger"],
+		// `sessionLifecycleStore`: the lifecycle port admission reads after a
+		// live record; a session closing or closed registers nothing.
+		optional: ["subjectRevocation", "sessionLifecycleStore", "auditSink", "logger"],
 		// Optional to wire, not optional to decide — the same constants every
 		// module attaches to these keys, which the declared-absence check
 		// requires to agree.
@@ -134,6 +136,7 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 							{
 								userSessionStore: deps.userSessionStore,
 								subjectRevocation: deps.subjectRevocation,
+								sessionLifecycleStore: deps.sessionLifecycleStore,
 								requirements,
 								acrTable: NO_ACR_TABLE,
 								logger,

@@ -25,8 +25,7 @@
  *
  * - shipped: every package on, as the full set boots it;
  * - configured: each owner's own key set by an operator
- *   (`session.rateLimit.login`, `device-grant.rateLimit`,
- *   `webauthn.rateLimit.authenticationOptions`);
+ *   (`session.rateLimit.login`, `device-grant.rateLimit`);
  * - declared: the same, and every prefix but a verifier's also declared in
  *   the limiter's own `limits`, which wins; `login` and `device_verification`
  *   stay their owners', since a limiter's `limits` may not name them;
@@ -36,9 +35,10 @@
  *   not installed, or installed and switched off (the device grant), sets no
  *   budget.
  *
- * `token` has no owner: the limiter's `defaultLimit`, or its own `limits`
- * entry. `mfa`'s owner claims it with no budget: the limiter's own `limits`
- * entry, which the template's application.conf ships. `login` and
+ * `token` has no owner, and `webauthn-authentication-options` an owner that
+ * claims it with no budget: the limiter's `defaultLimit`, or its own `limits`
+ * entry. `mfa`'s owner claims it with no budget too: the limiter's own
+ * `limits` entry, which the template's application.conf ships. `login` and
  * `device_verification` are claimed with no budget: their
  * owners count attempts on the attempt counter, against
  * `session.rateLimit.login` and `device-grant.rateLimit`, so the limiter
@@ -102,8 +102,8 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		offConfigured: spec(60, 60),
 	},
 	"webauthn-authentication-options": {
-		shipped: spec(30, 60),
-		configured: spec(11, 30),
+		shipped: spec(60, 60),
+		configured: spec(60, 60),
 		declared: spec(9, 15),
 		off: spec(60, 60),
 		offConfigured: spec(60, 60),
@@ -129,7 +129,6 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 const OWNERS_KEYS = `
 session.rateLimit.login { windowMs = 60000, limit = 7 }
 device-grant.rateLimit { limit = 3, windowSeconds = 120 }
-webauthn.rateLimit.authenticationOptions { limit = 11, windowSeconds = 30 }
 `;
 
 /** The limiter's own section's name. */

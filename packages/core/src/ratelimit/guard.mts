@@ -51,8 +51,7 @@ export interface RateLimitGuardOptions {
 	/**
 	 * Configured spec backing the `RateLimit-Limit` / `RateLimit-Reset` headers
 	 * when the decision does not carry `limit` / `resetAt`. Callers with a
-	 * documented per-endpoint spec (e.g. `webauthn.rateLimit.authenticationOptions`) pass it here;
-	 * without it the guard only advertises what the adapter actually reported,
+	 * documented per-endpoint spec pass it here; without it the guard only advertises what the adapter actually reported,
 	 * because a header value the caller invented is a limit no request is
 	 * measured against.
 	 */

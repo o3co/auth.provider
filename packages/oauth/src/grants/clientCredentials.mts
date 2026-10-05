@@ -17,6 +17,7 @@
 import {
 	type AuthenticatedClient,
 	boundPolicyAudience,
+	checkOAuthTokenSettings,
 	deriveAudienceFromResources,
 	evaluateGrantPolicy,
 	extractResourceParam,
@@ -27,18 +28,23 @@ import {
 	generateToken,
 	generateTokenResponse,
 	ownedConfirmation,
+	type ProviderDeps,
 	readSpaceDelimitedParameter,
-	resolveAccessTokenLifetime,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 
 const GRANT_TYPE = "client_credentials";
 
-/** What the client_credentials grant reads; see `AuthorizationGrantDeps`. */
+/**
+ * What the client_credentials grant reads; see `AuthorizationGrantDeps`. The
+ * access-token lifetime and the resource-indicator switch come from the
+ * `oauthTokenSettings` slot; nothing is read from the whole configuration.
+ */
 export type ClientCredentialsGrantDeps = Pick<
 	GrantDependencies,
-	"config" | "keyStore" | "grantPolicy" | "logger"
->;
+	"keyStore" | "grantPolicy" | "logger"
+> &
+	ProviderDeps<"oauthTokenSettings">;
 
 /**
  * `client_credentials` grant (RFC 6749 §4.4), for confidential clients only:
@@ -50,10 +56,13 @@ export type ClientCredentialsGrantDeps = Pick<
  * end-user), and no refresh token is issued (RFC 6749 §4.4.3).
  */
 export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): GrantHandler => {
-	const { config, keyStore } = deps;
-	// Resolved once when the grant is built, so a hand-built configuration the
-	// resolver refuses fails composition rather than a request.
-	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
+	const { keyStore } = deps;
+	// The token settings are read once, here, from the `oauthTokenSettings`
+	// slot alone, checked whole first: a hand-built value the check refuses,
+	// or none, fails at composition, naming the slot, rather than a request.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
+	const { resourceIndicatorEnabled } = tokenSettings;
 
 	return {
 		// Machine-to-machine access is never acquired by omission: dispatch
@@ -94,10 +103,9 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 			// The policy's audience, when it narrowed one; null falls back below.
 			let policyGrantedAudience: string | null = null;
 
-			// RFC 8707 is read only under oauth.resourceIndicator.enabled (off by
-			// default); the policy runs whenever grantPolicy is wired, and sees no
-			// resource with the flag off.
-			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+			// RFC 8707 is read only under the slot's `resourceIndicatorEnabled`
+			// (off by default); the policy runs whenever grantPolicy is wired, and
+			// sees no resource with the flag off.
 			const requestedResource = resourceIndicatorEnabled
 				? extractResourceParam(ctx.body as Record<string, unknown>)
 				: null;

@@ -40,10 +40,10 @@ import { refuseCeremonyStoreUnavailable } from "../internal/storeUnavailable.mjs
 
 /**
  * Endpoint tag for `createRateLimitGuard`: the `<tag>:ip:<ip>` key prefix a limiter resolves this
- * route's budget by, and the `tag` on the guard's log and audit events. The module contributes
- * `webauthn.rateLimit.authenticationOptions` as the budget under it; operators use it as the key
- * in `core-rate-limiter-memory.limits` / `redis-rate-limiter.limits` to override that. Contains no `:`,
- * since a limiter takes the prefix up to the first colon.
+ * route's limit by, and the `tag` on the guard's log and audit events. The module claims it with no
+ * budget; operators set the route's limit as the key in `core-rate-limiter-memory.limits` /
+ * `redis-rate-limiter.limits`, else the limiter's `defaultLimit` applies. Contains no `:`, since a
+ * limiter takes the prefix up to the first colon.
  */
 export const WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG = "webauthn-authentication-options";
 
@@ -87,9 +87,16 @@ export function createAuthenticationOptionsHandler(
 
 		// A fixed, non-user-scoped namespace: the authenticator identifies the user, not the
 		// request.
-		const expiresAtMs = Date.now() + deps.config.challengeTtlMs;
+		// Recorded with the challenge: the passkey grant stamps `auth_time` from it.
+		const issuedAtMs = Date.now();
+		const expiresAtMs = issuedAtMs + deps.config.challengeTtlMs;
 		try {
-			await deps.challengeStore.issue("webauthn:authentication", options.challenge, expiresAtMs);
+			await deps.challengeStore.issue(
+				"webauthn:authentication",
+				options.challenge,
+				expiresAtMs,
+				issuedAtMs,
+			);
 		} catch (err) {
 			refuseCeremonyStoreUnavailable(
 				res,

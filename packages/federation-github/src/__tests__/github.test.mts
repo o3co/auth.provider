@@ -110,12 +110,10 @@ describe("createGithubProvider", () => {
 		expect(tokenRequest?.headers.has("authorization")).toBe(false);
 	});
 
-	it("does not forward a callback's iss to the library: the login succeeds and the token request carries only the grant's parameters", async () => {
-		// GitHub names its issuer "https://github.com/login/oauth"; the library
-		// is configured with the profile label "https://github.com". Forwarded,
-		// the library would compare the two and refuse the login.
-		const iss = "https://github.com/login/oauth";
-		const profile = await exchange({ callbackParams: { iss, state: "route-checked" } });
+	it("logs in with a callback carrying GitHub's own issuer as iss, and the token request carries only the grant's parameters", async () => {
+		const profile = await exchange({
+			callbackParams: { iss: "https://github.com/login/oauth", state: "route-checked" },
+		});
 		expect(profile.sub).toBe("12345");
 
 		// The token request carries the route's code, the callback URL as
@@ -135,6 +133,26 @@ describe("createGithubProvider", () => {
 		// before calling the adapter, and hands the adapter none. An adapter that
 		// asked the library to expect one would refuse this login ("state"
 		// missing), so the success above is the check that it does not.
+	});
+
+	it.each([
+		["another authorization server's issuer", "https://accounts.google.com"],
+		["the profile's label rather than GitHub's issuer", "https://github.com"],
+	])("refuses a callback whose iss is %s, before any token request", async (_label, iss) => {
+		await expect(exchange({ callbackParams: { iss } })).rejects.toThrow();
+		expect(github.requestsTo(GITHUB.tokenEndpoint)).toEqual([]);
+	});
+
+	it("logs in with a callback that carries no iss", async () => {
+		const profile = await exchange({ callbackParams: { state: "route-checked" } });
+		expect(profile.sub).toBe("12345");
+	});
+
+	it("keeps the profile's issuer label: a linked GitHub identity is the same identity", async () => {
+		const profile = await exchange({
+			callbackParams: { iss: "https://github.com/login/oauth" },
+		});
+		expect(profile.issuer).toBe("https://github.com");
 	});
 
 	it("fails the exchange when GitHub refuses the code, which it answers with HTTP 200 and an error body", async () => {
@@ -189,7 +207,7 @@ describe("createGithubProvider", () => {
 	it("never carries an id_token: GitHub is plain OAuth 2.0 and issues none, so one in its answer was put there by something else", async () => {
 		// A proxy or an interceptor between this server and GitHub can add one.
 		// Its claims are shaped to pass the library's claim checks — GitHub's
-		// issuer, this client — and its signature is nobody's: nothing verifies
+		// authorization server's issuer, this client — and its signature is nobody's: nothing verifies
 		// it, and a stored one would later be handed to an end-session endpoint
 		// as `id_token_hint`, as if it were GitHub's.
 		const segment = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -197,7 +215,7 @@ describe("createGithubProvider", () => {
 		const forged = [
 			segment({ alg: "RS256", typ: "JWT" }),
 			segment({
-				iss: "https://github.com",
+				iss: "https://github.com/login/oauth",
 				aud: baseConfig.clientId,
 				sub: "12345",
 				iat: now,
@@ -443,5 +461,26 @@ describe("config.fetch — a proxy, or a test seam", () => {
 			"/user",
 			"/user/emails",
 		]);
+	});
+});
+
+describe("the freshness ask and the upstream's authentication instant", () => {
+	it("ignores an ask: GitHub's OAuth authorization has neither prompt=login nor max_age", () => {
+		const p = createGithubProvider(baseConfig);
+		const build = (ask?: { readonly login?: true; readonly maxAgeSeconds?: number }) =>
+			p.buildAuthorizationUrl({
+				redirectUri: baseConfig.callbackURL,
+				state: "abc",
+				codeVerifier: VERIFIER,
+				...(ask === undefined ? {} : { ask }),
+			} as Parameters<typeof p.buildAuthorizationUrl>[0]);
+		const asked = build({ login: true, maxAgeSeconds: 0 });
+		expect(asked.href).toBe(build().href);
+		expect(asked.searchParams.has("prompt")).toBe(false);
+		expect(asked.searchParams.has("max_age")).toBe(false);
+	});
+
+	it("reports no authTime: GitHub issues no id_token to carry one", async () => {
+		expect(await exchange()).not.toHaveProperty("authTime");
 	});
 });

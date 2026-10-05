@@ -42,7 +42,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import {
@@ -53,6 +53,10 @@ import {
 	tokenSettings,
 	tokensOf,
 } from "./fixtures.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 /** A consumer-contributed token type, used to drive claims the built-in
@@ -354,6 +358,8 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 	});
 
 	it("keeps the configured lifetime when the subject token outlives it", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" }, { expiresIn: "1h" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
@@ -433,11 +439,17 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 			const tokens = tokensOf(result);
 			const claims = decodeJwt(tokens.access_token);
 			expect(claims.exp as number).toBeLessThanOrEqual(subjectExp);
-			expect((claims.exp as number) - (claims.iat as number)).toBe(tokens.expires_in);
+			// `expires_in` counts from the answer (RFC 6749 §5.1), never past `exp`.
+			expect(tokens.expires_in).toBeGreaterThan(0);
+			expect(tokens.expires_in).toBeLessThanOrEqual(
+				(claims.exp as number) - (claims.iat as number),
+			);
 		});
 	});
 
 	it("leaves the configured lifetime alone when the subject token carries no exp", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const g = buildGrant({
 			stub: { sub: "user-1", scope: "read", claims: { sub: "user-1" } },
 		});
@@ -475,6 +487,11 @@ describe("token exchange — a request may ask for its lifetime with expires_in"
 		const extra = expiresIn === undefined ? {} : { expires_in: expiresIn };
 		return { token, ...(await g.handle(ctx(exchangeBody(token, extra)))) };
 	}
+
+	// `expires_in` is the time left when answered: read on a frozen clock.
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+	});
 
 	/** The response's `expires_in`, asserting it is the lifetime actually minted. */
 	function mintedLifetime(result: Awaited<ReturnType<typeof exchange>>["result"]): number {

@@ -43,6 +43,7 @@ import {
 	type SubjectRevocation,
 	type UserSession,
 	type UserSessionStore,
+	verifyJwt,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
@@ -50,6 +51,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 
 const SID = "sid-1";
@@ -130,6 +132,9 @@ const makeGrant = (opts: {
 	auditEvents?: AuditEvent[];
 	/** Runs while the grant signs each token, between the two reads. */
 	betweenReads?: () => Promise<void>;
+	/** Runs while the grant joins the session, after the revalidation. */
+	duringJoin?: () => Promise<void>;
+	grantedScope?: readonly string[];
 	sid?: string | undefined;
 }) => {
 	const codeRepository = {
@@ -140,7 +145,7 @@ const makeGrant = (opts: {
 				redirect_uri: REDIRECT_URI,
 				code_challenge: CHALLENGE,
 				code_challenge_method: "S256",
-				grantedScope: ["openid"],
+				grantedScope: [...(opts.grantedScope ?? ["openid"])],
 				sid: "sid" in opts ? opts.sid : SID,
 			}),
 		),
@@ -160,7 +165,9 @@ const makeGrant = (opts: {
 	} as unknown as SessionFamilyIndex;
 	const sessionRPRegistry = {
 		kind: "memory",
-		registerRP: vi.fn(async () => {}),
+		registerRP: vi.fn(async () => {
+			await opts.duringJoin?.();
+		}),
 		listRPs: vi.fn(async () => []),
 		removeBySid: vi.fn(async () => {}),
 	} as unknown as SessionRPRegistry;
@@ -171,7 +178,7 @@ const makeGrant = (opts: {
 		return sign(options);
 	});
 	const handler = createAuthorizationGrant({
-		config,
+		...grantSettingsFrom(config),
 		keyStore,
 		codeRepository,
 		clientRepository,
@@ -193,7 +200,7 @@ const makeGrant = (opts: {
 				}
 			: {}),
 	});
-	return { handler, signed, sessionFamilyIndex };
+	return { handler, signed, sessionFamilyIndex, keyStore };
 };
 
 const ctx = (session: Record<string, unknown> = {}): GrantContext => ({
@@ -479,5 +486,85 @@ describe("the authorization_code grant on admission — the revalidation", () =>
 			expect.objectContaining({ store: "user_session", action: "oauth.code_exchange" }),
 			"session_admission_unavailable",
 		);
+	});
+});
+
+describe("the authorization_code grant — one issuance instant for the three tokens", () => {
+	const START = new Date("2026-10-05T00:00:00.000Z");
+	const advance = (ms: number): void => {
+		vi.setSystemTime(Date.now() + ms);
+	};
+	const withClock = async (run: () => Promise<void>) => {
+		vi.useFakeTimers({ toFake: ["Date"], now: START });
+		try {
+			await run();
+		} finally {
+			vi.useRealTimers();
+		}
+	};
+	const tokensOf = async (
+		handler: ReturnType<typeof createAuthorizationGrant>,
+		session: Record<string, unknown> = {},
+	) => {
+		const { result } = await handler.handle(ctx(session));
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		return result.tokens;
+	};
+
+	it("a boundary stamped while the session is joined covers the id_token as it covers the access token: one iat", async () => {
+		await withClock(async () => {
+			const revocation = createInMemorySubjectRevocation();
+			const { handler, keyStore } = makeGrant({
+				userSessionStore: storeAnswering(record(), record()),
+				subjectRevocation: revocation,
+				duringJoin: async () => {
+					advance(5_000);
+					await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
+					advance(5_000);
+				},
+			});
+			const tokens = await tokensOf(handler);
+			const idToken = tokens.id_token as string;
+			expect(decodeJwt(idToken).iat).toBe(decodeJwt(tokens.access_token).iat);
+			const verify = (token: string, type: "access_token" | "id_token") =>
+				verifyJwt(token, keyStore, {
+					type,
+					expectedIssuer: "https://issuer.test",
+					expectedAudience: CLIENT_ID,
+					revocation: { subjectRevocation: revocation },
+				});
+			await expect(verify(tokens.access_token, "access_token")).rejects.toMatchObject({
+				reason: "revoked",
+			});
+			await expect(verify(idToken, "id_token")).rejects.toMatchObject({ reason: "revoked" });
+		});
+	});
+
+	it("without openid, the access and refresh tokens share one iat and no id_token is signed", async () => {
+		await withClock(async () => {
+			const { handler } = makeGrant({
+				userSessionStore: storeAnswering(record(), record()),
+				grantedScope: ["profile"],
+				betweenReads: async () => advance(5_000),
+			});
+			const tokens = await tokensOf(handler);
+			expect(tokens.id_token).toBeUndefined();
+			expect(decodeJwt(tokens.refresh_token as string).iat).toBe(
+				decodeJwt(tokens.access_token).iat,
+			);
+			expect(decodeJwt(tokens.access_token).iat).toBe(Math.floor(START.getTime() / 1000));
+		});
+	});
+
+	it("without a store, the access and refresh tokens share one iat and no id_token is signed", async () => {
+		await withClock(async () => {
+			const { handler } = makeGrant({ betweenReads: async () => advance(5_000) });
+			const tokens = await tokensOf(handler, { user: { id: "cookie-user" } });
+			expect(tokens.id_token).toBeUndefined();
+			expect(decodeJwt(tokens.refresh_token as string).iat).toBe(
+				decodeJwt(tokens.access_token).iat,
+			);
+			expect(decodeJwt(tokens.access_token).iat).toBe(Math.floor(START.getTime() / 1000));
+		});
 	});
 });

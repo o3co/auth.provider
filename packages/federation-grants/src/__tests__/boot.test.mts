@@ -26,8 +26,10 @@
 import type {
 	BootstrapMap,
 	ClientRepository,
+	FederationGrantPolicy,
 	FederationProvider,
 	LoginEntry,
+	Module,
 	RateLimiter,
 } from "@o3co/auth-provider-core";
 import {
@@ -41,6 +43,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
+	createTestFederationGrantPolicy,
 	createTestOAuthTokenSettings,
 	federationTypeForTests,
 	makeValidCoreConfig,
@@ -53,6 +56,11 @@ import {
 	type FederationGrantBackground,
 	federationGrantsModules,
 } from "#/index.mjs";
+import {
+	type FederationGrantsModuleDeps,
+	federationGrantsConfigSchema,
+	federationGrantsModule,
+} from "#/module.mjs";
 import {
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
@@ -230,12 +238,19 @@ interface Setup {
 	 * `"without-check"`, a guard with no `check` to ask.
 	 */
 	readonly withCsrfGuard?: boolean | "without-check";
-	/** The oauthTokenSettings the composition holds; none by default. */
-	readonly tokenSettingsIssuer?: string;
+	/**
+	 * The issuer of the oauthTokenSettings the composition holds, the
+	 * configuration's by default; `null` holds none.
+	 */
+	readonly tokenSettingsIssuer?: string | null;
 	/** Where the memory store's cleanup records that it ran; no cleanup by default. */
 	readonly storeClosed?: string[];
 	/** A registry the host supplies through `overrideComponents`, in place of the module's. */
 	readonly background?: FederationGrantBackground;
+	/** A policy the host supplies through `overrideComponents`. */
+	readonly overridePolicy?: FederationGrantPolicy;
+	/** Modules installed beside the feature's, after them. */
+	readonly beside?: readonly Module[];
 }
 
 /**
@@ -279,12 +294,15 @@ const boot = (setup: Setup) => {
 									: storeModuleClosingInto(setup.storeClosed),
 				]),
 		...(setup.federationFirst === false ? federation : []),
+		...(setup.beside ?? []),
 	];
+	const overrideComponents = {
+		...(setup.background === undefined ? {} : { federationGrantBackground: setup.background }),
+		...(setup.overridePolicy === undefined ? {} : { federationGrantPolicy: setup.overridePolicy }),
+	};
 	return createApp({
 		modules,
-		...(setup.background === undefined
-			? {}
-			: { overrideComponents: { federationGrantBackground: setup.background } }),
+		...(Object.keys(overrideComponents).length === 0 ? {} : { overrideComponents }),
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
@@ -320,15 +338,23 @@ const boot = (setup: Setup) => {
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
-			...(setup.tokenSettingsIssuer === undefined
-				? {}
-				: {
-						oauthTokenSettings: createTestOAuthTokenSettings({ issuer: setup.tokenSettingsIssuer }),
-					}),
 			...(() => {
-				const { federationGrantIntentStore, userRepository, loginEntry, csrfGuard } =
-					acquisitionComponents();
+				const {
+					oauthTokenSettings,
+					federationGrantIntentStore,
+					userRepository,
+					loginEntry,
+					csrfGuard,
+				} = acquisitionComponents();
 				return {
+					...(setup.tokenSettingsIssuer === null
+						? {}
+						: {
+								oauthTokenSettings:
+									setup.tokenSettingsIssuer === undefined
+										? oauthTokenSettings
+										: createTestOAuthTokenSettings({ issuer: setup.tokenSettingsIssuer }),
+							}),
 					...(setup.withIntentStore === false ? {} : { federationGrantIntentStore }),
 					...(setup.withCsrfGuard === false
 						? {}
@@ -566,10 +592,21 @@ describe("enabling the feature", () => {
 		await expect(boot({ provider: formPost })).rejects.toThrow(/form_post/);
 	});
 
-	it("refuses to discard every disclosure without being told to, naming core.declaredAbsent", async () => {
-		await expect(boot({ withAudit: false })).rejects.toThrow(
-			/list "auditSink" in core\.declaredAbsent/,
+	it("refuses to discard every disclosure without being told to, by core's absence policy naming core.declaredAbsent", async () => {
+		const error = await boot({ withAudit: false }).then(
+			() => undefined,
+			(thrown: unknown) => thrown,
 		);
+		expect(error).toBeInstanceOf(BootError);
+		expect(error).toMatchObject({
+			reason: "component-absence-undeclared",
+			details: { componentKey: "auditSink", absentValue: "auditSink" },
+		});
+		expect((error as BootError).details).toHaveProperty(
+			"consumedBy",
+			expect.arrayContaining(["federation-grants"]),
+		);
+		expect((error as Error).message).toMatch(/list "auditSink" in core\.declaredAbsent/);
 	});
 
 	it('does not take audit.sink.type = "none", where the declaration was, as the declaration', async () => {
@@ -745,6 +782,44 @@ describe("what creating a grant needs", () => {
 		);
 	});
 
+	it("refuses to boot enabled without oauthTokenSettings, naming the slot", async () => {
+		// The issuer every route and callback is built on is the slot's alone:
+		// a composition without the oauth module fills it, and nothing reads
+		// `oauth.jwt.issuer` off the configuration in its place.
+		await expect(boot({ tokenSettingsIssuer: null })).rejects.toThrow(/oauthTokenSettings/);
+	});
+
+	it("boots disabled without oauthTokenSettings: switched off, the module requires nothing", async () => {
+		const handle = await boot({ enabled: false, tokenSettingsIssuer: null });
+		await handle.dispose();
+	});
+
+	it("builds both halves from its section and slots, with no configuration in its deps", async () => {
+		const handle = await boot({});
+		try {
+			const {
+				config: _none,
+				lifecycleRegistrar: _registered,
+				...components
+			} = handle.components as Record<string, unknown>;
+			const deps = {
+				...components,
+				section: federationGrantsConfigSchema.parse({
+					enabled: true,
+					connections: { calendar: CONNECTION },
+					...ACQUISITION_GRANT_SETTINGS,
+				}),
+			} as unknown as FederationGrantsModuleDeps;
+			const routes = federationGrantsModule.contributes?.routes ?? [];
+			expect(routes).toHaveLength(2);
+			for (const route of routes) {
+				expect(() => (route as (deps: FederationGrantsModuleDeps) => unknown)(deps)).not.toThrow();
+			}
+		} finally {
+			await handle.dispose();
+		}
+	});
+
 	it("holds every connection's callback to the origin of the oauthTokenSettings issuer, over the configuration's", async () => {
 		// The callbacks are written on the configuration's issuer; the slot names
 		// another origin, so they are no longer on the provider's own.
@@ -846,5 +921,119 @@ describe("what creating a grant needs", () => {
 			grants: { consent: {} },
 		});
 		await handle.dispose();
+	});
+});
+
+describe("the federationGrantPolicy a composition holds", () => {
+	/** A module that lists the slot as optional, and keeps what it was handed. */
+	const reader = (seen: { read: boolean; policy?: FederationGrantPolicy }) =>
+		defineModule({
+			name: "test:federation-grant-policy-reader",
+			optional: ["federationGrantPolicy"] as const,
+			contributes: {
+				routes: [
+					(deps) => {
+						seen.read = true;
+						seen.policy = deps.federationGrantPolicy;
+						return {
+							id: "test-federation-grant-policy-reader",
+							mountPath: "/__test_federation_grant_policy_reader__",
+							handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+						};
+					},
+				],
+			},
+		});
+
+	/** Boots `setup` beside a reader, and answers what the reader was handed. */
+	const readThroughBoot = async (setup: Setup) => {
+		const seen: { read: boolean; policy?: FederationGrantPolicy } = { read: false };
+		const handle = await boot({ ...setup, beside: [reader(seen)] });
+		try {
+			expect(seen.read).toBe(true);
+			return { policy: seen.policy, held: handle.components.federationGrantPolicy };
+		} finally {
+			await handle.dispose();
+		}
+	};
+
+	/** What a composition with the feature off holds: nothing the feature needs. */
+	const OFF: Setup = {
+		enabled: false,
+		withStore: false,
+		withLimiter: false,
+		withAudit: false,
+		provider: null,
+	};
+
+	it("is the module's while it is on: grants on, nothing kept, frozen, handed to a reader as held", async () => {
+		const { policy, held } = await readThroughBoot({});
+		expect(policy).toStrictEqual({ enabled: true, allowKeepOnSubjectRevocation: false });
+		expect(Object.isFrozen(policy)).toBe(true);
+		expect(held).toBe(policy);
+	});
+
+	it("is filled whenever the module is on, read or not", async () => {
+		const handle = await boot({});
+		try {
+			expect(handle.components.federationGrantPolicy).toStrictEqual({
+				enabled: true,
+				allowKeepOnSubjectRevocation: false,
+			});
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("allows keeping grants when federation-grants.allowKeepOnSubjectRevocation = true", async () => {
+		const { policy } = await readThroughBoot({ grants: { allowKeepOnSubjectRevocation: true } });
+		expect(policy).toStrictEqual({ enabled: true, allowKeepOnSubjectRevocation: true });
+	});
+
+	it("reads the keep policy in the spellings a variable arrives in", async () => {
+		for (const [written, kept] of [
+			["true", true],
+			["1", true],
+			[" TRUE ", true],
+			["false", false],
+			["0", false],
+			["", false],
+		] as const) {
+			const { policy } = await readThroughBoot({
+				grants: { allowKeepOnSubjectRevocation: written },
+			});
+			expect(policy?.allowKeepOnSubjectRevocation, JSON.stringify(written)).toBe(kept);
+		}
+	});
+
+	it("refuses a host's override while the module is on, as an authoritative slot's", async () => {
+		const caught = await boot({
+			overridePolicy: createTestFederationGrantPolicy({ enabled: true }),
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(thrown: unknown) => thrown,
+		);
+		expect(caught).toBeInstanceOf(BootError);
+		expect((caught as BootError).reason).toBe("authoritative-component-overridden");
+		expect((caught as BootError).details).toEqual({
+			reason: "authoritative-component-overridden",
+			module: "federation-grants",
+			componentKey: "federationGrantPolicy",
+		});
+	});
+
+	it("is absent while the module is off: its readers have grants off", async () => {
+		const { policy, held } = await readThroughBoot(OFF);
+		expect(policy).toBeUndefined();
+		expect(held).toBeUndefined();
+	});
+
+	it("is the host's to fill while the module is off: a switched-off module claims nothing", async () => {
+		const own = createTestFederationGrantPolicy();
+		const { policy } = await readThroughBoot({ ...OFF, overridePolicy: own });
+		expect(policy).toStrictEqual(own);
 	});
 });

@@ -56,7 +56,10 @@ import { exportPKCS8, exportSPKI, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
-import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import {
+	oauthAuthorizationConfigSchema,
+	oauthAuthorizationGrantsModule,
+} from "#/oauthAuthorization.mjs";
 import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
@@ -596,7 +599,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				oauthAuthorizationModule({ config }),
+				oauthAuthorizationGrantsModule,
 				memoryAccessTokenDenylistModule,
 				// The refresh_token grant, on here, refuses to boot without its families.
 				memoryRefreshTokenFamilyStoreModule,
@@ -1213,6 +1216,27 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 	});
 });
 
+describe("oauthModule — the session-close notifier", () => {
+	it("contributes one notifier, built over its client registry, key store and issuer", async () => {
+		const factories = oauthEndpointsModule.contributes?.sessionCloseNotifiers;
+		expect(Object.keys(factories ?? {})).toEqual(["oauth"]);
+		const notifier = await factories?.oauth?.({
+			keyStore: createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx"),
+			clientRepository: { findById: async () => null },
+			section: {
+				jwt: { issuer: "https://auth.test" },
+				accessToken: { defaultExpiresIn: 3600, maxExpiresIn: 3600 },
+				refreshToken: { expiresIn: 86_400 },
+			},
+		} as never);
+		expect(typeof notifier?.notify).toBe("function");
+		// An unregistered client is settled, nothing sent.
+		await expect(
+			notifier?.notify({ sid: "s", sub: "u", clientId: "gone", cause: "rp_logout" }),
+		).resolves.toBeUndefined();
+	});
+});
+
 describe("oauthModule — a consumer of session admission", () => {
 	it("requires sessionRequirementResolver, the synthetic key every consumer of admission takes", () => {
 		const module = oauthEndpointsModule;
@@ -1250,8 +1274,7 @@ describe("oauthModule — a consumer of session admission", () => {
 	};
 
 	it("registers each session-bound grant's action beside the grant, graded use", () => {
-		const config = grantsConfig({ authorization_code: true, refresh_token: true, session: true });
-		expect(oauthAuthorizationModule({ config }).contributes?.admissionActions).toEqual({
+		expect(oauthAuthorizationGrantsModule.contributes?.admissionActions).toEqual({
 			"oauth.code_exchange": { grade: "use" },
 			"oauth.refresh": { grade: "use" },
 		});
@@ -1260,13 +1283,19 @@ describe("oauthModule — a consumer of session admission", () => {
 		});
 	});
 
-	it("registers no grant's action while the grant is off: nothing admits it", () => {
-		const config = grantsConfig({ authorization_code: true, refresh_token: false, session: false });
-		expect(oauthAuthorizationModule({ config }).contributes?.admissionActions).toEqual({
-			"oauth.code_exchange": { grade: "use" },
-		});
+	it("registers no action while every grant of the module is off: the module is off", () => {
+		/** Whether the module is on for `config`'s section, read as boot reads it. */
+		const isEnabled = (config: ReturnType<typeof grantsConfig>) =>
+			oauthAuthorizationGrantsModule.section?.isEnabled?.(
+				oauthAuthorizationConfigSchema.parse(config["oauth-authorization"]),
+			);
+		expect(
+			isEnabled(grantsConfig({ authorization_code: true, refresh_token: false, session: false })),
+		).toBe(true);
+		const off = grantsConfig({ authorization_code: false, refresh_token: false, session: false });
+		expect(isEnabled(off)).toBe(false);
 		// The session grant's module registers nothing at all while its section is off.
-		expect(oauthSessionGrantModule.section?.isEnabled?.(config["oauth-session"])).toBe(false);
+		expect(oauthSessionGrantModule.section?.isEnabled?.(off["oauth-session"])).toBe(false);
 	});
 });
 
@@ -1291,7 +1320,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 		return createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				oauthAuthorizationModule({ config }),
+				oauthAuthorizationGrantsModule,
 				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
@@ -1344,7 +1373,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				oauthAuthorizationModule({ config }),
+				oauthAuthorizationGrantsModule,
 				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,

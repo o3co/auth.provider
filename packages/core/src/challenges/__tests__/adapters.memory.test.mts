@@ -42,6 +42,7 @@ const issueMany = async (
  * challenge only when its (scope, value) is looked up again would leave each
  * one resident for the life of the process, so the store also sweeps.
  */
+
 describe("createMemoryChallengeStore — bounded growth", () => {
 	it("drops challenges issued and abandoned, and still finds a live one", async () => {
 		// Pinned first so the fills below cannot be vacuous.

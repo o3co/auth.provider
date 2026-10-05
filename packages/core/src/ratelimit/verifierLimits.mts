@@ -34,17 +34,6 @@ import type {
 	VerifierLimitDeclaration,
 } from "../modules/manifest/contributes-map.mjs";
 
-/**
- * TRANSITIONAL: the prefixes core names itself until their owning modules
- * declare them (`verifierLimitClaim`). A declared setting wins. Removed once
- * the session and device-grant modules declare `login` and
- * `device_verification`.
- */
-const UNDECLARED_VERIFIER_LIMIT_SETTINGS: ReadonlyMap<string, string> = new Map([
-	["login", "session.rateLimit.login"],
-	["device_verification", "device-grant.rateLimit"],
-]);
-
 /** The declarations boot holds while it parses the module sections. */
 let declaredWhileParsing: ReadonlyMap<string, string> | undefined;
 
@@ -70,12 +59,13 @@ export function withVerifierLimitDeclarations<T>(
 /**
  * Where the limit under `prefix` is set when a verifier owns it — the
  * setting a refusal names: the one `declared` holds (by default, what boot
- * holds while parsing), else the transitional one, else `undefined`.
+ * holds while parsing), else `undefined`. Core names no prefix itself: only
+ * a declaration makes one a verifier's.
  */
 export const verifierLimitSetting = (
 	prefix: string,
 	declared: ReadonlyMap<string, string> | undefined = declaredWhileParsing,
-): string | undefined => declared?.get(prefix) ?? UNDECLARED_VERIFIER_LIMIT_SETTINGS.get(prefix);
+): string | undefined => declared?.get(prefix);
 
 /** Why a limiter's `limits` may not name `prefix`, or `undefined` when it may. */
 const verifierLimitProblem = (prefix: string): string | undefined => {

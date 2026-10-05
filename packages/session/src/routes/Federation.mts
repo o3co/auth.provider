@@ -24,20 +24,20 @@
  */
 
 import {
-	type AppConfig,
 	type AuditSink,
 	admitSession,
 	checkResolver,
 	consoleLogger,
 	establishWithoutAsking,
 	type FederationProvider,
+	type FederationSettings,
 	type FederationTokenStore,
-	federationTrustsUpstreamAmr,
 	type Logger,
 	loggableError,
 	readUserSnapshot,
 	type SessionClaim,
 	type SessionFederationIndex,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type SubjectSessionIndex,
@@ -53,7 +53,6 @@ import { consentedScope } from "../federations/consented-scope.mjs";
 import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
 import {
 	DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
-	deriveFederationTransactionCookieName,
 	type LinkIntent,
 } from "../federations/transaction.mjs";
 import { SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
@@ -64,7 +63,6 @@ import { readCallbackParams, resolveCallbackProvider } from "./FederationCallbac
 import { consumeCallbackState } from "./FederationCallbackState.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import { completeLink, recordedTokenType } from "./FederationLinkCallback.mjs";
-import { readCsrfTrustedOrigins } from "./FederationLinkStart.mjs";
 import {
 	type FederationStore,
 	type FederationStoreStep,
@@ -73,7 +71,7 @@ import {
 } from "./FederationLog.mjs";
 import { redirectAfterCallback } from "./FederationRedirectAnswer.mjs";
 import { createStartHandler } from "./FederationStart.mjs";
-import { createTransactionCookie, readSessionCookieName } from "./FederationTransactionCookie.mjs";
+import { createTransactionCookie } from "./FederationTransactionCookie.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -120,7 +118,8 @@ export const createRouter = (
 		urlencoded: (opts: { extended: boolean }) => RequestHandler;
 	},
 	{
-		config,
+		federationSettings,
+		linkTrustedOrigins = [],
 		federationProviders,
 		federationRedirectPolicyResolver,
 		providerCallbackUrls,
@@ -128,6 +127,7 @@ export const createRouter = (
 		userSessionStore,
 		subjectSessionIndex,
 		subjectRevocation,
+		sessionLifecycleStore,
 		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
@@ -137,7 +137,17 @@ export const createRouter = (
 		auditSink,
 		logger = consoleLogger,
 	}: {
-		config: AppConfig;
+		/**
+		 * Core's view of `core.federations` (the `federationSettings` slot):
+		 * whether each installed federation's upstream `amr` counts.
+		 */
+		federationSettings: FederationSettings;
+		/**
+		 * The origins other than this site's own an account-link start may be
+		 * navigated from: `session.csrf.trustedOrigins`. None when absent, so
+		 * only this site's own pages can start a link.
+		 */
+		linkTrustedOrigins?: readonly string[];
 		federationProviders: ReadonlyMap<string, FederationProvider>;
 		federationRedirectPolicyResolver: ReadonlyMap<string, FederationRedirectPolicy>;
 		providerCallbackUrls: ReadonlyMap<string, string>;
@@ -154,6 +164,8 @@ export const createRouter = (
 		 * sessions were revoked can link until it expires.
 		 */
 		subjectRevocation?: SubjectRevocation;
+		/** The session lifecycle port the link routes' admission reads after a live record, when wired. */
+		sessionLifecycleStore?: SessionLifecycleStore | undefined;
 		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
@@ -163,13 +175,12 @@ export const createRouter = (
 		 */
 		federationTransactionTtlMs?: number;
 		/**
-		 * Name of the `form_post` transaction cookie. Defaults to the
-		 * deployment's session cookie name run through
-		 * {@link deriveFederationTransactionCookieName}, so it inherits the
-		 * operator's naming without inheriting a `__Host-` prefix this
-		 * path-scoped cookie could not satisfy.
+		 * Name of the `form_post` transaction cookie: the deployment's session
+		 * cookie name run through `deriveFederationTransactionCookieName`,
+		 * so it inherits the operator's naming without inheriting a `__Host-`
+		 * prefix this path-scoped cookie could not satisfy.
 		 */
-		federationTransactionCookieName?: string;
+		federationTransactionCookieName: string;
 		/**
 		 * The registered session requirements the link routes admit through.
 		 * Required: a missing resolver, or one the boot planner did not build,
@@ -190,6 +201,10 @@ export const createRouter = (
 	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");
 	if (!userRepository) throw new Error("federation routes require userRepository");
 	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
+	if (!federationSettings) throw new Error("federation routes require federationSettings");
+	if (!federationTransactionCookieName) {
+		throw new Error("federation routes require federationTransactionCookieName");
+	}
 
 	const router = express.Router();
 
@@ -202,6 +217,7 @@ export const createRouter = (
 			{
 				userSessionStore,
 				subjectRevocation,
+				sessionLifecycleStore,
 				requirements,
 				acrTable: NO_ACR_TABLE,
 				logger: log,
@@ -211,20 +227,17 @@ export const createRouter = (
 		);
 
 	// Whether each installed federation's upstream `amr` counts, read once at
-	// composition (an unusable switch refuses to build the routes) by the same
-	// reading the `acr` table uses, so a session's record and `/authorize`'s
-	// advertisement agree. Keyed by the installed name the callback resolves by.
+	// composition from core's reading of `trustUpstreamAmr` — the one the
+	// `acr` table uses, so a session's record and `/authorize`'s advertisement
+	// agree. Keyed by the installed name the callback resolves by; a name the
+	// settings do not hold trusts nothing.
 	const trustsUpstreamAmr = new Map<string, boolean>(
 		[...federationProviders.keys()].map((name) => [
 			name,
-			federationTrustsUpstreamAmr(config, name),
+			Object.hasOwn(federationSettings, name) &&
+				federationSettings[name]?.trustsUpstreamAmr === true,
 		]),
 	);
-
-	const transactionCookieName =
-		federationTransactionCookieName ??
-		deriveFederationTransactionCookieName(readSessionCookieName(config));
-	const linkTrustedOrigins = readCsrfTrustedOrigins(config);
 
 	const ctx: FederationRouterContext = {
 		federationProviders,
@@ -238,7 +251,7 @@ export const createRouter = (
 		logger,
 		linkTrustedOrigins,
 		admitLink,
-		...createTransactionCookie(providerCallbackUrls, transactionCookieName),
+		...createTransactionCookie(providerCallbackUrls, federationTransactionCookieName),
 	};
 
 	/**

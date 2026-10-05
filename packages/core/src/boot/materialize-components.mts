@@ -26,6 +26,7 @@ import type { AppConfig } from "../config/application.schema.mjs";
 import { deploymentModeOf } from "../deployment/mode.mjs";
 import { resolveTokenBindingSettings } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
+import { outboundPolicyOf } from "../net/outbound-fetch.mjs";
 import { prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { auditSlotFor } from "./audit-fan-out.mjs";
 import { clientRecordSlotFor } from "./client-record-slot.mjs";
@@ -116,8 +117,8 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 /**
  * Whether `components` holds `key` as `undefined`. A slot so filled — a host
  * map entry given as `undefined`, or a provider resolving to it — is
- * unfilled. A provider no active module reads is not run, and its slot stays
- * unset rather than holding `undefined`.
+ * unfilled. A provider no active module reads is not run unless seeded, and
+ * its slot stays unset rather than holding `undefined`.
  * @internal
  */
 function holdsUndefined(components: Record<string, unknown>, key: ComponentKey): boolean {
@@ -175,7 +176,8 @@ function unfilledSlotRefusal(
  * Stage 3 of the boot planner. Seeds `bootstrapComponents`, applies
  * `overrideComponents`, fills `deploymentMode` from the configuration's
  * `core.deployment.mode`, `tokenBindingSettings` from its
- * `core.tokenBinding` and `federationSettings` from its `core.federations`,
+ * `core.tokenBinding`, `federationSettings` from its `core.federations` and
+ * `outboundPolicy` from its `core.outbound`,
  * injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
@@ -245,6 +247,10 @@ export async function materializeComponents(
 	// core's readings of `core.federations` — the map stage 1 dispatched by.
 	// Stage 1 refuses the key from every other source.
 	components.federationSettings = federationSettingsOf(bootstrapComponents.config);
+	// The outbound destination policy, frozen all the way down, from the same
+	// configuration with core's one reader of `core.outbound`. Stage 1 refuses
+	// the key from every other source.
+	components.outboundPolicy = outboundPolicyOf(bootstrapComponents.config);
 
 	// Synthetic projections are stable read-through views of the collectors
 	// stage 4 fills, so a provider that requires one gets the object the world

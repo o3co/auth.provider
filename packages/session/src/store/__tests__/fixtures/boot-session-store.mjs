@@ -8,7 +8,7 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
-// Boots `sessionStoreModuleFor(config)` through core's `createApp`, the way a
+// Boots `sessionStoreModule` through core's `createApp`, the way a
 // composition root does, with `session-store.storage.type` set from
 // SESSION_STORE_STORAGE_TYPE, and prints the outcome as the last line of stdout:
 // `RESULT {"booted":true}` or `RESULT {"booted":false,"message":"…"}`.
@@ -18,7 +18,7 @@
 // what Node's resolver does with them: run it after `pnpm run build`.
 import { createApp } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
-import { sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionStoreModule } from "@o3co/auth-provider-session";
 
 const type = process.env.SESSION_STORE_STORAGE_TYPE ?? "memory";
 const base = makeValidAppConfig();
@@ -28,7 +28,7 @@ const store = {
 	// connecting when a package it loads is missing.
 	storage: { type, redis: { url: "redis://127.0.0.1:1" } },
 };
-const module = sessionStoreModuleFor({ "session-store": store });
+const module = sessionStoreModule;
 // What a resolution of the package's reference captures of the names the
 // module declares renamed, under an environment that sets none of them.
 const config = {

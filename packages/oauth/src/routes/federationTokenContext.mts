@@ -31,6 +31,7 @@ import {
 	loggableError,
 	type RefreshTokenFamilyRevocation,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SubjectRevocation,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -40,6 +41,12 @@ export interface FederationTokenRouterOptions {
 	keyStore: KeyStore;
 	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	userSessionStore: UserSessionStore;
+	/**
+	 * Core's session lifecycle. Where installed, it answers whether the
+	 * caller's session is live in place of `userSessionStore`: a session whose
+	 * close has committed is not live.
+	 */
+	sessionLifecycle?: SessionLifecycle;
 	sessionFederationIndex: SessionFederationIndex;
 	federationTokenStore: FederationTokenStore;
 	clientRepository: ClientRepository;

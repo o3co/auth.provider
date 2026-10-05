@@ -166,6 +166,22 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   non-discoverable (non-resident) keys can no longer sign in through the
   passkey grant: re-enroll them with discoverable credentials.
   `POST /oauth/webauthn/authentication/options` no longer reads `userId`.
+- `webauthn.rateLimit.authenticationOptions`, and its variables
+  `WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT`,
+  `WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS` and their older
+  names `WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT` and
+  `WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS`, at any value, refuse
+  the boot wherever `webauthnModule` is installed. The authentication options
+  route is guarded by the deployment's `rateLimiter` alone, with no
+  per-process fallback: wire a limiter and set the route's limit as
+  `limits.webauthn-authentication-options` in its section
+  (`core-rate-limiter-memory` or `redis-rate-limiter`), else its
+  `defaultLimit` applies. Without a limiter the route is not throttled. The
+  effective limit changes: a deployment that never set the key moves from 30
+  per 60 s to the limiter's `defaultLimit`, 60 per 60 s in both bundled
+  `reference.conf` files. To keep the old bound, set
+  `limits.webauthn-authentication-options { limit = 30, windowSeconds = 60 }`
+  in the limiter's section.
 - `oauth.grants.authorization_code.pkce.*` and
   `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` refuse the boot; S256
   is mandatory regardless (#827).
@@ -214,6 +230,30 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   slashless `iss`, which is what discovery already advertised.
 - **Unknown keys.** A key under `oauth.clientIdMetadataDocuments` that the
   oauth package's `reference.conf` does not list refuses the boot (#1151).
+- **BREAKING: an `oauth.authorize.acrValues` key is one value an
+  `acr_values` request can name (#728).** `/authorize` reads `acr_values` as
+  space-delimited RFC 6749 §3.3 scope-tokens, so a key is one or more
+  printable ASCII characters other than the space, `"` and `\`. A key with
+  any other character — whitespace, a quote, a backslash, a non-ASCII
+  letter — was advertised in `acr_values_supported` and could never be
+  requested; it now refuses the boot (`config-validation-failed` at
+  `oauth.authorize.acrValues.<key>`), naming the key, every such key in one
+  boot. Rename the entry to a value a client can send, such as a URN
+  (`urn:example:acr:mfa`), and tell the relying parties that asked for it.
+  Core's schema and the oauth module's (`oauthSectionSchema`) refuse the
+  same keys with the same message, so a section parsed with either alone —
+  a composition root's own check, a test — is refused as boot refuses it.
+- **BREAKING: an empty `oauth.consentPage.url` refuses the boot (#728).** An
+  `ENDPOINTS_CONSENT_URL` (now `OAUTH_CONSENT_PAGE_URL`) exported empty
+  (`ENDPOINTS_CONSENT_URL=` in a `.env`, a compose file or a ConfigMap) used
+  to boot, and every client that
+  is not first-party was then redirected to `?challenge=<id>` relative to
+  `/oauth/authorize` — a page that is not there. The old name is first
+  refused as renamed (`environment-variable-renamed`); renamed to
+  `OAUTH_CONSENT_PAGE_URL` and still exported empty or blank, it now refuses
+  the boot (`config-validation-failed` at `oauth.consentPage.url`), as an
+  empty `session.loginPage.url` already did. Unset the variable to keep the
+  default, `/consent`, or set it to your consent page.
 - **BREAKING: `oauth {}` refuses a key it does not declare, at every level
   (#728).** Wherever the oauth module is installed (the standalone template
   installs it), a key under `oauth` that its schema does not declare — a
@@ -241,7 +281,13 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   delete it (#1339). `mfa`, at every level, and `mfa-totp-factor` refuse one
   too (#1329): an empty `mfa.factors` block an older configuration leaves
   behind (the TOTP factor's old path, its variables unset) is such a key —
-  delete it. So does `webauthn`, at every level (#1336). The keys under `audit-sink` are the
+  delete it. So do `webauthn`, at every level (#1336), `session`, at every
+  level (#728), and `federation-grants`, at every level: the keys under
+  `federation-grants.connections` are the connections you name, and a
+  connection's `authorizationParams` the upstream's parameters, so those stay
+  open. So do `oauth-session` and `oauth-authorization`, the latter at every
+  level: `grants` holds the four grants' blocks alone, and each block
+  `enabled` alone (#728). The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -284,9 +330,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   refused (`component-absence-undeclared`, naming `rateLimiter`) unless
   `core.declaredAbsent` lists it: `core.declaredAbsent = ["rateLimiter"]`,
   beside `"auditSink"` if you list that. Declared absent, a route that keys
-  the limiter lets every request through unless its module falls back to a
-  per-process limiter (WebAuthn authentication options does), so request-volume limits on the others are then for what
-  sits in front of the provider. The template wires a limiter
+  the limiter lets every request through — no module falls back to a
+  per-process limiter — so request-volume limits are then for what sits in
+  front of the provider. The template wires a limiter
   (`adapters.rateLimiter`), so a scaffold needs nothing.
 - **Federation grants no longer require a rate limiter (#807).** With
   `federation-grants.enabled = true` and no `rateLimiter` wired, the module
@@ -294,10 +340,20 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   every request through, and core's policy for the slot applies instead: list
   `"rateLimiter"` in `core.declaredAbsent`. With a limiter wired, both are
   throttled as before.
+- **BREAKING: a first-time federation-grant lodging is also limited per client
+  (#628).** After client authentication, `POST /oauth/federation-grants` asks
+  the limiter again under `federation_grants:client:<client_id>`. One client
+  lodging for many subjects, behind several egress IPs for example, is now
+  capped at `limits.federation_grants` (else `defaultLimit`) across all of its
+  addresses, and refused `429 rate_limited` / `provider` beyond it. The
+  bundled limiters apply that one `limits.federation_grants` to the IP keys
+  and the client keys alike; raise it if such a client lodges faster.
 - **BREAKING: a limiter's `limits.login` and `limits.device_verification` are
   refused (#807).** `core-rate-limiter-memory.limits` and
-  `redis-rate-limiter.limits` may not name either prefix: each is a verifier's
-  own attempt limit, which no limiter module's configuration may loosen. A limiter built with
+  `redis-rate-limiter.limits` may not name either prefix while its owner, the
+  session or the device-grant module, is loaded: each declares its prefix a
+  verifier's own attempt limit, which no limiter module's configuration may
+  loosen. Core names neither prefix itself. A limiter built with
   `registerBuiltinRateLimiters` or `redisRateLimiterBuilder` reads no
   contributed budget and keeps the `limits` it is given.
   The boot is refused (`config-validation-failed`, naming the key and the
@@ -565,6 +621,15 @@ modules fills them.
   (`DEVICE_GRANT_ADMISSION_ACTIONS`, `OAUTH_ROUTER_ADMISSION_ACTIONS`) (#793).
   A hand-written requirement that reaches or adds a second factor declares
   `secondFactorAuthority: true` (#781).
+  `admitSession` refuses, with a `RangeError` before anything is read, a
+  `remediation` action issued to a requirement its resolver does not hold
+  (another composition's, or another boot's), as it refuses a literal or a
+  copy; it no longer asks the requirements about it as `credential_change`,
+  and `session_admission_remediation_undeclared` is no longer logged. Pass a
+  route's own issued action to the resolver its requirement is registered
+  in, read in the boot that registered it: a requirement object registered
+  again (a second `createApp` with the same module instance) is issued new
+  actions, which the earlier boot's resolver refuses (#798).
 - **Slots one module owns.** An enabled device grant requires the
   `csrfGuard` slot, and enabled federation grants `csrfGuard` and
   `loginEntry` (#746, #784); `sessionModule` requires `csrfTokenSigner`, and
@@ -573,6 +638,32 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **BREAKING: `sessionModule` reads the federations from the
+  `federationSettings` slot, not `config` (#728).** It requires core's
+  `federationSettings`, which core fills from `core.federations` in every
+  composition, and no longer requires `config` or declares a `configSchema`:
+  a composition booted with `createApp` sees no change. The federation routes
+  take each enabled federation's callback URL, and whether an installed one's
+  upstream `amr` counts, from the slot, and the origins an account link may
+  be started from out of the module's own section
+  (`session.csrf.trustedOrigins`). A deps object handed to the module's
+  factories by hand carries `federationSettings` (in a test,
+  `createTestFederationSettings()`) instead of `config`.
+- **BREAKING: the oauth module reads the federations from the
+  `federationSettings` slot, not `config`, and `createOAuthRouter` requires
+  `section` and `federationSettings` (#728).** `oauthEndpointsModule`
+  requires core's `federationSettings` in place of `config`: the `acr` table
+  `/authorize` answers from and discovery advertises reads which installed
+  federation trusts its upstream IdP's `amr` from the slot, which core fills
+  from `core.federations` in every composition, so a composition booted with
+  `createApp` sees no change. A router built by hand with `createOAuthRouter`
+  no longer takes `config`: pass the module's parsed section as `section`
+  (where you passed `config`, `section: config.oauth` as the oauth schema
+  parses it) and core's view of the federations as `federationSettings` (in
+  a test, `createTestFederationSettings()`). Without either the router
+  refuses to build, naming the option; it no longer falls back to the
+  `oauth {}` a `config` carries. A deps object handed to the module's
+  factories by hand carries `federationSettings` instead of `config`.
 - **BREAKING: an enabled TOTP factor requires the `oauthTokenSettings`
   slot (#1329).** `mfaTotpFactorModule` takes the deployment's issuer, which
   an unset `mfa-totp-factor.issuer` defaults to the host of, from the slot
@@ -581,6 +672,12 @@ modules fills them.
   is on provides the slot itself, or the boot is refused
   (`missing-required-component`, naming `oauthTokenSettings`). A factor
   switched off by `mfa-totp-factor.enabled = false` requires nothing.
+- **BREAKING: an enabled `authorization_code` grant with `subjectRevocation`
+  wired requires `userSessionStore`.** Without one the boot is refused
+  (`contribute-factory-failed`, naming both slots): wire a
+  `userSessionStore` (core's `memorySessionStoresModule` or
+  `redisSessionStoresModule`, which fill both), or remove
+  `subjectRevocation`. The standalone template wires both.
 - **The federation projections.** A name-keyed contribution factory (a
   `grants` or `mfaFactors` entry, say) that reads `federationProviders` or
   `federationRedirectPolicyResolver` while it runs refuses the boot
@@ -612,6 +709,29 @@ modules fills them.
   federation's redirect policy through `federationRedirectPolicies` overrides
   the type instead (`overrides.federationTypes.<type>`, with its own
   `redirectPolicy`).
+- **BREAKING: a contribution kind's container is its kind's shape (#911).**
+  In `contributes` and in `overrides`, a name-keyed kind (`grants`,
+  `tokenExchangeValidators`, `mfaFactors`, `sessionRequirements`,
+  `rateLimitBudgets`, `federationTypes`, `admissionActions`,
+  `sessionCloseNotifiers`, and a kind of your own whose collector is
+  name-keyed) takes a record, and a list-shaped kind (`routes`,
+  `auditHooks`, `grantPolicyHooks`, `grantMiddleware`,
+  `tokenBindingMechanisms`, `discoveryMetadata`, and a list-shaped kind of
+  your own) takes an array. A manifest that bypasses `ContributesMap`'s
+  types — written in JavaScript, or cast — with an array under a name-keyed
+  kind used to boot with those contributions dropped, filed under keys no
+  reader reaches, or to fail with a plain `TypeError` when they were
+  overrides or a factory failed; a record under a list-shaped kind failed
+  with a `TypeError`, and `null` or a function was ignored for most kinds.
+  Each is now refused before any factory runs (`contribution-malformed`,
+  naming the module, the kind, the channel and what the container was).
+  A record is a plain object — a literal, or `Object.create(null)`; a class
+  instance, a `Map` or an object with another prototype is refused too,
+  though `ContributesMap`'s types accept it. Write the kind's shape as a
+  literal record or array. An array under `overrides.sessionCloseNotifiers`
+  is now refused for its container (`contribution-malformed`) before the
+  override guard (`contribution-kind-guarded`) that a record there still
+  meets.
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). No module
   overrides a prefix: an `overrides.rateLimitBudgets` entry refuses the boot
@@ -624,6 +744,17 @@ modules fills them.
   deps object for their factories carries. `createDeviceVerificationHandler`'s
   `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
   `revokedBefore` (#717).
+- **A switched-off grant or second factor is no override target (#728).** A
+  `grants` or `mfaFactors` factory may answer `null` — switched off by its
+  module's settings while the module is on; the entry stays claimed, and an
+  `overrides.grants` or `overrides.mfaFactors` entry for it refuses the boot
+  before the overriding module's factories run (`override-target-missing`, naming the kind, the
+  name and the overriding module; the message says the entry is switched
+  off), so an override never switches on what its owner switched off. Switch
+  the entry on at its owner's setting and keep the override, or drop the
+  override. A module that is itself off contributes nothing, so an override
+  of its entries is refused as a missing target. An override may still
+  answer `null`, switching off the entry it replaces.
 - **BREAKING: an enabled `dpopModule` requires `oauthTokenSettings`, and
   no longer reads the configuration (#728).** It takes the issuer every
   proof's `htu` is checked against from the slot alone, and no longer falls
@@ -734,12 +865,102 @@ modules fills them.
   throws a `RangeError` naming it when it is missing or breaks the slot's
   contract; `SessionGrantDeps` no longer has `config` (in a test,
   `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
+- **BREAKING: `subjectRevocationServiceModule` requires `oauthTokenSettings`,
+  reads `federationGrantPolicy`, and no longer reads the configuration
+  (#728).** It sizes the subject's revocation boundary from the token
+  lifetimes in `oauthTokenSettings` and no longer falls back to
+  `oauth.accessToken` and `oauth.refreshToken.expiresIn`; it reads whether
+  federation grants are on, and whether a revocation may keep them, from the
+  `federationGrantPolicy` slot the federation-grants module provides, not
+  from `federation-grants {}`. With `oauthModule` and the federation-grants
+  module installed nothing changes. A composition without `oauthModule` puts
+  an `oauthTokenSettings` value in `bootstrapComponents`, or the boot is
+  refused for the missing component. A composition that wires a
+  `federationGrantStore` and holds no `federationGrantPolicy` — grants on
+  without the federation-grants module, or the module installed but switched
+  off (`federation-grants.enabled = false`) with a grant store still wired —
+  is refused at boot (`provides-factory-failed`, naming both), where grants
+  used to be read from `federation-grants.enabled`: install the
+  federation-grants module and switch it on, or, to keep grants off with the
+  store wired, put `federationGrantPolicy` `{ enabled: false,
+  allowKeepOnSubjectRevocation: false }` in `bootstrapComponents`. A deps
+  object handed to the module's provider carries `oauthTokenSettings` and,
+  for grants, `federationGrantPolicy` (in a test,
+  `createTestOAuthTokenSettings()` and `createTestFederationGrantPolicy()`);
+  `SubjectRevocationServiceModuleDeps` no longer has `config`.
+- **BREAKING: the authorization_code, refresh_token, client_credentials and
+  jwt-bearer grants are one module, `oauthAuthorizationGrantsModule`,
+  switched by its own section (#728).** List it as it is: it reads each
+  `oauth-authorization.grants.<grant>.enabled` from the configuration boot
+  parses, and an absent section or key is off. `oauthAuthorizationModule({
+  config })` is removed: list `oauthAuthorizationGrantsModule` in its place.
+  The refusal of a module built from a configuration that disagrees with the
+  booted one about a grant's switch is gone, and the standalone template no longer reads
+  `oauth-authorization.grants` before boot (its `SWITCHES` no longer lists
+  it). A grant switched off registers nothing, but while the module is on it
+  still claims its grant type: a composition that pairs the module with its
+  own `client_credentials`, `refresh_token` or jwt-bearer grant, this
+  module's switch for it off, is refused (`duplicate-contribute`) where it
+  used to boot — and an override of a switched-off grant is refused
+  (`override-target-missing`). Drop your grant, or switch every grant of
+  this module off; with every grant off the
+  module registers and requires nothing — no slot, and no `subjectRevocation`
+  or `auditSink` absence policy. While any grant is on, the module declares
+  both session-bound grants' actions (`oauth.code_exchange`,
+  `oauth.refresh`), whichever is on. Its schema,
+  `oauthAuthorizationConfigSchema`, fills no default: the package's
+  `config/reference.conf` ships every switch off.
+- **BREAKING: an enabled oauth-authorization grant requires
+  `oauthTokenSettings` and `tokenBindingSettings`, and reads its settings
+  from them, not from the configuration (#728).** The grants take the
+  issuer, the lifetimes they mint, `legacyTypAccept`, whether resource
+  indicators are enforced and `requireEmailVerified` from
+  `oauthTokenSettings`, and the refresh-token binding rule
+  (`bindConfidentialClientRefreshTokens`) from core's `tokenBindingSettings`,
+  which boot always fills. With `oauthModule` installed nothing changes. A
+  composition with a grant on and without `oauthModule` puts an
+  `oauthTokenSettings` value in `bootstrapComponents`, or the boot is refused
+  for the missing component. The id_token's `iss` is the slot's issuer, so
+  an id_token is issued whenever `openid` is granted and a session is read;
+  before, a configuration built by hand without `oauth.jwt.issuer` got none.
+  The refresh grant still reads `oauth.refreshToken.unknownFamilyPolicy` from
+  `config`, so the module still requires `config`. A deps object handed to
+  the module's grant factories carries `section`, `oauthTokenSettings` and
+  `tokenBindingSettings`; a factory refuses a missing or broken
+  `oauthTokenSettings` with a `RangeError` naming it, and a
+  `tokenBindingSettings` whose rule is not a boolean with a `TypeError`.
+- **BREAKING: enabled federation grants require `oauthTokenSettings`, and
+  `federationGrantsModule` no longer reads the configuration (#728).** It
+  takes the issuer every route, `connect_uri` and callback check is built on
+  from the slot alone, and no longer falls back to `oauth.jwt.issuer` when no
+  module provides it. With `oauthModule` installed nothing changes. A
+  composition with `federation-grants.enabled = true` and without
+  `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`,
+  or the boot is refused for the missing component. The federations a
+  connection names — whether each is configured and on, its `issuer` and
+  `clientId` — come from core's `federationSettings` slot, which core fills
+  from `core.federations` in every composition: nothing to do under
+  `createApp`, and the refusals are unchanged. A deps object handed to the
+  module's route factories carries `oauthTokenSettings`,
+  `federationSettings` and `section`; `config` is no longer read. The audit
+  sink's declared absence is now core's guard: enabled with no `auditSink`
+  and no `core.declaredAbsent = ["auditSink"]`, the boot is refused at
+  manifest validation with core's `component-absence-undeclared`
+  (`consumedBy` naming `federation-grants`), ahead of the module's other
+  refusals, and no longer with the module's own
+  `federationGrantsModule: … with no auditSink component` error; match on
+  the reason. Disabled, the module requires nothing.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
   `@o3co/auth-provider-core/testing` (#786, #796).
 - **Shutdown.** A cleanup registers the allowance it needs; the template's
   `installGracefulShutdown` takes `cleanupAllowanceMs` (#797).
+- **The session lifecycle sweeps unless told not to.** Installing
+  `sessionLifecycleModule` starts a sweep that resumes the closes left
+  pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
+  sets another interval, and `0` turns it off. It is stopped on dispose,
+  and its timer never keeps the process alive.
 
 ### Exports removed, and signatures changed
 
@@ -753,6 +974,29 @@ modules fills them.
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
+- **A manifest's `replicaSafety` may be a function of the module's section**
+  (#1371, #728). A declaration written as `{ unsafe: true, reason }` is read
+  as before. Code that reads the field off a `Module` (`module.replicaSafety.reason`)
+  no longer compiles, since the field may now be a function, and the exported
+  `ReplicaSafetyModuleRef.replicaSafety` widened the same way: ask
+  `replicaUnsafeReason(module, section)` instead, which answers both forms
+  and throws for a declaration made from the section when no section is
+  given. A composition root that runs `checkReplicaSafety` itself hands it
+  the parsed sections (`sections`) once any module declares from its section.
+- **The session package's `sessionStoreModule` declares its replica safety
+  from its own section** (#1381, #728): replica-unsafe when
+  `session-store.storage.type = "memory"`, nothing for any other type. So the
+  replica-safety guard refuses it by name under `core.deployment.mode = "multi"`,
+  warns when the mode is unset, and says nothing under `"single"` — what
+  `sessionStoreModuleFor(config)` declared from `config`. List
+  `sessionStoreModule` in place of `sessionStoreModuleFor(config)`; boot
+  answers it for the section it parses. `replicaUnsafeReason(sessionStoreModule)`
+  with no section, and `checkReplicaSafety` without its `sections`, now throw
+  a `TypeError` naming `session-store`: pass the parsed section. A
+  composition that already listed `sessionStoreModule` (which declared
+  nothing) now sees memory storage under `multi` refused while manifests are
+  validated, as `replica-unsafe-adapter`, where the route factory used to
+  refuse it (`contribute-factory-failed`); and an unset mode now warns.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name
@@ -826,13 +1070,22 @@ modules fills them.
   configuration (#728).** A composition that provides the `oauthTokenSettings`
   slot itself calls `oauthTokenSettingsFrom(config.oauth)` where it called
   `oauthTokenSettingsFrom(config)`.
+- **`oauth.refreshToken.unknownFamilyPolicy` and `legacyRtPolicy` are
+  optional in `AppConfig` and `CoreConfig` (#728).** Core's schema holds
+  their shape, the same enums, and no default; core's `reference.conf` no
+  longer sets them or binds `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`. The
+  oauth package's reference sets both to `"reject"` and binds the variable,
+  and the oauth module's section still requires both, so a composition with
+  the oauth module behaves as before. Code that reads either key off
+  `AppConfig` or `CoreConfig` handles `undefined`; a configuration built by
+  hand for core's schema alone may leave both out.
 - **The oauth module is one value, `oauthEndpointsModule` (#728).** Compose it
   where you composed `oauthModule({ config })`. `oauthModule` is deprecated:
   it answers `oauthEndpointsModule` whatever it is handed, and never read its
   parameter. The module reads every `oauth.*` setting from its own parsed
   section; `createOAuthRouter` takes that section as `section` (typed
-  `OAuthSection`) and, without one, reads the `oauth {}` its `config`
-  carries, as before.
+  `OAuthSection`), which it requires (under "Slots, admission and wiring",
+  above).
 - **Signatures.** `renderFrontchannelLogoutHtml` takes
   `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
   requires a `grantPolicy` key, `undefined` for none (#1169); the federation
@@ -929,6 +1182,11 @@ with what a store of yours records and refuses. Per port:
 - **`RateLimiter`.** One that declares no `failMode` fails closed, whatever
   `redis-rate-limiter.failMode` says (formerly `rateLimit.failMode`, now a
   retired path that refuses the boot); a wrapper forwards `failMode` (#782).
+  It also meets a second key shape (#628): `federation_grants:client:<client_id>`,
+  with `ctx.clientId` set, on a first-time federation-grant lodging, beside
+  `federation_grants:ip:<ip>`. Its prefix is the same, so a limiter that
+  budgets by prefix applies one budget to both; one that wants a separate
+  per-client budget tells the `:client:` keys apart.
 - **Redis clients of your own.** `SubjectRevocationClient` implements
   `advanceRevocationBoundaries`, and `setRevocationBoundaries` is gone (#993):
   add the method on the current release first.
@@ -945,6 +1203,13 @@ with what a store of yours records and refuses. Per port:
   `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
   and the [test kit](../packages/test-kit/README.md).
+- **A second factor of your own (`MfaFactor`)** answers each challenge's and
+  enrollment start's `response` as a plain JSON-shaped object — no class
+  instance, list or `-0`, every own key an enumerable string, at any depth —
+  an `ok` that is the literal `true` or `false`, and a refusal `reason` its
+  type names (#1406). Any other answer is the factor's failure: a `503`.
+  `mfaFactorContract` in the test kit holds a factor to the same, and now
+  fails one that answers otherwise (#1442).
 
 ## Store implementer checklist (before switching to `required`)
 

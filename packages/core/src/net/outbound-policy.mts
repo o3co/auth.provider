@@ -270,7 +270,11 @@ export const OutboundSectionSchema = z
 	})
 	.strict();
 
-/** The policy `core.outbound` states, its lists read into patterns. */
+/**
+ * The policy `core.outbound` states, its lists read into patterns: what
+ * `outboundPolicyOf` (`outbound-fetch.mts`) answers, frozen all the way
+ * down, and what the `outboundPolicy` slot holds.
+ */
 export interface OutboundPolicy {
 	readonly allowedHosts: readonly HostPattern[];
 	readonly deniedHosts: readonly HostPattern[];
@@ -443,5 +447,20 @@ export function admitAddresses(
 	}
 	if (destination.plaintext && !addresses.every(isLoopbackHostname)) {
 		throw new OutboundFetchError("scheme_not_allowed", destination.host);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		/**
+		 * The outbound destination policy: filled by boot with
+		 * `outboundPolicyOf` over the configuration's `core.outbound` for every
+		 * composition, before any provider runs. A synthetic key: no module
+		 * provides it and no host map sets it (`synthetic-key-collision`).
+		 */
+		readonly outboundPolicy?: OutboundPolicy;
 	}
 }

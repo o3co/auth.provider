@@ -370,11 +370,12 @@ describe("createWebAuthnGrant — refresh_token allowlist gate", () => {
 
 describe("createWebAuthnGrant — the auth_time it stamps", () => {
 	// A signed assertion can be held until its challenge expires, so the time it
-	// reaches the grant says nothing about when the user made the gesture. The
-	// challenge was issued before the gesture, and no assertion arrives more than
-	// one challenge lifetime after it was issued. Whatever the grant spends after
-	// the challenge is consumed (the ceremony's seen-set write, the verification)
-	// must not move `auth_time` later.
+	// reaches the grant says nothing about when the user made the gesture. These
+	// challenges are stored without their issuance, so `auth_time` falls back to
+	// the earliest a live challenge could have been issued: one challenge lifetime
+	// before the redemption. Whatever the grant spends after the challenge is
+	// consumed (the ceremony's seen-set write, the verification) must not move it
+	// later.
 	const TTL_MS = 120_000;
 	const ISSUED_AT_MS = Date.UTC(2026, 8, 30, 12, 0, 0);
 
@@ -788,7 +789,6 @@ describe("webauthnModule — refresh-token family wiring", () => {
 				challengeTtlMs: 120_000,
 				attestationPreference: "none",
 				userVerification: "preferred",
-				rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 			},
 			grantPolicy: { kind: "test-noop", evaluate: async () => ({ outcome: "allow" }) as const },
 			refreshTokenFamilyRotation: {

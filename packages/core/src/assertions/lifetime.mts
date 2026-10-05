@@ -35,6 +35,48 @@
 export const MAX_ASSERTION_LIFETIME_SECONDS = 3600;
 
 /**
+ * How long an issuer's assertion may live, `exp − iat`, when its entry names
+ * no `maxLifetimeSeconds`: an hour, as single-use assertions are held to
+ * ({@link MAX_ASSERTION_LIFETIME_SECONDS}). RFC 7523 §3 lets an authorization
+ * server refuse an `exp` unreasonably far ahead; a device or agent mints an
+ * assertion per exchange, so an hour is ample.
+ */
+export const DEFAULT_ASSERTION_MAX_LIFETIME_SECONDS = 3600;
+
+/**
+ * The most an entry's `maxLifetimeSeconds` may be: a day. A subject's
+ * sessions boundary is kept at least this long plus the largest clock
+ * tolerance (`resolveSubjectRevocationHorizonMs`), so it outlives every
+ * assertion issued before it that an entry could accept. A day is already
+ * the default refresh-token lifetime, which that boundary is kept for.
+ */
+export const ASSERTION_MAX_LIFETIME_LIMIT_SECONDS = 86_400;
+
+/**
+ * Whether `value` is a usable `maxLifetimeSeconds`: a whole number of seconds
+ * from 1 to {@link ASSERTION_MAX_LIFETIME_LIMIT_SECONDS}. Anything else would
+ * outlive the boundary that revokes it, or switch the ceiling off.
+ */
+export function isValidAssertionMaxLifetime(value: unknown): value is number {
+	return (
+		typeof value === "number" &&
+		Number.isInteger(value) &&
+		value >= 1 &&
+		value <= ASSERTION_MAX_LIFETIME_LIMIT_SECONDS
+	);
+}
+
+/** The refusal {@link isValidAssertionMaxLifetime} is reported with. */
+export function describeInvalidAssertionMaxLifetime(value: unknown): string {
+	const got = typeof value === "number" ? String(value) : `a ${typeof value}`;
+	return (
+		`maxLifetimeSeconds must be a whole number of seconds from 1 to ` +
+		`${ASSERTION_MAX_LIFETIME_LIMIT_SECONDS} (got ${got}): a subject's revocation boundary ` +
+		"is kept no longer than the limit, and a value outside it switches the ceiling off"
+	);
+}
+
+/**
  * The largest clock tolerance an assertion verifier may be given, in seconds:
  * an issuer entry's `clockToleranceSeconds`, `private_key_jwt`'s
  * `clockToleranceSeconds`. Five minutes — the tolerance `verifyJwt` gives this

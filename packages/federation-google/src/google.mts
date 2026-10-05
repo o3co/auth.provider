@@ -24,6 +24,7 @@ import {
 	federationTokenSnapshot,
 	type MappedClaims,
 	type RefreshedTokens,
+	readUpstreamAuthTime,
 	type SupportsClaimMapping,
 	type SupportsLogout,
 	type SupportsRefresh,
@@ -179,6 +180,8 @@ export function createNamedGoogleProvider(
 		name,
 		scope: SCOPES,
 
+		// A freshness ask (`params.ask`) is not forwarded: Google documents
+		// `prompt` as `none`, `consent` or `select_account` only, and no `max_age`.
 		buildAuthorizationUrl(params: {
 			readonly redirectUri: string;
 			readonly state: string;
@@ -245,11 +248,17 @@ export function createNamedGoogleProvider(
 			// Google id_tokens always carry a non-empty string sub. If the claim is absent,
 			// non-string, or empty we MUST fail closed — falling back to `skipSubjectCheck`
 			// would silently downgrade the binding contract for a token we cannot identify.
-			const idTokenSub = tokens.claims()?.sub;
+			const idTokenClaims = tokens.claims();
+			const idTokenSub = idTokenClaims?.sub;
 			if (typeof idTokenSub !== "string" || idTokenSub.length === 0) {
 				throw new Error(
 					`${subject} id_token is missing the sub claim required for UserInfo binding (OIDC §5.3.2).`,
 				);
+			}
+			// From the verified id_token alone, never UserInfo.
+			const authTime = readUpstreamAuthTime(idTokenClaims?.auth_time);
+			if (authTime === "invalid") {
+				throw new Error(`${subject} id_token auth_time is not a usable instant (OIDC Core §2).`);
 			}
 			const userInfo = await oidc.fetchUserInfo(oidcConfig, tokens.access_token, idTokenSub);
 
@@ -267,6 +276,7 @@ export function createNamedGoogleProvider(
 				// the scope as sent (what it granted, RFC 6749 §5.1), and the
 				// token type — core's one reading for every adapter.
 				...federationTokenSnapshot(tokens, obtainedAt),
+				...(authTime === undefined ? {} : { authTime }),
 			};
 
 			// Carry through known extension claims (e.g. Google hd).
