@@ -22,12 +22,16 @@ import {
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type ClientCredentialsGrantDeps,
 	createClientCredentialsGrant,
 } from "#/grants/clientCredentials.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -152,6 +156,8 @@ describe("createClientCredentialsGrant — token issuance", () => {
 	});
 
 	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const handler = createClientCredentialsGrant({
 			...baseDeps,
 			...grantSettingsFrom({

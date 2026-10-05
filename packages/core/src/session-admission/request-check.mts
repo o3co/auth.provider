@@ -37,6 +37,7 @@ import {
 	type AdmissionDeps,
 	type AdmissionRequest,
 	isIssuedAction,
+	issuedActionsOf,
 	type SessionClaim,
 	type SessionRequirementResolver,
 } from "./requirement.mjs";
@@ -102,8 +103,10 @@ function readOnce<T>(read: () => T): () => T {
 /**
  * The action a request names: a registered action by its name — the object
  * registration made, so the grade is never the caller's to restate — or a
- * remediation core issued to a requirement, by its identity. Both are core's
- * vocabulary, so a log line names either.
+ * remediation core issued to one of these requirements, by its identity. Both
+ * are core's vocabulary, so a log line names either. A remediation issued to
+ * a requirement this resolver does not hold (another composition's, another
+ * boot's) is refused as a literal or a copy is.
  */
 function checkedAction(asked: unknown, requirements: SessionRequirementResolver): AdmissionAction {
 	if (typeof asked === "string") {
@@ -115,10 +118,18 @@ function checkedAction(asked: unknown, requirements: SessionRequirementResolver)
 		}
 		return registered;
 	}
-	// The issued object keeps its identity: that is what step 5 checks.
-	if (isIssuedAction(asked)) return asked;
+	// The issued object keeps its identity: step 5 lets it skip the requirements.
+	if (
+		isIssuedAction(asked) &&
+		// Every registered copy was issued its actions ({} when it declared none).
+		[...requirements.entries()].some(([, r]) =>
+			Object.values(issuedActionsOf(r) as object).includes(asked),
+		)
+	) {
+		return asked;
+	}
 	throw new RangeError(
-		"admitSession: the action is a registered action's name, or a remediation core issued to a requirement (issuedRemediationActions)",
+		"admitSession: the action is a registered action's name, or a remediation core issued to one of these requirements (issuedRemediationActions)",
 	);
 }
 

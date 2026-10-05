@@ -40,12 +40,6 @@ const REQUIRES = [
 	"challengeStore",
 	"challengeCeremony",
 	"keyStore",
-	// The replica count the authentication/options route's fallback limiter is
-	// refused or warned about by; the grant does not read it.
-	"deploymentMode",
-	// The contributed budgets, which the options route's mismatch warning reads; the
-	// grant does not read it.
-	"rateLimitBudgetResolver",
 	// What the grant reads of `oauth {}`.
 	"oauthTokenSettings",
 	// What the grant reads of `core.tokenBinding`, which core fills.

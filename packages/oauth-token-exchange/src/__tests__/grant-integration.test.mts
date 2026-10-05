@@ -1998,6 +1998,8 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings, never the
 	});
 
 	it("mints the slot's default lifetime, not the configuration's", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const factory = tokenExchangeModule.contributes?.grants?.[TOKEN_EXCHANGE_GRANT_TYPE];
 		if (factory === undefined) throw new Error("the module contributes no token_exchange grant");
 		const grant = (factory as (deps: unknown) => GrantHandler)({

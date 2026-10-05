@@ -220,6 +220,7 @@ describe("the grant manifests declare what admission reads", () => {
 		const module = oauthSessionGrantModule;
 		expect(module.requires).toContain("sessionRequirementResolver");
 		expect(module.optional).toContain("userSessionStore");
+		expect(module.optional).toContain("sessionLifecycleStore");
 		expect(module.optional).toContain("subjectRevocation");
 		expect(module.optional).toContain("auditSink");
 		expect(module.optional).toContain("logger");
@@ -238,6 +239,7 @@ describe("the grant manifests declare what admission reads", () => {
 		const module = oauthAuthorizationGrantsModule;
 		expect(module.requires).toContain("sessionRequirementResolver");
 		expect(module.optional).toContain("userSessionStore");
+		expect(module.optional).toContain("sessionLifecycleStore");
 		expect(module.optional).toContain("subjectRevocation");
 		expect(module.optional).toContain("auditSink");
 		expect(module.optional).toContain("logger");

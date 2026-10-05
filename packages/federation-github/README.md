@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-github
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 GitHub federation provider for `auth.provider`: sign-in with a GitHub account
 through a GitHub OAuth App, with upstream logout and claim mapping.
@@ -127,12 +127,13 @@ read by the provider and the redirect policy; the schema fills in no default.
 - **Code exchange:** at GitHub's token endpoint, the client secret in the
   request body (`client_secret_post`, `openid-client`'s default), with the PKCE
   verifier.
-- **The callback's `iss` is not checked.** GitHub advertises RFC 9207 and names
-  its issuer `https://github.com/login/oauth`, while this adapter configures its
-  library with `https://github.com` (the profile's `issuer` label); forwarding
-  `iss` would refuse every login, so the exchange URL is built from `code` alone.
-  Configuring the library with GitHub's own issuer and then comparing `iss` is
-  [#598](https://github.com/o3co/auth.provider/issues/598).
+- **The callback's `iss` is checked when it is sent (RFC 9207).** The library is
+  configured with GitHub's authorization server's issuer,
+  `https://github.com/login/oauth`, as its published metadata names it, and the
+  exchange URL is built with core's `callbackUrlForExchange`, so a callback whose
+  `iss` names another issuer is refused before any token request. A callback
+  without `iss` is accepted. The profile's `issuer` label stays
+  `https://github.com`: it is part of the identity a linked account is keyed by.
 - **The user** is `GET https://api.github.com/user`, with no subject binding
   (there is no id_token `sub` to bind to). It is GitHub's REST API, not an
   OpenID Connect UserInfo endpoint — it answers a numeric `id` and no `sub` — so
@@ -215,7 +216,7 @@ are pinned by the tests' assertions instead.
 
 | Test file | Pins |
 | --- | --- |
-| [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the REST headers, the e-mail choice, malformed rows and a failed `/user/emails`, the scope rules, `expiresAt`, `expiresIn` and `tokenType`, no refresh, `mapClaims`, `endSession`, and that `config.fetch` carries every request |
+| [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the callback's `iss` (GitHub's accepted, another refused before the token request, none accepted), the profile's issuer label, the REST headers, the e-mail choice, malformed rows and a failed `/user/emails`, the scope rules, `expiresAt`, `expiresIn` and `tokenType`, no refresh, `mapClaims`, `endSession`, and that `config.fetch` carries every request |
 | [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and `id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no `id`, or one that is not a positive safe integer or a canonical digit string) |
 | [`fake-github.test.mts`](src/__tests__/fake-github.test.mts) | the fake itself: form-encoded token answers, the `User-Agent` refusal, and that the adapter's requests satisfy both |
 | [`github-type-module.test.mts`](src/__tests__/github-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes under the entry's name, the strict, flat schema, that a refusal never quotes the client secret, the `fetch` option, and that every key of the entry reaches the provider and its redirect policy |

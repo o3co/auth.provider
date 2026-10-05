@@ -74,9 +74,6 @@ const stubWebAuthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	// A throttle limit high enough that the body-parser probes below are never
-	// denied; the throttle itself is covered by module.rateLimit.test.mts.
-	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
 
 /** The `oauthTokenSettings` slot webauthnModule requires, for the issuer above. */
@@ -428,7 +425,6 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 		challengeTtlMs: 120000,
 		attestationPreference: "none",
 		userVerification: "preferred",
-		rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
 		rpId: "example.com",
 		rpName: "Example App",
 		origin: `https://example.com,${ANDROID}`,
@@ -587,6 +583,70 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 		} finally {
 			await handle.dispose();
 		}
+	});
+});
+
+/**
+ * `webauthn.rateLimit` is removed: the options route is guarded by the
+ * deployment's `rateLimiter` alone. A configuration still setting any key
+ * under it, at any value, and an environment still setting one of its
+ * variables (the current names and the older ones), refuse the boot.
+ */
+describe("the retired webauthn.rateLimit", () => {
+	async function refusedWith(config: Record<string, unknown>): Promise<Error> {
+		try {
+			const handle = await createApp({
+				modules: happyPathModules,
+				bootstrapComponents: {
+					config,
+					pathResolver: (p: string) => p,
+					oauthTokenSettings: tokenSettings,
+				} as never,
+			});
+			await handle.dispose();
+		} catch (error) {
+			return error as Error;
+		}
+		throw new Error("expected the boot to be refused");
+	}
+
+	it.each([
+		[{ authenticationOptions: { limit: 30, windowSeconds: 60 } }],
+		[{ authenticationOptions: { limit: "30" } }],
+	])("refuses a configuration setting it to %j, naming the key", async (value) => {
+		const refused = await refusedWith({
+			...coreConfig,
+			webauthn: { ...stubWebAuthnConfig, rateLimit: value },
+		});
+		expect(refused).toMatchObject({ name: "BootError", reason: "config-path-relocated" });
+		expect(refused.message).toMatch(/webauthn\.rateLimit\.authenticationOptions\.\w+ was removed/);
+	});
+
+	it("refuses an empty one as a key the section does not declare, naming it", async () => {
+		const refused = await refusedWith({
+			...coreConfig,
+			webauthn: { ...stubWebAuthnConfig, rateLimit: {} },
+		});
+		expect(refused).toMatchObject({ name: "BootError", reason: "config-validation-failed" });
+		expect(refused.message).toContain("webauthn");
+		expect(refused.message).toContain("rateLimit");
+	});
+
+	it.each([
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT",
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS",
+	])("refuses an environment setting %s, naming the variable", async (variable) => {
+		const refused = await refusedWith({
+			...coreConfig,
+			"renamed-variables": {
+				...coreConfig["renamed-variables"],
+				...renamedVariableCaptures({ modules: [webauthnModule], env: { [variable]: "30" } }),
+			},
+		});
+		expect(refused).toMatchObject({ name: "BootError", reason: "environment-variable-renamed" });
+		expect(refused.message).toContain(variable);
 	});
 });
 

@@ -779,6 +779,43 @@ describe("/authorize — policy evaluation edges", () => {
 		},
 	);
 
+	it.each([
+		["a Symbol", Symbol("code"), "(symbol)"],
+		["an object with no prototype", Object.create(null), "(object)"],
+		[
+			"an object whose toString throws",
+			{
+				toString: () => {
+					throw new Error("no");
+				},
+			},
+			"(object)",
+		],
+		["a number", 7, "(number)"],
+	])(
+		"answers access_denied for a deny code that is %s, logging its type and not the value",
+		async (_label, code, logged) => {
+			const logger = createMockLogger();
+			const { app } = await makeApp({
+				logger,
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () => ({
+						outcome: "deny",
+						error: code as string,
+						errorDescription: "no",
+					}),
+				},
+			});
+			const params = redirectParams(await authorize(app, baseQuery));
+			expect(params.get("error")).toBe("access_denied");
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ error: logged },
+				"authorize_policy_deny_error_malformed",
+			);
+		},
+	);
+
 	it("logs a long malformed deny code capped", async () => {
 		const logger = createMockLogger();
 		const { app } = await makeApp({
