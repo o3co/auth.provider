@@ -24,6 +24,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
@@ -939,6 +940,9 @@ describe("establishWithoutAsking — a federated login's establishment, from the
 			{ ...federated, upstreamAuthTime: "2026-09-28T11:50:00Z" },
 			{ ...federated, upstreamAuthTime: new Date(Number.NaN) },
 			{ ...federated, upstreamAuthTime: null },
+			// Further ahead than hosts' clocks drift: refused here, before any
+			// code is spent, rather than by the store that would record it.
+			{ ...federated, upstreamAuthTime: new Date(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000) },
 			{ ...federated, callbackMeetsFreshness: "false" },
 			{ ...federated, callbackMeetsFreshness: null },
 		]) {

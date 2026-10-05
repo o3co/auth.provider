@@ -935,6 +935,32 @@ describe("step 4 — the revocation boundary", () => {
 		}
 	});
 
+	it("judges a federated session by when it was established, not by its upstream's older authentication", async () => {
+		// The upstream authenticated the user before the boundary; this provider
+		// established the session after it. Revocation reads establishment, so
+		// the session is not revoked at birth.
+		const record = session({
+			authTime: minutesAgo(5),
+			amr: ["fed"],
+			authentication: {
+				primary: "fed",
+				federation: "google",
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+				upstreamAuthTime: minutesAgo(30),
+			},
+		});
+		expect(
+			await admitSession(
+				deps({
+					userSessionStore: holding(record),
+					subjectRevocation: revocationOf(async () => minutesAgo(10)),
+				}),
+				request(),
+			),
+		).toMatchObject({ outcome: "admitted" });
+	});
+
 	it("reads the boundary for the record's subject", async () => {
 		const asked: string[] = [];
 		await admitSession(

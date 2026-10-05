@@ -24,6 +24,12 @@
  * write and the read are one design. See ADR
  * 2026-09-25-multi-factor-authentication.
  *
+ * Also how fresh a session's authentication is (`authenticationFreshness`,
+ * `sessionFreshness`): what a freshness ask is judged against — the earlier
+ * of `authTime` and a federated login's recorded upstream authentication,
+ * never fresh when the upstream showed no time. `authTime` stays when this
+ * provider established the session.
+ *
  * A session carrying `authentication` holds in `amr` only what this
  * provider vouches for. One written before that key is split as it is read:
  * `fed` makes it federated and every other value an upstream IdP's, never
@@ -468,7 +474,7 @@ const RECORDABLE_RULES: Readonly<Record<AuthenticationField, string>> = {
 	"authentication.mfaAt":
 		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, or undefined",
 	"authentication.upstreamAuthTime":
-		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined",
+		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, null, or undefined — undefined for a password primary",
 };
 
 /** {@link readAuthentication}'s answer: a copy of what it admits, or the first field it refuses. */
@@ -483,7 +489,7 @@ type AuthenticationRead =
  * is none when `rules.nullFederationIsNone`); an `upstreamAmr` that is not a
  * list of strings; an `mfaAt` that is not a `Date` whose time
  * `rules.admitsInstant`; an `upstreamAuthTime` that is neither `null` nor
- * such a `Date`. A field may be `undefined`, `primary` excepted; an
+ * such a `Date`, or any on a password primary, which has no upstream. A field may be `undefined`, `primary` excepted; an
  * `upstreamAuthTime` that is `undefined` is left out of the answer. The one
  * rule a store records by and the readers read by.
  */
@@ -519,8 +525,8 @@ function readAuthentication(value: unknown, rules: AuthenticationRules): Authent
 		upstreamAuthTime instanceof Date ? upstreamAuthTime.getTime() : Number.NaN;
 	if (
 		upstreamAuthTime !== undefined &&
-		upstreamAuthTime !== null &&
-		!rules.admitsInstant(upstreamAuthTimeMs)
+		(primary === PASSWORD_AMR ||
+			(upstreamAuthTime !== null && !rules.admitsInstant(upstreamAuthTimeMs)))
 	) {
 		return { refused: "authentication.upstreamAuthTime" };
 	}
