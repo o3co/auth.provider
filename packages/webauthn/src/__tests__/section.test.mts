@@ -42,6 +42,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { type WebAuthnConfig, webauthnConfigSchema } from "#/config.mjs";
 import { webauthnModule } from "#/module.mjs";
 import { makeAppConfig, testTokenSettings, withWebAuthnSection } from "./appConfig.fixture.mjs";
@@ -269,5 +270,89 @@ describe("the oauthTokenSettings slot", () => {
 		const error = await refusal(boot(shippedSection(), { withoutTokenSettings: true }));
 		expect(error.reason).toBe("missing-required-component");
 		expect(error.message).toContain("oauthTokenSettings");
+	});
+});
+
+/**
+ * A composition root hands boot its resolved configuration, and boot parses
+ * `webauthn` with `webauthnConfigSchema` over it: no key of the section is
+ * dropped before the module reads it, and a key the module declares removed
+ * reaches the removed-key refusal.
+ */
+describe("boot hands webauthnConfigSchema every key it reads, and the removed-key refusal every removed one", () => {
+	/** Every dotted key path in an object schema, through optional / default / pipe wrappers. */
+	const keyPaths = (schema: z.ZodType, prefix = ""): string[] => {
+		let inner: z.ZodType = schema;
+		for (;;) {
+			if (inner instanceof z.ZodOptional || inner instanceof z.ZodNullable) {
+				inner = inner.unwrap() as z.ZodType;
+			} else if (inner instanceof z.ZodDefault) {
+				inner = inner.removeDefault() as z.ZodType;
+			} else if (inner instanceof z.ZodPipe) {
+				inner = inner.out as z.ZodType;
+			} else {
+				break;
+			}
+		}
+		if (!(inner instanceof z.ZodObject)) return [];
+		return Object.entries(inner.shape).flatMap(([key, value]) => {
+			const path = prefix === "" ? key : `${prefix}.${key}`;
+			return [path, ...keyPaths(value as z.ZodType, path)];
+		});
+	};
+
+	/** Every dotted key path in a value; a list is one value. */
+	const valuePaths = (value: unknown, prefix = ""): string[] => {
+		if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+		return Object.entries(value).flatMap(([key, inner]) => {
+			const path = prefix === "" ? key : `${prefix}.${key}`;
+			return [path, ...valuePaths(inner, path)];
+		});
+	};
+
+	it("holds every key the schema names in the section the webauthnConfig slot carries", async () => {
+		const section = shippedSection({
+			...RELYING_PARTY_ENV,
+			WEBAUTHN_TOP_ORIGIN: "https://partner.example",
+		});
+		let read: unknown;
+		const reader = defineModule({
+			name: "test:webauthn-config-key-reader",
+			requires: ["webauthnConfig"] as const,
+			contributes: {
+				routes: [
+					({ webauthnConfig }) => {
+						read = webauthnConfig;
+						return {
+							id: "test-webauthn-config-key-reader",
+							mountPath: "/__test_webauthn_config_key_reader__",
+							handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+						};
+					},
+				],
+			},
+		});
+		const handle = await boot(section, { modules: [reader] });
+		try {
+			expect(valuePaths(read).sort()).toEqual(keyPaths(webauthnConfigSchema).sort());
+			// Not vacuous: the walk reached the section's keys, an optional one included.
+			expect(keyPaths(webauthnConfigSchema)).toEqual(
+				expect.arrayContaining(["challengeTtlMs", "topOrigin"]),
+			);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses the boot for each key the module declares removed, set beside a complete section", async () => {
+		const removed = Object.entries(webauthnModule.section?.relocatedFrom ?? {})
+			.filter(([, to]) => to === null)
+			.map(([from]) => from.replace(/^webauthn\./, ""));
+		expect(removed).toEqual(["allowCredentialsForKnownUser", "rateLimit"]);
+		for (const key of removed) {
+			const error = await refusal(boot(shippedSection(undefined, { [key]: true })));
+			expect(error.reason, key).toBe("config-path-relocated");
+			expect(error.message, key).toContain(`webauthn.${key} was removed`);
+		}
 	});
 });
