@@ -52,6 +52,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRouter as createUserinfoRouter } from "#/routes/userinfo.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -150,7 +151,7 @@ describe("a denylist outage at /oauth/introspect", () => {
 		const { router } = await createOAuthRouter(express, {
 			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
-			config: baseConfig,
+			...routerInputsOf(baseConfig),
 			clientRepository,
 			codeRepository,
 			keyStore,

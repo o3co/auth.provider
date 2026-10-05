@@ -85,7 +85,7 @@ export type AuthorizationGrantDeps = Pick<
 		| "sessionRequirementResolver"
 		| "oauthTokenSettings"
 		| "tokenBindingSettings",
-		"auditSink" | "sessionLifecycle"
+		"auditSink" | "sessionLifecycle" | "sessionLifecycleStore"
 	>;
 
 /**
@@ -128,6 +128,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	// No acr table: the acr was chosen at /authorize and travels on the code.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		subjectRevocation: deps.subjectRevocation,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createAuthorizationGrant"),
 		acrTable: {},

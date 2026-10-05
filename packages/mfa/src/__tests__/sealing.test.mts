@@ -512,7 +512,8 @@ describe("what is sealed: plain JSON-shaped values, copied once", () => {
 	const SECRET_TEXT = "S3CR3T-VALUE";
 	const STATE_BINDING = { transactionId: "tx-1", kind: "totp", use: "enrollment" } as const;
 	/** What every refusal says, whatever was refused: nothing of the value. */
-	const NOT_PLAIN = "a factor's data or state must be a plain JSON object of plain JSON values";
+	const NOT_PLAIN =
+		"a factor's data, state or response must be a plain JSON object of plain JSON values";
 
 	/** What `run` threw, or `undefined`. */
 	const thrownBy = (run: () => unknown): unknown => {

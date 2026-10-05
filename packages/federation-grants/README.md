@@ -16,9 +16,10 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 
 **Owns:**
 
-- the client routes: the order of their guards (correlation id, throttle, body bound and parsing, client authentication), their answers and their error identifiers;
+- the client routes: the order of their guards (correlation id, throttle, body bound and parsing, client authentication, and on a first-time lodging the throttle keyed on the client), their answers and their error identifiers;
 - the browser half: the connect handle, the consent page's contract, and the checks the callback runs before a grant is activated;
 - the boot refusals of an enabled feature that is missing what it needs;
+- the `federationGrantPolicy` slot, what modules outside it read of `federation-grants {}` — whether grants are on, and the keep policy in force ([below](#what-other-modules-read-of-the-section));
 - the shutdown drain of work still in flight after a response (`federationGrantBackgroundModule`).
 
 **Does not own:**
@@ -201,7 +202,14 @@ say what each one means and what to do.
 - **The throttles** log and audit a limiter outage through core with the
   deployment's own logger and sink — `rate_limiter_failed_closed` /
   `rate_limiter_failed_open` and `rate_limit.unavailable`, tagged
-  `federation_grants` or `federation_grants_browser`. While the feature is on,
+  `federation_grants` or `federation_grants_browser`. The client routes are
+  throttled under `federation_grants:ip:<ip>` before client authentication,
+  and a first-time lodging (`POST /oauth/federation-grants`) also under
+  `federation_grants:client:<client_id>` after it: a lodging writes records
+  for any subject the client names, so one client's lodgings are counted
+  across every address it calls from. Its refusal (`429` or `503`) carries
+  none of the IP throttle's `RateLimit-*` headers, which describe a budget
+  that allowed the request. While the feature is on,
   the module claims both prefixes with no budget of its own
   (`rateLimitBudgets`): the limiter's `limits` entry or its default applies,
   and no other module can set a budget for them. Request volume is the
@@ -215,16 +223,26 @@ say what each one means and what to do.
 Exported from [`src/index.mts`](src/index.mts); the linked file holds each definition and its doc comment:
 
 - `federationGrantsModules` — the pair to install — and its two halves `federationGrantsModule` and `federationGrantBackgroundModule`, with `federationGrantsConfigSchema` — [`module.mts`](src/module.mts).
-- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication), for a root that mounts them itself; and a 404 that names no feature, for a root that mounts the path itself while the feature is off. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`.
+- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication, the client's throttle on a lodging), for a root that mounts them itself; and a 404 that names no feature, for a root that mounts the path itself while the feature is off. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`.
 - `createFederationGrantTokenHandler`, `FederationGrantTokenHandlerOptions` — [`tokenRoute.mts`](src/tokenRoute.mts); `createFederationGrantStatusHandler`, `FederationGrantStatusHandlerOptions` — [`statusRoute.mts`](src/statusRoute.mts). Single handlers, without that chain.
 - `createFederationGrantBackground`, `FederationGrantBackground`, `federationGrantsCleanupTailMs` — [`background.mts`](src/background.mts). The shutdown registry, and the tail its drain is registered with ([below](#shutting-down-without-losing-a-rotated-credential)).
 - `FEDERATION_GRANTS_MOUNT_PATH` — [`types.mts`](src/types.mts).
 
 The browser half is mounted only by the module. The store ports, the grant domain types and retrieval are core's and are not re-exported.
 
+## What other modules read of the section
+
+While it is on, `federationGrantsModule` provides core's `federationGrantPolicy` slot ([`policy.mts`](../core/src/federation-grants/policy.mts)) from its parsed section, so that a module outside this package — whatever must end a subject's grants with the subject's access — reads whether grants are on and may be kept without reading `federation-grants {}`: `enabled: true`, and `allowKeepOnSubjectRevocation` as core's `resolveFederationGrantKeepPolicy` reads `federation-grants.allowKeepOnSubjectRevocation` — `false` by default, `true` for any spelling of true `coerceBooleanFromEnv` accepts (`true`, `"true"`, `"1"`, ignoring case and surrounding spaces) — held to `checkFederationGrantPolicy` and frozen. A reader lists the slot as optional.
+
+- **Eager.** The slot is filled whenever the module is installed and on, whether or not an activated module reads it.
+- **Authoritative.** The module's own code reads the section, so while it is on an `overrideComponents` entry for the slot refuses boot (`authoritative-component-overridden`), as a `bootstrapComponents` entry (`bootstrap-component-collision`) and a second provider (`duplicate-provides`) are for any provided key.
+- **Absent while off.** Switched off, the module provides nothing: the slot is absent, which reads as grants off, and a host may fill it itself.
+
+[`grantPolicy.test.mts`](src/__tests__/grantPolicy.test.mts) runs core's `federationGrantPolicyContract` over what the module provides; [`boot.test.mts`](src/__tests__/boot.test.mts) pins what a composition holds.
+
 ## A disabled deployment registers nothing
 
-`federation-grants.enabled` defaults to `false`, and it is the routes module's switch (`section.isEnabled`): while it is false, `federationGrantsModule` registers nothing — no route, admission action or rate-limit prefix — and reads none of the feature's configuration or components, so a deployment that leaves the feature off needs none of what it would need to turn it on. Its section is still parsed, and its old path still refused. Nothing is mounted under `/oauth/federation-grants` or `/session/federation-grants`: the host's own fallback answers both, as for a deployment that never installed the package, so nothing in the answer names the feature. A root that wants the client routes' JSON `404`, with its cache directives, while the feature is off mounts `createDisabledFederationGrantRouter` at `FEDERATION_GRANTS_MOUNT_PATH` itself. [`disabledRoutes.test.mts`](src/__tests__/disabledRoutes.test.mts) pins it.
+`federation-grants.enabled` defaults to `false`, and it is the routes module's switch (`section.isEnabled`): while it is false, `federationGrantsModule` registers nothing — no route, admission action, rate-limit prefix or `federationGrantPolicy` — and reads none of the feature's configuration or components, so a deployment that leaves the feature off needs none of what it would need to turn it on. Its section is still parsed, and its old path still refused. Nothing is mounted under `/oauth/federation-grants` or `/session/federation-grants`: the host's own fallback answers both, as for a deployment that never installed the package, so nothing in the answer names the feature. A root that wants the client routes' JSON `404`, with its cache directives, while the feature is off mounts `createDisabledFederationGrantRouter` at `FEDERATION_GRANTS_MOUNT_PATH` itself. [`disabledRoutes.test.mts`](src/__tests__/disabledRoutes.test.mts) pins it.
 
 ## The routes a client calls
 
@@ -290,6 +308,7 @@ keep `offline_access` where the connection lists it.
 | `scope` outside the connection / without `openid` / without `offline_access` / a subset where subsets are off | 400 | `invalid_scope` | `scope_exceeded` / `openid_required` / `offline_access_required` / `scope_subsets_not_allowed` |
 | The client may not use this connection — whether or not it exists | 403 | `access_denied` | `connection_not_permitted` |
 | Sixteen live first-time intents for this client and this user | 429 | `rate_limited` | `intent_limit` |
+| This deployment's own throttle, keyed on the authenticated client (`federation_grants:client:<client_id>`) | 429 | `rate_limited` | `provider` |
 | The connection is not configured | 503 | `temporarily_unavailable` | `connection_not_configured` |
 | A store could not be read or written | 503 | `temporarily_unavailable` | `storage` |
 | Admitted as the process began shutting down | 503 | `service_unavailable` | `shutting_down` |
@@ -528,8 +547,10 @@ the same claim, just before the activation), each graded `use` as
 `federationGrantsModule` registers it while `federation-grants.enabled` is set;
 switched off, the module registers none of them. Admission
 reads the durable session behind the cookie — live, the cookie's own
-subject's, not past its `expiresAt` — the subject's sessions boundary through
-`subjectRevocation`, and the registered session requirements. What stays
+subject's, not past its `expiresAt` — the session's lifecycle record through
+`sessionLifecycleStore` when wired (one closing or closed is not admitted),
+the subject's sessions boundary through `subjectRevocation`, and the
+registered session requirements. What stays
 here is the flow's own: the intent's subject, the browser binding (the
 express session and the durable `sid` a challenge was issued to), the
 grant's current intent, the client's permission, the connection's pins and
@@ -708,7 +729,7 @@ A refused answer is logged as one warn line,
 | The answer names no origin, and carries no valid CSRF token | 403 | `invalid_request` | `no origin and no valid csrf token` |
 | This deployment's own throttle (`federation_grants_browser`) | 429 | `rate_limited` | `provider` |
 | A store of this package could not answer | 503 | `temporarily_unavailable` | `storage` |
-| Session admission could not answer — the session store, the sessions boundary or a session requirement — described as every consumer of admission describes it (core's `describeAdmissionOutage`) | 503 | `temporarily_unavailable` | `session store unavailable`, `revocation store unavailable` or `session requirement unavailable` |
+| Session admission could not answer — the session store, the session lifecycle store, the sessions boundary or a session requirement — described as every consumer of admission describes it (core's `describeAdmissionOutage`) | 503 | `temporarily_unavailable` | `session store unavailable`, `session lifecycle store unavailable`, `revocation store unavailable` or `session requirement unavailable` |
 | The client registry could not answer — judging the question or describing the client | 503 | `temporarily_unavailable` | `client registry unavailable` |
 | The limiter backend is down, and the limiter's `failMode` is `"closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
 | The upstream URL could not be built, or the federation lost the capability (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
