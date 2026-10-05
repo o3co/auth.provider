@@ -29,6 +29,7 @@ import {
 	type FederationProvider,
 	type Logger,
 	type PrimaryAuthentication,
+	type SessionLifecycle,
 	type SessionRequirement,
 	type SubjectSessionIndex,
 	type User,
@@ -135,6 +136,49 @@ describe("the federation callback's login establishes without asking", () => {
 			user: { id: "user-1", username: "alice", email: "alice@example.com" },
 		});
 		expect(session).not.toHaveProperty("redirectTo");
+	});
+});
+
+describe("the federation callback's login — the session lifecycle, where it is installed", () => {
+	const callback = async (outcome: "opened" | "unavailable") => {
+		const open = vi.fn(async () => ({ outcome }));
+		const harness = buildFederationApp({
+			providers: new Map([["test", provider]]),
+			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
+			sessionLifecycle: { open } as unknown as SessionLifecycle,
+		});
+		harness.store.set("browser", {
+			data: { federation: { name: "test", state: "st-1", codeVerifier: "cv-1" } },
+			cookie: { sameSite: "lax", secure: false, httpOnly: true },
+		});
+		const res = await request(harness.app)
+			.get("/oauth/federation/test/callback?state=st-1&code=c-1")
+			.set("Cookie", "sid=browser");
+		return { res, open, harness };
+	};
+
+	it("opens the session's lifecycle record for the record's sid, subject and end", async () => {
+		const { res, open, harness } = await callback("opened");
+
+		expect(res.status).toBe(302);
+		const created = harness.userSessionStore.create.mock.calls[0]?.[0] as {
+			sid: string;
+			expiresAt: Date;
+		};
+		expect(open).toHaveBeenCalledExactlyOnceWith(created.sid, {
+			sub: "user-1",
+			expiresAt: created.expiresAt,
+		});
+	});
+
+	it("answers 503 when the record cannot be opened, with nothing written", async () => {
+		const { res, harness } = await callback("unavailable");
+
+		expect(res.status).toBe(503);
+		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
+		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
+		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
+		expect(harness.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
 	});
 });
 

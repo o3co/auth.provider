@@ -138,8 +138,9 @@ export const createRouter = (
 		 */
 		subjectSessionIndex?: SubjectSessionIndex;
 		/**
-		 * Core's session lifecycle, where installed: `POST /session/logout` closes
-		 * the session through it instead of deleting the records it owns.
+		 * Core's session lifecycle, where installed: a login opens the session's
+		 * lifecycle record in it, and `POST /session/logout` closes the session
+		 * through it instead of deleting the records it owns.
 		 */
 		sessionLifecycle?: SessionLifecycle | undefined;
 		/**
@@ -483,6 +484,7 @@ export const createRouter = (
 					req,
 					...(userSessionStore === undefined ? {} : { userSessionStore }),
 					...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+					...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 					sessionTtlMs,
 					reporter: ({ sid, sub }) => {
 						// Every line names the sid where there is one; the record's

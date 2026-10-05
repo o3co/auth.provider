@@ -24,6 +24,7 @@ import {
 	type Logger,
 	newRenewalNonce,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SubjectSessionIndex,
 	type UserRepository,
 	type UserSessionStore,
@@ -178,6 +179,7 @@ function buildApp(
 		userRepository?: UserRepository;
 		userSessionStore?: UserSessionStore;
 		subjectSessionIndex?: SubjectSessionIndex;
+		sessionLifecycle?: SessionLifecycle;
 		federationTokenStore?: FederationTokenStore;
 		sessionFederationIndex?: SessionFederationIndex;
 		logger?: Logger;
@@ -206,6 +208,7 @@ function buildApp(
 		} as unknown as UserRepository,
 		userSessionStore,
 		subjectSessionIndex,
+		sessionLifecycle,
 		federationTokenStore,
 		sessionFederationIndex,
 		logger,
@@ -271,6 +274,7 @@ function buildApp(
 		requirements: resolverForTests([]),
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
 		...(subjectSessionIndex !== undefined ? { subjectSessionIndex } : {}),
+		...(sessionLifecycle !== undefined ? { sessionLifecycle } : {}),
 		...(federationTokenStore !== undefined ? { federationTokenStore } : {}),
 		...(sessionFederationIndex !== undefined ? { sessionFederationIndex } : {}),
 		...(logger !== undefined ? { logger } : {}),
@@ -909,6 +913,52 @@ function makeSubjectSessionIndex(override?: Partial<SubjectSessionIndex>): Subje
 		removeSid: ReturnType<typeof vi.fn>;
 	};
 }
+
+describe("Session routes — the session lifecycle, where it is installed", () => {
+	const lifecycleAnswering = (outcome: "opened" | "unavailable") => {
+		const open = vi.fn(async () => ({ outcome }));
+		return { open, lifecycle: { open } as unknown as SessionLifecycle };
+	};
+
+	it("a login opens the session's lifecycle record for the record's sid, subject and end", async () => {
+		const store = makeUserSessionStore();
+		const { open, lifecycle } = lifecycleAnswering("opened");
+		const { app } = buildApp({
+			userSessionStore: store,
+			sessionLifecycle: lifecycle,
+			sessionTtlMs: 3600_000,
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(200);
+		const created = store.sessions[0] as { sid: string; sub: string; expiresAt: Date };
+		expect(open).toHaveBeenCalledExactlyOnceWith(created.sid, {
+			sub: "u-1",
+			expiresAt: created.expiresAt,
+		});
+	});
+
+	it("a login whose lifecycle record cannot be opened is a 503, with no session record", async () => {
+		const store = makeUserSessionStore();
+		const { lifecycle } = lifecycleAnswering("unavailable");
+		const { app, capturedSession } = buildApp({
+			userSessionStore: store,
+			sessionLifecycle: lifecycle,
+			sessionTtlMs: 3600_000,
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(503);
+		expect(store.sessions).toEqual([]);
+		expect(capturedSession.current).not.toHaveProperty("isAuthenticated");
+	});
+});
 
 describe("Session routes — subject session index", () => {
 	it("records the sid against the subject on a successful login", async () => {

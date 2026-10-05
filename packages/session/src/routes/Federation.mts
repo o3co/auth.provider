@@ -37,6 +37,7 @@ import {
 	readUserSnapshot,
 	type SessionClaim,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
@@ -128,6 +129,7 @@ export const createRouter = (
 		subjectSessionIndex,
 		subjectRevocation,
 		sessionLifecycleStore,
+		sessionLifecycle,
 		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
@@ -166,6 +168,8 @@ export const createRouter = (
 		subjectRevocation?: SubjectRevocation;
 		/** The session lifecycle port the link routes' admission reads after a live record, when wired. */
 		sessionLifecycleStore?: SessionLifecycleStore | undefined;
+		/** Core's session lifecycle, where installed: a federated login opens the session's lifecycle record in it. */
+		sessionLifecycle?: SessionLifecycle | undefined;
 		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
@@ -415,6 +419,7 @@ export const createRouter = (
 				req,
 				userSessionStore,
 				...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+				...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 				sessionTtlMs,
 				beforeRegenerate: [
 					{

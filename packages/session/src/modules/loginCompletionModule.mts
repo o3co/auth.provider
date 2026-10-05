@@ -35,20 +35,22 @@ import { createLoginCompletion } from "../login-completion.mjs";
 
 export const loginCompletionModule = defineModule<
 	"sessionCookiePolicy" | "userSessionStore" | "csrfGuard",
-	"subjectSessionIndex"
+	"subjectSessionIndex" | "sessionLifecycle"
 >({
 	name: "login-completion",
 	// `sessionCookiePolicy`: the session's lifetime, which the session store's
 	// module owns.
 	requires: ["sessionCookiePolicy", "userSessionStore", "csrfGuard"],
 	// A composition without subject-level revocation has no index to record
-	// the session in, as for the session routes.
-	optional: ["subjectSessionIndex"],
+	// the session in, as for the session routes; without core's session
+	// lifecycle module, a login opens no lifecycle record.
+	optional: ["subjectSessionIndex", "sessionLifecycle"],
 	provides: {
 		loginCompletion: (deps) =>
 			createLoginCompletion({
 				userSessionStore: deps.userSessionStore,
 				...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
+				...(deps.sessionLifecycle ? { sessionLifecycle: deps.sessionLifecycle } : {}),
 				sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
 				csrf: deps.csrfGuard as CsrfGuard,
 			}),

@@ -30,6 +30,8 @@ import {
 	passwordPrimary,
 	passwordSessionAuthentication,
 	resumePrimary,
+	type SessionLifecycle,
+	type SessionOpenOutcome,
 	type SessionRequirement,
 	type SubjectSessionIndex,
 	type User,
@@ -105,6 +107,8 @@ function harness(
 		readonly redirectTo?: string;
 		/** The reporter's calls join the trace where they happen. */
 		readonly traceReporter?: boolean;
+		/** A session lifecycle whose `open` answers this, or rejects with it. Absent: none is wired. */
+		readonly lifecycle?: SessionOpenOutcome["outcome"] | Error;
 	} = {},
 ) {
 	const trace: string[] = [];
@@ -140,6 +144,14 @@ function harness(
 		run: step("after", fail.after),
 		undo: { step: "delete", run: step("after-undo", fail.afterUndo) },
 	};
+
+	const sessionLifecycle = {
+		open: vi.fn(async (_sid: string, _request: { sub: string; expiresAt: Date }) => {
+			trace.push("open");
+			if (shape.lifecycle instanceof Error) throw shape.lifecycle;
+			return { outcome: shape.lifecycle ?? "opened" } as SessionOpenOutcome;
+		}),
+	} satisfies Pick<SessionLifecycle, "open">;
 
 	// The express session: `regenerate` swaps in a fresh bag, as express-session
 	// does, so a test can tell the flags landed on the new one and not the old.
@@ -187,6 +199,7 @@ function harness(
 			req: req as unknown as Request,
 			...(shape.userSessionStore === false ? {} : { userSessionStore }),
 			...(shape.subjectSessionIndex === false ? {} : { subjectSessionIndex }),
+			...(shape.lifecycle === undefined ? {} : { sessionLifecycle }),
 			sessionTtlMs: TTL_MS,
 			...(shape.steps === false ? {} : { beforeRegenerate: [before], afterRegenerate: [after] }),
 			reporter: reporterFactory,
@@ -201,6 +214,7 @@ function harness(
 		req,
 		userSessionStore,
 		subjectSessionIndex,
+		sessionLifecycle,
 		before,
 		after,
 		reporter,
@@ -528,6 +542,80 @@ describe("establishSession", () => {
 				"after",
 				"save",
 			]);
+		});
+	});
+
+	describe("the session lifecycle, where it is wired", () => {
+		it("opens the session's lifecycle record for the record's sid, subject and end, before the record is created", async () => {
+			const h = harness({}, { lifecycle: "opened" });
+
+			const result = await h.run();
+
+			const sid = createdSid(h);
+			expect(result).toEqual({ outcome: "established", sid });
+			expect(h.trace).toEqual([
+				"reporter",
+				"open",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"save",
+			]);
+			expect(h.sessionLifecycle.open).toHaveBeenCalledExactlyOnceWith(sid, {
+				sub: "u-1",
+				expiresAt: new Date(authTime.getTime() + TTL_MS),
+			});
+		});
+
+		it.each(["unavailable", "refused"] as const)(
+			"an open answered %s is the record's outage at create: nothing else written, nothing undone, the cookie session kept",
+			async (outcome) => {
+				const h = harness({}, { lifecycle: outcome });
+
+				const result = await h.run();
+
+				expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
+				expect(h.trace).toEqual(["reporter", "open"]);
+				expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+					"user_session",
+					"create",
+					expect.objectContaining({
+						message: `the session lifecycle answered ${outcome} to the open`,
+					}),
+				);
+				expect(h.reporter.cleanupFailed).not.toHaveBeenCalled();
+				expect(h.req.session).toMatchObject({ id: "stale" });
+			},
+		);
+
+		it("an open that throws is the record's outage at create, named as the lifecycle's, its error the cause", async () => {
+			const thrown = new RangeError("session lifecycle: sub must be 1 to 512 characters");
+			const h = harness({}, { lifecycle: thrown });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
+			expect(h.trace).toEqual(["reporter", "open"]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"user_session",
+				"create",
+				expect.objectContaining({
+					message: "the session lifecycle could not open the session",
+					cause: thrown,
+				}),
+			);
+			expect(h.req.session).toMatchObject({ id: "stale" });
+		});
+
+		it("opens nothing without a UserSessionStore: there is no record", async () => {
+			const h = harness({}, { userSessionStore: false, lifecycle: "opened" });
+
+			await h.run();
+
+			expect(h.sessionLifecycle.open).not.toHaveBeenCalled();
+			expect(h.trace).toEqual(["reporter", "regenerate", "save"]);
 		});
 	});
 

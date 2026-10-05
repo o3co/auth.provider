@@ -32,6 +32,7 @@ import {
 	type FederationTokenStore,
 	type LoginCompletion,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -113,6 +114,43 @@ describe("createLoginCompletion keeps core's loginCompletion contract", () => {
 				createLoginCompletion({ userSessionStore: counted.store, sessionTtlMs: 1, csrf: guard }),
 			),
 		).toBe(true);
+	});
+});
+
+describe("the login-completion module's provider, with core's session lifecycle", () => {
+	const guard = createTestCsrfGuard();
+	/** Every record is created only once its lifecycle is open, or the login fails. */
+	const opened = new Set<string>();
+	let counted = countingStore();
+	const lifecycle = {
+		open: async (sid: string) => {
+			opened.add(sid);
+			return { outcome: "opened" as const };
+		},
+	} as unknown as SessionLifecycle;
+	const openFirst = (inner: UserSessionStore): UserSessionStore => ({
+		...inner,
+		create: async (input) => {
+			if (!opened.has(input.sid)) throw new Error(`no lifecycle record is open for ${input.sid}`);
+			await inner.create(input);
+		},
+	});
+	it.each(
+		loginCompletionContract({
+			build: () => {
+				counted = countingStore();
+				return loginCompletionModule.provides?.loginCompletion?.({
+					userSessionStore: openFirst(counted.store),
+					sessionLifecycle: lifecycle,
+					sessionCookiePolicy: createTestSessionCookiePolicy(),
+					csrfGuard: guard,
+				} as never) as LoginCompletion;
+			},
+			records: () => counted.records(),
+			csrfCookieName: guard.cookieName,
+		}),
+	)("$name, opening each session's lifecycle record before its record", async ({ run }) => {
+		await run();
 	});
 });
 
@@ -219,6 +257,11 @@ describe("the login-completion module provides loginCompletion", () => {
 		);
 		expect(loginCompletionModule.requires).not.toContain("config");
 		expect(Object.keys(loginCompletionModule.provides ?? {})).toEqual(["loginCompletion"]);
+	});
+
+	it("takes core's session lifecycle as an optional slot", () => {
+		expect(loginCompletionModule.optional).toContain("sessionLifecycle");
+		expect(loginCompletionModule.requires).not.toContain("sessionLifecycle");
 	});
 
 	it("is not the session module's: a provider there could not read the guard its own module fills", () => {

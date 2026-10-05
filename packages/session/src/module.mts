@@ -237,7 +237,8 @@ export const sessionModule = defineModule<
 	// unavailable; `subjectRevocation` is the boundary, and
 	// `sessionLifecycleStore` the lifecycle port, the link routes' admission
 	// reads when wired; `sessionLifecycle`, core's session lifecycle, where its
-	// module is installed, is what `POST /session/logout` closes the session through.
+	// module is installed, opens each login's session record and is what
+	// `POST /session/logout` closes the session through.
 	optional: [
 		"logger",
 		"attemptCounter",
@@ -342,6 +343,7 @@ export const sessionModule = defineModule<
 						requirements: deps.sessionRequirementResolver,
 						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 						sessionLifecycleStore: deps.sessionLifecycleStore,
+						sessionLifecycle: deps.sessionLifecycle,
 						federationTokenStore: deps.federationTokenStore,
 						sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
 						// Named after the deployment's session cookie, as the CSRF

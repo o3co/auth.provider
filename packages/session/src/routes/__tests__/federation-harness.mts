@@ -29,6 +29,7 @@ import type {
 	FederationTokenStore,
 	Logger,
 	SessionFederationIndex,
+	SessionLifecycle,
 	SessionLifecycleStore,
 	SessionRequirementResolver,
 	SubjectRevocation,
@@ -278,6 +279,7 @@ export function buildFederationApp({
 	requirements,
 	subjectRevocation,
 	sessionLifecycleStore,
+	sessionLifecycle,
 	auditSink,
 	logger,
 }: {
@@ -289,6 +291,7 @@ export function buildFederationApp({
 	requirements?: SessionRequirementResolver;
 	subjectRevocation?: SubjectRevocation;
 	sessionLifecycleStore?: SessionLifecycleStore;
+	sessionLifecycle?: SessionLifecycle;
 	auditSink?: AuditSink;
 	logger?: Logger;
 }): HarnessApp {
@@ -313,6 +316,7 @@ export function buildFederationApp({
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			...(subjectRevocation ? { subjectRevocation } : {}),
 			...(sessionLifecycleStore ? { sessionLifecycleStore } : {}),
+			...(sessionLifecycle ? { sessionLifecycle } : {}),
 			federationTokenStore,
 			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
 			requirements: requirements ?? resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),

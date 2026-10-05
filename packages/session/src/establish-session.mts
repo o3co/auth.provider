@@ -27,7 +27,11 @@
  * (steps) and their log vocabulary (reporter).
  *
  * Sequence:
- * 1. `UserSessionStore.create` (a failure has nothing to undo);
+ * 1. the record: where the session lifecycle is wired, its lifecycle record
+ *    opened first, then `UserSessionStore.create`. Either failing or
+ *    throwing, or the open refused, is the record's outage at `create`, with
+ *    nothing to undo:
+ *    an open record with no user session is not live and nothing joins it;
  * 2. `SubjectSessionIndex.addSid`, best effort, at the earliest point the
  *    session exists: a missing entry is a live session a credential change
  *    never finds, while an orphan costs only a redundant cascade;
@@ -63,6 +67,7 @@ import {
 	type Establishment,
 	isEstablishment,
 	newRenewalNonce,
+	type SessionLifecycle,
 	type SessionRenewalReporter,
 	type SessionRenewalResult,
 	type SessionRenewalStep,
@@ -144,6 +149,8 @@ export interface EstablishSessionDeps<S extends string = never, T extends string
 	/** Absent: no record is created, and the express session alone is authenticated. */
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
+	/** Where installed, the session lifecycle the record's lifecycle is opened in. */
+	readonly sessionLifecycle?: Pick<SessionLifecycle, "open">;
 	/** The session's lifetime: the record expires this long after `authTime`. */
 	readonly sessionTtlMs: number;
 	/** Writes beside the record before the express session is regenerated. */
@@ -170,6 +177,25 @@ export type EstablishSessionResult<S extends string = never, T extends string = 
 	  };
 
 /**
+ * Opens `record`'s lifecycle in `lifecycle`. Anything but `opened` throws,
+ * named as the lifecycle's so its line tells it apart from the store's.
+ */
+const openLifecycle = async (
+	lifecycle: Pick<SessionLifecycle, "open">,
+	record: EstablishedRecord,
+): Promise<void> => {
+	let opened: Awaited<ReturnType<SessionLifecycle["open"]>>;
+	try {
+		opened = await lifecycle.open(record.sid, { sub: record.sub, expiresAt: record.expiresAt });
+	} catch (cause) {
+		throw new Error("the session lifecycle could not open the session", { cause });
+	}
+	if (opened.outcome !== "opened") {
+		throw new Error(`the session lifecycle answered ${opened.outcome} to the open`);
+	}
+};
+
+/**
  * Establish the session admission established (sequence and rollback in this
  * file's header). Answers `established` with the record's `sid` (`undefined`
  * without a store), or `unavailable` naming the store and step that failed,
@@ -187,7 +213,7 @@ export async function establishSession<S extends string = never, T extends strin
 			"establishSession: the establishment must be one admitPrimary, resumePrimary or establishWithoutAsking built",
 		);
 	}
-	const { req, userSessionStore, subjectSessionIndex, sessionTtlMs } = deps;
+	const { req, userSessionStore, subjectSessionIndex, sessionLifecycle, sessionTtlMs } = deps;
 	const {
 		subject: sub,
 		user,
@@ -258,6 +284,7 @@ export async function establishSession<S extends string = never, T extends strin
 
 	if (record !== undefined && userSessionStore !== undefined) {
 		try {
+			if (sessionLifecycle !== undefined) await openLifecycle(sessionLifecycle, record);
 			await userSessionStore.create({
 				sid: record.sid,
 				sub,
