@@ -612,8 +612,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	 * Runs the work of `record`, which no store holds, in its phases: each
 	 * phase only once every item of the earlier ones has run. Throws when an
 	 * item fails, leaving the later phases unrun. Nothing records what ran, so
-	 * a retry runs it all again only while the user session, deleted in the
-	 * phase before the last, is still there.
+	 * a retry runs it all again only while the user session, deleted in its
+	 * phase, before the subject's entry where one is kept, is still there.
 	 */
 	const runUnsaved = async (sid: string, record: SessionLifecycleRecord): Promise<void> => {
 		const limit = callLimit(CLOSE_CONCURRENCY);
@@ -667,7 +667,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		// since the read above, and whose closed record then left the store,
 		// let the open land. The close deletes the user session before it
 		// closes the record, so the session read first, still read now, was
-		// never closed; one gone, or another created under the sid since, was.
+		// not closed before the join landed; one gone, or another created
+		// under the sid since, was. A join refused here leaves the record it
+		// opened active, with what it joined, until the record lapses; the
+		// withdraw revokes the family and removes the federation's tokens.
 		if (read === null) {
 			const again = await userSessionOf(sid);
 			if (again === null || !sameSession(again, session)) return false;

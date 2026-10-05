@@ -333,6 +333,19 @@ describe("join", () => {
 		expect((await h.read())?.value.participants.map((p) => p.id)).toEqual(["google"]);
 	});
 
+	it("lets two adopting joins at once both join, onto one record", async () => {
+		const h = harness({ familyIndexWithoutEnd: true });
+		await h.establish(SID, { open: false });
+		const answers = await Promise.all([
+			h.lifecycle.join(SID, { rp: relyingParty("a") }),
+			h.lifecycle.join(SID, { rp: relyingParty("b") }),
+		]);
+		expect(answers).toEqual([{ outcome: "joined" }, { outcome: "joined" }]);
+		const record = await h.read();
+		expect(record?.value.state).toBe("active");
+		expect(record?.value.participants.map((p) => p.id).sort()).toEqual(["a", "b"]);
+	});
+
 	it("refuses a join whose session a close ended, and whose closed record went, while it adopted the record", async () => {
 		// The race: the join reads no record and a live user session; before
 		// it opens the record, a close of the session completes and its closed
@@ -369,6 +382,9 @@ describe("join", () => {
 			outcome: "refused",
 		});
 		expect(h.revoked.has("f-late")).toBe(true);
+		// Once by the close, which lists it through the per-session index the
+		// join wrote first, and once by the refused join's withdraw.
+		expect(h.calls.filter((call) => call === "revoke_family:f-late")).toHaveLength(2);
 		expect(h.calls).toContain(`delete_federation_tokens:${SID}:google`);
 		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
 	});
@@ -437,6 +453,9 @@ describe("join", () => {
 			};
 			expect(await h.lifecycle.join(SID, { familyId: "f-stale" })).toEqual({ outcome: "refused" });
 			expect(h.revoked.has("f-stale")).toBe(true);
+			// Once by the close, which lists it through the per-session index the
+			// join wrote first, and once by the refused join's withdraw.
+			expect(h.calls.filter((call) => call === "revoke_family:f-stale")).toHaveLength(2);
 			const record = readVersionedSessionLifecycle(
 				await (fresh as SessionLifecycleStore).read(SID),
 			);
@@ -452,6 +471,9 @@ describe("join", () => {
 			};
 			expect(await h.lifecycle.join(SID, { familyId: "f-stale" })).toEqual({ outcome: "refused" });
 			expect(h.revoked.has("f-stale")).toBe(true);
+			// Once by the close, which lists it through the per-session index the
+			// join wrote first, and once by the refused join's withdraw.
+			expect(h.calls.filter((call) => call === "revoke_family:f-stale")).toHaveLength(2);
 		});
 	});
 

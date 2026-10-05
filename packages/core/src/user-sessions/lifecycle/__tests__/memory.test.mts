@@ -213,14 +213,34 @@ describe("createInMemorySessionLifecycleStore", () => {
 			expect((await read(store, "new"))?.value.state).toBe("active");
 		});
 
-		it("full, keeps a closed record whose session has not ended, so the sid cannot be opened again", async () => {
+		it("full, evicts a closed record whose session has not ended", async () => {
 			const time = clock();
 			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries: 2 });
 			await closed(store, "closed", 5 * HOUR);
 			await openFor(store, time, "active");
-			await expect(openFor(store, time, "new")).rejects.toThrow(/full/);
-			expect((await read(store, "closed"))?.value.state).toBe("closed");
-			expect((await store.open("closed", "u", new Date(START + HOUR))).outcome).toBe("refused");
+			expect(await openFor(store, time, "new")).toBe("opened");
+			expect(await read(store, "closed")).toBeNull();
+			expect((await read(store, "active"))?.value.state).toBe("active");
+		});
+
+		it("full of a login and logout loop's closed records, still opens a new login's", async () => {
+			const time = clock();
+			const maxEntries = 50;
+			const store = createInMemorySessionLifecycleStore({ now: time.now, maxEntries });
+			for (let i = 0; i < maxEntries; i++) {
+				expect(await openFor(store, time, `login-${i}`, 24 * HOUR)).toBe("opened");
+				const answer = readSessionCloseAnswer(
+					await store.beginClose(`login-${i}`, { ...CLOSE, retainMs: 24 * HOUR }),
+				);
+				if (answer.outcome !== "closing") throw new Error("not closing");
+				await store.completeIf(`login-${i}`, answer.generation, "user_session");
+				time.advance(1);
+			}
+			for (let i = 0; i < 3; i++) {
+				expect(await openFor(store, time, `next-${i}`, 24 * HOUR)).toBe("opened");
+				expect(await read(store, `login-${i}`)).toBeNull();
+			}
+			expect((await read(store, `login-${maxEntries - 1}`))?.value.state).toBe("closed");
 		});
 
 		it("full, drops lapsed records first and evicts nothing when that makes room", async () => {

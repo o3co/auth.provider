@@ -21,16 +21,16 @@
  * this process. A record lapses whole at its retention, judged on the
  * store's clock. It holds at most `maxEntries` records and `maxParticipants`
  * per record. Full, it drops lapsed records and, if that makes no room,
- * evicts the `closed` record of an ended session (its `expiresAt` not after
- * the store's clock) whose retention ends first; it rejects when there is
- * none. So a full store may drop such a record before its retention, which
- * the session lifecycle allows: it closes a record only after deleting its
- * user session, and `open` and `join` refuse an ended session, so the sid
- * can be neither opened nor joined again. A close repeated after the
+ * evicts the `closed` record whose retention ends first; it rejects when
+ * there is none. So a full store may drop a closed record before its
+ * retention, which the session lifecycle allows: it closes a record only
+ * after deleting its user session, and a join that adopts a session with no
+ * record is refused unless the user session it read first is still there
+ * once it has written (#1468), so a closed session is not joined again
+ * through a record that left the store. A close repeated after the
  * eviction, or `federations`, then answers no snapshot, as after the
- * record's retention. A record not closed, or closed while its session has
- * not ended, is never evicted: that would let a closed session be opened
- * and joined again, or leave its work undone.
+ * record's retention. An active or closing record is never evicted: that
+ * would drop a live session's fence, or leave its close work undone.
  */
 
 import {
@@ -164,18 +164,14 @@ export function createInMemorySessionLifecycleStore(
 			}
 			if (records.size >= maxEntries) {
 				// One pass: drop the lapsed records, and note the closed record
-				// of an ended session whose retention ends first, the first held
-				// on a tie, to evict only if dropping makes no room.
+				// whose retention ends first, the first held on a tie, to evict
+				// only if dropping makes no room.
 				let evictable: string | undefined;
 				let evictableUntilMs = Number.POSITIVE_INFINITY;
 				for (const [key, entry] of records) {
 					if (entry.retainUntilMs <= at) {
 						records.delete(key);
-					} else if (
-						entry.state === "closed" &&
-						entry.expiresAtMs <= at &&
-						entry.retainUntilMs < evictableUntilMs
-					) {
+					} else if (entry.state === "closed" && entry.retainUntilMs < evictableUntilMs) {
 						evictable = key;
 						evictableUntilMs = entry.retainUntilMs;
 					}
@@ -183,7 +179,7 @@ export function createInMemorySessionLifecycleStore(
 				if (records.size >= maxEntries) {
 					if (evictable === undefined) {
 						throw new Error(
-							`${owner}: full at ${maxEntries} records, none of them closed for an ended session; nothing was written`,
+							`${owner}: full at ${maxEntries} records, none of them closed; nothing was written`,
 						);
 					}
 					records.delete(evictable);

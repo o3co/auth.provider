@@ -295,9 +295,12 @@ record then left the store, let the open land, and the close deleted the
 user session before it closed the record, so a join that finds it gone, or
 finds another session created under the sid since (another subject,
 authentication time or end), is refused and withdrawn like one the record
-refuses.
-Liveness of a session with no record reads its user session alone. The bridge and adoption go with the old stores; an absent
-record then reads as closed.
+refuses. A join refused there leaves the record it opened active, with what
+it joined, until the record lapses; the withdraw revokes the family and
+removes the federation's tokens, and no live session is read for the sid.
+Liveness of a session with no record reads its user session alone. The
+bridge and adoption go with the old stores; an absent record then reads as
+closed.
 
 Two known limitations of the bridge are accepted as interim. It exists only
 between this amendment and the removal of the bridge and adoption, which
@@ -376,20 +379,20 @@ snapshot's. Once the bridge goes, the record's order alone holds it. A logout re
 federation tokens that carry the upstream `id_token_hint`. A logout whose
 close commits with work still pending is audited as `logout.close_pending`.
 
-## Amendment 2026-10-06 — the memory store, full, evicts a closed record of an ended session
+## Amendment 2026-10-06 — the memory store, full, evicts a closed record
 
 The memory store no longer only refuses when full. It drops lapsed records
-and, if that makes no room, evicts the `closed` record of an ended session
-(its `expiresAt` not after the store's clock) whose retention ends first; it
-refuses when there is none. A login and logout loop on one account would
-otherwise fill it with closed records and refuse every login until they
-lapsed.
+and, if that makes no room, evicts the `closed` record whose retention ends
+first; it refuses when there is none. A login and logout loop on one
+account would otherwise fill it with closed records and refuse every login
+until they lapsed.
 
-Such a record may so go before its retention. The service closes a record
-only after deleting its user session, and the store's `open` and `join`
-refuse an ended session, so the sid can be neither opened nor joined again
-and no live session is read for it either way. A repeated close or
-`federations` then answers no snapshot, as after the record's retention. A
-record not closed, or closed while its session has not ended, is never
-evicted: a join racing a close could otherwise open the sid again and join
-a closed session. The port and its contract are unchanged.
+A closed record may so go before its retention. What makes that safe is
+the service's re-check on a join that adopts a session (#1468): the service
+closes a record only after deleting its user session, and a join that
+finds no record, opens one and joins is refused unless the user session it
+read first is still there, so a closed session is not joined again through
+a record that left the store. A repeated close or `federations` then
+answers no snapshot, as after the record's retention. An active or closing
+record is never evicted: that would drop a live session's fence, or leave
+its close work undone. The port and its contract are unchanged.
