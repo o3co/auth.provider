@@ -51,8 +51,8 @@
  * thrown for any other primary, a federated login having no such read —
  * then a recent primary (core's `authenticationFreshness`: `authTime`, or for
  * a federated login the earlier of that and the upstream's recorded
- * authentication, never recent when the upstream showed no time; a second
- * factor does not stand in for it), then the subject's first-binding mark
+ * authentication once the federation callback records it, never recent when
+ * the upstream showed no time; a second factor does not stand in for it), then the subject's first-binding mark
  * (`firstBindingMark.mts`), read against when the session was established: a
  * session it distrusts, whose recorded witness may predate the subject's
  * enrollment, is sent to log in — said at info — and a mark that cannot be
@@ -442,6 +442,16 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return (await mayHoldCountingFactor(session.sub)) ? verdict : REAUTHENTICATE;
 	};
 
+	/** Whether `freshness` is a recent primary at `nowMs`: within `mfa.manage.maxAgeSeconds`. */
+	const recentPrimary = (freshness: Date | undefined, nowMs: number): boolean =>
+		freshness !== undefined &&
+		isRecentMfa(
+			{ authTime: freshness, mfaAt: undefined },
+			{ holdsCountingFactor: false },
+			recentMfaMaxAgeSeconds,
+			nowMs,
+		);
+
 	/**
 	 * A first binding in `session`, whose subject holds no record that may
 	 * count: what the session recorded of its login's `User` — none is a new
@@ -468,16 +478,22 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			if (primary === PASSWORD_AMR) return REAUTHENTICATE;
 			inconsistent(session.sub, facts.witness, { purpose: "session", action: action.name });
 		}
-		const freshness = authenticationFreshness(session.authTime, recorded);
-		const recentPrimary =
-			freshness !== undefined &&
-			isRecentMfa(
-				{ authTime: freshness, mfaAt: undefined },
-				{ holdsCountingFactor: false },
-				recentMfaMaxAgeSeconds,
-				nowMs,
-			);
-		if (!recentPrimary) return REAUTHENTICATE;
+		if (!recentPrimary(authenticationFreshness(session.authTime, recorded), nowMs)) {
+			// Said only where the upstream is why: the callback alone was recent.
+			const reason =
+				recorded.upstreamAuthTime === null
+					? "upstream_unknown"
+					: recorded.upstreamAuthTime !== undefined && recentPrimary(session.authTime, nowMs)
+						? "upstream_stale"
+						: undefined;
+			if (reason !== undefined) {
+				logger.info(
+					{ sub: session.sub, action: action.name, reason },
+					"mfa_first_binding_upstream_not_recent",
+				);
+			}
+			return REAUTHENTICATE;
+		}
 		const mark = readFirstBindingMark(await firstBindingAt(session.sub, nowMs), nowMs);
 		if (firstBindingMark.distrusts(session.authTime.getTime(), mark)) {
 			logger.info({ sub: session.sub, action: action.name }, "mfa_first_binding_distrusted");

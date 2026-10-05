@@ -465,6 +465,68 @@ describe("a subject with no counting factor, in a federated session whose upstre
 		});
 	}
 
+	it("binds at exactly the window's edge over the upstream's time, and not a millisecond past it", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-10-06T00:00:00Z") });
+		try {
+			const { requirement } = build({ requireEmailProof: "never" });
+			const edge = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 300_000 });
+			expect(await requirement.admit(inputFor(edge))).toEqual(MET);
+			const past = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 300_001 });
+			expect(await requirement.admit(inputFor(past))).toEqual(REAUTHENTICATE);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("reads an upstream time later than the callback as the callback's: the earlier of the two is the freshness", async () => {
+		const { requirement } = build({ requireEmailProof: "never" });
+		const later = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: -60_000 });
+		expect(await requirement.admit(inputFor(later))).toEqual(MET);
+		const staleCallback = sessionOf("fed", facts(), { ageMs: 301_000, upstreamAgeMs: -60_000 });
+		expect(await requirement.admit(inputFor(staleCallback))).toEqual(REAUTHENTICATE);
+	});
+
+	it("sends a session whose stored upstream time cannot be read to log in again", async () => {
+		const { requirement } = build({ requireEmailProof: "never" });
+		const session = sessionOf("fed", facts(), { ageMs: 1_000 });
+		const malformed = {
+			...session,
+			authentication: { ...session.authentication, upstreamAuthTime: "2026-10-06" },
+		} as unknown as UserSession;
+		expect(await requirement.admit(inputFor(malformed))).toEqual(REAUTHENTICATE);
+	});
+
+	it("says at info why a federated session's primary is not recent, when the upstream is the reason", async () => {
+		const info = vi.fn();
+		const logger = { ...silentLogger(), info } as unknown as Logger;
+		const { requirement } = build({ logger });
+		await requirement.admit(
+			inputFor(sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: null }), "session.link"),
+		);
+		await requirement.admit(
+			inputFor(sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 301_000 }), "session.link"),
+		);
+		expect(info.mock.calls).toEqual([
+			[
+				{ sub: SUBJECT, action: "session.link", reason: "upstream_unknown" },
+				"mfa_first_binding_upstream_not_recent",
+			],
+			[
+				{ sub: SUBJECT, action: "session.link", reason: "upstream_stale" },
+				"mfa_first_binding_upstream_not_recent",
+			],
+		]);
+		// A callback that is itself too old is no upstream's doing: nothing said.
+		info.mockClear();
+		await requirement.admit(
+			inputFor(
+				sessionOf("fed", facts(), { ageMs: 301_000, upstreamAgeMs: 400_000 }),
+				"session.link",
+			),
+		);
+		expect(info).not.toHaveBeenCalled();
+	});
+
 	it("holds the first-binding mark to when the session was established, not to the upstream's authentication", async () => {
 		// The upstream authenticated the user inside the mark's window, the
 		// callback established the session after it: the mark distrusts what
