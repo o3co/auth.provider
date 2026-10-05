@@ -50,6 +50,7 @@ import { authenticateClient } from "./clientAuthentication.mjs";
 import { delegationRefusal } from "./delegation.mjs";
 import { GRANT_TYPE } from "./grantType.mjs";
 import { issueAccessToken } from "./issuance.mjs";
+import { liveSessionSubject } from "./sessionLiveness.mjs";
 import { issuedTarget, type RequestTargets, requestTargets } from "./targetCeilings.mjs";
 import { readTokenRequest, type TokenRequest } from "./tokenRequest.mjs";
 import {
@@ -481,10 +482,15 @@ async function sessionRefusal(
 	const lifecycle = deps.sessionLifecycle;
 	const store = deps.userSessionStore;
 	const outage = (where: Readonly<Record<string, unknown>>, err?: unknown): GrantHandlerResult => {
-		(deps.logger ?? consoleLogger).error(
-			{ ...where, role, ...(err === undefined ? {} : { err: loggableError(err) }) },
-			"token_exchange_session_store_unavailable",
-		);
+		const logger = deps.logger ?? consoleLogger;
+		if (err === undefined) {
+			logger.error({ ...where, role }, "token_exchange_session_store_unavailable");
+		} else {
+			logger.error(
+				{ ...where, role, err: loggableError(err) },
+				"token_exchange_session_store_unavailable",
+			);
+		}
 		return {
 			result: {
 				status: 503,
@@ -499,14 +505,14 @@ async function sessionRefusal(
 	let live: boolean;
 	if (lifecycle !== undefined) {
 		const where = { store: "session_lifecycle", step: "liveness" };
-		let answer: Awaited<ReturnType<typeof lifecycle.liveness>>;
+		let session: Awaited<ReturnType<typeof liveSessionSubject>>;
 		try {
-			answer = await lifecycle.liveness(sid);
+			session = await liveSessionSubject(lifecycle, sid);
 		} catch (err) {
 			return outage(where, err);
 		}
-		if (answer.outcome === "unavailable") return outage(where);
-		live = answer.outcome === "live" && answer.session.sub === validated.sub;
+		if (session === "unavailable") return outage(where);
+		live = session !== "not_live" && session.subject === validated.sub;
 	} else if (store !== undefined) {
 		try {
 			live = (await store.get(sid))?.sub === validated.sub;
