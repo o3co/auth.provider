@@ -204,6 +204,12 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   refused. Delete the key.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
+- `device-grant.store` (and `oauth.deviceAuthorization.store`), at any value,
+  refuses the boot wherever `deviceAuthorizationGrantModule` is installed,
+  the grant on or off (#728). Delete the line. An enabled device grant needs
+  a `deviceCodeStore` component (`memoryDeviceCodeStoreModule` on one
+  replica, `redisDeviceCodeStoreModule` otherwise); a disabled one needs
+  nothing.
 
 ### Values read more strictly
 
@@ -597,9 +603,9 @@ actions.
 
 - **device-grant** off: no `404` on its two paths, no `device_verification`
   budget, no requirement on `clientRepository` or `keyStore`, no absence
-  policy. A deployment that leaves it off may drop `device-grant.store =
-  "unsupported"`, and `"auditSink"` from `core.declaredAbsent` if only the
-  device grant asked for it (#1175).
+  policy. A deployment that leaves it off may drop `"auditSink"` from
+  `core.declaredAbsent` if only the device grant asked for it (#1175), and
+  deletes `device-grant.store` ([Keys removed](#keys-removed)).
 - **federation-grants** off: nothing mounted; a composition that wants the
   JSON `404` mounts `createDisabledFederationGrantRouter()` at
   `FEDERATION_GRANTS_MOUNT_PATH` itself (#1174).
