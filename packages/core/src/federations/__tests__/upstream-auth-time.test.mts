@@ -42,6 +42,23 @@ describe("readUpstreamAuthTime — an upstream id_token's auth_time", () => {
 		expect(readUpstreamAuthTime(aheadS, NOW_MS)).toEqual(new Date(aheadS * 1000));
 	});
 
+	it("takes an adapter's own ahead tolerance in place of the default", () => {
+		const aheadS = NOW_S + 600;
+		expect(readUpstreamAuthTime(aheadS, NOW_MS)).toBe("invalid");
+		expect(readUpstreamAuthTime(aheadS, NOW_MS, 600_000)).toEqual(new Date(aheadS * 1000));
+		expect(readUpstreamAuthTime(aheadS + 1, NOW_MS, 600_000)).toBe("invalid");
+		expect(readUpstreamAuthTime(NOW_S + 1, NOW_MS, 0)).toBe("invalid");
+		expect(readUpstreamAuthTime(NOW_S, NOW_MS, 0)).toEqual(new Date(NOW_MS));
+	});
+
+	it.each([
+		["negative", -1],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+	])("throws a RangeError for an ahead tolerance that is %s", (_label, tolerance) => {
+		expect(() => readUpstreamAuthTime(NOW_S, NOW_MS, tolerance)).toThrow(RangeError);
+	});
+
 	it("answers invalid for an instant further ahead: it would read as fresher than any ask", () => {
 		expect(readUpstreamAuthTime(NOW_S + DEFAULT_CLOCK_SKEW_MS / 1000 + 1, NOW_MS)).toBe("invalid");
 	});
