@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -360,7 +360,7 @@ signs as the module does, so tokens issued under that secret keep verifying.
 | GET | `/session/csrf` | Issue a double-submit CSRF token |
 | POST | `/session/login` | Password login |
 | POST | `/session/logout` | End the browser session — see [what it invalidates](#what-post-sessionlogout-invalidates) |
-| GET | `/session/oauth/federation/:name` | Start a federation (`?redirect_to=`, `?link=1`) |
+| GET | `/session/oauth/federation/:name` | Start a federation (`?redirect_to=`, `?link=1`, and the freshness hints `?prompt=` — only `login` counts — and `?max_age=`, a non-negative integer no larger than 2^53−1; a repeated or malformed hint is `400 invalid_request`) |
 | GET | `/session/oauth/federation/:name/callback` | Callback of a `query` federation; `405` (`Allow: POST`) for a `form_post` one |
 | POST | `/session/oauth/federation/:name/callback` | Callback of a `form_post` federation; `405` (`Allow: GET`) for a `query` one |
 

@@ -130,7 +130,7 @@ export const createStartHandler =
 				.json(
 					errorEnvelope(
 						"invalid_request",
-						"prompt must be a space-delimited list, and max_age a non-negative integer",
+						"prompt must be a space-delimited list, and max_age a non-negative integer no larger than 2^53-1",
 					),
 				);
 		}

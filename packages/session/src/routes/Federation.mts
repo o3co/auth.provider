@@ -239,6 +239,17 @@ export const createRouter = (
 		]),
 	);
 
+	// Whether each installed federation's callback alone meets a freshness ask,
+	// read once at composition from core's reading of `callbackMeetsFreshness`,
+	// as `trustsUpstreamAmr` is.
+	const callbackMeetsFreshness = new Map<string, boolean>(
+		[...federationProviders.keys()].map((name) => [
+			name,
+			Object.hasOwn(federationSettings, name) &&
+				federationSettings[name]?.callbackMeetsFreshness === true,
+		]),
+	);
+
 	const ctx: FederationRouterContext = {
 		federationProviders,
 		federationRedirectPolicyResolver,
@@ -286,7 +297,7 @@ export const createRouter = (
 			log,
 		);
 		if (identity === null) return;
-		const { profile, identityToken, user, lifetime } = identity;
+		const { profile, identityToken, user, lifetime, upstreamAuthTime } = identity;
 
 		// An explicit link request completes or is refused here; it never falls
 		// through to the login path below: a link is not a login.
@@ -390,10 +401,8 @@ export const createRouter = (
 				// The upstream's authentication time (the verified id_token's
 				// `auth_time`), and whether this federation's callback alone meets a
 				// freshness ask when there is none; core records either as it reads them.
-				...(profile.authTime === undefined ? {} : { upstreamAuthTime: profile.authTime }),
-				callbackMeetsFreshness:
-					Object.hasOwn(federationSettings, fed.name) &&
-					federationSettings[fed.name]?.callbackMeetsFreshness === true,
+				...(upstreamAuthTime === undefined ? {} : { upstreamAuthTime }),
+				callbackMeetsFreshness: callbackMeetsFreshness.get(fed.name) === true,
 				authTime: new Date(),
 				redirectTo: undefined,
 				request: loginRequestFacts(req),

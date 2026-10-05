@@ -26,7 +26,11 @@ import type {
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { codeChallenge, type FederationSettings } from "@o3co/auth-provider-core";
+import {
+	codeChallenge,
+	DEFAULT_CLOCK_SKEW_MS,
+	type FederationSettings,
+} from "@o3co/auth-provider-core";
 import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
@@ -681,6 +685,12 @@ describe("account linking across federations", () => {
 				.set("Sec-Fetch-Site", "same-origin");
 			expect(res.status).toBe(302);
 			expect(buildSpy.mock.calls[0]?.[0]).not.toHaveProperty("ask");
+			// What its hint names, it asks.
+			const hinted = await agent
+				.get("/oauth/federation/test?link=1&prompt=login")
+				.set("Sec-Fetch-Site", "same-origin");
+			expect(hinted.status).toBe(302);
+			expect(buildSpy.mock.calls[1]?.[0].ask).toEqual({ login: true });
 		});
 
 		describe("a link start must come from this deployment's own pages", () => {
@@ -1496,6 +1506,45 @@ describe("account linking across federations", () => {
 		};
 
 		describe.each(["login", "link"] as const)("on the %s path", (path) => {
+			it.each([
+				["null", null],
+				["a string", "2026-10-06T00:00:00Z"],
+				["an Invalid Date", new Date(Number.NaN)],
+				["a date before the epoch", new Date(-1_000)],
+				["a date further ahead than hosts' clocks drift", "ahead"],
+			])(
+				"an answer whose authTime is %s is refused as a failed exchange, before core is asked to record it",
+				async (_label, value) => {
+					// An adapter may tolerate more clock skew than core records, or be
+					// buggy: what core would refuse is the upstream's answer refused,
+					// never this server's outage after the code was spent.
+					const authTime =
+						value === "ahead" ? new Date(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000) : value;
+					const provider = makeFakeProvider({
+						exchangeCode: vi.fn(
+							async () =>
+								({
+									issuer: "https://idp.example.com",
+									sub: "external-42",
+									accessToken: "at",
+									expiresAt: null,
+									authTime,
+								}) as unknown as FederationProfile,
+						),
+					});
+					const logger = spyLogger();
+					const { res, fts, repo } = await runCallback(path, provider, logger as unknown as Logger);
+
+					expect(res.status).toBe(502);
+					expect(res.body.error).toBe("exchange_failed");
+					expect(fts.attach).not.toHaveBeenCalled();
+					expect(repo.authenticateByToken).not.toHaveBeenCalled();
+					const warned = logger.warn.mock.calls.map((call) => call[1]);
+					expect(warned).toEqual(["federation_callback_exchange_failed"]);
+					expect(logger.error).not.toHaveBeenCalled();
+				},
+			);
+
 			it.each(["expiresIn", "expiresAt"])(
 				"an answer whose %s cannot be read is refused as a failed exchange, and nothing is linked",
 				async (field) => {
@@ -3554,6 +3603,7 @@ describe("GET /oauth/federation/:name — a freshness hint for the upstream", ()
 		// A space list: only `login` counts.
 		expect((await startWith("?prompt=consent%20login")).params?.ask).toEqual({ login: true });
 		expect((await startWith("?prompt=consent")).params).not.toHaveProperty("ask");
+		expect((await startWith("?prompt=none")).params).not.toHaveProperty("ask");
 		// Empty reads as omitted, as /authorize reads it (RFC 6749 §3.1).
 		expect((await startWith("?prompt=&max_age=")).params).not.toHaveProperty("ask");
 	});

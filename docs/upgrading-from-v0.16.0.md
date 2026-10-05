@@ -555,12 +555,14 @@ The boot refusals you can meet, with their messages, are in
   within the new bound (#774).
 - **The federation start's freshness hints (#1084).** `GET
   /session/oauth/federation/:name` reads optional `prompt` (a space-delimited
-  list, of which only `login` counts) and `max_age` (a non-negative integer).
+  list, of which only `login` counts) and `max_age` (a non-negative integer
+  no larger than 2^53−1).
   An empty value reads as omitted. A repeated or malformed one — a query
   parameter this route used to ignore — is now `400 invalid_request`. The
-  hints, and a start from a browser that already holds an application session
-  (not a link, which is a re-authentication and asks `login`), are passed to
-  the adapter as its freshness ask; the OIDC adapter forwards them as
+  hints are passed to the adapter as its freshness ask. A start from a browser
+  that already holds an application session, and is not a link, is a
+  re-authentication: `login` is asked whether or not the hint named it. A link
+  start asks only what its hint names. The OIDC adapter forwards the ask as
   `prompt=login` / `max_age`, so its IdP prompts a signed-in user who starts a
   federated login again. A login page that links to the federation start
   should forward the `prompt` and `max_age` it finds in `redirect_to`.
