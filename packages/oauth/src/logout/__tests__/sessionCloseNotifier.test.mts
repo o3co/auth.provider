@@ -21,8 +21,10 @@
  */
 
 import {
+	ClientEntrySchema,
 	type ClientRepository,
 	createSymmetricKeyStore,
+	InMemoryClientRepository,
 	type SessionCloseNotice,
 } from "@o3co/auth-provider-core";
 import { decodeJwt, decodeProtectedHeader } from "jose";
@@ -35,11 +37,6 @@ const BCL_EVENT = "http://schemas.openid.net/event/backchannel-logout";
 
 const clients: Record<string, Record<string, unknown>> = {
 	rp: { clientId: "rp", backchannelLogoutUri: "https://rp.example/bc" },
-	"rp-sid": {
-		clientId: "rp-sid",
-		backchannelLogoutUri: "https://rp-sid.example/bc",
-		backchannelLogoutSessionRequired: true,
-	},
 	"rp-no-sid": {
 		clientId: "rp-no-sid",
 		backchannelLogoutUri: "https://rp-no-sid.example/bc",
@@ -157,23 +154,62 @@ describe("createSessionCloseNotifier", () => {
 		await expect(notifier.notify(notice())).rejects.toThrow("key store down");
 	});
 
-	describe("a subject revocation", () => {
-		it("sends a sub-scoped token, with no sid unless the relying party registered for one", async () => {
-			const fetchImpl = answering(200);
-			await notifierWith(fetchImpl).notify(notice({ cause: "subject_revocation" }));
-			const claims = decodeJwt(tokenOf(fetchImpl.mock.calls[0] as [string, RequestInit]));
-			expect(claims.sub).toBe("user-1");
-			expect(claims.sid).toBeUndefined();
-		});
-
-		it("includes the sid where the relying party registered for sids", async () => {
-			const fetchImpl = answering(200);
-			await notifierWith(fetchImpl).notify(
-				notice({ cause: "subject_revocation", clientId: "rp-sid" }),
+	describe("the sid, by one rule for every cause", () => {
+		/** A registry holding `rp`, registered through the client boundary's own defaults. */
+		const registered = (extra: Record<string, unknown> = {}) =>
+			new InMemoryClientRepository(
+				new Map([
+					[
+						"rp",
+						ClientEntrySchema.parse({
+							tokenEndpointAuthMethod: "client_secret_basic",
+							clientSecret: "rp-secret-long-enough",
+							allowedGrantTypes: ["authorization_code"],
+							allowedRedirectUris: ["https://rp.example/cb"],
+							allowedScopes: ["openid"],
+							backchannelLogoutUri: "https://rp.example/bc",
+							...extra,
+						}),
+					],
+				]),
 			);
-			const claims = decodeJwt(tokenOf(fetchImpl.mock.calls[0] as [string, RequestInit]));
-			expect(claims).toMatchObject({ sub: "user-1", sid: "sid-1" });
+
+		it.each(["rp_logout", "subject_revocation"] as const)(
+			"%s carries the sid for a relying party registered with the default",
+			async (cause) => {
+				const fetchImpl = answering(200);
+				await notifierWith(fetchImpl, registered()).notify(notice({ cause }));
+				const claims = decodeJwt(tokenOf(fetchImpl.mock.calls[0] as [string, RequestInit]));
+				expect(claims).toMatchObject({ sub: "user-1", sid: "sid-1" });
+			},
+		);
+
+		it.each(["rp_logout", "subject_revocation"] as const)(
+			"%s leaves the sid out for a relying party that declined it",
+			async (cause) => {
+				const fetchImpl = answering(200);
+				await notifierWith(
+					fetchImpl,
+					registered({ backchannelLogoutSessionRequired: false }),
+				).notify(notice({ cause }));
+				const claims = decodeJwt(tokenOf(fetchImpl.mock.calls[0] as [string, RequestInit]));
+				expect(claims.sid).toBeUndefined();
+				expect(claims.sub).toBe("user-1");
+			},
+		);
+	});
+
+	it("cancels the answer's body, which it never reads", async () => {
+		let cancelled = false;
+		const body = new ReadableStream({
+			cancel() {
+				cancelled = true;
+			},
 		});
+		const fetchImpl = vi.fn(async () => new Response(body, { status: 200 }));
+		await notifierWith(fetchImpl).notify(notice());
+		await Promise.resolve();
+		expect(cancelled).toBe(true);
 	});
 
 	it("leaves the sid out of a session's token where the relying party declined it", async () => {

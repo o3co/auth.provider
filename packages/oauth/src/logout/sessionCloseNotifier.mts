@@ -24,10 +24,8 @@
  * keeps the work pending: the registry or the key store could not answer, the
  * request did not complete, or the answer was 408, 429 or a 5xx.
  *
- * A session's token carries its `sid` unless the relying party declined
- * one (`backchannel_logout_session_required: false`). A subject revocation's
- * is sub-scoped: it carries the `sid` only for a relying party that
- * registered for one.
+ * Every token carries the session's `sid` unless the relying party declined
+ * one (`backchannel_logout_session_required: false`), whatever closed it.
  */
 
 import {
@@ -36,7 +34,6 @@ import {
 	type EventLogger,
 	generateLogoutToken,
 	type KeyStore,
-	type SessionCloseNotice,
 	type SessionCloseNotifier,
 } from "@o3co/auth-provider-core";
 import { postLogoutToken } from "./broadcastBackchannel.mjs";
@@ -57,10 +54,6 @@ export interface SessionCloseNotifierOptions {
 /** Whether an answer that is not a success is worth sending the notice again. */
 const retryable = (status: number): boolean => status === 408 || status === 429 || status >= 500;
 
-/** Whether `notice`'s token carries its `sid`, by the relying party's registration. */
-const carriesSid = (notice: SessionCloseNotice, sessionRequired: boolean | undefined): boolean =>
-	notice.cause === "subject_revocation" ? sessionRequired === true : sessionRequired !== false;
-
 export function createSessionCloseNotifier(
 	options: SessionCloseNotifierOptions,
 ): SessionCloseNotifier {
@@ -74,7 +67,7 @@ export function createSessionCloseNotifier(
 				sub: notice.sub,
 				aud: notice.clientId,
 				sid: notice.sid,
-				includeSid: carriesSid(notice, client.backchannelLogoutSessionRequired),
+				includeSid: client.backchannelLogoutSessionRequired !== false,
 				keyStore: options.keyStore,
 			});
 			const answer = await postLogoutToken(uri, token, {

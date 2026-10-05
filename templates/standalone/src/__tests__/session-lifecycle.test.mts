@@ -20,9 +20,21 @@
  * which the oauth module contributes.
  */
 
-import { type SessionLifecycle, sessionLifecycleModule } from "@o3co/auth-provider-core";
-import { describe, expect, it } from "vitest";
-import { compose } from "./all-modules-composition.fixture.mjs";
+import {
+	type SessionLifecycle,
+	sessionLifecycleModule,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { compose, ISSUER } from "./all-modules-composition.fixture.mjs";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+/** A JWT's claims, unverified. */
+const claimsOf = (token: string): Record<string, unknown> =>
+	JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
 
 describe("the template with the session lifecycle module", () => {
 	it("boots, the oauth module's notifier contributed", async () => {
@@ -35,6 +47,64 @@ describe("the template with the session lifecycle module", () => {
 				outcome: "done",
 				rps: [],
 				federations: [],
+			});
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("tells a relying party that joined, through the oauth module's notifier, when the session closes", async () => {
+		const { handle } = await compose({
+			extraModules: () => [sessionLifecycleModule],
+			extraClients: {
+				"rp-bc": {
+					tokenEndpointAuthMethod: "client_secret_basic",
+					clientSecret: "rp-bc-secret-long-enough",
+					allowedRedirectUris: ["https://rp-bc.test/cb"],
+					allowedScopes: ["openid"],
+					allowedGrantTypes: ["authorization_code"],
+					backchannelLogoutUri: "https://rp-bc.test/logout",
+				},
+			},
+		});
+		try {
+			const components = handle.components as Record<string, unknown>;
+			const lifecycle = components.sessionLifecycle as SessionLifecycle;
+			const sessions = components.userSessionStore as UserSessionStore;
+			const expiresAt = new Date(Date.now() + 3_600_000);
+			await sessions.create({
+				sid: "sid-bc",
+				sub: "u-bc",
+				authTime: new Date(),
+				expiresAt,
+				claims: {},
+				amr: ["pwd"],
+				authentication: undefined,
+			});
+			const rp = {
+				clientId: "rp-bc",
+				backchannelLogoutUri: "https://rp-bc.test/logout",
+				backchannelLogoutSessionRequired: true,
+				frontchannelLogoutUri: undefined,
+				frontchannelLogoutSessionRequired: undefined,
+				registeredAt: new Date(),
+			};
+			expect(await lifecycle.join("sid-bc", { rp, familyId: "family-bc" })).toEqual({
+				outcome: "joined",
+			});
+			const posted = vi
+				.spyOn(globalThis, "fetch")
+				.mockImplementation(async () => new Response(null, { status: 200 }));
+			expect((await lifecycle.close("sid-bc", "rp_logout")).outcome).toBe("done");
+			expect(posted).toHaveBeenCalledTimes(1);
+			const [url, init] = posted.mock.calls[0] as [string, RequestInit];
+			expect(url).toBe("https://rp-bc.test/logout");
+			const token = new URLSearchParams(String(init.body)).get("logout_token");
+			expect(claimsOf(token ?? "")).toMatchObject({
+				iss: ISSUER,
+				aud: "rp-bc",
+				sub: "u-bc",
+				sid: "sid-bc",
 			});
 		} finally {
 			await handle.dispose();

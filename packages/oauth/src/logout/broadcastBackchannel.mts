@@ -53,23 +53,27 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 /**
  * POSTs one logout_token to `uri` as OIDC Back-Channel Logout 1.0 §2.5 has
  * it, a form body, under one deadline (default 5000ms): the relying party's
- * answer, or the rejection of a request that did not complete.
+ * answer's status, its body left unread and cancelled, or the rejection of a
+ * request that did not complete.
  */
 export async function postLogoutToken(
 	uri: string,
 	token: string,
 	options: { readonly fetchImpl?: typeof fetch; readonly timeoutMs?: number } = {},
-): Promise<Response> {
+): Promise<{ readonly ok: boolean; readonly status: number }> {
 	const fetchImpl = options.fetchImpl ?? fetch;
 	const abort = new AbortController();
 	const timer = setTimeout(() => abort.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 	try {
-		return await fetchImpl(uri, {
+		const answer = await fetchImpl(uri, {
 			method: "POST",
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams({ logout_token: token }).toString(),
 			signal: abort.signal,
 		});
+		// Nothing of the body is read: release it.
+		answer.body?.cancel().catch(() => undefined);
+		return { ok: answer.ok, status: answer.status };
 	} finally {
 		clearTimeout(timer);
 	}
