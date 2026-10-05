@@ -404,7 +404,10 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
   are `oauth`'s.
 - `optional`: `logger`, `attemptCounter`, `auditSink`, `subjectSessionIndex`,
-  `subjectRevocation` (the boundary the linking routes' admission reads).
+  `subjectRevocation` (the boundary the linking routes' admission reads),
+  `sessionLifecycleStore` (core's session lifecycle port, which the linking
+  routes' admission reads after a live record: a session closing or closed
+  links nothing).
   `auditSink` unwired must be declared with `core.declaredAbsent = ["auditSink"]`, and
   `subjectSessionIndex` and `subjectRevocation` unwired with
   `oauth.revocation.subject = "unsupported"`, or boot refuses.

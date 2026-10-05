@@ -528,8 +528,10 @@ the same claim, just before the activation), each graded `use` as
 `federationGrantsModule` registers it while `federation-grants.enabled` is set;
 switched off, the module registers none of them. Admission
 reads the durable session behind the cookie — live, the cookie's own
-subject's, not past its `expiresAt` — the subject's sessions boundary through
-`subjectRevocation`, and the registered session requirements. What stays
+subject's, not past its `expiresAt` — the session's lifecycle record through
+`sessionLifecycleStore` when wired (one closing or closed is not admitted),
+the subject's sessions boundary through `subjectRevocation`, and the
+registered session requirements. What stays
 here is the flow's own: the intent's subject, the browser binding (the
 express session and the durable `sid` a challenge was issued to), the
 grant's current intent, the client's permission, the connection's pins and
