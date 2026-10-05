@@ -142,7 +142,6 @@ async function buildApp(): Promise<Harness> {
 		"refresh_token",
 		createRefreshTokenGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-			config,
 			...grantSettingsFrom(config),
 			keyStore,
 			refreshTokenFamilyRotation: rotation,

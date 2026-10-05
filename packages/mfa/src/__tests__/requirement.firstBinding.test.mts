@@ -117,6 +117,8 @@ function sessionOf(
 		readonly sid?: string;
 		/** A password session's second factor this long ago; its sign-in's age by default, and none when `null`. */
 		readonly mfaAgeMs?: number | null;
+		/** A federated session's upstream authentication this long ago; none recorded by default, and `null` when it showed none. */
+		readonly upstreamAgeMs?: number | null;
 	} = {},
 ): UserSession {
 	const now = Date.now();
@@ -151,6 +153,12 @@ function sessionOf(
 						federation: "google",
 						upstreamAmr: undefined,
 						mfaAt: undefined,
+						...(options.upstreamAgeMs === undefined
+							? {}
+							: {
+									upstreamAuthTime:
+										options.upstreamAgeMs === null ? null : new Date(now - options.upstreamAgeMs),
+								}),
 					},
 				}),
 		...(recorded === undefined ? {} : { enrollmentFacts: recorded }),
@@ -166,6 +174,8 @@ interface BuildOptions {
 	readonly transactionStore?: MfaTransactionStore;
 	readonly events?: AuditEvent[];
 	readonly logger?: Logger;
+	/** `mfa.manage.maxAgeSeconds`; 300 by default. */
+	readonly recentMfaMaxAgeSeconds?: number;
 }
 
 /** The requirement over `options`: TOTP and recovery codes installed, a mail sender wired, `when-mail`, no record held. */
@@ -180,7 +190,7 @@ function build(options: BuildOptions = {}) {
 		factorStore: factorStoreHolding(...(options.records ?? [])),
 		transactions: createLoginTransactions({ store: transactionStore, ttlSeconds: 600 }),
 		stepUpPage: PAGE,
-		recentMfaMaxAgeSeconds: 300,
+		recentMfaMaxAgeSeconds: options.recentMfaMaxAgeSeconds ?? 300,
 		logger: options.logger ?? silentLogger(),
 		...(events === undefined
 			? {}
@@ -423,6 +433,120 @@ describe("a subject with no counting factor whose primary is older than mfa.mana
 			expect(events).toHaveLength(2);
 		});
 	}
+});
+
+describe("a subject with no counting factor, in a federated session whose upstream authenticated it", () => {
+	for (const mode of MODES) {
+		it(`${mode}: reads the recent primary over the session's freshness — an upstream authentication inside the window binds as the callback alone does`, async () => {
+			const { requirement } = build({ mode, requireEmailProof: "never" });
+			for (const action of ACTIONS) {
+				const fresh = sessionOf("fed", facts(), { upstreamAgeMs: 120_000 });
+				expect(await requirement.admit(inputFor(fresh, action)), action).toEqual(MET);
+			}
+		});
+
+		it(`${mode}: is sent to log in again when the upstream authenticated it longer ago than the window, however recent the callback`, async () => {
+			const transactionStore = createMemoryMfaTransactionStore();
+			const flag = vi.spyOn(transactionStore, "emailProofRequiredAtNextBinding");
+			const { requirement } = build({ mode, transactionStore });
+			for (const action of ACTIONS) {
+				const stale = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 301_000 });
+				expect(await requirement.admit(inputFor(stale, action)), action).toEqual(REAUTHENTICATE);
+			}
+			expect(flag).not.toHaveBeenCalled();
+		});
+
+		it(`${mode}: is sent to log in again when the upstream showed no authentication time`, async () => {
+			const { requirement } = build({ mode });
+			for (const action of ACTIONS) {
+				const unknown = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: null });
+				expect(await requirement.admit(inputFor(unknown, action)), action).toEqual(REAUTHENTICATE);
+			}
+		});
+	}
+
+	it("binds at exactly the window's edge over the upstream's time, and not a millisecond past it", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-10-06T00:00:00Z") });
+		try {
+			const { requirement } = build({ requireEmailProof: "never" });
+			const edge = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 300_000 });
+			expect(await requirement.admit(inputFor(edge))).toEqual(MET);
+			const past = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 300_001 });
+			expect(await requirement.admit(inputFor(past))).toEqual(REAUTHENTICATE);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("reads an upstream time later than the callback as the callback's: the earlier of the two is the freshness", async () => {
+		const { requirement } = build({ requireEmailProof: "never" });
+		const later = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: -60_000 });
+		expect(await requirement.admit(inputFor(later))).toEqual(MET);
+		const staleCallback = sessionOf("fed", facts(), { ageMs: 301_000, upstreamAgeMs: -60_000 });
+		expect(await requirement.admit(inputFor(staleCallback))).toEqual(REAUTHENTICATE);
+	});
+
+	it("sends a session whose stored upstream time cannot be read to log in again", async () => {
+		const { requirement } = build({ requireEmailProof: "never" });
+		const session = sessionOf("fed", facts(), { ageMs: 1_000 });
+		const malformed = {
+			...session,
+			authentication: { ...session.authentication, upstreamAuthTime: "2026-10-06" },
+		} as unknown as UserSession;
+		expect(await requirement.admit(inputFor(malformed))).toEqual(REAUTHENTICATE);
+	});
+
+	it("says at info why a federated session's primary is not recent, when the upstream is the reason", async () => {
+		const info = vi.fn();
+		const logger = { ...silentLogger(), info } as unknown as Logger;
+		const { requirement } = build({ logger });
+		await requirement.admit(
+			inputFor(sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: null }), "session.link"),
+		);
+		await requirement.admit(
+			inputFor(sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 301_000 }), "session.link"),
+		);
+		expect(info.mock.calls).toEqual([
+			[
+				{ sub: SUBJECT, action: "session.link", reason: "upstream_unknown" },
+				"mfa_first_binding_upstream_not_recent",
+			],
+			[
+				{ sub: SUBJECT, action: "session.link", reason: "upstream_stale" },
+				"mfa_first_binding_upstream_not_recent",
+			],
+		]);
+		// A callback that is itself too old is no upstream's doing: nothing said.
+		info.mockClear();
+		await requirement.admit(
+			inputFor(
+				sessionOf("fed", facts(), { ageMs: 301_000, upstreamAgeMs: 400_000 }),
+				"session.link",
+			),
+		);
+		expect(info).not.toHaveBeenCalled();
+	});
+
+	it("holds the first-binding mark to when the session was established, not to the upstream's authentication", async () => {
+		// The upstream authenticated the user inside the mark's window, the
+		// callback established the session after it: the mark distrusts what
+		// was established before another session bound a factor, so this one
+		// is not distrusted. A window wide enough for both to be recent.
+		const transactionStore = createMemoryMfaTransactionStore();
+		const session = sessionOf("fed", facts(), { ageMs: 1_000, upstreamAgeMs: 600_000 });
+		const mark = session.authTime.getTime() - DEFAULT_CLOCK_SKEW_MS - FIRST_BINDING_LEASE_MS - 1;
+		vi.spyOn(transactionStore, "firstBindingAt").mockImplementation(async () => mark);
+		const { requirement } = build({
+			transactionStore,
+			requireEmailProof: "never",
+			recentMfaMaxAgeSeconds: 900,
+		});
+		expect(await requirement.admit(inputFor(session))).toEqual(MET);
+		// The same mark against the upstream's time would distrust it.
+		expect(mark + DEFAULT_CLOCK_SKEW_MS + FIRST_BINDING_LEASE_MS).toBeGreaterThan(
+			session.authTime.getTime() - 600_000 + 1_000,
+		);
+	});
 });
 
 describe("under required, a password session without a second factor whose subject holds no counting factor", () => {

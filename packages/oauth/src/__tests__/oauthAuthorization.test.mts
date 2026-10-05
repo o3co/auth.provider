@@ -22,7 +22,6 @@ import {
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
 	defineModule,
-	type GrantDependencies,
 	type GrantPolicyHook,
 	type Logger,
 	type Module,
@@ -646,13 +645,6 @@ describe("createRefreshTokenGrant — refreshTokenFamilyRotation forwarding", ()
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 		const baseDeps: RefreshTokenGrantDeps = {
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-			config: {
-				oauth: {
-					jwt: { secret: "test-secret" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-				},
-			} as unknown as GrantDependencies["config"],
 			oauthTokenSettings,
 			tokenBindingSettings: createTestTokenBindingSettings(),
 			keyStore,
@@ -686,6 +678,72 @@ describe("createRefreshTokenGrant — refreshTokenFamilyRotation forwarding", ()
 		});
 
 		expect(rotateSpy).toHaveBeenCalled();
+	});
+});
+
+describe("oauthAuthorizationGrantsModule — the refresh_token grant's unknown-family policy, from the section", () => {
+	const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
+
+	/** The status the module's refresh_token grant answers a token of a family no record holds, built over `refreshToken`. */
+	async function statusFor(refreshToken: Record<string, unknown>): Promise<number> {
+		const factory = oauthAuthorizationGrantsModule.contributes?.grants?.refresh_token;
+		if (factory === undefined) return expect.fail("the module contributes no refresh_token grant");
+		const handler = await factory({
+			section: oauthAuthorizationConfigSchema.parse({
+				grants: { refreshToken: { enabled: true, ...refreshToken } },
+			}),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			oauthTokenSettings,
+			tokenBindingSettings: createTestTokenBindingSettings(),
+			keyStore,
+			refreshTokenFamilyRotation: {
+				register: async () => {},
+				rotate: async () => ({ outcome: "unknown_family" }),
+			},
+			refreshTokenFamilyRevocation: {
+				revokeFamily: async () => {},
+				isFamilyRevoked: async () => false,
+			},
+		} as never);
+		if (handler === null) return expect.fail("the grant is switched on");
+		const { generateToken } = await import("@o3co/auth-provider-core");
+		const rt = await generateToken(
+			{ family_id: "fam-unknown" },
+			{
+				expiresIn: 3600,
+				keyStore,
+				issuer: "test-issuer",
+				audience: "client-1",
+				subject: "user-1",
+				authorizedParty: "client-1",
+				scope: null,
+				tokenType: "rt+jwt",
+			},
+		);
+		const { result } = await handler.handle({
+			body: { refresh_token: rt.token },
+			session: {},
+			issuer: "test-issuer",
+			metadata: {},
+			authenticatedClient: { clientId: "client-1", tokenEndpointAuthMethod: "client_secret_basic" },
+		});
+		return result.status;
+	}
+
+	it("accepts a family-less chain under grants.refreshToken.unknownFamilyPolicy = accept", async () => {
+		expect(await statusFor({ unknownFamilyPolicy: "accept" })).toBe(200);
+	});
+
+	it.each([
+		["reject", { unknownFamilyPolicy: "reject" }],
+		["absent", {}],
+	])("rejects it under %s", async (_what, refreshToken) => {
+		expect(await statusFor(refreshToken)).toBe(400);
+	});
+
+	it("requires no config: the section carries the policy", () => {
+		expect(oauthAuthorizationGrantsModule.requires).not.toContain("config");
+		expect(oauthAuthorizationGrantsModule.optional ?? []).not.toContain("config");
 	});
 });
 
@@ -820,13 +878,6 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 		// Now test the refresh grant with grantPolicy
 		const rtDeps: RefreshTokenGrantDeps = {
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-			config: {
-				oauth: {
-					jwt: { secret: "test-secret" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-				},
-			} as unknown as GrantDependencies["config"],
 			oauthTokenSettings,
 			tokenBindingSettings: createTestTokenBindingSettings(),
 			keyStore,
