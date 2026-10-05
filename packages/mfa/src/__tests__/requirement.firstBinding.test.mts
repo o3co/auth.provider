@@ -55,6 +55,8 @@ import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
 import {
 	FACTORS,
+	FIRST_BINDING_LEASE_MS,
+	FIRST_BINDING_MARK,
 	factorRecord,
 	factorStoreHolding,
 	resolverOver,
@@ -192,6 +194,7 @@ function build(options: BuildOptions = {}) {
 		sessionEmailProofAt: (subject, sid, nowMs) =>
 			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
 		firstBindingAt: (subject, nowMs) => transactionStore.firstBindingAt(subject, nowMs),
+		firstBindingMark: FIRST_BINDING_MARK,
 		sealing: SEALING,
 	});
 	return { requirement, transactionStore };
@@ -763,12 +766,14 @@ describe("a subject with no counting factor whose first-binding mark distrusts t
 		}
 	}
 
-	it("refuses a session authenticated at the mark plus the clock skew, and admits one a millisecond later", async () => {
+	it("refuses a session authenticated at the mark plus the clock skew and a factor-set lease — the owner's factor may still have been landing — and admits one a millisecond later", async () => {
 		const session = sessionOf("pwd", facts());
 		const authTime = session.authTime.getTime();
-		const at = markedAt(() => authTime - DEFAULT_CLOCK_SKEW_MS);
+		const within = markedAt(() => authTime - DEFAULT_CLOCK_SKEW_MS - 1);
+		expect(await within.requirement.admit(inputFor(session))).toEqual(REAUTHENTICATE);
+		const at = markedAt(() => authTime - DEFAULT_CLOCK_SKEW_MS - FIRST_BINDING_LEASE_MS);
 		expect(await at.requirement.admit(inputFor(session))).toEqual(REAUTHENTICATE);
-		const after = markedAt(() => authTime - DEFAULT_CLOCK_SKEW_MS - 1);
+		const after = markedAt(() => authTime - DEFAULT_CLOCK_SKEW_MS - FIRST_BINDING_LEASE_MS - 1);
 		expect(await after.requirement.admit(inputFor(session))).toEqual(MET);
 		const none = markedAt(() => null);
 		expect(await none.requirement.admit(inputFor(session))).toEqual(MET);
