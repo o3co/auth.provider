@@ -241,3 +241,86 @@ describe("generateIdToken — amr / acr", () => {
 		expect(payload((await generateIdToken({ ...base, amr: [] })).token).amr).toBeUndefined();
 	});
 });
+
+describe("generateIdToken — issuedAt", () => {
+	const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxxxx");
+	// The clock runs well past the issuance instant, so a claim read off the
+	// clock instead of `issuedAt` shows.
+	const issuedAt = 1_790_000_000;
+	const clockMs = (issuedAt + 120) * 1000 + 500;
+	const base = {
+		sub: "u-1",
+		aud: "client-1",
+		authTime: new Date((issuedAt - 60) * 1000),
+		sid: "sid-1",
+		scopes: ["openid"],
+		userClaims: {},
+		keyStore,
+		issuer: "https://auth.example.com",
+	};
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("signs iat as issuedAt and measures exp from it", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: clockMs });
+		const { token } = await generateIdToken({ ...base, issuedAt, expiresIn: 600 });
+		const payload = decodeJwt(token);
+		expect(payload.iat).toBe(issuedAt);
+		expect(payload.exp).toBe(issuedAt + 600);
+		expect(payload.auth_time).toBe(issuedAt - 60);
+	});
+
+	it("reads auth_time against issuedAt: an instant up to DEFAULT_CLOCK_SKEW_MS past it is issuedAt", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: clockMs });
+		const { token } = await generateIdToken({
+			...base,
+			authTime: new Date(issuedAt * 1000 + DEFAULT_CLOCK_SKEW_MS),
+			issuedAt,
+		});
+		const payload = decodeJwt(token);
+		expect(payload.iat).toBe(issuedAt);
+		expect(payload.auth_time).toBe(issuedAt);
+	});
+
+	it("reads auth_time against issuedAt: an instant further past it is a RangeError, though the clock is later", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: clockMs });
+		const authTime = new Date(issuedAt * 1000 + DEFAULT_CLOCK_SKEW_MS + 1);
+		// The same instant reads fine against the clock ...
+		await expect(generateIdToken({ ...base, authTime })).resolves.toBeDefined();
+		// ... and not against the issuance instant.
+		await expect(generateIdToken({ ...base, authTime, issuedAt })).rejects.toThrow(RangeError);
+	});
+
+	it("refuses an issuedAt that is not a whole number of epoch seconds", async () => {
+		const sign = vi.spyOn(keyStore, "sign");
+		for (const bad of [Number.NaN, 1.5, -1, Number.POSITIVE_INFINITY]) {
+			await expect(generateIdToken({ ...base, issuedAt: bad }), String(bad)).rejects.toThrow(
+				/issuedAt/,
+			);
+		}
+		expect(sign).not.toHaveBeenCalled();
+		sign.mockRestore();
+	});
+
+	it("refuses an issuedAt whose exp would pass Number.MAX_SAFE_INTEGER", async () => {
+		await expect(
+			generateIdToken({
+				...base,
+				authTime: new Date(0),
+				issuedAt: Number.MAX_SAFE_INTEGER - 10,
+				expiresIn: 60,
+			}),
+		).rejects.toThrow(RangeError);
+	});
+
+	it("takes iat from the clock when issuedAt is omitted", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: clockMs });
+		const { token } = await generateIdToken(base);
+		const payload = decodeJwt(token);
+		expect(payload.iat).toBe(Math.floor(clockMs / 1000));
+		expect(payload.exp).toBe(Math.floor(clockMs / 1000) + 3600);
+		expect(payload.auth_time).toBe(issuedAt - 60);
+	});
+});
