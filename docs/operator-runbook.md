@@ -2479,7 +2479,7 @@ lists every breaking change since, and which of the steps below each needs.
    `redis-federation-token-store.scanFallback` ([§5](#operational-notes)),
    `oauth.jwt.legacyTypAccept` (`OAUTH_JWT_LEGACY_TYP_ACCEPT`), and
    `oauth.refreshToken.unknownFamilyPolicy = "accept"`
-   (`packages/core/config/reference.conf`). That last one does not close by
+   (`packages/oauth/config/reference.conf`). That last one does not close by
    waiting: under `"accept"` a refresh token with no family record is
    redeemed with a new one of the full `oauth.refreshToken.expiresIn`, in the
    same family and still with no record, so a client that keeps refreshing

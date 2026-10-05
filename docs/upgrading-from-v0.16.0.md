@@ -1029,6 +1029,15 @@ modules fills them.
   configuration (#728).** A composition that provides the `oauthTokenSettings`
   slot itself calls `oauthTokenSettingsFrom(config.oauth)` where it called
   `oauthTokenSettingsFrom(config)`.
+- **`oauth.refreshToken.unknownFamilyPolicy` and `legacyRtPolicy` are
+  optional in `AppConfig` and `CoreConfig` (#728).** Core's schema holds
+  their shape, the same enums, and no default; core's `reference.conf` no
+  longer sets them or binds `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`. The
+  oauth package's reference sets both to `"reject"` and binds the variable,
+  and the oauth module's section still requires both, so a composition with
+  the oauth module behaves as before. Code that reads either key off
+  `AppConfig` or `CoreConfig` handles `undefined`; a configuration built by
+  hand for core's schema alone may leave both out.
 - **The oauth module is one value, `oauthEndpointsModule` (#728).** Compose it
   where you composed `oauthModule({ config })`. `oauthModule` is deprecated:
   it answers `oauthEndpointsModule` whatever it is handed, and never read its
