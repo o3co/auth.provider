@@ -22,8 +22,9 @@
  * lands once a close has committed, and every part of a session's record
  * lapses at one retention.
  *
- * Its one caller is core's session lifecycle service; no other module reads
- * a generation, a state or a work item. Every answer is read through the
+ * Core's session lifecycle service is its one writer and the one reader of a
+ * generation or a work item; session admission reads a record's state and
+ * subject, to refuse a session closing. Every answer is read through the
  * readers in `readers.mts`.
  */
 

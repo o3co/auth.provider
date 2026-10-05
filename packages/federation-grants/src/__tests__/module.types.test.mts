@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { FederationGrantStore, ProviderDeps, RateLimiter } from "@o3co/auth-provider-core";
+import {
+	AUDIT_SINK_ABSENCE_POLICY,
+	type FederationGrantStore,
+	type ProviderDeps,
+	type RateLimiter,
+} from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	type FederationGrantsModuleDeps,
@@ -27,11 +32,15 @@ import {
 // Compile-time facts: they fire under vitest's typecheck mode only.
 
 const REQUIRES = [
-	"config",
 	"federationGrantBackground",
 	"clientRepository",
 	// The session-admission ADR's D1: every consumer of admission requires it.
 	"sessionRequirementResolver",
+	// The issuer the routes and the acquisition settings are built on.
+	"oauthTokenSettings",
+	// The federations a connection names: whether each is configured and on,
+	// and its issuer and client id.
+	"federationSettings",
 ] as const;
 const OPTIONAL = [
 	"federationGrantStore",
@@ -48,8 +57,6 @@ const OPTIONAL = [
 	"loginEntry",
 	// The CSRF policy the consent answer is held to.
 	"csrfGuard",
-	// The issuer the routes and the acquisition settings are built on.
-	"oauthTokenSettings",
 	// Where an enabled deployment registers the drain's tail.
 	"lifecycleRegistrar",
 ] as const;
@@ -64,6 +71,13 @@ describe("federationGrantsModule's deps are the slots it declares", () => {
 		expectTypeOf<FederationGrantsModuleDeps>().branded.toEqualTypeOf<Declared>();
 		expect([...(federationGrantsModule.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(federationGrantsModule.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
+	});
+
+	it("reads no whole configuration, and leaves the audit sink's declared absence to core's policy", () => {
+		expect(federationGrantsModule.requires).not.toContain("config");
+		expect(federationGrantsModule.absencePolicies).toEqual({
+			auditSink: AUDIT_SINK_ABSENCE_POLICY,
+		});
 	});
 
 	it("refuses, at compile time, a read of a slot the module never declared", () => {
