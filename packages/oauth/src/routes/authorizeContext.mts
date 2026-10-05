@@ -31,6 +31,7 @@ import {
 	type LoginEntry,
 	type PendingConsentStore,
 	readSpaceDelimitedParameter,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type UserSessionStore,
@@ -73,6 +74,8 @@ export interface AuthorizeHandlerOptions {
 	 * Without it (no session-backed login) admission decides on the cookie alone.
 	 */
 	readonly userSessionStore?: UserSessionStore;
+	/** The session lifecycle port admission reads after a live record, when wired. */
+	readonly sessionLifecycleStore?: SessionLifecycleStore;
 	/**
 	 * The subject-revocation boundary admission applies to the live record: a
 	 * session established before the subject's sessions were revoked is refused

@@ -57,6 +57,7 @@ import {
 	loggableError,
 	type PendingConsentRecord,
 	type PendingConsentStore,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type UserSessionStore,
@@ -103,6 +104,8 @@ export interface ConsentRouterOptions {
 	 * later login inherits without being asked.
 	 */
 	readonly userSessionStore?: UserSessionStore;
+	/** The session lifecycle port, read after a live record when wired. */
+	readonly sessionLifecycleStore?: SessionLifecycleStore;
 	/** The subject-revocation boundary, applied to the live record when wired. */
 	readonly subjectRevocation?: SubjectRevocation;
 	/** The registered session requirements; required. */
@@ -154,6 +157,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore,
 		subjectRevocation,
+		sessionLifecycleStore: opts.sessionLifecycleStore,
 		requirements: checkResolver(opts.requirements, "createConsentRouter", [CONSENT_ACTION]),
 		acrTable: {},
 		logger,

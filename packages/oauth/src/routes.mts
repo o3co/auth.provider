@@ -50,6 +50,7 @@ import {
 	readAccessTokenRevocationMode,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SessionRPRegistry,
 	type SubjectRevocation,
@@ -379,6 +380,7 @@ export const createOAuthRouter = async (
 		accessTokenDenylist,
 		subjectRevocation,
 		userSessionStore,
+		sessionLifecycleStore,
 		sessionRPRegistry,
 		sessionFamilyIndex,
 		sessionFederationIndex,
@@ -441,6 +443,8 @@ export const createOAuthRouter = async (
 		 */
 		subjectRevocation?: SubjectRevocation;
 		userSessionStore?: UserSessionStore;
+		/** The session lifecycle port `/authorize` and the consent step admit through, when wired. */
+		sessionLifecycleStore?: SessionLifecycleStore;
 		sessionRPRegistry?: SessionRPRegistry;
 		sessionFamilyIndex?: SessionFamilyIndex;
 		sessionFederationIndex?: SessionFederationIndex;
@@ -599,6 +603,7 @@ export const createOAuthRouter = async (
 					// subject-revocation boundary (applied when wired) and the resolver.
 					userSessionStore,
 					subjectRevocation,
+					sessionLifecycleStore,
 					requirements,
 				})
 			: undefined;
@@ -835,6 +840,7 @@ export const createOAuthRouter = async (
 				// same slots.
 				userSessionStore,
 				subjectRevocation,
+				sessionLifecycleStore,
 				requirements,
 			}),
 		);

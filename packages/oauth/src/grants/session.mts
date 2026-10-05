@@ -63,7 +63,10 @@ export type SessionGrantDeps = Pick<
 	GrantDependencies,
 	"keyStore" | "userSessionStore" | "subjectRevocation" | "grantPolicy" | "logger"
 > &
-	ProviderDeps<"sessionRequirementResolver" | "oauthTokenSettings", "auditSink">;
+	ProviderDeps<
+		"sessionRequirementResolver" | "oauthTokenSettings",
+		"auditSink" | "sessionLifecycleStore"
+	>;
 
 /**
  * The token endpoint's answer to an admission that does not mint, or
@@ -117,6 +120,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
 		subjectRevocation: deps.subjectRevocation,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createSessionGrant"),
 		acrTable: {},
 		logger: deps.logger,

@@ -265,6 +265,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: opts.userSessionStore,
 		subjectRevocation: opts.subjectRevocation,
+		sessionLifecycleStore: opts.sessionLifecycleStore,
 		requirements: checkResolver(opts.requirements, "createAuthorizeHandler", [AUTHORIZE_ACTION]),
 		acrTable: opts.oauth.acrValues,
 		logger: opts.logger,

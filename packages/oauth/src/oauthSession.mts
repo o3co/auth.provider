@@ -72,6 +72,7 @@ const REQUIRES = [
 const OPTIONAL = [
 	"userSessionStore",
 	"subjectRevocation",
+	"sessionLifecycleStore",
 	"auditSink",
 	"grantPolicy",
 	"logger",

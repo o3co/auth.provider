@@ -2152,7 +2152,8 @@ describe("createAuthorizationGrant", () => {
 					["a non-http(s) scheme (a custom scheme)", "com.example.app:/x"],
 					["a non-http(s) scheme (an ftp URL)", "ftp://rp.example/front"],
 					["a value that is not a URL", "not-a-url"],
-					["a value that is not a string", 42],
+					// A number no stack trace's line or column can contain.
+					["a value that is not a string", 987_654_321],
 				])(
 					"refuses a record with %s from a custom repository whole: 503, no RP registered, and neither the warn nor the outage line names the URI",
 					async (_label, uri) => {

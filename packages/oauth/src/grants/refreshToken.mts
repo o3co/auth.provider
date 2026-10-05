@@ -78,7 +78,7 @@ export type RefreshTokenGrantDeps = Pick<
 	| "subjectRevocation"
 	| "userSessionStore"
 > &
-	ProviderDeps<"sessionRequirementResolver", "auditSink">;
+	ProviderDeps<"sessionRequirementResolver", "auditSink" | "sessionLifecycleStore">;
 
 /**
  * The token endpoint's answer to an admission that does not refresh, or
@@ -123,6 +123,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
 		subjectRevocation,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createRefreshTokenGrant"),
 		acrTable: {},
 		logger,

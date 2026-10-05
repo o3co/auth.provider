@@ -28,6 +28,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createSymmetricKeyStore,
 	type GrantContext,
@@ -37,6 +38,7 @@ import {
 	type GrantResult,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type SubjectRevocation,
 	type UserSession,
@@ -132,6 +134,7 @@ const fixture = (
 const grant = (opts: {
 	userSessionStore?: UserSessionStore;
 	subjectRevocation?: SubjectRevocation;
+	sessionLifecycleStore?: SessionLifecycleStore;
 	requirements?: readonly SessionRequirement[];
 	logger?: MockLogger;
 	grantPolicy?: GrantPolicyHook;
@@ -145,6 +148,7 @@ const grant = (opts: {
 		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
+		...(opts.sessionLifecycleStore ? { sessionLifecycleStore: opts.sessionLifecycleStore } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 	});
@@ -176,6 +180,27 @@ describe("the session grant on admission — what the session and its record dec
 			grant({ userSessionStore: storeWith(record()), subjectRevocation: revocation }),
 		);
 		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+	});
+
+	it("a session whose lifecycle record is closing is 400 invalid_grant session_invalid, and one still active mints", async () => {
+		const lifecycle = createInMemorySessionLifecycleStore();
+		await lifecycle.open(SID, SUBJECT, new Date(Date.now() + 3_600_000));
+		const handler = grant({
+			userSessionStore: storeWith(record()),
+			sessionLifecycleStore: lifecycle,
+		});
+		expect((await handler.handle(ctx(LIVE_COOKIE))).result.status).toBe(200);
+		await lifecycle.beginClose(SID, {
+			cause: "rp_logout",
+			steps: ["tokens"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+		expect(await refused(handler)).toMatchObject({
 			status: 400,
 			error: "invalid_grant",
 			errorDescription: "session_invalid",
