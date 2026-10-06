@@ -32,7 +32,6 @@ import { type Logger, loggableError } from "@o3co/auth-provider-core";
 export type FederationStore =
 	| "user_repository"
 	| "user_session"
-	| "session_federation_index"
 	| "federation_token"
 	| "subject_session_index"
 	| "federation_transaction"
@@ -50,13 +49,10 @@ export type FederationStoreStep =
 	| "create"
 	| "authenticate_by_token"
 	| "link"
-	| "list"
-	| "add"
 	| "attach"
-	| "remove"
-	| "remove_by_sid"
 	| "remove_sid"
-	| "join";
+	| "join"
+	| "federations";
 
 /** Which leg of a federation a store outage stopped. */
 type FederationOutageEvent =

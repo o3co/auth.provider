@@ -342,11 +342,6 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		why: `${TOKEN_SIDE}: RP-initiated logout's read of the session it ends`,
 	},
 	{
-		file: "packages/oauth-token-exchange/src/grant.mts",
-		sites: { get: 1 },
-		why: `${TOKEN_SIDE}: the token-exchange grant's liveness read`,
-	},
-	{
 		file: "packages/device-grant/src/grant.mts",
 		sites: { revokedBefore: 1 },
 		why: `${TOKEN_SIDE}: the device_code grant's boundary read at the poll`,

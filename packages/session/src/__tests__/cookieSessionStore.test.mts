@@ -97,7 +97,6 @@ import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import {
 	makeFederationTokenStore,
 	makePermissivePolicy,
-	makeSessionFederationIndex,
 	makeUserRepository,
 	makeUserSessionStore,
 } from "#/routes/__tests__/federation-harness.mjs";
@@ -273,7 +272,6 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 						userRepository: makeUserRepository(),
 						userSessionStore: makeUserSessionStore(),
 						sessionLifecycle: fakeSessionLifecycle(),
-						sessionFederationIndex: makeSessionFederationIndex(),
 						federationTokenStore: makeFederationTokenStore(),
 						logger: logger as unknown as Logger,
 					}),

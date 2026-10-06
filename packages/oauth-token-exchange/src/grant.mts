@@ -91,6 +91,14 @@ export interface TokenExchangeDependencies
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycle === undefined) {
+		throw new Error(
+			"The token_exchange grant: userSessionStore is wired, but sessionLifecycle is not. " +
+				"Where a user-session store is wired, core's session lifecycle is required: the " +
+				"grant reads the liveness of a presented token's session through it. Install " +
+				"sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
+	}
 	// The lifetimes are read once, when the grant is built, so a hand-built value
 	// that breaks the contract fails the composition instead of every request after
 	// client authentication. Checked whole, never member by member.
@@ -385,7 +393,7 @@ async function presentedTokensRefusal(
 async function standingRefusal(
 	deps: Pick<
 		TokenExchangeDependencies,
-		"refreshTokenFamilyRevocation" | "userSessionStore" | "sessionLifecycle" | "logger"
+		"refreshTokenFamilyRevocation" | "sessionLifecycle" | "logger"
 	>,
 	role: "subject" | "actor",
 	validated: ValidatedToken,
@@ -459,28 +467,27 @@ async function familyRefusal(
  * the same rule, keyed on the validator's `ValidatedToken.sid` (never
  * `claims.sid`, which a foreign issuer's token may carry).
  *
- * - No `sid`, or neither `sessionLifecycle` nor `userSessionStore`: nothing to
- *   check (introspection passes the token too).
- * - With `sessionLifecycle` installed, its `liveness` decides, so a session
- *   closing or closed is refused from the closing commit on; otherwise the
- *   `userSessionStore` record does.
+ * - No `sid`, or no `sessionLifecycle` (a sessionless composition, which the
+ *   grant's construction holds to wiring no `userSessionStore` either):
+ *   nothing to check (introspection passes the token too).
+ * - Otherwise the lifecycle's `liveness` decides, so a session closing or
+ *   closed is refused from the closing commit on.
  * - No live session under the `sid`, or one for another subject:
  *   `session_invalid` (`actor_token session_invalid` for the actor), as
  *   `invalid_request`.
- * - A read that throws, or a lifecycle answer that is neither `live` nor
+ * - A `liveness` that rejects, or an answer that is neither `live` nor
  *   `not_live`: `503 temporarily_unavailable`, logged once as
  *   `token_exchange_session_store_unavailable`; an outage is never read as an
  *   ended or a live session.
  */
 async function sessionRefusal(
-	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "sessionLifecycle" | "logger">,
+	deps: Pick<TokenExchangeDependencies, "sessionLifecycle" | "logger">,
 	role: "subject" | "actor",
 	validated: ValidatedToken,
 	{ sid }: ReportedBindings,
 ): Promise<GrantHandlerResult | null> {
-	if (sid === undefined) return null;
 	const lifecycle = deps.sessionLifecycle;
-	const store = deps.userSessionStore;
+	if (sid === undefined || lifecycle === undefined) return null;
 	const outage = (where: Readonly<Record<string, unknown>>, err?: unknown): GrantHandlerResult => {
 		const logger = deps.logger ?? consoleLogger;
 		if (err === undefined) {
@@ -502,27 +509,15 @@ async function sessionRefusal(
 	// The session grant's rule: the session must be this token's subject's. A
 	// token naming another subject's session is not tied to it, and that
 	// session's liveness says nothing about this subject.
-	let live: boolean;
-	if (lifecycle !== undefined) {
-		const where = { store: "session_lifecycle", step: "liveness" };
-		let session: Awaited<ReturnType<typeof liveSessionSubject>>;
-		try {
-			session = await liveSessionSubject(lifecycle, sid);
-		} catch (err) {
-			return outage(where, err);
-		}
-		if (session === "no_answer") return outage(where);
-		live = session !== "not_live" && session.subject === validated.sub;
-	} else if (store !== undefined) {
-		try {
-			live = (await store.get(sid))?.sub === validated.sub;
-		} catch (err) {
-			return outage({ store: "user_session", step: "get" }, err);
-		}
-	} else {
-		return null;
+	const where = { store: "session_lifecycle", step: "liveness" };
+	let session: Awaited<ReturnType<typeof liveSessionSubject>>;
+	try {
+		session = await liveSessionSubject(lifecycle, sid);
+	} catch (err) {
+		return outage(where, err);
 	}
-	if (live) return null;
+	if (session === "no_answer") return outage(where);
+	if (session !== "not_live" && session.subject === validated.sub) return null;
 	return invalidRequest(forRole(role, "session_invalid"));
 }
 

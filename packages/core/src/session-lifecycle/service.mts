@@ -92,12 +92,8 @@ export interface SessionOpenRequest {
  * subject or end, or one closing or closed), or the end has passed; nothing
  * was written, and nothing is established on that sid. A store that cannot
  * answer rejects the call with its own error; nothing is established on it.
- * `unavailable` is never answered by core's service.
  */
-export type SessionOpenOutcome =
-	| { readonly outcome: "opened" }
-	| { readonly outcome: "refused" }
-	| { readonly outcome: "unavailable" };
+export type SessionOpenOutcome = { readonly outcome: "opened" } | { readonly outcome: "refused" };
 
 /** What a join adds to a session. At least one is named. */
 export interface SessionJoinRequest {
@@ -113,13 +109,9 @@ export interface SessionJoinRequest {
  * `joined`: hand out what joined. `refused`: the session is closing, closed
  * or gone; hand out nothing (the service has already revoked the family and
  * removed the federation's tokens). A store that cannot answer rejects the
- * call with its own error; hand out nothing. `unavailable` is never answered
- * by core's service.
+ * call with its own error; hand out nothing.
  */
-export type SessionJoinOutcome =
-	| { readonly outcome: "joined" }
-	| { readonly outcome: "refused" }
-	| { readonly outcome: "unavailable" };
+export type SessionJoinOutcome = { readonly outcome: "joined" } | { readonly outcome: "refused" };
 
 /**
  * `done`: the session is closed and every item of its close work ran.
@@ -138,15 +130,12 @@ export type SessionJoinOutcome =
  * could not be read (with the store's own error), or, where the commit found
  * no live record (the session's end passed on the store's clock), when an
  * item of the close work, run with no record to save it in, failed.
- * `unavailable` is never answered by core's service.
  */
-export type SessionCloseOutcome =
-	| {
-			readonly outcome: "done" | "pending";
-			readonly rps: readonly string[];
-			readonly federations: readonly string[];
-	  }
-	| { readonly outcome: "unavailable" };
+export type SessionCloseOutcome = {
+	readonly outcome: "done" | "pending";
+	readonly rps: readonly string[];
+	readonly federations: readonly string[];
+};
 
 /**
  * `listed`: the federations a session joined, in the order they joined:
@@ -154,21 +143,21 @@ export type SessionCloseOutcome =
  * the order they were added (every join writes the index before the record),
  * then the record's, each once — the union and order the close that makes the
  * closing commit answers. A store that cannot answer rejects the call with
- * its own error; `unavailable` is never answered by core's service.
+ * its own error.
  */
-export type SessionFederations =
-	| { readonly outcome: "listed"; readonly federations: readonly string[] }
-	| { readonly outcome: "unavailable" };
+export type SessionFederations = {
+	readonly outcome: "listed";
+	readonly federations: readonly string[];
+};
 
 /**
  * `live`, with the user session; `not_live` from the closing commit on, or
  * once the user session is gone. A store that cannot answer rejects the call
- * with its own error; `unavailable` is never answered by core's service.
+ * with its own error.
  */
 export type SessionLiveness =
 	| { readonly outcome: "live"; readonly session: UserSession }
-	| { readonly outcome: "not_live" }
-	| { readonly outcome: "unavailable" };
+	| { readonly outcome: "not_live" };
 
 /** How many closing sessions one resumption left `done`, still `pending`, or could not read. */
 export interface SessionResumeReport {

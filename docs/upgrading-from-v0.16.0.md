@@ -1227,13 +1227,14 @@ modules fills them.
     session already gone, reporting a logout that revoked nothing. A sid the
     lifecycle cannot hold is therefore a `503` too; such a sid is never
     issued.
-  - `oauthSessionGrantModule`, with the grant on, is refused the same way
-    when no `sessionLifecycleStore` (the port core's session-store modules fill, which
-    `sessionLifecycleModule` requires) is wired beside its `userSessionStore`:
-    `contribute-factory-failed`, the message naming both slots, and
-    `createSessionGrant` throws the same refusal. The grant's admission
-    reads the session's lifecycle record, so a session closing or closed
-    mints nothing.
+  - The `token_exchange` grant (`tokenExchangeModule`) is refused the same
+    way, with `contribute-factory-failed`, and `createTokenExchangeGrant`
+    throws the same refusal. The grant reads a presented token's session
+    through the lifecycle's `liveness` alone: the `userSessionStore`
+    fallback is removed, so `token_exchange_session_store_unavailable` no
+    longer carries `store: "user_session"` (`step: "get"`), only
+    `store: "session_lifecycle"` (`step: "liveness"`). Move an alert keyed
+    on the old value.
 - **BREAKING: `POST /session/logout` closes the session through the
   lifecycle only.** The path that deleted the `UserSession`, the subject-index
   entry and the federation tokens itself, without the lifecycle, is removed,
@@ -1244,6 +1245,18 @@ modules fills them.
   is core's `session_close_item_failed`. A federated login and a link join
   their federation through the lifecycle only; the federated login no longer
   writes the `sessionFederationIndex` entry itself.
+- **BREAKING: the session module no longer needs `sessionFederationIndex`.**
+  `sessionModule` and the federation router no longer require the slot (the
+  router's `sessionFederationIndex` option is removed). A link reads whether
+  the session already carries the federation from core's session lifecycle
+  (`sessionLifecycle.federations`) and no longer removes an index entry on
+  rollback; the lifecycle's join records the federation. A link's outage
+  there is logged as `federation_link_store_unavailable` with
+  `store: "session_lifecycle"`, `step: "federations"`, in place of
+  `store: "session_federation_index"`, `step: "list"` and `"remove"`.
+  Keep its provider: `sessionLifecycleModule` and the
+  `federation-stores-incomplete` guard still require the slot; only
+  `sessionModule`'s own `requires` and the router option drop it.
 - **BREAKING: every failed close at `POST /session/logout` is an outage.** A
   logout whose `sid` the session lifecycle cannot hold now answers
   `503 temporarily_unavailable` and keeps the cookie, as any close the
@@ -1261,7 +1274,11 @@ modules fills them.
   and `liveness` reject where they answered `{ outcome: "unavailable" }`,
   and the warn `session_lifecycle_unavailable` is no longer logged for them;
   each consumer logs its own event once, at error, with the error's
-  projection. A caller of your own catches the rejection as an outage. The
+  projection. A caller of your own catches the rejection as an outage.
+  `{ outcome: "unavailable" }` is removed from `SessionOpenOutcome`,
+  `SessionJoinOutcome`, `SessionCloseOutcome`, `SessionFederations` and
+  `SessionLiveness`: a comparison against it no longer compiles, and a
+  lifecycle of your own rejects instead of answering it. The
   close work's and the sweep's own lines (`session_close_item_failed`,
   `session_lifecycle_unavailable` for a close-work completion or re-read,
   or a resumed session, `session_lifecycle_sweep_*`) are unchanged.
