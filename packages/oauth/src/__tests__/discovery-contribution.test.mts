@@ -62,7 +62,7 @@ function configWithRevocation(mode?: "denylist" | "unsupported"): AppConfig {
 	if (mode === undefined) return base as unknown as AppConfig;
 	return {
 		...base,
-		oauth: { ...base.oauth, revocation: { accessToken: mode } },
+		oauth: { ...(base.oauth as object), revocation: { accessToken: mode } },
 	} as unknown as AppConfig;
 }
 
@@ -163,7 +163,7 @@ describe("oauthEndpointsModule — discoveryMetadata contribution", () => {
 		const config = {
 			...base,
 			oauth: {
-				...base.oauth,
+				...(base.oauth as object),
 				grants: { authorization_code: { pkce: { supportedMethods: ["S256", "plain"] } } },
 			},
 		} as unknown as AppConfig;
@@ -335,7 +335,7 @@ describe("acr_values_supported", () => {
 		const base = configWithRevocation();
 		return {
 			...base,
-			oauth: { ...base.oauth, authorize: acrValues ? { acrValues } : {} },
+			oauth: { ...(base.oauth as object), authorize: acrValues ? { acrValues } : {} },
 		} as unknown as AppConfig;
 	};
 
@@ -505,7 +505,7 @@ describe("oauthEndpointsModule — client_id_metadata_document_supported", () =>
 		const base = configWithRevocation();
 		return {
 			...base,
-			oauth: { ...base.oauth, clientIdMetadataDocuments: { enabled: true } },
+			oauth: { ...(base.oauth as object), clientIdMetadataDocuments: { enabled: true } },
 		} as unknown as AppConfig;
 	};
 
@@ -619,7 +619,10 @@ describe("a composition with no authorization_code grant", () => {
 		const base = configWithRevocation();
 		const config = {
 			...base,
-			oauth: { ...base.oauth, authorize: { acrValues: { "urn:example:pwd": ["pwd"] } } },
+			oauth: {
+				...(base.oauth as object),
+				authorize: { acrValues: { "urn:example:pwd": ["pwd"] } },
+			},
 		} as unknown as AppConfig;
 		const meta = await discoveryContribution(
 			{ grantHandlerResolver: grantResolver("client_credentials") },

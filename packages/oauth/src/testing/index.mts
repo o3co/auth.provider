@@ -52,8 +52,8 @@ const copyAcrValues = (
 
 /**
  * The `oauth` section, as a configuration fragment to lay over a
- * configuration: the keys core's schema still declares (`jwt`, `accessToken`,
- * `refreshToken` and the rest) from core's testing builder, and this
+ * configuration: the keys core's testing builder still carries (`jwt`,
+ * `accessToken`, `refreshToken` and the rest), and this
  * package's own keys (`consentPage`, `clientIdMetadataDocuments`) at
  * `config/reference.conf`'s defaults, with `options` laid over them. A fresh
  * object each call.

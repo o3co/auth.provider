@@ -239,7 +239,7 @@ describe("jwt-bearer grant — oauth.requireEmailVerified", () => {
 	// on would otherwise find two paths gated and this one wide open.
 	const gated = {
 		...config,
-		oauth: { ...config.oauth, requireEmailVerified: true },
+		oauth: { ...(config.oauth as object), requireEmailVerified: true },
 	} as unknown as AppConfig;
 
 	it("refuses when the gate is on and the Store published no verification", async () => {
@@ -845,7 +845,10 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		await build({
 			logger,
 			// The resource is read only under RFC 8707's flag.
-			config: { ...config, oauth: { ...config.oauth, resourceIndicator: { enabled: true } } },
+			config: {
+				...config,
+				oauth: { ...(config.oauth as object), resourceIndicator: { enabled: true } },
+			},
 			grantPolicy: policyOf(
 				async (request) =>
 					({ outcome: "allow", grantedAudience: request.resource }) as GrantPolicyDecision,
@@ -870,7 +873,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		// the audience from `resource` under `oauth.resourceIndicator.enabled`.
 		const flagOn = {
 			...config,
-			oauth: { ...config.oauth, resourceIndicator: { enabled: true } },
+			oauth: { ...(config.oauth as object), resourceIndicator: { enabled: true } },
 		} as unknown as AppConfig;
 		const registered = (over: Partial<AuthenticatedClient> = {}) =>
 			client({ allowedAudiences: ["https://api.example", "https://other.example"], ...over });
@@ -972,7 +975,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 			verifierFor({ subjectHandle: "device:abc", issuer: "https://devices.example", audience });
 		const flagOn = {
 			...config,
-			oauth: { ...config.oauth, resourceIndicator: { enabled: true } },
+			oauth: { ...(config.oauth as object), resourceIndicator: { enabled: true } },
 		} as unknown as AppConfig;
 
 		it("hands the verifier the presenting client, or nothing for an unauthenticated presenter", async () => {

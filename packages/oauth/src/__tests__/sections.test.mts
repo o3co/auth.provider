@@ -183,6 +183,7 @@ describe("the package's config/reference.conf", () => {
 		"OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY",
 		"ENDPOINTS_CONSENT_URL",
 		"OAUTH_CIMD_ENABLED",
+		"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS",
 	])("binds %s in its capture alone", (variable) => {
 		expect(bindings().filter((binding) => binding.startsWith(`${variable} `))).toEqual([
 			`${variable} at renamed-variables.${variable}`,
@@ -191,7 +192,7 @@ describe("the package's config/reference.conf", () => {
 });
 
 describe("the paths the settings moved from, on the manifests", () => {
-	it("oauth: the consent page from endpoints.consent.url, legacyRtPolicy, legacyTokenCompat and allowUnmarkedClients removed, and the Client ID Metadata Documents' variables renamed in place", () => {
+	it("oauth: the consent page from endpoints.consent.url, legacyRtPolicy, legacyTokenCompat and allowUnmarkedClients removed with allowUnmarkedClients' variable, and the Client ID Metadata Documents' variables renamed in place", () => {
 		const section = everyModule()[0]?.section;
 		expect(section?.relocatedFrom).toEqual({
 			"endpoints.consent.url": "consentPage.url",
@@ -203,8 +204,9 @@ describe("the paths the settings moved from, on the manifests", () => {
 			ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
 			OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",
 			OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "oauth.clientIdMetadataDocuments.maxConcurrentFetches",
+			OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "oauth.authorize.allowUnmarkedClients",
 		});
-		expect(Object.keys(section?.renamedVariables ?? {})).toHaveLength(13);
+		expect(Object.keys(section?.renamedVariables ?? {})).toHaveLength(14);
 	});
 
 	it("oauth-session: the switch from oauth.grants.session", () => {
@@ -571,8 +573,7 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			});
 
 			// Refused by the oauth module's own declaration, before any schema
-			// parses the configuration: no copy of `oauth {}` in core's schema is
-			// read for it.
+			// parses the configuration.
 			expect(err.details).toEqual({
 				reason: "config-path-relocated",
 				relocated: [{ module: "oauth", from: `oauth.${block}.${key}`, to: null }],
@@ -583,27 +584,52 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		},
 	);
 
-	it("refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS exported, which core's reference writes at the removed key", async () => {
-		const layered = parseFile(fileURLToPath(coreReference()), {
-			env: { OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false" },
-		}).toObject() as { oauth: { authorize: Record<string, unknown> } };
-		expect(layered.oauth.authorize.allowUnmarkedClients).toBe("false");
+	it.each(["false", "true", ""])(
+		"refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS = %j exported, as the variable of a removed key",
+		async (value) => {
+			// No reference binds the variable at the removed key any more: the
+			// package's reference captures it, and boot refuses it set at all.
+			for (const reference of [coreReference(), REFERENCE]) {
+				const layered = parseFile(fileURLToPath(reference), {
+					env: { OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: value },
+				}).toObject() as { oauth?: { authorize?: Record<string, unknown> } };
+				expect(layered.oauth?.authorize?.allowUnmarkedClients).toBeUndefined();
+			}
 
-		const err = await refusal((config) => {
-			const oauth = config.oauth as Record<string, Record<string, unknown>>;
-			return oauthWith(config, {
-				authorize: {
-					...oauth.authorize,
-					allowUnmarkedClients: layered.oauth.authorize.allowUnmarkedClients,
-				},
+			const err = await refusal((config) => config, {
+				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: value,
 			});
-		});
 
-		expect(err.details).toEqual({
-			reason: "config-path-relocated",
-			relocated: [{ module: "oauth", from: "oauth.authorize.allowUnmarkedClients", to: null }],
+			expect(err.details).toEqual({
+				reason: "environment-variable-renamed",
+				renamed: [
+					{
+						module: "oauth",
+						from: "OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS",
+						to: null,
+						path: null,
+						state: "removed",
+					},
+				],
+			});
+			expect(err.message).toContain(
+				"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS sets oauth.authorize.allowUnmarkedClients, which was removed",
+			);
+			expect(err.message).not.toContain(`"${value}"`);
+		},
+	);
+
+	it("boots with OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS unset, captured as null", async () => {
+		const { modules, config } = composition((c) => c);
+		expect(
+			(config["renamed-variables"] as Record<string, unknown>)
+				.OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS,
+		).toBeNull();
+		const handle = await createApp({
+			modules,
+			bootstrapComponents: { config, pathResolver: (s: string) => s } as never,
 		});
-		expect(err.message).toContain("unset the environment variable that sets it");
+		await handle.dispose();
 	});
 
 	it("refuses OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256 set at all, as removed", async () => {

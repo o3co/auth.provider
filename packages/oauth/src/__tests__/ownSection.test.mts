@@ -55,7 +55,7 @@ const fixture = (): AppConfig => makeValidAppConfig() as AppConfig;
 /** `oauth {}` as the module's schema parses it, from the fixture with `change` laid over it. */
 const sectionOf = (change: Record<string, unknown> = {}): OAuthSection =>
 	oauthSectionSchema.parse({
-		...fixture().oauth,
+		...(fixture().oauth as object),
 		consentPage: { url: "/consent" },
 		clientIdMetadataDocuments: { enabled: false },
 		...change,
@@ -66,7 +66,7 @@ const misleadingConfig = (): AppConfig =>
 	({
 		...fixture(),
 		oauth: {
-			...fixture().oauth,
+			...(fixture().oauth as object),
 			jwt: { issuer: "https://config.test" },
 			accessToken: { expiresIn: 60 },
 			revocation: { accessToken: "unsupported" },
@@ -274,7 +274,7 @@ describe("boot refuses a key oauth {} does not declare, at its path", () => {
 			"oauth.jwt",
 		],
 	])("in %s", async (_level, change, path) => {
-		const error = await refusal(change({ ...fixture().oauth }));
+		const error = await refusal(change({ ...(fixture().oauth as object) }));
 		expect(error.reason).toBe("config-validation-failed");
 		expect(error.message).toContain(`${path}: Unrecognized key: "unexpected"`);
 	});
