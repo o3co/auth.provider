@@ -198,6 +198,14 @@ describe("foundationMfaFactorStoreModule", () => {
 		}
 	});
 
+	it("refuses the boot for a deadline past the factor store's write lifetime, which the user repository takes", async () => {
+		const refused = await refusal(() => provided({ timeout: String(2 * 86_400_000) }));
+		expect(refused.reason).toBe("provides-factory-failed");
+		expect(refused.message).toContain("HttpMfaFactorStore");
+		expect(refused.message).toContain('"timeout"');
+		expect(refused.message).toContain("BUNDLED_STORE_WRITE_LIFETIME_MS");
+	});
+
 	it("refuses the boot when the settings it is handed are absent or not a section of keys, rather than sending no credential", async () => {
 		for (const storeTransport of [undefined, "https://store.example", 5000, null, ["x"]]) {
 			const refused = await refusal(() => bootWith(storeTransport, configOver()));

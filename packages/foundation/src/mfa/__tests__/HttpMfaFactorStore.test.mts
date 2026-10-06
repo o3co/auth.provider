@@ -27,8 +27,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { inspect } from "node:util";
 import {
 	auditedError,
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	DEFAULT_CLOCK_SKEW_MS,
 	isStoreGeneration,
 	loggableError,
+	MFA_SUBJECT_LEASE_MAX_MS,
 	type MfaFactorRecord,
 	type StoreGeneration,
 	sealWithKeyRing,
@@ -953,6 +956,33 @@ describe("construction", () => {
 		for (const bearerToken of ["", "short", "Bearer abc", `${TOKEN}\n`]) {
 			expect(() => storeOver({ bearerToken }), JSON.stringify(bearerToken)).toThrow(/bearerToken/);
 			expect(() => repository({ bearerToken }), JSON.stringify(bearerToken)).toThrow(/bearerToken/);
+		}
+	});
+
+	it("refuses, with a RangeError naming timeout and its bound, a timeout whose write could outlive the factor store's write lifetime; the user repository still takes it", () => {
+		const bound =
+			BUNDLED_STORE_WRITE_LIFETIME_MS - MFA_SUBJECT_LEASE_MAX_MS - DEFAULT_CLOCK_SKEW_MS;
+		expect(storeOver({ timeout: bound }).kind).toBe("store");
+		for (const timeout of [bound + 1, 2 * 86_400_000, 2_147_483_647]) {
+			let error: unknown;
+			try {
+				storeOver({ timeout });
+			} catch (thrown) {
+				error = thrown;
+			}
+			expect(error, String(timeout)).toBeInstanceOf(RangeError);
+			const message = (error as Error).message;
+			expect(message).toContain("HttpMfaFactorStore");
+			expect(message).toContain('"timeout"');
+			expect(message).toContain(String(bound));
+			expect(message).toContain("BUNDLED_STORE_WRITE_LIFETIME_MS");
+			expect(
+				new HttpUserRepository({
+					authenticateUrl: "https://store.example/authenticate",
+					authenticateByTokenUrl: "https://store.example/authenticate-by-token",
+					timeout,
+				}),
+			).toBeInstanceOf(HttpUserRepository);
 		}
 	});
 
