@@ -41,7 +41,7 @@ export { oauthSectionSchema };
 /**
  * The module's section, `oauth`, strict at every level (`./section.mts`), with
  * the package's defaults: the consent page moved from `endpoints.consent.url`;
- * three keys removed, each refusing boot set at all, since the behaviour it
+ * three keys removed, each refusing boot set to a value, since the behaviour it
  * switched no longer exists — `oauth.refreshToken.legacyRtPolicy` (a refresh
  * token lacking `jti` or `family_id` while family rotation is wired is always
  * refused), `oauth.refreshToken.legacyTokenCompat` (no v0.4.x refresh-token

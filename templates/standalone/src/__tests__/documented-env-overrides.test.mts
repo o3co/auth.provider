@@ -310,7 +310,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
  */
 const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 	OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS:
-		"#330 tombstone — any value must fail boot with migration instructions",
+		"#330 tombstone — any value must fail boot, refused as a removed key",
 	DEPLOYMENT_MODE:
 		"renamed CORE_DEPLOYMENT_MODE, and only captured — set alone, or to another value, it fails boot",
 	MEMORY_RATE_LIMITER_MAX_BUCKETS:

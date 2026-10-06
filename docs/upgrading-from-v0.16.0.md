@@ -275,7 +275,10 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   wherever `oauthEndpointsModule` is installed as `config-path-relocated`
   (`<key> was removed; see CHANGELOG. Remove this field …`) instead of
   `config-validation-failed` naming the release that removed the key. Delete
-  the key and unset the variable.
+  the key and unset the variable. For `allowUnmarkedClients`, first mark
+  `firstParty: true` every client you operate that you would trust to
+  receive a user's identity without the user being asked: `/authorize`
+  refuses every other client.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
 - `device-grant.store` (and `oauth.deviceAuthorization.store`), at any value,
