@@ -150,7 +150,13 @@ const grant = (opts: {
 		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
-		...(opts.sessionLifecycleStore ? { sessionLifecycleStore: opts.sessionLifecycleStore } : {}),
+		// Core's session lifecycle port, required beside a user-session store.
+		...(opts.userSessionStore || opts.sessionLifecycleStore
+			? {
+					sessionLifecycleStore:
+						opts.sessionLifecycleStore ?? createInMemorySessionLifecycleStore(),
+				}
+			: {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 	});
@@ -619,6 +625,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 					oauthTokenSettings: createTestOAuthTokenSettings(),
 					keyStore,
 					userSessionStore: store,
+					sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 					sessionRequirementResolver: resolverForTests(requirements, {
 						issuer: "https://issuer.test",
 						actions: OAUTH_ADMISSION_ACTIONS,

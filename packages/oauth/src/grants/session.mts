@@ -115,6 +115,14 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 
 export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	const { keyStore } = deps;
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"oauth-session: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
+				"user-session store is wired, core's session lifecycle is required: the session " +
+				"grant's admission reads the session's lifecycle record through it. Install " +
+				"sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
+	}
 	// What admission reads for this grant: the module's own slots as wired,
 	// and no acr table, since the grant asks for no acr.
 	const admissionDeps: AdmissionDeps = {
