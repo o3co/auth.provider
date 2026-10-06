@@ -57,7 +57,7 @@ const TEST_BASIC_AUTH = `Basic ${Buffer.from(`${TEST_CLIENT_ID}:${TEST_CLIENT_SE
 const fullConfig = {
 	oauth: {
 		jwt: { issuer: ISSUER },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 	},
 	rateLimit: { failMode: "open" as const },
 	endpoints: { login: { url: "/login" } },

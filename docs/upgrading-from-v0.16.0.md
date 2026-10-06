@@ -140,10 +140,10 @@ rather than `workspace:*`, and refresh the lockfile. Then:
   `mfaMode`, the user repository's HTTP settings, and whether federation
   grants are installed — nothing of core's section or of a package's.
   - The `config_key_deprecated` (warn) line for `oauth.accessToken.expiresIn`
-    (`OAUTH_ACCESS_TOKEN_EXPIRES_IN`) is no longer logged. The key is still
-    read as the access-token default while `oauth.accessToken.defaultExpiresIn`
-    is unset: move the value to `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`. An
-    alert on that line sees nothing now.
+    (`OAUTH_ACCESS_TOKEN_EXPIRES_IN`) is no longer logged: the key and the
+    variable now refuse the boot instead ([Paths and variables that
+    moved](#paths-and-variables-that-moved)). An alert on that line sees
+    nothing now.
   - A `federation-grants.enabled` (`FEDERATION_GRANTS_ENABLED`) that does not
     read as a boolean installs the federation-grants modules and is refused at
     boot, `config-validation-failed` naming `federation-grants.enabled`. A
@@ -151,7 +151,7 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     schema refuses — `expected` not a list of names, or a key core does not
     declare — is refused the same way at its path, and so is a bad
     access-token lifetime (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`,
-    `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`, `OAUTH_ACCESS_TOKEN_EXPIRES_IN`),
+    `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`),
     which the template no longer reads before boot either. With MFA on, a
     written `core.sessionRequirements.secondFactorAuthority` other than `mfa`
     is still refused before boot.
@@ -235,6 +235,7 @@ sections that still accept one.
 | Each in-process and Redis store's settings, and `federationGrants` → `federation-grants {}`, under their modules' names, with eight renamed variables (`RATE_LIMIT_FAIL_MODE` → `REDIS_RATE_LIMITER_FAIL_MODE` among them) (#811) | the [redis README](../packages/redis/README.md), the [federation-grants README](../packages/federation-grants/README.md) |
 | The oauth and session settings: the grant switches, `oauth-session`, `session-store {}`, the login and consent pages, `OAUTH_CIMD_*` → `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`; the PKCE key retired (#827) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 5 |
 | The refresh grant's unknown-family policy: `oauth.refreshToken.unknownFamilyPolicy` → `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` → `OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` (#728) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 2; the [oauth README](../packages/oauth/README.md#refresh_token) |
+| The access-token default: `oauth.accessToken.expiresIn` → `oauth.accessToken.defaultExpiresIn`, `OAUTH_ACCESS_TOKEN_EXPIRES_IN` → `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`. Move the value, do not delete it: without it the default is `3600`, which a deployment that set a shorter lifetime would not notice | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 2 |
 | The template's own settings, the adapter selections (`adapters.<slot>`), the repositories, `audit-sink`, `core.federations`, `key-store`, `redis-clients`, `LOG_LEVEL` → `LOGGING_LEVEL` (#853) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 6 |
 | Module names are kebab-case, as their sections are (#738): boot error details and anything that finds a module by name see the new names | — |
 
@@ -1538,6 +1539,22 @@ modules fills them.
   section from `deps.section`, or narrows the value where it reads it.
   `makeValidAppConfig` and `makeValidCoreConfig` on `./testing` keep their
   names and contents, typed as the literals they build.
+- **BREAKING: `oauth.accessToken.expiresIn` is no longer part of any type
+  or resolver.** `AccessTokenConfig` (and so `OAuthSection["accessToken"]`)
+  and `AccessTokenLifetimeSource` (`@o3co/auth-provider-core`) and
+  `OAuthTokenSection` (`@o3co/auth-provider-oauth`) lose `expiresIn`;
+  `AccessTokenConfig.expiresIn` was required, so code that read it reads
+  `resolveAccessTokenLifetime(config).defaultExpiresIn` instead.
+  `resolveAccessTokenLifetime` reads `defaultExpiresIn` alone, and its
+  messages and the oauth section's no longer mention the old key. On the
+  testing entries, `makeValidCoreConfig().oauth.accessToken` is
+  `{ defaultExpiresIn: 3600 }`, and `oauthConfigForTests({ accessTokenExpiresIn })`
+  writes `defaultExpiresIn`. A configuration built by hand for a composition
+  that loads `oauthEndpointsModule` captures the module's two new renamed
+  variables, `OAUTH_ACCESS_TOKEN_EXPIRES_IN` and
+  `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`, as every other rename
+  (`renamedVariableCaptures` on core's `./testing` builds them), or the boot
+  refuses it, `environment-variable-renamed` with `state: "uncaptured"`.
 - **`establishSession`** (`@o3co/auth-provider-session`) refuses a
   `userSessionStore` handed without a `sessionLifecycle`, with a `TypeError`
   before anything is written, and `EstablishSessionDeps.sessionLifecycle` is
@@ -2137,6 +2154,13 @@ What carries across the step:
 
 - **Upgrade every package together, onto the same release:** core and every
   adapter package at one release in each replica.
+- **Move the access-token default before the upgrade.** v0.16.0 already reads
+  `oauth.accessToken.defaultExpiresIn` and `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`
+  first, so on v0.16.0: write the value at the new key, export the new
+  variable at the value the old one carries, then delete the old key and
+  unset the old variable. This release refuses the old key at any value, and
+  the old variable unless the new one carries the same value. Move the value
+  rather than deleting it: without it, the default is `3600`.
 - **The federation-grant rotation budget counts from the upgrade** (#1032).
   v0.16.0 took no rotation, so the refreshes it made are not counted against
   a grant's budget.

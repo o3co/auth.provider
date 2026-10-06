@@ -57,7 +57,7 @@ const S256_CHALLENGE = crypto.createHash("sha256").update(CODE_VERIFIER).digest(
 const config = {
 	oauth: {
 		jwt: { secret: "test-secret" },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: REFRESH_TOKEN_TTL },
 		grants: { authorization_code: { enabled: true } },
 	},

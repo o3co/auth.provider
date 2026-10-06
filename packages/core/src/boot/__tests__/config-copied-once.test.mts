@@ -235,7 +235,7 @@ describe("the configuration stage 1 is handed is copied once, and only the copy 
 		const written = base();
 		const resolved = {
 			...(parseString(
-				'core.sessionRequirements.expected = []\noauth { jwt.issuer = "https://auth.test", refreshToken.expiresIn = 86400, accessToken.expiresIn = 3600 }\nwidget { size = 3, list = [1, { a = 2 }], empty = {} }',
+				'core.sessionRequirements.expected = []\noauth { jwt.issuer = "https://auth.test", refreshToken.expiresIn = 86400, accessToken.defaultExpiresIn = 3600 }\nwidget { size = 3, list = [1, { a = 2 }], empty = {} }',
 			).toObject() as Record<string, unknown>),
 			"renamed-variables": written["renamed-variables"],
 		};

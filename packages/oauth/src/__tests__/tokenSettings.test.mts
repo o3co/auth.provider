@@ -19,8 +19,8 @@
  * read of `oauth {}`, resolved once from the section this module owns and
  * deeply frozen. Each value is what the readers resolve for themselves: the
  * issuer as written, the lifetimes as core's `resolveAccessTokenLifetime` /
- * `resolveRefreshTokenLifetime` read them (the deprecated `expiresIn`
- * included), and every switch on only when it is `true`.
+ * `resolveRefreshTokenLifetime` read them, and every switch on only when it
+ * is `true`.
  *
  * The module fills the slot whenever it is installed, whether or not a module
  * requires it, so core's own machinery can read it too. It names the slot
@@ -93,7 +93,7 @@ describe.each([
 });
 
 describe("oauthTokenSettingsFrom answers what the readers resolve for themselves today", () => {
-	it("over the fixture configuration: its issuer, the deprecated expiresIn as default and max, every switch off", () => {
+	it("over the fixture configuration: its issuer, its default lifetime as default and max, every switch off", () => {
 		const config = fixture();
 		expect(oauthTokenSettingsFrom(config.oauth)).toEqual({
 			issuer: config.oauth.jwt.issuer,
@@ -135,11 +135,11 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 	it("never outlasts the lifetimes core resolves from the same configuration, so a reader's check answers it", () => {
 		// Every reader holds a slot to the configured lifetimes; this provider
 		// resolves its lifetimes with the resolvers that check compares with.
-		const alias = () => {
+		const longerDefault = () => {
 			const base = fixture();
-			return { ...base, oauth: { ...base.oauth, accessToken: { expiresIn: 7200 } } };
+			return { ...base, oauth: { ...base.oauth, accessToken: { defaultExpiresIn: 7200 } } };
 		};
-		for (const config of [fixture(), everySwitchOn(), alias()]) {
+		for (const config of [fixture(), everySwitchOn(), longerDefault()]) {
 			const settings = oauthTokenSettingsFrom(config.oauth);
 			expect(checkOAuthTokenSettings(settings, config)).toEqual(settings);
 		}

@@ -42,7 +42,7 @@ import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 const config = {
-	oauth: { jwt: { issuer: "https://auth.example" }, accessToken: { expiresIn: 300 } },
+	oauth: { jwt: { issuer: "https://auth.example" }, accessToken: { defaultExpiresIn: 300 } },
 } as unknown as AppConfig;
 
 /** A boundary 10 minutes ago, with a sub-second part, as a store records it. */

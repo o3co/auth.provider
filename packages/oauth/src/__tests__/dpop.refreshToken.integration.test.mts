@@ -63,7 +63,7 @@ const PUBLIC_CLIENT_ID = "rt-public-client";
 const mockConfig = {
 	oauth: {
 		jwt: { secret: SECRET },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {
 			refresh_token: { enabled: true },

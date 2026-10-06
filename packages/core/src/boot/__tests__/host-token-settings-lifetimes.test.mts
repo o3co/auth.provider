@@ -170,12 +170,12 @@ describe("a host-filled oauthTokenSettings over a configuration that resolves no
 		["no oauth {} at all", undefined, /oauth\.accessToken\.defaultExpiresIn is required/],
 		[
 			"an environment string where no schema coerced it",
-			{ accessToken: { expiresIn: "3600" }, refreshToken: { expiresIn: 86_400 } },
-			/oauth\.accessToken\.expiresIn must be a whole number of seconds/,
+			{ accessToken: { defaultExpiresIn: "3600" }, refreshToken: { expiresIn: 86_400 } },
+			/oauth\.accessToken\.defaultExpiresIn must be a whole number of seconds/,
 		],
 		[
 			"a refresh-token lifetime out of range",
-			{ accessToken: { expiresIn: 3600 }, refreshToken: { expiresIn: 0 } },
+			{ accessToken: { defaultExpiresIn: 3600 }, refreshToken: { expiresIn: 0 } },
 			/oauth\.refreshToken\.expiresIn must be a whole number of seconds/,
 		],
 	])("refuses with a BootError at stage 1, naming the key, for %s", async (_, oauth, named) => {

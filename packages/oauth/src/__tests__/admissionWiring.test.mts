@@ -59,7 +59,7 @@ import { routerInputsOf } from "./_helpers/sections.mjs";
 const config = {
 	oauth: {
 		jwt: { issuer: "https://issuer.example", secret: "test-secret" },
-		accessToken: { expiresIn: 300 },
+		accessToken: { defaultExpiresIn: 300 },
 		refreshToken: { expiresIn: 86400 },
 	},
 	"oauth-session": { enabled: true },

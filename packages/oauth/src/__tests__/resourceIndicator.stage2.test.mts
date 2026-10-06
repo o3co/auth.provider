@@ -96,7 +96,7 @@ function makeCCDeps(
 		...grantSettingsFrom({
 			oauth: {
 				jwt: { issuer: "https://test.example" },
-				accessToken: { expiresIn: 3600 },
+				accessToken: { defaultExpiresIn: 3600 },
 				refreshToken: { expiresIn: 86400 },
 				resourceIndicator: { enabled },
 			},
@@ -172,7 +172,7 @@ function makeAuthzDeps(
 		...grantSettingsFrom({
 			oauth: {
 				jwt: { secret: "test-secret" },
-				accessToken: { expiresIn: 3600 },
+				accessToken: { defaultExpiresIn: 3600 },
 				refreshToken: { expiresIn: 86400 },
 				grants: {
 					authorization_code: { enabled: true },

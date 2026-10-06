@@ -105,7 +105,7 @@ export interface AccessTokenConfig {
 	/**
 	 * The lifetime, in seconds, every grant mints when the request does not ask
 	 * for one — and every grant but token exchange never lets it ask. Absent
-	 * when unset, in which case the deprecated `expiresIn` supplies it.
+	 * when unset, which the resolver refuses.
 	 */
 	defaultExpiresIn?: number;
 	/**
@@ -114,14 +114,6 @@ export interface AccessTokenConfig {
 	 * request extends past it unless the operator opts in.
 	 */
 	maxExpiresIn?: number;
-	/**
-	 * The resolved default lifetime, in seconds, mirrored so readers of this key
-	 * mint what every other grant mints.
-	 *
-	 * @deprecated As a configuration key, an alias of `defaultExpiresIn`; readers
-	 * should call `resolveAccessTokenLifetime`. See CHANGELOG.
-	 */
-	expiresIn: number;
 }
 
 /** What {@link resolveAccessTokenLifetime} answers. */
@@ -142,12 +134,11 @@ export interface AccessTokenLifetimeSource {
 		readonly accessToken?: {
 			readonly defaultExpiresIn?: unknown;
 			readonly maxExpiresIn?: unknown;
-			readonly expiresIn?: unknown;
 		};
 	};
 }
 
-const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const;
+const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn"] as const;
 
 /**
  * The keys of `oauth {}` the two lifetime resolvers here read by path, each
@@ -180,9 +171,7 @@ type AccessTokenLifetimeCheck =
 /**
  * The lifetime rules {@link resolveAccessTokenLifetime} holds a configuration
  * to; the oauth module's section schema holds `oauth.accessToken` to the same
- * rules, in the same words. `defaultExpiresIn` wins over the deprecated `expiresIn` whenever set, and a
- * disagreement cannot fail boot: `reference.conf` keeps the shipped literal on
- * `expiresIn`, so a configuration using the new key always carries both.
+ * rules, in the same words.
  */
 function checkAccessTokenLifetime(
 	accessToken: AccessTokenLifetimeSource["oauth"]["accessToken"],
@@ -196,25 +185,19 @@ function checkAccessTokenLifetime(
 			};
 		}
 	}
-	const configuredDefault = accessToken?.defaultExpiresIn as number | undefined;
-	const aliasDefault = accessToken?.expiresIn as number | undefined;
-	const defaultExpiresIn = configuredDefault ?? aliasDefault;
+	const defaultExpiresIn = accessToken?.defaultExpiresIn as number | undefined;
 	if (defaultExpiresIn === undefined) {
 		return {
 			ok: false,
 			message:
-				"oauth.accessToken.defaultExpiresIn is required (OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN); the deprecated oauth.accessToken.expiresIn is still read in its place",
+				"oauth.accessToken.defaultExpiresIn is required (OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN)",
 		};
 	}
 	const maxExpiresIn = (accessToken?.maxExpiresIn as number | undefined) ?? defaultExpiresIn;
 	if (defaultExpiresIn > maxExpiresIn) {
-		const source =
-			configuredDefault === undefined
-				? ", read from the deprecated oauth.accessToken.expiresIn"
-				: "";
 		return {
 			ok: false,
-			message: `oauth.accessToken.defaultExpiresIn (${defaultExpiresIn}${source}) must not exceed oauth.accessToken.maxExpiresIn (${maxExpiresIn}): lower the default or raise the max`,
+			message: `oauth.accessToken.defaultExpiresIn (${defaultExpiresIn}) must not exceed oauth.accessToken.maxExpiresIn (${maxExpiresIn}): lower the default or raise the max`,
 		};
 	}
 	return { ok: true, lifetime: { defaultExpiresIn, maxExpiresIn } };
@@ -225,7 +208,7 @@ function checkAccessTokenLifetime(
  * request asks for nothing, and the max no request may exceed. Every grant
  * reads it through this function when it is built.
  *
- * - `defaultExpiresIn` when set, otherwise the deprecated `expiresIn`;
+ * - `defaultExpiresIn`, which is required;
  * - `maxExpiresIn` when set, otherwise the default, so nothing is extended past
  *   the default unless the operator opts in.
  *
@@ -233,10 +216,8 @@ function checkAccessTokenLifetime(
  * repeated for a configuration no such schema parsed — one built by hand, or
  * one whose `oauth {}` no loaded module owns — so a bad or missing value fails
  * when the grant is built rather than after a request's single-use credential
- * is spent. The alias is
- * resolved here, not in HOCON, because `parseFile` resolves substitutions per
- * file before the layers merge. {@link resolveRefreshTokenLifetime} is the
- * refresh token's counterpart.
+ * is spent. {@link resolveRefreshTokenLifetime} is the refresh token's
+ * counterpart.
  *
  * @throws RangeError naming the key, for a missing default, a default above the
  * max, or a value that is not whole seconds within the one-year ceiling.

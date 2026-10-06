@@ -86,7 +86,7 @@ const DEFAULT_AUTH_CLIENT = {
 const mockConfig = {
 	oauth: {
 		jwt: { secret: "test-secret" },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {
 			session: { enabled: true },
@@ -347,9 +347,8 @@ describe("createAuthorizationGrant", () => {
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
 			// `expires_in` is the time left when answered: read on a frozen clock.
 			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
-			// A configuration with only `defaultExpiresIn` / `maxExpiresIn`: read
-			// through `resolveAccessTokenLifetime`, not the deprecated `expiresIn`,
-			// which is absent here. Only token exchange honours `expires_in`.
+			// The lifetime is read through `resolveAccessTokenLifetime`. Only token
+			// exchange honours `expires_in`.
 			const deps = {
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode })),
 				...grantSettingsFrom({
@@ -822,7 +821,7 @@ describe("createAuthorizationGrant", () => {
 			const legacyConfig = (requireS256: boolean) => ({
 				oauth: {
 					jwt: { secret: "test-secret" },
-					accessToken: { expiresIn: 3600 },
+					accessToken: { defaultExpiresIn: 3600 },
 					refreshToken: { expiresIn: 86400 },
 					grants: {
 						session: { enabled: true },
@@ -1154,7 +1153,7 @@ describe("createAuthorizationGrant", () => {
 				return {
 					oauth: {
 						jwt: { secret: "test-secret" },
-						accessToken: { expiresIn: 3600 },
+						accessToken: { defaultExpiresIn: 3600 },
 						refreshToken: { expiresIn: 86400 },
 						grants: {
 							authorization_code: {
@@ -1273,7 +1272,7 @@ describe("createAuthorizationGrant", () => {
 			const mockConfigWithIssuer = {
 				oauth: {
 					jwt: { secret: "test-secret", issuer: "https://auth.example.com" },
-					accessToken: { expiresIn: 3600 },
+					accessToken: { defaultExpiresIn: 3600 },
 					refreshToken: { expiresIn: 86400 },
 					grants: {
 						session: { enabled: true },
@@ -2666,7 +2665,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 	const configWithIssuer = {
 		oauth: {
 			jwt: { secret: "test-secret", issuer: ISSUER },
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			grants: {
 				session: { enabled: true },

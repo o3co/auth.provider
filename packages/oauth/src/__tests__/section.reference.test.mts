@@ -83,9 +83,7 @@ describe("the package's reference binds every variable of oauth {} at its path",
 	it.each([
 		["OAUTH_JWT_ISSUER", "oauth.jwt.issuer"],
 		["OAUTH_JWT_LEGACY_TYP_ACCEPT", "oauth.jwt.legacyTypAccept"],
-		["OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN", "oauth.accessToken.defaultExpiresIn"],
 		["OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN", "oauth.accessToken.maxExpiresIn"],
-		["OAUTH_ACCESS_TOKEN_EXPIRES_IN", "oauth.accessToken.expiresIn"],
 		["OAUTH_REFRESH_TOKEN_EXPIRES_IN", "oauth.refreshToken.expiresIn"],
 		["OAUTH_OIDC_MODE", "oauth.oidcMode"],
 		["OAUTH_REVOCATION_ACCESS_TOKEN", "oauth.revocation.accessToken"],
@@ -166,7 +164,7 @@ describe("the reference, read by the module's schema", () => {
 	it("parses with no variable but the issuer set, every switch off and the shipped defaults", () => {
 		expect(load()).toEqual({
 			jwt: { issuer: "https://auth.test", legacyTypAccept: false },
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 			requireEmailVerified: false,
@@ -213,25 +211,15 @@ describe("the reference, read by the module's schema", () => {
 		const lifetime = (env: Record<string, string> = {}, applicationConf?: string) =>
 			resolveAccessTokenLifetime({ oauth: load(env, applicationConf) });
 
-		it("ships a one-hour default and no extension past it", () => {
+		it("ships a one-hour default on defaultExpiresIn and no extension past it", () => {
 			expect(lifetime()).toEqual({ defaultExpiresIn: 3600, maxExpiresIn: 3600 });
-			expect(load().accessToken.expiresIn).toBe(3600);
+			expect(load().accessToken).toEqual({ defaultExpiresIn: 3600 });
 		});
 
-		it("still honours OAUTH_ACCESS_TOKEN_EXPIRES_IN as the default", () => {
-			expect(lifetime({ OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900" })).toEqual({
-				defaultExpiresIn: 900,
-				maxExpiresIn: 900,
-			});
-		});
-
-		it("reads OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN over the deprecated variable", () => {
-			const env = {
-				OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900",
-				OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "600",
-			};
+		it("reads OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN", () => {
+			const env = { OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "600" };
 			expect(lifetime(env)).toEqual({ defaultExpiresIn: 600, maxExpiresIn: 600 });
-			expect(load(env).accessToken.expiresIn).toBe(600);
+			expect(load(env).accessToken).toEqual({ defaultExpiresIn: 600 });
 		});
 
 		it("reads OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN", () => {
@@ -254,26 +242,17 @@ describe("the reference, read by the module's schema", () => {
 			expect(() => load({ OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN: "1800" })).toThrow(/maxExpiresIn/);
 		});
 
-		it.each([
-			"OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
-			"OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN",
-			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
-		])("refuses an exported-but-empty %s rather than reading it as zero", (name) => {
-			expect(() => load({ [name]: "" })).toThrow();
-		});
+		it.each(["OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN", "OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN"])(
+			"refuses an exported-but-empty %s rather than reading it as zero",
+			(name) => {
+				expect(() => load({ [name]: "" })).toThrow();
+			},
+		);
 
-		it("keeps an application layer's override of the deprecated key deciding the default", () => {
-			expect(lifetime({}, "oauth.accessToken.expiresIn = 900")).toEqual({
-				defaultExpiresIn: 900,
-				maxExpiresIn: 900,
-			});
-			expect(load({}, "oauth.accessToken.expiresIn = 900").accessToken.expiresIn).toBe(900);
-		});
-
-		it("lets an application layer's defaultExpiresIn outrank the shipped literal on the deprecated key", () => {
+		it("lets an application layer's defaultExpiresIn override the shipped default", () => {
 			const conf = "oauth.accessToken { defaultExpiresIn = 300, maxExpiresIn = 1200 }";
 			expect(lifetime({}, conf)).toEqual({ defaultExpiresIn: 300, maxExpiresIn: 1200 });
-			expect(load({}, conf).accessToken.expiresIn).toBe(300);
+			expect(load({}, conf).accessToken).toEqual({ defaultExpiresIn: 300, maxExpiresIn: 1200 });
 		});
 	});
 });

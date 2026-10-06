@@ -95,7 +95,7 @@ function makeRefreshDeps(
 	const base = {
 		oauth: {
 			jwt: { secret: SECRET },
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			grants: {
 				authorization_code: { enabled: true },
@@ -132,7 +132,7 @@ function makeAuthzDeps(
 	const base = {
 		oauth: {
 			jwt: { secret: "test-secret" },
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			grants: {
 				authorization_code: { enabled: true },
@@ -189,7 +189,7 @@ function makeCCDeps(
 	const base = {
 		oauth: {
 			jwt: { issuer: "https://test.example" },
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 		},
 	};

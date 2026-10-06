@@ -35,7 +35,7 @@ import { type OAuthTokenSection, oauthTokenSettingsFrom } from "#/tokenSettings.
  * deployment's issuer fill them.
  */
 const FIXTURE_ISSUER = "https://auth.test";
-const FIXTURE_ACCESS_TOKEN = { expiresIn: 3600 };
+const FIXTURE_ACCESS_TOKEN = { defaultExpiresIn: 3600 };
 const FIXTURE_REFRESH_TOKEN_EXPIRES_IN = 86_400;
 
 /**

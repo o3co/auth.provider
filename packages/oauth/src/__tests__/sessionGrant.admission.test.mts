@@ -70,7 +70,7 @@ const SUBJECT = "user-1";
 const config = {
 	oauth: {
 		jwt: { issuer: "https://issuer.test", secret: "test-secret" },
-		accessToken: { expiresIn: 60 },
+		accessToken: { defaultExpiresIn: 60 },
 		refreshToken: { expiresIn: 86400 },
 		grants: { session: { enabled: true } },
 	},

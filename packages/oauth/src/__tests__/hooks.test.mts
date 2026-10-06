@@ -50,7 +50,7 @@ const PKCE_CODE_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const mockConfig = {
 	oauth: {
 		jwt: { issuer: "https://auth.example" },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		// These tests target audit / grantPolicy / rateLimit hooks at the
 		// authorize endpoint and do not request openid. oidcMode defaults to

@@ -54,7 +54,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 	const config = (over: Record<string, unknown> = {}) => ({
 		oauth: {
 			refreshToken: { expiresIn: 86_400 },
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 			...((over.oauth as Record<string, unknown>) ?? {}),
 		},
 		...over,
@@ -70,7 +70,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 	});
 
 	it("sizes the access token from the maximum a request may obtain, not the default", () => {
-		// `expiresIn` is what a grant mints when the request asks for nothing;
+		// `defaultExpiresIn` is what a grant mints when the request asks for nothing;
 		// token exchange may ask for more, up to `maxExpiresIn`. A horizon
 		// computed from the default expires while those longer tokens are still
 		// valid — and a token that outlives the boundary that revoked it works
@@ -87,10 +87,10 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		expect(horizon).toBeGreaterThan(86_400_000);
 	});
 
-	it("reads the deprecated alias where that is all a deployment has", () => {
-		// `expiresIn` alone means both the default and the maximum.
+	it("takes the default as the maximum where no maximum is set", () => {
+		// `defaultExpiresIn` alone means both the default and the maximum.
 		const horizon = resolveSubjectRevocationHorizonMs(
-			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 172_800 } } },
+			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { defaultExpiresIn: 172_800 } } },
 			session(60_000),
 		);
 		expect(horizon).toBeGreaterThan(172_800_000);
@@ -103,7 +103,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		// clock tolerance past `exp`. The registry is not visible here, so the
 		// limit stands in for the largest ceiling.
 		const horizon = resolveSubjectRevocationHorizonMs(
-			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 60 } } },
+			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { defaultExpiresIn: 60 } } },
 			session(60_000),
 		);
 		expect(horizon).toBeGreaterThan(
@@ -127,7 +127,9 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 	it("takes the access-token maximum, which configuration does not bound by the refresh token", () => {
 		// Nothing says an access token must be shorter than a refresh token.
 		const horizon = resolveSubjectRevocationHorizonMs(
-			config({ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 86_400 } } }),
+			config({
+				oauth: { refreshToken: { expiresIn: 60 }, accessToken: { defaultExpiresIn: 86_400 } },
+			}),
 			session(43_200_000),
 		);
 		expect(horizon).toBeGreaterThanOrEqual(86_400_000 + 300_000);
@@ -138,7 +140,9 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		// computed from a missing lifetime is a boundary that expires early.
 		for (const broken of [
 			{},
-			config({ oauth: { refreshToken: { expiresIn: "soon" }, accessToken: { expiresIn: 3600 } } }),
+			config({
+				oauth: { refreshToken: { expiresIn: "soon" }, accessToken: { defaultExpiresIn: 3600 } },
+			}),
 		]) {
 			expect(
 				() => resolveSubjectRevocationHorizonMs(broken, session(43_200_000)),
@@ -169,7 +173,10 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 			// an hour, and two days of access token. The slot is what was minted.
 			const horizon = resolveSubjectRevocationHorizonMs(
 				config({
-					oauth: { refreshToken: { expiresIn: 30 * 86_400 }, accessToken: { expiresIn: 3600 } },
+					oauth: {
+						refreshToken: { expiresIn: 30 * 86_400 },
+						accessToken: { defaultExpiresIn: 3600 },
+					},
 				}),
 				{
 					tokenSettings: tokenSettings({

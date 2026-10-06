@@ -147,8 +147,8 @@ export function resolveSubjectRevocationHorizonMs(
 	// The maximum, not the default: token exchange may ask for up to
 	// `maxExpiresIn`, and a horizon sized from the default would let those
 	// longer tokens outlive the boundary that revoked them.
-	// `resolveAccessTokenLifetime` is the one reader of that pair, alias and
-	// all, and refuses a value that is not a lifetime.
+	// `resolveAccessTokenLifetime` is the one reader of that pair, and refuses
+	// a value that is not a lifetime.
 	const accessMs =
 		(tokenSettings === undefined
 			? resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn

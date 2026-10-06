@@ -569,7 +569,7 @@ describe("subjectRevocationServiceModule", () => {
 			// as long as it did.
 			const issuer = { jwt: { issuer: "https://issuer.example" } };
 			const sections = [
-				{ accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 86_400 } },
+				{ accessToken: { defaultExpiresIn: 300 }, refreshToken: { expiresIn: 86_400 } },
 				{
 					accessToken: { defaultExpiresIn: 60, maxExpiresIn: 30 * 86_400 },
 					refreshToken: { expiresIn: 86_400 },
@@ -578,7 +578,7 @@ describe("subjectRevocationServiceModule", () => {
 					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7_200 },
 					refreshToken: { expiresIn: 40 * 86_400 },
 				},
-				{ accessToken: { expiresIn: 900 }, refreshToken: { expiresIn: 3_600 } },
+				{ accessToken: { defaultExpiresIn: 900 }, refreshToken: { expiresIn: 3_600 } },
 				{ accessToken: { defaultExpiresIn: 1, maxExpiresIn: 1 }, refreshToken: { expiresIn: 1 } },
 			];
 			const sessions = [

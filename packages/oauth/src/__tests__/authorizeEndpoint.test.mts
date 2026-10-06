@@ -80,7 +80,7 @@ const makeConfig = (oauthOverrides: Record<string, unknown>): AppConfig =>
 	({
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
-			accessToken: { expiresIn: 300 },
+			accessToken: { defaultExpiresIn: 300 },
 			// `dual` so requests without `openid` reach the branch under test
 			// instead of tripping the `openid` scope gate first.
 			oidcMode: "dual",

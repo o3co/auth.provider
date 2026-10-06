@@ -50,7 +50,7 @@ function configWith(jwt: Record<string, unknown>): AppConfig {
 	return {
 		oauth: {
 			jwt,
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 		},
 		rateLimit: { failMode: "open" as const },
 		endpoints: { login: { url: "/login" } },

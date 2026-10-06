@@ -141,7 +141,7 @@ const familyStoreModules = [
 const authorizeConfig = {
 	oauth: {
 		jwt: { issuer: "https://auth.example" },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		oidcMode: "oidc-required",
 	},
@@ -1537,7 +1537,7 @@ describe("/authorize nonce length + character-set validation", () => {
 			configOverride: {
 				oauth: {
 					jwt: { issuer: "https://auth.example" },
-					accessToken: { expiresIn: 3600 },
+					accessToken: { defaultExpiresIn: 3600 },
 					refreshToken: { expiresIn: 86400 },
 					nonce: { maxLength: 10 },
 				},

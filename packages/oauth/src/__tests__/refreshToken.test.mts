@@ -63,7 +63,7 @@ const secretKey = createSecretKey(Buffer.from(SECRET));
 const mockConfig = {
 	oauth: {
 		jwt: { secret: SECRET },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {
 			session: { enabled: true },
@@ -281,8 +281,7 @@ describe("createRefreshTokenGrant", () => {
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
 			// `expires_in` is the time left when answered: read on a frozen clock.
 			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
-			// Only the current keys are configured, so a grant reading the
-			// deprecated `expiresIn` would mint a token with no `exp` at all.
+			// The lifetime is read through `resolveAccessTokenLifetime`.
 			const handler = createRefreshTokenGrant({
 				...mockDeps,
 				...grantSettingsFrom({

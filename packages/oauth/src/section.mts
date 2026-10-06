@@ -81,25 +81,18 @@ const jwtSchema = z
 /** A lifetime in whole seconds, positive and bounded. */
 const lifetimeSecondsSchema = wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS);
 
-const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const;
+const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn"] as const;
 
 /**
- * `oauth.accessToken`. Every key is optional so either spelling of the default
- * can stand alone; the refinement requires one, and refuses a default above
- * the max, by the rules and in the words of core's `resolveAccessTokenLifetime`,
- * which reads the lifetime for every grant. The output mirrors the resolved
- * default onto the deprecated `expiresIn`, idempotently: boot may parse a
- * configuration this level already parsed.
+ * `oauth.accessToken`. Each key is optional to the object so that the
+ * refinement reports a missing default, and a default above the max, by the
+ * rules and in the words of core's `resolveAccessTokenLifetime`, which reads
+ * the lifetime for every grant.
  */
 const accessTokenSchema = z
 	.object({
 		defaultExpiresIn: lifetimeSecondsSchema.optional(),
 		maxExpiresIn: lifetimeSecondsSchema.optional(),
-		/**
-		 * @deprecated An alias of `defaultExpiresIn`, still read when that key is
-		 * unset. See CHANGELOG.
-		 */
-		expiresIn: lifetimeSecondsSchema.optional(),
 	})
 	.strict()
 	.superRefine((value, ctx) => {
@@ -112,39 +105,26 @@ const accessTokenSchema = z
 		) {
 			return;
 		}
-		const configuredDefault = value.defaultExpiresIn;
-		const defaultExpiresIn = configuredDefault ?? value.expiresIn;
+		const defaultExpiresIn = value.defaultExpiresIn;
 		if (defaultExpiresIn === undefined) {
 			ctx.addIssue({
 				code: "custom",
 				message:
-					"oauth.accessToken.defaultExpiresIn is required (OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN); the deprecated oauth.accessToken.expiresIn is still read in its place",
+					"oauth.accessToken.defaultExpiresIn is required (OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN)",
 				path: ["defaultExpiresIn"],
 			});
 			return;
 		}
 		const maxExpiresIn = value.maxExpiresIn ?? defaultExpiresIn;
 		if (defaultExpiresIn > maxExpiresIn) {
-			const source =
-				configuredDefault === undefined
-					? ", read from the deprecated oauth.accessToken.expiresIn"
-					: "";
 			ctx.addIssue({
 				code: "custom",
-				message: `oauth.accessToken.defaultExpiresIn (${defaultExpiresIn}${source}) must not exceed oauth.accessToken.maxExpiresIn (${maxExpiresIn}): lower the default or raise the max`,
+				message: `oauth.accessToken.defaultExpiresIn (${defaultExpiresIn}) must not exceed oauth.accessToken.maxExpiresIn (${maxExpiresIn}): lower the default or raise the max`,
 				path: ["maxExpiresIn"],
 			});
 		}
 	})
-	.transform(
-		({ defaultExpiresIn, maxExpiresIn, expiresIn }): AccessTokenConfig => ({
-			...(defaultExpiresIn !== undefined ? { defaultExpiresIn } : {}),
-			...(maxExpiresIn !== undefined ? { maxExpiresIn } : {}),
-			// The refinement above guarantees one of the two; the transform does
-			// not run on a value that failed it.
-			expiresIn: (defaultExpiresIn ?? expiresIn) as number,
-		}),
-	);
+	.transform((value): AccessTokenConfig => value);
 
 /** `oauth.refreshToken`. */
 const refreshTokenSchema = z
@@ -211,8 +191,7 @@ const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =
 export const oauthSectionSchema = z
 	.object({
 		jwt: jwtSchema,
-		// The access-token lifetime: `defaultExpiresIn`, `maxExpiresIn`, and the
-		// deprecated `expiresIn` alias.
+		// The access-token lifetime: `defaultExpiresIn` and `maxExpiresIn`.
 		accessToken: accessTokenSchema,
 		refreshToken: refreshTokenSchema,
 		// As an OIDC OP, `/authorize` refuses a request without `openid` unless

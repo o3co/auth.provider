@@ -54,7 +54,7 @@ const idp = generateKeyPairSync("ed25519");
 const devices = generateKeyPairSync("ed25519");
 
 const config = {
-	oauth: { jwt: { issuer: AS }, accessToken: { expiresIn: 300 } },
+	oauth: { jwt: { issuer: AS }, accessToken: { defaultExpiresIn: 300 } },
 } as unknown as AppConfig;
 
 const client: AuthenticatedClient = {
