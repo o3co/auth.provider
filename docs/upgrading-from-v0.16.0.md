@@ -269,6 +269,13 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   wherever `oauthEndpointsModule` is installed (#728): a refresh token
   lacking `jti` or `family_id` while family rotation is wired is always
   refused. Delete the key.
+- `oauth.refreshToken.legacyTokenCompat` and
+  `oauth.authorize.allowUnmarkedClients`, and an exported
+  `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, still refuse the boot, now
+  wherever `oauthEndpointsModule` is installed as `config-path-relocated`
+  (`<key> was removed; see CHANGELOG. Remove this field …`) instead of
+  `config-validation-failed` naming the release that removed the key. Delete
+  the key and unset the variable.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
 - `device-grant.store` (and `oauth.deviceAuthorization.store`), at any value,

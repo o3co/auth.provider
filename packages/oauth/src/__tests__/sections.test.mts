@@ -23,14 +23,16 @@
  * one, a variable renamed with them refuses boot unless its new name carries
  * the same value, and the authorization-code grant's `pkce` block, and its
  * variable, refuse boot as removed. The refresh grant's unknown-family policy
- * sits beside its switch, moved from `oauth.refreshToken`; `legacyRtPolicy`
- * refuses boot as removed.
+ * sits beside its switch, moved from `oauth.refreshToken`; `legacyRtPolicy`,
+ * `legacyTokenCompat` and `oauth.authorize.allowUnmarkedClients` refuse boot
+ * as removed.
  */
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
 	BootError,
+	coreReference,
 	createApp,
 	createSymmetricKeyStore,
 	defineModule,
@@ -185,11 +187,13 @@ describe("the package's config/reference.conf", () => {
 });
 
 describe("the paths the settings moved from, on the manifests", () => {
-	it("oauth: the consent page from endpoints.consent.url, legacyRtPolicy removed, and the Client ID Metadata Documents' variables renamed in place", () => {
+	it("oauth: the consent page from endpoints.consent.url, legacyRtPolicy, legacyTokenCompat and allowUnmarkedClients removed, and the Client ID Metadata Documents' variables renamed in place", () => {
 		const section = everyModule()[0]?.section;
 		expect(section?.relocatedFrom).toEqual({
 			"endpoints.consent.url": "consentPage.url",
 			"oauth.refreshToken.legacyRtPolicy": null,
+			"oauth.refreshToken.legacyTokenCompat": null,
+			"oauth.authorize.allowUnmarkedClients": null,
 		});
 		expect(section?.renamedVariables).toMatchObject({
 			ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
@@ -548,6 +552,55 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			expect(err.message).toContain("was removed");
 		},
 	);
+
+	it.each([
+		["refreshToken", "legacyTokenCompat", false],
+		["refreshToken", "legacyTokenCompat", true],
+		["authorize", "allowUnmarkedClients", false],
+		["authorize", "allowUnmarkedClients", "true"],
+	])(
+		"refuses oauth.%s.%s = %j as removed, telling the operator to remove it",
+		async (block, key, value) => {
+			const err = await refusal((config) => {
+				const oauth = config.oauth as Record<string, Record<string, unknown>>;
+				return oauthWith(config, { [block]: { ...oauth[block], [key]: value } });
+			});
+
+			// Refused by the oauth module's own declaration, before any schema
+			// parses the configuration: no copy of `oauth {}` in core's schema is
+			// read for it.
+			expect(err.details).toEqual({
+				reason: "config-path-relocated",
+				relocated: [{ module: "oauth", from: `oauth.${block}.${key}`, to: null }],
+			});
+			expect(err.message).toContain(
+				`oauth.${block}.${key} was removed; see CHANGELOG. Remove this field from your config (or unset the environment variable that sets it).`,
+			);
+		},
+	);
+
+	it("refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS exported, which core's reference writes at the removed key", async () => {
+		const layered = parseFile(fileURLToPath(coreReference()), {
+			env: { OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false" },
+		}).toObject() as { oauth: { authorize: Record<string, unknown> } };
+		expect(layered.oauth.authorize.allowUnmarkedClients).toBe("false");
+
+		const err = await refusal((config) => {
+			const oauth = config.oauth as Record<string, Record<string, unknown>>;
+			return oauthWith(config, {
+				authorize: {
+					...oauth.authorize,
+					allowUnmarkedClients: layered.oauth.authorize.allowUnmarkedClients,
+				},
+			});
+		});
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [{ module: "oauth", from: "oauth.authorize.allowUnmarkedClients", to: null }],
+		});
+		expect(err.message).toContain("unset the environment variable that sets it");
+	});
 
 	it("refuses OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256 set at all, as removed", async () => {
 		const err = await refusal((config) => config, {
