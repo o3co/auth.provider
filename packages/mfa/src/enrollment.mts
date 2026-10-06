@@ -784,9 +784,9 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				// given and the first counting factor written.
 				const flagCleared =
 					binding === "email_proof"
-						? await writes.run(
-								() => kit.consumeEmailProofRequirement(tx.subject),
-								(failed) => ({ failed }),
+						? await writes.emailProofRequirement.consume(tx.subject).then(
+								() => undefined,
+								(failed: unknown) => ({ failed }),
 							)
 						: undefined;
 				const issuing = { factors, writes, sealing, subject: tx.subject, binding, nowMs };
