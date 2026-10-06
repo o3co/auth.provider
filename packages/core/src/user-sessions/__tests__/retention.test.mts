@@ -70,7 +70,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 	});
 
 	it("sizes the access token from the maximum a request may obtain, not the default", () => {
-		// `expiresIn` is what a grant mints when the request asks for nothing;
+		// `defaultExpiresIn` is what a grant mints when the request asks for nothing;
 		// token exchange may ask for more, up to `maxExpiresIn`. A horizon
 		// computed from the default expires while those longer tokens are still
 		// valid — and a token that outlives the boundary that revoked it works
@@ -87,8 +87,8 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		expect(horizon).toBeGreaterThan(86_400_000);
 	});
 
-	it("reads the deprecated alias where that is all a deployment has", () => {
-		// `expiresIn` alone means both the default and the maximum.
+	it("takes the default as the maximum where no maximum is set", () => {
+		// `defaultExpiresIn` alone means both the default and the maximum.
 		const horizon = resolveSubjectRevocationHorizonMs(
 			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { defaultExpiresIn: 172_800 } } },
 			session(60_000),

@@ -44,8 +44,9 @@ export { oauthSectionSchema };
  * the access-token default moved from `oauth.accessToken.expiresIn` to
  * `oauth.accessToken.defaultExpiresIn`, its variable,
  * `OAUTH_ACCESS_TOKEN_EXPIRES_IN`, renamed with it
- * (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`); three keys removed, each refusing boot set to a value, since the behaviour it
- * switched no longer exists — `oauth.refreshToken.legacyRtPolicy` (a refresh
+ * (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`); three keys removed, each
+ * refusing boot set to a value, since the behaviour it switched no longer
+ * exists — `oauth.refreshToken.legacyRtPolicy` (a refresh
  * token lacking `jti` or `family_id` while family rotation is wired is always
  * refused), `oauth.refreshToken.legacyTokenCompat` (no v0.4.x refresh-token
  * shape is accepted) and `oauth.authorize.allowUnmarkedClients` (`/authorize`
