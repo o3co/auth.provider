@@ -23,7 +23,6 @@
  */
 
 import type { RequestHandler, Router } from "express";
-import type { z } from "zod";
 import { createLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
@@ -45,6 +44,7 @@ import type { SessionCloseNotifier } from "../session-lifecycle/notifier.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
 import { assembleApp } from "./assemble-app.mjs";
 import { freezeWorld } from "./freeze-world.mjs";
+import { snapshotHostMap } from "./host-maps.mjs";
 import { materializeComponents } from "./materialize-components.mjs";
 import { planBoot } from "./plan-boot.mjs";
 import { runCleanupsReverse } from "./run-cleanups.mjs";
@@ -63,7 +63,6 @@ import type {
 	RegisteredFederationType,
 	RouteCollector,
 } from "./types.mjs";
-import { BootError } from "./types.mjs";
 import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.mjs";
 
 // ---------------------------------------------------------------------------
@@ -101,13 +100,14 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	options: CreateAppOptions<B>,
 ): Promise<AppHandle> {
 	const { modules } = options;
-	// Each host map is read once, here: stage 1 checks what later stages use,
-	// so a map that answers differently on a later read (a Proxy, a getter)
-	// cannot have one answer checked and another materialised — nor can the
-	// collectors the guard below reads differ from the ones merged.
-	const bootstrapComponents = snapshotHostMap(options.bootstrapComponents);
-	const overrideComponents = snapshotHostMap(options.overrideComponents);
-	const contributionKinds = snapshotHostMap(options.contributionKinds);
+	// Each host map is read once, here, at the one boundary (`host-maps.mts`):
+	// stage 1 checks what later stages use, so a map that answers differently
+	// on a later read (a Proxy, a getter) cannot have one answer checked and
+	// another materialised — nor can the collectors the guard below reads
+	// differ from the ones merged.
+	const bootstrapComponents = snapshotHostMap(options.bootstrapComponents, "bootstrapComponents");
+	const overrideComponents = snapshotHostMap(options.overrideComponents, "overrideComponents");
+	const contributionKinds = snapshotHostMap(options.contributionKinds, "contributionKinds");
 
 	// A host collector for a guarded kind is refused before anything is merged
 	// or validated.
@@ -194,63 +194,6 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		);
 		throw err;
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Internal: snapshotHostMap
-// ---------------------------------------------------------------------------
-
-/**
- * A host map's `config`, read once; a read that throws refuses boot as a
- * configuration that cannot be read (`config-validation-failed`), never with
- * what it threw.
- */
-function readConfigSlot(source: Record<string, unknown>): unknown {
-	try {
-		return source.config;
-	} catch {
-		const issues = [
-			{
-				code: "custom",
-				path: [],
-				message: "the configuration could not be read: reading it threw",
-			} as z.ZodIssue,
-		];
-		throw new BootError({
-			message:
-				"Config validation failed — 1 issue(s) found: (the configuration): the configuration could not be read: reading it threw.",
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: { reason: "config-validation-failed", issues, modules: [] },
-		});
-	}
-}
-
-/**
- * A plain copy of a host map's own enumerable keys and their values, each
- * read once. Every key is defined, not assigned, so an own `__proto__` stays a
- * key (stage 1 refuses it, naming the map) rather than becoming the copy's
- * prototype. Anything that is not an object is handed on as it is, for stage
- * 1 to judge.
- */
-function snapshotHostMap<T>(map: T): T {
-	if (map === null || typeof map !== "object") return map;
-	const copy: Record<string, unknown> = {};
-	const source = map as Record<string, unknown>;
-	for (const key of Object.keys(source)) {
-		Object.defineProperty(copy, key, {
-			// Stage 1 refuses an own `__proto__` whatever it holds, so its value
-			// is never read: an accessor there does not run. The configuration
-			// is read through `readConfigSlot`, whose throw refuses as a
-			// configuration that cannot be read.
-			value:
-				key === "__proto__" ? undefined : key === "config" ? readConfigSlot(source) : source[key],
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
-	}
-	return copy as T;
 }
 
 // ---------------------------------------------------------------------------

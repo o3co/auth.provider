@@ -51,7 +51,6 @@ import {
 import { describeValue } from "../errors/describe-value.mjs";
 import { enabledFederationsOf } from "../federations/configured.mjs";
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
-import { copyPlainJsonNegativeZeroAsZero } from "../json/plainJson.mjs";
 import {
 	type AbsencePolicy,
 	describeAbsenceDeclaration,
@@ -85,6 +84,7 @@ import {
 	federationTypeSnapshot,
 	parseFederationEntries,
 } from "./federation-entries.mjs";
+import { snapshotHostMap } from "./host-maps.mjs";
 import { unreadCorsSection } from "./http-settings.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
 import {
@@ -2186,7 +2186,7 @@ const UNREAD_OAUTH_KEY =
  * Where no loaded module's section is `oauth` — the oauth endpoints module is
  * not loaded — the issues of core's reading of `oauth {}` in `config`, the
  * frozen plain-data copy stage 1 took of what was handed over
- * (`withConfigCopied`): a section that is not an object, every key set that
+ * (`snapshotHostMap`): a section that is not an object, every key set that
  * core does not read (`OAUTH_PATHS_CORE_READS`, segment for segment, by the
  * reading of what a configuration sets the relocation refusal uses:
  * `pathsSetBy`), and an issuer present that is not a canonical issuer,
@@ -3304,75 +3304,6 @@ function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
 }
 
 /**
- * The bootstrap map's own entries, `config` read once as an own property (one
- * the map inherits is none) and replaced by its frozen plain-data copy
- * (`copyPlainJson`, `-0` read as `0` as JSON writes it, since HOCON resolves
- * it from what an operator wrote): every field read once — a getter runs once — and every
- * object and list copied, so no getter, Proxy trap or prototype of a
- * configuration built in code survives into what stage 1 checks and every
- * later stage reads. Taken first, before anything reads the configuration;
- * `copyPlainJson` is the one reader of what the composition root handed over,
- * which is neither frozen nor changed. A configuration resolved from HOCON is
- * plain data and is copied as it is. One that is not — a read that throws,
- * a value JSON would not give back as it is (a `Date`, a class instance, a
- * symbol's field, a cycle), or a `config` whose own read throws — refuses
- * boot (`config-validation-failed`), naming where and never what a read
- * threw. A configuration that is no object (a string) is handed on as it is,
- * for the composed parse to refuse. Every other entry is carried over as it
- * was defined, and `config` is not read again.
- * @internal
- */
-function withConfigCopied(bootstrap: BootstrapMap): BootstrapMap {
-	// The map's own entries, each carried over as it was defined, `config`
-	// read once as an own property: one the map inherits is none, as the host
-	// maps createApp copies keep their own keys alone.
-	const copied: Record<string, unknown> = {};
-	let handed: unknown;
-	for (const key of Object.keys(bootstrap)) {
-		// An own key `Object.keys` listed has a descriptor.
-		const descriptor = Object.getOwnPropertyDescriptor(bootstrap, key) as PropertyDescriptor;
-		if (key !== "config") {
-			Object.defineProperty(copied, key, descriptor);
-			continue;
-		}
-		try {
-			handed = "value" in descriptor ? descriptor.value : descriptor.get?.call(bootstrap);
-		} catch {
-			throw configNotPlainData("the configuration could not be read: reading it threw");
-		}
-	}
-	if (!Object.hasOwn(bootstrap, "config")) return copied as BootstrapMap;
-	if (handed === null || typeof handed !== "object") {
-		defineConfigKey(copied, "config", handed);
-		return copied as BootstrapMap;
-	}
-	const taken = copyPlainJsonNegativeZeroAsZero(handed);
-	if (!taken.ok) {
-		const where = taken.at === "" ? "the configuration" : `the configuration at ${taken.at}`;
-		throw configNotPlainData(
-			`${where} is not plain data: a read threw there, or it holds a value configuration cannot (a getter or Proxy that throws, a class instance, a symbol's field, a cycle)`,
-		);
-	}
-	defineConfigKey(copied, "config", taken.copy);
-	return copied as BootstrapMap;
-}
-
-/** The refusal of a configuration that cannot be copied as plain data: one issue at its root. */
-function configNotPlainData(message: string): BootError {
-	const issues = [issueAt([], message)];
-	return new BootError({
-		message: `Config validation failed — ${issues.length} issue(s) found: ${namedIssues(issues)}.`,
-		reason: "config-validation-failed",
-		stage: "validateManifests",
-		details: {
-			reason: "config-validation-failed",
-			issues: issues as z.ZodIssue[],
-			modules: [],
-		},
-	});
-}
-
-/**
  * The bootstrap map without `configDefaults`, and that input read once into a
  * copy of its plain data (`readConfigDefaults`): boot reads it at stage 1 for
  * the notices and seeds no component from it. The map itself, and no
@@ -3765,14 +3696,16 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * loaded reads (`logConfigNotices`) and the replica-safety warning.
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
-	const { modules, contributionKinds, overrideComponents } = input;
+	const { modules, contributionKinds } = input;
+	// The host maps read once, at the one boundary (`host-maps.mts`), before
+	// anything else reads them: the configuration copied as frozen plain data,
+	// every slot a data property. A map createApp already read is taken as is.
+	const overrideComponents = snapshotHostMap(input.overrideComponents, "overrideComponents");
 	// `configDefaults` is read here and is no component: no check and no later
 	// stage sees it.
-	const taken = takeConfigDefaults(input.bootstrapComponents);
-	const { configDefaults } = taken;
-	// The configuration as frozen plain data, read once, before anything reads
-	// it: what every check below and every later stage reads.
-	const bootstrapComponents = withConfigCopied(taken.bootstrapComponents);
+	const { bootstrapComponents, configDefaults } = takeConfigDefaults(
+		snapshotHostMap(input.bootstrapComponents, "bootstrapComponents"),
+	);
 
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);
