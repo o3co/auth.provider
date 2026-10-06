@@ -1050,6 +1050,11 @@ export interface OutageCase<C extends Composition = Composition> {
 	readonly storeFieldNotRequired?: string;
 	/** The predicates the composition breaks today, each naming its defect. */
 	readonly defects?: Partial<Record<OutagePredicate, string>>;
+	/**
+	 * The warn lines a `no-warn` defect writes, pinned exactly while it stands,
+	 * so the defect covers those lines and no other.
+	 */
+	readonly defectWarns?: readonly string[];
 }
 
 /** The same defect text for every predicate that depends on the one missing line. */
@@ -1080,6 +1085,14 @@ export function describeOutages<C extends Composition>(
 ): void {
 	describe(title, () => {
 		for (const c of cases) {
+			if (
+				c.defectWarns !== undefined &&
+				(c.defects?.["no-warn"] === undefined || c.defectWarns.length === 0)
+			) {
+				throw new Error(
+					`${c.module}: ${c.slot} down at ${c.surface}: defectWarns pins the lines of a no-warn defect, so it needs defects["no-warn"] and at least one line`,
+				);
+			}
 			describe(`${c.module}: ${c.slot} down at ${c.surface}`, () => {
 				let res: request.Response;
 				let lines: LogLine[] = [];
@@ -1159,13 +1172,20 @@ export function describeOutages<C extends Composition>(
 					expect(err).toMatchObject({ name: expect.any(String) });
 					expect(err).not.toBeInstanceOf(Error);
 				});
-				check("no-warn", "writes no warn line for it", () => {
-					const warns = lines
+				const outageWarns = () =>
+					lines
 						.filter((line) => line.level === "warn")
 						.map((line) => (typeof line.args[1] === "string" ? line.args[1] : String(line.args[0])))
 						.filter((event) => !(c.unrelatedWarns ?? []).includes(event));
-					expect(warns).toEqual([]);
+				check("no-warn", "writes no warn line for it", () => {
+					expect(outageWarns()).toEqual([]);
 				});
+				if (c.defectWarns !== undefined) {
+					const pinned = c.defectWarns;
+					it(`writes exactly the warn lines its no-warn defect names: ${pinned.join(", ")}`, () => {
+						expect(outageWarns()).toEqual(pinned);
+					});
+				}
 			});
 		}
 	});
