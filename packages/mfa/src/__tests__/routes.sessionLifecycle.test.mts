@@ -15,18 +15,22 @@
  */
 
 /**
- * The MFA routes admit a session through the session lifecycle port when one
- * is wired: a session whose lifecycle record is closing is not admitted.
+ * The MFA routes admit a session through the session lifecycle port, which
+ * a composition wires beside its user-session store: a session whose
+ * lifecycle record is closing is not admitted. Without the port the routes
+ * refuse to build.
  */
 
 import {
 	createInMemorySessionLifecycleStore,
+	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
-	defineModule,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ALICE, boot, configFor, disposeAll } from "./moduleHarness.mjs";
+import type { MfaRoutesOptions } from "#/routes.mjs";
+import { createMfaRouter } from "#/routes.mjs";
+import { ALICE, boot, configFor, disposeAll, refusal } from "./moduleHarness.mjs";
 import { freezeClock, seedTotp, signInWithTotp, T0, thawClock } from "./routesHarness.mjs";
 
 beforeEach(() => freezeClock());
@@ -43,12 +47,7 @@ describe("the MFA routes and the session lifecycle", () => {
 		const built = await boot({
 			config: configFor("optional"),
 			factorStore,
-			extraModules: [
-				defineModule({
-					name: "test:session-lifecycle-store",
-					provides: { sessionLifecycleStore: () => lifecycle },
-				}),
-			],
+			sessionLifecycleStore: lifecycle,
 		});
 		const totp = await seedTotp(factorStore);
 		const { agent, sid } = await signInWithTotp(
@@ -68,5 +67,23 @@ describe("the MFA routes and the session lifecycle", () => {
 		const res = await agent.get("/session/mfa/factors");
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("login_required");
+	});
+
+	it("refuse to boot with userSessionStore wired and no sessionLifecycleStore, naming both slots", async () => {
+		const err = await refusal({ sessionLifecycleStore: null });
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa", module: "mfa" });
+		expect((err.cause as Error).message).toMatch(
+			/^mfa: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Install sessionLifecycleModule/,
+		);
+	});
+
+	it("refuse to build the router with a user-session store and no session lifecycle port", () => {
+		const options = {
+			admission: { userSessionStore: createInMemoryUserSessionStore() },
+		} as unknown as MfaRoutesOptions;
+		expect(() => createMfaRouter(options)).toThrow(
+			/userSessionStore is wired, but sessionLifecycleStore is not/,
+		);
 	});
 });

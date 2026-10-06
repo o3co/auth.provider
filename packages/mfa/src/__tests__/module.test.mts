@@ -25,6 +25,7 @@
 import {
 	type AppConfig,
 	admitPrimary,
+	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
@@ -763,6 +764,7 @@ describe("the development sample key", () => {
 			mfaFactorStore: createMemoryMfaFactorStore(),
 			mfaTransactionStore: createMemoryMfaTransactionStore(),
 			userSessionStore: createInMemoryUserSessionStore(),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: resolverForTests([]),
 			logger: spyLogger(),
 		});
