@@ -22,7 +22,7 @@
  * behind the admission do not read it twice. Internal to the package.
  */
 
-import express, { type RequestHandler } from "express";
+import express, { type RequestHandler, type Response } from "express";
 
 /** The one content type the parser reads. */
 const JSON_TYPE = "application/json";
@@ -32,6 +32,41 @@ const LIMIT = "100kb";
 
 /** A parser of a JSON request body within the package's limit. */
 export const jsonBody = (): RequestHandler => express.json({ type: JSON_TYPE, limit: LIMIT });
+
+const refuseNotJson = (res: Response): void => {
+	res.status(400).json({
+		error: "invalid_request",
+		error_description: "The request body must be application/json",
+	});
+};
+
+/**
+ * Whether a body a parser produced carries nothing: no value, an empty string
+ * or buffer, or an object with no fields (what a form parser makes of an
+ * empty body). Judged on the parsed value, since the bytes are gone.
+ */
+const parsedEmpty = (body: unknown): boolean =>
+	body === undefined ||
+	body === null ||
+	body === "" ||
+	(typeof body === "object" && Object.keys(body).length === 0);
+
+/**
+ * A body something in front of the provider's routes already read — a body
+ * parser the host installs (which marks it `_body`), or any reader that took
+ * the stream to its end — is judged by the content type it was sent with: a
+ * JSON body passes as JSON, and any other body passes only when what was made
+ * of it carries nothing; otherwise `400 invalid_request`. A body nothing has
+ * read goes on to the package's own readers.
+ */
+const judgeBodyReadUpstream: RequestHandler = (req, res, next) => {
+	const readUpstream = (req as { _body?: unknown })._body === true || req.readableEnded;
+	if (readUpstream && !req.is(JSON_TYPE) && !parsedEmpty(req.body)) {
+		refuseNotJson(res);
+		return;
+	}
+	next();
+};
 
 /**
  * What remains of a body the JSON parser did not read, read to its end within
@@ -48,10 +83,7 @@ const refuseBytesNotJson: RequestHandler = (req, res, next) => {
 	const body: unknown = req.body;
 	if (Buffer.isBuffer(body)) {
 		if (body.length > 0) {
-			res.status(400).json({
-				error: "invalid_request",
-				error_description: "The request body must be application/json",
-			});
+			refuseNotJson(res);
 			return;
 		}
 		req.body = undefined;
@@ -61,9 +93,16 @@ const refuseBytesNotJson: RequestHandler = (req, res, next) => {
 
 /**
  * The body as the admission in front of the registration routes reads it:
- * to its end, whatever its framing, before anything after runs. A JSON body
- * is parsed as the routes parse it; any other body is read within the same
- * limit and refused with `400 invalid_request` when it has bytes, since the
- * routes would not read it. A request with no body, or an empty one, passes.
+ * to its end, whatever its framing, before anything after runs. A body read
+ * before the provider's routes is judged as it was read. Otherwise a JSON
+ * body is parsed as the routes parse it, and any other body is read within
+ * the same limit and refused with `400 invalid_request` when it has bytes,
+ * since the routes would not read it. A request with no body, or an empty
+ * one, passes.
  */
-export const wholeBody = (): RequestHandler[] => [jsonBody(), remainingBody(), refuseBytesNotJson];
+export const wholeBody = (): RequestHandler[] => [
+	judgeBodyReadUpstream,
+	jsonBody(),
+	remainingBody(),
+	refuseBytesNotJson,
+];

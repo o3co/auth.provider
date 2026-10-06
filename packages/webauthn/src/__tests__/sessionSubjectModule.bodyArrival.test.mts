@@ -82,7 +82,13 @@ function deferred() {
  * registration under that subject would verify too); the server listening.
  * `preset` is a subject an earlier middleware set.
  */
-async function setup(options: { readonly preset?: WebAuthnSubject } = {}) {
+async function setup(
+	options: {
+		readonly preset?: WebAuthnSubject;
+		/** A body parser the host installs in front of the provider's routes. */
+		readonly upstream?: RequestHandler;
+	} = {},
+) {
 	const now = Date.now();
 	const record: UserSession = {
 		sid: SID,
@@ -162,6 +168,7 @@ async function setup(options: { readonly preset?: WebAuthnSubject } = {}) {
 		headersArrived.resolve();
 		next();
 	});
+	if (options.upstream !== undefined) app.use(options.upstream);
 	const core = express.Router();
 	for (const contribution of [sessionSubject, ...registrationRoutes]) {
 		core.use(contribution.mountPath, contribution.handler);
@@ -356,6 +363,20 @@ describe("webauthnSessionSubjectModule — admission once an empty chunked body 
 			);
 
 			expect(res.status).toBe(401);
+		} finally {
+			close();
+		}
+	});
+});
+
+describe("webauthnSessionSubjectModule — a body the host's own parser read first", () => {
+	it("registers a JSON body an upstream JSON parser read, as usual", async () => {
+		const { post, registerCredential, close } = await setup({ upstream: express.json() });
+		try {
+			const res = await post(async () => {});
+
+			expect(res.status, JSON.stringify(res.body)).toBe(200);
+			expect(registerCredential).toHaveBeenCalledTimes(1);
 		} finally {
 			close();
 		}
