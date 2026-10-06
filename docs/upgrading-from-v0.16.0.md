@@ -1083,6 +1083,14 @@ modules fills them.
   throws a `RangeError` naming it when it is missing or breaks the slot's
   contract; `SessionGrantDeps` no longer has `config` (in a test,
   `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
+- **BREAKING: an enabled session grant with a `userSessionStore` requires
+  core's session lifecycle (#1030).** Without a `sessionLifecycleStore` (the
+  port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) `oauthSessionGrantModule` is refused at boot:
+  `contribute-factory-failed`, the message naming both slots, and
+  `createSessionGrant` throws the same refusal. The grant's admission reads
+  the session's lifecycle record, so a session closing or closed mints
+  nothing. A sessionless grant is unaffected.
 - **BREAKING: `subjectRevocationServiceModule` requires `oauthTokenSettings`,
   reads `federationGrantPolicy`, and no longer reads the configuration
   (#728).** It sizes the subject's revocation boundary from the token
@@ -1194,7 +1202,9 @@ modules fills them.
   place of the six session-cascade slots. A sessionless composition (client
   credentials, jwt-bearer) wires neither and is unaffected. A test or
   composition of your own that fills the slots by hand provides a
-  `sessionLifecycle` too.
+  `sessionLifecycle` too. Where another package's module admits a session,
+  it requires `sessionLifecycleStore` beside the store the same way; each
+  such refusal is listed with that module's own entry in this section.
   - The code exchange joins its session through the lifecycle alone: the
     grant no longer reads `sessionRPRegistry` or `sessionFamilyIndex`, and
     `oauthAuthorizationGrantsModule` no longer declares them, nor
