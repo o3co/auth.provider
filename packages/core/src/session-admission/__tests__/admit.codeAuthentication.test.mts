@@ -404,6 +404,10 @@ describe("a code that carries no readable authentication is refused once its ses
 		{ primary: undefined },
 		{ primary: "pwd" },
 		new Date("2026-10-06T11:59:00Z"),
+		// Only a plain object's own keys are a snapshot.
+		Object.create({ primary: undefined, mfaAt: undefined }),
+		Object.assign(new Date("2026-10-06T11:59:00Z"), { primary: undefined, mfaAt: undefined }),
+		Object.assign(Object.create(null), { primary: "pwd" }),
 	];
 
 	it("as unauthenticated, on both reads, before any requirement is asked — one an earlier release issued included", async () => {
@@ -422,6 +426,16 @@ describe("a code that carries no readable authentication is refused once its ses
 			}
 			expect(seen, JSON.stringify(code)).toEqual([]);
 		}
+	});
+
+	it("reads a snapshot that is a plain object without a prototype, both keys its own", async () => {
+		const authentication = Object.assign(Object.create(null), { primary: "pwd", mfaAt: undefined });
+		expect(
+			await judgedOn(
+				steppedUp(),
+				codeClaimFirstRead(record({ sid: "sid-1", amr: ["pwd"], authentication })),
+			),
+		).toMatchObject({ authentication: { primary: "pwd", mfaAt: undefined }, amr: ["pwd"] });
 	});
 
 	it("is read as before without a session store: there is no session to judge it against, and the requirements decide", async () => {

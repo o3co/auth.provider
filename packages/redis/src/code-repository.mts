@@ -64,15 +64,31 @@ const isStoredInstant = (ms: unknown): ms is number =>
 	typeof ms === "number" && Number.isSafeInteger(ms) && ms >= 0 && ms <= 8_640_000_000_000_000;
 
 /**
+ * Whether `value` is a plain object (its prototype `Object.prototype` or
+ * `null`) with `primary` and the instant's key as its own keys: the rule core
+ * reads a code's `authentication` by.
+ */
+const isSnapshot = (value: unknown, instantKey: "mfaAt" | "mfaAtMs"): value is object => {
+	if (typeof value !== "object" || value === null) return false;
+	const prototype: unknown = Object.getPrototypeOf(value);
+	return (
+		(prototype === Object.prototype || prototype === null) &&
+		Object.hasOwn(value, "primary") &&
+		Object.hasOwn(value, instantKey)
+	);
+};
+
+/**
  * `authentication` in its stored form, or none for one not in a shape a code
- * records: a `primary` that is neither `undefined` nor a non-empty string,
- * an `mfaAt` that is neither `undefined` nor a `Date` that round-trips.
+ * records: not a plain object with `primary` and `mfaAt` its own keys; a
+ * `primary` that is neither `undefined` nor a non-empty string; an `mfaAt`
+ * that is neither `undefined` nor a `Date` that round-trips.
  */
 const storedAuthentication = (
 	authentication: CodeAuthentication | undefined,
 ): StoredCodeAuthentication | undefined => {
-	if (authentication === undefined) return undefined;
-	const { primary, mfaAt } = authentication;
+	if (!isSnapshot(authentication, "mfaAt")) return undefined;
+	const { primary, mfaAt } = authentication as Partial<Record<keyof CodeAuthentication, unknown>>;
 	if (primary !== undefined && (typeof primary !== "string" || primary.length === 0)) {
 		return undefined;
 	}
@@ -83,21 +99,13 @@ const storedAuthentication = (
 
 /**
  * A stored `authentication` read back, or `undefined` for none and for one
- * not in the stored shape: not an object; one without both keys; a `primary`
+ * not in the stored shape: not a plain object with both keys its own; a `primary`
  * that is neither `null` nor a non-empty string; an `mfaAtMs` that is
  * neither `null` nor an instant a `Date` round-trips. Mapped at the boundary;
  * the exchange decides what a code without one is.
  */
 const readStoredAuthentication = (stored: unknown): CodeAuthentication | undefined => {
-	if (
-		typeof stored !== "object" ||
-		stored === null ||
-		Array.isArray(stored) ||
-		!("primary" in stored) ||
-		!("mfaAtMs" in stored)
-	) {
-		return undefined;
-	}
+	if (!isSnapshot(stored, "mfaAtMs")) return undefined;
 	const { primary, mfaAtMs } = stored as Record<keyof StoredCodeAuthentication, unknown>;
 	if (primary !== null && (typeof primary !== "string" || primary.length === 0)) return undefined;
 	if (mfaAtMs !== null && !isStoredInstant(mfaAtMs)) return undefined;

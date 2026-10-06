@@ -454,6 +454,8 @@ describe("InMemoryCodeRepository", () => {
 				{ primary: "pwd" },
 				{ mfaAt: undefined },
 				new Date(),
+				Object.create({ primary: undefined, mfaAt: undefined }),
+				Object.assign(new Date(), { primary: undefined, mfaAt: undefined }),
 				{ primary: "" },
 				{ primary: "pwd", mfaAt: new Date(Number.NaN) },
 			]) {

@@ -508,6 +508,31 @@ describe("RedisCodeRepository", () => {
 			expect(await repo.consumeByCode("old")).toHaveProperty("authentication", undefined);
 		});
 
+		it("answers and stores as none a snapshot not in core's shape: not a plain object, or without both keys its own", async () => {
+			const malformed: unknown[] = [
+				{},
+				{ mfaAt: undefined },
+				{ primary: "pwd" },
+				new Date(),
+				Object.create({ primary: undefined, mfaAt: undefined }),
+				Object.assign(new Date(), { primary: undefined, mfaAt: undefined }),
+			];
+			for (const authentication of malformed) {
+				const created = await repo.createCode({
+					...minimalParams,
+					authentication: authentication as never,
+				});
+				const label = String(Object.keys(authentication as object));
+				expect(created.authentication, label).toBeUndefined();
+				const parsed = JSON.parse(store.get(`${KEY_PREFIX}${created.code}`) as string);
+				expect(parsed, label).not.toHaveProperty("authentication");
+				expect(await repo.consumeByCode(created.code), label).toHaveProperty(
+					"authentication",
+					undefined,
+				);
+			}
+		});
+
 		it("answers and stores as none an mfaAt that is not a valid Date", async () => {
 			const created = await repo.createCode({
 				...minimalParams,

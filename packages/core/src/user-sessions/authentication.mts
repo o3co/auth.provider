@@ -738,11 +738,19 @@ export function codeFieldsOf(reading: AuthenticationReading | null): CodeFields 
 	});
 }
 
+/** Whether `value` is a plain object: its prototype `Object.prototype` or `null`, never an array, a `Date` or another instance. */
+const isPlainObject = (value: unknown): value is object => {
+	if (typeof value !== "object" || value === null) return false;
+	const prototype: unknown = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+};
+
 /**
  * A code record's `authentication` as a frozen copy (its `mfaAt` a `Date`
  * of its own), or `undefined` when the record carries none or one not in a
- * shape a code records: not an object, or one without both keys — each is
- * recorded, `undefined` included; a `primary` that is neither `undefined`
+ * shape a code records: not a plain object (its prototype `Object.prototype`
+ * or `null`), or one without both keys its own — each is recorded,
+ * `undefined` included; a `primary` that is neither `undefined`
  * nor a non-empty string; an `mfaAt` that is neither `undefined` nor a
  * `Date` at or after the epoch. The one rule a code repository copies it by and the
  * exchange reads it by: the record is a deployment's store's, not trusted for
@@ -753,11 +761,9 @@ export function readCodeAuthentication(code: {
 }): CodeAuthentication | undefined {
 	const stored: unknown = code.authentication;
 	if (
-		typeof stored !== "object" ||
-		stored === null ||
-		Array.isArray(stored) ||
-		!("primary" in stored) ||
-		!("mfaAt" in stored)
+		!isPlainObject(stored) ||
+		!Object.hasOwn(stored, "primary") ||
+		!Object.hasOwn(stored, "mfaAt")
 	) {
 		return undefined;
 	}
