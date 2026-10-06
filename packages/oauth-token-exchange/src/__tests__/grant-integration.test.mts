@@ -230,7 +230,7 @@ describe("token_exchange — integration", () => {
 
 	it("declares no configSchema: it reads its own section and the slots it declares", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
-		expect(tokenExchangeModule.configSchema).toBeUndefined();
+		expect(tokenExchangeModule).not.toHaveProperty("configSchema");
 		expect(tokenExchangeModule.requires).not.toContain("config");
 		expect(tokenExchangeModule.optional ?? []).not.toContain("config");
 	});

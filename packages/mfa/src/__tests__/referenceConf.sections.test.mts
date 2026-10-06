@@ -80,11 +80,11 @@ describe("the package's config/reference.conf", () => {
 	];
 
 	it("is read at each module's name: mfa, mfa-totp-factor, mfa-recovery-code-factor and mfa-email-factor", () => {
-		expect(modules.map((module) => module.section?.at)).toEqual([
-			undefined,
-			undefined,
-			undefined,
-			undefined,
+		expect(modules.map((module) => Object.hasOwn(module.section ?? {}, "at"))).toEqual([
+			false,
+			false,
+			false,
+			false,
 		]);
 		expect(modules.map((module) => module.name)).toEqual([
 			"mfa",

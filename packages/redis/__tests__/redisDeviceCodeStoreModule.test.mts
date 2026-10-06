@@ -65,7 +65,7 @@ const multiReplicaConfig = (extra: Record<string, unknown> = {}) =>
 	}) as never;
 
 describe("redisDeviceCodeStoreModule manifest", () => {
-	// Name, requires and configSchema are pinned with the other modules in
+	// Name, requires and section are pinned with the other modules in
 	// `modules.test.mts`; here is what matters for replica safety.
 	it("provides deviceCodeStore", () => {
 		expect(typeof redisDeviceCodeStoreModule.provides?.deviceCodeStore).toBe("function");

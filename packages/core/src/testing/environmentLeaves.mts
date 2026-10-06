@@ -34,14 +34,14 @@ import {
 import type { Module } from "../modules/manifest/module-spec.mjs";
 
 /**
- * Whether core's base reads the value at `path` (a `*` key: any) from a
- * string before a module does, and hands on the kind of value `leaf` takes —
- * a base that reads the string and leaves it a string covers no module's
- * number.
+ * Whether core's base reads the value at `path`, its keys (a `*` key: any),
+ * from a string before a module does, and hands on the kind of value `leaf`
+ * takes — a base that reads the string and leaves it a string covers no
+ * module's number.
  */
-function coveredByBase(path: string, leaf: z.ZodType): boolean {
+function coveredByBase(path: readonly string[], leaf: z.ZodType): boolean {
 	const wanted = outputKinds(leaf);
-	const leaves = schemasAtPath(TransitionalConfigSchema, path.split("."));
+	const leaves = schemasAtPath(TransitionalConfigSchema, path);
 	return (
 		wanted !== undefined &&
 		leaves.length > 0 &&
@@ -57,8 +57,8 @@ function coveredByBase(path: string, leaf: z.ZodType): boolean {
 }
 
 /**
- * Every leaf the modules' `configSchema`s and section schemas declare that
- * would refuse an environment variable's string — a bare `z.boolean()`, or a
+ * Every leaf the modules' section schemas declare, each at its module's name,
+ * that would refuse an environment variable's string — a bare `z.boolean()`, or a
  * `z.number()` that does not coerce, with core's base not coercing the path
  * first — as `<module>: <path>`, sorted. A record's value is `*`, a list's
  * element `[]`.
@@ -66,13 +66,16 @@ function coveredByBase(path: string, leaf: z.ZodType): boolean {
 export function unreadableModuleLeaves(modules: readonly Module[]): string[] {
 	return modules
 		.flatMap((module) => {
-			const configSchema = module.configSchema ? unreadableLeaves(module.configSchema) : [];
-			const section = module.section
-				? unreadableLeaves(module.section.schema, module.section.at ?? module.name)
-				: [];
-			return [...configSchema, ...section]
-				.filter(({ path, leaf }) => !coveredByBase(path, leaf))
-				.map(({ path }) => `${module.name}: ${path}`);
+			// Paths inside the section; the module's name is one key in front, never split on its dots.
+			const section = module.section ? unreadableLeaves(module.section.schema) : [];
+			return section
+				.filter(
+					({ path, leaf }) =>
+						!coveredByBase([module.name, ...(path === "" ? [] : path.split("."))], leaf),
+				)
+				.map(
+					({ path }) => `${module.name}: ${path === "" ? module.name : `${module.name}.${path}`}`,
+				);
 		})
 		.filter((entry, index, all) => all.indexOf(entry) === index)
 		.sort();

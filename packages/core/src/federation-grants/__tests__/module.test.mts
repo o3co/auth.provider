@@ -39,8 +39,8 @@ describe("memoryFederationGrantStoreModule", () => {
 	});
 
 	it("reads the retention an operator wrote at its own section, in seconds", () => {
-		expect(memoryFederationGrantStoreModule.section?.at).toBeUndefined();
-		expect(memoryFederationGrantStoreModule.configSchema).toBeUndefined();
+		expect(memoryFederationGrantStoreModule.section).not.toHaveProperty("at");
+		expect(memoryFederationGrantStoreModule).not.toHaveProperty("configSchema");
 		expect(parse({ tombstoneRetention: 60 })?.tombstoneRetention).toBe(60);
 		expect(parse({ tombstoneRetention: "60" })?.tombstoneRetention).toBe(60);
 		// Zero is a deployment that wants no tombstones, and says so.

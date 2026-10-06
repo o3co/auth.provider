@@ -25,8 +25,8 @@
  *    optional;
  * 2. laid over what was written ({@link overlayConfig}), so a key no schema
  *    declares is kept, not stripped;
- * 3. then by the modules' own `configSchema`s, and by each module's section
- *    schema at its path, which boot writes back there.
+ * 3. then by each module's section schema at its name, which boot writes
+ *    back there.
  *
  * {@link readTransitionalConfig} is steps 1 and 2 alone, over the paths a
  * composition root reads before it knows its modules. Both are transitional:

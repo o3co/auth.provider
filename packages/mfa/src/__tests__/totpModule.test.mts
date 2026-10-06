@@ -145,7 +145,7 @@ describe("mfaTotpFactorModule", () => {
 	});
 
 	it("reads its own section at its name, mfa-totp-factor, moved whole from mfa.factors.totp", () => {
-		expect(mfaTotpFactorModule.section?.at).toBeUndefined();
+		expect(mfaTotpFactorModule.section).not.toHaveProperty("at");
 		expect(mfaTotpFactorModule.section?.relocatedFrom).toEqual(["mfa.factors.totp"]);
 		expect(mfaTotpFactorModule.section?.reference?.href).toMatch(/\/config\/reference\.conf$/);
 	});

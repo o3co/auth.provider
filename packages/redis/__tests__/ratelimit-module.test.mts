@@ -172,7 +172,7 @@ describe("redisRateLimiterModule", () => {
 	});
 
 	it("reads its own section, redis-rate-limiter, its defaultLimit 60 per 60 s unless written", () => {
-		expect(redisRateLimiterModule.configSchema).toBeUndefined();
+		expect(redisRateLimiterModule).not.toHaveProperty("configSchema");
 		expect(redisRateLimiterModule.section?.schema.parse(undefined)).toEqual({
 			limits: {},
 			defaultLimit: { limit: 60, windowSeconds: 60 },

@@ -63,8 +63,8 @@ export function frozenSection(value: unknown, copies = new Map<object, unknown>(
 }
 
 /**
- * Parse `value` with one schema of the composed parse — core's base, a
- * module's `configSchema` or a module's section — synchronously. A schema
+ * Parse `value` with one schema of stage 1 — core's base or a module's
+ * section — synchronously. A schema
  * that throws instead of answering — an async refinement (Zod cannot finish
  * it synchronously), or a transform or a getter that throws — is one more
  * issue at the root of what it parsed, naming `subject`, so it refuses boot

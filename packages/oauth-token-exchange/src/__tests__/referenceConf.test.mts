@@ -45,8 +45,12 @@ describe("the package's config/reference.conf", () => {
 
 	it("is read at the section named after its module", () => {
 		expect(
-			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
-		).toEqual([["oauth-token-exchange", true, undefined]]);
+			modules.map((module) => [
+				module.name,
+				module.section !== undefined,
+				Object.hasOwn(module.section ?? {}, "at"),
+			]),
+		).toEqual([["oauth-token-exchange", true, false]]);
 	});
 
 	it("is declared by the module and holds only its section, which its schema parses without losing a path", () => {

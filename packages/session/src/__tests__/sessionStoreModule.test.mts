@@ -7,7 +7,7 @@
 // factory and forwards `BuilderContext.lifecycle` so the underlying session
 // store registers its disposal callback. Tests exercise the route-contribution
 // factory directly with mock deps, and boot the module through createApp for
-// what its configSchema refuses and what it mounts.
+// what its section schema refuses and what it mounts.
 
 import {
 	type AppConfig,
@@ -96,7 +96,7 @@ describe("sessionStoreModule", () => {
 		const m = sessionStoreModule as unknown as Module;
 		expect(m.name).toBe("session-store");
 		expect(m.requires ?? []).not.toContain("config");
-		expect(m.section?.at).toBeUndefined();
+		expect(m.section).not.toHaveProperty("at");
 		expect(m.optional).toContain("lifecycleRegistrar");
 		expect(m.optional).toContain("readinessRegistrar");
 	});
@@ -415,7 +415,7 @@ describe("sessionStoreModule — the storage under core.deployment.mode", () => 
 
 // ---------------------------------------------------------------------------
 // The cookie the store mounts is the one its `sessionCookiePolicy` describes:
-// the module's configSchema refuses at validation every section the policy
+// the module's section schema refuses at validation every section the policy
 // refuses, and the route reuses the provider's policy.
 // ---------------------------------------------------------------------------
 
@@ -458,7 +458,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			(err: unknown) => err,
 		);
 
-	/** A refusal the module's configSchema makes: [what, key, change, message]. */
+	/** A refusal the module's section schema makes: [what, key, change, message]. */
 	const REFUSED_BY_THE_STORE = [
 		["a name that is not an RFC 6265 token", "name", { name: "auth session" }, NOT_A_TOKEN],
 		[

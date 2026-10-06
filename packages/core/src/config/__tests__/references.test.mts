@@ -37,14 +37,10 @@ const REF_B = new URL("file:///packages/b/config/reference.conf");
 /** Core's own `reference.conf`, found from this file. */
 const CORE_HREF = new URL("../../../config/reference.conf", import.meta.url).href;
 
-const sectioned = (name: string, reference: URL | undefined, at?: string): Module =>
+const sectioned = (name: string, reference: URL | undefined): Module =>
 	defineModule({
 		name,
-		section: {
-			schema: z.unknown(),
-			...(reference === undefined ? {} : { reference }),
-			...(at === undefined ? {} : { at }),
-		},
+		section: { schema: z.unknown(), ...(reference === undefined ? {} : { reference }) },
 	});
 
 describe("moduleReferences — the references a composition layers beneath its own files", () => {
@@ -115,14 +111,13 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 		section: {
 			schema: z.object({ enabled: z.boolean(), window: z.number().default(60) }),
 			reference: REF_A,
-			at: "oauth.dpop",
 		},
 	});
 
 	it("finds nothing wrong with a reference its modules' sections parse whole", () => {
 		expect(
 			referenceConfProblems({
-				tree: { oauth: { dpop: { enabled: false, window: 30 } } },
+				tree: { "dpop-like": { enabled: false, window: 30 } },
 				reference: REF_A,
 				modules: [dpopLike],
 			}),
@@ -132,41 +127,39 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 	it("names a path no module that declares the reference owns", () => {
 		expect(
 			referenceConfProblems({
-				tree: { oauth: { dpop: { enabled: false }, mtls: { enabled: false } }, extra: 1 },
+				tree: { "dpop-like": { enabled: false }, "mtls-like": { enabled: false }, extra: 1 },
 				reference: REF_A,
 				modules: [dpopLike],
 			}),
 		).toEqual([
 			"extra: no module declaring this reference owns it",
-			"oauth.mtls.enabled: no module declaring this reference owns it",
+			"mtls-like.enabled: no module declaring this reference owns it",
 		]);
 	});
 
 	it("names a path a section's schema loses, and a value it refuses", () => {
 		expect(
 			referenceConfProblems({
-				tree: { oauth: { dpop: { enabled: false, forgotten: "x" } } },
+				tree: { "dpop-like": { enabled: false, forgotten: "x" } },
 				reference: REF_A,
 				modules: [dpopLike],
 			}),
-		).toEqual(['oauth.dpop.forgotten: lost by module "dpop-like"\'s section schema']);
+		).toEqual(['dpop-like.forgotten: lost by module "dpop-like"\'s section schema']);
 		expect(
 			referenceConfProblems({
-				tree: { oauth: { dpop: { enabled: "no" } } },
+				tree: { "dpop-like": { enabled: "no" } },
 				reference: REF_A,
 				modules: [dpopLike],
 			}),
 		).toEqual([
-			expect.stringMatching(
-				/^oauth\.dpop\.enabled: refused by module "dpop-like"'s section schema/,
-			),
+			expect.stringMatching(/^dpop-like\.enabled: refused by module "dpop-like"'s section schema/),
 		]);
 	});
 
 	it("counts no key whose value is undefined as a path", () => {
 		expect(
 			referenceConfProblems({
-				tree: { oauth: { dpop: { enabled: false, retired: undefined } }, stray: undefined },
+				tree: { "dpop-like": { enabled: false, retired: undefined }, stray: undefined },
 				reference: REF_A,
 				modules: [dpopLike],
 			}),
@@ -182,12 +175,11 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 					limits: z.object({ token: z.number().default(60) }),
 				}),
 				reference: REF_A,
-				at: "oauth.dpop",
 			},
 		});
 		expect(
 			referenceConfProblems({
-				tree: { oauth: { dpop: { enabled: false, limits: {} } } },
+				tree: { filling: { enabled: false, limits: {} } },
 				reference: REF_A,
 				modules: [filling],
 			}),
@@ -195,11 +187,11 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 		// An empty object the schema drops is still lost.
 		expect(
 			referenceConfProblems({
-				tree: { oauth: { dpop: { enabled: false, limits: {} } } },
+				tree: { "dpop-like": { enabled: false, limits: {} } },
 				reference: REF_A,
 				modules: [dpopLike],
 			}),
-		).toEqual(['oauth.dpop.limits: lost by module "dpop-like"\'s section schema']);
+		).toEqual(['dpop-like.limits: lost by module "dpop-like"\'s section schema']);
 	});
 
 	it("names a reference no module declares", () => {
@@ -208,42 +200,64 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 		]);
 	});
 
-	it("reads the sections of every module declaring the reference, a nested one included", () => {
-		const outer = sectioned("outer", REF_B, "outer-section");
-		const inner = sectioned("inner", REF_B, "outer-section.factors.inner");
+	it("reads the sections of every module declaring the reference", () => {
+		const outer = sectioned("outer", REF_B);
+		const inner = sectioned("inner", REF_B);
 		expect(
 			referenceConfProblems({
 				tree: {
-					"outer-section": { lockout: { threshold: 5 }, factors: { inner: { enabled: true } } },
+					outer: { lockout: { threshold: 5 } },
+					inner: { enabled: true },
 				},
 				reference: REF_B,
 				modules: [outer, inner, dpopLike],
 			}),
 		).toEqual([]);
 	});
+
+	it("reads a dotted module name as one key: nested keys of the same spelling are no module's", () => {
+		const dotted = defineModule({
+			name: "outer.inner",
+			section: { schema: z.object({ enabled: z.boolean() }).optional(), reference: REF_B },
+		});
+		expect(
+			referenceConfProblems({
+				tree: { outer: { inner: { enabled: true } } },
+				reference: REF_B,
+				modules: [dotted],
+			}),
+		).toEqual(["outer.inner.enabled: no module declaring this reference owns it"]);
+		expect(
+			referenceConfProblems({
+				tree: { "outer.inner": { enabled: true, forgotten: 1 } },
+				reference: REF_B,
+				modules: [dotted],
+			}),
+		).toEqual(['outer.inner.forgotten: lost by module "outer.inner"\'s section schema']);
+	});
 });
 
 describe("packageReferenceProblems — the check each package's test runs over its own reference", () => {
 	const dpopLike = defineModule({
 		name: "dpop-like",
-		section: { schema: z.object({ enabled: z.boolean() }), reference: REF_A, at: "oauth.dpop" },
+		section: { schema: z.object({ enabled: z.boolean() }), reference: REF_A },
 	});
 
 	it("reads the file with the reader it is given, and checks what it read", () => {
-		const read = vi.fn((_path: string): unknown => ({ oauth: { dpop: { enabled: false } } }));
+		const read = vi.fn((_path: string): unknown => ({ "dpop-like": { enabled: false } }));
 		expect(packageReferenceProblems({ reference: REF_A, modules: [dpopLike], read })).toEqual([]);
 		expect(read).toHaveBeenCalledWith(fileURLToPath(REF_A), {});
 
 		const lossy = vi.fn((_path: string): unknown => ({
-			oauth: { dpop: { enabled: false, x: 1 } },
+			"dpop-like": { enabled: false, x: 1 },
 		}));
 		expect(
 			packageReferenceProblems({ reference: REF_A, modules: [dpopLike], read: lossy }),
-		).toEqual(['oauth.dpop.x: lost by module "dpop-like"\'s section schema']);
+		).toEqual(['dpop-like.x: lost by module "dpop-like"\'s section schema']);
 	});
 
 	it("names each module it is given that does not declare the file", () => {
-		const read = (): unknown => ({ oauth: { dpop: { enabled: false } } });
+		const read = (): unknown => ({ "dpop-like": { enabled: false } });
 		expect(
 			packageReferenceProblems({
 				reference: REF_A,

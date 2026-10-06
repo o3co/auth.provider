@@ -109,7 +109,6 @@
 . ConditionalSetRemoveAnswer type
 . ConfigDefaultsInvalidDetails type
 . ConfigPathRelocatedDetails type
-. ConfigSchema type
 . ConfigValidationFailedDetails type
 . ConfiguredFederation type
 . Confirmation type
@@ -1179,7 +1178,6 @@
 ./modules/manifest ComponentKey type
 ./modules/manifest ComponentLifecycle type
 ./modules/manifest ComponentMap type
-./modules/manifest ConfigSchema type
 ./modules/manifest Contributed type
 ./modules/manifest ContributesMap type
 ./modules/manifest ExchangeTokenValidator type

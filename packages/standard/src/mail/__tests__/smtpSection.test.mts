@@ -219,7 +219,7 @@ describe("standardSmtpMailSenderModule, which declares the section", () => {
 
 	it("is named after its section, reads it at its name, and declares the package's reference.conf, which holds only its section", () => {
 		expect(standardSmtpMailSenderModule.name).toBe("standard-smtp-mail-sender");
-		expect(standardSmtpMailSenderModule.section?.at).toBeUndefined();
+		expect(standardSmtpMailSenderModule.section).not.toHaveProperty("at");
 		expect(standardSmtpMailSenderModule.section?.reference?.href).toBe(REFERENCE.href);
 		expect(
 			packageReferenceProblems({

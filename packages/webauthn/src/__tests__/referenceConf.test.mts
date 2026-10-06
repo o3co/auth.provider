@@ -41,10 +41,14 @@ describe("the package's config/reference.conf", () => {
 
 	it("is read at the section named after its module", () => {
 		expect(
-			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
+			modules.map((module) => [
+				module.name,
+				module.section !== undefined,
+				Object.hasOwn(module.section ?? {}, "at"),
+			]),
 		).toEqual([
-			["webauthn", true, undefined],
-			["webauthn-mfa-factor", true, undefined],
+			["webauthn", true, false],
+			["webauthn-mfa-factor", true, false],
 		]);
 	});
 

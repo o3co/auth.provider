@@ -760,10 +760,10 @@ export function readAccessTokenRevocationMode(
  * `CoreConfigSchema`.
  *
  * @deprecated Boot parses the configuration once with core's transitional base,
- * then each module's `configSchema` over the base's output, and refuses outputs
- * that disagree. An intersection parses every schema over the raw input, so a
- * module's schema refuses the environment strings core's schema coerces. Kept
- * for callers that still compose a schema of their own.
+ * then each module's section at its name over the base's output. An
+ * intersection parses every schema over the raw input, so a module's schema
+ * refuses the environment strings core's schema coerces. Kept for callers
+ * that still compose a schema of their own.
  */
 export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[]): z.ZodType {
 	let schema: z.ZodType = CoreConfigSchema;

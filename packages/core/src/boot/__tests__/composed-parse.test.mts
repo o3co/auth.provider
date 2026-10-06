@@ -19,9 +19,9 @@
  * configuration it resolved — never parsed first — and boot parses it once:
  * with the transitional base (core's sections and every section core still
  * mirrors for a package, each optional), laid over what was written so
- * nothing is stripped; then with each module's `configSchema`, over the
- * base's output; then each module's section at its path, written back there.
- * A top-level section nobody owns is kept, and named once in the log.
+ * nothing is stripped; then each module's section at its name, over the
+ * base's output, written back there. A top-level section nobody owns is kept,
+ * and named once in the log.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -99,16 +99,11 @@ const bootRefused = (modules: readonly Module[], config: Record<string, unknown>
 		}),
 	);
 
-/** A module whose section is `schema` at `at`, recording what its factory was handed. */
-function sectioned(
-	name: string,
-	schema: z.ZodType,
-	at: string | undefined,
-	seen: Record<string, unknown> = {},
-): Module {
+/** A module whose section, at its name, is `schema`, recording what its factory was handed. */
+function sectioned(name: string, schema: z.ZodType, seen: Record<string, unknown> = {}): Module {
 	return defineModule({
 		name,
-		section: { schema, ...(at === undefined ? {} : { at }) },
+		section: { schema },
 		contributes: {
 			grantMiddleware: [
 				(deps) => {
@@ -138,32 +133,31 @@ describe("one composed parse over the transitional base", () => {
 	it.each([
 		[
 			"an async refinement",
-			z.object({ widget: z.object({ size: z.number() }) }).refine(async () => true),
+			z.object({ size: z.number() }).refine(async () => true),
 			/could not be parsed synchronously/,
 		],
 		[
 			"a transform that throws",
 			z.object({
-				widget: z.object({
-					size: z.number().transform((): number => {
-						throw new Error("the widget broke");
-					}),
+				size: z.number().transform((): number => {
+					throw new Error("the widget broke");
 				}),
 			}),
 			/the widget broke/,
 		],
 	])(
-		"refuses a module's configSchema that throws instead of answering — %s — naming the module",
-		async (_label, configSchema, cause) => {
+		"refuses a module's section schema that throws instead of answering — %s — naming its section",
+		async (_label, schema, cause) => {
 			const err = await bootRefused(
-				[defineModule({ name: "throwing-reader", configSchema: configSchema as z.ZodObject })],
-				resolved({ widget: { size: 3 } }),
+				[sectioned("throwing-reader", schema)],
+				resolved({ "throwing-reader": { size: 3 } }),
 			);
 			expect(err.reason).toBe("config-validation-failed");
-			expect(err.message).toMatch(
-				/module "throwing-reader"'s configSchema threw instead of answering/,
-			);
+			expect(err.message).toMatch(/throwing-reader: /);
 			expect(err.message).toMatch(cause);
+			expect(err.details).toMatchObject({
+				modules: [{ module: "throwing-reader", schemaPath: "throwing-reader" }],
+			});
 		},
 	);
 
@@ -225,35 +219,29 @@ describe("one composed parse over the transitional base", () => {
 		expect((config.oauth as Record<string, unknown>).extra).toBe("kept");
 	});
 
-	it("hands a module's configSchema the base's output: an environment string arrives coerced", async () => {
-		const strict = defineModule({
-			name: "strict-reader",
-			configSchema: z.object({ oauth: z.object({ nonce: z.object({ maxLength: z.number() }) }) }),
-		});
+	it("hands a module's section the base's output: an environment string arrives coerced", async () => {
+		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
-			[strict],
-			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } } }),
+			[sectioned("webauthn", z.object({ challengeTtlMs: z.number() }), seen)],
+			resolved({ webauthn: { challengeTtlMs: "120000" } }),
 		);
-		expect((config.oauth as { nonce?: { maxLength?: unknown } }).nonce?.maxLength).toBe(128);
+		expect(seen.webauthn).toEqual({ challengeTtlMs: 120000 });
+		expect((config.webauthn as { challengeTtlMs?: unknown }).challengeTtlMs).toBe(120000);
 	});
 
-	it("reports only the base's refusals when the base refuses, not a module's schema reading what the base would have coerced", async () => {
-		// Run over what was written, a module's schema would refuse the
+	it("reports only the base's refusals when the base refuses, not a module's section reading what the base would have coerced", async () => {
+		// Run over what was written, a section's schema would refuse the
 		// environment string the base reads as a number: an error nobody made.
-		const strict = defineModule({
-			name: "strict-reader",
-			configSchema: z.object({ oauth: z.object({ nonce: z.object({ maxLength: z.number() }) }) }),
-		});
 		const err = await bootRefused(
-			[strict],
+			[sectioned("webauthn", z.object({ challengeTtlMs: z.number() }))],
 			resolved({
-				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } },
+				webauthn: { challengeTtlMs: "120000" },
 				core: { ...makeValidCoreConfig().core, deployment: { mode: "loud" } },
 			}),
 		);
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toMatch(/core\.deployment\.mode: /);
-		expect(err.message).not.toMatch(/oauth\.nonce\.maxLength/);
+		expect(err.message).not.toMatch(/webauthn\.challengeTtlMs/);
 		expect(
 			(err.details as unknown as { issues: { path: PropertyKey[] }[] }).issues.map((issue) =>
 				issue.path.join("."),
@@ -261,120 +249,128 @@ describe("one composed parse over the transitional base", () => {
 		).toEqual(["core.deployment.mode"]);
 	});
 
-	describe("two modules' configSchemas that make different values of one key", () => {
-		const coercing = defineModule({
-			name: "coercing-reader",
-			configSchema: z.object({ widget: z.object({ size: z.coerce.number() }) }),
-		});
-		const verbatim = defineModule({
-			name: "verbatim-reader",
-			configSchema: z.object({ widget: z.object({ size: z.string() }) }),
-		});
-
-		it.each([
-			["coercing first", [coercing, verbatim]],
-			["verbatim first", [verbatim, coercing]],
-		])(
-			"refuse boot, naming the key and both modules, whatever their order (%s)",
-			async (_label, modules) => {
-				const err = await bootRefused(modules, resolved({ widget: { size: "3" } }));
-				expect(err.reason).toBe("config-validation-failed");
-				expect(err.message).toMatch(/widget\.size: /);
-				expect(err.message).toMatch(/"coercing-reader"/);
-				expect(err.message).toMatch(/"verbatim-reader"/);
-			},
+	it("keeps what a module's section schema does not declare under the keys it does", async () => {
+		const seen: Record<string, unknown> = {};
+		const config = await bootAndRead(
+			[sectioned("widget", z.object({ size: z.coerce.number() }), seen)],
+			resolved({ widget: { size: "3", note: "kept" } }),
 		);
-
-		const emptying = defineModule({
-			name: "emptying-reader",
-			configSchema: z.object({
-				widget: z.object({ size: z.unknown().transform(() => ({})) }),
-			}),
-		});
-
-		it.each([
-			["the value first", [coercing, emptying]],
-			["the empty object first", [emptying, coercing]],
-		])(
-			"refuse boot when one makes an empty object where another makes a value (%s)",
-			async (_label, modules) => {
-				// Laid over each other, the later one would win: an empty object
-				// over the number, or the number over the empty object.
-				const err = await bootRefused(modules, resolved({ widget: { size: "3" } }));
-				expect(err.reason).toBe("config-validation-failed");
-				expect(err.message).toMatch(/widget\.size: /);
-				expect(err.message).toMatch(/"coercing-reader"/);
-				expect(err.message).toMatch(/"emptying-reader"/);
-			},
-		);
-
-		it("name each disagreeing key once, with the first two modules that disagree there", async () => {
-			const alsoVerbatim = defineModule({
-				name: "also-verbatim-reader",
-				configSchema: z.object({
-					widget: z.object({ size: z.string().transform((v) => `${v}!`) }),
-				}),
-			});
-			const err = await bootRefused(
-				[coercing, verbatim, alsoVerbatim],
-				resolved({ widget: { size: "3" } }),
-			);
-			const issues = (
-				err.details as unknown as { issues: { path: PropertyKey[]; message: string }[] }
-			).issues;
-			expect(issues.map((issue) => issue.path.join("."))).toEqual(["widget.size"]);
-			expect(issues[0]?.message).toMatch(/"coercing-reader".*"verbatim-reader"/);
-		});
-
-		it("boot when one of them declares nothing: an empty object holds no value", async () => {
-			const empty = defineModule({ name: "empty-reader", configSchema: z.object({}) });
-			const config = await bootAndRead([empty, coercing], resolved({ widget: { size: "3" } }));
-			expect(config.widget).toEqual({ size: 3 });
-		});
-
-		it("boot when they make the same value of it", async () => {
-			const alsoCoercing = defineModule({
-				name: "also-coercing-reader",
-				configSchema: z.object({ widget: z.object({ size: z.coerce.number() }) }),
-			});
-			const config = await bootAndRead(
-				[coercing, alsoCoercing],
-				resolved({ widget: { size: "3" } }),
-			);
-			expect(config.widget).toEqual({ size: 3 });
-		});
-	});
-
-	it("keeps what a module's configSchema does not declare under the keys it does", async () => {
-		const reader = defineModule({
-			name: "partial-reader",
-			configSchema: z.object({ widget: z.object({ size: z.coerce.number() }) }),
-		});
-		const config = await bootAndRead([reader], resolved({ widget: { size: "3", note: "kept" } }));
+		expect(seen.widget).toEqual({ size: 3 });
 		expect(config.widget).toEqual({ size: 3, note: "kept" });
 	});
 });
 
+describe("a module rewrites nothing outside its own section", () => {
+	/** Under `multi`, the replica-safety guard refuses this module. */
+	const replicaUnsafe = defineModule({
+		name: "fixture-replica-unsafe",
+		replicaSafety: { unsafe: true, reason: "state forks per replica" },
+	});
+	const multi = () =>
+		resolved({ core: { ...makeValidCoreConfig().core, deployment: { mode: "multi" } } });
+
+	it("refuses a manifest carrying a configSchema that would rewrite core's deployment mode", async () => {
+		const rewriting = defineModule({
+			name: "fixture-rewriting",
+			configSchema: z.object({
+				core: z.object({
+					deployment: z.object({ mode: z.unknown().transform(() => "single") }),
+				}),
+			}),
+		} as never);
+		const err = await bootRefused([rewriting, replicaUnsafe], multi());
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({ module: "fixture-rewriting" });
+	});
+
+	it.each([
+		["core.deployment.mode", { core: { deployment: { mode: "single" } } }],
+		[
+			"core.sessionRequirements",
+			{ core: { sessionRequirements: { expected: ["fixture-requirement"] } } },
+		],
+	])(
+		"writes a section's output back at its name alone: %s stays as written",
+		async (_label, output) => {
+			const seen: Record<string, unknown> = {};
+			const rewriting = sectioned(
+				"fixture-rewriting",
+				z.unknown().transform(() => output),
+				seen,
+			);
+			const written = multi();
+			const config = await bootAndRead([rewriting], written);
+			expect(seen["fixture-rewriting"]).toEqual(output);
+			expect(config["fixture-rewriting"]).toEqual(output);
+			expect(config.core).toEqual(written.core);
+		},
+	);
+
+	it("refuses a module named core, the one name whose section would be core's keys", async () => {
+		const rewriting = sectioned(
+			"core",
+			z.unknown().transform(() => ({ deployment: { mode: "single" } })),
+		);
+		const err = await bootRefused([rewriting, replicaUnsafe], multi());
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({ module: "core", at: "core" });
+	});
+
+	it("writes a section naming the issuer, from a module not named oauth, under its own name", async () => {
+		const output = { oauth: { jwt: { issuer: "https://rewritten.example" } } };
+		const config = await bootAndRead(
+			[
+				sectioned(
+					"fixture-rewriting",
+					z.unknown().transform(() => output),
+				),
+			],
+			multi(),
+		);
+		expect(config["fixture-rewriting"]).toEqual(output);
+		expect((config.oauth as { jwt?: unknown }).jwt).toEqual(makeValidCoreConfig().oauth.jwt);
+	});
+
+	it("still refuses a replica-unsafe module under multi when a section's output names single", async () => {
+		const rewriting = sectioned(
+			"fixture-rewriting",
+			z.unknown().transform(() => ({ core: { deployment: { mode: "single" } } })),
+		);
+		const err = await bootRefused([rewriting, replicaUnsafe], multi());
+		expect(err.reason).toBe("replica-unsafe-adapter");
+	});
+});
+
 describe("a loaded module's section is never stripped", () => {
-	it("is written back at a path under a section core declares", async () => {
+	it("is written back at a section core's base also declares", async () => {
 		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
-			[sectioned("fixture-widget", RetrySection, "oauth.fixtureWidget", seen)],
-			resolved({ oauth: { ...makeValidCoreConfig().oauth, fixtureWidget: { retries: "3" } } }),
+			[sectioned("webauthn", z.object({ rpId: z.string() }), seen)],
+			resolved({ webauthn: { rpId: "example.com", challengeTtlMs: "120000" } }),
 		);
-		expect(seen["fixture-widget"]).toEqual({ retries: 3 });
-		expect((config.oauth as Record<string, unknown>).fixtureWidget).toEqual({ retries: 3 });
+		expect(seen.webauthn).toEqual({ rpId: "example.com" });
+		expect(config.webauthn).toEqual({ rpId: "example.com", challengeTtlMs: 120000 });
 	});
 
 	it("is written back at a top-level path core does not declare", async () => {
 		const config = await bootAndRead(
-			[sectioned("fixture-section", RetrySection, undefined)],
+			[sectioned("fixture-section", RetrySection)],
 			resolved({ "fixture-section": { retries: "3" } }),
 		);
 		expect(config["fixture-section"]).toEqual({ retries: 3 });
 	});
 
-	it("is laid over what is at its path, so a schema narrower than core's copy drops nothing", async () => {
+	it("is written back into a configuration handed over without a prototype, every other section kept", async () => {
+		const config = Object.assign(Object.create(null) as Record<string, unknown>, {
+			...resolved({ other: { kept: 1 }, "fixture-section": { retries: "2" } }),
+		});
+		const parsed = await bootAndRead([sectioned("fixture-section", RetrySection)], config);
+		expect(parsed["fixture-section"]).toEqual({ retries: 2 });
+		expect(parsed.other).toEqual({ kept: 1 });
+		expect(parsed.core).toEqual(makeValidCoreConfig().core);
+	});
+
+	it("is laid over what is at its name, so a schema narrower than core's copy drops nothing", async () => {
 		// A section schema that reads one key of a section core mirrors whole:
 		// written back in place of the section, it would take every other key
 		// from every module reading `config`.
@@ -385,17 +381,10 @@ describe("a loaded module's section is never stripped", () => {
 		};
 		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
-			[
-				sectioned(
-					"narrow-repositories",
-					z.object({ code: z.object({ type: z.string() }) }),
-					"repositories",
-					seen,
-				),
-			],
+			[sectioned("repositories", z.object({ code: z.object({ type: z.string() }) }), seen)],
 			resolved({ repositories }),
 		);
-		expect(seen["narrow-repositories"]).toEqual({ code: { type: repositories.code.type } });
+		expect(seen.repositories).toEqual({ code: { type: repositories.code.type } });
 		const written = config.repositories as Record<string, unknown>;
 		expect(written.client).toEqual(repositories.client);
 		expect(Object.keys(written).sort()).toEqual(Object.keys(repositories).sort());
@@ -404,57 +393,14 @@ describe("a loaded module's section is never stripped", () => {
 	it("writes back what the schema makes of an absent section, and nothing when that is undefined", async () => {
 		const config = await bootAndRead(
 			[
-				sectioned("defaulted", RetrySection.default({ retries: 7 }), undefined),
-				sectioned("optional", RetrySection.optional(), "fixture.optional"),
+				sectioned("defaulted", RetrySection.default({ retries: 7 })),
+				sectioned("optional", RetrySection.optional()),
 			],
 			resolved(),
 		);
 		expect(config.defaulted).toEqual({ retries: 7 });
-		expect(Object.hasOwn(config, "fixture")).toBe(false);
+		expect(Object.hasOwn(config, "optional")).toBe(false);
 	});
-
-	it("refuses a section it cannot write back, naming the path that is in the way", async () => {
-		const err = await bootRefused(
-			[sectioned("under-a-scalar", RetrySection.default({ retries: 1 }), "legacy.fixture")],
-			resolved({ legacy: 5 }),
-		);
-		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/legacy\.fixture: /);
-		expect(err.message).toMatch(/legacy holds a number, not an object/);
-	});
-
-	it("writes into an object without a prototype, keeping it one", async () => {
-		const fixture = Object.assign(Object.create(null) as Record<string, unknown>, { other: 1 });
-		const config = await bootAndRead(
-			[sectioned("into-null-prototype", RetrySection, "fixture.inner")],
-			resolved({ fixture: Object.assign(fixture, { inner: { retries: "2" } }) }),
-		);
-		const written = config.fixture as Record<string, unknown>;
-		expect(Object.getPrototypeOf(written)).toBeNull();
-		expect(written.other).toBe(1);
-		expect(written.inner).toEqual({ retries: 2 });
-	});
-
-	it.each([
-		["null", null, "null"],
-		["a list", ["x"], "a list"],
-		["an instance", new URL("https://idp.example/"), "an object that is not plain data"],
-	])(
-		"names what stands in the way by its kind, never its value: %s",
-		async (_label, obstacle, kind) => {
-			// The value there may be a secret; what the operator needs is where,
-			// and what kind of thing, took the section's place.
-			const err = await bootRefused(
-				[sectioned("under-it", RetrySection.default({ retries: 1 }), "legacy.fixture")],
-				resolved({ legacy: obstacle }),
-			);
-			expect(err.reason).toBe("config-validation-failed");
-			expect(err.message).toMatch(
-				new RegExp(`legacy\\.fixture: .*legacy holds ${kind}, not an object`),
-			);
-			expect(err.message).not.toMatch(/idp\.example/);
-		},
-	);
 });
 
 describe("a value a schema makes nothing of", () => {
@@ -463,11 +409,10 @@ describe("a value a schema makes nothing of", () => {
 		z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
 
 	it("is removed from the config slot, not left as it was written", async () => {
-		const reader = defineModule({
-			name: "blank-reader",
-			configSchema: z.object({ widget: z.object({ note: blankIsUnset(z.string()) }) }),
-		});
-		const config = await bootAndRead([reader], resolved({ widget: { note: "", extra: "kept" } }));
+		const config = await bootAndRead(
+			[sectioned("widget", z.object({ note: blankIsUnset(z.string()) }))],
+			resolved({ widget: { note: "", extra: "kept" } }),
+		);
 		expect(config.widget).toEqual({ extra: "kept" });
 		expect(Object.hasOwn(config.widget as object, "note")).toBe(false);
 	});
@@ -475,7 +420,7 @@ describe("a value a schema makes nothing of", () => {
 	it("removes a section whose schema makes nothing of what is there", async () => {
 		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
-			[sectioned("blank-section", blankIsUnset(RetrySection), undefined, seen)],
+			[sectioned("blank-section", blankIsUnset(RetrySection), seen)],
 			resolved({ "blank-section": "" }),
 		);
 		expect(seen["blank-section"]).toBeUndefined();
@@ -483,68 +428,24 @@ describe("a value a schema makes nothing of", () => {
 	});
 });
 
-describe("a section nested in another module's", () => {
-	const Outer = z.object({ level: z.coerce.number() });
-
-	it("is read from what was written, parsed, and written back inside the outer section", async () => {
-		// The outer schema keeps only `level`: were the inner section read from
-		// its output, the inner module would be handed nothing.
-		const seen: Record<string, unknown> = {};
-		const modules = [
-			sectioned("outer", Outer, "fixture", seen),
-			sectioned("inner", RetrySection, "fixture.inner", seen),
-		];
-		const raw = resolved({ fixture: { level: "2", inner: { retries: "4" } } });
-		const config = await bootAndRead(modules, raw);
-		expect(seen.outer).toEqual({ level: 2 });
-		expect(seen.inner).toEqual({ retries: 4 });
-		expect(config.fixture).toEqual({ level: 2, inner: { retries: 4 } });
-		// The order the modules are listed in decides nothing.
-		expect(await bootAndRead([...modules].reverse(), raw)).toEqual(config);
-	});
-
-	it("is refused when the outer section's parsed value leaves no object to write it into", async () => {
+describe("a section has one owner", () => {
+	it("refuses two modules of one name: they would read one section", async () => {
 		const err = await bootRefused(
-			[
-				sectioned("outer", z.object({ inner: z.string().optional() }).passthrough(), "fixture"),
-				sectioned("inner", RetrySection.default({ retries: 1 }), "fixture.inner.deeper"),
-			],
-			resolved({ fixture: { inner: "a string" } }),
+			[sectioned("fixture-shared", RetrySection), sectioned("fixture-shared", RetrySection)],
+			resolved({ "fixture-shared": { retries: 1 } }),
 		);
-		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/fixture\.inner\.deeper: /);
-	});
-
-	it("may not share its path with another module's section", async () => {
-		const err = await bootRefused(
-			[
-				sectioned("first", RetrySection, "fixture.shared"),
-				sectioned("second", RetrySection, "fixture.shared"),
-			],
-			resolved({ fixture: { shared: { retries: 1 } } }),
-		);
-		expect(err.reason).toBe("module-section-path-invalid");
-		expect(err.message).toMatch(
-			/^Module "second" declares its section at "fixture\.shared": module "first"/,
-		);
-		expect(err.details).toEqual({
-			reason: "module-section-path-invalid",
-			module: "second",
-			at: "fixture.shared",
-			problem: 'module "first" declares its section there too, and a section has one owner',
-		});
+		expect(err.reason).toBe("duplicate-module-name");
 	});
 });
 
 describe("config_sections_ignored — a top-level section nobody owns", () => {
 	it("is kept, and named once in the log with every other one", async () => {
 		const logger = recordingLogger();
-		const reader = defineModule({
-			name: "reader",
-			configSchema: z.object({ readerSettings: z.object({}).passthrough() }),
-		});
 		const config = await bootAndRead(
-			[reader, sectioned("fixture-section", RetrySection, undefined)],
+			[
+				sectioned("readerSettings", z.object({}).passthrough()),
+				sectioned("fixture-section", RetrySection),
+			],
 			resolved({
 				"fixture-section": { retries: 1 },
 				readerSettings: {},
@@ -617,7 +518,7 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 	it("logs nothing when every section is owned", async () => {
 		const logger = recordingLogger();
 		await bootAndRead(
-			[sectioned("fixture-section", RetrySection, "fixture.nested")],
+			[sectioned("fixture", z.object({ nested: RetrySection }))],
 			resolved({
 				fixture: { nested: { retries: 1 } },
 			}),

@@ -1192,6 +1192,29 @@ modules fills them.
   `device-grant.store`, the key it named, is refused
   ([Keys removed](#keys-removed)). A module of your own that attached it
   requires `deviceCodeStore` instead, or reads the slot without a policy.
+- **`ModuleSpec.configSchema`, the `ConfigSchema` type and `ModuleSection.at`
+  are removed: a module's section is at its name** (#1478, #728, #777). A
+  module reads its configuration as its own section, the top-level key named
+  exactly as the module (never split on its dots), declared with
+  `section.schema`. No module parses the whole configuration, and a section is
+  read and written back only at its own top-level name. Core's own keys are
+  under `core`, a name no module may take, so no section's write-back reaches
+  them (`core.deployment.mode`, for one); `oauth {}` is the oauth module's
+  section, which core's schema still validates as written before the
+  write-back, and core reads `oauth.*` afterwards from that module's output.
+  A module named after a key configuration cannot carry (`__proto__`,
+  `constructor`, …) is refused, and so is a module's `relocatedFrom` naming a
+  path at or under `core`. Move a `configSchema`'s keys into the
+  module's section, and a section that sat at `section.at` under the module's
+  name, declaring the old path in `section.relocatedFrom` so a configuration
+  still setting it is refused naming the new one. A manifest that still
+  carries `configSchema`, or a `section` that still carries `at` — whatever
+  the value, the module's own name included — refuses boot at stage 1 with
+  `module-section-path-invalid`, naming the module, the field and that the
+  section is at the module's name; TypeScript refuses both at compile time.
+  `ConfigValidationFailedDetails.modules` is empty when core's own parse
+  refuses, and names each refused section's module with its name as
+  `schemaPath`.
 - **A manifest's `replicaSafety` may be a function of the module's section**
   (#1371, #728). A declaration written as `{ unsafe: true, reason }` is read
   as before. Code that reads the field off a `Module` (`module.replicaSafety.reason`)

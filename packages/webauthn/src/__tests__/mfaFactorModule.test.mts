@@ -137,7 +137,7 @@ describe("webauthnMfaFactorModule", () => {
 	});
 
 	it("reads its own section at its name, with the package's reference.conf", () => {
-		expect(webauthnMfaFactorModule.section?.at).toBeUndefined();
+		expect(webauthnMfaFactorModule.section).not.toHaveProperty("at");
 		expect(webauthnMfaFactorModule.section?.reference?.href).toBe(
 			new URL("../../config/reference.conf", import.meta.url).href,
 		);

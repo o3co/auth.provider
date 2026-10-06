@@ -114,7 +114,10 @@ describe("the package's config/reference.conf", () => {
 	it("is read at each module's name: session and session-store", () => {
 		const modules = [sessionModule, sessionStoreModule];
 		expect(modules.map((module) => module.name)).toEqual(["session", "session-store"]);
-		expect(modules.map((module) => module.section?.at)).toEqual([undefined, undefined]);
+		expect(modules.map((module) => Object.hasOwn(module.section ?? {}, "at"))).toEqual([
+			false,
+			false,
+		]);
 		expect(modules.map((module) => module.section?.reference?.href)).toEqual([
 			REFERENCE.href,
 			REFERENCE.href,

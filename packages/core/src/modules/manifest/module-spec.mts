@@ -22,18 +22,6 @@ import type { ModuleSection, SectionSchema } from "./module-section.mjs";
 import type { Provider, ProviderDeps } from "./provider.mjs";
 
 /**
- * Optional Zod schema declaring the slice of application config a module
- * requires. Boot's one composed parse runs it over core's base parse and lays
- * its output on top: an undeclared key is kept, a coerced value arrives
- * coerced. Two schemas that make different values of one key refuse boot
- * (`config-validation-failed`).
- *
- * To be deprecated once each section sits under its module's name; a module
- * then declares a {@link ModuleSection} (`section`) and reads `deps.section`.
- */
-export type ConfigSchema = z.ZodObject<z.ZodRawShape>;
-
-/**
  * Lifecycle hooks a module declares for one of its provided slots; `K` types
  * `cleanup`'s value as `ComponentMap[K]`.
  */
@@ -97,21 +85,13 @@ export interface ModuleSpec<
 	readonly name: string;
 
 	/**
-	 * The module's own configuration section: its schema, where it sits, and the
-	 * `reference.conf` holding its defaults. Parsed at stage 1 and passed to
+	 * The module's own configuration section, at the top-level key named
+	 * exactly as the module: its schema, and the `reference.conf` holding its
+	 * defaults. Parsed at stage 1 and passed to
 	 * every factory in `provides`, `contributes` and `overrides` as
 	 * `deps.section`, typed as the schema's output. See {@link ModuleSection}.
 	 */
 	readonly section?: ModuleSection<S>;
-
-	/**
-	 * Optional Zod schema declaring this module's config slice, composed with
-	 * core's schema over the whole configuration. To be deprecated in favour of
-	 * `section` once the loader layers each package's `reference.conf`. For a
-	 * section at a path under a parent core's schema declares, it is what keeps
-	 * the section's keys (see `ModuleSection.at`).
-	 */
-	readonly configSchema?: ConfigSchema;
 
 	/**
 	 * Component keys this module reads from DI. Required keys appear as

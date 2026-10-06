@@ -402,7 +402,7 @@ describe("redisAttemptCounterModule", () => {
 
 	it(`reads its own section, 'redis-attempt-counter', strict, whose keyPrefix defaults to '${DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX}'`, () => {
 		const schema = redisAttemptCounterModule.section?.schema;
-		expect(redisAttemptCounterModule.section?.at).toBeUndefined();
+		expect(redisAttemptCounterModule.section).not.toHaveProperty("at");
 		expect(schema?.parse(undefined)).toEqual({ keyPrefix: "attempt:" });
 		expect(schema?.safeParse({ keyPrefx: "a:" }).success).toBe(false);
 		expect(schema?.safeParse({ keyPrefix: "" }).success).toBe(false);

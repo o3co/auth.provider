@@ -245,7 +245,7 @@ describe("the template's config/reference.conf", () => {
 describe("logging", () => {
 	it("owns logging, and requires nothing", () => {
 		expect(loggingModule.name).toBe("logging");
-		expect(loggingModule.section?.at).toBeUndefined();
+		expect(loggingModule.section).not.toHaveProperty("at");
 		expect(loggingModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(loggingModule.requires ?? []).toEqual([]);
 		expect(loggingModule.optional ?? []).toEqual([]);
@@ -352,7 +352,7 @@ const preflight = (app: express.Express, origin: string) =>
 describe("http", () => {
 	it("owns http, the CORS list included, and requires nothing", () => {
 		expect(httpModule.name).toBe("http");
-		expect(httpModule.section?.at).toBeUndefined();
+		expect(httpModule.section).not.toHaveProperty("at");
 		expect(httpModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(httpModule.requires ?? []).toEqual([]);
 		expect(httpModule.optional ?? []).toEqual([]);
@@ -767,7 +767,7 @@ describe("an environment variable takes effect though application.conf does not 
 describe("key-store", () => {
 	it("owns key-store, and reads it as its section rather than the configuration", () => {
 		expect(keyStoreModule.name).toBe("key-store");
-		expect(keyStoreModule.section?.at).toBeUndefined();
+		expect(keyStoreModule.section).not.toHaveProperty("at");
 		expect(keyStoreModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(keyStoreModule.requires ?? []).not.toContain("config");
 		expect(keyStoreModule.optional ?? []).not.toContain("config");
@@ -984,7 +984,7 @@ async function listeningRedis(): Promise<{
 describe("redis-clients", () => {
 	it("owns redis-clients, and reads it as its section rather than the configuration", () => {
 		expect(standaloneRedisClientsModule.name).toBe("redis-clients");
-		expect(standaloneRedisClientsModule.section?.at).toBeUndefined();
+		expect(standaloneRedisClientsModule.section).not.toHaveProperty("at");
 		expect(standaloneRedisClientsModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(standaloneRedisClientsModule.requires ?? []).not.toContain("config");
 		expect(standaloneRedisClientsModule.optional ?? []).not.toContain("config");
@@ -1155,7 +1155,7 @@ describe("repositories", () => {
 		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
 		const modules = buildModules(readSwitches(own), { environment: "development" });
 		const repositories = named(modules, "repositories");
-		expect(repositories.section?.at).toBeUndefined();
+		expect(repositories.section).not.toHaveProperty("at");
 		expect(repositories.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(repositories.requires ?? []).not.toContain("config");
 		expect(repositories.optional ?? []).not.toContain("config");
@@ -1448,7 +1448,7 @@ describe("audit-sink", () => {
 			buildModules(readSwitches(own), { environment: "development" }),
 			"audit-sink",
 		);
-		expect(sink.section?.at).toBeUndefined();
+		expect(sink.section).not.toHaveProperty("at");
 		expect(sink.requires ?? []).not.toContain("config");
 	});
 
