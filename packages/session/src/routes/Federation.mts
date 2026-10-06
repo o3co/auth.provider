@@ -36,7 +36,6 @@ import {
 	loggableError,
 	readUserSnapshot,
 	type SessionClaim,
-	type SessionFederationIndex,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
 	type SessionRequirementResolver,
@@ -130,7 +129,6 @@ export const createRouter = (
 		subjectRevocation,
 		sessionLifecycleStore,
 		sessionLifecycle,
-		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		federationTransactionTtlMs = DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
@@ -175,7 +173,6 @@ export const createRouter = (
 		 * refused.
 		 */
 		sessionLifecycle?: SessionLifecycle | undefined;
-		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
 		/**
@@ -206,7 +203,6 @@ export const createRouter = (
 ): Router => {
 	checkResolver(requirements, "federation routes", Object.keys(SESSION_ADMISSION_ACTIONS));
 	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
-	if (!sessionFederationIndex) throw new Error("federation routes require sessionFederationIndex");
 	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");
 	if (!userRepository) throw new Error("federation routes require userRepository");
 	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
@@ -269,7 +265,6 @@ export const createRouter = (
 		federationRedirectPolicyResolver,
 		providerCallbackUrls,
 		userRepository,
-		sessionFederationIndex,
 		federationTokenStore,
 		sessionLifecycle,
 		federationTransactionTtlMs,

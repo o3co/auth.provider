@@ -176,8 +176,8 @@ const csrfGuardOf = (
  *
  * `requires`: `userRepository`; core's `federationSettings`, the federations
  * `core.federations` declares (each enabled one's callback URL, and whether
- * an installed one's upstream `amr` counts); the three stores these routes
- * use (`userSessionStore`, `federationTokenStore`, `sessionFederationIndex`);
+ * an installed one's upstream `amr` counts); the two stores these routes
+ * use (`userSessionStore`, `federationTokenStore`);
  * `csrfTokenSigner`, what the CSRF token is signed and checked with (the
  * session store's module provides it from `session-store.secret`, which this
  * module never reads); `sessionCookiePolicy`, the session cookie's name,
@@ -199,7 +199,6 @@ export const sessionModule = defineModule<
 	| "userRepository"
 	| "userSessionStore"
 	| "federationTokenStore"
-	| "sessionFederationIndex"
 	| "csrfTokenSigner"
 	| "sessionCookiePolicy"
 	| "federationProviders"
@@ -222,7 +221,6 @@ export const sessionModule = defineModule<
 		"userRepository",
 		"userSessionStore",
 		"federationTokenStore",
-		"sessionFederationIndex",
 		"csrfTokenSigner",
 		"sessionCookiePolicy",
 		"federationProviders",
@@ -331,7 +329,6 @@ export const sessionModule = defineModule<
 						providerCallbackUrls: providerCallbackUrlsOf(deps.federationSettings),
 						userRepository: deps.userRepository,
 						userSessionStore: deps.userSessionStore,
-						sessionFederationIndex: deps.sessionFederationIndex,
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						// The link flow admits its session with these: the resolver,
 						// read per request, and the boundary when it is wired.

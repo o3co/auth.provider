@@ -1237,6 +1237,15 @@ modules fills them.
   is core's `session_close_item_failed`. A federated login and a link join
   their federation through the lifecycle only; the federated login no longer
   writes the `sessionFederationIndex` entry itself.
+- **BREAKING: the session module no longer needs `sessionFederationIndex`.**
+  `sessionModule` and the federation router no longer require the slot (the
+  router's `sessionFederationIndex` option is removed). A link reads whether
+  the session already carries the federation from core's session lifecycle
+  (`sessionLifecycle.federations`) and no longer removes an index entry on
+  rollback; the lifecycle's join records the federation. A link's outage
+  there is logged as `federation_link_store_unavailable` with
+  `store: "session_lifecycle"`, `step: "federations"`, in place of
+  `store: "session_federation_index"`, `step: "list"` and `"remove"`.
 - **BREAKING: every failed close at `POST /session/logout` is an outage.** A
   logout whose `sid` the session lifecycle cannot hold now answers
   `503 temporarily_unavailable` and keeps the cookie, as any close the
