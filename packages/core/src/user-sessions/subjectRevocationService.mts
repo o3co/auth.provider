@@ -215,8 +215,8 @@ export function createSubjectRevocationService(
 /**
  * Sessions and tokens end; established grants stay. Same order as the full
  * revocation, for the same reason: the boundary is written before anything
- * is enumerated, and stamped again once that write has taken effect
- * (`stampSubjectBoundary`). Only the sessions boundary moves
+ * is enumerated, and stamped again once that write has taken effect, until
+ * a write commits promptly (`stampSubjectBoundary`). Only the sessions boundary moves
  * (`revokeSessionsBefore`), so a grant covered by an earlier full revocation
  * stays covered.
  */
