@@ -431,8 +431,10 @@ upstream refresh-token rotations (24 by default) in a window of
 opens when its first rotation is taken, and a rotation given back (a refresh
 the upstream provably did not act on) leaves it where it opened. A refresh
 answered 503, like 500, 502 or 504, is not given back: a proxy in front of the
-IdP may answer it after forwarding the refresh, so a sustained outage spends
-the budget, one attempt per failure backoff (30 seconds by default). With the
+IdP may answer it after forwarding the refresh, so a sustained outage answered
+503 spends the budget, one attempt per failure backoff
+(`federation-grants.refreshFailureBackoff`, 30 seconds by default); a refused
+connection still gives its rotation back. With the
 budget spent, a good stored token is still answered; otherwise the answer is `429 rate_limited/provider` with
 `Retry-After` until the window closes. Each setting is a whole number of at
 least 1, refused at boot otherwise. The [operator
