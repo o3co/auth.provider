@@ -815,9 +815,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// the family it was handed, or logged its failure as
 					// `session_join_withdraw_failed`. A sid is only read with a
 					// userSessionStore, which the factory refuses without a lifecycle.
-					// A join that rejects with its store's error is the outage it
-					// is; a RangeError (a sid or participant the lifecycle cannot
-					// hold) is a fault, and leaves through the catch below.
+					// Every rejection of the join is the outage it may be, a
+					// RangeError included: a store's own error can be one, and the
+					// family is revoked before the 503.
 					const linkingUnavailable = async (thrown?: { readonly error: unknown }) => {
 						lifecycleUnavailable(authenticatedClientId, thrown);
 						await revokeRefusedFamily(familyId, at);
@@ -834,7 +834,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						// biome-ignore lint/style/noNonNullAssertion: see the factory's refusal
 						joined = await deps.sessionLifecycle!.join(sid, { rp, familyId });
 					} catch (error) {
-						if (error instanceof RangeError) throw error;
 						return await linkingUnavailable({ error });
 					}
 					if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
