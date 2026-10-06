@@ -707,6 +707,16 @@ The boot refusals you can meet, with their messages, are in
   and audited `device.rate_limited`, now with `Retry-After` and
   `Cache-Control: no-store`.
 
+- **BREAKING: every user signs in again, and a refresh token bound to a
+  v0.16.0 session stops working** (#1030). A session's record in core's
+  session lifecycle is what makes it live, and a session established before
+  the upgrade has none: it reads as closed. Its cookie no longer admits it,
+  its access tokens no longer introspect active or reach `/userinfo`, nothing
+  joins it, and a refresh token that names its `sid` is refused
+  `400 invalid_grant` (`session_invalid`) before it rotates. Every refresh
+  token the authorization-code grant mints names its session, so each one
+  issued under v0.16.0 stops working at the upgrade; a refresh token without
+  a `sid` (a sessionless composition) is unaffected.
 - **WebAuthn.** An assertion whose user handle is not its credential owner's
   canonical handle is `400 invalid_grant` (`user_handle_mismatch`) (#863); one
   without a handle is refused too (#1153, #1217). Migrated passkeys and
@@ -1181,8 +1191,7 @@ modules fills them.
   is required** (#1030). A composition that wires `userSessionStore`
   installs `sessionLifecycleModule` beside it (the standalone template does;
   see [Your scaffold](#your-scaffold)), with what that module requires:
-  `sessionLifecycleStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
-  `sessionFederationIndex`, `refreshTokenFamilyRevocation` and
+  `sessionLifecycleStore`, `refreshTokenFamilyRevocation` and
   `federationTokenStore`. Without it the boot is refused, each message
   naming `userSessionStore` and `sessionLifecycle`: in the session package,
   `sessionModule`'s route factories with `contribute-factory-failed` and
@@ -1262,6 +1271,32 @@ modules fills them.
   close work's and the sweep's own lines (`session_close_item_failed`,
   `session_lifecycle_unavailable` for a close-work completion or re-read,
   or a resumed session, `session_lifecycle_sweep_*`) are unchanged.
+- **BREAKING: a session with no lifecycle record reads as closed**
+  (#1030). Core's session lifecycle reads and writes its own record alone:
+  `liveness` answers `not_live`, `join` answers `refused` (revoking the
+  family and removing the federation's tokens it was handed, and writing
+  nothing), and `close` answers `done` with no relying party or federation
+  and nothing to run. Session admission answers `not_live` (`closing`) for a
+  sid with no record wherever a `sessionLifecycleStore` is handed
+  (`AdmissionDeps.sessionLifecycleStore`). A record that lapsed at its end on
+  the store's clock, before the closing commit too, reads the same: such a
+  close no longer runs the close work itself. Sessions established before
+  the upgrade have no record, so they are refused for any join and by
+  admission ([every user signs in again](#passkeys-users-and-sessions)).
+  - The lifecycle no longer reads or writes the per-session stores
+    (`sessionRPRegistry`, `sessionFamilyIndex` and its end mark,
+    `sessionFederationIndex`), and adopts no session from them.
+    `SessionLifecycleOptions` loses `sessionRPRegistry`,
+    `sessionFamilyIndex` and `sessionFederationIndex`, and
+    `sessionLifecycleModule` no longer requires those slots.
+  - An enabled `core.federations.<name>` requires `sessionLifecycle` in place
+    of `sessionRPRegistry`, `sessionFamilyIndex` and `sessionFederationIndex`:
+    boot refuses one without `userSessionStore`, `sessionLifecycle`,
+    `federationTokenStore` and `refreshTokenFamilyRevocation`
+    (`federation-stores-incomplete`).
+  - A test or composition of your own that set a session up by writing the
+    user session alone opens it first, `sessionLifecycle.open(sid, { sub,
+    expiresAt })`, as a login through the session package does.
 - **The session lifecycle sweeps unless told not to.** Installing
   `sessionLifecycleModule` starts a sweep that resumes the closes left
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
@@ -1830,6 +1865,10 @@ detail; what a mixed fleet of v0.16.0 and this release does:
 - **Fix the client records the boundary refuses before the roll.** During
   it, such a client alternates between `200` from v0.16.0 replicas and `503`
   from new ones ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
+- **Sessions a v0.16.0 replica establishes are refused by this release**
+  (#1030): they have no lifecycle record, which reads as closed
+  ([above](#passkeys-users-and-sessions)). A user signed in through an older
+  replica during the roll signs in again once a new replica serves them.
 - **Federated sessions** live at the upgrade stamp `["fed"]` until the user
   logs in again ([operator runbook §7](operator-runbook.md#before-you-upgrade),
   step 3).

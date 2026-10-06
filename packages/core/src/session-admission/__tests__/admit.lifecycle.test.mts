@@ -16,10 +16,10 @@
 
 /**
  * Admission's read of the session lifecycle: after the live record, the
- * lifecycle port's record for its sid — one closing or closed is
- * `not_live` (`closing`); an absent record, or no store handed, keeps the
- * reading as it was; a store that cannot answer, or answers outside its
- * types, is `unavailable` (`session_lifecycle`).
+ * lifecycle port's record for its sid — one closing or closed, or none,
+ * is `not_live` (`closing`); no store handed keeps the reading as it was; a
+ * store that cannot answer, or answers outside its types, is `unavailable`
+ * (`session_lifecycle`).
  */
 
 import { describe, expect, it } from "vitest";
@@ -148,11 +148,24 @@ describe("admission's read of the session lifecycle", () => {
 		});
 	});
 
-	it("reads as before for a session with no lifecycle record", async () => {
+	it("is not_live (closing) for a session with no lifecycle record: an absent record reads as closed", async () => {
 		const store = createInMemorySessionLifecycleStore({ now: () => NOW.getTime() });
-		expect((await admitSession(deps({ sessionLifecycleStore: store }), cookie())).outcome).toBe(
-			"admitted",
-		);
+		expect(await admitSession(deps({ sessionLifecycleStore: store }), cookie())).toEqual({
+			outcome: "not_live",
+			reason: "closing",
+		});
+	});
+
+	it("is not_live (closing) for a token carrier naming a session with no lifecycle record", async () => {
+		const store = createInMemorySessionLifecycleStore({ now: () => NOW.getTime() });
+		const token: AdmissionRequest = {
+			claim: tokenClaim({ sid: SID, sub: SUB, amr: ["pwd"] }),
+			action: "test.use",
+		};
+		expect(await admitSession(deps({ sessionLifecycleStore: store }), token)).toEqual({
+			outcome: "not_live",
+			reason: "closing",
+		});
 	});
 
 	it("reads as before where no lifecycle store is handed", async () => {

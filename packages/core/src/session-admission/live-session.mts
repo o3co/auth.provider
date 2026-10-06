@@ -169,23 +169,22 @@ export async function readLiveSession(
 	}
 
 	// Step 3c: the session's lifecycle, after the subject and the renewal
-	// nonce. Closing or closed from its closing commit on is not live; no
-	// record, or no store, reads as before. The store is read off `deps` once,
-	// in the same guarded section as its answer, which core's reader holds to
-	// the port's types; a record of another subject is no answer for this
-	// session, refused as malformed.
+	// nonce. Closing or closed from its closing commit on is not live, and an
+	// absent record reads as closed; no store reads as before. The store is
+	// read off `deps` once, in the same guarded section as its answer, which
+	// core's reader holds to the port's types; a record of another subject is
+	// no answer for this session, refused as malformed.
 	if (session !== null && presented.sid !== undefined) {
 		try {
 			const lifecycleStore = checked.readSessionLifecycleStore();
-			const lifecycle =
-				lifecycleStore === undefined
-					? null
-					: readVersionedSessionLifecycle(await lifecycleStore.read(presented.sid));
-			if (lifecycle !== null && lifecycle.value.sub !== session.sub) {
-				throw new TypeError("the session lifecycle record names another subject");
-			}
-			if (lifecycle !== null && lifecycle.value.state !== "active") {
-				return { answer: { outcome: "not_live", reason: "closing" } };
+			if (lifecycleStore !== undefined) {
+				const lifecycle = readVersionedSessionLifecycle(await lifecycleStore.read(presented.sid));
+				if (lifecycle !== null && lifecycle.value.sub !== session.sub) {
+					throw new TypeError("the session lifecycle record names another subject");
+				}
+				if (lifecycle === null || lifecycle.value.state !== "active") {
+					return { answer: { outcome: "not_live", reason: "closing" } };
+				}
 			}
 		} catch (err) {
 			return {

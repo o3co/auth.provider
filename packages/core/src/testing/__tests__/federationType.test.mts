@@ -27,14 +27,12 @@ import type { FederationProvider } from "#/federations/types.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
 import { federationTypeForTests, makeValidCoreConfig, withFederation } from "#/testing/index.mjs";
 
-/** The six slots an enabled federation needs wired (`federation-stores-wiring`). */
+/** The four slots an enabled federation needs wired (`federation-stores-wiring`). */
 const federationStores = defineModule({
 	name: "test:federation-stores",
 	provides: {
 		userSessionStore: () => ({ kind: "stub" }),
-		sessionRPRegistry: () => ({ kind: "stub" }),
-		sessionFamilyIndex: () => ({ kind: "stub" }),
-		sessionFederationIndex: () => ({ kind: "stub" }),
+		sessionLifecycle: () => ({ kind: "stub" }),
 		federationTokenStore: () => ({ kind: "stub" }),
 		refreshTokenFamilyRevocation: () => ({ kind: "stub" }),
 	} as never,
