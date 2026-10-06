@@ -1078,6 +1078,7 @@ export { createRepositoryFactories } from "./repositories/RepositoryFactory.mjs"
 export type {
 	Client,
 	Code,
+	CodeAuthentication,
 	CodeData,
 	TokenEndpointAuthMethod,
 	User,

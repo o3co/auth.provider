@@ -39,7 +39,7 @@
 
 import { describe, expectTypeOf, it } from "vitest";
 import type { CodeRepository, CreateCodeInput } from "#/repositories/CodeRepository.mjs";
-import type { Code } from "#/repositories/types.mjs";
+import type { Code, CodeAuthentication } from "#/repositories/types.mjs";
 
 /** `true` when `K` must be present on `T` — not merely declared. */
 type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, K> ? false : true;
@@ -48,8 +48,8 @@ type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, 
 type OptionalKeys<T> = { [K in keyof T]-?: IsRequiredKey<T, K> extends true ? never : K }[keyof T];
 
 describe("Code — what a repository answers with", () => {
-	it("has no optional key", () => {
-		expectTypeOf<OptionalKeys<Code>>().toEqualTypeOf<never>();
+	it("has no optional key but authentication, optional until every writer names it", () => {
+		expectTypeOf<OptionalKeys<Code>>().toEqualTypeOf<"authentication">();
 	});
 
 	it("names each field, so a failure says which one regressed", () => {
@@ -68,6 +68,7 @@ describe("Code — what a repository answers with", () => {
 		expectTypeOf<Code["nonce"]>().toEqualTypeOf<string | undefined>();
 		expectTypeOf<Code["grantedAudience"]>().toEqualTypeOf<readonly string[] | undefined>();
 		expectTypeOf<Code["amr"]>().toEqualTypeOf<readonly string[] | undefined>();
+		expectTypeOf<Code["authentication"]>().toEqualTypeOf<CodeAuthentication | undefined>();
 	});
 });
 
@@ -76,8 +77,8 @@ describe("CreateCodeInput — what /authorize writes", () => {
 		expectTypeOf<Parameters<CodeRepository["createCode"]>[0]>().toEqualTypeOf<CreateCodeInput>();
 	});
 
-	it("leaves only expiresIn optional — absent means the repository's default", () => {
-		expectTypeOf<OptionalKeys<CreateCodeInput>>().toEqualTypeOf<"expiresIn">();
+	it("leaves only expiresIn optional — absent means the repository's default — and authentication, until every writer names it", () => {
+		expectTypeOf<OptionalKeys<CreateCodeInput>>().toEqualTypeOf<"expiresIn" | "authentication">();
 	});
 
 	it("names exactly the record's fields but the code itself", () => {

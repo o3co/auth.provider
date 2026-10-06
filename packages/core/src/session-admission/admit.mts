@@ -32,12 +32,19 @@ import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
 import {
+	type AuthenticationReading,
 	canRecordSecondFactor,
+	codeFieldsOf,
+	codeReadingOver,
 	copySessionAuthentication,
 	federatedSessionAuthentication,
 	passwordSessionAuthentication,
+	readCodeAtExchange,
 	requirementSession,
 	requirementSessionFromAmr,
+	requirementSessionOf,
+	sessionReading,
+	tokenReading,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
 import type { UserSession, UserSessionClaims, UserSessionStore } from "../user-sessions/types.mjs";
@@ -153,24 +160,30 @@ export interface CodeCarrier {
 /**
  * A code record's claim on its first read: authenticated (a session minted
  * the code), with the code's `sid` and no subject, since `CodeData` carries
- * no `sub`; `admitSession`'s subject check has nothing to compare.
+ * no `sub`; `admitSession`'s subject check has nothing to compare. How the
+ * code's session had authenticated is read here, once, and held beside the
+ * claim: the requirements judge the code on it.
  */
 export function codeClaimFirstRead(code: CodeCarrier): SessionClaim {
 	if (!isObject(code)) {
 		throw new RangeError("codeClaimFirstRead: the code record must be an object");
 	}
-	return brandClaim({
-		authenticated: true,
-		sid: nonEmptyString(code.sid),
-		subject: undefined,
-		carrier: "code",
-	} as SessionClaim);
+	return brandClaim(
+		{
+			authenticated: true,
+			sid: nonEmptyString(code.sid),
+			subject: undefined,
+			carrier: "code",
+		} as SessionClaim,
+		readCodeAtExchange(code),
+	);
 }
 
 /**
  * A code record's claim on the `authorization_code` grant's second read:
  * the first read's `subject`, required, so the two reads are compared and
- * the comparison cannot be left out by omitting an option.
+ * the comparison cannot be left out by omitting an option. The code is read
+ * as the first read reads it.
  */
 export function codeClaimRevalidation(code: CodeCarrier, subject: string): SessionClaim {
 	if (!isObject(code)) {
@@ -181,12 +194,15 @@ export function codeClaimRevalidation(code: CodeCarrier, subject: string): Sessi
 			"codeClaimRevalidation: the first read's subject must be a non-empty string",
 		);
 	}
-	return brandClaim({
-		authenticated: true,
-		sid: nonEmptyString(code.sid),
-		subject,
-		carrier: "code",
-	} as SessionClaim);
+	return brandClaim(
+		{
+			authenticated: true,
+			sid: nonEmptyString(code.sid),
+			subject,
+			carrier: "code",
+		} as SessionClaim,
+		readCodeAtExchange(code),
+	);
 }
 
 /** What a link claim is built from: the link transaction's envelope, which records the session and its subject at the start. */
@@ -313,7 +329,10 @@ const copyView = (view: SessionView): SessionView =>
  * 5. requirements, for `use` and `credential_change`: each `admit` in
  *    registration order, the first verdict that is not `met` taken (see
  *    `stepUpVerdict` for `step_up`). A token carrier is judged on the
- *    token's own `amr`, record or not.
+ *    token's own `amr`, record or not; a code carrier, over a record, on
+ *    how its session had authenticated at `/authorize` as the code carries
+ *    it (`codeReadingOver`), and on the record when it carries nothing
+ *    readable.
  * 6. `acr_values`: `selectAcr` over the vouched `amr`, with reach the union
  *    of every requirement's when the session is live.
  * 7. `merge` of 5 and 6. In the met + step_up row, a step-up through the
@@ -362,13 +381,19 @@ export async function admitSession(
 	const requirements = [...resolver.entries()];
 	const effective = effectiveAction(checked.action);
 	// A token carrier's authentication is the token's own, whether or not a
-	// record was read: the record is only the view. Each reading is a frozen
+	// record was read: the record is only the view. A code carrier's is what
+	// the code carries, over the record. Each requirement session is a frozen
 	// copy of its own: the merge's here, and each requirement's below, so what
 	// one does to its copy reaches no other.
-	const authentication =
+	const reading: AuthenticationReading | null =
 		presented.carrier === "token"
-			? requirementSessionFromAmr(presented.tokenAmr)
-			: requirementSession(session);
+			? tokenReading(presented.tokenAmr)
+			: session === null
+				? null
+				: presented.carrier === "code" && checked.codeReading !== undefined
+					? codeReadingOver(checked.codeReading, session)
+					: sessionReading(session);
+	const authentication = reading === null ? null : requirementSessionOf(reading);
 	let verdict: RequirementOutcome = { outcome: "met" };
 	let asked = false;
 	if (effective.grade !== "remediation") {
@@ -384,10 +409,7 @@ export async function admitSession(
 				...shared,
 				// Its own copy: a requirement that moves its clock moves no other's.
 				now: new Date(now.getTime()),
-				authentication:
-					presented.carrier === "token"
-						? requirementSessionFromAmr(presented.tokenAmr)
-						: requirementSession(session),
+				authentication: reading === null ? null : requirementSessionOf(reading),
 				session: live === null ? null : copyView(live.view),
 			});
 			let answer: unknown;
@@ -442,6 +464,7 @@ export async function admitSession(
 		// What step 5 handed the requirements, from a reading no requirement was handed.
 		held: authentication?.amr ?? [],
 		table: checked.acrTable,
+		codeFields: codeFieldsOf(reading),
 	});
 
 	// Step 8: the last reading. Nothing is awaited after it, so the record and

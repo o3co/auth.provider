@@ -335,6 +335,7 @@ describe("InMemoryCodeRepository", () => {
 				sid: "sid-rt",
 				acr: "urn:example:acr:mfa",
 				amr: ["pwd", "otp", "mfa"],
+				authentication: { primary: "pwd", mfaAt: new Date("2026-10-06T11:59:00Z") },
 				expiresIn: 90,
 				grantedScope: ["openid", "read"],
 				grantedAudience: ["https://api.example"],
@@ -392,6 +393,74 @@ describe("InMemoryCodeRepository", () => {
 			const r = await repo.findByCode(code);
 			expect(r?.nonce).toBeUndefined();
 			expect(r?.sid).toBeUndefined();
+		});
+	});
+
+	describe("authentication: how the code's session had authenticated at /authorize", () => {
+		const MFA_AT = new Date("2026-10-06T11:59:00Z");
+
+		it("round-trips it through createCode and both reads, the whole record compared", async () => {
+			repo = new InMemoryCodeRepository();
+			const params: CreateCodeInput = {
+				...minimalParams,
+				sid: "sid-rt",
+				amr: ["pwd", "otp", "mfa"],
+				authentication: { primary: "pwd", mfaAt: MFA_AT },
+			};
+			const created = await repo.createCode(params);
+			const expected = { ...params, code: created.code, expiresIn: 600 };
+			expect(created).toStrictEqual(expected);
+			expect(await repo.findByCode(created.code)).toStrictEqual(expected);
+			expect(await repo.consumeByCode(created.code)).toStrictEqual(expected);
+		});
+
+		it("keeps one whose primary could not be told, as recorded", async () => {
+			repo = new InMemoryCodeRepository();
+			const authentication = { primary: undefined, mfaAt: undefined };
+			const created = await repo.createCode({ ...minimalParams, authentication });
+			expect((await repo.consumeByCode(created.code))?.authentication).toStrictEqual(
+				authentication,
+			);
+		});
+
+		it("keeps the instant it was given: neither the caller's Date nor a returned one reaches the stored code", async () => {
+			repo = new InMemoryCodeRepository();
+			const mfaAt = new Date(MFA_AT.getTime());
+			const created = await repo.createCode({
+				...minimalParams,
+				authentication: { primary: "pwd", mfaAt },
+			});
+			mfaAt.setTime(0);
+			expect(Object.isFrozen(created.authentication)).toBe(true);
+			created.authentication?.mfaAt?.setTime(1);
+			const found = await repo.findByCode(created.code);
+			found?.authentication?.mfaAt?.setTime(2);
+			expect((await repo.consumeByCode(created.code))?.authentication).toStrictEqual({
+				primary: "pwd",
+				mfaAt: MFA_AT,
+			});
+		});
+
+		it("names it undefined when none was given, and when what was given is not in a shape a code records", async () => {
+			repo = new InMemoryCodeRepository();
+			const created = await repo.createCode(minimalParams);
+			expect(created).toHaveProperty("authentication", undefined);
+			expect(await repo.findByCode(created.code)).toHaveProperty("authentication", undefined);
+			for (const authentication of [
+				null,
+				"pwd",
+				{ primary: "" },
+				{ primary: "pwd", mfaAt: new Date(Number.NaN) },
+			]) {
+				const malformed = await repo.createCode({
+					...minimalParams,
+					authentication: authentication as never,
+				});
+				expect(
+					await repo.consumeByCode(malformed.code),
+					JSON.stringify(authentication),
+				).toHaveProperty("authentication", undefined);
+			}
 		});
 	});
 });

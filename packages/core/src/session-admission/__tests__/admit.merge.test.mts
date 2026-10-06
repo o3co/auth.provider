@@ -276,6 +276,7 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 			session,
 			view: viewOf(session, true),
 			acr: MFA,
+			codeFields: { amr: ["pwd"], authentication: { primary: "pwd", mfaAt: undefined } },
 		});
 		expect(
 			mergeAdmission({ outcome: "unmet", requirement: "acr" }, session, undefined, store),

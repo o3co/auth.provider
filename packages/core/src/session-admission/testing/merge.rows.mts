@@ -25,6 +25,7 @@
  * list. Nothing here runs a test.
  */
 
+import { codeFieldsOf, sessionReading } from "../../user-sessions/authentication.mjs";
 import { isRenewalNonce } from "../../user-sessions/renewalNonce.mjs";
 import {
 	supportsSecondFactorUpdate,
@@ -616,6 +617,7 @@ export function mergeAdmission(
 				session,
 				view: session === null ? null : viewOver(session),
 				acr: expected.acr,
+				codeFields: codeFieldsOf(session === null ? null : sessionReading(session)),
 				// The record's nonce as admission reads it: absent when it holds none.
 				...(session !== null && isRenewalNonce(session.renewalNonce)
 					? { renewalNonce: session.renewalNonce }
