@@ -3679,10 +3679,14 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// post-config row, which may assume the configuration is valid.
 	// A limiter section refuses the prefixes every loaded module claims as a
 	// verifier's, switched on or not: no switch is read before the parse.
-	const { config: parsedConfig, sections } = withVerifierLimitDeclarations(
+	const { config: writtenConfig, sections } = withVerifierLimitDeclarations(
 		declaredVerifierLimits(normalisedModules),
 		() => parseModuleSections(modules, composedConfig),
 	);
+	// The `config` slot, and what every later row and stage reads: a frozen
+	// copy (`frozenSection`), so no module changes what another — or core —
+	// reads, and the host's own objects are left as it made them.
+	const parsedConfig = frozenSection(writtenConfig);
 	const substitutedBootstrap: BootstrapMap = {
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],

@@ -495,13 +495,13 @@ describe("a module's section — one frozen object", () => {
 		expect(Object.isFrozen(first.free)).toBe(true);
 		expect(Object.isFrozen(first.free.deep)).toBe(true);
 		// A subtree the schema passed through is a copy: the config slot's own is
-		// neither the section's nor frozen by it.
+		// not the section's, and is frozen by boot's freeze of the slot.
 		expect(config).toBeDefined();
 		const raw = (config?.["fixture-section"] as { free: { deep: object } } | undefined)?.free;
 		expect(raw).toBeDefined();
 		if (raw === undefined) return;
 		expect(raw).not.toBe(first.free);
-		expect(Object.isFrozen(raw.deep)).toBe(false);
+		expect(Object.isFrozen(raw.deep)).toBe(true);
 		await handle.dispose();
 	});
 

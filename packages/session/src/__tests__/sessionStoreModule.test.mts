@@ -610,9 +610,9 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		expect(createClient).toHaveBeenCalledTimes(1);
 	});
 
-	it("mounts the cookie its provider built, though config's session-store changed after", async () => {
+	it("mounts the cookie its provider built, a later module's write to config's session-store refused", async () => {
 		const config = configWith({ name: "auth.session", secure: false }) as AppConfig;
-		const seen: { policy?: SessionCookiePolicy } = {};
+		const seen: { policy?: SessionCookiePolicy; write?: string } = {};
 		const handle = await createApp({
 			modules: [
 				// Listed first, so its route factory runs after the providers and
@@ -623,9 +623,15 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 					contributes: {
 						routes: [
 							(deps) => {
-								(deps.config as unknown as { "session-store": { name: string } })[
-									"session-store"
-								].name = "auth.other";
+								// The config slot is frozen: the write throws in strict-mode code.
+								try {
+									(deps.config as unknown as { "session-store": { name: string } })[
+										"session-store"
+									].name = "auth.other";
+									seen.write = "allowed";
+								} catch (err) {
+									seen.write = (err as Error).constructor.name;
+								}
 								return { id: "test:mutator", mountPath: "/mutator", handler: express.Router() };
 							},
 						],
@@ -655,6 +661,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		try {
 			const res = await request(express().use(handle.router)).post("/touch");
 			expect(res.status).toBe(200);
+			expect(seen.write).toBe("TypeError");
 			expect(seen.policy?.name).toBe("auth.session");
 			expect(res.headers["set-cookie"]?.[0] ?? "").toMatch(/^auth\.session=/);
 		} finally {
