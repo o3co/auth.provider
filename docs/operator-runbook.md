@@ -2628,10 +2628,15 @@ lists every breaking change since, and which of the steps below each needs.
      `httpSettings` slot alone. A configuration that still writes
      `cors.allowedOrigins` refuses to start where a loaded module relocates
      it (the standalone template's `http` module names
-     `http.cors.allowedOrigins`); in a composition of your own with no such
-     module, it starts, the value unread, and `cors` is named at `warn` as
-     `config_sections_ignored`. One with no `httpSettings` provider mounts no
-     CORS. The `cors_allowed_origins_unreadable` warning
+     `http.cors.allowedOrigins`). In a composition of your own with no such
+     module it starts, the value unread — where it used to refuse to start —
+     and the only signal is one `warn` line naming `cors`, never its value:
+     `config_sections_ignored`, or `config_sections_not_loaded` where the
+     composition hands boot `configDefaults` that hold a `cors` section. That
+     line goes only to the logger bootstrapped beside the configuration
+     (`bootstrapComponents.logger`); without one, it starts silently. Move
+     the origins to the module that provides `httpSettings`. One with no
+     `httpSettings` provider mounts no CORS. The `cors_allowed_origins_unreadable` warning
      is gone, as the module that provides the slot refuses such a value at
      boot.
    - **Messages name the new paths.** `core.federations.<name>…` for the

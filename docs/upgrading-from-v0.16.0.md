@@ -240,17 +240,24 @@ section — `webauthn`, `federation-grants` (its `enabled` included),
 while the module is loaded. Without the module nothing reads or checks it: a
 value that used to refuse the boot there (`webauthn.userVerification =
 "optional"`, `federation-grants.enabled = "sometimes"`) now boots, kept as
-written and named once at `warn` as `config_sections_ignored`, or as
-`config_sections_not_loaded` where the composition hands boot its
-`configDefaults` and the section differs from them. An old path no loaded
-module relocates is named the same way instead of being kept silently.
-**`cors` is no longer refused outright**: a loaded module that relocates it
+written. An old path no loaded module relocates is kept the same way.
+
+**`cors` is no longer refused outright.** A loaded module that relocates it
 refuses it (`config-path-relocated`), as the standalone template's `http`
-does, and without one it is named as `config_sections_ignored`; an empty
-`cors {}` sets nothing and is not named. Core reads no `cors`: a
-composition's CORS origins come from the `httpSettings` slot. After the
-upgrade, treat either warning naming a section you set as a setting nothing
-applies.
+does. Without one, a written `cors.allowedOrigins` boots, unread, where it
+used to refuse the boot; an empty `cors {}` sets nothing. Core reads no
+`cors`: a composition's CORS origins come from the `httpSettings` slot, so
+move them to the module that provides it.
+
+The only signal for such a section is one line at `warn`, naming the
+sections and never a value, and only to the logger the composition
+bootstraps beside the configuration (`bootstrapComponents.logger`): without
+one, a section nothing reads — a written `cors.allowedOrigins` among them —
+boots silently. The line is `config_sections_ignored`, or
+`config_sections_not_loaded` where the composition hands boot
+`configDefaults` that hold the section and the configuration changed it; a
+section left equal to those defaults is not named. After the upgrade, treat
+either line naming a section you set as a setting nothing applies.
 
 ### Keys removed
 

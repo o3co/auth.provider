@@ -157,8 +157,8 @@ const jwtSchemaBase = z.object({
 			});
 		}
 	}),
-	// Presence-only: the path the key-store module's section moved from.
-	// Nothing reads it.
+	// Presence-only: the path the key-store module's section moved from (see
+	// `CoreConfigSchema` on presence-only keys).
 	signingKey: z.unknown().optional(),
 	// When true, the JWT verifier accepts tokens with no `typ` header and warns.
 	// No schema default: `reference.conf` ships `false` (a typ-less token is a
@@ -166,7 +166,7 @@ const jwtSchemaBase = z.object({
 	// is a migration override. `coerceBooleanFromEnv` because this section sits
 	// behind `z.preprocess`, which the hocon bridge does not coerce through.
 	legacyTypAccept: coerceBooleanFromEnv.optional(),
-	// Presence-only: the JWKS module's old paths. Nothing reads them.
+	// Presence-only: the JWKS module's old paths (see `CoreConfigSchema`).
 	jwksPath: z.unknown().optional(),
 	jwksCacheMaxAge: z.unknown().optional(),
 });
@@ -529,6 +529,16 @@ const federationEntrySchema = z
 /**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
+ *
+ * The presence-only keys under `oauth` are paths a module's section, core's
+ * own, or a composition root's setting moved from. No reader in core uses
+ * them, and this schema does not refuse them: whoever declares the move does,
+ * from the configuration as written — a module's `section.relocatedFrom`,
+ * `CORE_RELOCATIONS` for `oauth.tokenBinding`, the standalone template's
+ * adapter selections for `oauth.code` — and boot keeps every key as written
+ * whatever this schema declares. They are declared only so a direct parse with
+ * this schema keeps them as written and `CoreConfig` names them; they go with
+ * core's copy of `oauth {}`.
  */
 export const CoreConfigSchema = z.object({
 	oauth: z.object({
@@ -540,7 +550,7 @@ export const CoreConfigSchema = z.object({
 		refreshToken: refreshTokenSchema,
 		// Presence-only: the path the grant switches moved from (each grant's
 		// under its module's section, `oauth-session` and
-		// `oauth-authorization`). Nothing reads it.
+		// `oauth-authorization`).
 		grants: z.unknown().optional(),
 		// As an OIDC OP, `/authorize` rejects requests without `openid` unless the
 		// operator chooses dual OAuth/OIDC mode. Default in HOCON.
@@ -563,10 +573,10 @@ export const CoreConfigSchema = z.object({
 		// `REMOVED_AUTHORIZE_FIELDS`).
 		authorize: authorizeSchema,
 		// Presence-only: the path the code repository's selection moved from (the
-		// composition root's `adapters.codeRepository`). Nothing reads it.
+		// composition root's `adapters.codeRepository`).
 		code: z.unknown().optional(),
 		// Presence-only: the paths the device-grant, oauth-token-exchange, mTLS
-		// and DPoP modules' sections moved from. Nothing reads them.
+		// and DPoP modules' sections moved from.
 		deviceAuthorization: z.unknown().optional(),
 		tokenExchange: z.unknown().optional(),
 		mtls: z.unknown().optional(),
@@ -613,7 +623,7 @@ export const CoreConfigSchema = z.object({
 			})
 			.optional(),
 		// Presence-only: the path core's token-binding settings moved from
-		// (`core.tokenBinding`). Nothing reads it.
+		// (`core.tokenBinding`).
 		tokenBinding: z.unknown().optional(),
 	}),
 	// Core's own section, strict at every level: an unknown key is refused,
