@@ -117,21 +117,38 @@ describe("checkOAuthTokenSettings", () => {
 		);
 	});
 
-	it("says the configured lifetime bounds the refresh-token family retention, which does not read the slot", () => {
-		const longerRefresh = createTestOAuthTokenSettings({ refreshTokenExpiresIn: 86_401 });
-		const message = (() => {
+	it("names, for each member, the reader that sizes a record from the configured lifetime and cannot read the slot", () => {
+		const refusal = (settings: unknown): string => {
 			try {
-				checkOAuthTokenSettings(longerRefresh, CONFIG);
+				checkOAuthTokenSettings(settings, CONFIG);
 			} catch (err) {
 				return (err as Error).message;
 			}
 			throw new Error("expected a refusal");
-		})();
-		expect(message).toMatch(/refresh-token family modules keep a revoked family/);
-		expect(message).toMatch(/read the configuration, not the slot/);
-		// The subject revocation boundary is sized from the slot where one is
-		// held, so the refusal does not claim it is bounded by the configuration.
-		expect(message).not.toMatch(/subject revocation/);
+		};
+		// The access-token maximum sizes how long the refresh-token family
+		// modules remember a revoked family; the family's own expiry follows the
+		// slot's refresh-token lifetime, so the refresh member is not theirs.
+		const access = refusal(
+			createTestOAuthTokenSettings({
+				accessTokenLifetime: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+			}),
+		);
+		expect(access).toMatch(/refresh-token family modules/);
+		expect(access).toMatch(/revoked family/);
+		expect(access).not.toMatch(/session lifecycle/);
+		// The refresh-token lifetime sizes how long the session lifecycle keeps a
+		// closing session's record.
+		const refresh = refusal(createTestOAuthTokenSettings({ refreshTokenExpiresIn: 86_401 }));
+		expect(refresh).toMatch(/session lifecycle/);
+		expect(refresh).toMatch(/closing session's record/);
+		expect(refresh).not.toMatch(/refresh-token family modules/);
+		for (const message of [access, refresh]) {
+			expect(message).toMatch(/not the slot/);
+			// The subject revocation boundary is sized from the slot where one is
+			// held, so no refusal claims the configuration bounds it.
+			expect(message).not.toMatch(/subject revocation/);
+		}
 	});
 
 	it("answers lifetimes at or under the configuration's", () => {
