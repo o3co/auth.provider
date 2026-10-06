@@ -18,6 +18,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemoryUserSessionStore,
 	createSymmetricKeyStore,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
@@ -523,6 +524,66 @@ describe("oauthAuthorizationGrantsModule — the authorization_code grant with a
 	it("boots sessionless, with neither wired", async () => {
 		const handle = await boot([]);
 		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
+		await handle.dispose();
+	});
+});
+
+/**
+ * Where a user-session store is wired, the refresh_token grant admits the
+ * token's session through core's session lifecycle port, which it then
+ * requires: a composition with the store and no port is refused at boot, and
+ * a sessionless one is not.
+ */
+describe("oauthAuthorizationGrantsModule — the refresh_token grant with a user-session store needs the session lifecycle port", () => {
+	const userSessionStoreOnly = defineModule({
+		name: "test:user-session-store",
+		provides: { userSessionStore: () => createInMemoryUserSessionStore() },
+	});
+	const boot = (modules: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthAuthorizationGrantsModule,
+				clientRepositoryModule,
+				keyStoreModule,
+				...familyStoreModules,
+				...modules,
+			],
+			bootstrapComponents: {
+				config: captured(
+					withGrants(makeValidAppConfig(), { authorizationCode: false, refreshToken: true }),
+				),
+				pathResolver: (s: string) => s,
+				oauthTokenSettings,
+			},
+		});
+
+	it("refuses to boot with userSessionStore wired and no sessionLifecycleStore, naming both slots", async () => {
+		const refusal = await boot([userSessionStoreOnly]).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "refresh_token" },
+		});
+		const message = String(refusal?.cause?.message);
+		expect(message).toMatch(/userSessionStore is wired, but sessionLifecycleStore is not/);
+		expect(message).toMatch(/memorySessionStoresModule or redisSessionStoresModule/);
+	});
+
+	it("boots with a session-store module that fills both", async () => {
+		const handle = await boot([memorySessionStoresModule]);
+		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("boots sessionless, with neither wired", async () => {
+		const handle = await boot([]);
+		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
 		await handle.dispose();
 	});
 });
