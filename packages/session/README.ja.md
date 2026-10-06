@@ -6,7 +6,7 @@
 
 ## 責務と役割
 
-**役割。** 認証のブラウザ側の半分。このパッケージが使うポート（`UserRepository`、`UserSessionStore`、`FederationTokenStore`、`SessionFederationIndex`、フェデレーションアダプター契約）は core が持ち、core はルートを一つも実装しない。このパッケージはそれらのポートをブラウザ向けに駆動するドライバーである。責務は三つ:
+**役割。** 認証のブラウザ側の半分。このパッケージが使うポート（`UserRepository`、`UserSessionStore`、`FederationTokenStore`、`SessionLifecycle`、フェデレーションアダプター契約）は core が持ち、core はルートを一つも実装しない。このパッケージはそれらのポートをブラウザ向けに駆動するドライバーである。責務は三つ:
 
 1. **`/session` ルート** — `sessionModule`。パスワードログイン、ログアウト、CSRF トークンのルート、フェデレーションの開始ルートとコールバックルート。パスワード検証または上流 IdP の応答を `UserSession` レコードと認証済みの express session に変え — どちらも一つの関数 [`establishSession`](#セッションの確立) を通して。この関数は core の [セッションアドミッション](../core/src/session-admission/README.md) が確立したものを書き、セッション requirement の完了（MFA パッケージのもの）もこれを呼ぶ — ログアウトでそれを取り消す。パスワードログインは何かを書く前に登録済みのセッション requirement に問い合わせ、requirement はそれを [中断する](#requirement-がログインを中断するとき) ことがある。
 2. **フェデレーションアダプターのツールキット** — アダプターパッケージが、自分が差し込まれるルーターから import するもの: `createFederationRedirectPolicy` とその元になる許可リストの規則。アダプターが上流への要求を組み立てるヘルパー — `codeChallenge`、`callbackUrlForExchange`、`FederationClientSecret` / `resolveClientSecret` — は core のもの。
@@ -65,7 +65,8 @@ const handle = await createApp({
     sessionStoreModule,           // 先頭に置く。後に続くすべてのモジュールが req.session を読めるように。csrfTokenSigner も提供する
     sessionModule,                // factory ではなく const Module
     googleFederationTypeModule(), // type が "google" の core.federations エントリをすべて扱う
-    // ... userRepository、userSessionStore、federationTokenStore を提供するモジュール
+    // ... userRepository、userSessionStore、federationTokenStore、
+    //     sessionFederationIndex（sessionLifecycleModule のため）を提供するモジュール
   ],
   bootstrapComponents: { config, pathResolver },
 });
@@ -145,6 +146,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 マニフェスト（[`src/module.mts`](src/module.mts)）:
 
 - `requires`: `userRepository`、`userSessionStore`、`federationTokenStore`、`csrfTokenSigner`（CSRF トークンを署名・検査するもの。セッションストアのモジュールが提供する）、core の `federationSettings`（core がどの構成でも埋める `core.federations` の見え方。有効な各エントリのコールバック URL と、インストールされたフェデレーションの上流 `amr` が数えられるかどうか。モジュールは自分のセクション以外の設定を読まない）、`sessionCookiePolicy`（セッション cookie の名前・属性・寿命。これもセッションストアのモジュールが提供する）、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは、core が type で振り分けるフェデレーションから組み立てる — 有効な `core.federations` のエントリごとに、その `type` を登録するモジュールが作るプロバイダーとリダイレクトポリシー。さらに `sessionRequirementResolver` — パスワードログインは何かを書く前に core の [セッションアドミッション](../core/src/session-admission/README.md) を通して登録済みの requirement に問い合わせ、アカウントリンクのルートはそれを通してセッションを読むので、`sessionModule` を入れる構成は `core.sessionRequirements.expected` を宣言する。手で組み立てるルーター（`routes/Session.mts`、`routes/Federation.mts`）は resolver を必須のオプション `requirements` として受け取り、無ければ例外を投げる。テストは core の `resolverForTests` で作る。そして `deploymentMode` — core が `core.deployment.mode` から埋める。ログインの試行をプロセスごとに数えることは `multi` で拒否されるので、モードは未設定として読まれるのではなく必須になっている。手で組み立てるセッションルーターは、署名器も必須のオプション `csrfTokenSigner` として受け取って無ければ例外を投げ、モードを必須のオプション `deploymentMode` として受け取って、三つの値のどれでもない値（無い場合も含む）は構築時に TypeError になる。手で組み立てるフェデレーションルーターは、core のフェデレーションの見え方を必須のオプション `federationSettings` として、トランザクション cookie の名前を必須の `federationTransactionCookieName` として（モジュールは `sessionCookiePolicy` スロットの cookie の名前から付ける）、リンクを始めてよい場所を `linkTrustedOrigins` として（モジュールは `session.csrf.trustedOrigins` を渡す。無ければこのサイト自身のページだけ）受け取り、前の二つが無ければ例外を投げる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
+- `sessionFederationIndex` は要らない: リンクはセッションのフェデレーションを core のセッションライフサイクルから読む。そのプロバイダーは残す: `sessionLifecycleModule` と `federation-stores-incomplete` のガードは今もこのスロットを必要とする。外れるのは `sessionModule` 自身の `requires` とルーターのオプションだけである。
 - `optional`: `logger`、`attemptCounter`、`auditSink`、`subjectSessionIndex`、`subjectRevocation`（リンクのルートのアドミッションが読む境界）、`sessionLifecycleStore`（core のセッションライフサイクルのポート。リンクのルートのアドミッションが生きているレコードの後に読む: 終了中・終了済みのセッションは何もリンクしない）、`sessionLifecycle`（core のセッションライフサイクル。`sessionLifecycleModule` が埋める。ログインごとにそのセッションのライフサイクルのレコードを開き、フェデレーションはそれを通してセッションに参加し、ログアウトはそれを通してセッションを終了する。`loginCompletionModule` も受け取る）。マニフェスト上は optional だが、`userSessionStore` を配線するところ — このモジュールでは常に — では必須で、ルートのファクトリーと `loginCompletionModule` のプロバイダーは、二つのスロットを名指しして起動を拒否する。セッションを持たない構成（user-session ストアなし）には要らない。`auditSink` を配線しないなら `core.declaredAbsent = ["auditSink"]`、`subjectSessionIndex` と `subjectRevocation` を配線しないなら `oauth.revocation.subject = "unsupported"` で宣言しなければ起動は拒否される。
 
 ### パスワードログイン

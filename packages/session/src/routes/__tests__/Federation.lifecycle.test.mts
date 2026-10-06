@@ -534,10 +534,9 @@ describe("a link callback over the session lifecycle", () => {
 		expect(w.federations).toHaveBeenCalledExactlyOnceWith(LINKED_SID);
 	});
 
-	it("keeps the tokens of a federation the lifecycle lists when the re-link's join rejects", async () => {
-		const w = await world({
-			federations: async () => ({ outcome: "listed", federations: ["test"] }),
-		});
+	it("keeps the re-link's newly attached tokens on a federation the lifecycle lists when the join rejects", async () => {
+		// The session joined `test` earlier through the lifecycle, which lists it.
+		const w = await world();
 		w.join.mockImplementationOnce(async () => {
 			throw new Error("lifecycle store down");
 		});
@@ -578,6 +577,7 @@ describe("a link callback over the session lifecycle", () => {
 		const w = await world({
 			federations: (async () => ({
 				outcome: "undeclared",
+				federations: [],
 			})) as unknown as SessionLifecycle["federations"],
 		});
 

@@ -11,7 +11,7 @@ routes — and every other route that reads `req.session` — run over.
 
 **Role.** The browser-facing half of authentication. Core owns the ports this
 package uses (`UserRepository`, `UserSessionStore`, `FederationTokenStore`,
-`SessionFederationIndex`, and the federation adapter contract) and implements no
+`SessionLifecycle`, and the federation adapter contract) and implements no
 route; this package is the driver of those ports for a browser. It has three
 responsibilities:
 
@@ -161,7 +161,8 @@ const handle = await createApp({
     sessionStoreModule,           // first, so every module after it can read req.session; provides csrfTokenSigner too
     sessionModule,                // a const Module, not a factory
     googleFederationTypeModule(), // handles every core.federations entry of type "google"
-    // ... modules providing userRepository, userSessionStore, federationTokenStore
+    // ... modules providing userRepository, userSessionStore, federationTokenStore,
+    //     and sessionFederationIndex (for sessionLifecycleModule)
   ],
   bootstrapComponents: { config, pathResolver },
 });
@@ -396,6 +397,10 @@ The manifest ([`src/module.mts`](src/module.mts)):
   only this site's own pages), and throws without the first two.
   `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
   are `oauth`'s.
+- Not `sessionFederationIndex`: a link reads the session's federations from
+  core's session lifecycle. Keep its provider: `sessionLifecycleModule` and
+  the `federation-stores-incomplete` guard still require the slot; only
+  `sessionModule`'s own `requires` and the router option drop it.
 - `optional`: `logger`, `attemptCounter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads),
   `sessionLifecycleStore` (core's session lifecycle port, which the linking

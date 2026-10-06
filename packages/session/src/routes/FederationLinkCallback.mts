@@ -67,8 +67,9 @@ export const recordedTokenType = (named: unknown): string | undefined => {
  * whose envelope was verified like a login's. An identity resolving to
  * nobody asks the Store to link; to someone else is `409` (linking never
  * merges accounts); to this account links nothing new. The federation is
- * then attached to the live session (index entry and upstream tokens under
- * the current `sid`); no `UserSession` is created and the session is not
+ * then attached to the live session (its upstream tokens under the current
+ * `sid`, and a join through core's session lifecycle); no `UserSession` is
+ * created and the session is not
  * regenerated. The session is admitted as `session.link_callback`; a
  * step-up is `login_required`, since the IdP's callback has no page to
  * return to.
@@ -198,8 +199,9 @@ export const completeLink = async (
 	// Whether the session already carried this federation, as the lifecycle
 	// lists the federations it joined: a failed re-link must not take an
 	// existing attachment down with it. `listed` says the read answered at
-	// all — until it has, nothing was written and there is nothing this
-	// request may undo.
+	// all — until it has, nothing was attached to the session and there is
+	// nothing this request may undo (the Store's link above stands either
+	// way).
 	let hadFederation = false;
 	let listed = false;
 	// The step in flight, so the one catch that answers them all can log

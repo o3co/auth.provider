@@ -1246,6 +1246,9 @@ modules fills them.
   there is logged as `federation_link_store_unavailable` with
   `store: "session_lifecycle"`, `step: "federations"`, in place of
   `store: "session_federation_index"`, `step: "list"` and `"remove"`.
+  Keep its provider: `sessionLifecycleModule` and the
+  `federation-stores-incomplete` guard still require the slot; only
+  `sessionModule`'s own `requires` and the router option drop it.
 - **BREAKING: every failed close at `POST /session/logout` is an outage.** A
   logout whose `sid` the session lifecycle cannot hold now answers
   `503 temporarily_unavailable` and keeps the cookie, as any close the
