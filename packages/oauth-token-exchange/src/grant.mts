@@ -467,8 +467,8 @@ async function familyRefusal(
  * - No live session under the `sid`, or one for another subject:
  *   `session_invalid` (`actor_token session_invalid` for the actor), as
  *   `invalid_request`.
- * - A read that throws, or a lifecycle that cannot answer: `503
- *   temporarily_unavailable`, logged once as
+ * - A read that throws, or a lifecycle answer that is neither `live` nor
+ *   `not_live`: `503 temporarily_unavailable`, logged once as
  *   `token_exchange_session_store_unavailable`; an outage is never read as an
  *   ended or a live session.
  */
@@ -511,7 +511,7 @@ async function sessionRefusal(
 		} catch (err) {
 			return outage(where, err);
 		}
-		if (session === "unavailable") return outage(where);
+		if (session === "no_answer") return outage(where);
 		live = session !== "not_live" && session.subject === validated.sub;
 	} else if (store !== undefined) {
 		try {

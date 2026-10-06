@@ -236,31 +236,33 @@ export const createRouter = (
 
 	/**
 	 * Closes `sid` through core's session lifecycle for a session logout:
-	 * `closed` once the closing commit has landed — a commit with work still
-	 * pending audited as `logout.close_pending`; `unavailable` when the close
-	 * did not complete its commit, or the lifecycle rejected, whatever the
-	 * error, logged once as `session_logout_store_unavailable`.
+	 * `true` once the closing commit has landed (`done`, or `pending` — audited
+	 * as `logout.close_pending`); `false` for anything else — a rejection,
+	 * whatever the error, or any other answer — logged once as
+	 * `session_logout_store_unavailable`.
 	 */
 	const closeSession = async (
 		lifecycle: SessionLifecycle,
 		sid: string,
 		sub: string | undefined,
 		req: Request,
-	): Promise<"closed" | "unavailable"> => {
+	): Promise<boolean> => {
 		try {
-			const answer = await lifecycle.close(sid, "session_logout");
-			if (answer.outcome === "pending") {
-				emitAuditEvent(auditSink, {
-					timestamp: new Date(),
-					type: "logout.close_pending",
-					subject: sub,
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: { sid },
-				});
+			const { outcome } = await lifecycle.close(sid, "session_logout");
+			if (outcome === "done" || outcome === "pending") {
+				if (outcome === "pending") {
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "logout.close_pending",
+						subject: sub,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { sid },
+					});
+				}
+				return true;
 			}
-			if (answer.outcome !== "unavailable") return "closed";
-			// The lifecycle logs its own error; this line carries none.
+			// An answer that is not a commit: no error to project.
 			logger.error(
 				{ sid, store: "session_lifecycle", step: "close" },
 				"session_logout_store_unavailable",
@@ -271,7 +273,7 @@ export const createRouter = (
 				"session_logout_store_unavailable",
 			);
 		}
-		return "unavailable";
+		return false;
 	};
 
 	/**
@@ -471,7 +473,7 @@ export const createRouter = (
 			// sessionless router has no record to close.
 			if (sid && !renewedAway && sessionLifecycle) {
 				const closed = await closeSession(sessionLifecycle, sid, sub, req);
-				if (closed === "unavailable") return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				if (!closed) return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 			}
 
 			const destroyErr = await new Promise<unknown>((resolve) => {

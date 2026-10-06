@@ -246,10 +246,12 @@ export const completeLink = async (
 		// session closed since its admission is refused, and the lifecycle
 		// removes those tokens.
 		linking = { store: "session_lifecycle", step: "join" };
-		const joined = await sessionLifecycle.join(currentSid, { federation: provider.name });
-		if (joined.outcome === "refused") return notLive();
-		if (joined.outcome === "unavailable") {
-			throw new Error("the session lifecycle could not answer the join");
+		const { outcome: joined } = await sessionLifecycle.join(currentSid, {
+			federation: provider.name,
+		});
+		if (joined === "refused") return notLive();
+		if (joined !== "joined") {
+			throw new Error(`the session lifecycle answered ${joined} to the join`);
 		}
 	} catch (err) {
 		logStoreUnavailable(

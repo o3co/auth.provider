@@ -205,16 +205,16 @@ const openLifecycle = async (
 
 /**
  * Closes `record`'s lifecycle in `lifecycle`, for a rollback. A rejection
- * propagates as the lifecycle's own error; an `unavailable` answer throws,
- * named as the lifecycle's.
+ * propagates as the lifecycle's own error; any answer but a committed close
+ * (`done` or `pending`) throws, named as the lifecycle's.
  */
 const closeLifecycle = async (
 	lifecycle: Pick<SessionLifecycle, "close">,
 	record: EstablishedRecord,
 ): Promise<void> => {
-	const closed = await lifecycle.close(record.sid, "session_logout");
-	if (closed.outcome === "unavailable") {
-		throw new Error("the session lifecycle answered unavailable to the close");
+	const { outcome } = await lifecycle.close(record.sid, "session_logout");
+	if (outcome !== "done" && outcome !== "pending") {
+		throw new Error(`the session lifecycle answered ${outcome} to the close`);
 	}
 };
 
