@@ -1019,6 +1019,12 @@ modules fills them.
   `tokenBindingSettings` (`resolveTokenBindingSettings(config)`; in a test,
   `createTestTokenBindingSettings()`) instead of `config`; without it the
   grant throws a `TypeError` naming the slot when it is built.
+- **BREAKING: `webauthnSessionSubjectModule` requires core's session lifecycle
+  beside its `userSessionStore` (#1030).** Without a `sessionLifecycleStore`
+  (the port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) the boot is refused: `contribute-factory-failed`, the message
+  naming both slots. Its admission reads the session's lifecycle record, so a
+  session closing or closed registers no passkey.
 - **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
   section's defaults live only in the package's `config/reference.conf`. A
   configuration that layers the modules' references (`moduleReferences`, as
@@ -1194,7 +1200,9 @@ modules fills them.
   place of the six session-cascade slots. A sessionless composition (client
   credentials, jwt-bearer) wires neither and is unaffected. A test or
   composition of your own that fills the slots by hand provides a
-  `sessionLifecycle` too.
+  `sessionLifecycle` too. Where another package's module admits a session,
+  it requires `sessionLifecycleStore` beside the store the same way; each
+  such refusal is listed with that module's own entry in this section.
   - The code exchange joins its session through the lifecycle alone: the
     grant no longer reads `sessionRPRegistry` or `sessionFamilyIndex`, and
     `oauthAuthorizationGrantsModule` no longer declares them, nor
