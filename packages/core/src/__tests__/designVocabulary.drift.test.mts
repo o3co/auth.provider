@@ -1245,6 +1245,24 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 2,
 		why: "the amr, acr and auth_time the presented refresh token carries, read above as claims.amr, wellFormedAcr and wellFormedAuthTime",
 	},
+	{
+		file: "packages/oauth-token-exchange/src/validator/selfIssuedAccessToken.mts",
+		read: "payload.amr",
+		count: 1,
+		why: "the built-in exchange validator records the amr claim of an access token this provider signed and verified, minted from vouchedAmr, never a session record",
+	},
+	{
+		file: "packages/oauth-token-exchange/src/issuance.mts",
+		read: "{amr}=verified",
+		count: 1,
+		why: "token exchange carries the amr the built-in validator verified on the subject token, recorded above as payload.amr",
+	},
+	{
+		file: "packages/oauth-token-exchange/src/issuance.mts",
+		read: "...carriedAuthentication()",
+		count: 1,
+		why: "the subject token's amr, acr and auth_time the exchanged token carries, read above as {amr}=verified",
+	},
 	// The authorization code's amr: what the session vouched for at `/authorize`
 	// (`vouchedAmr`), carried on the code to the exchange.
 	{
