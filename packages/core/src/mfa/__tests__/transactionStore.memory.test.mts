@@ -29,9 +29,11 @@ import type {
 	MfaTransactionStore,
 } from "#/mfa/transactionStore.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { runMfaEmailProofRequirementContract } from "./emailProofRequirement.contract.mjs";
 import { runMfaTransactionStoreContract } from "./transactionStore.contract.mjs";
 
 runMfaTransactionStoreContract(async () => createMemoryMfaTransactionStore());
+runMfaEmailProofRequirementContract(async () => createMemoryMfaTransactionStore());
 
 const POLICY: MfaLockoutPolicy = {
 	threshold: 5,
