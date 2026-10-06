@@ -565,7 +565,7 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `maxmemory-policy noeviction` (the default), which the module holds it to
   as the next entry says.
 - **BREAKING: the Redis stores that keep durable keys refuse to boot unless
-  the server's `maxmemory-policy` is `noeviction`.** The attempt counter,
+  the server's `maxmemory-policy` is `noeviction` (#1541).** The attempt counter,
   the session lifecycle store, the federation token store and the two MFA
   stores are built only once the server reports `noeviction` (`INFO memory`,
   then `CONFIG GET maxmemory-policy`). Any other policy refuses the boot —
@@ -1840,7 +1840,7 @@ modules fills them.
   `FederationGrantReauthorizationResult` loses `connection_not_configured`
   (#963). An exhaustive `switch` over one needs the change.
 - **BREAKING: the Redis factories of the stores that keep durable keys are
-  async.** `createRedisAttemptCounter`, `createRedisSessionLifecycleStore`,
+  async (#1541).** `createRedisAttemptCounter`, `createRedisSessionLifecycleStore`,
   `createRedisFederationTokenStore`, `createRedisMfaFactorStore` and
   `createRedisMfaTransactionStore` return a `Promise` of the store, and so
   does `redisFederationTokenStoreBuilder`: each resolves once the server
