@@ -527,7 +527,9 @@ const modules = [
   keys, refuse the boot rather than send no credential. A setting the
   transport refuses — the rules of
   [constructor validation](#constructor-validation) — refuses the boot too
-  (`provides-factory-failed`), naming `HttpMfaFactorStore`.
+  (`provides-factory-failed`), naming `HttpMfaFactorStore`; so does a
+  `timeout` above the factor store's own bound, 85 500 000 ms, which the user
+  repository alone would take.
 - It declares no replica-unsafe state: the factors are the Store's.
 
 It writes the factor set's membership through `createIf`, `removeIf` and
@@ -759,6 +761,13 @@ the race it hangs forever. A request that outlives the deadline rejects with a
 `timed out after <n>ms` error naming the endpoint, named `TimeoutError` on
 every request, so a reporter that classifies by name reads it as a timeout.
 
+**`HttpMfaFactorStore` holds `timeout` to 85 500 000 milliseconds** (23.75
+hours) as well; above it, construction throws a `RangeError` naming `timeout`
+and the bound. Its write lifetime W is the timeout plus `DEFAULT_CLOCK_SKEW_MS`,
+and the factor-set writer issues a conditional write up to
+`MFA_SUBJECT_LEASE_MAX_MS` after its read, so the timeout plus those two must
+be within `BUNDLED_STORE_WRITE_LIFETIME_MS` (all core's exports).
+
 **`maxResponseBytes` must be a positive integer**, defaulting to
 `DEFAULT_MAX_RESPONSE_BYTES` (1 MiB). The cap is enforced against
 `Content-Length` *and* while streaming, so a Store that omits the header — or
@@ -837,9 +846,9 @@ its `storeTransport`.
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | the https-or-loopback rule |
 | [`storeFailure.test.mts`](src/mfa/__tests__/storeFailure.test.mts) | what the MFA endpoints' failures throw: nothing the Store wrote in any form the error leaves in, the body released unread, no status to answer with; a skipped version's log line naming the subject and the factor id, each sanitised and bounded, however long they are |
 | [`section.test.mts`](src/mfa/__tests__/section.test.mts) | the `foundation-mfa-factor-store` section: its schema, its reader, and through `createApp` with the package's module the boot refused for a missing, malformed or unknown key, the module installed alone included |
-| [`module.test.mts`](src/mfa/__tests__/module.test.mts) | `foundationMfaFactorStoreModule` through `createApp`: the Store-backed store provided over the section's URLs with nothing else installed; the Store transport settings required, the user repository's bearer token, deadline and cap read from them (text read as numbers), the boot refused for settings absent or not a section of keys and for a value the user repository refuses too |
+| [`module.test.mts`](src/mfa/__tests__/module.test.mts) | `foundationMfaFactorStoreModule` through `createApp`: the Store-backed store provided over the section's URLs with nothing else installed; the Store transport settings required, the user repository's bearer token, deadline and cap read from them (text read as numbers), the boot refused for settings absent or not a section of keys and for a value the user repository refuses too, or a deadline past the factor store's write lifetime |
 | [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | the test kit's `MfaFactorStore` suite and the factor set's conditional-write binding against `HttpMfaFactorStore` over the fake Store, with a second adapter on the same Store, one whose Store has closed, and the Store's tombstone clock moved past the write-lifetime bound |
-| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | what it sends — each URL as configured, the bearer token, the sealed data byte for byte and nothing it was sealed from, nothing the codec refuses; each operation's answers, and a Store that breaks the contract: `404`, `5xx`, a redirect, a malformed answer, an unreadable record, a foreign subject, a repeated id, a skipped version, an answer that did not write the changes; the set's members: what they send, each status with its outcome body, a `404` or `409` without one malformed, any other status unexpected, a list without its generation malformed, a conditional write given up at its deadline, its `deadlineMs` the send time plus the timeout, a late one refused `408` and not applied, one within its deadline applied; nothing the Store sent in anything thrown; the credential refused (naming this store), a deadline over the head or the body, the cap, an unreachable Store; construction, no unconditional `create` or `remove`, and neither the token nor the endpoints shown when the store is inspected |
+| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | what it sends — each URL as configured, the bearer token, the sealed data byte for byte and nothing it was sealed from, nothing the codec refuses; each operation's answers, and a Store that breaks the contract: `404`, `5xx`, a redirect, a malformed answer, an unreadable record, a foreign subject, a repeated id, a skipped version, an answer that did not write the changes; the set's members: what they send, each status with its outcome body, a `404` or `409` without one malformed, any other status unexpected, a list without its generation malformed, a conditional write given up at its deadline, its `deadlineMs` the send time plus the timeout, a late one refused `408` and not applied, one within its deadline applied; nothing the Store sent in anything thrown; the credential refused (naming this store), a deadline over the head or the body, the cap, an unreachable Store; construction, a timeout past the write lifetime a `RangeError` the user repository does not throw, no unconditional `create` or `remove`, and neither the token nor the endpoints shown when the store is inspected |
 | [`foundationMfaFactorStoreConfig.test.mts`](src/testing/__tests__/foundationMfaFactorStoreConfig.test.mts) | the testing entry's section builder |
 | [`foundationUserRepositoryHttpConfig.test.mts`](src/testing/__tests__/foundationUserRepositoryHttpConfig.test.mts) | the testing entry's builder of the user repository's `http` block, which the `"http"` builder takes |
 | [`storeRequestMessages.test.mts`](src/mfa/__tests__/storeRequestMessages.test.mts) | one wording for a transport failure at the MFA endpoints, whichever client sends to them |

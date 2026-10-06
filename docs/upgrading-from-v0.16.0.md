@@ -2186,6 +2186,11 @@ are the template README's
    ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
 4. Make the Redis the factor store uses durable; give the Store `mfaEnrolled`
    and `markMfaEnrolledUrl` ([the checklist](#store-implementer-checklist-before-switching-to-required)).
+   With the factors in the Store, keep the Store transport's `timeout`
+   (`repositories.user.http.timeout`, which the user repository shares) at
+   most 85 500 000 ms: `HttpMfaFactorStore` refuses a larger one at
+   construction with a `RangeError`, and `foundationMfaFactorStoreModule`
+   refuses the boot ([foundation's README](../packages/foundation/README.md#constructor-validation)).
 5. Teach the login page `403 mfa_required` / `mfa_enrollment_required`; build
    the MFA page and the account page.
 6. Teach BFFs using the `session` grant its `step_up` member, and the
