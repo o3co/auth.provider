@@ -800,6 +800,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 							"oauth.code_exchange" satisfies keyof typeof AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS,
 					});
 					if (revalidation.outcome !== "admitted" || revalidation.session === null) {
+						await revokeRefusedFamily(familyId, at);
 						return {
 							result: revalidationRefusal(revalidation, at),
 						};
