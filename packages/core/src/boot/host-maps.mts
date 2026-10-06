@@ -33,8 +33,9 @@
  * map and `config`, `config-defaults-invalid` for `configDefaults`, and
  * `missing-required-component` for a component slot, which then supplies
  * nothing boot could hand on. A configuration that is no object (a string) is
- * kept for the composed parse to refuse, and a map that is no object is
- * handed on as it is, for stage 1 to judge.
+ * kept for the composed parse to refuse. A function is read as a map, like
+ * any object; a map that is neither is handed on as it is, for stage 1 to
+ * judge.
  */
 
 import type { z } from "zod";
@@ -113,7 +114,10 @@ function copiedConfig(handed: unknown): unknown {
  * answered as it is.
  */
 export function snapshotHostMap<T>(map: T, name: HostMapName): T {
-	if (map === null || typeof map !== "object" || snapshots.has(map)) return map;
+	// A function carrying slots is read as a map too, so no map escapes the
+	// boundary by being callable.
+	if (map === null || (typeof map !== "object" && typeof map !== "function")) return map;
+	if (snapshots.has(map)) return map;
 	let keys: readonly PropertyKey[];
 	try {
 		keys = Reflect.ownKeys(map);

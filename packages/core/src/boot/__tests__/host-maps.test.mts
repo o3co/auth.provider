@@ -250,6 +250,30 @@ describe("the host-map boundary", () => {
 		expect(Object.keys(snapshotHostMap(override, "overrideComponents"))).toEqual(["shown"]);
 	});
 
+	it.each([
+		["createApp", viaCreateApp],
+		["validateManifests", viaValidate],
+	])(
+		"reads a callable map as a map, through %s: its config getter once, copied as plain data",
+		async (_, enter) => {
+			let reads = 0;
+			const map = Object.assign(() => undefined, { pathResolver: (p: string) => p });
+			Object.defineProperty(map, "config", {
+				enumerable: true,
+				get(): unknown {
+					reads += 1;
+					if (reads > 1) throw new Error("SECRET second read");
+					return { ...withoutIssuer(), widget: new Date(0) };
+				},
+			});
+			const err = await thrown(enter(map));
+			expect(reads).toBe(1);
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain("the configuration at .widget is not plain data");
+			expect(err.message).not.toContain("SECRET");
+		},
+	);
+
 	it("boots a plain map alike through createApp and a direct validateManifests", async () => {
 		const map = { config: withoutIssuer(), pathResolver: (p: string) => p };
 		const validated = validateManifests({
