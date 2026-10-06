@@ -486,3 +486,56 @@ describe("federation token route — a stored token is handed on after an upstre
 		);
 	});
 });
+
+describe("federation token route — a liveness reply outside the lifecycle's contract is the outage", () => {
+	const malformed: ReadonlyArray<readonly [string, unknown]> = [
+		["null", null],
+		["undefined", undefined],
+		["a string", "live"],
+		["live with a null session", { outcome: "live", session: null }],
+		["live with no session", { outcome: "live" }],
+		["live with a session that is not an object", { outcome: "live", session: "u-1" }],
+		["an unknown outcome", { outcome: "unrecognised" }],
+	];
+
+	const expectOutage = (r: Route, res: request.Response): void => {
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(audited(r, "federation.token.success")).toEqual([]);
+		expect(r.logger.error).toHaveBeenCalledTimes(1);
+		expect(r.logger.error).toHaveBeenCalledWith(
+			{ federation: NAME, store: "session_lifecycle", step: "liveness" },
+			"federation_token_store_unavailable",
+		);
+	};
+
+	it.each(malformed)(
+		"answers 503 when the read after the refresh answers %s",
+		async (_label, reply) => {
+			const r = await route({ seed: link() });
+			r.releaseRemoval();
+			r.liveness
+				.mockImplementationOnce((sid) => r.real.liveness(sid))
+				.mockImplementationOnce(async () => reply as SessionLiveness);
+
+			const res = await r.post();
+
+			expectOutage(r, res);
+			expect(r.refreshToken).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it.each(malformed)("answers 503 when the first read answers %s", async (_label, reply) => {
+		const r = await route({ seed: link() });
+		r.releaseRemoval();
+		r.liveness.mockImplementationOnce(async () => reply as SessionLiveness);
+
+		const res = await r.post();
+
+		expectOutage(r, res);
+		expect(r.refreshToken).not.toHaveBeenCalled();
+	});
+});

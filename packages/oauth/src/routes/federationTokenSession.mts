@@ -18,11 +18,31 @@
  * Whether the caller's session is live, read from core's session lifecycle:
  * a session whose close has committed is not, nor a live session of another
  * subject. Not live is `401 invalid_token` "session not found"; an outage, or
- * any answer other than `live` or `not_live`, is `503`.
+ * any reply that is not `live` with a session object or `not_live`, is `503`.
  */
 
 import { loggableError, type SessionLiveness } from "@o3co/auth-provider-core";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
+
+/**
+ * The lifecycle's reply as `live` with the session's subject, `not_live`, or
+ * `null` for any other shape: a lifecycle filled by the host may answer
+ * outside its contract.
+ */
+const readLiveness = (
+	reply: unknown,
+):
+	| { readonly outcome: "live"; readonly sub: unknown }
+	| { readonly outcome: "not_live" }
+	| null => {
+	if (typeof reply !== "object" || reply === null) return null;
+	const { outcome } = reply as { outcome?: unknown };
+	if (outcome === "not_live") return { outcome };
+	if (outcome !== "live") return null;
+	const { session } = reply as { session?: unknown };
+	if (typeof session !== "object" || session === null) return null;
+	return { outcome, sub: (session as { sub?: unknown }).sub };
+};
 
 /** Answers and returns `false` unless the caller's session is live for its `sub`. */
 export const checkSessionLive = async (
@@ -31,9 +51,9 @@ export const checkSessionLive = async (
 ): Promise<boolean> => {
 	const { opts, res, federation, logger } = ctx;
 	const { sid, sub } = caller;
-	let liveness: SessionLiveness;
+	let reply: SessionLiveness;
 	try {
-		liveness = await opts.sessionLifecycle.liveness(sid);
+		reply = await opts.sessionLifecycle.liveness(sid);
 	} catch (error) {
 		// A lifecycle filled by the host may throw: an outage all the same.
 		logger.error(
@@ -46,9 +66,10 @@ export const checkSessionLive = async (
 		});
 		return false;
 	}
-	// Any answer other than `live` or `not_live` (core's lifecycle gives none,
-	// as it rejects on an outage) is answered as the outage.
-	if (liveness.outcome !== "live" && liveness.outcome !== "not_live") {
+	// Any other reply (core's lifecycle gives none, as it rejects on an
+	// outage) is answered as the outage.
+	const liveness = readLiveness(reply);
+	if (liveness === null) {
 		logger.error(
 			{ federation, store: "session_lifecycle", step: "liveness" },
 			"federation_token_store_unavailable",
@@ -59,7 +80,7 @@ export const checkSessionLive = async (
 		});
 		return false;
 	}
-	if (liveness.outcome === "live" && liveness.session.sub === sub) return true;
+	if (liveness.outcome === "live" && liveness.sub === sub) return true;
 	res.setHeader(
 		"WWW-Authenticate",
 		'Bearer error="invalid_token", error_description="session not found"',
