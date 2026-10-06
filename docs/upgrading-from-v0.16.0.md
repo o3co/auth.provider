@@ -1186,6 +1186,13 @@ modules fills them.
   refusals, and no longer with the module's own
   `federationGrantsModule: … with no auditSink component` error; match on
   the reason. Disabled, the module requires nothing.
+- **BREAKING: enabled federation grants require core's session lifecycle
+  beside the `userSessionStore` (#1030).** Without a `sessionLifecycleStore`
+  (the port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) `federationGrantsModule` is refused at boot:
+  `contribute-factory-failed`, the message naming both slots. The connect
+  flow's admission reads the session's lifecycle record, so a session closing
+  or closed connects nothing.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from

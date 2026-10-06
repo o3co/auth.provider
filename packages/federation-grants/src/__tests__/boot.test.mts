@@ -35,6 +35,7 @@ import type {
 import {
 	BootError,
 	createApp,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
@@ -227,6 +228,8 @@ interface Setup {
 	readonly userRepository?: "with-lookup" | "without-lookup" | "bundled";
 	/** The durable sessions the connect flow re-reads. */
 	readonly withUserSessionStore?: boolean;
+	/** Core's session lifecycle port beside the durable sessions; wired by default. */
+	readonly withSessionLifecycleStore?: boolean;
 	/**
 	 * Where connect sends a browser that is not signed in — the `loginEntry`
 	 * slot; `"unconfigured"`, the entry the session module
@@ -384,6 +387,9 @@ const boot = (setup: Setup) => {
 			// here is the grant refusals, and nothing in this file logs anyone in.
 			...SESSION_FEDERATION_STORES,
 			...(setup.withUserSessionStore === false ? { userSessionStore: undefined } : {}),
+			...(setup.withSessionLifecycleStore === false
+				? {}
+				: { sessionLifecycleStore: createInMemorySessionLifecycleStore() }),
 			// The boundary a grant is compared against on every disclosure (the
 			// federation-grants ADR, D13). Bundled here because every composition
 			// that enables the feature needs one, which is the point of the
@@ -840,6 +846,17 @@ describe("what creating a grant needs", () => {
 		// store guard refuses it before the module is built.
 		await expect(boot({ withUserSessionStore: false })).rejects.toThrow(
 			/required federation stores are missing: userSessionStore/,
+		);
+	});
+
+	it("refuses a deployment that wires durable sessions without core's session lifecycle, naming both slots", async () => {
+		const refusal = boot({ withSessionLifecycleStore: false });
+		await expect(refusal).rejects.toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+		});
+		await expect(refusal).rejects.toThrow(
+			/federation-grants: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 
