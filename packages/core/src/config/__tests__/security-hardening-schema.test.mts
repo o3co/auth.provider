@@ -20,17 +20,17 @@
  * expires at issue.
  */
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
-import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 
-function issuePaths(result: ReturnType<typeof AppConfigSchema.safeParse>): string[] {
+function issuePaths(result: ReturnType<typeof CoreConfigSchema.safeParse>): string[] {
 	return result.success ? [] : result.error.issues.map((i) => i.path.join("."));
 }
 
 describe("token lifetimes are positive and bounded", () => {
-	function parseWithOauth(patch: (base: ReturnType<typeof makeValidAppConfig>) => unknown) {
-		const base = makeValidAppConfig();
-		return AppConfigSchema.safeParse(patch(base));
+	function parseWithOauth(patch: (base: ReturnType<typeof makeValidCoreConfig>) => unknown) {
+		const base = makeValidCoreConfig();
+		return CoreConfigSchema.safeParse(patch(base));
 	}
 
 	it("rejects accessToken.expiresIn = 0", () => {
@@ -79,6 +79,6 @@ describe("token lifetimes are positive and bounded", () => {
 	}
 
 	it("accepts the shipped defaults (3600s access, 86400s refresh)", () => {
-		expect(AppConfigSchema.safeParse(makeValidAppConfig()).success).toBe(true);
+		expect(CoreConfigSchema.safeParse(makeValidCoreConfig()).success).toBe(true);
 	});
 });

@@ -1881,8 +1881,8 @@ function sessionRecordReadSites(): Map<string, SessionRecordRead[]> {
 }
 
 /**
- * Core's configuration schema: the one schema that declares `deployment` —
- * under core's own section, and presence-only at the path it moved from.
+ * Core's configuration schema: the one schema that declares `deployment`,
+ * under core's own section.
  */
 const DEPLOYMENT_SCHEMA_HOME = "packages/core/src/config/application.schema.mts";
 
@@ -2525,7 +2525,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			Object.entries(deploymentTouchSites("schema")).map(([file, found]) => [file, found.length]),
 		);
 		expect(counts, "the section is core's: a module requires the deploymentMode slot").toEqual({
-			[DEPLOYMENT_SCHEMA_HOME]: 2,
+			[DEPLOYMENT_SCHEMA_HOME]: 1,
 		});
 	});
 

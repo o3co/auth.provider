@@ -18,7 +18,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { overlayConfig, TransitionalConfigSchema } from "#/config/composed.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
+import { overlayConfig } from "#/config/composed.mjs";
 import { CORE_RELOCATIONS } from "#/config/core-relocations.mjs";
 import { coreReference } from "#/config/references.mjs";
 import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
@@ -28,8 +29,7 @@ import { referenceConfProblems } from "#/testing/referenceConf.mjs";
 import { renamedVariableProblems } from "#/testing/renamedVariables.mjs";
 
 /** What core's base makes of `raw`, laid over it: boot's first parse. */
-const parsedByBase = (raw: unknown): unknown =>
-	overlayConfig(raw, TransitionalConfigSchema.parse(raw));
+const parsedByBase = (raw: unknown): unknown => overlayConfig(raw, CoreConfigSchema.parse(raw));
 
 /**
  * Core's `reference.conf` holds only what core's schema declares, and the
@@ -40,8 +40,9 @@ const parsedByBase = (raw: unknown): unknown =>
  * every package, the full-set composition in `tools/composition`), and each
  * package checks its own `reference.conf` against its modules' sections
  * (`packageReferenceProblems`). What stays here is core's own file against
- * core's own schema: resolved and parsed with the transitional base, with
- * nothing laid back over it, any path the file has and the parse lacks is a
+ * core's own schema: resolved and parsed with core's base
+ * (`CoreConfigSchema`), with nothing laid back over it, any path the file has
+ * and the parse lacks is a
  * default core ships that core's schema does not declare — one no reader is
  * sure to see — unless it lies in the section of one of core's own modules
  * that declares this file, whose schema holds it instead. The captures of
@@ -109,7 +110,7 @@ function hasPath(tree: unknown, path: string): boolean {
 describe("core's reference.conf holds only what core's schema declares", () => {
 	const resolved = parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject();
 	// The base alone, stripping what it does not declare: nothing laid back over it.
-	const parsed = TransitionalConfigSchema.parse(resolved);
+	const parsed = CoreConfigSchema.parse(resolved);
 
 	it("resolves to a non-trivial tree, so the diff below is over something", () => {
 		const paths = collectPaths(resolved);

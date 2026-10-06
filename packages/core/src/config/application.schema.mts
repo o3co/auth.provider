@@ -27,7 +27,7 @@ import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonic
 import { OutboundSectionSchema } from "../net/outbound-policy.mjs";
 import { checkAcrValueName } from "./acr-values.mjs";
 import { MAX_DURATION_SECONDS } from "./durations.mjs";
-import { type RemovedKey, unreadSection, withRemovedKeys } from "./removed-keys.mjs";
+import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
 
 /**
@@ -157,9 +157,8 @@ const jwtSchemaBase = z.object({
 			});
 		}
 	}),
-	// Presence-only: the path the key-store module's section moved from, kept
-	// so a root that parses with `AppConfigSchema` before boot still hands it
-	// to the relocation refusal. Nothing reads it.
+	// Presence-only: the path the key-store module's section moved from.
+	// Nothing reads it.
 	signingKey: z.unknown().optional(),
 	// When true, the JWT verifier accepts tokens with no `typ` header and warns.
 	// No schema default: `reference.conf` ships `false` (a typ-less token is a
@@ -167,9 +166,7 @@ const jwtSchemaBase = z.object({
 	// is a migration override. `coerceBooleanFromEnv` because this section sits
 	// behind `z.preprocess`, which the hocon bridge does not coerce through.
 	legacyTypAccept: coerceBooleanFromEnv.optional(),
-	// Presence-only: the JWKS module's old paths, kept so a root that parses
-	// with `AppConfigSchema` before boot still hands them to the relocation
-	// refusal. Nothing reads them.
+	// Presence-only: the JWKS module's old paths. Nothing reads them.
 	jwksPath: z.unknown().optional(),
 	jwksCacheMaxAge: z.unknown().optional(),
 });
@@ -543,9 +540,7 @@ export const CoreConfigSchema = z.object({
 		refreshToken: refreshTokenSchema,
 		// Presence-only: the path the grant switches moved from (each grant's
 		// under its module's section, `oauth-session` and
-		// `oauth-authorization`), kept so a root that parses with
-		// `AppConfigSchema` before boot still hands it to the relocation
-		// refusal. Nothing reads it.
+		// `oauth-authorization`). Nothing reads it.
 		grants: z.unknown().optional(),
 		// As an OIDC OP, `/authorize` rejects requests without `openid` unless the
 		// operator chooses dual OAuth/OIDC mode. Default in HOCON.
@@ -571,9 +566,7 @@ export const CoreConfigSchema = z.object({
 		// composition root's `adapters.codeRepository`). Nothing reads it.
 		code: z.unknown().optional(),
 		// Presence-only: the paths the device-grant, oauth-token-exchange, mTLS
-		// and DPoP modules' sections moved from, kept so a root that parses with
-		// `AppConfigSchema` before boot still hands them to the relocation
-		// refusal. Nothing reads them.
+		// and DPoP modules' sections moved from. Nothing reads them.
 		deviceAuthorization: z.unknown().optional(),
 		tokenExchange: z.unknown().optional(),
 		mtls: z.unknown().optional(),
@@ -593,9 +586,8 @@ export const CoreConfigSchema = z.object({
 			})
 			.optional(),
 		// Presence-only: the keys of `oauth {}` the oauth module's own schema
-		// declares — the consent page, and the Client ID Metadata Documents —
-		// kept so a root that parses with `AppConfigSchema` before boot does not
-		// strip them. The module parses them.
+		// declares — the consent page, and the Client ID Metadata Documents.
+		// The module parses them.
 		consentPage: z.unknown().optional(),
 		clientIdMetadataDocuments: z.unknown().optional(),
 		// What `POST /oauth/revoke` promises for access tokens:
@@ -621,9 +613,7 @@ export const CoreConfigSchema = z.object({
 			})
 			.optional(),
 		// Presence-only: the path core's token-binding settings moved from
-		// (`core.tokenBinding`), kept so a root that parses with
-		// `AppConfigSchema` before boot still hands it to the relocation
-		// refusal. Nothing reads it.
+		// (`core.tokenBinding`). Nothing reads it.
 		tokenBinding: z.unknown().optional(),
 	}),
 	// Core's own section, strict at every level: an unknown key is refused,
@@ -756,193 +746,10 @@ export function readAccessTokenRevocationMode(
 }
 
 /**
- * Composes a config schema by intersecting module schemas with
- * `CoreConfigSchema`.
- *
- * @deprecated Boot parses the configuration once with core's transitional base,
- * then each module's section at its name over the base's output. An
- * intersection parses every schema over the raw input, so a module's schema
- * refuses the environment strings core's schema coerces. Kept for callers
- * that still compose a schema of their own.
+ * The type of the `config` slot: the configuration as boot's composed parse
+ * leaves it. Core's own sections are parsed by `CoreConfigSchema`; every other
+ * top-level section is a loaded module's, parsed by that module's own schema
+ * and read through its `deps.section`, or one nothing loaded reads. Core
+ * declares no type for them, so each reads as `unknown` here.
  */
-export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[]): z.ZodType {
-	let schema: z.ZodType = CoreConfigSchema;
-	for (const moduleSchema of moduleSchemas) {
-		schema = schema.and(moduleSchema);
-	}
-	return schema;
-}
-
-/**
- * The sections core mirrors for other packages' modules. This object strips
- * undeclared keys, so a section parsed through `AppConfigSchema` survives only
- * if declared here. Boot itself parses once, with these sections optional in its
- * transitional base (`TransitionalConfigSchema`); each mirror stays for the
- * coercions and checks it applies, validated whenever the configuration carries
- * it, until its package owns the section. Mirrors are presence and shape only:
- * bounds and defaults stay with the owning package.
- */
-export const fullSectionsSchema = z.object({
-	// Presence-only: the paths core's own settings moved from, kept so a root
-	// that parses with `AppConfigSchema` before boot still hands them to the
-	// relocation refusal, which refuses them before boot's parse. Nothing reads
-	// them.
-	deployment: z.unknown().optional(),
-	sessionRequirements: z.unknown().optional(),
-	// Presence-only: the path the federation-grants section, and the grant
-	// stores' own keys, moved from.
-	federationGrants: z.unknown().optional(),
-	// The federation-grants module's section, parsed by its module. Mirrored
-	// for the one key a composition root reads before it knows its modules,
-	// `enabled`; every other key is kept as written.
-	"federation-grants": z
-		.object({ enabled: coerceBooleanFromEnv.optional() })
-		.passthrough()
-		.optional(),
-	// The oauth package's grant modules' sections, each parsed by its module.
-	// Mirrored for the keys a composition root reads before it knows its
-	// modules — whether each grant is on — kept as written.
-	"oauth-session": z.object({ enabled: z.unknown().optional() }).passthrough().optional(),
-	"oauth-authorization": z.object({ grants: z.unknown().optional() }).passthrough().optional(),
-	// Presence-only: the session module's section, `session`, which its module
-	// parses, and under it the paths the session store's keys moved from; and
-	// `rateLimit`, where the login's budget moved from. Kept so a root that
-	// parses with `AppConfigSchema` before boot still hands them to the
-	// relocation refusal. Core reads `rateLimit.failMode` alone, as written,
-	// for boot's `rate_limit_fail_mode_not_applied` warning.
-	session: z.unknown().optional(),
-	rateLimit: z.unknown().optional(),
-	// The session store's section, parsed by its module. Mirrored for the key
-	// a composition root may read before boot — the storage — kept as
-	// written.
-	"session-store": z
-		.object({
-			storage: z.object({ type: z.unknown().optional() }).passthrough().optional(),
-		})
-		.passthrough()
-		.optional(),
-	// Presence-only: the path the federations' map moved from
-	// (`core.federations`), kept so a root that parses with `AppConfigSchema`
-	// before boot still hands it to the relocation refusal. Nothing reads it.
-	federations: z.unknown().optional(),
-	// Presence-only: the section the repositories' settings sit in (the
-	// standalone template's `repositories` module's), and where the code
-	// repositories' moved from. Nothing in core reads it.
-	repositories: z.unknown().optional(),
-	// Presence-only: the paths the login and consent pages moved from
-	// (`session.loginPage.url`, `oauth.consentPage.url`). Nothing reads them.
-	endpoints: z.unknown().optional(),
-	// Refused whenever present: core reads a composition's CORS origins from
-	// the `httpSettings` slot alone. A loaded module that relocates `cors` (the
-	// standalone template's `http`) refuses it first, before parse, naming its
-	// own path.
-	cors: unreadSection(
-		"cors",
-		"The CORS origins are handed to core in the httpSettings slot (cors.allowedOrigins), by the module that provides the slot; without the slot, no CORS is mounted.",
-	),
-	// The WebAuthn deployer section, which a composition root's bootstrap
-	// module parses with `webauthnConfigSchema`; lost here, the bootstrap fails
-	// on a missing `rpId` instead of reading the operator's. Presence-only:
-	// `webauthnConfigSchema` owns the constraints (the origin allowlist's
-	// no-wildcard / secure-scheme rules) and the package's `reference.conf` the
-	// defaults.
-	webauthn: z
-		.object({
-			rpId: z.string().optional(),
-			rpName: z.string().optional(),
-			// A list in a config file, a single string from `${?WEBAUTHN_ORIGIN}`.
-			// Both spellings reach `webauthnConfigSchema`, which is where the
-			// shape is decided; narrowing to an array here would fail the env
-			// spelling at the wrong layer, with the wrong message.
-			origin: z.union([z.string(), z.array(z.string())]).optional(),
-			// The origins this RP may be framed by; the same two spellings as
-			// `origin`, for the same reason.
-			topOrigin: z.union([z.string(), z.array(z.string())]).optional(),
-			challengeTtlMs: wholeNumberInRangeFromEnv(1).optional(),
-			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
-			userVerification: z.enum(["required", "preferred", "discouraged"]).optional(),
-			// Presence-only: removed keys, kept so a root that parses with
-			// `AppConfigSchema` before boot still hands them to the removed-key refusal.
-			allowCredentialsForKnownUser: z.unknown().optional(),
-			rateLimit: z.unknown().optional(),
-		})
-		.optional(),
-	// Presence-only: the path the audit sink's selection (the composition
-	// root's `adapters.auditSink`), its options (the `audit-sink` module's) and
-	// its declared absence (`core.declaredAbsent`) moved from.
-	audit: z.unknown().optional(),
-	// Presence-only: the path the shared Redis connection's settings moved from
-	// (`redis-clients`, the standalone template's module's). Nothing reads it.
-	refreshTokenFamilyStore: z.unknown().optional(),
-	// Presence-only: the paths the adapter selections moved from (the
-	// composition root's `adapters`), and the stores' sections moved from with
-	// them, kept so a root that parses with `AppConfigSchema` before boot
-	// still hands them to the relocation refusal. Nothing reads them.
-	rateLimiter: z.unknown().optional(),
-	userSessionStores: z.unknown().optional(),
-	federationTokenStore: z.unknown().optional(),
-	federationGrantStore: z.unknown().optional(),
-	federationGrantIntentStore: z.unknown().optional(),
-	mfaFactorStore: z.unknown().optional(),
-	mfaTransactionStore: z.unknown().optional(),
-	accessTokenDenylist: z.unknown().optional(),
-	replaySeenSet: z.unknown().optional(),
-	challengeStore: z.unknown().optional(),
-	consentStore: z.unknown().optional(),
-	redisCodeRepository: z.unknown().optional(),
-	// Presence-only: the paths the stores' sections moved from, kept so a root
-	// that parses with `AppConfigSchema` before boot still hands them to the
-	// relocation refusal. Nothing reads them.
-	memoryRateLimiter: z.unknown().optional(),
-	redisRateLimiter: z.unknown().optional(),
-	redisAccessTokenDenylist: z.unknown().optional(),
-	redisChallengeStore: z.unknown().optional(),
-	redisConsentStore: z.unknown().optional(),
-	redisDeviceCodeStore: z.unknown().optional(),
-	redisMfaFactorStore: z.unknown().optional(),
-	redisMfaTransactionStore: z.unknown().optional(),
-	redisRefreshTokenFamilyStore: z.unknown().optional(),
-	redisReplaySeenSet: z.unknown().optional(),
-	redisSessionStores: z.unknown().optional(),
-	redisFederationTokenStore: z.unknown().optional(),
-	redisFederationGrantStore: z.unknown().optional(),
-	// Presence-only: the stores' own sections, each parsed by its module. A
-	// package's `reference.conf` is layered whenever any of its modules is
-	// loaded, so it sets these sections while their own module may not be;
-	// declared here, they are not named as ignored at boot.
-	"core-rate-limiter-memory": z.unknown().optional(),
-	"core-federation-grant-store-memory": z.unknown().optional(),
-	"redis-access-token-denylist": z.unknown().optional(),
-	"redis-challenge-store": z.unknown().optional(),
-	"redis-code-repository": z.unknown().optional(),
-	"redis-consent-store": z.unknown().optional(),
-	"redis-device-code-store": z.unknown().optional(),
-	"redis-mfa-factor-store": z.unknown().optional(),
-	"redis-mfa-transaction-store": z.unknown().optional(),
-	"redis-rate-limiter": z.unknown().optional(),
-	"redis-refresh-token-family-store": z.unknown().optional(),
-	"redis-replay-seen-set": z.unknown().optional(),
-	"redis-session-stores": z.unknown().optional(),
-	"redis-federation-token-store": z.unknown().optional(),
-	"redis-federation-grant-store": z.unknown().optional(),
-	"redis-federation-grant-intent-store": z.unknown().optional(),
-	// Presence-only, for the same reason: the WebAuthn second factor's
-	// section, parsed by its module, set by the webauthn package's
-	// `reference.conf` wherever the grant's module is loaded without it.
-	"webauthn-mfa-factor": z.unknown().optional(),
-});
-
-/**
- * Full application config schema including all optional module sections. A
- * plain ZodObject (via `.extend`) so consumers can read `.shape` and the
- * ts.hocon zod coercion can traverse it.
- *
- * @deprecated A composition root hands `createApp` the configuration it
- * resolved, and boot parses it once with each loaded module's own schema;
- * parsing with this schema first strips every section it does not declare.
- * Read what the root needs before it knows its modules with
- * `readTransitionalConfig`. The `AppConfig` type stays.
- */
-export const AppConfigSchema = CoreConfigSchema.extend(fullSectionsSchema.shape);
-
-export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type AppConfig = CoreConfig & Readonly<Record<string, unknown>>;

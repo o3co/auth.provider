@@ -323,14 +323,16 @@ describe("a module's section — read from the parsed configuration", () => {
 	it("sees what core's schema made of the section: coerced, with the keys core does not declare kept", async () => {
 		// The choice pinned: the section is read out of the composed parse's
 		// output — core's schema laid over what was written. At a section
-		// core's schema mirrors, a value core coerces arrives coerced — so a
-		// section read raw would refuse `challengeTtlMs: "120000"` — and a key
+		// core's schema declares, a value core coerces arrives coerced — so a
+		// section read raw would refuse `nonce.maxLength: "128"` — and a key
 		// core does not declare is still there.
 		let seen: unknown;
 		const sectioned = defineModule({
-			name: "webauthn",
+			name: "oauth",
 			section: {
-				schema: z.object({ challengeTtlMs: z.number(), extra: z.string().optional() }),
+				schema: z.object({
+					nonce: z.object({ maxLength: z.number(), extra: z.string().optional() }),
+				}),
 			},
 			contributes: {
 				grantMiddleware: [
@@ -344,10 +346,12 @@ describe("a module's section — read from the parsed configuration", () => {
 
 		const handle = await createApp({
 			modules: [sectioned],
-			bootstrapComponents: bootWith({ webauthn: { challengeTtlMs: "120000", extra: "kept" } }),
+			bootstrapComponents: bootWith({
+				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128", extra: "kept" } },
+			}),
 		});
 
-		expect(seen).toEqual({ challengeTtlMs: 120000, extra: "kept" });
+		expect(seen).toEqual({ nonce: { maxLength: 128, extra: "kept" } });
 		await handle.dispose();
 	});
 

@@ -20,16 +20,15 @@
  * always, and boot's one composed parse is plain Zod: a bare `z.boolean()` /
  * `z.number()` leaf would refuse `"false"`.
  *
- * The walk covers core's transitional base (core's sections and every section
- * it mirrors) through objects, records and lists. The modules' own schemas are
- * held to the same rule where they are all loaded (`tools/composition`,
+ * The walk covers core's base (`CoreConfigSchema`, core's sections) through
+ * objects, records and lists. The modules' own schemas are held to the same
+ * rule where they are all loaded (`tools/composition`,
  * `unreadableModuleLeaves` from the testing entry).
  */
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { coerceBooleanFromEnv } from "#/config/application.schema.mjs";
-import { TransitionalConfigSchema } from "#/config/composed.mjs";
+import { CoreConfigSchema, coerceBooleanFromEnv } from "#/config/application.schema.mjs";
 import {
 	readsEnvironmentString,
 	schemasAtPath,
@@ -49,7 +48,7 @@ describe("every leaf core's schema declares reads the string an environment vari
 	});
 
 	it("finds no bare boolean, and no number that does not coerce", () => {
-		expect(unreadableLeafPaths(TransitionalConfigSchema)).toEqual([]);
+		expect(unreadableLeafPaths(CoreConfigSchema)).toEqual([]);
 	});
 
 	it("tells a leaf that reads a string from one that does not", () => {
@@ -75,11 +74,9 @@ describe("every leaf core's schema declares reads the string an environment vari
 		const durations = schemasAtPath(JWKS_SECTION, ["cacheMaxAge"]);
 		expect(durations).toHaveLength(1);
 		expect(durations.every(readsEnvironmentString)).toBe(true);
-		expect(
-			schemasAtPath(TransitionalConfigSchema, ["federationGrants", "tombstoneRetention"]).every(
-				readsEnvironmentString,
-			),
-		).toBe(true);
+		// A presence-only key, which reads whatever is written, reads the string too.
+		expect(readsEnvironmentString(z.unknown())).toBe(true);
+		expect(readsEnvironmentString(z.unknown().optional())).toBe(true);
 	});
 });
 

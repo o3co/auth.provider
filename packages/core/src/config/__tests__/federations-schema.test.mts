@@ -14,28 +14,28 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.mjs";
-import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 
 /** The schema of `core.federations`, for tests of an entry's shape. */
 const federationsSchema = CoreConfigSchema.shape.core.unwrap().shape.federations.unwrap();
 
 /**
  * Per ADR 2026-04-30: schema is a pure type contract; defaults live in
- * hocon. AppConfigSchema.parse rejects bare `{}` inputs, so the fixture
+ * hocon. CoreConfigSchema.parse rejects bare `{}` inputs, so the fixture
  * supplies a minimal schema-valid baseline (intentionally diverges from
- * reference.conf — see makeValidAppConfig docstring). Per-test
+ * reference.conf — see makeValidCoreConfig docstring). Per-test
  * overrides target only the field-under-test (e.g. add `core.federations`
  * for federation-specific assertions).
  */
-const minimalConfig = makeValidAppConfig();
+const minimalConfig = makeValidCoreConfig();
 
 describe("core.federations schema — every entry names its type", () => {
 	it.each([
 		["an enabled entry", true],
 		["a disabled entry", false],
 	])("refuses %s without a type at core.federations.<name>.type", (_label, enabled) => {
-		const result = AppConfigSchema.safeParse({
+		const result = CoreConfigSchema.safeParse({
 			...minimalConfig,
 			core: { ...minimalConfig.core, federations: { google: { enabled } } },
 		});
@@ -136,7 +136,7 @@ describe("core.federations schema — open to z.record with passthrough", () => 
 	it("leaves core.federations absent when the configuration has none (no schema-side default)", () => {
 		// Core's reference.conf ships the empty map; the schema itself does
 		// not inject `{}` when the key is omitted.
-		const parsed = AppConfigSchema.parse(minimalConfig);
+		const parsed = CoreConfigSchema.parse(minimalConfig);
 		expect(parsed.core?.federations).toBeUndefined();
 	});
 
@@ -209,7 +209,7 @@ describe("core.federations schema — open to z.record with passthrough", () => 
 
 	it("rejects enabled='yes' with type error (unrecognized string values are not silently coerced)", () => {
 		expect(() =>
-			AppConfigSchema.parse({
+			CoreConfigSchema.parse({
 				...minimalConfig,
 				core: {
 					...minimalConfig.core,

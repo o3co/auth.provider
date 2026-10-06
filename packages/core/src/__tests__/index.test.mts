@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import * as core from "#/index.mjs";
 import {
 	AdapterFactoryError,
-	AppConfigSchema,
+	CoreConfigSchema,
 	createAdapterFactory,
 	createApp,
 	createAsymmetricKeyStore,
@@ -21,8 +22,16 @@ describe("public API", () => {
 		expect(typeof InMemoryClientRepository).toBe("function");
 	});
 
-	it("exports AppConfigSchema", () => {
-		expect(AppConfigSchema).toBeDefined();
+	it("exports core's schema, CoreConfigSchema, and no schema of the whole configuration", () => {
+		expect(CoreConfigSchema).toBeDefined();
+		for (const removed of [
+			"AppConfigSchema",
+			"fullSectionsSchema",
+			"composeConfigSchema",
+			"readTransitionalConfig",
+		]) {
+			expect(core, removed).not.toHaveProperty(removed);
+		}
 	});
 
 	it("exports InMemoryUserRepository class", () => {

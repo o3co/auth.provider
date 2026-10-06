@@ -17,15 +17,13 @@
 /**
  * Where a configuration path lands in a Zod schema: the schema that
  * parses the value at a dot path, found by walking the schema's objects and
- * the wrappers a configuration schema puts around them. Three readers use
- * it: the transitional reader's picked schema (`pickConfigSchema`, what a
- * composition root reads before it knows its modules), the guard that every
- * leaf an environment variable sets reads the string it arrives as, and the
- * check that a section refuses an unknown key at every object level it
- * declares (`schemaObjectLevels`).
+ * the wrappers a configuration schema puts around them. Two readers use
+ * it: the guard that every leaf an environment variable sets reads the
+ * string it arrives as, and the check that a section refuses an unknown key
+ * at every object level it declares (`schemaObjectLevels`).
  */
 
-import { z } from "zod";
+import type { z } from "zod";
 
 /** The definition every Zod v4 schema carries, as far as this file reads it. */
 interface Def {
@@ -66,14 +64,12 @@ const WRAPPERS = new Set([
  * target of a `z.preprocess`, the source of a `.transform`), each member of a
  * union, both sides of an intersection, a lazy schema's result.
  */
-function bodiesOf(schema: z.ZodType, onTransform?: () => void): z.ZodType[] {
+function bodiesOf(schema: z.ZodType): z.ZodType[] {
 	const def = defOf(schema);
-	const inner = (next: z.ZodType) => bodiesOf(next, onTransform);
+	const inner = (next: z.ZodType) => bodiesOf(next);
 	if (WRAPPERS.has(def.type) && def.innerType) return inner(def.innerType);
 	if (def.type === "pipe" && def.in && def.out) {
-		if (defOf(def.out).type !== "transform") return inner(def.out);
-		onTransform?.();
-		return inner(def.in);
+		return inner(defOf(def.out).type === "transform" ? def.in : def.out);
 	}
 	if (def.type === "union" && def.options) return def.options.flatMap(inner);
 	if (def.type === "intersection" && def.left && def.right) {
@@ -287,119 +283,4 @@ export function schemaObjectLevels(schema: z.ZodType): SchemaObjectLevel[] {
 /** The paths of `unreadableLeaves`. */
 export function unreadableLeafPaths(schema: z.ZodType, prefix = ""): string[] {
 	return unreadableLeaves(schema, prefix).map(({ path }) => path);
-}
-
-/** A node of the tree `pickConfigSchema` builds: a picked leaf, or keys under it. */
-type PickNode = { readonly leaf: z.ZodType } | { readonly children: Map<string, PickNode> };
-
-/**
- * The one schema declared at `segments` inside `schema`, for a picked read — a
- * `RangeError` naming the path when there is none, or several, or when the
- * path runs beneath a value the schema transforms as a whole (a `.transform`):
- * a key read there would be what was written, not what the transform makes
- * of it, so the refusal names the shorter path to read instead. A
- * `z.preprocess` is read through.
- */
-function pickedAt(schema: z.ZodType, segments: readonly string[]): z.ZodType {
-	const path = segments.join(".");
-	let candidates: z.ZodType[] = [schema];
-	for (const [index, key] of segments.entries()) {
-		const next: z.ZodType[] = [];
-		for (const candidate of candidates) {
-			let transformed = false;
-			const bodies = bodiesOf(candidate, () => {
-				transformed = true;
-			});
-			if (transformed) {
-				const shorter = segments.slice(0, index).join(".");
-				throw new RangeError(
-					`cannot read "${path}": the configuration schema transforms "${shorter}" as a whole — read "${shorter}"`,
-				);
-			}
-			for (const body of bodies) {
-				const def = defOf(body);
-				if (def.type === "object" && def.shape && Object.hasOwn(def.shape, key)) {
-					next.push(def.shape[key] as z.ZodType);
-				} else if (def.type === "record" && def.valueType) {
-					next.push(def.valueType);
-				}
-			}
-		}
-		candidates = next;
-	}
-	if (candidates.length !== 1) {
-		throw new RangeError(
-			candidates.length === 0
-				? `cannot read "${path}": the configuration schema declares no such key`
-				: `cannot read "${path}": the configuration schema declares ${candidates.length} schemas there — read a shorter path`,
-		);
-	}
-	return candidates[0] as z.ZodType;
-}
-
-/**
- * The default `schema` declares for an absent value, seen through the
- * wrappers around it (`.default()`, or `.prefault()`), or none.
- */
-function declaredDefault(schema: z.ZodType): { readonly value: unknown } | undefined {
-	const def = defOf(schema) as Def & { readonly defaultValue?: unknown };
-	if (def.type === "default" || def.type === "prefault") return { value: def.defaultValue };
-	if (WRAPPERS.has(def.type) && def.innerType) return declaredDefault(def.innerType);
-	return undefined;
-}
-
-/**
- * The schema of `paths` alone inside `schema` (transitional), what a
- * composition root parses before it knows its modules: each path's own
- * schema as `schema` declares it there (wrappers, coercions, checks and
- * transforms included), under objects that hold only the picked keys. An
- * ancestor of a picked path is optional unless `schema` declares a default
- * for it; then an absent ancestor reads as that default. A path under another
- * picked path is covered by it.
- *
- * A path `schema` does not declare as one schema (a key no object on the way
- * declares, one a union offers several schemas for, or one beneath a value
- * the schema transforms whole) is a `RangeError` naming it and, for a
- * transform, the shorter path to read.
- */
-export function pickConfigSchema(schema: z.ZodType, paths: readonly string[]): z.ZodObject {
-	const root: Map<string, PickNode> = new Map();
-	const sorted = [...new Set(paths)].sort((a, b) => a.split(".").length - b.split(".").length);
-	for (const path of sorted) {
-		const segments = path.split(".");
-		if (segments.some((key) => key.length === 0)) {
-			throw new RangeError(`cannot read "${path}": not a dot-separated path of non-empty keys`);
-		}
-		const leaf = pickedAt(schema, segments);
-		let children = root;
-		for (const [index, key] of segments.entries()) {
-			const node = children.get(key);
-			// Shorter paths come first: one already picked covers this one.
-			if (node !== undefined && "leaf" in node) break;
-			if (index === segments.length - 1) {
-				children.set(key, { leaf });
-				break;
-			}
-			const next = node ?? { children: new Map<string, PickNode>() };
-			if (node === undefined) children.set(key, next);
-			children = next.children;
-		}
-	}
-	const build = (
-		children: Map<string, PickNode>,
-		prefix: readonly string[],
-	): Record<string, z.ZodType> =>
-		Object.fromEntries(
-			[...children].map(([key, node]) => {
-				if ("leaf" in node) return [key, node.leaf];
-				const path = [...prefix, key];
-				const picked = z.object(build(node.children, path));
-				const declared = declaredDefault(pickedAt(schema, path));
-				return [
-					key,
-					declared === undefined ? picked.optional() : picked.prefault(declared.value as never),
-				];
-			}),
-		);
-	return z.object(build(root, []));
 }

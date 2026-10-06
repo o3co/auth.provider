@@ -31,20 +31,28 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "#/boot/create-app.mjs";
 import { type AppHandle, BootError, type BootstrapMap } from "#/boot/types.mjs";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
-import { CORE_RELOCATIONS } from "#/config/core-relocations.mjs";
 import { coreReference } from "#/config/references.mjs";
-import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
-import { jwksModule } from "#/jwks/module.mjs";
-import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { resolveTokenBindingSettings } from "#/middleware/tokenBinding.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
-import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import { renamedVariableCaptures } from "#/testing/renamedVariables.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /** The sections core's reference sets that these tests read: core's own, the JWKS module's, and the captures. */
 const READ = ["core", "jwks", "renamed-variables"] as const;
+
+/**
+ * The fixture's configuration less the oauth package's grant switches
+ * (`oauth-session`, `oauth-authorization`): no module here reads them, so
+ * boot would name them as ignored.
+ */
+function withoutGrantSwitches(): Record<string, unknown> {
+	const {
+		"oauth-session": _session,
+		"oauth-authorization": _authorization,
+		...config
+	} = makeValidCoreConfig();
+	return config;
+}
 
 /**
  * Core's valid configuration, with `operator` HOCON over core's own
@@ -62,7 +70,7 @@ function resolved(env: Record<string, string>, operator = ""): Record<string, un
 		.toObject() as Record<string, unknown>;
 	const sections = [...READ, ...Object.keys(own.toObject() as Record<string, unknown>)];
 	return {
-		...makeValidCoreConfig(),
+		...withoutGrantSwitches(),
 		...Object.fromEntries(sections.map((section) => [section, layered[section]])),
 	};
 }
@@ -303,16 +311,40 @@ describe("the federations, under core.federations", () => {
 	});
 });
 
-describe("cors, which core no longer reads", () => {
-	it("refuses a configuration that still writes it, saying core reads its CORS origins from the httpSettings slot alone", async () => {
-		const err = await refusal(boot({}, 'cors.allowedOrigins = ["https://app.example"]\n'));
+describe("cors, which core does not read", () => {
+	/**
+	 * The notices of sections nothing loaded reads that `operator` boots with,
+	 * no module loaded, and the config slot it boots to.
+	 */
+	const bootLogged = async (
+		operator: string,
+	): Promise<{ warnings: unknown[][]; config: Record<string, unknown> }> => {
+		const logger = recordingLogger();
+		const handle = await boot({}, operator, logger);
+		const config = handle.components.config as unknown as Record<string, unknown>;
+		await handle.dispose();
+		const warnings = logger.warn.mock.calls.filter(([, message]) =>
+			String(message).startsWith("config_sections_"),
+		);
+		return { warnings, config };
+	};
 
-		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/cors/);
-		expect(err.message).toContain("httpSettings");
-		// Core's words, not a composition's: no module's path is named.
-		expect(err.message).not.toContain("http.cors");
-		expect(err.message).not.toContain("https://app.example");
+	it("boots a configuration that writes it with no module relocating it, naming the section once as ignored and never its value", async () => {
+		const { warnings, config } = await bootLogged(
+			'cors.allowedOrigins = ["https://app.example"]\n',
+		);
+
+		expect(warnings).toEqual([[{ sections: ["cors"] }, "config_sections_ignored"]]);
+		expect(JSON.stringify(warnings)).not.toContain("https://app.example");
+		// Kept as written, read by nothing: no CORS is mounted without the
+		// httpSettings slot.
+		expect(config.cors).toEqual({ allowedOrigins: ["https://app.example"] });
+	});
+
+	it("names nothing for an empty cors section: it sets nothing", async () => {
+		const { warnings } = await bootLogged("cors {}\n");
+
+		expect(warnings).toEqual([]);
 	});
 
 	it("leaves the refusal to a loaded module that relocates cors, in its words", async () => {
@@ -343,65 +375,6 @@ describe("cors, which core no longer reads", () => {
 			],
 		});
 	});
-});
-
-describe("a root that parses its resolved configuration with AppConfigSchema before boot", () => {
-	/**
-	 * `operator` HOCON over core's own `reference.conf` and the fixture's
-	 * sections, parsed with `AppConfigSchema`, with the captures the
-	 * resolution saw added back, as such a root must.
-	 */
-	const preParsed = (operator: string): Record<string, unknown> => {
-		const own = parseString(operator, {});
-		const layered = own
-			.withFallback(
-				parseFile(fileURLToPath(coreReference()), {
-					env: { OAUTH_JWT_ISSUER: "https://auth.test" },
-				}),
-			)
-			.toObject() as Record<string, unknown>;
-		const sections = [...READ, ...Object.keys(own.toObject() as Record<string, unknown>)];
-		const parsed = AppConfigSchema.parse({
-			...makeValidAppConfig(),
-			...Object.fromEntries(sections.map((section) => [section, layered[section]])),
-		}) as Record<string, unknown>;
-		return {
-			...parsed,
-			[RENAMED_VARIABLES_SECTION]: renamedVariableCaptures({
-				modules: [],
-				core: CORE_RELOCATIONS,
-				env: {},
-			}),
-		};
-	};
-
-	/** The key store the jwks module requires. */
-	const keyStoreModule = defineModule({
-		name: "test:key-store",
-		provides: { keyStore: () => createSymmetricKeyStore("core-section-test-secret-for-jwks!!") },
-	});
-
-	it.each([
-		['deployment.mode = "multi"', [], "deployment.mode"],
-		['sessionRequirements.expected = ["mfa"]', [], "sessionRequirements.expected"],
-		[
-			'oauth.tokenBinding.dispatch-policy = "strict-mutual-exclusion"',
-			[],
-			"oauth.tokenBinding.dispatch-policy",
-		],
-		['oauth.jwt.jwksPath = "/keys/jwks.json"', [jwksModule, keyStoreModule], "oauth.jwt.jwksPath"],
-		["oauth.jwt.jwksCacheMaxAge = 60", [jwksModule, keyStoreModule], "oauth.jwt.jwksCacheMaxAge"],
-	] as const)(
-		"is refused for %s as relocated, the parse keeping the old path",
-		async (hocon, modules, from) => {
-			const err = await refusal(
-				createApp({ modules, bootstrapComponents: bootstrap(preParsed(`${hocon}\n`)) }),
-			);
-
-			expect(err.reason).toBe("config-path-relocated");
-			expect(err.details).toMatchObject({ relocated: [{ from }] });
-		},
-	);
 });
 
 describe("the JWKS module's section, shipped in core's reference.conf, in a composition without the module", () => {
