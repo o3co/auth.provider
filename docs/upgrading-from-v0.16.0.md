@@ -1703,7 +1703,7 @@ with what a store of yours records and refuses. Per port:
   renewal of a signed-in session's id a step-up finishes with: the
   [session README](../packages/session/README.md#renewing-a-signed-in-sessions-id).
 - **`SessionRPRegistry`, `SessionFamilyIndex`, `SessionFederationIndex`.**
-  The ports are removed (#1030, below): an adapter of your own for them has
+  The ports are removed (#1030, above): an adapter of your own for them has
   nothing to implement and nothing reads it.
 - **`DeviceCodeStore`.** Record `approvedAtMs`, and what
   `recordableDeviceApproval({ amr, authTime }, nowMs)` answers (#1093).
