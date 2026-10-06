@@ -24,14 +24,18 @@
 export type BoundaryWrite = (before: Date, expiresAt: Date) => Promise<void>;
 
 /**
- * How long a write may take to commit and still settle the boundary: well
- * inside the one-second allowance verification grants past it, so a token
- * minted while that write was in flight is covered by the instant it carries.
+ * How long a write may take to commit and still settle the boundary, and how
+ * far past the instant read before it the boundary is stamped. A token minted
+ * before a settled write commits was minted before the boundary it carries,
+ * so the verification allowance is left whole for the issuers' clock skew.
  */
 const SETTLED_WRITE_MS = 250;
 
 /** The most writes one stamping makes. */
 const MAX_STAMPS = 4;
+
+/** Whether a clock moved forward across a write by no more than {@link SETTLED_WRITE_MS}. */
+const withinBound = (ms: number): boolean => ms >= 0 && ms <= SETTLED_WRITE_MS;
 
 /** What {@link stampSubjectBoundary} did. */
 export interface BoundaryStamp {
@@ -45,29 +49,32 @@ export interface BoundaryStamp {
 }
 
 /**
- * Writes the boundary at `now()`, and once that write has taken effect,
- * writes it again at a fresh `now()`, each lasting `ttlMs`; then again while
- * the last write took longer than {@link SETTLED_WRITE_MS} to commit, up to
- * {@link MAX_STAMPS} writes in all.
+ * Writes the boundary at `now()` plus {@link SETTLED_WRITE_MS}, and once that
+ * write has taken effect, writes it again from a fresh `now()`, each lasting
+ * `ttlMs` past the boundary; then again while the last write did not settle,
+ * up to {@link MAX_STAMPS} writes in all.
  *
- * A write that commits late carries the instant read before it, and a token
- * minted between that instant and the commit would postdate it. Each later
- * stamp is read after the previous commit, so it reaches past it, and one
- * whose write settled covers what was minted while it was in flight. A store
- * keeps the later of two boundaries (the port's rule), so no stamp moves the
- * boundary back, even on a clock that stepped back. The second is tried even
- * when the first throws: a write can fail after it committed.
+ * A write settles when it commits within {@link SETTLED_WRITE_MS} on the
+ * monotonic clock (`elapsed`) and the wall clock moved forward by no more
+ * than that across it: a token minted before it committed then predates the
+ * boundary it wrote. A store keeps the later of two boundaries (the port's
+ * rule), so no stamp moves the boundary back, even on a clock that stepped
+ * back. The second is tried even when the first throws: a write can fail
+ * after it committed.
  */
 export async function stampSubjectBoundary(
 	write: BoundaryWrite,
 	now: () => number,
 	ttlMs: number,
+	elapsed: () => number = () => performance.now(),
 ): Promise<BoundaryStamp> {
-	/** Writes one stamp; answers whether it committed within the bound. */
+	/** Writes one stamp; answers whether it settled. */
 	const stamp = async (): Promise<boolean> => {
 		const at = now();
-		await write(new Date(at), new Date(at + ttlMs));
-		return now() - at <= SETTLED_WRITE_MS;
+		const started = elapsed();
+		const before = at + SETTLED_WRITE_MS;
+		await write(new Date(before), new Date(before + ttlMs));
+		return withinBound(elapsed() - started) && withinBound(now() - at);
 	};
 	let firstError: { readonly error: unknown } | undefined;
 	try {
@@ -92,7 +99,7 @@ export async function stampSubjectBoundary(
 		written: true,
 		failure: {
 			error: new Error(
-				`the subject boundary was written ${MAX_STAMPS} times and no write committed within ${SETTLED_WRITE_MS} ms`,
+				`no write of the subject boundary after the first settled within ${SETTLED_WRITE_MS} ms in ${MAX_STAMPS - 1} attempts`,
 			),
 			stamp: 2,
 		},

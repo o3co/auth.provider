@@ -33,6 +33,8 @@ import type { SubjectRevocation, SupportsSessionsOnlyRevocation } from "#/user-s
 
 const TTL = 3_600_000;
 const T0 = 1_790_000_000_000;
+/** How far past the instant read before a write its boundary is stamped. */
+const AHEAD = 250;
 
 /** A clock the test moves. */
 const clockAt = (startMs: number) => {
@@ -87,7 +89,7 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 			now: clock.now,
 		});
 		expect(result.tokensRevoked).toBe(true);
-		expect(writes).toEqual([T0, T0 + 5_000]);
+		expect(writes).toEqual([T0 + AHEAD, T0 + 5_000 + AHEAD]);
 		expect(await covered(store, mintedIat)).toBe(true);
 	});
 
@@ -103,7 +105,7 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 			cascadeSession: async () => ({ ok: true }),
 			now: clock.now,
 		});
-		expect(writes).toEqual([T0, T0 + 5_000, T0 + 10_000]);
+		expect(writes).toEqual([T0 + AHEAD, T0 + 5_000 + AHEAD, T0 + 10_000 + AHEAD]);
 		expect(result.tokensRevoked).toBe(true);
 		expect(result.failures).toEqual([]);
 		expect(await covered(store, mintedIat)).toBe(true);
@@ -127,6 +129,36 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 		}
 	});
 
+	it("measures each write's commit on the monotonic clock: a wall clock stepped back across a slow write does not settle it", async () => {
+		const clock = clockAt(T0);
+		const inner = createInMemorySubjectRevocation({ now: clock.now });
+		let monotonic = 0;
+		const ticking = vi.spyOn(performance, "now").mockImplementation(() => monotonic);
+		try {
+			let calls = 0;
+			await revokeAllForSubject({
+				subject: "user-1",
+				watermarkTtlMs: TTL,
+				subjectRevocation: {
+					kind: "stepped-back",
+					async revokeBefore(subject, before, expiresAt) {
+						calls += 1;
+						// The second write takes five seconds, while the wall clock is
+						// stepped back by as much: it reads as instant.
+						if (calls <= 2) monotonic += 5_000;
+						await inner.revokeBefore(subject, before, expiresAt);
+					},
+					revokedBefore: (s) => inner.revokedBefore(s),
+				},
+				cascadeSession: async () => ({ ok: true }),
+				now: clock.now,
+			});
+			expect(calls).toBe(3);
+		} finally {
+			ticking.mockRestore();
+		}
+	});
+
 	it("stops after four stamps when no write settles, and reports the boundary as a failed second stamp", async () => {
 		const clock = clockAt(T0);
 		const { store, writes } = slowStore(clock, [5_000]);
@@ -139,7 +171,12 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 			now: clock.now,
 			logger: { error, warn: vi.fn(), info: vi.fn(), debug: vi.fn() } as never,
 		});
-		expect(writes).toEqual([T0, T0 + 5_000, T0 + 10_000, T0 + 15_000]);
+		expect(writes).toEqual([
+			T0 + AHEAD,
+			T0 + 5_000 + AHEAD,
+			T0 + 10_000 + AHEAD,
+			T0 + 15_000 + AHEAD,
+		]);
 		expect(result.tokensRevoked).toBe(true);
 		expect(result.complete).toBe(false);
 		expect(result.failures).toEqual([
@@ -154,7 +191,7 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 			expect.objectContaining({ stamp: 2 }),
 			"revoke_all_watermark_failed",
 		);
-		expect((await store.revokedBefore("user-1"))?.getTime()).toBe(T0 + 15_000);
+		expect((await store.revokedBefore("user-1"))?.getTime()).toBe(T0 + 15_000 + AHEAD);
 	});
 
 	it("never moves the boundary back, even when the clock stepped back between the stamps", async () => {
@@ -175,7 +212,7 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 			cascadeSession: async () => ({ ok: true }),
 			now: clock.now,
 		});
-		expect((await store.revokedBefore("user-1"))?.getTime()).toBe(T0);
+		expect((await store.revokedBefore("user-1"))?.getTime()).toBe(T0 + AHEAD);
 	});
 
 	it("reports a second stamp that fails, with the boundary of the first still in force", async () => {
@@ -206,7 +243,7 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 				stamp: 2,
 			}),
 		]);
-		expect((await inner.revokedBefore("user-1"))?.getTime()).toBe(T0);
+		expect((await inner.revokedBefore("user-1"))?.getTime()).toBe(T0 + AHEAD);
 	});
 
 	it("logs which stamp failed", async () => {
@@ -260,7 +297,7 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 		expect(result.failures).toEqual([
 			expect.objectContaining({ operation: "revokeBefore", stamp: 1 }),
 		]);
-		expect((await inner.revokedBefore("user-1"))?.getTime()).toBe(T0 + 5_000);
+		expect((await inner.revokedBefore("user-1"))?.getTime()).toBe(T0 + 5_000 + AHEAD);
 	});
 
 	it("reports the second write's error when both throw, and no boundary written", async () => {
@@ -326,7 +363,7 @@ describe("the subject revocation service's sessions-only stamp, likewise", () =>
 			federationGrants: "keep",
 		});
 		expect(result.tokensRevoked).toBe(true);
-		expect(writes).toEqual([T0, T0 + 5_000]);
+		expect(writes).toEqual([T0 + AHEAD, T0 + 5_000 + AHEAD]);
 		expect(await covered(store, mintedIat)).toBe(true);
 		// The grants boundary stays where it was: the stamps were sessions-only.
 		expect(await store.grantsRevokedBefore("user-1")).toBeNull();
@@ -346,7 +383,7 @@ describe("the subject revocation service's sessions-only stamp, likewise", () =>
 			subject: "user-1",
 			federationGrants: "keep",
 		});
-		expect(slowSecond.writes).toEqual([T0, T0 + 5_000, T0 + 10_000]);
+		expect(slowSecond.writes).toEqual([T0 + AHEAD, T0 + 5_000 + AHEAD, T0 + 10_000 + AHEAD]);
 		expect(settled.failures).toEqual([]);
 		expect(await covered(slowSecond.store, mintedIat)).toBe(true);
 

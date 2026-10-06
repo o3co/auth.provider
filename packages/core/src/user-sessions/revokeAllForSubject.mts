@@ -118,9 +118,10 @@ export interface RevokeAllForSubjectResult {
 	/** Session ids whose cascade failed — still live, safe to retry. */
 	readonly sessionsFailed: readonly string[];
 	/**
-	 * Whether the access-token watermark was written. It is written again
-	 * once the first write has taken effect, and again while the last write
-	 * was slow to commit, a bounded number of times; true when any write took
+	 * Whether the access-token watermark was written. It is stamped a little
+	 * past the instant read before each write, written again once the first
+	 * write has taken effect, and again until a write commits promptly, a
+	 * bounded number of times; true when any write took
 	 * effect. A write that threw, or no write settling, is in `failures` with
 	 * its `stamp`, and `complete` is then `false`.
 	 */
