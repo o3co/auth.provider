@@ -351,7 +351,9 @@ Module-level messages that arrive wrapped in a factory failure:
   `maxmemory-policy` `noeviction`**, on a server of its own if the rest of your
   Redis may not. The policy is read from `INFO memory` (`CONFIG GET
   maxmemory-policy` only where INFO does not say), so a managed server that
-  blocks `CONFIG` still reports it. Any other policy — `allkeys-*`,
+  blocks `CONFIG` still reports it; a reply about the policy it cannot read
+  either way (another shape, or `INFO memory` naming it twice, differently)
+  fails the boot. Any other policy — `allkeys-*`,
   `volatile-*`, one the check does not know — is refused with a
   `RedisStoreEvictableError` `cause` whose `reason` names the store
   (`federation-token-store-evictable`, `session-lifecycle-store-evictable`,

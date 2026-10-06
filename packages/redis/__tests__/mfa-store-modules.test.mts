@@ -34,8 +34,8 @@
  * disabled command) is read so; any other reply error, and any failure to
  * reach the server, fails the boot.
  *
- * Every real-server case that reads or sets the eviction policy is in this
- * file alone, so no other file sees the policy this one sets for a moment.
+ * The cases that set the eviction policy run on a server of their own: the
+ * policy is the whole server's, and the shared one never changes it.
  */
 
 import {
@@ -52,6 +52,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { Redis } from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { RedisDurability } from "#/clients.mjs";
 import {
@@ -472,7 +473,7 @@ describe.each(CASES)("$clientSlot's durability() against a real server", (c) => 
 	});
 
 	it("reads the policy and AOF from INFO for a user the server refuses CONFIG, and names the refusal", async () => {
-		await asUser(["-config"], async (restricted) => {
+		await asUser(shared(), ["-config"], async (restricted) => {
 			const report = await c.client(restricted).durability();
 			expect(report).toMatchObject({
 				maxmemoryPolicy: "noeviction",
@@ -484,7 +485,7 @@ describe.each(CASES)("$clientSlot's durability() against a real server", (c) => 
 	});
 
 	it("falls back to CONFIG GET maxmemory-policy for a user the server refuses INFO", async () => {
-		await asUser(["-info"], async (restricted) => {
+		await asUser(shared(), ["-info"], async (restricted) => {
 			const report = await c.client(restricted).durability();
 			expect(report).toMatchObject({
 				maxmemoryPolicy: "noeviction",
@@ -598,30 +599,73 @@ describe.each(CASES)("$clientSlot's durability() against fakes", (c) => {
 	);
 });
 
-/** Runs `use` over a connection as a fresh ACL user with every command but `denied`, and removes the user. */
-async function asUser(denied: readonly string[], use: (io: Redis) => Promise<void>): Promise<void> {
+/** Where a connection reaches a server, and the connection that administers it. */
+interface Server {
+	readonly admin: Redis;
+	readonly at: { readonly host: string; readonly port: number };
+}
+
+/** The shared test server. */
+const shared = (): Server => ({ admin: raw, at });
+
+/** Runs `use` over a connection to `server` as a fresh ACL user with every command but `denied`, and removes the user. */
+async function asUser(
+	server: Server,
+	denied: readonly string[],
+	use: (io: Redis) => Promise<void>,
+): Promise<void> {
 	const user = `mfa-durability-${denied.join("").replace(/\W/g, "")}-${Date.now()}-${Math.random()}`;
-	await raw.call("ACL", "SETUSER", user, "on", ">secret", "~*", "+@all", ...denied);
-	const restricted = new Redis({ ...at, username: user, password: "secret" });
+	await server.admin.call("ACL", "SETUSER", user, "on", ">secret", "~*", "+@all", ...denied);
+	const restricted = new Redis({ ...server.at, username: user, password: "secret" });
 	try {
 		await use(restricted);
 	} finally {
 		restricted.disconnect();
-		await raw.call("ACL", "DELUSER", user);
+		await server.admin.call("ACL", "DELUSER", user);
 	}
 }
 
-describe("allkeys-lru set on the real server", () => {
-	/** Runs `use` with the server's policy at allkeys-lru, and puts the policy back. */
+/**
+ * A server's eviction policy is the whole server's, whatever database a test
+ * uses: these cases set it on a container of their own, so no other file's
+ * stores see it.
+ */
+describe("allkeys-lru set on a server of its own", () => {
+	let container: StartedTestContainer | undefined;
+	let own: Server | undefined;
+
+	beforeAll(async () => {
+		container = await new GenericContainer("redis:7.2-alpine")
+			.withExposedPorts(6379)
+			.withStartupTimeout(60_000)
+			.start();
+		const ownAt = { host: container.getHost(), port: container.getMappedPort(6379) };
+		const admin = new Redis(ownAt);
+		admin.on("error", () => {});
+		own = { admin, at: ownAt };
+	}, 120_000);
+
+	afterAll(async () => {
+		own?.admin.disconnect();
+		await container?.stop();
+	});
+
+	const server = (): Server => {
+		if (own === undefined) throw new Error("the container did not start");
+		return own;
+	};
+
+	/** Runs `use` with the own server's policy at allkeys-lru, and puts the policy back. */
 	async function underAllkeysLru(use: () => Promise<void>): Promise<void> {
-		const [, original] = (await raw.config("GET", "maxmemory-policy")) as [string, string];
-		await raw.config("SET", "maxmemory-policy", "allkeys-lru");
+		const { admin } = server();
+		const [, original] = (await admin.config("GET", "maxmemory-policy")) as [string, string];
+		await admin.config("SET", "maxmemory-policy", "allkeys-lru");
 		try {
 			await use();
 		} finally {
-			await raw.config("SET", "maxmemory-policy", original);
+			await admin.config("SET", "maxmemory-policy", original);
 		}
-		expect(await raw.config("GET", "maxmemory-policy")).toEqual(["maxmemory-policy", original]);
+		expect(await admin.config("GET", "maxmemory-policy")).toEqual(["maxmemory-policy", original]);
 	}
 
 	const refusesBoth = async (io: Redis): Promise<void> => {
@@ -634,20 +678,20 @@ describe("allkeys-lru set on the real server", () => {
 	};
 
 	it("refuses both modules at boot, and the policy is put back", async () => {
-		await underAllkeysLru(() => refusesBoth(raw));
+		await underAllkeysLru(() => refusesBoth(server().admin));
 	});
 
 	it("refuses both modules for a user the server refuses CONFIG: INFO memory says the policy", async () => {
-		await underAllkeysLru(() => asUser(["-config"], refusesBoth));
+		await underAllkeysLru(() => asUser(server(), ["-config"], refusesBoth));
 	});
 
 	it("refuses both modules for a user the server refuses INFO: CONFIG GET says the policy", async () => {
-		await underAllkeysLru(() => asUser(["-info"], refusesBoth));
+		await underAllkeysLru(() => asUser(server(), ["-info"], refusesBoth));
 	});
 
 	it("refuses both modules for a user refused INFO and CONFIG: the policy cannot be read", async () => {
 		await underAllkeysLru(() =>
-			asUser(["-info", "-config"], async (restricted) => {
+			asUser(server(), ["-info", "-config"], async (restricted) => {
 				for (const c of CASES) {
 					await expect(
 						providerOf(c)(
@@ -662,7 +706,7 @@ describe("allkeys-lru set on the real server", () => {
 
 	it("refuses both modules for a client that assumes noeviction where INFO memory says the policy", async () => {
 		await underAllkeysLru(() =>
-			asUser(["-config"], async (restricted) => {
+			asUser(server(), ["-config"], async (restricted) => {
 				for (const c of CASES) {
 					await expect(
 						providerOf(c)(
@@ -681,7 +725,7 @@ describe("allkeys-lru set on the real server", () => {
 
 describe("a user the real server refuses INFO and CONFIG", () => {
 	it("boots both modules when the client assumes noeviction, with the warning that persistence could not be checked", async () => {
-		await asUser(["-info", "-config"], async (restricted) => {
+		await asUser(shared(), ["-info", "-config"], async (restricted) => {
 			for (const c of CASES) {
 				const { logger, calls } = recordingLogger();
 				const store = await providerOf(c)(

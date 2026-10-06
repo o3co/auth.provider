@@ -299,3 +299,129 @@ describe("makeIoredisClients' assumeNoEviction", () => {
 		}
 	});
 });
+
+describe("the policy the bundled clients read off the server", () => {
+	/** Each store's client in `makeIoredisClients`, by the store's name in STORES. */
+	const CLIENT_OF: Readonly<Record<string, keyof ReturnType<typeof makeIoredisClients>>> = {
+		attemptCounter: "attemptCounterClient",
+		sessionLifecycleStore: "sessionLifecycleStoreClient",
+		federationTokenStore: "federationTokenStoreClient",
+		mfaFactorStore: "mfaFactorStoreClient",
+		mfaTransactionStore: "mfaTransactionStoreClient",
+	};
+
+	/** A connection whose INFO memory and CONFIG GET maxmemory-policy answer as given; an Error is thrown. */
+	const answering = (memory: unknown, policy: unknown): Redis =>
+		({
+			info: async (section: string) => {
+				const reply = section === "memory" ? memory : "# Persistence\r\naof_enabled:1\r\n";
+				if (reply instanceof Error) throw reply;
+				return reply;
+			},
+			config: async () => {
+				if (policy instanceof Error) throw policy;
+				return policy;
+			},
+		}) as unknown as Redis;
+
+	/** Builds every store through its factory over `io`'s bundled clients. */
+	const buildAll = (io: Redis, assumeNoEviction?: boolean) => {
+		const clients = makeIoredisClients(
+			io,
+			assumeNoEviction === undefined ? {} : { assumeNoEviction },
+		);
+		return STORES.map((s) => ({
+			store: s.store,
+			reason: s.reason,
+			built: (s.paths[0] as Path).build(clients[CLIENT_OF[s.store] as never] as never),
+		}));
+	};
+
+	it.each([
+		["an array", ["maxmemory-policy", "allkeys-lru"]],
+		["a map object", { "maxmemory-policy": "allkeys-lru" }],
+		["a Map", new Map([["maxmemory-policy", "allkeys-lru"]])],
+	])(
+		"refuses a policy CONFIG GET reports as %s, whatever the client assumes",
+		async (_shape, reply) => {
+			for (const assume of [undefined, true]) {
+				for (const { store, reason, built } of buildAll(answering(NOPERM, reply), assume)) {
+					await expect(built, store).rejects.toMatchObject({
+						reason,
+						maxmemoryPolicy: "allkeys-lru",
+					});
+				}
+			}
+		},
+	);
+
+	it.each([
+		["an array", ["maxmemory-policy", "noeviction"]],
+		["a map object", { "maxmemory-policy": "noeviction" }],
+		["a Map", new Map([["maxmemory-policy", "noeviction"]])],
+	])("builds on noeviction CONFIG GET reports as %s", async (_shape, reply) => {
+		for (const { store, built } of buildAll(answering(NOPERM, reply))) {
+			await expect(built, store).resolves.toBeDefined();
+		}
+	});
+
+	it.each([
+		["a string", "allkeys-lru"],
+		["a number", 7],
+		["null", null],
+		["an array naming another parameter", ["maxmemory", "allkeys-lru"]],
+		["an array of odd length", ["maxmemory-policy"]],
+		["an array whose value is no string", ["maxmemory-policy", 1]],
+		["a map naming another parameter", { maxmemory: "0" }],
+		["a map whose value is no string", { "maxmemory-policy": ["allkeys-lru"] }],
+	])(
+		"fails the build on a CONFIG GET reply it does not recognise (%s), never reading it as unread",
+		async (_shape, reply) => {
+			for (const { store, built } of buildAll(answering(NOPERM, reply), true)) {
+				await expect(built, store).rejects.toThrow(/CONFIG GET maxmemory-policy/);
+			}
+		},
+	);
+
+	it("reads an empty CONFIG GET reply as a policy it could not read", async () => {
+		for (const reply of [[], {}, new Map()]) {
+			for (const { store, reason, built } of buildAll(answering(NOPERM, reply))) {
+				await expect(built, store).rejects.toMatchObject({ reason, maxmemoryPolicy: undefined });
+			}
+		}
+	});
+
+	it.each([
+		["noeviction, then allkeys-lru", "maxmemory_policy:noeviction\r\nmaxmemory_policy:allkeys-lru"],
+		["allkeys-lru, then noeviction", "maxmemory_policy:allkeys-lru\r\nmaxmemory_policy:noeviction"],
+		["noeviction, then an empty value", "maxmemory_policy:noeviction\r\nmaxmemory_policy:"],
+	])(
+		"fails the build on an INFO memory reply that names the policy twice, differently (%s), whatever the client assumes",
+		async (_label, lines) => {
+			for (const assume of [undefined, true]) {
+				const io = answering(`# Memory\r\n${lines}\r\n`, ["maxmemory-policy", "noeviction"]);
+				for (const { store, built } of buildAll(io, assume)) {
+					await expect(built, store).rejects.toThrow(/INFO memory/);
+				}
+			}
+		},
+	);
+
+	it("builds on an INFO memory reply that names noeviction twice", async () => {
+		const io = answering(
+			"# Memory\r\nmaxmemory_policy:noeviction\r\nmaxmemory_policy:noeviction\r\n",
+			NOPERM,
+		);
+		for (const { store, built } of buildAll(io)) {
+			await expect(built, store).resolves.toBeDefined();
+		}
+	});
+
+	it("fails the build on an INFO memory reply that is no text", async () => {
+		for (const reply of [7, { maxmemory_policy: "noeviction" }, ["maxmemory_policy:noeviction"]]) {
+			for (const { store, built } of buildAll(answering(reply, NOPERM), true)) {
+				await expect(built, store).rejects.toThrow(/INFO memory/);
+			}
+		}
+	});
+});
