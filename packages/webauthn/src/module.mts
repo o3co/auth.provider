@@ -34,6 +34,7 @@ import {
 import express from "express";
 import { webauthnConfigSchema } from "./config.mjs";
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE, type WebAuthnGrantDeps } from "./grant.mjs";
+import { jsonBody } from "./internal/jsonBody.mjs";
 import {
 	createAuthenticationOptionsHandler,
 	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
@@ -194,10 +195,10 @@ export const webauthnModule = defineModule<
 			// Each contributed router installs its own JSON parser (createApp installs none), on
 			// the route's own path (`router.all("/")`), not `router.use`: core mounts routers by
 			// prefix, so a `use` parser would also read the bodies of later routes beneath it.
-			// 100kb caps DoS; real WebAuthn payloads are under 10KB.
+			// The parser caps a body at the package's limit (`internal/jsonBody.mts`).
 			(deps) => {
 				const router = express.Router();
-				router.all("/", express.json({ limit: "100kb" }));
+				router.all("/", jsonBody());
 				router.post(
 					"/",
 					createRegistrationOptionsHandler({
@@ -214,10 +215,10 @@ export const webauthnModule = defineModule<
 				};
 			},
 			// POST /oauth/webauthn/registration/verify
-			// express.json() on the route's own path — same rationale as registration/options above.
+			// The JSON parser on the route's own path — same rationale as registration/options above.
 			(deps) => {
 				const router = express.Router();
-				router.all("/", express.json({ limit: "100kb" }));
+				router.all("/", jsonBody());
 				router.post(
 					"/",
 					createRegistrationVerifyHandler({
@@ -234,11 +235,11 @@ export const webauthnModule = defineModule<
 				};
 			},
 			// POST /oauth/webauthn/authentication/options
-			// express.json() on the route's own path, as above. The route is unauthenticated and
+			// The JSON parser on the route's own path, as above. The route is unauthenticated and
 			// writes a challenge per request, so the deployment's limiter, when wired, guards it.
 			(deps) => {
 				const router = express.Router();
-				router.all("/", express.json({ limit: "100kb" }));
+				router.all("/", jsonBody());
 				const logger = deps.logger ?? consoleLogger;
 				router.post(
 					"/",

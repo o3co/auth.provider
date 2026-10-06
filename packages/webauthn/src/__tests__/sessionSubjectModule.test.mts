@@ -26,6 +26,8 @@
  * no subject otherwise, so the routes answer their `401`.
  */
 
+import { once } from "node:events";
+import net, { type AddressInfo } from "node:net";
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	createInMemorySessionLifecycleStore,
@@ -152,6 +154,8 @@ interface Setup {
 	readonly noStore?: boolean;
 	/** A subject an earlier middleware set — the deployment's bearer-token bridge, say. */
 	readonly preset?: WebAuthnSubject;
+	/** A body parser the host installs in front of the provider's routes. */
+	readonly upstream?: RequestHandler;
 }
 
 interface Contribution {
@@ -209,6 +213,7 @@ function setup(options: Setup = {}) {
 		if (options.preset !== undefined) req.webauthnSubject = options.preset;
 		next();
 	});
+	if (options.upstream !== undefined) app.use(options.upstream);
 	app.use(contribution.mountPath, contribution.handler);
 	const probe: RequestHandler = (req, res) => {
 		res.status(200).json({ subject: req.webauthnSubject ?? null });
@@ -522,6 +527,54 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 		expect(res.body.subject).toBeNull();
 		expect(get).not.toHaveBeenCalled();
 	});
+
+	it.each([
+		["options", "a body that is not JSON", "{not json", 400],
+		[
+			"verify",
+			"a body over the routes' 100kb limit",
+			JSON.stringify({ pad: "x".repeat(110_000) }),
+			413,
+		],
+	] as const)(
+		"reads the %s body before the session: %s is refused with no session read",
+		async (route, _what, body, status) => {
+			const { app, get } = setup();
+			const res = await supertest(app)
+				.post(`/oauth/webauthn/registration/${route}`)
+				.set("Content-Type", "application/json")
+				.send(body);
+			expect(res.status).toBe(status);
+			expect(get).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each([
+		["options", "text/plain", "text/plain"],
+		["verify", "a form", "application/x-www-form-urlencoded"],
+		["verify", "no content type", undefined],
+	] as const)(
+		"refuses a %s body sent as %s with 400 invalid_request, with no session read",
+		async (route, _what, contentType) => {
+			const { app, get } = setup();
+			const request = supertest(app).post(`/oauth/webauthn/registration/${route}`);
+			if (contentType !== undefined) request.set("Content-Type", contentType);
+			else request.unset("Content-Type");
+			const res = await request.send(Buffer.from('{"a":1}'));
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({ error: "invalid_request" });
+			expect(get).not.toHaveBeenCalled();
+		},
+	);
+
+	it("admits a POST with an empty body and no content type", async () => {
+		const { app } = setup();
+		const res = await supertest(app)
+			.post("/oauth/webauthn/registration/options")
+			.set("Content-Length", "0");
+		expect(res.status).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -603,5 +656,261 @@ describe("webauthnSessionSubjectModule — the deployment's mapper is held to th
 		expect(context.reason).toBe("threw");
 		expect(context.err).not.toBeInstanceOf(Error);
 		expect(context.err).toMatchObject({ name: "Error" });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The body's framing
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends `head` — the request line and headers, without `Host` and
+ * `Connection` — then `body`, exactly as given, over a socket; answers the
+ * status and the body, parsed when it is JSON.
+ */
+async function rawPost(app: express.Express, head: readonly string[], body = "") {
+	const server = app.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	try {
+		const { port } = server.address() as AddressInfo;
+		const socket = net.connect(port, "127.0.0.1");
+		await once(socket, "connect");
+		socket.write([...head, "Host: 127.0.0.1", "Connection: close", "", ""].join("\r\n") + body);
+		const chunks: Buffer[] = [];
+		for await (const chunk of socket) chunks.push(chunk as Buffer);
+		const text = Buffer.concat(chunks).toString("utf8");
+		const payload = text.slice(text.indexOf("\r\n\r\n") + 4);
+		let parsed: unknown = payload;
+		try {
+			parsed = JSON.parse(payload);
+		} catch {
+			// Not JSON: answered as text.
+		}
+		return { status: Number(text.split(" ")[1]), body: parsed as Record<string, unknown> };
+	} finally {
+		server.close();
+	}
+}
+
+const OPTIONS_LINE = "POST /oauth/webauthn/registration/options HTTP/1.1";
+const CHUNKED = "Transfer-Encoding: chunked";
+
+describe("webauthnSessionSubjectModule — the body's framing", () => {
+	it.each([
+		[
+			"a chunked JSON body",
+			[OPTIONS_LINE, "Content-Type: application/json", CHUNKED],
+			"1\r\n{\r\n1\r\n}\r\n0\r\n\r\n",
+		],
+		["an empty chunked body with no content type", [OPTIONS_LINE, CHUNKED], "0\r\n\r\n"],
+		["Content-Length: 00 with no content type", [OPTIONS_LINE, "Content-Length: 00"], ""],
+		["a request with no body framing at all", [OPTIONS_LINE], ""],
+		[
+			"a JSON body with a charset parameter",
+			[OPTIONS_LINE, "Content-Type: application/json; charset=utf-8", "Content-Length: 2"],
+			"{}",
+		],
+	] as const)("admits %s", async (_what, head, body) => {
+		const { app, get } = setup();
+		const res = await rawPost(app, head, body);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+		expect(get).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		[
+			"a body sent as application/*+json, which the routes' parser does not read",
+			[OPTIONS_LINE, "Content-Type: application/vnd.example+json", "Content-Length: 2"],
+			"{}",
+		],
+		["a chunked body with no content type", [OPTIONS_LINE, CHUNKED], "2\r\n{}\r\n0\r\n\r\n"],
+		[
+			"a body with a non-JSON content type",
+			[OPTIONS_LINE, "Content-Type: text/plain", "Content-Length: 02"],
+			"{}",
+		],
+	] as const)(
+		"refuses %s with 400 invalid_request, with no session read",
+		async (_what, head, body) => {
+			const { app, get } = setup();
+			const res = await rawPost(app, head, body);
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({ error: "invalid_request" });
+			expect(get).not.toHaveBeenCalled();
+		},
+	);
+
+	it("refuses a chunked body with no content type over the routes' 100kb limit with 413, with no session read", async () => {
+		const { app, get } = setup();
+		const big = "x".repeat(110_000);
+		const res = await rawPost(
+			app,
+			[OPTIONS_LINE, CHUNKED],
+			`${big.length.toString(16)}\r\n${big}\r\n0\r\n\r\n`,
+		);
+		expect(res.status).toBe(413);
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("leaves a subject an earlier middleware set for an empty chunked request from a browser that is not signed in", async () => {
+		const { app, get } = setup({ session: {}, preset: { userId: "bearer-user" } });
+		const res = await rawPost(app, [OPTIONS_LINE, CHUNKED], "0\r\n\r\n");
+		expect(res.status).toBe(200);
+		expect(res.body.subject).toEqual({ userId: "bearer-user" });
+		expect(get).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * A reader the host installs that takes the body to its end, then sets
+ * `req.body` to what `parsed` answers, if anything, and marks it read when
+ * `mark` is set.
+ */
+const drainingParser =
+	(parsed?: () => unknown, mark = false): RequestHandler =>
+	(req, _res, next) => {
+		req.on("data", () => {});
+		req.on("end", () => {
+			if (parsed !== undefined) req.body = parsed();
+			if (mark) (req as { _body?: boolean })._body = true;
+			next();
+		});
+	};
+
+const FORM = "application/x-www-form-urlencoded";
+
+describe("webauthnSessionSubjectModule — a body the host's own parser read first", () => {
+	it.each([
+		[
+			"a form body an upstream form parser read",
+			express.urlencoded({ extended: true }),
+			FORM,
+			"a=1&b[c]=2",
+		],
+		["a form body of separators alone", express.urlencoded({ extended: true }), FORM, "&&&"],
+		[
+			"a form body of a prototype key",
+			express.urlencoded({ extended: true }),
+			FORM,
+			"__proto__[x]=1",
+		],
+		["a text body an upstream text parser read", express.text(), "text/plain", "hello"],
+		[
+			"a multipart body a file-upload parser consumed, leaving an empty object",
+			drainingParser(() => ({}), true),
+			"multipart/form-data; boundary=x",
+			'--x\r\nContent-Disposition: form-data; name="f"; filename="a.txt"\r\n\r\nhello\r\n--x--\r\n',
+		],
+		[
+			"a body a reader drained without setting a body or marking it read",
+			drainingParser(),
+			"application/octet-stream",
+			"hello",
+		],
+		[
+			"a body parsed into an object that inherits a response",
+			drainingParser(() => Object.create({ response: { id: "x" } }), true),
+			"application/x-custom",
+			"hello",
+		],
+	] as const)(
+		"refuses %s with 400 invalid_request, with no session read",
+		async (_what, upstream, type, body) => {
+			const { app, get } = setup({ upstream });
+			const res = await supertest(app)
+				.post("/oauth/webauthn/registration/options")
+				.set("Content-Type", type)
+				.send(body);
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({ error: "invalid_request" });
+			expect(get).not.toHaveBeenCalled();
+		},
+	);
+
+	it("admits an empty form body an upstream form parser read", async () => {
+		const { app } = setup({ upstream: express.urlencoded({ extended: true }) });
+		const res = await rawPost(app, [
+			OPTIONS_LINE,
+			"Content-Type: application/x-www-form-urlencoded",
+			"Content-Length: 0",
+		]);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+	});
+
+	it("refuses an empty chunked body a parser marked read without taking the stream to its end: the framing shows a body", async () => {
+		const marksRead: RequestHandler = (req, _res, next) => {
+			(req as { _body?: boolean })._body = true;
+			req.body = {};
+			next();
+		};
+		const { app, get } = setup({ upstream: marksRead });
+		const res = await rawPost(app, [OPTIONS_LINE, `Content-Type: ${FORM}`, CHUNKED], "0\r\n\r\n");
+		expect(res.status).toBe(400);
+		expect(res.body).toMatchObject({ error: "invalid_request" });
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("refuses an empty chunked form body an upstream form parser read: only framing that shows no body passes", async () => {
+		const { app, get } = setup({ upstream: express.urlencoded({ extended: true }) });
+		const res = await rawPost(app, [OPTIONS_LINE, `Content-Type: ${FORM}`, CHUNKED], "0\r\n\r\n");
+		expect(res.status).toBe(400);
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("admits a form body an upstream form parser read under Content-Length: 00", async () => {
+		const { app } = setup({ upstream: express.urlencoded({ extended: true }) });
+		const res = await rawPost(app, [OPTIONS_LINE, `Content-Type: ${FORM}`, "Content-Length: 00"]);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+	});
+
+	it("admits a JSON body an upstream JSON parser read", async () => {
+		const { app } = setup({ upstream: express.json() });
+		const res = await supertest(app)
+			.post("/oauth/webauthn/registration/options")
+			.set("Content-Type", "application/json; charset=utf-8")
+			.send('{"a":1}');
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+	});
+
+	it("answers each of two requests pipelined on one connection", async () => {
+		const { app } = setup({ upstream: express.urlencoded({ extended: true }) });
+		const server = app.listen(0, "127.0.0.1");
+		await once(server, "listening");
+		try {
+			const { port } = server.address() as AddressInfo;
+			const socket = net.connect(port, "127.0.0.1");
+			await once(socket, "connect");
+			socket.write(
+				[
+					OPTIONS_LINE,
+					"Host: 127.0.0.1",
+					CHUNKED,
+					"",
+					"0",
+					"",
+					OPTIONS_LINE,
+					"Host: 127.0.0.1",
+					"Content-Type: application/x-www-form-urlencoded",
+					"Content-Length: 3",
+					"Connection: close",
+					"",
+					"a=1",
+				].join("\r\n"),
+			);
+			const chunks: Buffer[] = [];
+			for await (const chunk of socket) chunks.push(chunk as Buffer);
+			const statuses = [
+				...Buffer.concat(chunks)
+					.toString("utf8")
+					.matchAll(/HTTP\/1\.1 (\d{3})/g),
+			].map((match) => match[1]);
+			expect(statuses).toEqual(["200", "400"]);
+		} finally {
+			server.close();
+		}
 	});
 });
