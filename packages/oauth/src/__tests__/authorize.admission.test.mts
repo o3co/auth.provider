@@ -1612,6 +1612,104 @@ describe("/authorize on admission — the session's authentication time is read 
 		loginRedirectTo(await authorize(harness.app, Object.fromEntries(back.searchParams.entries())));
 	});
 
+	it("neither max_age nor prompt=login: a session authenticated further ahead than the skew allows is sent on one login trip, logged, never minted from", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: beyondTheSkew() })),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, baseQuery));
+		expect(back.searchParams.get("reauth_ask")).toBeTruthy();
+		expect(harness.regenerated).toBe(0);
+		expect(harness.createCode).not.toHaveBeenCalled();
+		expect(harness.logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: SID, clientId: CLIENT_ID, aheadMs: expect.any(Number) }),
+			"auth_time_ahead_of_clock",
+		);
+	});
+
+	it("neither max_age nor prompt=login: back from that login trip still further ahead than the skew allows is login_required, not sent again", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: beyondTheSkew() })),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, baseQuery));
+		harness.login({ isAuthenticated: true, user: { id: SUBJECT }, sid: SID });
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
+	it("neither max_age nor prompt=login: back from that login trip with a new session whose authentication time can be read, mints and spends the ask", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async (sid) =>
+				sid === SID
+					? record({ authTime: beyondTheSkew() })
+					: sid === "sid-2"
+						? record({ sid: "sid-2", authTime: new Date(), createdAt: new Date() })
+						: null,
+			),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, baseQuery));
+		const askKey = `reauth:${back.searchParams.get("reauth_ask")}`;
+		expect(harness.records.has(askKey)).toBe(true);
+		harness.login({ isAuthenticated: true, user: { id: SUBJECT }, sid: "sid-2" });
+		expect(
+			codeOf(await authorize(harness.app, Object.fromEntries(back.searchParams.entries()))),
+		).toBe("code-x");
+		expect(harness.createCode).toHaveBeenCalledTimes(1);
+		expect(harness.records.has(askKey)).toBe(false);
+	});
+
+	it("neither max_age nor prompt=login, under prompt=none: such a session is login_required, logged", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: beyondTheSkew() })),
+		});
+		const params = redirectParams(await authorize(harness.app, { ...baseQuery, prompt: "none" }));
+		expect(params.get("error")).toBe("login_required");
+		expect(harness.createCode).not.toHaveBeenCalled();
+		expect(harness.logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: SID, clientId: CLIENT_ID }),
+			"auth_time_ahead_of_clock",
+		);
+	});
+
+	it("neither max_age nor prompt=login, with no ask store to bound the trip: such a session is invalid_request", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: beyondTheSkew() })),
+			sessionStore: false,
+		});
+		const params = redirectParams(await authorize(harness.app, baseQuery));
+		expect(params.get("error")).toBe("invalid_request");
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
+	it("neither max_age nor prompt=login: an instant ahead within the skew reads as now, and mints", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 60_000) })),
+		});
+		expect(codeOf(await authorize(harness.app, baseQuery))).toBe("code-x");
+	});
+
+	it("max_age met by a federated session's upstream time: established further ahead than the skew allows is still sent to log in", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(
+				record({
+					authTime: beyondTheSkew(),
+					amr: ["fed"],
+					authentication: {
+						primary: "fed",
+						federation: "google",
+						upstreamAmr: undefined,
+						mfaAt: undefined,
+						upstreamAuthTime: minutesAgo(1),
+					},
+				}),
+			),
+		});
+		loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
 	it("a record whose authTime is not a valid Date never reaches these checks: admission answers not_live, and the browser logs in anew", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record({ authTime: new Date(Number.NaN) })),

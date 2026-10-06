@@ -33,6 +33,7 @@ import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provi
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
@@ -179,6 +180,7 @@ function buildApp() {
 			providerCallbackUrls: new Map([["apple", CALLBACK_URL]]),
 			userRepository: makeUserRepository(),
 			userSessionStore,
+			sessionLifecycle: fakeSessionLifecycle(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			federationTokenStore: makeFederationTokenStore(),
 			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,

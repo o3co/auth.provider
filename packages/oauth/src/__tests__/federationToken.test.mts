@@ -36,7 +36,7 @@ import {
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/federationToken.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import {
@@ -2857,6 +2857,245 @@ describe("POST /oauth/federation/:name/token", () => {
 					refreshToken: "original-rt", // preserved from original
 				}),
 			);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// Back-off after a refresh answered `500 refresh_failed`
+	// ---------------------------------------------------------------------------
+
+	describe("a refresh answered 500 refresh_failed is not retried upstream within the back-off window", () => {
+		const WINDOW_MS = 30_000;
+
+		/** An app whose provider's refresh is `refresh`, over a record that is due and holds `accessToken`. */
+		const appRefreshing = (
+			refresh: (rt: string) => Promise<unknown>,
+			fedTokenStore: FederationTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({
+					...baseFedTokens,
+					expiresAt: new Date(Date.now() - 1000),
+				}),
+			}),
+			observers: { auditSink?: AuditSink; logger?: Logger } = {},
+		) => {
+			const provider = { ...federationBase("google"), refreshToken: refresh };
+			return buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", provider as FederationProvider]]),
+				...observers,
+			});
+		};
+		const recordingAuditSink = (): AuditSink => ({
+			kind: "mock",
+			record: vi.fn().mockResolvedValue(undefined),
+		});
+		const refreshFailedAudits = (auditSink: AuditSink) =>
+			vi
+				.mocked(auditSink.record)
+				.mock.calls.filter(([event]) => event.type === "federation.token.refresh_failed");
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("answers a refused refresh answer again without calling the adapter", async () => {
+			const refresh = vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" });
+			const auditSink = recordingAuditSink();
+			const logger = createMockLogger();
+			const app = appRefreshing(refresh, undefined, { auditSink, logger });
+			const token = await mintAccessToken();
+
+			const first = await postFedToken(app, "google", token);
+			const second = await postFedToken(app, "google", token);
+
+			expect(first.status).toBe(500);
+			expect(second.status).toBe(500);
+			expect(second.body).toEqual({
+				error: "refresh_failed",
+				error_description: "federation token refresh failed",
+			});
+			expect(second.headers["cache-control"]).toBe("no-store");
+			expect(second.headers["retry-after"]).toBeUndefined();
+			expect(refresh).toHaveBeenCalledTimes(1);
+			// The held answer is not audited again, and logs the federation only.
+			expect(refreshFailedAudits(auditSink)).toHaveLength(1);
+			const backedOff = logger.info.mock.calls.filter(
+				([, msg]) => msg === "federation_token_refresh_backed_off",
+			);
+			expect(backedOff).toEqual([
+				[{ federation: "google" }, "federation_token_refresh_backed_off"],
+			]);
+			const logged = JSON.stringify(
+				Object.values(logger).flatMap((fn) => (vi.isMockFunction(fn) ? fn.mock.calls : [])),
+			);
+			expect(logged).not.toContain("sid-1");
+			expect(logged).not.toContain("upstream-at-xyz");
+			expect(logged).not.toContain("upstream-rt-xyz");
+		});
+
+		it("answers JSON 500 and audits a refresh whose record holds no access token", async () => {
+			const refresh = vi.fn().mockRejectedValue(new Error("unexpected provider error"));
+			const auditSink = recordingAuditSink();
+			const app = appRefreshing(
+				refresh,
+				makeFedTokenStore({
+					get: vi.fn().mockResolvedValue({
+						...baseFedTokens,
+						accessToken: undefined,
+						expiresAt: new Date(Date.now() - 1000),
+					}),
+				}),
+				{ auditSink },
+			);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(500);
+			expect(res.body).toEqual({
+				error: "refresh_failed",
+				error_description: "federation token refresh failed",
+			});
+			expect(refreshFailedAudits(auditSink)).toHaveLength(1);
+		});
+
+		it("releases the refresh lock on a held answer", async () => {
+			const refresh = vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" });
+			const release = vi.fn().mockResolvedValue(undefined);
+			const fedTokenStore = {
+				...makeFedTokenStore({
+					get: vi.fn().mockResolvedValue({
+						...baseFedTokens,
+						expiresAt: new Date(Date.now() - 1000),
+					}),
+				}),
+				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
+			};
+			const app = appRefreshing(refresh, fedTokenStore);
+			const token = await mintAccessToken();
+
+			await postFedToken(app, "google", token);
+			release.mockClear();
+			const held = await postFedToken(app, "google", token);
+
+			expect(held.status).toBe(500);
+			expect(refresh).toHaveBeenCalledTimes(1);
+			expect(release).toHaveBeenCalledTimes(1);
+		});
+
+		it("holds the record whose rotated refresh token was kept", async () => {
+			const due = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const get = vi.fn().mockResolvedValue(due);
+			const refresh = vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" });
+			const app = appRefreshing(refresh, makeFedTokenStore({ get }));
+			const token = await mintAccessToken();
+
+			await postFedToken(app, "google", token);
+			get.mockResolvedValue({ ...due, refreshToken: "rotated-rt" });
+			const held = await postFedToken(app, "google", token);
+
+			expect(held.status).toBe(500);
+			expect(refresh).toHaveBeenCalledTimes(1);
+		});
+
+		it("answers an unclassified refresh failure again without calling the adapter", async () => {
+			const refresh = vi.fn().mockRejectedValue(new Error("unexpected provider error"));
+			const app = appRefreshing(refresh);
+			const token = await mintAccessToken();
+
+			expect((await postFedToken(app, "google", token)).status).toBe(500);
+			expect((await postFedToken(app, "google", token)).status).toBe(500);
+			expect(refresh).toHaveBeenCalledTimes(1);
+		});
+
+		it("calls the adapter again once the window has passed", async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			const refresh = vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" });
+			const app = appRefreshing(refresh);
+			const token = await mintAccessToken();
+
+			await postFedToken(app, "google", token);
+			vi.setSystemTime(Date.now() + WINDOW_MS - 1);
+			await postFedToken(app, "google", token);
+			expect(refresh).toHaveBeenCalledTimes(1);
+
+			vi.setSystemTime(Date.now() + 1);
+			await postFedToken(app, "google", token);
+			expect(refresh).toHaveBeenCalledTimes(2);
+		});
+
+		it.each([
+			[
+				"an unreachable upstream (503)",
+				new Error("temporarily_unavailable: provider 503"),
+				503,
+				"temporarily_unavailable",
+			],
+			[
+				"a rate limit (429)",
+				Object.assign(new Error("rate limit hit"), { status: 429 }),
+				429,
+				"rate_limited",
+			],
+		])("does not back off after %s", async (_label, error, status, code) => {
+			const refresh = vi.fn().mockRejectedValue(error);
+			const app = appRefreshing(refresh);
+			const token = await mintAccessToken();
+
+			const first = await postFedToken(app, "google", token);
+			const second = await postFedToken(app, "google", token);
+
+			expect([first.status, first.body.error]).toEqual([status, code]);
+			expect([second.status, second.body.error]).toEqual([status, code]);
+			expect(refresh).toHaveBeenCalledTimes(2);
+		});
+
+		it("does not back off after a refused answer that served the stored token", async () => {
+			// No finite expiry: a refused lifetime still answers the stored token.
+			const refresh = vi.fn().mockResolvedValue({ accessToken: "new-at", expiresAt: "garbage" });
+			const app = appRefreshing(
+				refresh,
+				makeFedTokenStore({
+					get: vi.fn().mockResolvedValue({ ...baseFedTokens, expiresAt: null }),
+				}),
+			);
+			const token = await mintAccessToken();
+
+			const first = await postFedToken(app, "google", token);
+			await postFedToken(app, "google", token);
+
+			expect(first.status).toBe(200);
+			expect(refresh).toHaveBeenCalledTimes(2);
+		});
+
+		it("calls the adapter for a record relinked with another access token", async () => {
+			const get = vi
+				.fn()
+				.mockResolvedValue({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) });
+			const refresh = vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" });
+			const app = appRefreshing(refresh, makeFedTokenStore({ get }));
+			const token = await mintAccessToken();
+
+			await postFedToken(app, "google", token);
+			get.mockResolvedValue({
+				...baseFedTokens,
+				accessToken: "relinked-at",
+				expiresAt: new Date(Date.now() - 1000),
+			});
+			await postFedToken(app, "google", token);
+
+			expect(refresh).toHaveBeenCalledTimes(2);
+		});
+
+		it("holds back only the session whose refresh failed", async () => {
+			const refresh = vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" });
+			const app = appRefreshing(refresh);
+
+			await postFedToken(app, "google", await mintAccessToken());
+			await postFedToken(app, "google", await mintAccessToken({ sid: "sid-2" }));
+
+			expect(refresh).toHaveBeenCalledTimes(2);
 		});
 	});
 

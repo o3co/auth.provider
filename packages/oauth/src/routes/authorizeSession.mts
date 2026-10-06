@@ -22,6 +22,7 @@
 
 import {
 	type Admission,
+	authTimeAt,
 	cookieClaim,
 	describeAdmissionOutage,
 	isEmailVerified,
@@ -183,22 +184,18 @@ const newLogin = async (
 };
 
 /**
- * A `reauthenticate` admission: one login trip, with the ask recorded (and a
- * step-up trip already asked carried). The live session is kept, as the
- * `prompt=login` trip keeps it: a request anyone can send must not sign the
- * user out. A session that comes back from that trip still `reauthenticate`
- * is refused rather than sent round again, whether it logged in since the
- * ask or not: `unmet_authentication_requirements` for `acr` (a new login
- * could not carry what the request asked for), `login_required` for a
- * requirement. `prompt=none` is `login_required`; no session store to
- * record the ask in is a composition error.
+ * One login trip, with the ask recorded (and a step-up trip already asked
+ * carried). The live session is kept, as the `prompt=login` trip keeps it: a
+ * request anyone can send must not sign the user out. A session that comes
+ * back from the login trip already asked is refused by `refuse`, never sent
+ * round again. `prompt=none` is `login_required`; no session store to record
+ * the ask in is a composition error.
  */
-const reauthenticate = async (
+const oneLoginTrip = async (
 	ctx: AuthorizeContext,
-	admission: Extract<Admission, { outcome: "reauthenticate" }>,
 	prompt: PromptDirective,
-	requested: readonly string[],
 	askStore: ReauthAskStore | undefined,
+	refuse: (loginAskedAt: number) => void,
 ): Promise<void> => {
 	if (prompt.silent) {
 		redirectError(
@@ -222,22 +219,7 @@ const reauthenticate = async (
 	if (ask === undefined) return;
 	const loginAskedAt = ask?.loginAskedAt;
 	if (loginAskedAt !== undefined) {
-		// The trip already asked is the one this request gets. Whether a login
-		// was made since only words the refusal.
-		const loggedIn =
-			admission.session !== null &&
-			loginSince(admission.session, loginAskedAt, Date.now()) === true;
-		if (admission.requirement === "acr") {
-			refuseUnmet(ctx, "acr", requested);
-		} else {
-			redirectError(
-				ctx,
-				"login_required",
-				loggedIn
-					? `the session still does not meet the ${admission.requirement} requirement after the login it was sent to`
-					: "re-authentication was requested but the session was not re-established",
-			);
-		}
+		refuse(loginAskedAt);
 		return;
 	}
 	// An ask spent by another pass since it was read: no successor carries
@@ -245,6 +227,68 @@ const reauthenticate = async (
 	if ((await sendToLogin(ctx, askStore, ask)) === "spent") {
 		await sendToLogin(ctx, askStore, null);
 	}
+};
+
+/**
+ * A `reauthenticate` admission: one login trip (`oneLoginTrip`). A session
+ * that comes back from it still `reauthenticate` is refused, whether it
+ * logged in since the ask or not: `unmet_authentication_requirements` for
+ * `acr` (a new login could not carry what the request asked for),
+ * `login_required` for a requirement.
+ */
+const reauthenticate = (
+	ctx: AuthorizeContext,
+	admission: Extract<Admission, { outcome: "reauthenticate" }>,
+	prompt: PromptDirective,
+	requested: readonly string[],
+	askStore: ReauthAskStore | undefined,
+): Promise<void> =>
+	oneLoginTrip(ctx, prompt, askStore, (loginAskedAt) => {
+		// The trip already asked is the one this request gets. Whether a login
+		// was made since only words the refusal.
+		const loggedIn =
+			admission.session !== null &&
+			loginSince(admission.session, loginAskedAt, Date.now()) === true;
+		if (admission.requirement === "acr") {
+			refuseUnmet(ctx, "acr", requested);
+			return;
+		}
+		redirectError(
+			ctx,
+			"login_required",
+			loggedIn
+				? `the session still does not meet the ${admission.requirement} requirement after the login it was sent to`
+				: "re-authentication was requested but the session was not re-established",
+		);
+	});
+
+/**
+ * Whether `session`'s `authTime` can be read against this clock (core's
+ * `authTimeAt`), as every exchange of a code minted from it reads it. One
+ * that cannot is logged as the exchange logs it and sent on one login trip
+ * (`oneLoginTrip`), and refused with `login_required` when it comes back
+ * still unreadable; `false` then, once answered.
+ */
+const authTimeReadable = async (
+	ctx: AuthorizeContext,
+	session: UserSession,
+	prompt: PromptDirective,
+	askStore: ReauthAskStore | undefined,
+): Promise<boolean> => {
+	const now = Date.now();
+	if (authTimeAt(session.authTime, now) !== undefined) return true;
+	ctx.opts.logger.warn(
+		{ sid: session.sid, clientId: ctx.clientId, aheadMs: session.authTime.getTime() - now },
+		"auth_time_ahead_of_clock",
+	);
+	await oneLoginTrip(ctx, prompt, askStore, () =>
+		redirectError(
+			ctx,
+			"login_required",
+			"the session's authentication time cannot be read; a new login is required",
+		),
+	);
+	return false;
 };
 
 /**
@@ -256,7 +300,8 @@ const reauthenticate = async (
  * session, freshness (`max_age`, `prompt=login`) is decided first, so
  * `prompt=none` with a stale `max_age` is `login_required` whatever the
  * verdict; then `unmet` is refused, `step_up` is a trip, and `admitted`
- * proceeds with the `acr` the session met.
+ * proceeds with the `acr` the session met, once its `authTime` can be read
+ * against the clock (`authTimeReadable`).
  */
 export const decideOnAdmission = async (
 	ctx: AuthorizeContext,
@@ -333,6 +378,12 @@ const decideWithAsk = async (
 	}
 	if (admission.outcome === "step_up") {
 		return (await stepUpTrip(ctx, admission, prompt, askStore, ask)) === "spent" ? "spent" : null;
+	}
+	if (
+		admission.session !== null &&
+		!(await authTimeReadable(ctx, admission.session, prompt, askStore))
+	) {
+		return null;
 	}
 	return { session: admission.session, acr: admission.acr, freshByAsk: reauth === "fresh_by_ask" };
 };

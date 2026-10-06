@@ -37,6 +37,7 @@ import {
 	type StoredRecord,
 } from "./federationTokenRecord.mjs";
 import { narrowedScope, type RefreshReading } from "./federationTokenRefreshAnswer.mjs";
+import { stampRefreshFailed } from "./federationTokenRefreshFailure.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
 
 /**
@@ -137,6 +138,7 @@ export const recordRefresh = async (
 			}
 			return answerToken(ctx, caller, currentTokens, false);
 		}
+		stampRefreshFailed(ctx, caller, current);
 		return res.status(500).json({
 			error: "refresh_failed",
 			error_description: "federation token refresh failed",

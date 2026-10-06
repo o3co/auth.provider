@@ -267,11 +267,7 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 			SUBJECT,
 			expect.objectContaining({ provider: "test" }),
 		);
-		expect(harness.sessionFederationIndex.addFederation).toHaveBeenCalledWith(
-			SID,
-			"test",
-			live().expiresAt,
-		);
+		expect(harness.sessionLifecycle.join).toHaveBeenCalledWith(SID, { federation: "test" });
 	});
 
 	it("records the subject in a form_post transaction too", async () => {
@@ -537,11 +533,7 @@ describe("the link callback reads the session the start bound through admission 
 			SUBJECT,
 			expect.objectContaining({ provider: "test", sub: "external-42" }),
 		);
-		expect(harness.sessionFederationIndex.addFederation).toHaveBeenCalledWith(
-			SID,
-			"test",
-			live().expiresAt,
-		);
+		expect(harness.sessionLifecycle.join).toHaveBeenCalledWith(SID, { federation: "test" });
 	});
 
 	it("admits a form_post callback arriving on a fresh cookie session, by the transaction's sid and subject", async () => {

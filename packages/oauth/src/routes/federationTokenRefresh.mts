@@ -128,6 +128,21 @@ export const refreshStoredTokens = async (
 			});
 		}
 
+		// A refresh of this record answered `500 refresh_failed` within the
+		// back-off window: answered the same without calling the upstream.
+		if (
+			ctx.refreshBackoff.holds(
+				{ sid, federationName: name, accessToken: current.value.accessToken },
+				Date.now(),
+			)
+		) {
+			logger.info({ federation }, "federation_token_refresh_backed_off");
+			return res.status(500).json({
+				error: "refresh_failed",
+				error_description: "federation token refresh failed",
+			});
+		}
+
 		// 11e: refresh with the freshest snapshot. The lock is held across the
 		// IdP call; its TTL should cover the IdP timeout, else a second waiter
 		// also calls the IdP. Each write lands only on the record it refreshed

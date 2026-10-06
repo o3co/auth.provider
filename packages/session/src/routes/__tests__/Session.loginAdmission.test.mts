@@ -42,6 +42,7 @@ import express from "express";
 import session, { MemoryStore } from "express-session";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import {
 	type AnswerInterruptionResult,
 	answerInterruption,
@@ -248,6 +249,7 @@ function setup(options: Setup = {}) {
 			sessionCookie,
 			deploymentMode: "unset",
 			userSessionStore,
+			sessionLifecycle: fakeSessionLifecycle(),
 			subjectSessionIndex: subjectSessionIndex as never,
 			logger: logger as unknown as Logger,
 			requirements: resolverForTests(options.requirements ?? []),

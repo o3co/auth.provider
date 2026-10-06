@@ -34,6 +34,7 @@ import {
 	type SubjectRevocation,
 } from "@o3co/auth-provider-core";
 import type { Request, Response } from "express";
+import type { RefreshBackoff } from "./federationTokenRefreshBackoff.mjs";
 
 export interface FederationTokenRouterOptions {
 	keyStore: KeyStore;
@@ -132,6 +133,8 @@ export interface FederationTokenContext {
 	readonly refreshBufferMs: number;
 	/** A refreshed token is stored for at most this many milliseconds. */
 	readonly maxTokenLifetimeMs: number;
+	/** The router's refresh back-off, shared by its requests. */
+	readonly refreshBackoff: RefreshBackoff;
 }
 
 /** The access token's claims the later stages act on, each present. */

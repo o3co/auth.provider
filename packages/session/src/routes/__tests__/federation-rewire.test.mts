@@ -15,6 +15,7 @@
  */
 import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
+import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createRouter } from "../Federation.mjs";
 
@@ -66,6 +67,7 @@ describe("Federation.mts route rewire — federationRedirectPolicyResolver param
 				providerCallbackUrls: new Map(),
 				userRepository: { authenticateByToken: async () => null } as never,
 				userSessionStore: {} as never,
+				sessionLifecycle: fakeSessionLifecycle(),
 				sessionFederationIndex: stubSessionFederationIndex,
 				federationTokenStore: {} as never,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),

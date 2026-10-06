@@ -25,6 +25,7 @@ import {
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
+	sessionLifecycleModule,
 } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
@@ -133,6 +134,7 @@ async function boot(federations: Record<string, unknown>, options: BootOptions =
 		sessionStoreModule,
 		sessionModule,
 		memorySessionStoresModule,
+		sessionLifecycleModule,
 		memoryFederationTokenStoreModule,
 		memoryRefreshTokenFamilyStoreModule,
 		defaultRefreshTokenFamilyRevocationModule,
