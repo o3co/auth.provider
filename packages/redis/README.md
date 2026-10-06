@@ -149,7 +149,11 @@ holds the store to the same gate
 
 - The policy is read from `INFO memory`, and from `CONFIG GET
   maxmemory-policy` only where INFO does not say, so a managed server that
-  blocks `CONFIG` still reports it.
+  blocks `CONFIG` still reports it. `CONFIG GET` is read in either reply
+  shape, a flat array (RESP2) or a map (RESP3). A reply about the policy that
+  is neither a policy nor a refusal — another shape, or `INFO memory` naming
+  the policy on two lines with different values — fails the build, whatever
+  the client assumes.
 - `noeviction` passes. Any other policy it reads — `allkeys-*`, `volatile-*`
   or one it does not know — refuses with a `RedisStoreEvictableError`
   (`reason` `<store>-evictable`, `maxmemoryPolicy`), which boot carries as the
