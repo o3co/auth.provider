@@ -393,7 +393,10 @@ describe("discovery", () => {
 	const withoutConnections = (config: AppConfig): AppConfig =>
 		({
 			...config,
-			"federation-grants": { ...config["federation-grants"], connections: {} },
+			"federation-grants": {
+				...(config["federation-grants"] as Record<string, unknown>),
+				connections: {},
+			},
 		}) as AppConfig;
 
 	const FEATURE_SWITCHES: ReadonlyArray<

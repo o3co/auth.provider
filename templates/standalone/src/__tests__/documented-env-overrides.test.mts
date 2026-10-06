@@ -28,6 +28,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
+import { federationGrantsModule } from "@o3co/auth-provider-federation-grants";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
@@ -673,6 +674,13 @@ function sessionStoreSection(config: AppConfig): {
 	>;
 }
 
+/** `federation-grants {}` as the federation-grants module parses it. */
+function federationGrantsSection(config: AppConfig): { readonly enabled?: boolean } {
+	const schema = federationGrantsModule.section?.schema;
+	if (schema === undefined) throw new Error("the federation-grants module declares no section");
+	return schema.parse(config["federation-grants"]) as ReturnType<typeof federationGrantsSection>;
+}
+
 /** `session {}` as the session module parses it. */
 function sessionSection(config: AppConfig): { readonly csrf?: { readonly ttlSeconds: number } } {
 	const schema = sessionModule.section?.schema;
@@ -766,7 +774,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.core?.federations?.oidc?.enabled).toBe(true);
 		// A leftover string here would be read as "on" by a truthiness check
 		// and as "off" by `=== true`, for a feature whose whole default is off.
-		expect(config["federation-grants"]?.enabled).toBe(true);
+		expect(federationGrantsSection(config).enabled).toBe(true);
 	});
 
 	it("turns every non-boolean override into its declared type", async () => {

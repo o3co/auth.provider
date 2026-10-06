@@ -136,6 +136,8 @@ describe("oauthSessionGrantModule", () => {
 				logger,
 			},
 		});
+		// What boot logged of the configuration is not this test's: the outage alone is.
+		logger.warn.mockClear();
 		try {
 			const grant = handle.inspect.grants.get("session") as GrantHandler;
 			const { result } = await grant.handle({
