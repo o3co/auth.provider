@@ -16,12 +16,17 @@
 
 /**
  * The name a deployment selected its configuration by, as every guard that
- * refuses a development-only thing reads it: trimmed and in lower case, and
- * production or staging whichever of the names consulted says so.
+ * refuses a development-only thing reads it: trimmed and in lower case,
+ * production or staging whichever of the names consulted says so, and
+ * development or test only when every name set says so and one is set.
  */
 
 import { describe, expect, it } from "vitest";
-import { productionEnvironmentIn, readEnvironmentName } from "#/index.mjs";
+import {
+	isDevelopmentEnvironment,
+	productionEnvironmentIn,
+	readEnvironmentName,
+} from "#/index.mjs";
 
 describe("readEnvironmentName", () => {
 	it("reads a name trimmed and in lower case, and anything else, or nothing, as none", () => {
@@ -48,6 +53,39 @@ describe("productionEnvironmentIn", () => {
 			["preproduction", "production-like", "stage"],
 		]) {
 			expect(productionEnvironmentIn(names), JSON.stringify(names)).toBeUndefined();
+		}
+	});
+});
+
+describe("isDevelopmentEnvironment", () => {
+	it("answers yes when every name set reads as development or test, whatever its case and the whitespace around it", () => {
+		for (const names of [
+			["development"],
+			[" Test\n"],
+			["development", "test"],
+			[undefined, "DEVELOPMENT", ""],
+		]) {
+			expect(isDevelopmentEnvironment(names), JSON.stringify(names)).toBe(true);
+		}
+	});
+
+	it("answers no when no name is set", () => {
+		for (const names of [[], [undefined], ["", "   "], [null, 7]]) {
+			expect(isDevelopmentEnvironment(names), JSON.stringify(names)).toBe(false);
+		}
+	});
+
+	it("answers no when any name set reads as something else, production and an alias of it included", () => {
+		for (const names of [
+			["prod"],
+			["development", "production"],
+			["test", "staging"],
+			["development", "qa"],
+			["dev"],
+			["testing"],
+			[undefined, "local"],
+		]) {
+			expect(isDevelopmentEnvironment(names), JSON.stringify(names)).toBe(false);
 		}
 	});
 });
