@@ -400,19 +400,19 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `subjectRevocation` (the boundary the linking routes' admission reads),
   `sessionLifecycleStore` (core's session lifecycle port, which the linking
   routes' admission reads after a live record: a session closing or closed
-  links nothing; required beside `userSessionStore`, so the federation
-  routes' factory refuses a composition without it, naming the slot),
-  `sessionLifecycle` (core's session lifecycle, which
-  `sessionLifecycleModule` fills: each login opens its session's lifecycle
-  record, a federation joins the session through it, and the logout closes
-  the session through it; `loginCompletionModule` takes it too). It is
-  optional to the manifest, but where `userSessionStore` is wired — always,
-  for this module — it is required: the route factories, and
-  `loginCompletionModule`'s provider, refuse the boot without it, naming
-  both slots. A sessionless composition (no user-session store) needs none.
-  `auditSink` unwired must be declared with `core.declaredAbsent = ["auditSink"]`, and
-  `subjectSessionIndex` and `subjectRevocation` unwired with
-  `oauth.revocation.subject = "unsupported"`, or boot refuses.
+  links nothing; it is required beside `userSessionStore`, and the federation
+  routes' factory refuses a composition without it, naming both slots),
+  `sessionLifecycle` (core's session lifecycle, which `sessionLifecycleModule`
+  fills: each login opens its session's lifecycle record, a federation joins
+  the session through it, and the logout closes the session through it;
+  `loginCompletionModule` takes it too). It is optional to the manifest, but
+  where `userSessionStore` is wired — always, for this module — it is
+  required: the route factories, and `loginCompletionModule`'s provider,
+  refuse the boot without it, naming both slots. A sessionless composition (no
+  user-session store) needs none. `auditSink` unwired must be declared with
+  `core.declaredAbsent = ["auditSink"]`, and `subjectSessionIndex` and
+  `subjectRevocation` unwired with `oauth.revocation.subject = "unsupported"`,
+  or boot refuses.
 
 ### Password login
 

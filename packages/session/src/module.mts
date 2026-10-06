@@ -237,8 +237,9 @@ export const sessionModule = defineModule<
 	// lifecycle, opens each login's session record, joins its federations and
 	// is what `POST /session/logout` closes the session through, and
 	// `sessionLifecycleStore` is the lifecycle port the link routes' admission
-	// reads: both are required beside `userSessionStore`, and the route
-	// factories refuse a composition without either, naming the slot.
+	// reads: both are required beside `userSessionStore`. The route factories
+	// refuse a composition without `sessionLifecycle`, and the federation
+	// routes' factory one without `sessionLifecycleStore`, naming both slots.
 	optional: [
 		"logger",
 		"attemptCounter",
