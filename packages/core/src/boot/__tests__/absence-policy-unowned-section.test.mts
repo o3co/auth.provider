@@ -26,7 +26,8 @@
  * would once have booted. A value written at the key is read as written.
  *
  * The section the guard reads is owned while a loaded module's policy reads
- * it: boot does not name it among the sections nothing loaded reads.
+ * it, and `oauth {}` always, since core reads keys of it by path: boot does
+ * not name it among the sections nothing loaded reads.
  */
 
 import { fileURLToPath } from "node:url";
@@ -175,7 +176,10 @@ describe("an absence policy keyed in oauth {} with no oauth-package module loade
 		expect(noticesOf(logger, "config_sections_not_loaded")).toEqual([]);
 	});
 
-	it("names oauth as ignored when no loaded module reads it", async () => {
+	it("does not name oauth with no module reading it either: core reads keys of it by path", async () => {
+		// The issuer a grant policy is checked against, the lifetimes a host's
+		// token settings are bounded by and the default family modules keep a
+		// revoked family for: a section core reads is not one nothing reads.
 		const logger = recordingLogger();
 		const handle = await bootOn(
 			resolvedWithoutOAuth({}, 'oauth.revocation.subject = "unsupported"\n'),
@@ -183,6 +187,7 @@ describe("an absence policy keyed in oauth {} with no oauth-package module loade
 			logger,
 		);
 		await handle.dispose();
-		expect(noticesOf(logger, "config_sections_ignored")).toEqual([{ sections: ["oauth"] }]);
+		expect(noticesOf(logger, "config_sections_ignored")).toEqual([]);
+		expect(noticesOf(logger, "config_sections_not_loaded")).toEqual([]);
 	});
 });

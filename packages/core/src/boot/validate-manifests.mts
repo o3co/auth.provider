@@ -2164,18 +2164,27 @@ function validateAndComposeConfig(bootstrap: BootstrapMap): unknown {
 }
 
 /**
+ * The sections of another owner core reads keys of by path, loaded or not:
+ * `oauth {}`, for the issuer the grant-policy check and the discovery document
+ * are built on, the token lifetimes revoking records and a host's token
+ * settings are bounded by, and the revocation modes two absence policies are
+ * keyed in. The oauth module owns the section; while those readers move to its
+ * `oauthTokenSettings` slot, core reads the section where it is written.
+ */
+const SECTIONS_CORE_READS = ["oauth"] as const;
+
+/**
  * The top-level sections something loaded reads: every section core's base
- * declares, every loaded module's section, at its name, and the section each
- * absence policy a loaded module attaches is keyed in. The declared-absence
- * guard reads that key as written whether or not the module owning its
- * section is loaded (`oauth.revocation.subject`, read by modules outside the
- * oauth package), so the section is not one nothing reads. What the
- * configuration sets outside them is what stage 1's notices name
+ * declares, the sections core reads keys of by path (`SECTIONS_CORE_READS`),
+ * every loaded module's section, at its name, and the section each absence
+ * policy a loaded module attaches is keyed in, which the declared-absence
+ * guard reads as written whether or not the module owning it is loaded. What
+ * the configuration sets outside them is what stage 1's notices name
  * (`logConfigNotices`).
  * @internal
  */
 function ownedSections(modules: readonly Module[]): ReadonlySet<string> {
-	const owned = new Set<string>(Object.keys(CoreConfigSchema.shape));
+	const owned = new Set<string>([...Object.keys(CoreConfigSchema.shape), ...SECTIONS_CORE_READS]);
 	for (const m of modules) {
 		if (m.section !== undefined) owned.add(m.name);
 		for (const policy of Object.values(m.absencePolicies ?? {})) {

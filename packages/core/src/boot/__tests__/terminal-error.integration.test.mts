@@ -172,13 +172,12 @@ const routesModule = defineModule({
 });
 
 /**
- * The fixture's configuration less the oauth package's sections (`oauth`,
- * `oauth-session`, `oauth-authorization`): no module here reads them, so
+ * The fixture's configuration less the oauth package's grant switches
+ * (`oauth-session`, `oauth-authorization`): no module here reads them, so
  * boot would name them as ignored.
  */
-function withoutOAuthSections(): Record<string, unknown> {
+function withoutGrantSwitches(): Record<string, unknown> {
 	const {
-		oauth: _oauth,
 		"oauth-session": _session,
 		"oauth-authorization": _authorization,
 		...config
@@ -190,7 +189,7 @@ const boot = async (logger: ReturnType<typeof spyLogger>) => {
 	const handle = await createApp({
 		modules: [routesModule],
 		bootstrapComponents: {
-			config: withoutOAuthSections() as never,
+			config: withoutGrantSwitches() as never,
 			pathResolver: (s: string) => s,
 			logger: logger as unknown as Logger,
 		} satisfies Record<string, unknown> as BootstrapMap,
