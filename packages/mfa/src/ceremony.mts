@@ -471,8 +471,18 @@ export interface MfaCeremonyKit {
 		subject: string,
 		authTimeMs: number | undefined,
 	) => Promise<MfaFirstBindingDistrusted | MfaStoreOutage | undefined>;
-	/** `subject`'s first-binding mark noted at the clock's reading as it is noted, standing its lifetime; the outage otherwise. */
-	readonly noteFirstBinding: (subject: string) => Promise<MfaStoreOutage | undefined>;
+	/**
+	 * `subject`'s first-binding mark noted at the clock's reading as it is
+	 * noted, standing its lifetime, and the mark that stood before it — which
+	 * the store answers in the same step — judged as `firstBindingDistrust`
+	 * judges: the refusal when it distrusts an authentication at
+	 * `authTimeMs`; `undefined` when it does not, or none stood; the outage
+	 * when the mark could not be noted or the answer is outside the port.
+	 */
+	readonly noteFirstBinding: (
+		subject: string,
+		authTimeMs: number | undefined,
+	) => Promise<MfaFirstBindingDistrusted | MfaStoreOutage | undefined>;
 	/**
 	 * D12's reconciliation for `subject`, just verified with a counting factor
 	 * its `User` does not say it enrolled: the first-binding mark noted, then

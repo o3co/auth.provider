@@ -260,6 +260,88 @@ describe("a first binding in a session after the subject's first binding elsewhe
 		expect(events(logger, "info")).toContain("mfa_first_binding_distrusted");
 	});
 
+	it("is refused when another first binding's note, not answered in time, lands after the read under the lease: its own note answers the earlier mark, 401, nothing bound, the transaction kept, the earlier mark kept", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, logger } =
+			await composed("optional");
+		const stale = await signIn(app, userSessionStore);
+		const pending = await enrollFromAccount(stale.agent, "totp");
+		expect(pending.status, JSON.stringify(pending.body)).toBe(200);
+		freezeClock(T0 + 30_000);
+		const earlierAtMs = Date.now();
+		const note = transactionStore.noteFirstBinding.bind(transactionStore);
+		vi.spyOn(transactionStore, "noteFirstBinding").mockImplementationOnce(
+			async (subject, atMs, untilMs) => {
+				// Another first binding's note, given up on by its writer, lands after this
+				// completion read no mark under its lease.
+				await note(subject, earlierAtMs, earlierAtMs + LIFETIME_MS);
+				return note(subject, atMs, untilMs);
+			},
+		);
+
+		const res = await completeEnrollment(
+			stale.agent,
+			pending.body.transaction as string,
+			totpProofOf(pending.body.secret),
+		);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
+		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(await transactionStore.get(pending.body.transaction as string)).toMatchObject({
+			attempts: 1,
+		});
+		expect(events(logger, "info")).toContain("mfa_first_binding_distrusted");
+		expect(await transactionStore.firstBindingAt(ALICE.id, Date.now())).toBe(earlierAtMs);
+	});
+
+	it("is refused when a verification's note, not answered in time, lands after the read under the lease: the earlier mark protects as a note answered in time does", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, logger } =
+			await composed("optional");
+		const stale = await signIn(app, userSessionStore);
+		const pending = await enrollFromAccount(stale.agent, "totp");
+		expect(pending.status, JSON.stringify(pending.body)).toBe(200);
+		freezeClock(T0 + 30_000);
+		// A login verified with a factor its User does not say it enrolled reconciles
+		// the witness: its note is not answered in time, and lands later.
+		const seeded = await seedTotp(factorStore);
+		const note = transactionStore.noteFirstBinding.bind(transactionStore);
+		let landLate: (() => Promise<unknown>) | undefined;
+		const spy = vi
+			.spyOn(transactionStore, "noteFirstBinding")
+			.mockImplementationOnce(async (...args) => {
+				landLate = () => note(...args);
+				throw new Error("the store did not answer in time");
+			})
+			.mockImplementationOnce(async (subject, atMs, untilMs) => {
+				await landLate?.();
+				return note(subject, atMs, untilMs);
+			});
+		const login = await beginLogin(app);
+		const verified = await verify(
+			login.agent,
+			login.transaction,
+			seeded.record.id,
+			totpCode(seeded.secret),
+		);
+		expect(verified.status, JSON.stringify(verified.body)).toBe(200);
+		expect(landLate).toBeDefined();
+		await loseFactors(factorStore);
+
+		const res = await completeEnrollment(
+			stale.agent,
+			pending.body.transaction as string,
+			totpProofOf(pending.body.secret),
+		);
+
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(events(logger, "info")).toContain("mfa_first_binding_distrusted");
+		expect(await transactionStore.firstBindingAt(ALICE.id, Date.now())).toBe(T0 + 30_000);
+	});
+
 	it("answers 503 when the mark cannot be read under the subject's lease, binding nothing and keeping the transaction", async () => {
 		const { app, factorStore, transactionStore, userSessionStore, logger } =
 			await composed("optional");
