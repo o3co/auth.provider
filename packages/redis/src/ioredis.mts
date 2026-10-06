@@ -24,10 +24,7 @@ import type {
 	RateLimiterClient,
 	RefreshTokenFamilyClient,
 	ReplaySeenSetClient,
-	SessionFamilyIndexClient,
 	SessionLifecycleStoreClient,
-	SessionRPRegistryClient,
-	SessionSidSortedSetClient,
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	UserSessionStoreClient,
@@ -53,9 +50,6 @@ import {
 	makeIoredisReplaySeenSetClient,
 } from "./ioredis/clients/single-key-stores.mjs";
 import {
-	makeIoredisSessionFamilyIndexClient,
-	makeIoredisSessionRPRegistryClient,
-	makeIoredisSessionSidSortedSetClient,
 	makeIoredisSubjectRevocationClient,
 	makeIoredisSubjectSessionIndexClient,
 	makeIoredisUserSessionStoreClient,
@@ -103,9 +97,6 @@ export function makeIoredisClients(
 	replaySeenSetClient: ReplaySeenSetClient;
 	refreshTokenFamilyClient: RefreshTokenFamilyClient;
 	userSessionStoreClient: UserSessionStoreClient;
-	sessionRPRegistryClient: SessionRPRegistryClient;
-	sessionFamilyIndexClient: SessionFamilyIndexClient;
-	sessionFederationIndexClient: SessionSidSortedSetClient;
 	subjectSessionIndexClient: SubjectSessionIndexClient;
 	subjectRevocationClient: SubjectRevocationClient;
 	federationTokenStoreClient: FederationTokenStoreClient;
@@ -126,9 +117,6 @@ export function makeIoredisClients(
 	const replaySeenSetClient = makeIoredisReplaySeenSetClient(io);
 	const refreshTokenFamilyClient = makeIoredisRefreshTokenFamilyClient(io, logger);
 	const userSessionStoreClient = makeIoredisUserSessionStoreClient(io);
-	const sessionRPRegistryClient = makeIoredisSessionRPRegistryClient(io);
-	const sortedSetClient = makeIoredisSessionSidSortedSetClient(io);
-	const sessionFamilyIndexClient = makeIoredisSessionFamilyIndexClient(io);
 	const subjectSessionIndexClient = makeIoredisSubjectSessionIndexClient(io);
 	const subjectRevocationClient = makeIoredisSubjectRevocationClient(io);
 	const federationTokenStoreClient = makeIoredisFederationTokenStoreClient(io);
@@ -144,9 +132,6 @@ export function makeIoredisClients(
 		replaySeenSetClient,
 		refreshTokenFamilyClient,
 		userSessionStoreClient,
-		sessionRPRegistryClient,
-		sessionFamilyIndexClient,
-		sessionFederationIndexClient: sortedSetClient,
 		subjectSessionIndexClient,
 		subjectRevocationClient,
 		federationTokenStoreClient,

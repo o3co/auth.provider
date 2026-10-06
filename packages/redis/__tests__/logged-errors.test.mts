@@ -31,7 +31,6 @@ import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { RedisCodeRepository } from "#/code-repository.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
-import { createRedisSessionRPRegistry } from "#/sessionRPRegistry.mjs";
 import { createRedisUserSessionStore } from "#/userSessionStore.mjs";
 
 let container: StartedTestContainer;
@@ -177,37 +176,6 @@ describe("a stored session envelope it cannot parse", () => {
 		]);
 		for (const line of lines) {
 			expect(line).not.toContain("alice@exa");
-			expect(line).not.toContain(quoted);
-		}
-	});
-
-	it("is logged by the RP registry as a SyntaxError's projection, never the record V8 quotes", async () => {
-		const keyPrefix = `logged-errors:rp:${randomUUID()}:`;
-		const { sessionRPRegistryClient } = makeIoredisClients(raw);
-		const { logger, lines, calls } = serialiseEverythingLogger();
-		const registry = createRedisSessionRPRegistry({
-			client: sessionRPRegistryClient,
-			keyPrefix,
-			logger,
-		});
-		const envelope = `{"clientId":"rp-1","backchannelLogoutUri":https://rp.example/bc-logout}`;
-		await raw.hset(`${keyPrefix}sid-1`, "rp-1", envelope);
-		const quoted = parseMessageOf(envelope);
-		expect(quoted).toContain("https://rp");
-
-		expect(await registry.listRPs("sid-1")).toEqual([]);
-
-		expect(calls).toEqual([
-			{
-				level: "warn",
-				args: [
-					{ sid: "sid-1", reason: "json_parse", err: { name: "SyntaxError", stack: FRAMES } },
-					"session_rp_registry_corrupt_envelope",
-				],
-			},
-		]);
-		for (const line of lines) {
-			expect(line).not.toContain("https://rp");
 			expect(line).not.toContain(quoted);
 		}
 	});

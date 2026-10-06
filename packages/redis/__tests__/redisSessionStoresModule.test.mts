@@ -18,9 +18,7 @@ import {
 	createApp,
 	defineModule,
 	type Logger,
-	type SessionFamilyIndex,
 	type SessionLifecycleStore,
-	supportsSessionEnd,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { Redis } from "ioredis";
@@ -48,16 +46,13 @@ const minBoot = (extra: Record<string, unknown>) =>
 	}) as never;
 
 describe("redisSessionStoresModule manifest", () => {
-	it("declares requires: 7 per-purpose client slots", () => {
+	it("declares requires: 4 per-purpose client slots", () => {
 		// The two subject slots are `requires`, not optional: filling neither
 		// would leave `revokeAllForSubject` answering `unavailable` and
 		// revoking nothing.
 		expect(new Set(redisSessionStoresModule.requires)).toEqual(
 			new Set([
 				"userSessionStoreClient",
-				"sessionRPRegistryClient",
-				"sessionFamilyIndexClient",
-				"sessionFederationIndexClient",
 				"subjectSessionIndexClient",
 				"subjectRevocationClient",
 				"sessionLifecycleStoreClient",
@@ -65,15 +60,17 @@ describe("redisSessionStoresModule manifest", () => {
 		);
 	});
 
-	it("provides 7 components", () => {
-		const provides = redisSessionStoresModule.provides as Record<string, unknown>;
-		expect(typeof provides.userSessionStore).toBe("function");
-		expect(typeof provides.sessionRPRegistry).toBe("function");
-		expect(typeof provides.sessionFamilyIndex).toBe("function");
-		expect(typeof provides.sessionFederationIndex).toBe("function");
-		expect(typeof provides.subjectSessionIndex).toBe("function");
-		expect(typeof provides.subjectRevocation).toBe("function");
-		expect(typeof provides.sessionLifecycleStore).toBe("function");
+	it("provides 4 components: the session record, the subject stores and the lifecycle store", () => {
+		// The per-session stores (RP registry, family index, federation index)
+		// are not provided: core's session lifecycle holds what they held.
+		expect(new Set(Object.keys(redisSessionStoresModule.provides ?? {}))).toEqual(
+			new Set([
+				"userSessionStore",
+				"subjectSessionIndex",
+				"subjectRevocation",
+				"sessionLifecycleStore",
+			]),
+		);
 	});
 
 	it("reads its own section, redis-session-stores, keyPrefix defaulting to ss:", () => {
@@ -83,19 +80,12 @@ describe("redisSessionStoresModule manifest", () => {
 });
 
 describe("redisSessionStoresModule wiring", () => {
-	it("createApp wires all 6 components against per-purpose client slots", async () => {
+	it("createApp wires the session record and the subject stores against per-purpose client slots", async () => {
 		// Activator pattern (no `activate` field on ModuleSpec): use contributes.routes
 		// to force closure root inclusion, then read from handle.components after boot.
 		const activator = defineModule({
 			name: "activator",
-			requires: [
-				"userSessionStore",
-				"sessionRPRegistry",
-				"sessionFamilyIndex",
-				"sessionFederationIndex",
-				"subjectSessionIndex",
-				"subjectRevocation",
-			] as never,
+			requires: ["userSessionStore", "subjectSessionIndex", "subjectRevocation"] as never,
 			contributes: {
 				routes: [
 					{
@@ -112,7 +102,7 @@ describe("redisSessionStoresModule wiring", () => {
 			bootstrapComponents: {
 				config: minBoot({ "redis-session-stores": { keyPrefix: "wire:" } }),
 				pathResolver: (p: string) => p,
-				// Spread every per-purpose wrapper; the module consumes its 6.
+				// Spread every per-purpose wrapper; the module consumes its 4.
 				...makeIoredisClients(raw),
 			} as never,
 		});
@@ -120,49 +110,8 @@ describe("redisSessionStoresModule wiring", () => {
 		try {
 			const components = handle.components as Record<string, unknown>;
 			expect((components.userSessionStore as { kind: string }).kind).toBe("redis");
-			expect((components.sessionRPRegistry as { kind: string }).kind).toBe("redis");
-			expect((components.sessionFamilyIndex as { kind: string }).kind).toBe("redis");
-			expect((components.sessionFederationIndex as { kind: string }).kind).toBe("redis");
 			expect((components.subjectSessionIndex as { kind: string }).kind).toBe("redis");
 			expect((components.subjectRevocation as { kind: string }).kind).toBe("redis");
-		} finally {
-			await handle.dispose();
-		}
-	});
-
-	it("provides a family index with the session-end capability, its mark under the section's keyPrefix (ss: by default)", async () => {
-		const activator = defineModule({
-			name: "activator",
-			requires: ["sessionFamilyIndex"] as never,
-			contributes: {
-				routes: [
-					{
-						mountPath: "/__test_noop__",
-						id: "test-noop",
-						handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
-					},
-				],
-			},
-		});
-		const handle = await createApp({
-			modules: [redisSessionStoresModule, activator],
-			bootstrapComponents: {
-				config: minBoot({}),
-				pathResolver: (p: string) => p,
-				...makeIoredisClients(raw),
-			} as never,
-		});
-		try {
-			const index = (handle.components as { sessionFamilyIndex?: SessionFamilyIndex })
-				.sessionFamilyIndex;
-			if (!supportsSessionEnd(index)) {
-				throw new Error("the module's family index does not claim SupportsSessionEnd");
-			}
-			const expiresAt = new Date(Date.now() + 60_000);
-			await index.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
-			expect(await index.endSession("sid-1", expiresAt)).toEqual(["fam-A"]);
-			expect(await raw.exists("ss:fi-ended:sid-1")).toBe(1);
-			expect(await raw.zrange("ss:fi:sid-1", "0", "-1")).toEqual(["fam-A"]);
 		} finally {
 			await handle.dispose();
 		}

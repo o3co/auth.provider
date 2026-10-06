@@ -24,12 +24,7 @@ import type {
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,
-	SessionFamilyIndexClient,
 	SessionLifecycleStoreClient,
-	SessionRPRegistryClient,
-	SessionRPRegistryMultiClient,
-	SessionSidSortedSetClient,
-	SessionSidSortedSetMultiClient,
 	UserSessionStoreClient,
 } from "#/index.mjs";
 import type { makeIoredisClients } from "#/ioredis.mjs";
@@ -43,13 +38,16 @@ describe("makeIoredisClients return shape", () => {
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("replaySeenSetClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("refreshTokenFamilyClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("userSessionStoreClient");
-		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionRPRegistryClient");
-		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionFamilyIndexClient");
-		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionFederationIndexClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("federationTokenStoreClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionLifecycleStoreClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("rateLimiterClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("attemptCounterClient");
+	});
+
+	it("has no client for the per-session stores core's session lifecycle replaced", () => {
+		expectTypeOf<IoredisClientsReturn>().not.toHaveProperty("sessionRPRegistryClient");
+		expectTypeOf<IoredisClientsReturn>().not.toHaveProperty("sessionFamilyIndexClient");
+		expectTypeOf<IoredisClientsReturn>().not.toHaveProperty("sessionFederationIndexClient");
 	});
 
 	it("attemptCounterClient satisfies AttemptCounterClient", () => {
@@ -80,29 +78,6 @@ describe("makeIoredisClients return shape", () => {
 		expectTypeOf<
 			IoredisClientsReturn["userSessionStoreClient"]
 		>().toMatchTypeOf<UserSessionStoreClient>();
-	});
-
-	it("sessionRPRegistryClient satisfies SessionRPRegistryClient", () => {
-		expectTypeOf<
-			IoredisClientsReturn["sessionRPRegistryClient"]
-		>().toMatchTypeOf<SessionRPRegistryClient>();
-	});
-
-	it("sessionFamilyIndexClient satisfies SessionFamilyIndexClient, a SessionSidSortedSetClient", () => {
-		expectTypeOf<
-			IoredisClientsReturn["sessionFamilyIndexClient"]
-		>().toMatchTypeOf<SessionFamilyIndexClient>();
-		expectTypeOf<SessionFamilyIndexClient>().toMatchTypeOf<SessionSidSortedSetClient>();
-	});
-
-	it("a SessionSidSortedSetClient is a SessionFamilyIndexClient: the mark's two methods are optional", () => {
-		expectTypeOf<SessionSidSortedSetClient>().toMatchTypeOf<SessionFamilyIndexClient>();
-	});
-
-	it("sessionFederationIndexClient satisfies SessionSidSortedSetClient", () => {
-		expectTypeOf<
-			IoredisClientsReturn["sessionFederationIndexClient"]
-		>().toMatchTypeOf<SessionSidSortedSetClient>();
 	});
 
 	it("federationTokenStoreClient satisfies FederationTokenStoreClient", () => {
@@ -184,22 +159,10 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 		>();
 	});
 
-	it("sessionRPRegistryClient slot is optional and of SessionRPRegistryClient type", () => {
-		expectTypeOf<ComponentMap["sessionRPRegistryClient"]>().toEqualTypeOf<
-			SessionRPRegistryClient | undefined
-		>();
-	});
-
-	it("sessionFamilyIndexClient slot is optional and of SessionFamilyIndexClient type", () => {
-		expectTypeOf<ComponentMap["sessionFamilyIndexClient"]>().toEqualTypeOf<
-			SessionFamilyIndexClient | undefined
-		>();
-	});
-
-	it("sessionFederationIndexClient slot is optional and of SessionSidSortedSetClient type", () => {
-		expectTypeOf<ComponentMap["sessionFederationIndexClient"]>().toEqualTypeOf<
-			SessionSidSortedSetClient | undefined
-		>();
+	it("declares no slot for the per-session stores' clients", () => {
+		expectTypeOf<ComponentMap>().not.toHaveProperty("sessionRPRegistryClient");
+		expectTypeOf<ComponentMap>().not.toHaveProperty("sessionFamilyIndexClient");
+		expectTypeOf<ComponentMap>().not.toHaveProperty("sessionFederationIndexClient");
 	});
 
 	it("federationTokenStoreClient slot is optional and of FederationTokenStoreClient type", () => {
@@ -265,20 +228,6 @@ describe("Per-purpose multi-client interfaces", () => {
 		expectTypeOf<DisposableRefreshTokenFamilyClient[typeof Symbol.asyncDispose]>().toEqualTypeOf<
 			() => Promise<void>
 		>();
-	});
-
-	it("SessionRPRegistryMultiClient has chainable hSet + pExpireAt + pExpireGT + exec", () => {
-		expectTypeOf<SessionRPRegistryMultiClient["hSet"]>().toBeFunction();
-		expectTypeOf<SessionRPRegistryMultiClient["pExpireAt"]>().toBeFunction();
-		expectTypeOf<SessionRPRegistryMultiClient["pExpireGT"]>().toBeFunction();
-		expectTypeOf<SessionRPRegistryMultiClient["exec"]>().toBeFunction();
-	});
-
-	it("SessionSidSortedSetMultiClient has chainable pExpireAt + pExpireGT + zAdd + exec", () => {
-		expectTypeOf<SessionSidSortedSetMultiClient["pExpireAt"]>().toBeFunction();
-		expectTypeOf<SessionSidSortedSetMultiClient["pExpireGT"]>().toBeFunction();
-		expectTypeOf<SessionSidSortedSetMultiClient["zAdd"]>().toBeFunction();
-		expectTypeOf<SessionSidSortedSetMultiClient["exec"]>().toBeFunction();
 	});
 });
 

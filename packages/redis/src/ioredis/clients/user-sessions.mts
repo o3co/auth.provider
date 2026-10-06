@@ -21,11 +21,6 @@
 
 import type { Redis } from "ioredis";
 import type {
-	SessionFamilyIndexClient,
-	SessionRPRegistryClient,
-	SessionRPRegistryMultiClient,
-	SessionSidSortedSetClient,
-	SessionSidSortedSetMultiClient,
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	SubjectSessionIndexMultiClient,
@@ -56,115 +51,6 @@ export function makeIoredisUserSessionStoreClient(io: Redis): UserSessionStoreCl
 	return userSessionStoreClient;
 }
 
-export function makeIoredisSessionRPRegistryClient(io: Redis): SessionRPRegistryClient {
-	// `pExpireGT` is `PEXPIREAT NX` then `PEXPIREAT GT`: Redis treats a key with no TTL as
-	// infinite for GT/LT/NX, so a bare GT on a fresh key would no-op and leave it persistent. NX
-	// sets the first TTL; GT only raises it, so a stale `expiresAt` arriving late cannot shorten it.
-	const buildRPRegistryMulti = (p: ReturnType<Redis["multi"]>): SessionRPRegistryMultiClient => {
-		const m: SessionRPRegistryMultiClient = {
-			hSet: (k, f, v) => {
-				p.hset(k, f, v);
-				return m;
-			},
-			pExpireAt: (k, ms) => {
-				p.pexpireat(k, ms);
-				return m;
-			},
-			pExpireGT: (k, ms) => {
-				p.pexpireat(k, ms, "NX");
-				p.pexpireat(k, ms, "GT");
-				return m;
-			},
-			exec: async () => assertPipelineSucceeded(await p.exec(), "sessionRPRegistryClient.exec"),
-		};
-		return m;
-	};
-
-	const sessionRPRegistryClient: SessionRPRegistryClient = {
-		unlink: (k) => io.unlink(k),
-		hSet: (k, f, v) => io.hset(k, f, v) as Promise<number>,
-		// `hscanStream` emits a flat `[field, value, field, value, …]` array per
-		// cursor; re-pair it so callers never see the flattening.
-		hScanIterator: (key, opts) =>
-			(async function* () {
-				const stream = io.hscanStream(key, { count: opts?.COUNT });
-				for await (const flat of stream) {
-					const pairs = flat as string[];
-					for (let i = 0; i + 1 < pairs.length; i += 2) {
-						yield [pairs[i] as string, pairs[i + 1] as string] as const;
-					}
-				}
-			})(),
-		multi: () => buildRPRegistryMulti(io.multi()),
-		pExpireAt: (k, ms) => io.pexpireat(k, ms),
-		// 1 when either NX (first write) or GT (raise) set the TTL. Returns early on NX: the GT
-		// that follows a successful NX answers 0 and would misreport the first write.
-		pExpireGT: async (k, ms) => {
-			const nx = await io.pexpireat(k, ms, "NX");
-			if (nx === 1) return nx;
-			return io.pexpireat(k, ms, "GT");
-		},
-	};
-	return sessionRPRegistryClient;
-}
-
-export function makeIoredisSessionSidSortedSetClient(io: Redis): SessionSidSortedSetClient {
-	const buildSortedSetMulti = (p: ReturnType<Redis["multi"]>): SessionSidSortedSetMultiClient => {
-		const m: SessionSidSortedSetMultiClient = {
-			pExpireAt: (k, ms) => {
-				p.pexpireat(k, ms);
-				return m;
-			},
-			pExpireGT: (k, ms) => {
-				p.pexpireat(k, ms, "NX");
-				p.pexpireat(k, ms, "GT");
-				return m;
-			},
-			zAdd: (k, e, opts) => {
-				if (opts?.NX) p.zadd(k, "NX", e.score, e.value);
-				else p.zadd(k, e.score, e.value);
-				return m;
-			},
-			exec: async () => assertPipelineSucceeded(await p.exec(), "sessionSidSortedSetClient.exec"),
-		};
-		return m;
-	};
-
-	const sortedSetClient: SessionSidSortedSetClient = {
-		unlink: (k) => io.unlink(k),
-		multi: () => buildSortedSetMulti(io.multi()),
-		pExpireAt: (k, ms) => io.pexpireat(k, ms),
-		// See sessionRPRegistryClient.pExpireGT above for return-value rationale.
-		pExpireGT: async (k, ms) => {
-			const nx = await io.pexpireat(k, ms, "NX");
-			if (nx === 1) return nx;
-			return io.pexpireat(k, ms, "GT");
-		},
-		zAdd: (k, e, opts) =>
-			opts?.NX
-				? (io.zadd(k, "NX", e.score, e.value) as Promise<unknown> as Promise<number>)
-				: (io.zadd(k, e.score, e.value) as Promise<unknown> as Promise<number>),
-		// ioredis 6 types zrange's `stop` as `string | Buffer` (no `number`);
-		// the wire protocol stringifies args anyway, so String() is lossless.
-		zRange: (k, s, e) => io.zrange(k, String(s), String(e)),
-		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
-	};
-	return sortedSetClient;
-}
-
-/** The sorted set of `makeIoredisSessionSidSortedSetClient`, and the session's "ended" mark beside it. */
-export function makeIoredisSessionFamilyIndexClient(io: Redis): SessionFamilyIndexClient {
-	return {
-		...makeIoredisSessionSidSortedSetClient(io),
-		async writeEndedMark(key, msTimestamp) {
-			await io.set(key, "1", "PXAT", msTimestamp);
-		},
-		async hasEndedMark(key) {
-			return (await io.exists(key)) === 1;
-		},
-	};
-}
-
 export function makeIoredisSubjectSessionIndexClient(io: Redis): SubjectSessionIndexClient {
 	const buildSubjectIndexMulti = (p: ReturnType<Redis["multi"]>) => {
 		const m: SubjectSessionIndexMultiClient = {
@@ -172,9 +58,9 @@ export function makeIoredisSubjectSessionIndexClient(io: Redis): SubjectSessionI
 				p.zadd(k, e.score, e.value);
 				return m;
 			},
-			// Same NX-then-GT pair as the sid-keyed client, and for the same
-			// reason: Redis treats a non-volatile key as having infinite TTL for
-			// `GT`, so a bare `GT` silently no-ops on the first write.
+			// `PEXPIREAT NX` then `PEXPIREAT GT`: Redis treats a non-volatile key
+			// as having infinite TTL for `GT`, so a bare `GT` silently no-ops on
+			// the first write. NX sets the first TTL; GT only raises it.
 			pExpireGT: (k, ms) => {
 				p.pexpireat(k, ms, "NX");
 				p.pexpireat(k, ms, "GT");

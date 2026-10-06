@@ -107,16 +107,6 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   `private_key_jwt` and WebAuthn. A Redis at `maxmemory` refuses every
   consumer alike — keep the seen-set's instance sized for the flood, or on
   one of its own.
-- **For the family index's "ended" mark, reads and writes that are
-  linearizable, and reads served by the primary** (core's
-  `SupportsSessionEnd`): that a logout and a grant on one session never both
-  miss each other holds only while every operation sees each write completed
-  before it. Redis's asynchronous replication does not hold that across a
-  failover, where a promoted replica may lack a write the old primary
-  acknowledged, and a read answered by a replica does not either.
-  The RP registry rests on the same assumption (core's `SessionRPRegistry`):
-  a `registerRP` a promoted replica lost, or a `listRPs` a replica answered,
-  leaves that RP out of the logout fan-out.
 - **For the MFA stores, a server that keeps what it is written** (the MFA
   ADR's D12). An enrolled second factor lost to an eviction or a restart
   reads as "never enrolled", and whoever holds the password can then bind
@@ -179,9 +169,8 @@ Each one implements a port core declares; the slot name is in parentheses.
   `keyPrefix` plus `lc:`; `createRedisSessionLifecycleStore` builds it over
   `makeIoredisClients(io).sessionLifecycleStoreClient` directly. Nothing reads
   the slot yet.
-- `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,
-  `SessionFederationIndex`, `SubjectSessionIndex`, `SubjectRevocation` — the
-  six user-session and subject-revocation stores, installed together by
+- `UserSessionStore`, `SubjectSessionIndex`, `SubjectRevocation` — the
+  session record and the subject-revocation stores, installed together by
   `redisSessionStoresModule`. The `UserSessionStore` has the step-up
   capability (`recordSecondFactor`, the MFA ADR's D9): it reads the session,
   computes the next one with core's `sessionAfterSecondFactor` — which splits
@@ -215,24 +204,7 @@ Each one implements a port core declares; the slot name is in parentheses.
   recorded. Any other value reads the envelope as corrupt. A release before
   this one reads it as none recorded, and its step-up keeps it.
 
-  The `SessionFamilyIndex` has the session-end
-  capability (core's `SupportsSessionEnd`) when it is given an
-  `endedKeyPrefix` and a `SessionFamilyIndexClient` with `writeEndedMark` and
-  `hasEndedMark`, which `makeIoredisClients` provides, and which the module
-  and the builder (beside its default `keyPrefix`) give it: the mark is a
-  string at `<endedKeyPrefix><sid>` (`ss:fi-ended:` by default) expiring at
-  the session's `expiresAt` plus the clock-skew allowance (core's
-  `DEFAULT_CLOCK_SKEW_MS`), beside the family set, and `removeBySid` leaves
-  it. `endSession` writes the mark, even past `expiresAt`, and then lists;
-  `addFamilyIdUnlessEnded` adds, then reads the mark, then its clock, and
-  answers `"ended"` once `expiresAt` has passed. Each reply is in before the
-  next command is sent, with no script, so the two keys need not share a
-  Cluster slot. A client owes the capability writes that resolve only on the
-  server's reply and reads served by the primary. An index over a client
-  without the two methods, or without an `endedKeyPrefix`, works as before
-  without the capability; `createRedisSessionFamilyIndex` refuses an
-  `endedKeyPrefix` that overlaps `keyPrefix` (either starting with the
-  other). The `SubjectRevocation` store clamps a boundary later than the
+  The `SubjectRevocation` store clamps a boundary later than the
   server's `TIME` plus `DEFAULT_CLOCK_SKEW_MS` to that, in the script that
   writes it, and then says so at warn (`subject_revocation_boundary_clamped`,
   with `store`, `subject`, `requestedBefore`, `recordedBefore`) on the
@@ -361,11 +333,10 @@ projection keeps the command's name alone (`command: { name: "hello" }`), so
 the line still says which command failed. The connections
 `makeIoredisClients` opens for refresh rotation log
 `redis_duplicate_connection_error` through the projection, and a stored
-authorization code, user session or RP record that does not parse is logged as
+authorization code or user session that does not parse is logged as
 the parser error's name and position, as `err`, never the stored text the
-parser's message quotes: `authorization_code_corrupt_record` (error),
-`user_session_corrupt_envelope` and `session_rp_registry_corrupt_envelope`
-(warn), each with `reason` `json_parse` — or, for a record that parses but is
+parser's message quotes: `authorization_code_corrupt_record` (error) and
+`user_session_corrupt_envelope` (warn), each with `reason` `json_parse` — or, for a record that parses but is
 not one, `shape_invalid` (`identity_fields_missing` for a code without its
 client and redirect URI). The stores write them on the logger their module
 hands them (the `logger` slot) and on `consoleLogger` when there is none, so
@@ -485,7 +456,7 @@ Each adapter ships in up to two forms:
 | `redisReplaySeenSetModule` | `replaySeenSetClient` | `replaySeenSet` | `redis-replay-seen-set` | `redisReplaySeenSetBuilder` |
 | `redisAccessTokenDenylistModule` | `accessTokenDenylistClient` | `accessTokenDenylist` | `redis-access-token-denylist` | `redisAccessTokenDenylistBuilder` |
 | `redisRefreshTokenFamilyStoreModule` | `refreshTokenFamilyClient` | `refreshTokenFamilyStore` | `redis-refresh-token-family-store` | `redisRefreshTokenFamilyStoreBuilder` |
-| `redisSessionStoresModule` | the six session/subject clients, `sessionLifecycleStoreClient` | the six session/subject stores, `sessionLifecycleStore` | `redis-session-stores` | per-store builders |
+| `redisSessionStoresModule` | `userSessionStoreClient`, `subjectSessionIndexClient`, `subjectRevocationClient`, `sessionLifecycleStoreClient` | `userSessionStore`, `subjectSessionIndex`, `subjectRevocation`, `sessionLifecycleStore` | `redis-session-stores` | per-store builders |
 | `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redis-federation-token-store` | `redisFederationTokenStoreBuilder` |
 | `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redis-federation-grant-store` (`keyPrefix`, `listingAllowanceMs`, `tombstoneRetention`, `encryptionMode`, `encryptionKeys`) | — |
 | `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redis-federation-grant-intent-store` (`keyPrefix`, default `fg:`) | — |
@@ -558,7 +529,7 @@ give the same answers:
 | `FederationTokenStore` | a `ttl` that is not a positive number of seconds ending within the Date range (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
 | The federation-token lock (`acquireLock`) and the federation-grant refresh lock | a TTL that is not a positive lifetime, or a wait that is not a non-negative one, ending within the Date range | `PX` = the TTL, rounded up |
 | `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` or `authentication.mfaAt` that is an Invalid Date or before the epoch (the stored envelope reads back neither), or further ahead of the host's clock than `DEFAULT_CLOCK_SKEW_MS` (one a little ahead is recorded as the host's now) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range); `recordSecondFactor` keeps it (`KEEPTTL`) |
-| `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `addFamilyIdUnlessEnded`, `endSession`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt`; the family index's "ended" mark `PXAT` = that plus `DEFAULT_CLOCK_SKEW_MS` |
+| `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` | `PEXPIREAT` = the session's `expiresAt` |
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is not a `Date` with a finite time (core's `checkSubjectRevocationInstant`) | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor (the boundary as recorded, clamped, plus the retention) for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
@@ -596,9 +567,9 @@ Without it the only way to find them is `SCAN MATCH ${keyPrefix}${sid}:*` over
 the entire database — O(keys in Redis), on an end-user action, on the
 connection every other adapter here shares (#291).
 
-Two improvements apply unconditionally, flag or not: reads are paged (`SSCAN`,
-`HSCAN`, `ZRANGE` by rank), so no single command's reply grows with how
-heavily linked a session is; and removals use `UNLINK`, so the shared
+Two improvements apply unconditionally, flag or not: the index is read paged
+(`SSCAN`), so no single command's reply grows with how heavily linked a
+session is; and removals use `UNLINK`, so the shared
 connection is not blocked while Redis frees the values.
 
 ### `scanFallback` — a migration flag, not a tuning knob
@@ -1375,6 +1346,29 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   default) rejects and writes nothing. A `keyPrefix` holding a brace is a
   `RangeError` when the store is built.
 
+## Upgrading from v0.16.0: the per-session keys
+
+Before 0.17.0, `redisSessionStoresModule` also built an RP registry, a
+refresh-token family index and a federation index for each session. Core's
+session lifecycle record (`lc:`, [above](#session-lifecycle-one-key-per-session-in-fixed-shards))
+holds what they held, so the package no longer has them, and nothing reads
+or writes their keys. Under the section's `keyPrefix` (`ss:` by default):
+
+| Key | What it held |
+| --- | --- |
+| `rp:<sid>` | hash: the relying parties the session signed in to |
+| `fi:<sid>` | sorted set: the session's refresh-token families |
+| `fi-ended:<sid>` | string: the family index's "ended" mark |
+| `fed:<sid>` | sorted set: the federations the session signed in through |
+
+Each expires with its session. Deleting them sooner is recommended, once no
+v0.16.0 replica remains: by prefix (`SCAN MATCH`, then `UNLINK`), never with
+`FLUSHDB` or `FLUSHALL`, which takes keys this release reads with them. A
+v0.16.0 session has no lifecycle record and reads as closed, so its user
+signs in again, and a v0.16.0 refresh token bound to it is refused.
+[Upgrading from v0.16.0](../../docs/upgrading-from-v0.16.0.md#sessions-and-refresh-tokens-from-v0160)
+has the whole procedure, the refresh-token family keys (`rtfam:`) included.
+
 ## Contract tests
 
 Each adapter whose port has a core conformance suite is run through that
@@ -1421,7 +1415,7 @@ its port. Two directories hold what several of them share:
 
 - **`src/modules/`** — modules that bundle more than one store. Every other
   module is defined beside the one store it provides; `redisSessionStoresModule`
-  installs seven, with one key scheme across them, so it has a file of its own.
+  installs four, with one key scheme across them, so it has a file of its own.
 - **`src/internal/`** — helpers no consumer imports, and which the package's
   exports do not reach: the advisory lock (its options carry the federation
   token's `{ sid, federationName }`, so it is not a general-purpose lock), the
@@ -1430,6 +1424,5 @@ its port. Two directories hold what several of them share:
   which lives in core's `sealing/` leaf), the plaintext guard both sealing
   stores share (one escape hatch, `FEDERATION_TOKENS_ALLOW_INSECURE=1`, for
   both), the federation-grant codecs and lock, the MFA stores' key spelling and
-  their boot durability check, and the three sid-keyed structures (HASH, ZSET,
-  SET) the session and federation adapters are built from — same
-  `${keyPrefix}${sid}` layout and TTL contract, different Redis type.
+  their boot durability check, and the sid-keyed SET the federation token
+  store's index is built from.

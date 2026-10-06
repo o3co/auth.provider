@@ -448,33 +448,6 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.userSessionStoreClient;
 		},
-		sessionRPRegistryClient: async ({
-			section,
-			lifecycleRegistrar,
-			readinessRegistrar,
-			logger,
-		}) => {
-			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
-				.sessionRPRegistryClient;
-		},
-		sessionFamilyIndexClient: async ({
-			section,
-			lifecycleRegistrar,
-			readinessRegistrar,
-			logger,
-		}) => {
-			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
-				.sessionFamilyIndexClient;
-		},
-		sessionFederationIndexClient: async ({
-			section,
-			lifecycleRegistrar,
-			readinessRegistrar,
-			logger,
-		}) => {
-			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
-				.sessionFederationIndexClient;
-		},
 		// The grant store and the intent store, consumed by the Redis grant
 		// modules when their switches say "redis". Provided whenever this module
 		// is installed, as every slot here is: a slot is cheap, the socket is

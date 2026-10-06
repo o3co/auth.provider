@@ -114,7 +114,6 @@ export type {
 	ReserveMfaSubjectAttemptReply,
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
-	SessionFamilyIndexClient,
 	SessionLifecycleCloseInput,
 	SessionLifecycleCompleteInput,
 	SessionLifecycleJoinInput,
@@ -122,10 +121,6 @@ export type {
 	SessionLifecycleOpenInput,
 	SessionLifecycleStoreClient,
 	SessionLifecycleWriteDeadline,
-	SessionRPRegistryClient,
-	SessionRPRegistryMultiClient,
-	SessionSidSortedSetClient,
-	SessionSidSortedSetMultiClient,
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	SubjectSessionIndexMultiClient,
@@ -260,21 +255,6 @@ export {
 	DEFAULT_REDIS_SESSION_LIFECYCLE_MAX_PARTICIPANTS,
 	type RedisSessionLifecycleStoreOptions,
 } from "./session-lifecycle-store.mjs";
-export {
-	createRedisSessionFamilyIndex,
-	type RedisSessionFamilyIndexOptions,
-	redisSessionFamilyIndexBuilder,
-} from "./sessionFamilyIndex.mjs";
-export {
-	createRedisSessionFederationIndex,
-	type RedisSessionFederationIndexOptions,
-	redisSessionFederationIndexBuilder,
-} from "./sessionFederationIndex.mjs";
-export {
-	createRedisSessionRPRegistry,
-	type RedisSessionRPRegistryOptions,
-	redisSessionRPRegistryBuilder,
-} from "./sessionRPRegistry.mjs";
 export {
 	createRedisSubjectRevocation,
 	type RedisSubjectRevocationOptions,

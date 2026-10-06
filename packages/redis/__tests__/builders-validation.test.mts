@@ -21,16 +21,11 @@ import type {
 	DeviceCodeStoreClient,
 	PendingConsentStoreClient,
 	ReplaySeenSetClient,
-	SessionRPRegistryClient,
-	SessionSidSortedSetClient,
 	UserSessionStoreClient,
 } from "#/clients.mjs";
 import { redisConsentStoreBuilder, redisPendingConsentStoreBuilder } from "#/consent-store.mjs";
 import { redisDeviceCodeStoreBuilder } from "#/device-code-store.mjs";
 import { redisReplaySeenSetBuilder } from "#/replay-seen-set.mjs";
-import { redisSessionFamilyIndexBuilder } from "#/sessionFamilyIndex.mjs";
-import { redisSessionFederationIndexBuilder } from "#/sessionFederationIndex.mjs";
-import { redisSessionRPRegistryBuilder } from "#/sessionRPRegistry.mjs";
 import { redisUserSessionStoreBuilder } from "#/userSessionStore.mjs";
 
 // Boot-time guards on the builders AdapterFactory wiring calls with the merged
@@ -83,26 +78,7 @@ describe("redisReplaySeenSetBuilder — client guard", () => {
 	});
 });
 
-// The Redis session sub-adapter builders: the same boot-time guard.
-
-const noopSidSortedSetClient: SessionSidSortedSetClient = {
-	unlink: async () => 0,
-	multi: () => ({}) as never,
-	pExpireAt: async () => 0,
-	pExpireGT: async () => 0,
-	zAdd: async () => 0,
-	zRange: async () => [],
-	zRem: async () => 0,
-};
-
-const noopRPRegistryClient: SessionRPRegistryClient = {
-	unlink: async () => 0,
-	hSet: async () => 0,
-	hScanIterator: () => (async function* () {})(),
-	multi: () => ({}) as never,
-	pExpireAt: async () => 0,
-	pExpireGT: async () => 0,
-};
+// The Redis user-session store builder: the same boot-time guard.
 
 const noopUserSessionStoreClient: UserSessionStoreClient = {
 	set: (async () => "OK") as UserSessionStoreClient["set"],
@@ -110,57 +86,6 @@ const noopUserSessionStoreClient: UserSessionStoreClient = {
 	del: async () => 0,
 	replaceIfUnchanged: async () => false,
 };
-
-describe("redisSessionFamilyIndexBuilder — client guard", () => {
-	it("throws when 'client' option is missing (config = {})", () => {
-		expect(() =>
-			redisSessionFamilyIndexBuilder({} as never, { lifecycle: undefined } as never),
-		).toThrow("redisSessionFamilyIndexBuilder: 'client' option is required");
-	});
-
-	it("succeeds when 'client' is present", () => {
-		const adapter = redisSessionFamilyIndexBuilder(
-			{ client: noopSidSortedSetClient } as never,
-			{ lifecycle: undefined } as never,
-		) as { kind: string };
-		expect(adapter).toBeDefined();
-		expect(adapter.kind).toBe("redis");
-	});
-});
-
-describe("redisSessionFederationIndexBuilder — client guard", () => {
-	it("throws when 'client' option is missing (config = {})", () => {
-		expect(() =>
-			redisSessionFederationIndexBuilder({} as never, { lifecycle: undefined } as never),
-		).toThrow("redisSessionFederationIndexBuilder: 'client' option is required");
-	});
-
-	it("succeeds when 'client' is present", () => {
-		const adapter = redisSessionFederationIndexBuilder(
-			{ client: noopSidSortedSetClient } as never,
-			{ lifecycle: undefined } as never,
-		) as { kind: string };
-		expect(adapter).toBeDefined();
-		expect(adapter.kind).toBe("redis");
-	});
-});
-
-describe("redisSessionRPRegistryBuilder — client guard", () => {
-	it("throws when 'client' option is missing (config = {})", () => {
-		expect(() =>
-			redisSessionRPRegistryBuilder({} as never, { lifecycle: undefined } as never),
-		).toThrow("redisSessionRPRegistryBuilder: 'client' option is required");
-	});
-
-	it("succeeds when 'client' is present", () => {
-		const adapter = redisSessionRPRegistryBuilder(
-			{ client: noopRPRegistryClient } as never,
-			{ lifecycle: undefined } as never,
-		) as { kind: string };
-		expect(adapter).toBeDefined();
-		expect(adapter.kind).toBe("redis");
-	});
-});
 
 describe("redisUserSessionStoreBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {

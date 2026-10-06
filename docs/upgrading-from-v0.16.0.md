@@ -1407,6 +1407,32 @@ modules fills them.
 - **`cascadeLogout`, `CascadeLogoutOptions` and `CascadeLogoutResult`** are
   removed from `@o3co/auth-provider-oauth` (#1030). A session is ended
   through core's session lifecycle: `sessionLifecycle.close(sid, cause)`.
+- **BREAKING: `@o3co/auth-provider-redis` no longer has adapters for the
+  three per-session stores (#1030).** Core's session lifecycle holds what
+  the RP registry, the refresh-token family index and the federation index
+  held, so the package drops them:
+  - Removed exports: `createRedisSessionRPRegistry`,
+    `RedisSessionRPRegistryOptions`, `redisSessionRPRegistryBuilder`,
+    `createRedisSessionFamilyIndex`, `RedisSessionFamilyIndexOptions`,
+    `redisSessionFamilyIndexBuilder`, `createRedisSessionFederationIndex`,
+    `RedisSessionFederationIndexOptions`, `redisSessionFederationIndexBuilder`,
+    and the client interfaces `SessionRPRegistryClient`,
+    `SessionRPRegistryMultiClient`, `SessionSidSortedSetClient`,
+    `SessionSidSortedSetMultiClient` and `SessionFamilyIndexClient`.
+  - `makeIoredisClients` no longer returns `sessionRPRegistryClient`,
+    `sessionFamilyIndexClient` or `sessionFederationIndexClient`, and the
+    package no longer declares those three `ComponentMap` slots: a
+    composition that fills client slots by hand drops them.
+  - `redisSessionStoresModule` requires `userSessionStoreClient`,
+    `subjectSessionIndexClient`, `subjectRevocationClient` and
+    `sessionLifecycleStoreClient`, and provides `userSessionStore`,
+    `subjectSessionIndex`, `subjectRevocation` and `sessionLifecycleStore`;
+    it no longer provides `sessionRPRegistry`, `sessionFamilyIndex` or
+    `sessionFederationIndex`. The RP registry's warn
+    `session_rp_registry_corrupt_envelope` is gone with it.
+  - The keys those stores wrote are read by nothing; see
+    [Sessions and refresh tokens from v0.16.0](#sessions-and-refresh-tokens-from-v0160)
+    for what to delete.
 - **Core's public entries no longer export 42 undocumented names** (#1234):
   tuning defaults (most `DEFAULT_MEMORY_*` sweep and size defaults —
   `DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES` stays —
@@ -1948,4 +1974,49 @@ What carries across the step:
 - **Redis.** Records v0.16.0 wrote stay readable: a federation token record
   gets a generation at its first versioned read, and one without `obtainedAt`
   reads it as `undefined`, which is refreshed within the buffer. Scripts
-  whose text changed load by `EVAL` on `NOSCRIPT`.
+  whose text changed load by `EVAL` on `NOSCRIPT`. The per-session keys
+  v0.16.0 wrote beside its sessions are the exception: nothing reads them
+  ([below](#sessions-and-refresh-tokens-from-v0160)).
+- **Sessions do not cross releases.** A session a v0.16.0 replica opens,
+  during the roll or before it, reads as closed on this release
+  ([below](#sessions-and-refresh-tokens-from-v0160)).
+
+### Sessions and refresh tokens from v0.16.0
+
+Core's session lifecycle keeps one record per session — its state, the
+relying parties and federations that joined it, and its refresh-token
+families — where v0.16.0 kept three per-session stores (#1030). Nothing
+carries a v0.16.0 session over:
+
+- **Every v0.16.0 session reads as closed, and every user signs in again.**
+  A session v0.16.0 opened has no lifecycle record, and a session without
+  one is closed: its cookie no longer admits, and nothing can join it.
+- **A v0.16.0 refresh token bound to a session stops working at the
+  upgrade.** Every refresh is admitted against its session, which reads as
+  closed: the refresh answers `400 invalid_grant` (`session_invalid`), and
+  the client sends its user to sign in again. Only the `authorization_code`
+  grant issues refresh tokens, and where a `userSessionStore` is wired every
+  one it issued is bound to its session.
+- **A refresh token without a `sid` is not affected.** A composition with no
+  `userSessionStore` issues them. No logout ever reached them, and the
+  upgrade does not either: the subject's revocation boundary
+  (`revokeAllForSubject`, which a password reset calls) or their expiry ends
+  them, as before.
+- **Deleting what v0.16.0 wrote for its sessions is recommended.** It frees
+  the storage, and nothing reads these keys once the fleet runs this release.
+  Delete by prefix (`SCAN MATCH <prefix>*`, then `UNLINK` what it returns),
+  never with `FLUSHDB` or `FLUSHALL`: the same database holds keys this
+  release reads, the MFA factors among them, whose loss cannot be undone.
+  With the shipped prefixes (`redis-session-stores.keyPrefix` `ss:`,
+  `redis-refresh-token-family-store.keyPrefix` `rtfam:`):
+
+  | Keys | What they held | When to delete them |
+  | --- | --- | --- |
+  | `ss:rp:*`, `ss:fi:*`, `ss:fi-ended:*`, `ss:fed:*` | v0.16.0's RP registry, refresh-token family index (and its "ended" marks) and federation index | once no v0.16.0 replica remains, which still writes and reads them. Left alone, each expires with its session |
+  | `rtfam:*` | the refresh-token families | after the last v0.16.0 replica stops and before this release first starts: a family this release issues has the same key, and deleting it ends that refresh token too. Left alone, each expires with its family: at most `oauth.refreshToken.expiresIn` after it was issued, and a revoked one up to `oauth.accessToken.maxExpiresIn` plus about five minutes past its revocation |
+
+  With a family's key deleted, its refresh token is refused
+  (`400 invalid_grant`, `unknown_family`) under the shipped
+  `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, `"reject"`,
+  a token without a `sid` included. Delete them only under `"reject"`:
+  `"accept"` redeems a token whose family has no record.

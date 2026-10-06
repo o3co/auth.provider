@@ -18,21 +18,16 @@ import { consoleLogger, defineModule } from "@o3co/auth-provider-core";
 import { keyPrefixSection, redisReference } from "../internal/section.mjs";
 import { checkSessionLifecycleEviction } from "../internal/session-lifecycle-eviction.mjs";
 import { createRedisSessionLifecycleStore } from "../session-lifecycle-store.mjs";
-import { createRedisSessionFamilyIndex } from "../sessionFamilyIndex.mjs";
-import { createRedisSessionFederationIndex } from "../sessionFederationIndex.mjs";
-import { createRedisSessionRPRegistry } from "../sessionRPRegistry.mjs";
 import { createRedisSubjectRevocation } from "../subjectRevocation.mjs";
 import { createRedisSubjectSessionIndex } from "../subjectSessionIndex.mjs";
 import { createRedisUserSessionStore } from "../userSessionStore.mjs";
 
 /**
- * Bundled module providing the six Redis user-session stores and the session
- * lifecycle store off the per-purpose ComponentMap slots
- * `userSessionStoreClient`, `sessionRPRegistryClient`,
- * `sessionFamilyIndexClient`, `sessionFederationIndexClient`,
- * `subjectSessionIndexClient`, `subjectRevocationClient` (declared in
- * `@o3co/auth-provider-core`'s `user-sessions/types.mts`) and
- * `sessionLifecycleStoreClient` (this package's `clients.mts`).
+ * Bundled module providing the Redis session record store, the two subject
+ * stores and the session lifecycle store off the per-purpose ComponentMap
+ * slots `userSessionStoreClient`, `subjectSessionIndexClient`,
+ * `subjectRevocationClient` and `sessionLifecycleStoreClient` (this
+ * package's `clients.mts`).
  *
  * The subject stores (`subjectSessionIndex`, `subjectRevocation`) carry
  * subject-level revocation across replicas. Without them `verifyJwt` skips the
@@ -41,16 +36,14 @@ import { createRedisUserSessionStore } from "../userSessionStore.mjs";
  * no session or access token.
  *
  * `keyPrefix` is the outer namespace; each store gets a fixed subprefix
- * (`us:` / `rp:` / `fi:` / `fed:` / `sub:` / `rev:` / `lc:`), and the family
- * index's "ended" marks one of their own (`fi-ended:`). The subject-keyed
- * stores do not share one with the sid-keyed stores, so a sid cannot collide
- * with a subject. To override a single subprefix, use the per-adapter constructors.
+ * (`us:` / `sub:` / `rev:` / `lc:`). The subject-keyed stores do not share one
+ * with the sid-keyed stores, so a sid cannot collide with a subject. To
+ * override a single subprefix, use the per-adapter constructors.
  *
  * `keyPrefix` is its own section's, `redis-session-stores` (strict);
  * `redisSessionStores`, the section's old path, refuses boot naming it. The
- * optional `logger` goes to the two stores that report a stored record they
- * cannot read, the user-session store (`user_session_corrupt_envelope`) and
- * the RP registry (`session_rp_registry_corrupt_envelope`), and to the
+ * optional `logger` goes to the user-session store, which reports a stored
+ * record it cannot read (`user_session_corrupt_envelope`), and to the
  * revocation store, which says a clamped boundary
  * (`subject_revocation_boundary_clamped`); `consoleLogger` when it is empty.
  *
@@ -64,9 +57,6 @@ export const redisSessionStoresModule = defineModule({
 	name: "redis-session-stores",
 	requires: [
 		"userSessionStoreClient",
-		"sessionRPRegistryClient",
-		"sessionFamilyIndexClient",
-		"sessionFederationIndexClient",
 		"subjectSessionIndexClient",
 		"subjectRevocationClient",
 		"sessionLifecycleStoreClient",
@@ -86,26 +76,6 @@ export const redisSessionStoresModule = defineModule({
 				client: deps.userSessionStoreClient,
 				keyPrefix: `${deps.section.keyPrefix}us:`,
 				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
-			});
-		},
-		sessionRPRegistry: (deps) => {
-			return createRedisSessionRPRegistry({
-				client: deps.sessionRPRegistryClient,
-				keyPrefix: `${deps.section.keyPrefix}rp:`,
-				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
-			});
-		},
-		sessionFamilyIndex: (deps) => {
-			return createRedisSessionFamilyIndex({
-				client: deps.sessionFamilyIndexClient,
-				keyPrefix: `${deps.section.keyPrefix}fi:`,
-				endedKeyPrefix: `${deps.section.keyPrefix}fi-ended:`,
-			});
-		},
-		sessionFederationIndex: (deps) => {
-			return createRedisSessionFederationIndex({
-				client: deps.sessionFederationIndexClient,
-				keyPrefix: `${deps.section.keyPrefix}fed:`,
 			});
 		},
 		subjectSessionIndex: (deps) => {

@@ -110,7 +110,7 @@ everyone's dependency closure.
 capability is, never who provides it.
 
 **Client slots** are what a *specific adapter package* needs from a driver —
-`accessTokenDenylistClient`, `sessionRPRegistryClient`. They exist so
+`accessTokenDenylistClient`, `sessionLifecycleStoreClient`. They exist so
 `@o3co/auth-provider-redis` can be handed one ioredis socket and build every
 store on it, rather than opening a connection per store. A core module never
 requires one.
@@ -271,9 +271,6 @@ provider does not run and the slot is left unfilled.
 | `attemptCounterClient` | `AttemptCounterClient` | optional | `redis/clients.mts` | Vendor-facing half of the Redis attempt counter: one attempt counted against a fixed window, the window opened and its key's deadline set, in one indivisible step. |
 | `refreshTokenFamilyClient` | `RefreshTokenFamilyClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `replaySeenSetClient` | `ReplaySeenSetClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
-| `sessionFamilyIndexClient` | `SessionFamilyIndexClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
-| `sessionFederationIndexClient` | `SessionSidSortedSetClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
-| `sessionRPRegistryClient` | `SessionRPRegistryClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `subjectRevocationClient` | `SubjectRevocationClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `subjectSessionIndexClient` | `SubjectSessionIndexClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `userSessionStoreClient` | `UserSessionStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |

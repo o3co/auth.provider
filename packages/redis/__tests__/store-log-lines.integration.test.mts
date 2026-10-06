@@ -120,32 +120,6 @@ describe("redisSessionStoresModule: the stores it builds log on the composition'
 		]);
 	});
 
-	it("the RP registry: session_rp_registry_corrupt_envelope, the same shape", async () => {
-		const keyPrefix = `store-log:ss:${randomUUID()}:`;
-		const { logger, calls } = recordingLogger();
-		const registry = provide<{ listRPs(sid: string): Promise<unknown[]> }>(
-			redisSessionStoresModule,
-			"sessionRPRegistry",
-			sessionDeps(keyPrefix, logger),
-		);
-		await raw.hset(
-			`${keyPrefix}rp:sid-1`,
-			"rp-1",
-			`{"clientId":"rp-1","backchannelLogoutUri":https://rp.example/bc}`,
-		);
-
-		expect(await registry.listRPs("sid-1")).toEqual([]);
-		expect(calls).toEqual([
-			{
-				level: "warn",
-				args: [
-					{ sid: "sid-1", reason: "json_parse", err: SYNTAX_ERROR },
-					"session_rp_registry_corrupt_envelope",
-				],
-			},
-		]);
-	});
-
 	it("with no logger slot filled, consoleLogger writes the same line — never nothing", async () => {
 		const keyPrefix = `store-log:ss:${randomUUID()}:`;
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

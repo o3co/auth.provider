@@ -118,11 +118,6 @@ import type {
 	ReplaySeenSetClient,
 } from "./clients/single-key-stores.mjs";
 import type {
-	SessionFamilyIndexClient,
-	SessionRPRegistryClient,
-	SessionRPRegistryMultiClient,
-	SessionSidSortedSetClient,
-	SessionSidSortedSetMultiClient,
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	SubjectSessionIndexMultiClient,
@@ -200,7 +195,6 @@ export type {
 	ReserveMfaSubjectAttemptReply,
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
-	SessionFamilyIndexClient,
 	SessionLifecycleCloseInput,
 	SessionLifecycleCompleteInput,
 	SessionLifecycleJoinInput,
@@ -208,10 +202,6 @@ export type {
 	SessionLifecycleOpenInput,
 	SessionLifecycleStoreClient,
 	SessionLifecycleWriteDeadline,
-	SessionRPRegistryClient,
-	SessionRPRegistryMultiClient,
-	SessionSidSortedSetClient,
-	SessionSidSortedSetMultiClient,
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	SubjectSessionIndexMultiClient,
@@ -231,9 +221,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly replaySeenSetClient?: ReplaySeenSetClient;
 		readonly refreshTokenFamilyClient?: RefreshTokenFamilyClient;
 		readonly userSessionStoreClient?: UserSessionStoreClient;
-		readonly sessionRPRegistryClient?: SessionRPRegistryClient;
-		readonly sessionFamilyIndexClient?: SessionFamilyIndexClient;
-		readonly sessionFederationIndexClient?: SessionSidSortedSetClient;
 		readonly subjectSessionIndexClient?: SubjectSessionIndexClient;
 		readonly subjectRevocationClient?: SubjectRevocationClient;
 		readonly federationTokenStoreClient?: FederationTokenStoreClient;

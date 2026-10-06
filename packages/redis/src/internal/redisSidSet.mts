@@ -17,11 +17,7 @@
 import type { FederationTokenStoreClient } from "../clients.mjs";
 import { assertPositiveInteger } from "./validate.mjs";
 
-/**
- * The slice of `FederationTokenStoreClient` this helper consumes. Named after
- * its consumer, like `SessionRPRegistryClient` and `SessionSidSortedSetClient`
- * are for the other two sid-keyed helpers.
- */
+/** The slice of `FederationTokenStoreClient` this helper consumes. */
 export type RedisSidSetClient = Pick<
 	FederationTokenStoreClient,
 	"sAddWithTtl" | "sRem" | "sScanIterator" | "unlink" | "pExpireGT"
@@ -51,17 +47,15 @@ export interface RedisSidSet {
 const DEFAULT_SCAN_COUNT = 100;
 
 /**
- * Private Redis helper: an unordered sid-keyed SET at `${keyPrefix}${sid}`,
- * with the key layout of `createRedisSidHash` (HASH) and
- * `createRedisSidSortedSet` (ZSET). It lets the federation token store answer
- * "which federations does this sid have?" in O(the session's federations)
- * rather than by a keyspace `SCAN` on logout (README, Federation-token keys
- * and logout).
+ * Private Redis helper: an unordered sid-keyed SET at `${keyPrefix}${sid}`.
+ * It lets the federation token store answer "which federations does this sid
+ * have?" in O(the session's federations) rather than by a keyspace `SCAN` on
+ * logout (README, Federation-token keys and logout).
  *
- * TTL: unlike its siblings the caller passes a relative `ttlMs`, not
- * `session.expiresAt`, because the federation token store's records live on a
- * fixed store TTL that must outlive the upstream refresh token. `sAddWithTtl`
- * applies the siblings' `PEXPIRE … NX` + `PEXPIRE … GT` pair, so the index key
+ * TTL: the caller passes a relative `ttlMs`, not `session.expiresAt`, because
+ * the federation token store's records live on a fixed store TTL that must
+ * outlive the upstream refresh token. `sAddWithTtl` applies a
+ * `PEXPIRE … NX` + `PEXPIRE … GT` pair, so the index key
  * always outlives the envelopes it points at and no write can truncate a
  * further deadline. The add and its expiry being atomic is the client's
  * contract: a persistent index key would outlive the session it describes.
