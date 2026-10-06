@@ -684,7 +684,10 @@ The boot refusals you can meet, with their messages, are in
   clients — a gateway, an on-behalf-of service — add
   `allowExchangeOfTokensIssuedToOthers: true` to its client registration.
   Only a strict `true` counts. `may_act`, the scope and audience ceilings and
-  the grant allowlist still apply to it. See the
+  the grant allowlist still apply to it. A subject-token validator you
+  contribute (`tokenExchangeValidators`) must return the token's `aud` (as
+  `ValidatedToken.aud`) and/or its `azp` (in `claims`) as the token carries
+  them; an answer with neither is refused the same way. See the
   [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
   note 18.
 - **Federation grants.** `/reauthorize` answers a removed connection, or a
