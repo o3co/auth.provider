@@ -28,6 +28,7 @@ import { createApp } from "#/boot/create-app.mjs";
 import { snapshotHostMap } from "#/boot/host-maps.mjs";
 import { BootError } from "#/boot/types.mjs";
 import { validateManifests } from "#/boot/validate-manifests.mjs";
+import { GrantRegistry } from "#/grants/registry.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
 import type { GrantPolicyHook } from "#/policy/types.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
@@ -273,6 +274,45 @@ describe("the host-map boundary", () => {
 			expect(err.message).not.toContain("SECRET");
 		},
 	);
+
+	it("reads a contributionKinds slot's getter once through a direct validateManifests, a later throw never reached", () => {
+		let reads = 0;
+		const contributionKinds = {
+			get grants(): unknown {
+				reads += 1;
+				if (reads > 1) throw new Error("SECRET later read");
+				return new GrantRegistry();
+			},
+		};
+		validateManifests({
+			modules: [],
+			bootstrapComponents: {
+				config: withoutIssuer(),
+				pathResolver: (p: string) => p,
+			} as never,
+			contributionKinds: contributionKinds as never,
+		});
+		expect(reads).toBe(1);
+	});
+
+	it("refuses a contributionKinds slot whose read throws, through a direct validateManifests, without its text", async () => {
+		const contributionKinds = {
+			get grants(): never {
+				throw new Error("SECRET");
+			},
+		};
+		const err = await thrown(() =>
+			validateManifests({
+				modules: [],
+				bootstrapComponents: {
+					config: withoutIssuer(),
+					pathResolver: (p: string) => p,
+				} as never,
+				contributionKinds: contributionKinds as never,
+			}),
+		);
+		expect(err.message).not.toContain("SECRET");
+	});
 
 	it("boots a plain map alike through createApp and a direct validateManifests", async () => {
 		const map = { config: withoutIssuer(), pathResolver: (p: string) => p };

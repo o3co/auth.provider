@@ -3695,11 +3695,12 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * loaded reads (`logConfigNotices`) and the replica-safety warning.
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
-	const { modules, contributionKinds } = input;
+	const { modules } = input;
 	// The host maps read once, at the one boundary (`host-maps.mts`), before
 	// anything else reads them: the configuration copied as frozen plain data,
 	// every slot a data property. A map createApp already read is taken as is.
 	const overrideComponents = snapshotHostMap(input.overrideComponents, "overrideComponents");
+	const contributionKinds = snapshotHostMap(input.contributionKinds, "contributionKinds");
 	// `configDefaults` is read here and is no component: no check and no later
 	// stage sees it.
 	const { bootstrapComponents, configDefaults } = takeConfigDefaults(
