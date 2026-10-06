@@ -27,12 +27,7 @@
  */
 
 import { BootError, createApp, type MfaFactorStore } from "@o3co/auth-provider-core";
-import {
-	makeValidAppConfig,
-	unreadableModuleLeaves,
-	userRepositoryHttpOf,
-	withUserRepositoryHttp,
-} from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { foundationMfaFactorStoreModule } from "#/index.mjs";
 import {
@@ -40,7 +35,10 @@ import {
 	foundationMfaFactorStoreSection,
 	readFoundationMfaFactorStoreUrls,
 } from "#/mfa/section.mjs";
-import { foundationMfaFactorStoreConfig } from "#/testing/index.mjs";
+import {
+	foundationMfaFactorStoreConfig,
+	foundationUserRepositoryHttpConfig,
+} from "#/testing/index.mjs";
 import { consumer } from "./consumer.mjs";
 
 const URLS = {
@@ -60,9 +58,10 @@ const VARIABLES = {
 
 const KEYS = Object.keys(URLS) as (keyof typeof URLS)[];
 
-const base = withUserRepositoryHttp(makeValidAppConfig(), {});
+const base = makeValidAppConfig();
 /** The module as a composition root builds it, handed the user repository's HTTP settings. */
-const module = () => foundationMfaFactorStoreModule({ storeTransport: userRepositoryHttpOf(base) });
+const module = () =>
+	foundationMfaFactorStoreModule({ storeTransport: foundationUserRepositoryHttpConfig({}) });
 /** The configuration with the section holding `urls` and `extra`; without the section when `urls` is undefined. */
 const configWith = (
 	urls: Partial<Record<keyof typeof URLS, unknown>> | undefined,

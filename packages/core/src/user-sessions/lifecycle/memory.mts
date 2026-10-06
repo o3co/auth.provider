@@ -20,8 +20,19 @@
  * member checks and writes with no `await` between, so each is one step in
  * this process. A record lapses whole at its retention, judged on the
  * store's clock. It holds at most `maxEntries` records and `maxParticipants`
- * per record; full, it drops lapsed records and otherwise rejects, evicting
- * nothing, since an evicted record would let a closed session be joined.
+ * per record. Full, it drops lapsed records and, if that makes no room,
+ * evicts the `closed` record whose retention ends first; it rejects when
+ * there is none. So a full store may drop a closed record before its
+ * retention, which the session lifecycle allows: it closes a record only
+ * after deleting its user session, and a join that adopts a session with no
+ * record is refused unless the user session it read first is still there
+ * once it has written (#1468), so a closed session is not joined again
+ * through a record that left the store. A close repeated after the
+ * eviction, or `federations`, then answers no snapshot, as after the
+ * record's retention. An active or closing record is never evicted: that
+ * would drop a live session's fence, or leave its close work undone; so a
+ * loop whose closes stay pending still fills the store until their
+ * retention. An `open` at capacity scans the store once.
  */
 
 import {
@@ -154,9 +165,26 @@ export function createInMemorySessionLifecycleStore(
 				return { outcome: same ? "opened" : "refused" };
 			}
 			if (records.size >= maxEntries) {
-				for (const [key, entry] of records) if (entry.retainUntilMs <= at) records.delete(key);
+				// One pass: drop the lapsed records, and note the closed record
+				// whose retention ends first, the first held on a tie, to evict
+				// only if dropping makes no room.
+				let evictable: string | undefined;
+				let evictableUntilMs = Number.POSITIVE_INFINITY;
+				for (const [key, entry] of records) {
+					if (entry.retainUntilMs <= at) {
+						records.delete(key);
+					} else if (entry.state === "closed" && entry.retainUntilMs < evictableUntilMs) {
+						evictable = key;
+						evictableUntilMs = entry.retainUntilMs;
+					}
+				}
 				if (records.size >= maxEntries) {
-					throw new Error(`${owner}: full at ${maxEntries} records; nothing was written`);
+					if (evictable === undefined) {
+						throw new Error(
+							`${owner}: full at ${maxEntries} records, none of them closed; nothing was written`,
+						);
+					}
+					records.delete(evictable);
 				}
 			}
 			records.set(sid, {

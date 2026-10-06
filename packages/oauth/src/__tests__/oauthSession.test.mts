@@ -16,6 +16,8 @@
 
 import {
 	BootError,
+	createInMemorySessionLifecycleStore,
+	createInMemoryUserSessionStore,
 	createSymmetricKeyStore,
 	defineModule,
 	type GrantHandler,
@@ -26,9 +28,13 @@ import {
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
-import { oauthSessionGrantModule, oauthSessionModule } from "#/oauthSession.mjs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { capturing, withGrants } from "./_helpers/sections.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 /** `config` with the captures of the renames the module declares, as a resolution under an empty environment makes them. */
 const captured = <C extends object>(config: C): C => capturing(config, [oauthSessionGrantModule]);
@@ -72,6 +78,7 @@ describe("oauthSessionGrantModule", () => {
 							create: async () => {},
 							delete: async () => {},
 						}),
+						sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 					},
 				}),
 			],
@@ -122,6 +129,7 @@ describe("oauthSessionGrantModule", () => {
 							create: async () => {},
 							delete: async () => {},
 						}),
+						sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 					},
 				}),
 			],
@@ -132,6 +140,8 @@ describe("oauthSessionGrantModule", () => {
 				logger,
 			},
 		});
+		// What boot logged of the configuration is not this test's: the outage alone is.
+		logger.warn.mockClear();
 		try {
 			const grant = handle.inspect.grants.get("session") as GrantHandler;
 			const { result } = await grant.handle({
@@ -218,15 +228,9 @@ describe("oauthSessionGrantModule", () => {
 		expect(oauthSessionGrantModule.optional).not.toContain("oauthTokenSettings");
 	});
 
-	it("is what the deprecated oauthSessionModule returns, whatever it is handed", () => {
-		expect(oauthSessionModule()).toBe(oauthSessionGrantModule);
-		for (const session of [true, false]) {
-			const config = withGrants(makeValidAppConfig(), { session });
-			expect(oauthSessionModule({ config })).toBe(oauthSessionGrantModule);
-		}
-	});
-
 	it("mints with the lifetime the oauthTokenSettings slot holds, not one of the configuration's", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		// The configuration's access-token lifetime is 3600 s; the slot's is
 		// shorter, which boot accepts. The grant reads the slot alone.
 		const config = withGrants(makeValidAppConfig(), { session: true });
@@ -256,6 +260,33 @@ describe("oauthSessionGrantModule", () => {
 		} finally {
 			await handle.dispose();
 		}
+	});
+
+	it("refuses boot with the grant on, userSessionStore wired and no sessionLifecycleStore, naming both slots", async () => {
+		const config = withGrants(makeValidAppConfig(), { session: true });
+		const err = await createTestApp({
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: {
+				config: captured(config),
+				pathResolver: (s) => s,
+				oauthTokenSettings,
+				userSessionStore: createInMemoryUserSessionStore(),
+			},
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-session" },
+		});
+		expect(String((err as BootError).message)).toMatch(
+			/userSessionStore is wired, but sessionLifecycleStore is not/,
+		);
 	});
 
 	it("refuses boot with the grant on and no oauthTokenSettings, naming the slot", async () => {

@@ -58,7 +58,7 @@ describe("challenge store and replay seen-set wiring — full Redis composition 
 		});
 
 		// `makeValidCoreConfig` supplies the schema-required core sections
-		// (CoreConfigSchema is always composed in via composeConfigSchema).
+		// (boot parses them with CoreConfigSchema).
 		// The redis modules' own namespaced keys carry per-test isolation
 		// prefixes appended after the core baseline.
 		const config = {

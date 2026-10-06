@@ -17,10 +17,12 @@
 /**
  * The defaults of `oauth {}` and the environment variables bound to its keys
  * live in this package's `config/reference.conf`, read by the module's schema.
- * Core's `reference.conf` still sets the same paths, to the same values and
- * with the same variables, until core stops declaring `oauth {}`: the two are
- * held equal here, so the order a composition layers them in decides nothing.
- * Core's alone keeps the tombstone of a key it retired.
+ * Core's `reference.conf` still sets most of the same paths, to the same values
+ * and with the same variables, until core stops declaring `oauth {}`: every
+ * path it sets is held equal here, so the order a composition layers them in
+ * decides nothing. Core's alone keeps the tombstone of a key it retired.
+ * Neither sets a refresh-token family policy key under `oauth {}`: the
+ * unknown-family policy is the oauth-authorization module's.
  */
 
 import { readFileSync } from "node:fs";
@@ -69,6 +71,24 @@ function oauthBindings(file: string): string[] {
 const oauthOf = (file: string, env: Record<string, string> = {}): Record<string, unknown> =>
 	(parseFile(file, { env }).toObject() as { oauth: Record<string, unknown> }).oauth;
 
+const isSection = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" &&
+	value !== null &&
+	!Array.isArray(value) &&
+	Object.keys(value).length > 0;
+
+/** Every leaf of `tree` as `[path, value]`; an empty table is a leaf. */
+function leavesOf(tree: Record<string, unknown>, prefix = ""): [string, unknown][] {
+	return Object.entries(tree).flatMap(([key, value]): [string, unknown][] => {
+		const path = prefix === "" ? key : `${prefix}.${key}`;
+		return isSection(value) ? leavesOf(value, path) : [[path, value]];
+	});
+}
+
+/** The value at a dotted `path` of `tree`, or `undefined`. */
+const valueAt = (tree: unknown, path: string): unknown =>
+	path.split(".").reduce<unknown>((node, key) => (isSection(node) ? node[key] : undefined), tree);
+
 describe("the package's reference binds every variable of oauth {} at its path", () => {
 	it.each([
 		["OAUTH_JWT_ISSUER", "oauth.jwt.issuer"],
@@ -77,7 +97,6 @@ describe("the package's reference binds every variable of oauth {} at its path",
 		["OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN", "oauth.accessToken.maxExpiresIn"],
 		["OAUTH_ACCESS_TOKEN_EXPIRES_IN", "oauth.accessToken.expiresIn"],
 		["OAUTH_REFRESH_TOKEN_EXPIRES_IN", "oauth.refreshToken.expiresIn"],
-		["OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY", "oauth.refreshToken.unknownFamilyPolicy"],
 		["OAUTH_OIDC_MODE", "oauth.oidcMode"],
 		["OAUTH_REVOCATION_ACCESS_TOKEN", "oauth.revocation.accessToken"],
 		["OAUTH_REVOCATION_SUBJECT", "oauth.revocation.subject"],
@@ -91,25 +110,34 @@ describe("the package's reference binds every variable of oauth {} at its path",
 		).toEqual([`${variable} at ${path}`]);
 	});
 
+	it("binds no variable under oauth.refreshToken but its lifetime's", () => {
+		expect(
+			oauthBindings(REFERENCE).filter((binding) => binding.includes(" at oauth.refreshToken.")),
+		).toEqual(["OAUTH_REFRESH_TOKEN_EXPIRES_IN at oauth.refreshToken.expiresIn"]);
+	});
+
 	it("binds every variable core's reference binds under oauth {}, at the same path, but core's tombstone", () => {
-		// Core keeps the substitution that routes a still-exported variable of a
-		// key it retired into its removed-key refusal.
+		// Core keeps the substitution that writes a still-exported variable of a
+		// retired key at its removed path, which the module refuses.
 		const tombstone =
 			"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS at oauth.authorize.allowUnmarkedClients";
 		const core = oauthBindings(CORE_REFERENCE);
 		expect(core).toContain(tombstone);
-		expect(core.length).toBeGreaterThanOrEqual(15);
+		expect(core.length).toBeGreaterThanOrEqual(14);
 		expect(oauthBindings(REFERENCE)).toEqual(
 			expect.arrayContaining(core.filter((binding) => binding !== tombstone)),
 		);
 		expect(oauthBindings(REFERENCE)).not.toContain(tombstone);
 	});
 
-	it("sets every default core's reference sets under oauth {}, to the same value", () => {
+	it("sets every default core's reference sets under oauth {}, leaf by leaf, to the same value", () => {
 		for (const env of [{}, { OAUTH_JWT_ISSUER: "https://auth.test" }] as Record<string, string>[]) {
-			const core = oauthOf(CORE_REFERENCE, env);
+			const core = leavesOf(oauthOf(CORE_REFERENCE, env));
 			const own = oauthOf(REFERENCE, env);
-			expect(Object.fromEntries(Object.keys(core).map((key) => [key, own[key]]))).toEqual(core);
+			expect(core.length).toBeGreaterThan(0);
+			expect(Object.fromEntries(core.map(([path]) => [path, valueAt(own, path)]))).toEqual(
+				Object.fromEntries(core),
+			);
 		}
 	});
 
@@ -140,7 +168,7 @@ describe("the reference, read by the module's schema", () => {
 		expect(load()).toEqual({
 			jwt: { issuer: "https://auth.test", legacyTypAccept: false },
 			accessToken: { expiresIn: 3600 },
-			refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 			requireEmailVerified: false,
 			requireGrantTypeAllowlist: false,
@@ -162,7 +190,6 @@ describe("the reference, read by the module's schema", () => {
 			load({
 				OAUTH_JWT_LEGACY_TYP_ACCEPT: "true",
 				OAUTH_REFRESH_TOKEN_EXPIRES_IN: "7200",
-				OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
 				OAUTH_OIDC_MODE: "dual",
 				OAUTH_REVOCATION_ACCESS_TOKEN: "unsupported",
 				OAUTH_REVOCATION_SUBJECT: "watermark",
@@ -173,7 +200,7 @@ describe("the reference, read by the module's schema", () => {
 			}),
 		).toMatchObject({
 			jwt: { legacyTypAccept: true },
-			refreshToken: { expiresIn: 7200, unknownFamilyPolicy: "accept" },
+			refreshToken: { expiresIn: 7200 },
 			oidcMode: "dual",
 			revocation: { accessToken: "unsupported", subject: "watermark" },
 			requireEmailVerified: true,
@@ -241,6 +268,7 @@ describe("the reference, read by the module's schema", () => {
 				defaultExpiresIn: 900,
 				maxExpiresIn: 900,
 			});
+			expect(load({}, "oauth.accessToken.expiresIn = 900").accessToken.expiresIn).toBe(900);
 		});
 
 		it("lets an application layer's defaultExpiresIn outrank the shipped literal on the deprecated key", () => {

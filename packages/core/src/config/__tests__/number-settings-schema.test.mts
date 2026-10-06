@@ -22,16 +22,16 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
 import { memoryRateLimiterSectionSchema } from "#/ratelimit/module.mjs";
 import { createRepositoryFactories } from "#/repositories/RepositoryFactory.mjs";
-import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
-type AppConfigInput = ReturnType<typeof makeValidAppConfig>;
+type CoreConfigInput = ReturnType<typeof makeValidCoreConfig>;
 
-/** Each key core's application schema reads a number at, with the config that sets it. */
-const APP_CONFIG_KEYS: ReadonlyArray<
-	readonly [path: string, set: (base: AppConfigInput, value: unknown) => unknown]
+/** Each key core's schema reads a number at, with the config that sets it. */
+const CORE_CONFIG_KEYS: ReadonlyArray<
+	readonly [path: string, set: (base: CoreConfigInput, value: unknown) => unknown]
 > = [
 	[
 		"oauth.accessToken.defaultExpiresIn",
@@ -61,21 +61,6 @@ const APP_CONFIG_KEYS: ReadonlyArray<
 	[
 		"oauth.nonce.maxLength",
 		(base, value) => ({ ...base, oauth: { ...base.oauth, nonce: { maxLength: value } } }),
-	],
-	["webauthn.challengeTtlMs", (base, value) => ({ ...base, webauthn: { challengeTtlMs: value } })],
-	[
-		"webauthn.rateLimit.authenticationOptions.limit",
-		(base, value) => ({
-			...base,
-			webauthn: { rateLimit: { authenticationOptions: { limit: value, windowSeconds: 60 } } },
-		}),
-	],
-	[
-		"webauthn.rateLimit.authenticationOptions.windowSeconds",
-		(base, value) => ({
-			...base,
-			webauthn: { rateLimit: { authenticationOptions: { limit: 5, windowSeconds: value } } },
-		}),
 	],
 ];
 
@@ -121,10 +106,10 @@ const issuesAt = (
 		.filter((issue) => issue.path.map(String).join(".") === path)
 		.map((issue) => issue.message);
 
-describe("core's application schema reads each number setting in decimal digits", () => {
-	describe.each(APP_CONFIG_KEYS)("%s", (path, set) => {
+describe("core's schema reads each number setting in decimal digits", () => {
+	describe.each(CORE_CONFIG_KEYS)("%s", (path, set) => {
 		it.each(REFUSED.map((value) => [value]))("refuses %j, naming the key", (value) => {
-			const result = AppConfigSchema.safeParse(set(makeValidAppConfig(), value));
+			const result = CoreConfigSchema.safeParse(set(makeValidCoreConfig(), value));
 			expect(result.success).toBe(false);
 			expect(issuesAt(result, path)).toEqual([
 				expect.stringMatching(/^must be a whole number .*, in decimal digits$/),
@@ -132,7 +117,7 @@ describe("core's application schema reads each number setting in decimal digits"
 		});
 
 		it.each([[60], ["60"], [" 60 "]])("reads %j as 60", (value) => {
-			const result = AppConfigSchema.safeParse(set(makeValidAppConfig(), value));
+			const result = CoreConfigSchema.safeParse(set(makeValidCoreConfig(), value));
 			expect(result.error?.issues ?? []).toEqual([]);
 		});
 	});

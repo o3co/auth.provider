@@ -36,6 +36,7 @@ import {
 	type LoginEntry,
 	type RateLimiter,
 	recordAuditEvent,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type SupportsDelegatedAuthorization,
@@ -73,6 +74,13 @@ export interface FederationGrantBrowserRouterOptions {
 	 * authenticated after. The grants boundary is `grantsBoundary`.
 	 */
 	readonly subjectRevocation: SubjectRevocation;
+	/**
+	 * The session lifecycle port admission reads after a live record, so a
+	 * session closing or closed connects nothing. Required beside
+	 * `userSessionStore`: core's session lifecycle is required where a
+	 * user-session store is wired.
+	 */
+	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 	/**
 	 * The `sessionRequirementResolver` the boot planner built (`resolverForTests` in
 	 * tests): the session requirements admission asks. Admission refuses any other
@@ -159,6 +167,26 @@ export interface BrowserFlow {
 }
 
 /**
+ * Throws where a user-session store is wired without the session lifecycle
+ * port: admission would skip the lifecycle record, and a closing session
+ * could connect.
+ */
+export function requireSessionLifecycleStore(deps: {
+	readonly userSessionStore?: UserSessionStore | undefined;
+	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
+}): void {
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"federation-grants: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
+				"user-session store is wired, core's session lifecycle is required: the connect flow " +
+				"admits the session behind the cookie through its lifecycle record. Wire core's " +
+				"session lifecycle: a session-store module that fills sessionLifecycleStore " +
+				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
+		);
+	}
+}
+
+/**
  * The flow's shared part, derived once. `requirements` and `subjectRevocation` are
  * the ones the router has already checked.
  */
@@ -195,6 +223,7 @@ export function createBrowserFlow(
 	const admissionFor = (flow: LogFields): AdmissionDeps => ({
 		userSessionStore: options.userSessionStore,
 		subjectRevocation,
+		sessionLifecycleStore: options.sessionLifecycleStore,
 		requirements,
 		acrTable: NO_ACR_TABLE,
 		logger: log.bound(flow),

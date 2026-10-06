@@ -41,6 +41,8 @@ import { describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -131,12 +133,12 @@ async function buildApp(dispatchPolicy: DispatchPolicy): Promise<express.Express
 	const registry = new GrantRegistry();
 	registry.register(
 		"client_credentials",
-		createClientCredentialsGrant({ config: fullConfig, keyStore }),
+		createClientCredentialsGrant({ ...grantSettingsFrom(fullConfig), keyStore }),
 	);
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry,
-		config: fullConfig,
+		...routerInputsOf(fullConfig),
 		clientRepository: clientRepo,
 		codeRepository: codeRepoStub,
 		keyStore,

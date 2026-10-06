@@ -39,7 +39,6 @@ import { createSecretKey } from "node:crypto";
 import {
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type TokenBinding,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -47,6 +46,7 @@ import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -63,19 +63,15 @@ const mockConfig = {
 	oauth: {
 		jwt: { secret: SECRET },
 		accessToken: { expiresIn: 3600 },
-		refreshToken: {
-			expiresIn: 86400,
-			unknownFamilyPolicy: "reject",
-			legacyRtPolicy: "reject",
-		},
+		refreshToken: { expiresIn: 86400 },
 		grants: {
 			refresh_token: { enabled: true },
 		},
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const mockDeps: RefreshTokenGrantDeps = {
-	config: mockConfig,
+	...grantSettingsFrom(mockConfig),
 	keyStore,
 	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 };

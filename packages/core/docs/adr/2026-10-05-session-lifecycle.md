@@ -12,6 +12,11 @@ store and the callers' switch follow in the order below
   the cause policy, the relying-party notifier, the bridge and where the
   service lives (D8–D15); and how the notifier is wired (D16).
   Written against `develop` at `5871ff698`.
+- Amended 2026-10-05: the service opens a record where a session is
+  established (D8).
+- Amended 2026-10-06: the memory store, full, evicts a closed record.
+- Amended 2026-10-06: an outage rejects with the store's own error and is
+  logged by the caller; the service never answers `unavailable` (D8, D9).
 
 ## Context
 
@@ -106,7 +111,8 @@ the work, so every work item is safe to run more than once.
 - The memory store (`createInMemorySessionLifecycleStore`) runs each member as
   one synchronous step, holds at most `maxEntries` records and
   `maxParticipants` per record, and when full refuses rather than evicts: an
-  evicted record would let a closed session be joined again.
+  evicted record would let a closed session be joined again (superseded by
+  the 2026-10-06 amendment).
 - `sessionLifecycleStoreContract` in `@o3co/auth-provider-test-kit` holds a
   store to the rules a suite can observe; a Redis store runs it on two
   connections.
@@ -161,14 +167,21 @@ index kept in the same atomic step as the record.
 
 **D8. The service and its answers.** `SessionLifecycle`
 (`src/session-lifecycle/service.mts`) fills the `sessionLifecycle`
-slot through `sessionLifecycleModule`, which nothing installs until the
-callers switch. `join(sid, { rp?, familyId?, federation? })` answers
+slot through `sessionLifecycleModule`, which the standalone template
+installs. `open(sid, { sub, expiresAt })`, called where a session is
+established, writes its record active and answers `opened` (a repeat for the
+same subject and end too), `refused` or `unavailable`: the service is the
+port's one writer, so no caller opens a record through the port.
+`join(sid, { rp?, familyId?, federation? })` answers
 `joined`, `refused` or `unavailable`; on `refused` the service revokes the
 family and deletes that federation's tokens it was handed, and the caller
 hands out nothing. `close(sid, cause)` answers `done`, `pending` or
 `unavailable`, with the snapshot's relying parties and federations.
 `liveness(sid)` answers `live` with the user session, or `not_live`, or
-`unavailable`. `resumePending()` runs the close work of every closing
+`unavailable`. A sid the port cannot hold names no session, so the reads
+answer it as one never opened — `liveness` `not_live`, `federations` none —
+and reach no store; the writes, `join` and `close`, refuse it with a
+RangeError. `resumePending()` runs the close work of every closing
 record. A participant's `data` is `""`: its kind and id are all it holds
 (D7).
 
@@ -176,35 +189,65 @@ record. A participant's `data` is `""`: its kind and id are all it holds
 From the closing commit on, liveness answers `not_live` and nothing joins,
 so a close with work still outstanding has ended the session; it answers
 `pending`, distinct from `done`. `unavailable` means the commit did not land,
-or whether it did could not be read. How a route answers `pending` (the
-logout's 200 and a `logout.close_pending` audit event) is decided when that
-route switches.
+or whether it did could not be read. A commit that finds no live record —
+the session's end passed on the store's clock before its record could be
+opened, or since it was read, which the clock skew between the hosts and
+the store allows while the user session is still read — has no record to
+save the work in. The close runs that work at once, in its phases, over the
+record the commit would have saved (the read record's participants, or
+none), without `completeIf`, and answers `done`; an item that fails makes it
+answer `unavailable`, so a later close runs it all again — except once the
+user session is deleted: a close then finds neither a record nor a user
+session and answers `done`, and an entry the last phase left in the
+subject's index lapses at its retention or goes with a subject-wide
+revocation. How a route
+answers `pending` (the logout's 200 and a `logout.close_pending` audit
+event) is decided when that route switches.
 
 **D10. The close work, in phases.** An item runs only once no item of an
 earlier phase is pending in the record, so no phase runs over work an
 earlier one has not durably done:
-1. one item per family (`revokeFamily`), `revoke_bridged_families` (D14),
-   `remove_federation_tokens` (`federationTokenStore.removeBySid`) and
-   `remove_subject_session` (`subjectSessionIndex.removeSid`, where a subject
-   index is wired);
+1. one item per family (`revokeFamily`), `revoke_bridged_families` (D14)
+   and `remove_federation_tokens` (`federationTokenStore.removeBySid`);
 2. one item per relying party and `notify_bridged_rps` (D14), through
    `SessionCloseNotifier`; an item this code does not know waits here;
 3. `remove_session_indexes` (the per-session stores the bridge steps read);
-4. `delete_user_session`, last.
+4. `delete_user_session`;
+5. `remove_subject_session` (`subjectSessionIndex.removeSid`, where a
+   subject index is wired), last: a close still pending keeps the sid in
+   the subject's index, which a subject-wide revocation enumerates, so
+   where subject revocation closes through the lifecycle (#1455) a retry of
+   that revocation finds the sid and resumes its close. The index is read
+   only to enumerate the sessions to revoke, never as a sign that one is
+   live.
 
-Each item that ran is recorded with `completeIf` at the generation read; a
-conflict re-reads the record and goes on with what is still pending, so two
-closes of one session and the sweep may overlap. A failed item, or one whose
-completion could not be recorded, stays pending and the record stays
-`closing`; the other items of its phase still run.
+The items of a phase run together, and one close run makes at most eight
+notices and family revocations at once (`CLOSE_CONCURRENCY`), those of the
+record's participants and those a bridge step reaches sharing the eight
+places; an item or a bridge step holds no place itself. A notice waits on
+its relying party, so relying parties that do not answer hold a close for
+about one notifier timeout per eight, not one each. Each item that ran is
+recorded with `completeIf` at the generation read, one at a time once its
+phase's run has settled; a conflict re-reads the record and goes on with
+what is still pending, so two closes of one session and the sweep may
+overlap. A run that overlaps another, or one that stops before it records,
+may so run a whole phase's items again, which every item allows and the
+notifier allows for a notice (D13). A failed item, or one whose completion
+could not be recorded, stays pending and the record stays `closing`; the
+other items of its phase still run.
 
 **D11. Resumption.** A later close of the same sid resumes the saved work,
 whatever its cause (the first cause is kept). A sweep owned by core,
 `resumePending`, pages `listClosing` by its `after` cursor every
 `core.sessionLifecycle.sweepIntervalSeconds` — whole seconds, read through
 `configuredNumber`, refused at boot naming the key otherwise — one sweep at a
-time, stopped on dispose. Unwritten, there is no sweep: a deployment without
-relying parties leaves it so.
+time, stopped on dispose. Core's `reference.conf` ships 60, and a
+configuration without it reads 60 too; 0 turns the sweep off. A close
+left pending once its user session is gone has no later close to resume it,
+so without the sweep it would stay pending until the record lapses. A
+subject index that keeps failing leaves records `closing` on their last item
+that only the sweep or their retention ends, so with
+`sweepIntervalSeconds = 0` they stay until they lapse.
 
 **D12. The cause policy.** Every cause runs the work of D10. `rp_logout`,
 `session_logout`, `subject_revocation` and `operator_reset` also tell the
@@ -249,9 +292,19 @@ never unsafe; by a join only where no end mark can be present — its family
 passed `addFamilyIdUnlessEnded`, or the family index keeps no mark. A join
 with no family, on an index that keeps the mark, cannot read it and is
 refused with nothing written: the conservative reading of "only when no old
-mark is present". Liveness of a session with no record reads its user
-session alone. The bridge and adoption go with the old stores; an absent
-record then reads as closed.
+mark is present". A join that adopts is refused when the store refuses its
+open, and reads the user session again once it has opened the record and
+joined: a close that completed since its first read, and whose closed
+record then left the store, let the open land, and the close deleted the
+user session before it closed the record, so a join that finds it gone, or
+finds another session created under the sid since (another subject,
+authentication time or end), is refused and withdrawn like one the record
+refuses. A join refused there leaves the record it opened active, with what
+it joined, until the record lapses; the withdraw revokes the family and
+removes the federation's tokens, and no live session is read for the sid.
+Liveness of a session with no record reads its user session alone. The
+bridge and adoption go with the old stores; an absent record then reads as
+closed.
 
 Two known limitations of the bridge are accepted as interim. It exists only
 between this amendment and the removal of the bridge and adoption, which
@@ -311,5 +364,58 @@ once the notifier would have registered, and only where
 filled it with is the host's. It is refused as before, as that module's
 provider failing (`provides-factory-failed`, naming
 `core-session-lifecycle`), its remedy now naming the contribution: install a
-module that contributes a `sessionCloseNotifiers` entry, as `oauthModule` is
-to.
+module that contributes a `sessionCloseNotifiers` entry, as `oauthEndpointsModule`
+does.
+
+**D17. Join order, and the federations a logout reads first.** A record's
+participants are answered in the order each first joined; a repeat join
+replaces its `data` and does not move it — the order the per-session
+federation index has always kept, which a logout reads to pick the
+federation it ends upstream. The in-process store keeps that order; the
+Redis store keeps it from the join ordinal its join script writes, and
+until then answers byte order. `SessionLifecycle.federations(sid)` answers
+the federations in the order they joined: while the bridge stands, the
+index's first, in its insertion order — every join writes the index before
+the record, so that is the order of joining, a federation joined before the
+switch included — then the record's, each once. That is the union and order
+the close that makes the closing commit answers; a later close answers the
+snapshot's. Once the bridge goes, the record's order alone holds it. A logout reads it before the close, since the close removes the
+federation tokens that carry the upstream `id_token_hint`. A logout whose
+close commits with work still pending is audited as `logout.close_pending`.
+
+## Amendment 2026-10-06 — the memory store, full, evicts a closed record
+
+The memory store no longer only rejects when full. It drops lapsed records
+and, if that makes no room, evicts the `closed` record whose retention ends
+first; it rejects when there is none. A login and logout loop on one
+account would otherwise fill it with closed records and refuse every login
+until they lapsed. Closing records are never evicted, so a loop whose
+closes stay pending still fills the store until their retention.
+
+A closed record may so go before its retention. What makes that safe is
+the service's re-check on a join that adopts a session (#1468): the service
+closes a record only after deleting its user session, and a join that
+finds no record, opens one and joins is refused unless the user session it
+read first is still there, so a closed session is not joined again through
+a record that left the store. A repeated close or `federations` then
+answers no snapshot, as after the record's retention. An active or closing
+record is never evicted: that would drop a live session's fence, or leave
+its close work undone. A close run overlapping one that completed may
+answer `pending` once the closed record has left the store, as after its
+retention; a subject revocation may then report that sid not revoked until
+a retry. The port and its contract are unchanged.
+
+## Amendment 2026-10-06 — an outage rejects with the store's own error
+
+`open`, `join`, `close`, `federations` and `liveness` no longer answer
+`unavailable` (D8). A store that cannot answer rejects the call with its own
+error, unwrapped, and the service logs nothing for it: the caller logs the
+outage once, at error, with the error's projection, where it used to log an
+`unavailable` answer beside the service's own warn. Where D9 says a close
+answers `unavailable` — the closing commit did not land, whether it did could
+not be read, or an item of the close work run with no record to save it in
+failed — the close now rejects. `pending` and `done` are unchanged.
+`unavailable` is removed from the five answer types. The close work's
+and the sweep's own lines are unchanged: `session_lifecycle_unavailable`
+(warn) is still logged where a close's item ran but recording it failed, or a
+closing record could not be re-read by a close or the sweep.

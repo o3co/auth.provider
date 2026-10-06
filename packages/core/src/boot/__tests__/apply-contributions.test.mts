@@ -456,6 +456,116 @@ describe("applyContributions — step 2: pre-scan prevents factory side-effect l
 });
 
 // ---------------------------------------------------------------------------
+// 6b. A pre-scan refusal rolls back stage 3
+// ---------------------------------------------------------------------------
+
+describe("applyContributions — step 2: a pre-scan refusal runs the stage-3 cleanups", () => {
+	/**
+	 * Two providers whose lifecycle cleanups record their names, materialised
+	 * A then B (B requires A's slot); B's cleanup throws after recording when
+	 * `bThrows`.
+	 */
+	function providersWithCleanups(
+		cleaned: string[],
+		bThrows = false,
+	): ReturnType<typeof defineModule>[] {
+		return [
+			defineModule({
+				name: "ProvA",
+				provides: { slotAC: () => 1 },
+				lifecycle: { slotAC: { eager: true, cleanup: () => void cleaned.push("A") } },
+			}),
+			defineModule({
+				name: "ProvB",
+				requires: ["slotAC"] as never,
+				provides: { slotBC: () => "b" },
+				lifecycle: {
+					slotBC: {
+						eager: true,
+						cleanup: () => {
+							cleaned.push("B");
+							if (bThrows) throw new Error("close failed");
+						},
+					},
+				},
+			}),
+		];
+	}
+
+	const cases: readonly {
+		readonly reason: string;
+		readonly existing: ReadonlyMap<string, GrantHandler | null>;
+		readonly module: ReturnType<typeof defineModule>;
+	}[] = [
+		{
+			reason: "duplicate-contribute",
+			existing: new Map([["taken", fakeGrantHandler("existing")]]),
+			module: defineModule({
+				name: "Contributor",
+				contributes: { grants: { taken: () => fakeGrantHandler("second") } },
+			}),
+		},
+		// Stage 1 refuses an override of a name nothing holds; one of a
+		// switched-off entry reaches the pre-scan.
+		{
+			reason: "override-target-missing",
+			existing: new Map([["off", null]]),
+			module: defineModule({
+				name: "Overrider",
+				overrides: { grants: { off: () => fakeGrantHandler("override") } },
+			}),
+		},
+	];
+
+	it.each(cases)(
+		"refuses as $reason after running each cleanup once, in reverse",
+		async ({ reason, existing, module }) => {
+			const cleaned: string[] = [];
+			const collector = makeStubNameCollector<GrantHandler | null>();
+			for (const [name, value] of existing) collector.register(name, value);
+			const contributionKinds: ContributionCollectorMap = { grants: collector };
+			const world = await buildWorld(
+				[...providersWithCleanups(cleaned), module],
+				contributionKinds,
+			);
+			expect(world.cleanups.map((record) => record.module)).toEqual(["ProvA", "ProvB"]);
+
+			const err = await applyContributions(world, contributionKinds).then(
+				() => undefined,
+				(thrown: unknown) => thrown,
+			);
+
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe(reason);
+			expect((err as BootError).details).not.toHaveProperty("cleanupErrors");
+			expect(cleaned).toEqual(["B", "A"]);
+		},
+	);
+
+	it("runs every cleanup when one throws, and still refuses with the pre-scan's reason", async () => {
+		const cleaned: string[] = [];
+		const collector = makeStubNameCollector<GrantHandler | null>();
+		collector.register("off", null);
+		const contributionKinds: ContributionCollectorMap = { grants: collector };
+		const world = await buildWorld(
+			[
+				...providersWithCleanups(cleaned, true),
+				defineModule({
+					name: "Overrider",
+					overrides: { grants: { off: () => fakeGrantHandler("override") } },
+				}),
+			],
+			contributionKinds,
+		);
+
+		await expect(applyContributions(world, contributionKinds)).rejects.toMatchObject({
+			reason: "override-target-missing",
+		});
+		expect(cleaned).toEqual(["B", "A"]);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // 7. Overrides routed via collector.replace
 // ---------------------------------------------------------------------------
 

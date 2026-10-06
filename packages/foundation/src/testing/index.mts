@@ -60,8 +60,9 @@ export function foundationMfaFactorStoreConfig(
 /**
  * The user repository's `http` block, as the `"http"` builder reads it: the
  * Store URLs `urls` holds — a fake Store's `urls` included, its MFA factor
- * endpoints left behind — and `extra` as given. A composition places it with
- * core's `withUserRepositoryHttp`.
+ * endpoints left behind — and `extra` as given. A test hands it to the
+ * `"http"` builder, or to `foundationMfaFactorStoreModule` as its
+ * `storeTransport`.
  */
 export function foundationUserRepositoryHttpConfig(
 	urls: Partial<FoundationUserRepositoryUrls>,

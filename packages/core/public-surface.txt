@@ -29,7 +29,6 @@
 . AdmissionRequest type
 . Algorithm type
 . AppConfig type
-. AppConfigSchema value
 . AppHandle type
 . ApproveDeviceAuthorizationInput type
 . AssertionClaimReaders type
@@ -109,7 +108,6 @@
 . ConditionalSetRemoveAnswer type
 . ConfigDefaultsInvalidDetails type
 . ConfigPathRelocatedDetails type
-. ConfigSchema type
 . ConfigValidationFailedDetails type
 . ConfiguredFederation type
 . Confirmation type
@@ -151,7 +149,6 @@
 . DEFAULT_MFA_SUBJECT_LEASE_MS value
 . DEFAULT_SIGNING_ALGORITHM value
 . DEFAULT_SUBJECT_REVOCATION_SKEW_MS value
-. DEVICE_CODE_STORE_ABSENCE_POLICY value
 . DPOP_PROOF_REPLAY_SCOPE_PREFIX value
 . DefaultBootstrapMap type
 . DelegatedAuthorizationRequest type
@@ -200,6 +197,7 @@
 . FederatedIdentityLookupResult type
 . FederatedIdentityRegistration type
 . FederatedLogin type
+. FederationAsk type
 . FederationClientSecret type
 . FederationGrant type
 . FederationGrantAcquisitionConnection type
@@ -243,6 +241,7 @@
 . FederationGrantLodgingResult type
 . FederationGrantLodgingStepFailure type
 . FederationGrantOpened type
+. FederationGrantPolicy type
 . FederationGrantReauthorizationReason type
 . FederationGrantReauthorizationRequest type
 . FederationGrantReauthorizationResult type
@@ -496,6 +495,7 @@
 . PendingConsentStore type
 . PendingConsentStoreFactory type
 . PendingFederationGrant type
+. PlainJsonCopy type
 . PolicyAudienceOutcome type
 . PolicyDeniedOptions type
 . PolicyScopeCeiling type
@@ -637,6 +637,7 @@
 . SessionFamilyIndexFactory type
 . SessionFederationIndex type
 . SessionFederationIndexFactory type
+. SessionFederations type
 . SessionJoinAnswer type
 . SessionJoinOutcome type
 . SessionJoinRequest type
@@ -648,6 +649,8 @@
 . SessionLiveness type
 . SessionMutation type
 . SessionOpenAnswer type
+. SessionOpenOutcome type
+. SessionOpenRequest type
 . SessionParticipant type
 . SessionParticipantKind type
 . SessionRPRegistry type
@@ -746,6 +749,7 @@
 . auditedError value
 . authTimeAt value
 . authTimeClaim value
+. authenticationFreshness value
 . boundPolicyAudience value
 . browserFacingCorsRoutes value
 . buildCanonicalRequestUrl value
@@ -759,6 +763,7 @@
 . checkCanonicalIssuer value
 . checkConfiguredMfaLockoutPolicy value
 . checkDeploymentMode value
+. checkFederationGrantPolicy value
 . checkFirstBindingNote value
 . checkFirstBindingQuestion value
 . checkMfaLockoutPolicy value
@@ -794,7 +799,6 @@
 . codeClaimRevalidation value
 . coerceBooleanFromEnv value
 . composeAmr value
-. composeConfigSchema value
 . configuredNumber value
 . consentCovers value
 . consoleLogger value
@@ -802,6 +806,7 @@
 . cookieClaim value
 . cookieRenewedAway value
 . cookieSessionUser value
+. copyPlainJson value
 . coreReference value
 . corsMw value
 . coveredByRevocationBoundary value
@@ -889,7 +894,6 @@
 . describeSerializedOriginRejection value
 . describeTrustedProxyEntryRejection value
 . describeWeakSecret value
-. durationFromEnv value
 . effectiveFederationGrantStatus value
 . emitAuditEvent value
 . enabledFederationsOf value
@@ -901,6 +905,7 @@
 . extractConfirmation value
 . extractResourceParam value
 . federatedSessionAuthentication value
+. federationCallbackMeetsFreshness value
 . federationGrantAccessToken value
 . federationGrantAllowlist value
 . federationGrantAuditMetadata value
@@ -921,7 +926,6 @@
 . formatObject value
 . formatUserCode value
 . fromMfaStoreFactor value
-. fullSectionsSchema value
 . generateDeviceCode value
 . generateIdToken value
 . generateLogoutToken value
@@ -1071,7 +1075,7 @@
 . readSessionOpenAnswer value
 . readSpaceDelimitedParameter value
 . readTargetParameter value
-. readTransitionalConfig value
+. readUpstreamAuthTime value
 . readUpstreamTokenLifetime value
 . readUserSnapshot value
 . readVersioned value
@@ -1127,6 +1131,7 @@
 . sessionAuthentication value
 . sessionCloseItemOf value
 . sessionEmailProofAnswer value
+. sessionFreshness value
 . sessionLifecycleModule value
 . shownConfigValue value
 . stepUpReach value
@@ -1169,7 +1174,6 @@
 ./modules/manifest ComponentKey type
 ./modules/manifest ComponentLifecycle type
 ./modules/manifest ComponentMap type
-./modules/manifest ConfigSchema type
 ./modules/manifest Contributed type
 ./modules/manifest ContributesMap type
 ./modules/manifest ExchangeTokenValidator type
@@ -1230,6 +1234,7 @@
 ./testing FakeIdpRequest type
 ./testing FederationEntryForTests type
 ./testing FederationForTests type
+./testing FederationGrantPolicyContractInput type
 ./testing FederationSettingsContractInput type
 ./testing FederationTypeForTestsOptions type
 ./testing GrantRegistry value
@@ -1286,6 +1291,7 @@
 ./testing createTestApp value
 ./testing createTestCsrfGuard value
 ./testing createTestCsrfTokenSigner value
+./testing createTestFederationGrantPolicy value
 ./testing createTestFederationSettings value
 ./testing createTestHttpSettings value
 ./testing createTestLoginEntry value
@@ -1299,6 +1305,7 @@
 ./testing csrfGuardContract value
 ./testing csrfTokenSignerContract value
 ./testing deploymentModeContract value
+./testing federationGrantPolicyContract value
 ./testing federationSettingsContract value
 ./testing federationTypeForTests value
 ./testing httpSettingsContract value
@@ -1322,11 +1329,9 @@
 ./testing testMfaFactorProofs value
 ./testing tokenBindingSettingsContract value
 ./testing unreadableModuleLeaves value
-./testing userRepositoryHttpOf value
 ./testing withFederation value
 ./testing withInsecureSessionCookie value
 ./testing withOutbound value
-./testing withUserRepositoryHttp value
 exports .
 exports ./middleware/express.mjs
 exports ./modules/manifest

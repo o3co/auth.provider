@@ -21,10 +21,11 @@
  * (`admitPrimary`) before anything is written: if every requirement
  * establishes, `establishSession` writes the session and a fresh CSRF token
  * is returned; if one interrupts, its ceremony is opened on a regenerated,
- * unauthenticated session and its `403` answered. A logout invalidates the
- * records the session owns before destroying the cookie session — unless the
- * record was renewed away from this cookie session (core's
- * `cookieRenewedAway`), when only the cookie session is destroyed.
+ * unauthenticated session and its `403` answered. A logout closes the
+ * session through core's session lifecycle before destroying the cookie
+ * session, unless the record was renewed away from this cookie session
+ * (core's `cookieRenewedAway`), when only the cookie session is destroyed.
+ * Where a `UserSessionStore` is wired, the lifecycle is required beside it.
  */
 
 import {
@@ -40,13 +41,13 @@ import {
 	cookieRenewedAway,
 	createAttemptGuard,
 	type DeploymentMode,
-	type FederationTokenStore,
+	emitAuditEvent,
 	type Logger,
 	loggableError,
 	passwordPrimary,
 	readUserSnapshot,
 	type SessionCookiePolicy,
-	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SessionRequirementResolver,
 	type SubjectSessionIndex,
 	type User,
@@ -95,8 +96,7 @@ export const createRouter = (
 		deploymentMode,
 		userSessionStore,
 		subjectSessionIndex,
-		federationTokenStore,
-		sessionFederationIndex,
+		sessionLifecycle,
 		attemptCounter,
 		auditSink,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
@@ -134,16 +134,12 @@ export const createRouter = (
 		 */
 		subjectSessionIndex?: SubjectSessionIndex;
 		/**
-		 * Upstream-IdP tokens held for the session, dropped on logout. Optional:
-		 * a composition that federates nothing wires none.
+		 * Core's session lifecycle: a login opens the session's lifecycle record
+		 * in it, and `POST /session/logout` closes the session through it.
+		 * Required with a `userSessionStore`: a router built with the store and
+		 * without it is refused.
 		 */
-		federationTokenStore?: FederationTokenStore;
-		/**
-		 * Reverse index naming which federations a session touched. Removed
-		 * alongside `federationTokenStore` so the index does not outlive the
-		 * entries it points at.
-		 */
-		sessionFederationIndex?: SessionFederationIndex;
+		sessionLifecycle?: SessionLifecycle | undefined;
 		/**
 		 * The `attemptCounter` slot's counter, so the login's limit holds across
 		 * replicas. Omitted, the attempt guard counts per process where
@@ -180,17 +176,23 @@ export const createRouter = (
 			"session routes: csrfTokenSigner is required: pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)",
 		);
 	}
+	if (userSessionStore !== undefined && sessionLifecycle === undefined) {
+		throw new Error(
+			"session routes: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it, and the logout closes the session through it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
+	}
 	const replicas = checkDeploymentMode(deploymentMode, "session routes: deploymentMode");
 	const router = express.Router();
 
 	/**
-	 * What the login hands `admitPrimary`. The revocation boundary concerns
-	 * sessions that already exist, and the acr table is empty since nothing is
-	 * selected.
+	 * What the login hands `admitPrimary`. The revocation boundary and the
+	 * session lifecycle concern sessions that already exist, and the acr table
+	 * is empty since nothing is selected.
 	 */
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore,
 		subjectRevocation: undefined,
+		sessionLifecycleStore: undefined,
 		requirements,
 		acrTable: NO_ACR_TABLE,
 		logger,
@@ -233,62 +235,45 @@ export const createRouter = (
 	});
 
 	/**
-	 * Invalidates the server-side records a logging-out session owns, so tokens
-	 * bound to its `sid` stop introspecting `active` and answering at
-	 * `/userinfo`.
-	 *
-	 * Narrower than `/oauth/logout`'s cascade by layering: `cascadeLogout`
-	 * lives in the oauth package, which this package must not depend on. This
-	 * deletes what the session module owns: the `UserSession` record (primary:
-	 * every liveness check resolves it), its subject-index entry, and the
-	 * session's federation tokens and index (hygiene: unreachable once the
-	 * record is gone, but holding upstream refresh tokens at rest).
-	 * Refresh-token families are NOT revoked: a refresh token from an
-	 * `/authorize` flow is revoked only by `/oauth/logout`.
-	 *
-	 * The delete runs first, unlike the cascade's delete-last order: that order
-	 * keeps a failed cascade retryable, but this endpoint offers no retry, so
-	 * the failure to avoid is a token still honoured. Every step is best effort
-	 * and logged, never propagated: a store outage must not turn logout into a
-	 * 5xx while the cookie, the half this endpoint can always deliver,
-	 * survives. A failed delete is covered by the liveness checks failing
-	 * closed.
+	 * Closes `sid` through core's session lifecycle for a session logout:
+	 * `true` once the closing commit has landed (`done`, or `pending` — audited
+	 * as `logout.close_pending`); `false` for anything else — a rejection,
+	 * whatever the error, or any other answer — logged once as
+	 * `session_logout_store_unavailable`.
 	 */
-	const invalidateSessionRecords = async (sid: string, sub: string | undefined): Promise<void> => {
-		if (userSessionStore) {
-			try {
-				await userSessionStore.delete(sid);
-			} catch (err) {
-				logger.error({ err: loggableError(err), sid }, "logout_user_session_delete_failed");
+	const closeSession = async (
+		lifecycle: SessionLifecycle,
+		sid: string,
+		sub: string | undefined,
+		req: Request,
+	): Promise<boolean> => {
+		try {
+			const { outcome } = await lifecycle.close(sid, "session_logout");
+			if (outcome === "done" || outcome === "pending") {
+				if (outcome === "pending") {
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "logout.close_pending",
+						subject: sub,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { sid },
+					});
+				}
+				return true;
 			}
+			// An answer that is not a commit: no error to project.
+			logger.error(
+				{ sid, store: "session_lifecycle", step: "close" },
+				"session_logout_store_unavailable",
+			);
+		} catch (err) {
+			logger.error(
+				{ sid, store: "session_lifecycle", step: "close", err: loggableError(err) },
+				"session_logout_store_unavailable",
+			);
 		}
-		if (subjectSessionIndex && sub) {
-			try {
-				await subjectSessionIndex.removeSid(sub, sid);
-			} catch (err) {
-				logger.error(
-					{ err: loggableError(err), sub, sid },
-					"logout_subject_session_index_remove_failed",
-				);
-			}
-		}
-		if (federationTokenStore) {
-			try {
-				await federationTokenStore.removeBySid(sid);
-			} catch (err) {
-				logger.error({ err: loggableError(err), sid }, "logout_federation_token_remove_failed");
-			}
-		}
-		if (sessionFederationIndex) {
-			try {
-				await sessionFederationIndex.removeBySid(sid);
-			} catch (err) {
-				logger.error(
-					{ err: loggableError(err), sid },
-					"logout_session_federation_index_remove_failed",
-				);
-			}
-		}
+		return false;
 	};
 
 	/**
@@ -423,6 +408,7 @@ export const createRouter = (
 					req,
 					...(userSessionStore === undefined ? {} : { userSessionStore }),
 					...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+					...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 					sessionTtlMs,
 					reporter: ({ sid, sub }) => {
 						// Every line names the sid where there is one; the record's
@@ -480,8 +466,14 @@ export const createRouter = (
 					logger.error({ err: loggableError(err), sid }, "logout_user_session_read_failed");
 				}
 			}
-			if (sid && !renewedAway) {
-				await invalidateSessionRecords(sid, sub);
+			// Core's session lifecycle closes the session: it revokes its
+			// families, tells its relying parties and deletes its records. A
+			// close that committed is the logout's success, its work left
+			// pending or not; one that did not keeps the cookie for a retry. A
+			// sessionless router has no record to close.
+			if (sid && !renewedAway && sessionLifecycle) {
+				const closed = await closeSession(sessionLifecycle, sid, sub, req);
+				if (!closed) return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 			}
 
 			const destroyErr = await new Promise<unknown>((resolve) => {
@@ -489,8 +481,8 @@ export const createRouter = (
 			});
 			if (destroyErr) {
 				// The cookie store could not destroy the browser session: `503` so
-				// the client retries. The records are already gone, so the surviving
-				// cookie is refused at `/authorize` and its tokens at
+				// the client retries. The session's close has already committed, so
+				// the surviving cookie is refused at `/authorize` and its tokens at
 				// `/oauth/introspect` and `/oauth/userinfo`.
 				logger.error(
 					{

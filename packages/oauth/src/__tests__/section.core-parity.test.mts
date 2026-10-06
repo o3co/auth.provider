@@ -19,24 +19,30 @@
  * it before this module's schema, so an operator meets core's refusal first.
  * The two must agree on every key both declare: what each accepts, what it
  * makes of it, and each refusal's path and message, so nothing changes for an
- * operator when core stops declaring the section. What core retired from the
- * section stays core's: a retired key core refuses naming what became of it,
- * the module as a key it does not declare; a path another section moved from
+ * operator when core stops declaring the section. Of what core retired from
+ * the section, `oauth.jwt`'s flat key fields stay core's: core refuses them
+ * naming what became of them, the module as keys it does not declare. The keys
+ * the module removed (`oauth.refreshToken.legacyTokenCompat`,
+ * `oauth.authorize.allowUnmarkedClients`) its manifest declares removed, and
+ * boot refuses them before either schema runs; a path another section moved from
  * core carries unread, the module only as an empty object or null. Boot refuses a key
  * set under a moved path naming its new one before either schema runs, while
- * the module it moved to is loaded.
+ * the module it moved to is loaded; the refresh-token family policy keys core
+ * still declares optional are such paths, and the module declares neither.
  *
  * This file goes when core's schema stops declaring `oauth {}`.
  */
 
-import { CoreConfigSchema } from "@o3co/auth-provider-core";
+import { CoreConfigSchema, checkAcrValueName } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
+import { oauthEndpointsModule } from "#/module.mjs";
+import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { oauthSectionSchema } from "#/section.mjs";
 
 const valid = (): Record<string, unknown> => ({
 	jwt: { issuer: "https://auth.test", legacyTypAccept: false },
 	accessToken: { expiresIn: 3600 },
-	refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+	refreshToken: { expiresIn: 86400 },
 	oidcMode: "oidc-required",
 	requireEmailVerified: false,
 	requireGrantTypeAllowlist: false,
@@ -107,9 +113,6 @@ const CASES: ReadonlyArray<readonly [path: string, value: unknown]> = [
 	["refreshToken.expiresIn", "0x10"],
 	["refreshToken.expiresIn", 1.5],
 	["refreshToken.expiresIn", 31_536_001],
-	["refreshToken.unknownFamilyPolicy", "accept"],
-	["refreshToken.unknownFamilyPolicy", "warn"],
-	["refreshToken.legacyRtPolicy", "accept-with-warning"],
 	["oidcMode", "dual"],
 	["oidcMode", "oauth-only"],
 	["requireEmailVerified", "1"],
@@ -122,6 +125,10 @@ const CASES: ReadonlyArray<readonly [path: string, value: unknown]> = [
 	["authorize.acrValues", { "urn:x": [] }],
 	["authorize.acrValues", { "urn:x": ["pwd", ["hwk"]] }],
 	["authorize.acrValues", "urn:x"],
+	["authorize.acrValues", { "urn:x pwd": ["pwd"] }],
+	["authorize.acrValues", { 'urn:"x"': ["pwd"], "urn:x\\y": ["pwd"], "urn:é": ["pwd"] }],
+	["authorize.acrValues", { "urn:x\tpwd": ["pwd"], "urn:ok": ["pwd"], "urn:none": [] }],
+	["authorize.acrValues", { "": ["pwd"] }],
 	["nonce.maxLength", "512"],
 	["nonce.maxLength", 0],
 	["nonce.maxLength", "+5"],
@@ -148,13 +155,32 @@ describe("the module's schema and core's agree on every key both declare", () =>
 	});
 });
 
-describe("what core retired from the section stays core's", () => {
+describe("both refuse an acr value name /authorize can never be asked for, in one wording", () => {
+	it.each(["urn:x pwd", "urn:x\tpwd", "urn:x\n", 'urn:"x"', "urn:x\\y", "urn:é"])(
+		"%j: one issue at the key, checkAcrValueName's message, from each schema",
+		(key) => {
+			const input = withValue("authorize.acrValues", { [key]: ["pwd"] });
+			const expected = { issues: [`authorize.acrValues.${key}: ${checkAcrValueName(key)}`] };
+			expect(outcome(oauthSectionSchema, input)).toEqual(expected);
+			expect(outcome(coreOauth, input)).toEqual(expected);
+		},
+	);
+});
+
+describe("what core retired from the section", () => {
+	it("refreshToken.legacyTokenCompat and authorize.allowUnmarkedClients: the module's manifest declares them removed, so boot refuses them before either schema runs", () => {
+		expect(oauthEndpointsModule.section?.relocatedFrom).toMatchObject({
+			"oauth.refreshToken.legacyTokenCompat": null,
+			"oauth.authorize.allowUnmarkedClients": null,
+		});
+	});
+
 	it.each([
 		["jwt", { issuer: "https://auth.test", algorithm: "HS256" }, "jwt", "algorithm"],
 		["refreshToken.legacyTokenCompat", false, "refreshToken", "legacyTokenCompat"],
 		["authorize.allowUnmarkedClients", false, "authorize", "allowUnmarkedClients"],
 	])(
-		"%s = %j: core names what became of it, the module refuses a key it does not declare",
+		"%s = %j: core's schema names what became of it, the module's refuses a key it does not declare",
 		(path, value, level, key) => {
 			const input = withValue(path, value);
 			const core = outcome(coreOauth, input) as { issues?: string[] };
@@ -176,4 +202,34 @@ describe("what core retired from the section stays core's", () => {
 			});
 		},
 	);
+});
+
+describe("the refresh-token family policy keys: core accepts them absent, the module declares neither", () => {
+	it("a section without them parses alike in both", () => {
+		expect(outcome(coreOauth, valid())).toHaveProperty("data");
+		expect(outcome(oauthSectionSchema, valid())).toEqual(outcome(coreOauth, valid()));
+	});
+
+	it.each([
+		["unknownFamilyPolicy", "accept"],
+		["legacyRtPolicy", "reject"],
+	])(
+		"refreshToken.%s = %j: core carries it, the module refuses a key it does not declare",
+		(key, value) => {
+			const input = withValue(`refreshToken.${key}`, value);
+			expect(outcome(coreOauth, input)).toHaveProperty("data");
+			expect(outcome(oauthSectionSchema, input)).toEqual({
+				issues: [`refreshToken: Unrecognized key: "${key}"`],
+			});
+		},
+	);
+
+	it("boot refuses either before a schema runs: one as moved into oauth-authorization, the other as removed", () => {
+		expect(oauthAuthorizationGrantsModule.section?.relocatedFrom).toMatchObject({
+			"oauth.refreshToken.unknownFamilyPolicy": "grants.refreshToken.unknownFamilyPolicy",
+		});
+		expect(oauthEndpointsModule.section?.relocatedFrom).toMatchObject({
+			"oauth.refreshToken.legacyRtPolicy": null,
+		});
+	});
 });

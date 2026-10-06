@@ -374,7 +374,7 @@ describe("the Redis federation grant store module", () => {
 		// is "keep no tombstones", which is
 		// indistinguishable from thirty days of them until somebody asks why a
 		// revoked grant cannot be looked up.
-		for (const tombstoneRetention of [null, true, [], "1e3", "0x10"]) {
+		for (const tombstoneRetention of [null, true, [], "", "1e3", "0x10"]) {
 			expect(
 				() =>
 					build({
@@ -383,7 +383,7 @@ describe("the Redis federation grant store module", () => {
 						tombstoneRetention,
 					}),
 				JSON.stringify(tombstoneRetention),
-			).toThrow();
+			).toThrow("must be a whole number from 0 to 31536000, in decimal digits");
 		}
 	});
 
@@ -405,6 +405,12 @@ describe("the Redis federation grant store module", () => {
 			expect(() =>
 				build({ encryptionMode: "allow-plaintext" }, { environment: "production" }),
 			).toThrow(/\[federation-grants\] mode "allow-plaintext" is refused/);
+			// The environment's name is read whatever its case and the whitespace around it.
+			expect(() =>
+				build({ encryptionMode: "allow-plaintext" }, { environment: "Staging\n" }),
+			).toThrow(
+				/\[federation-grants\] mode "allow-plaintext" is refused because the environment is "staging"/,
+			);
 			expect(() => build({ encryptionMode: "allow-plaintext" }, {}, "multi")).toThrow(
 				/\[federation-grants\]/,
 			);
@@ -476,10 +482,14 @@ describe("the Redis federation grant store module", () => {
 		expect(resolve({ tombstoneRetention: 31_536_000 }).tombstoneRetentionMs).toBe(31_536_000_000);
 		expect(resolve({ listingAllowanceMs: 31_536_000_000 }).listingAllowanceMs).toBe(31_536_000_000);
 		for (const tombstoneRetention of [31_536_001, 1e18]) {
-			expect(() => resolve({ tombstoneRetention }), String(tombstoneRetention)).toThrow();
+			expect(() => resolve({ tombstoneRetention }), String(tombstoneRetention)).toThrow(
+				"must be a whole number from 0 to 31536000, in decimal digits",
+			);
 		}
-		for (const listingAllowanceMs of [31_536_000_001, 1e21]) {
-			expect(() => resolve({ listingAllowanceMs }), String(listingAllowanceMs)).toThrow();
+		for (const listingAllowanceMs of [31_536_000_001, 1e21, "", "1e3"]) {
+			expect(() => resolve({ listingAllowanceMs }), String(listingAllowanceMs)).toThrow(
+				"must be a whole number from 0 to 31536000000, in decimal digits",
+			);
 		}
 	});
 

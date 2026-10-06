@@ -3,7 +3,18 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import type { RateLimiter } from "@o3co/auth-provider-core";
+import {
+	BootError,
+	createApp,
+	defineModule,
+	type RateLimiter,
+	verifierLimitClaim,
+} from "@o3co/auth-provider-core";
+import {
+	CORE_RELOCATIONS,
+	makeValidAppConfig,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { redisRateLimiterModule } from "#/ratelimit.mjs";
 
@@ -12,25 +23,18 @@ describe("redisRateLimiterModule", () => {
 		expect(redisRateLimiterModule.name).toBe("redis-rate-limiter");
 	});
 
-	it("requires rateLimiterClient and the contributed budgets", () => {
-		expect(redisRateLimiterModule.requires).toEqual([
-			"rateLimiterClient",
-			"rateLimitBudgetResolver",
-		]);
+	it("requires rateLimiterClient alone: no contributed budget is read", () => {
+		expect(redisRateLimiterModule.requires).toEqual(["rateLimiterClient"]);
 	});
 
-	it("limits a prefix by the budget its owner contributed, read at each check, under its own limits entry", async () => {
-		const counts = new Map<string, number>();
+	it("limits a prefix by its own limits entry, else its defaultLimit", async () => {
 		const windows: number[] = [];
 		const client = {
-			async incrementWithTtl(key: string, ttlSeconds: number) {
+			async incrementWithTtl(_key: string, ttlSeconds: number) {
 				windows.push(ttlSeconds);
-				const next = (counts.get(key) ?? 0) + 1;
-				counts.set(key, next);
-				return next;
+				return 1;
 			},
 		};
-		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
 		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
 			section: {
 				limits: { token: { limit: 4, windowSeconds: 45 } },
@@ -38,43 +42,60 @@ describe("redisRateLimiterModule", () => {
 				failMode: "closed",
 			},
 			rateLimiterClient: client,
-			rateLimitBudgetResolver: {
-				get: (prefix: string) => budgets.get(prefix),
-				entries: () => budgets.entries(),
-			},
 		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
-		budgets.set("mfa", { limit: 2, windowSeconds: 300 });
-		budgets.set("login", { limit: 20, windowSeconds: 900 });
 
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(2);
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(true);
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
-		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(20);
 		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
-		expect((await limiter.check("authorize:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
-		expect(windows).toEqual([300, 300, 300, 900, 45, 60]);
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
+		expect(windows).toEqual([45, 60]);
 	});
 
 	it.each([
 		["login", "session.rateLimit.login"],
 		["device_verification", "device-grant.rateLimit"],
 	])(
-		"refuses a limits entry for %s, a verifier's own limit, in its section's schema, naming the key and the setting",
-		(prefix, setting) => {
-			const parsed = redisRateLimiterModule.section?.schema.safeParse({
-				limits: {
-					[prefix]: { limit: 5, windowSeconds: 60 },
-					token: { limit: 5, windowSeconds: 60 },
-				},
-			});
-			expect(parsed?.success).toBe(false);
-			expect(parsed?.error?.issues).toEqual([
-				expect.objectContaining({
-					path: ["limits", prefix],
-					message: expect.stringContaining(setting),
+		"refuses boot on a limits entry for %s while a module declares it a verifier's own limit, naming the key and the setting",
+		async (prefix, setting) => {
+			const modules = [
+				redisRateLimiterModule,
+				defineModule({
+					name: "verifier-owner",
+					contributes: { rateLimitBudgets: { [prefix]: verifierLimitClaim({ setting }) } },
 				}),
-			]);
+			];
+			const err = await createApp({
+				modules,
+				bootstrapComponents: {
+					config: {
+						...makeValidAppConfig(),
+						"renamed-variables": renamedVariableCaptures({
+							modules,
+							core: CORE_RELOCATIONS,
+							env: {},
+						}),
+						"redis-rate-limiter": { limits: { [prefix]: { limit: 5, windowSeconds: 60 } } },
+					},
+					pathResolver: (s: string) => s,
+				} as never,
+			}).then(
+				() => undefined,
+				(caught: unknown) => caught,
+			);
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe("config-validation-failed");
+			expect((err as BootError).message).toContain(`redis-rate-limiter.limits.${prefix}`);
+			expect((err as BootError).message).toContain(setting);
+		},
+	);
+
+	it.each(["login", "device_verification"])(
+		"accepts a limits entry for %s in its section's schema when nothing declares it: only declarations count",
+		(prefix) => {
+			expect(
+				redisRateLimiterModule.section?.schema.safeParse({
+					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+				})?.success,
+			).toBe(true);
 		},
 	);
 
@@ -84,7 +105,7 @@ describe("redisRateLimiterModule", () => {
 
 	it("reads no owner's key: a prefix nothing contributes a budget for falls to its defaultLimit", async () => {
 		// The owners' keys are their modules' to read, and to refuse; the
-		// limiter reads their budgets through rateLimitBudgetResolver alone.
+		// limiter reads none of them.
 		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
 			section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, failMode: "closed" },
 			config: {
@@ -97,7 +118,6 @@ describe("redisRateLimiterModule", () => {
 				},
 			},
 			rateLimiterClient: { incrementWithTtl: async () => 1 },
-			rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
 		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		for (const key of [
@@ -116,7 +136,6 @@ describe("redisRateLimiterModule", () => {
 			redisRateLimiterModule.provides?.rateLimiter?.({
 				section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, failMode },
 				rateLimiterClient: { incrementWithTtl: async () => 1 },
-				rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
 			} as never) as RateLimiter | undefined;
 
 		it.each(["open", "closed"] as const)(
@@ -153,7 +172,7 @@ describe("redisRateLimiterModule", () => {
 	});
 
 	it("reads its own section, redis-rate-limiter, its defaultLimit 60 per 60 s unless written", () => {
-		expect(redisRateLimiterModule.configSchema).toBeUndefined();
+		expect(redisRateLimiterModule).not.toHaveProperty("configSchema");
 		expect(redisRateLimiterModule.section?.schema.parse(undefined)).toEqual({
 			limits: {},
 			defaultLimit: { limit: 60, windowSeconds: 60 },

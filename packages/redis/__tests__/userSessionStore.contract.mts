@@ -131,6 +131,78 @@ export function runUserSessionStoreContract(
 			expect(await store.get("sid-auth-none")).toHaveProperty("authentication", undefined);
 		});
 
+		it("round-trips a federated session's upstreamAuthTime — a date, null — and leaves it out when none was recorded", async () => {
+			const store = await factory();
+			const federated = {
+				primary: "fed",
+				federation: "google",
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			};
+			const upstream = new Date(Date.now() - 600_000);
+			await store.create(
+				INPUT({
+					sid: "sid-upstream",
+					amr: ["fed"],
+					authentication: { ...federated, upstreamAuthTime: upstream },
+				}),
+			);
+			expect((await store.get("sid-upstream"))?.authentication).toStrictEqual({
+				...federated,
+				upstreamAuthTime: upstream,
+			});
+			// `null` is a value of its own — the upstream showed no time and the
+			// federation does not let its callback stand for one — never absence.
+			await store.create(
+				INPUT({
+					sid: "sid-upstream-null",
+					amr: ["fed"],
+					authentication: { ...federated, upstreamAuthTime: null },
+				}),
+			);
+			expect((await store.get("sid-upstream-null"))?.authentication).toStrictEqual({
+				...federated,
+				upstreamAuthTime: null,
+			});
+			await store.create(
+				INPUT({ sid: "sid-upstream-none", amr: ["fed"], authentication: federated }),
+			);
+			expect((await store.get("sid-upstream-none"))?.authentication).toStrictEqual(federated);
+		});
+
+		it("records an upstreamAuthTime no later than the store's clock, and refuses one further ahead than hosts' clocks drift", async () => {
+			const store = await factory();
+			const federated = {
+				primary: "fed",
+				federation: "google",
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			};
+			await store.create(
+				INPUT({
+					sid: "sid-upstream-ahead",
+					amr: ["fed"],
+					authentication: { ...federated, upstreamAuthTime: new Date(Date.now() + 60_000) },
+				}),
+			);
+			const recorded = (await store.get("sid-upstream-ahead"))?.authentication?.upstreamAuthTime;
+			expect(recorded).toBeInstanceOf(Date);
+			expect((recorded as Date).getTime()).toBeLessThanOrEqual(Date.now());
+			await expect(
+				store.create(
+					INPUT({
+						sid: "sid-upstream-far",
+						amr: ["fed"],
+						authentication: {
+							...federated,
+							upstreamAuthTime: new Date(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000),
+						},
+					}),
+				),
+			).rejects.toThrow(RangeError);
+			expect(await store.get("sid-upstream-far")).toBeNull();
+		});
+
 		it("returns the session whole, as plain data: what was written, and when it was created", async () => {
 			// Strictly: a key too many, one left out, or a class instance in place
 			// of plain data fails here, where the field-by-field checks above pass.
@@ -470,23 +542,29 @@ export function runUserSessionStoreContract(
 			// with a caller would let a later write change a verified session.
 			const store = await factory();
 			const mfaAtMs = Date.now() - 1_000;
+			const upstreamMs = Date.now() - 600_000;
 			const written = {
 				primary: "fed",
 				federation: "google",
 				upstreamAmr: ["hwk"],
 				mfaAt: new Date(mfaAtMs),
+				upstreamAuthTime: new Date(upstreamMs),
 			};
 			await store.create(INPUT({ sid: "auth-iso", amr: ["fed"], authentication: written }));
 			written.upstreamAmr.push("mfa");
 			written.mfaAt.setTime(0);
+			written.upstreamAuthTime.setTime(Date.now());
 			const read = await store.get("auth-iso");
 			expect(read?.authentication?.upstreamAmr).toEqual(["hwk"]);
 			expect(read?.authentication?.mfaAt?.getTime()).toBe(mfaAtMs);
+			expect(read?.authentication?.upstreamAuthTime?.getTime()).toBe(upstreamMs);
 			(read?.authentication?.upstreamAmr as string[] | undefined)?.push("phr");
 			read?.authentication?.mfaAt?.setTime(0);
+			read?.authentication?.upstreamAuthTime?.setTime(Date.now());
 			const again = await store.get("auth-iso");
 			expect(again?.authentication?.upstreamAmr).toEqual(["hwk"]);
 			expect(again?.authentication?.mfaAt?.getTime()).toBe(mfaAtMs);
+			expect(again?.authentication?.upstreamAuthTime?.getTime()).toBe(upstreamMs);
 		});
 
 		it("readonly kind field present", async () => {
@@ -519,6 +597,42 @@ export function runSecondFactorUpdateContract(
 
 	describe("SupportsSecondFactorUpdate contract — recordSecondFactor, a second factor verified in a live session", () => {
 		const at = (msAgo: number) => new Date(Date.now() - msAgo);
+
+		it("keeps a federated session's upstreamAuthTime, a date or null, through a second factor", async () => {
+			const store = await capable();
+			const upstream = at(600_000);
+			for (const [sid, upstreamAuthTime] of [
+				["sf-upstream", upstream],
+				["sf-upstream-null", null],
+			] as const) {
+				await store.create(
+					INPUT({
+						sid,
+						authTime: at(60_000),
+						amr: ["fed"],
+						authentication: {
+							primary: "fed",
+							federation: "google",
+							upstreamAmr: undefined,
+							mfaAt: undefined,
+							upstreamAuthTime,
+						},
+					}),
+				);
+				const recorded = await store.recordSecondFactor(sid, {
+					amr: ["otp", "mfa"],
+					at: at(1_000),
+				});
+				expect(recorded?.authentication?.upstreamAuthTime).toStrictEqual(upstreamAuthTime);
+				// What it answered is a copy: changing it changes nothing stored.
+				if (recorded?.authentication?.upstreamAuthTime instanceof Date) {
+					recorded.authentication.upstreamAuthTime.setTime(Date.now());
+				}
+				expect((await store.get(sid))?.authentication?.upstreamAuthTime).toStrictEqual(
+					upstreamAuthTime,
+				);
+			}
+		});
 
 		it("adds the factor's values to amr, in insertion order, sets mfaAt, and changes nothing else", async () => {
 			const store = await capable();

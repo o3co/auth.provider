@@ -17,8 +17,10 @@
 /**
  * The webauthn grant against the subject's revocation boundary.
  *
- * Pinned here: `auth_time` is one challenge lifetime before the redemption,
- * whatever expiry the ceremony reports; the boundary is read after every slow step
+ * Pinned here: `auth_time` is the challenge's recorded issuance, capped at the
+ * redemption, and one challenge lifetime before the redemption for a challenge
+ * recorded without one, whatever expiry the ceremony reports; the boundary is
+ * read after every slow step
  * and before anything is registered or signed, and compared by the rule
  * `verifyJwt` applies, so a passkey authentication made before a revocation
  * mints nothing; both tokens carry one `iat`, fixed before that read, so a
@@ -131,7 +133,10 @@ function spyLogger() {
 
 /** What a test arranges: when the challenge was issued, the boundary, and the slow steps. */
 interface Arrangement {
-	/** When the options route issued the challenge; its expiry is one lifetime later. */
+	/**
+	 * When the options route issued the challenge: recorded with it unless
+	 * `withoutIssuance`, and its expiry is one lifetime later.
+	 */
 	readonly challengeIssuedAtMs: number;
 	/** When the assertion reaches the grant. */
 	readonly redeemedAtMs: number;
@@ -143,6 +148,10 @@ interface Arrangement {
 	readonly withoutSubjectRevocation?: boolean;
 	/** Replaces the default ceremony over the memory challenge store. */
 	readonly ceremony?: ChallengeCeremony;
+	/** The challenge is stored without its issuance, as a store that does not record it holds it. */
+	readonly withoutIssuance?: boolean;
+	/** The grant's `challengeTtlMs`, when it differs from the one the challenge was issued under. */
+	readonly grantChallengeTtlMs?: number;
 	/** Runs inside the named step, before it answers, with the boundary's state. */
 	readonly during?: Partial<
 		Record<"signCount" | "policy" | "register", (state: BoundaryState) => void>
@@ -162,7 +171,12 @@ function stampNow(state: BoundaryState): void {
 async function arrange(a: Arrangement) {
 	vi.setSystemTime(a.challengeIssuedAtMs);
 	const challengeStore = createMemoryChallengeStore();
-	await challengeStore.issue(SCOPE, CHALLENGE, a.challengeIssuedAtMs + TTL_MS);
+	await challengeStore.issue(
+		SCOPE,
+		CHALLENGE,
+		a.challengeIssuedAtMs + TTL_MS,
+		...(a.withoutIssuance ? [] : [a.challengeIssuedAtMs]),
+	);
 	const ceremony =
 		a.ceremony ??
 		createChallengeCeremony({ challengeStore, replaySeenSet: createMemoryReplaySeenSet() });
@@ -210,7 +224,10 @@ async function arrange(a: Arrangement) {
 		},
 		challengeCeremony: ceremony,
 		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
-		webauthnConfig: createTestWebAuthnConfig({ origin: [ISSUER], challengeTtlMs: TTL_MS }),
+		webauthnConfig: createTestWebAuthnConfig({
+			origin: [ISSUER],
+			challengeTtlMs: a.grantChallengeTtlMs ?? TTL_MS,
+		}),
 		grantPolicy: {
 			kind: "test-allow",
 			evaluate: async () => {
@@ -296,6 +313,159 @@ describe("createWebAuthnGrant — the auth_time it stamps", () => {
 	}
 });
 
+describe("createWebAuthnGrant — auth_time from the challenge's recorded issuance", () => {
+	it("is the challenge's issuance when the ceremony reports it", async () => {
+		const issued = T0 + 400;
+		const h = await arrange({
+			challengeIssuedAtMs: issued,
+			redeemedAtMs: issued + 30_000,
+		});
+
+		const { access, refresh } = tokensOf(await h.run());
+
+		expect(decodePayload(access).auth_time).toBe(seconds(issued));
+		expect(decodePayload(refresh).auth_time).toBe(seconds(issued));
+	});
+
+	it("is the issuance even when the grant's challenge lifetime is now shorter than the one the challenge was issued under", async () => {
+		const h = await arrange({
+			challengeIssuedAtMs: T0,
+			redeemedAtMs: T0 + 90_000,
+			grantChallengeTtlMs: 60_000,
+		});
+
+		const { access } = tokensOf(await h.run());
+
+		expect(decodePayload(access).auth_time).toBe(seconds(T0));
+	});
+
+	it("is one challenge lifetime before the redemption when the challenge carries no issuance", async () => {
+		const h = await arrange({
+			challengeIssuedAtMs: T0,
+			redeemedAtMs: T0 + 30_000,
+			withoutIssuance: true,
+		});
+
+		const { access } = tokensOf(await h.run());
+
+		expect(decodePayload(access).auth_time).toBe(seconds(T0 + 30_000 - TTL_MS));
+	});
+
+	it("is one challenge lifetime before the redemption, warned, when the reported issuance is later than the redemption", async () => {
+		const h = await arrange({
+			challengeIssuedAtMs: T0,
+			redeemedAtMs: T0 + 5_000,
+			ceremony: {
+				consume: async () => ({
+					outcome: "consumed",
+					expiresAtMs: T0 + TTL_MS,
+					issuedAtMs: T0 + 20_000,
+				}),
+			},
+		});
+
+		const { access } = tokensOf(await h.run());
+
+		expect(decodePayload(access).auth_time).toBe(seconds(T0 + 5_000 - TTL_MS));
+		expect(h.logger.warn).toHaveBeenCalledTimes(1);
+		const [fields, event] = h.logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("passkey_challenge_issued_ahead_of_clock");
+		expect(fields).toEqual({ clientId: CLIENT_ID, aheadMs: 15_000 });
+		expect(JSON.stringify(fields)).not.toContain(CHALLENGE);
+	});
+
+	for (const [label, reported] of [
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a string", "123"],
+		["an instant before the epoch, which yields no claim", -5_000],
+	] as const) {
+		it(`is one challenge lifetime before the redemption when the ceremony reports ${label} as the issuance`, async () => {
+			const h = await arrange({
+				challengeIssuedAtMs: T0,
+				redeemedAtMs: T0 + 30_000,
+				ceremony: {
+					consume: async () => ({
+						outcome: "consumed",
+						expiresAtMs: T0 + TTL_MS,
+						issuedAtMs: reported as unknown as number,
+					}),
+				},
+			});
+
+			const { access, refresh } = tokensOf(await h.run());
+
+			expect(decodePayload(access).auth_time).toBe(seconds(T0 + 30_000 - TTL_MS));
+			expect(decodePayload(refresh).auth_time).toBe(seconds(T0 + 30_000 - TTL_MS));
+		});
+	}
+
+	it("mints when the clock steps back after the redemption, auth_time then later than iat, and verifyJwt accepts both tokens", async () => {
+		const issued = T0 + 10_000;
+		const h = await arrange({
+			challengeIssuedAtMs: issued,
+			redeemedAtMs: T0 + 30_000,
+			during: { policy: () => vi.setSystemTime(T0 + 5_000) },
+		});
+
+		const { access, refresh } = tokensOf(await h.run());
+
+		expect(decodePayload(access).auth_time).toBe(seconds(issued));
+		expect(decodePayload(access).iat as number).toBeLessThan(seconds(issued));
+		await expect(
+			verifyAgainstBoundary(access, "access_token", h.keyStore, h.subjectRevocation),
+		).resolves.toBeDefined();
+		await expect(
+			verifyAgainstBoundary(refresh, "refresh_token", h.keyStore, h.subjectRevocation),
+		).resolves.toBeDefined();
+	});
+
+	it("refuses a challenge issued in the second after the boundary's", async () => {
+		const stamp = T0 + 500;
+		const h = await arrange({
+			challengeIssuedAtMs: T0 + 1_200,
+			redeemedAtMs: T0 + 30_000,
+			boundary: new Date(stamp),
+		});
+
+		expect(await h.run()).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(h.sign).not.toHaveBeenCalled();
+	});
+
+	it("refuses a challenge issued just before a revocation of the subject", async () => {
+		const stamp = T0 + 500;
+		const h = await arrange({
+			challengeIssuedAtMs: stamp - 1,
+			redeemedAtMs: stamp + 30_000,
+			boundary: new Date(stamp),
+		});
+
+		expect(await h.run()).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(h.sign).not.toHaveBeenCalled();
+	});
+
+	it("mints for a challenge issued just past the revocation's allowance, though redeemed within one challenge lifetime of it", async () => {
+		// Past the boundary's second plus the one-second skew `verifyJwt` allows.
+		const stamp = T0 + 500;
+		const issued = stamp + 2_100;
+		const h = await arrange({
+			challengeIssuedAtMs: issued,
+			redeemedAtMs: issued + 30_000,
+			boundary: new Date(stamp),
+		});
+
+		const { access, refresh } = tokensOf(await h.run());
+
+		expect(decodePayload(access).auth_time).toBe(seconds(issued));
+		await expect(
+			verifyAgainstBoundary(access, "access_token", h.keyStore, h.subjectRevocation),
+		).resolves.toBeDefined();
+		await expect(
+			verifyAgainstBoundary(refresh, "refresh_token", h.keyStore, h.subjectRevocation),
+		).resolves.toBeDefined();
+	});
+});
+
 describe("createWebAuthnGrant — one issuance instant for both tokens", () => {
 	it("signs the access and refresh token with one iat, at or after auth_time, however long the family takes to register", async () => {
 		const h = await arrange({
@@ -376,20 +546,21 @@ describe("createWebAuthnGrant — the subject's revocation boundary", () => {
 		expect(h.subjectRevocation.revokedBefore).toHaveBeenCalledWith(USER_ID);
 	});
 
-	it("refuses a re-login within one challenge lifetime after the revocation, though its challenge postdates it", async () => {
-		// The known cost of an auth_time one challenge lifetime early.
+	it("pins the no-issuance fallback: refuses a re-login within one challenge lifetime after the revocation, though its challenge postdates it", async () => {
+		// The cost of an auth_time one challenge lifetime early.
 		const stamp = T0;
 		const h = await arrange({
 			challengeIssuedAtMs: stamp + 5_000,
 			redeemedAtMs: stamp + 10_000,
 			boundary: new Date(stamp),
+			withoutIssuance: true,
 		});
 
 		expect(await h.run()).toMatchObject({ status: 400, error: "invalid_grant" });
 		expect(h.sign).not.toHaveBeenCalled();
 	});
 
-	it("mints once one challenge lifetime before the redemption is more than two seconds after the revocation, and verifyJwt accepts both tokens", async () => {
+	it("pins the no-issuance fallback: mints once one challenge lifetime before the redemption is more than two seconds after the revocation, and verifyJwt accepts both tokens", async () => {
 		const stamp = T0 + 500;
 		const issued = stamp + 60_000;
 		const redeemed = stamp + TTL_MS + 2_100;
@@ -397,6 +568,7 @@ describe("createWebAuthnGrant — the subject's revocation boundary", () => {
 			challengeIssuedAtMs: issued,
 			redeemedAtMs: redeemed,
 			boundary: new Date(stamp),
+			withoutIssuance: true,
 		});
 
 		const { access, refresh } = tokensOf(await h.run());
@@ -464,7 +636,7 @@ describe("createWebAuthnGrant — the subject's revocation boundary", () => {
 		const { access, refresh } = tokensOf(await h.run());
 
 		expect(h.subjectRevocation.revokedBefore).not.toHaveBeenCalled();
-		expect(decodePayload(access).auth_time).toBe(seconds(T0 + 30_000 - TTL_MS));
+		expect(decodePayload(access).auth_time).toBe(seconds(T0));
 		expect(decodePayload(refresh).iat).toBe(decodePayload(access).iat);
 	});
 });

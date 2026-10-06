@@ -37,9 +37,7 @@ import {
 	type GrantError,
 	type RequirementInput,
 	type RequirementVerdict,
-	type SessionFamilyIndex,
 	type SessionRequirement,
-	type SessionRPRegistry,
 	type SubjectRevocation,
 	type UserSession,
 	type UserSessionStore,
@@ -51,7 +49,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
+import { joiningLifecycle } from "./_helpers/sessionLifecycle.mjs";
 
 const SID = "sid-1";
 const SUBJECT = "user-1";
@@ -156,20 +156,10 @@ const makeGrant = (opts: {
 		findById: vi.fn(async () => null),
 		authenticate: vi.fn(async () => null),
 	};
-	const sessionFamilyIndex = {
-		kind: "memory",
-		addFamilyId: vi.fn(async () => {}),
-		listFamilyIds: vi.fn(async () => []),
-		removeBySid: vi.fn(async () => {}),
-	} as unknown as SessionFamilyIndex;
-	const sessionRPRegistry = {
-		kind: "memory",
-		registerRP: vi.fn(async () => {
-			await opts.duringJoin?.();
-		}),
-		listRPs: vi.fn(async () => []),
-		removeBySid: vi.fn(async () => {}),
-	} as unknown as SessionRPRegistry;
+	const { lifecycle, join } = joiningLifecycle(async () => {
+		await opts.duringJoin?.();
+		return { outcome: "joined" };
+	});
 	const keyStore = createSymmetricKeyStore("test-secret");
 	const sign = keyStore.sign.bind(keyStore);
 	const signed = vi.spyOn(keyStore, "sign").mockImplementation(async (options) => {
@@ -177,17 +167,17 @@ const makeGrant = (opts: {
 		return sign(options);
 	});
 	const handler = createAuthorizationGrant({
-		config,
+		...grantSettingsFrom(config),
 		keyStore,
 		codeRepository,
 		clientRepository,
-		sessionFamilyIndex,
-		sessionRPRegistry,
 		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
 			issuer: "https://issuer.test",
 			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
-		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		...(opts.userSessionStore
+			? { userSessionStore: opts.userSessionStore, sessionLifecycle: lifecycle }
+			: {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.auditEvents
@@ -199,7 +189,7 @@ const makeGrant = (opts: {
 				}
 			: {}),
 	});
-	return { handler, signed, sessionFamilyIndex, keyStore };
+	return { handler, signed, join, keyStore };
 };
 
 const ctx = (session: Record<string, unknown> = {}): GrantContext => ({
@@ -413,7 +403,7 @@ describe("the authorization_code grant on admission — the revalidation", () =>
 	it("a subject changed between the two reads is 400 session_invalidated, audited by admission and warned by the grant", async () => {
 		const logger = createMockLogger();
 		const auditEvents: AuditEvent[] = [];
-		const { handler, sessionFamilyIndex } = makeGrant({
+		const { handler, join } = makeGrant({
 			logger,
 			auditEvents,
 			userSessionStore: storeAnswering(record(), record({ sub: "someone-else" })),
@@ -423,7 +413,7 @@ describe("the authorization_code grant on admission — the revalidation", () =>
 			error: "invalid_grant",
 			errorDescription: "session_invalidated",
 		});
-		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
+		expect(join).not.toHaveBeenCalled();
 		expect(auditEvents.map((e) => e.type)).toEqual(["session.admission.subject_mismatch"]);
 		expect(auditEvents[0]?.details).toMatchObject({ carrier: "code", claimedSubject: SUBJECT });
 		expect(logger.warn).toHaveBeenCalledWith(
@@ -457,7 +447,7 @@ describe("the authorization_code grant on admission — the revalidation", () =>
 
 	it("a boundary stamped between the two reads is 400 session_invalidated", async () => {
 		const revocation = createInMemorySubjectRevocation();
-		const { handler, sessionFamilyIndex } = makeGrant({
+		const { handler, join } = makeGrant({
 			userSessionStore: storeAnswering(record(), record()),
 			subjectRevocation: revocation,
 			betweenReads: () =>
@@ -467,7 +457,7 @@ describe("the authorization_code grant on admission — the revalidation", () =>
 			status: 400,
 			errorDescription: "session_invalidated",
 		});
-		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
+		expect(join).not.toHaveBeenCalled();
 	});
 
 	it("an outage on the revalidation is 503, logged once by admission", async () => {

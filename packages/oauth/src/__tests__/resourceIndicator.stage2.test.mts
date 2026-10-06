@@ -38,13 +38,21 @@ import {
 	type GrantPolicyHook,
 	type GrantResult,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/authorization.mjs";
-import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
+import {
+	type ClientCredentialsGrantDeps,
+	createClientCredentialsGrant,
+} from "#/grants/clientCredentials.mjs";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared setup
@@ -80,16 +88,19 @@ const refusalOf = (result: GrantResult): GrantError =>
 
 // ----- client_credentials -----
 
-function makeCCDeps(extra: Partial<GrantDependencies> = {}, enabled = true): GrantDependencies {
+function makeCCDeps(
+	extra: Partial<GrantDependencies> = {},
+	enabled = true,
+): ClientCredentialsGrantDeps {
 	return {
-		config: {
+		...grantSettingsFrom({
 			oauth: {
 				jwt: { issuer: "https://test.example" },
 				accessToken: { expiresIn: 3600 },
 				refreshToken: { expiresIn: 86400 },
 				resourceIndicator: { enabled },
 			},
-		} as unknown as GrantDependencies["config"],
+		}),
 		keyStore,
 		...extra,
 	};
@@ -119,18 +130,8 @@ function makeRefreshDeps(
 ): RefreshTokenGrantDeps {
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config: {
-			oauth: {
-				jwt: { secret: SECRET },
-				accessToken: { expiresIn: 3600 },
-				refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject" },
-				grants: {
-					authorization_code: { enabled: true },
-					refresh_token: { enabled: true },
-				},
-				resourceIndicator: { enabled },
-			},
-		} as unknown as GrantDependencies["config"],
+		oauthTokenSettings: createTestOAuthTokenSettings({ resourceIndicatorEnabled: enabled }),
+		tokenBindingSettings: createTestTokenBindingSettings(),
 		keyStore,
 		...extra,
 	};
@@ -168,7 +169,7 @@ function makeAuthzDeps(
 ): AuthorizationGrantDeps {
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config: {
+		...grantSettingsFrom({
 			oauth: {
 				jwt: { secret: "test-secret" },
 				accessToken: { expiresIn: 3600 },
@@ -179,7 +180,7 @@ function makeAuthzDeps(
 				},
 				resourceIndicator: { enabled },
 			},
-		} as unknown as GrantDependencies["config"],
+		}),
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {
 			consumeByCode: vi.fn().mockResolvedValue({

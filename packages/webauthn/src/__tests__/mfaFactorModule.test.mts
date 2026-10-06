@@ -137,7 +137,7 @@ describe("webauthnMfaFactorModule", () => {
 	});
 
 	it("reads its own section at its name, with the package's reference.conf", () => {
-		expect(webauthnMfaFactorModule.section?.at).toBeUndefined();
+		expect(webauthnMfaFactorModule.section).not.toHaveProperty("at");
 		expect(webauthnMfaFactorModule.section?.reference?.href).toBe(
 			new URL("../../config/reference.conf", import.meta.url).href,
 		);
@@ -290,7 +290,7 @@ describe("webauthn-mfa-factor.enabled as the module's switch", () => {
 });
 
 describe("the grant installed without the factor", () => {
-	it("names no section ignored when the package's reference.conf is layered: the factor's section is declared", async () => {
+	it("does not name the factor's section, which the package's reference.conf sets, when the composition hands boot its defaults", async () => {
 		// The relying party is the operator's, from the three variables the reference binds it to.
 		const reference = parseFile(REFERENCE, {
 			env: {
@@ -344,10 +344,16 @@ describe("the grant installed without the factor", () => {
 				pathResolver: (p: string) => p,
 				logger,
 				oauthTokenSettings: tokenSettings,
+				// The references as they set the configuration, with no operator
+				// layer and no environment: a section left equal to them is not named.
+				configDefaults: parseFile(REFERENCE, { env: {} }).toObject(),
 			} as never,
 		});
 
 		expect(reference).toHaveProperty("webauthn-mfa-factor");
-		expect(warn.mock.calls.map((call) => call[1])).not.toContain("config_sections_ignored");
+		const named = warn.mock.calls
+			.filter(([, message]) => String(message).startsWith("config_sections_"))
+			.flatMap(([fields]) => (fields as { sections: string[] }).sections);
+		expect(named).not.toContain("webauthn-mfa-factor");
 	});
 });

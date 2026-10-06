@@ -32,7 +32,6 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
@@ -40,6 +39,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -88,7 +88,7 @@ const mockConfig = {
 			authorization_code: { enabled: true },
 		},
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const mockClientRepository: ClientRepository = {
 	findById: vi.fn().mockResolvedValue(null),
@@ -98,7 +98,7 @@ const mockClientRepository: ClientRepository = {
 function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"]) {
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config: mockConfig,
+		...grantSettingsFrom(mockConfig),
 		keyStore: createSymmetricKeyStore("test-secret-mtls-ac"),
 		codeRepository: {
 			consumeByCode: consumeByCodeImpl,

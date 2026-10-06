@@ -37,9 +37,6 @@ import {
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type RefreshTokenFamilyRevocation,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
-	type SessionRPRegistry,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -56,6 +53,8 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example.com";
@@ -144,7 +143,7 @@ async function buildApp(stores: Stores = {}): Promise<Harness> {
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore(SECRET, "v0"),
@@ -157,25 +156,9 @@ async function buildApp(stores: Stores = {}): Promise<Harness> {
 		},
 		accessTokenDenylist: createMemoryAccessTokenDenylist(),
 		userSessionStore,
-		sessionRPRegistry: {
-			kind: "memory",
-			registerRP: async () => {},
-			listRPs: async () => [],
-			removeBySid: async () => {},
-		} as unknown as SessionRPRegistry,
-		sessionFamilyIndex: {
-			kind: "memory",
-			addFamilyId: async () => {},
-			listFamilyIds: async () => [],
-			removeBySid: async () => {},
-		} as unknown as SessionFamilyIndex,
-		sessionFederationIndex: {
-			kind: "memory",
-			addFederation: async () => {},
-			listFederations: async () => [FEDERATION],
-			removeFederation: async () => {},
-			removeBySid: async () => {},
-		} as unknown as SessionFederationIndex,
+		// A lifecycle the host fills, whose reads reject when the session store
+		// cannot answer.
+		sessionLifecycle: livenessOver(userSessionStore, [FEDERATION]),
 		federationTokenStore: {
 			kind: "memory",
 			attach: async () => {},
@@ -306,7 +289,7 @@ describe("a session store that cannot answer", () => {
 		expect(res.headers["www-authenticate"]).toBeUndefined();
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({
-				store: "user_session",
+				store: "session_lifecycle",
 				err: expect.objectContaining({ name: "ReplyError" }),
 			}),
 			"userinfo_store_unavailable",
@@ -320,7 +303,10 @@ describe("a session store that cannot answer", () => {
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual(outage("session store unavailable"));
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ store: "user_session" }),
+			expect.objectContaining({
+				store: "session_lifecycle",
+				err: expect.objectContaining({ name: "ReplyError" }),
+			}),
 			"introspect_store_unavailable",
 		);
 		expectNoRawStoreError(logger);

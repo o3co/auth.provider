@@ -23,16 +23,18 @@
  */
 
 import type { AppConfig, OidcDiscoveryContribution } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestFederationSettings,
+	makeValidAppConfig,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { oauthEndpointsModule } from "../module.mjs";
 
-/** Truthy stubs for the six session-store deps that gate logout advertisement. */
+/** Truthy stubs for the deps that gate logout advertisement. */
 const allLogoutStores = {
 	userSessionStore: {},
-	sessionRPRegistry: {},
-	sessionFamilyIndex: {},
-	sessionFederationIndex: {},
+	sessionLifecycle: {},
 	federationTokenStore: {},
 	refreshTokenFamilyRevocation: {},
 };
@@ -69,14 +71,16 @@ async function discoveryContribution(
 	config: AppConfig = configWithRevocation(),
 ): Promise<OidcDiscoveryContribution> {
 	const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
-	if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
+	if (factory === undefined)
+		throw new Error("oauthEndpointsModule contributes no discoveryMetadata");
 	// Awaited as the boot planner does: a contribution factory may answer with
 	// a promise.
 	return await factory({
-		config,
 		// The module's own section, as boot hands it: what the slice reads of
 		// `oauth {}`.
 		section: config.oauth,
+		// Core's view of `core.federations`: none declared unless a test says so.
+		federationSettings: createTestFederationSettings(),
 		// An authorization server that serves /authorize unless a test says
 		// otherwise.
 		grantHandlerResolver: grantResolver("authorization_code"),
@@ -85,7 +89,7 @@ async function discoveryContribution(
 	} as never);
 }
 
-describe("oauthModule — discoveryMetadata contribution", () => {
+describe("oauthEndpointsModule — discoveryMetadata contribution", () => {
 	it("declares itself the provider root so core activates discovery", async () => {
 		// oauth owns the authorization-server surface, so it sets `providerRoot`.
 		// This is the explicit signal (not an inferred `authorization_endpoint`)
@@ -164,7 +168,8 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 			},
 		} as unknown as AppConfig;
 		const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
-		if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
+		if (factory === undefined)
+			throw new Error("oauthEndpointsModule contributes no discoveryMetadata");
 		const meta = await factory({
 			config,
 			section: config.oauth,
@@ -430,47 +435,61 @@ describe("acr_values_supported", () => {
 	});
 
 	it("advertises every entry while an installed federation trusts its upstream amr: that IdP may assert any value", async () => {
-		const trusting = (trustUpstreamAmr: boolean): AppConfig => {
-			const config = withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] });
-			return {
-				...config,
-				core: { federations: { google: { type: "google", enabled: true, trustUpstreamAmr } } },
-			} as unknown as AppConfig;
-		};
-		const trusted = await discoveryContribution(
-			{ federationProviders: new Map([["google", {}]]) },
-			trusting(true),
-		);
+		const config = withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] });
+		const trusting = (trustsUpstreamAmr: boolean) => ({
+			federationProviders: new Map([["google", {}]]),
+			federationSettings: createTestFederationSettings({
+				google: { type: "google", trustsUpstreamAmr },
+			}),
+		});
+		const trusted = await discoveryContribution(trusting(true), config);
 		expect(trusted.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:phr"]);
-		const untrusted = await discoveryContribution(
-			{ federationProviders: new Map([["google", {}]]) },
-			trusting(false),
-		);
+		const untrusted = await discoveryContribution(trusting(false), config);
 		expect(untrusted.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
-	it("does not count an installed federation whose section is disabled as trusted", async () => {
-		// Installed, but its section switched off: nothing signs a user in
-		// through it, so nothing it could assert can meet an entry.
-		const config = {
-			...withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
-			core: { federations: { google: { type: "google", enabled: false, trustUpstreamAmr: true } } },
-		} as unknown as AppConfig;
+	it("takes trust from trustsUpstreamAmr alone, which core's view answers false for a disabled entry", async () => {
+		// Whether a disabled entry is trusted is core's decision, made when it
+		// fills the slot (`trustsUpstreamAmr` is true only beside `enabled`);
+		// the module reads the member and nothing else of the entry. The
+		// boot-level case in `module.test.mts` holds the decision end to end.
 		const meta = await discoveryContribution(
-			{ federationProviders: new Map([["google", {}]]) },
-			config,
+			{
+				federationProviders: new Map([["google", {}]]),
+				federationSettings: createTestFederationSettings({
+					google: { type: "google", enabled: false },
+				}),
+			},
+			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
 		);
 		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
 	it("does not count a trusted federation that is not installed", async () => {
-		// The switch names a configured section; only an installed federation
+		// The switch names a configured entry; only an installed federation
 		// can write a session.
-		const config = {
-			...withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
-			core: { federations: { google: { type: "google", enabled: false, trustUpstreamAmr: true } } },
-		} as unknown as AppConfig;
-		const meta = await discoveryContribution({ federationProviders: new Map() }, config);
+		const meta = await discoveryContribution(
+			{
+				federationProviders: new Map(),
+				federationSettings: createTestFederationSettings({
+					google: { type: "google", trustsUpstreamAmr: true },
+				}),
+			},
+			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
+		);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
+	});
+
+	it("does not count an installed federation federationSettings holds no entry for", async () => {
+		const meta = await discoveryContribution(
+			{
+				federationProviders: new Map([["google", {}]]),
+				federationSettings: createTestFederationSettings({
+					other: { type: "google", trustsUpstreamAmr: true },
+				}),
+			},
+			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
+		);
 		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
@@ -481,7 +500,7 @@ describe("acr_values_supported", () => {
 	});
 });
 
-describe("oauthModule — client_id_metadata_document_supported", () => {
+describe("oauthEndpointsModule — client_id_metadata_document_supported", () => {
 	const enabled = (): AppConfig => {
 		const base = configWithRevocation();
 		return {
@@ -518,7 +537,7 @@ describe("oauthModule — client_id_metadata_document_supported", () => {
 	});
 });
 
-describe("oauthModule — private_key_jwt is advertised only where it can be honoured", () => {
+describe("oauthEndpointsModule — private_key_jwt is advertised only where it can be honoured", () => {
 	it("says nothing about private_key_jwt when no replay seen-set is wired", async () => {
 		// A client assertion's `jti` is single-use, and the verifier answers
 		// `500 server_error` when it has nowhere to record one rather than

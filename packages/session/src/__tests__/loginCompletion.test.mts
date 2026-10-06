@@ -32,6 +32,7 @@ import {
 	type FederationTokenStore,
 	type LoginCompletion,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -49,6 +50,7 @@ import { createLoginCompletion } from "#/login-completion.mjs";
 import { sessionModule } from "#/module.mjs";
 import { loginCompletionModule } from "#/modules/loginCompletionModule.mjs";
 import { withSessionCaptures } from "./_helpers/sections.mjs";
+import { fakeSessionLifecycle, sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 /** A memory session store that counts the records it holds. */
 const countingStore = (): { readonly store: UserSessionStore; readonly records: () => number } => {
@@ -88,6 +90,7 @@ describe("createLoginCompletion keeps core's loginCompletion contract", () => {
 				counted = countingStore();
 				return createLoginCompletion({
 					userSessionStore: counted.store,
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionTtlMs: 3_600_000,
 					csrf: guard,
 				});
@@ -96,6 +99,7 @@ describe("createLoginCompletion keeps core's loginCompletion contract", () => {
 				counted = countingStore();
 				return createLoginCompletion({
 					userSessionStore: downStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionTtlMs: 3_600_000,
 					csrf: guard,
 				});
@@ -110,9 +114,61 @@ describe("createLoginCompletion keeps core's loginCompletion contract", () => {
 	it("is frozen", () => {
 		expect(
 			Object.isFrozen(
-				createLoginCompletion({ userSessionStore: counted.store, sessionTtlMs: 1, csrf: guard }),
+				createLoginCompletion({
+					userSessionStore: counted.store,
+					sessionLifecycle: fakeSessionLifecycle(),
+					sessionTtlMs: 1,
+					csrf: guard,
+				}),
 			),
 		).toBe(true);
+	});
+
+	it("refuses a userSessionStore without a sessionLifecycle, naming both", () => {
+		expect(() =>
+			createLoginCompletion({ userSessionStore: counted.store, sessionTtlMs: 1, csrf: guard }),
+		).toThrow(/userSessionStore is wired, but sessionLifecycle is not/);
+	});
+
+	it("builds sessionless, with neither: the express session alone is signed in", () => {
+		expect(createLoginCompletion({ sessionTtlMs: 1, csrf: guard })).toBeDefined();
+	});
+});
+
+describe("the login-completion module's provider, with core's session lifecycle", () => {
+	const guard = createTestCsrfGuard();
+	/** Every record is created only once its lifecycle is open, or the login fails. */
+	const opened = new Set<string>();
+	let counted = countingStore();
+	const lifecycle: SessionLifecycle = fakeSessionLifecycle({
+		open: async (sid) => {
+			opened.add(sid);
+			return { outcome: "opened" };
+		},
+	});
+	const openFirst = (inner: UserSessionStore): UserSessionStore => ({
+		...inner,
+		create: async (input) => {
+			if (!opened.has(input.sid)) throw new Error(`no lifecycle record is open for ${input.sid}`);
+			await inner.create(input);
+		},
+	});
+	it.each(
+		loginCompletionContract({
+			build: () => {
+				counted = countingStore();
+				return loginCompletionModule.provides?.loginCompletion?.({
+					userSessionStore: openFirst(counted.store),
+					sessionLifecycle: lifecycle,
+					sessionCookiePolicy: createTestSessionCookiePolicy(),
+					csrfGuard: guard,
+				} as never) as LoginCompletion;
+			},
+			records: () => counted.records(),
+			csrfCookieName: guard.cookieName,
+		}),
+	)("$name, opening each session's lifecycle record before its record", async ({ run }) => {
+		await run();
 	});
 });
 
@@ -152,6 +208,7 @@ const stores = [
 	// Where the session store's module is loaded, it provides these.
 	providing("test:csrf-token-signer", "csrfTokenSigner", createTestCsrfTokenSigner()),
 	providing("test:session-cookie-policy", "sessionCookiePolicy", createTestSessionCookiePolicy()),
+	sessionLifecycleTestModule(),
 ];
 
 /** A module that hands the test the `loginCompletion` it requires. */
@@ -219,6 +276,39 @@ describe("the login-completion module provides loginCompletion", () => {
 		);
 		expect(loginCompletionModule.requires).not.toContain("config");
 		expect(Object.keys(loginCompletionModule.provides ?? {})).toEqual(["loginCompletion"]);
+	});
+
+	it("refuses to boot with userSessionStore wired and no sessionLifecycle, naming both slots", async () => {
+		const refusal = await createTestApp({
+			modules: [
+				loginCompletionModule,
+				providing("test:user-session-store", "userSessionStore", moduleStore.store),
+				providing(
+					"test:session-cookie-policy",
+					"sessionCookiePolicy",
+					createTestSessionCookiePolicy(),
+				),
+				providing("test:csrf-guard", "csrfGuard", createTestCsrfGuard()),
+				consumer({}),
+			],
+			bootstrapComponents: {
+				config: withSessionCaptures(makeValidAppConfig()) as AppConfig,
+				pathResolver: (s: string) => s,
+			},
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught as { reason?: unknown; cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "provides-factory-failed",
+		});
+		const message = String(refusal?.cause?.message);
+		expect(message).toMatch(/userSessionStore is wired, but sessionLifecycle is not/);
+		expect(message).toMatch(/sessionLifecycleModule/);
 	});
 
 	it("is not the session module's: a provider there could not read the guard its own module fills", () => {

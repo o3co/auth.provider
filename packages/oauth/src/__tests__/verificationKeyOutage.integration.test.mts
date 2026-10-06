@@ -39,9 +39,6 @@ import {
 	type FederationTokenStore,
 	type KeyStore,
 	type RefreshTokenFamilyRevocation,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
-	type SessionRPRegistry,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -53,7 +50,10 @@ import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example.com";
@@ -149,7 +149,7 @@ async function buildApp(lookup: "up" | "down"): Promise<Harness> {
 	registry.register(
 		"refresh_token",
 		createRefreshTokenGrant({
-			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			logger,
 			sessionRequirementResolver: resolverForTests([]),
@@ -159,32 +159,14 @@ async function buildApp(lookup: "up" | "down"): Promise<Harness> {
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry,
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore,
 		logger,
 		accessTokenDenylist: denylist,
 		userSessionStore,
-		sessionRPRegistry: {
-			kind: "memory",
-			registerRP: async () => {},
-			listRPs: async () => [],
-			removeBySid: async () => {},
-		} as unknown as SessionRPRegistry,
-		sessionFamilyIndex: {
-			kind: "memory",
-			addFamilyId: async () => {},
-			listFamilyIds: async () => [],
-			removeBySid: async () => {},
-		} as unknown as SessionFamilyIndex,
-		sessionFederationIndex: {
-			kind: "memory",
-			addFederation: async () => {},
-			listFederations: async () => [FEDERATION],
-			removeFederation: async () => {},
-			removeBySid: async () => {},
-		} as unknown as SessionFederationIndex,
+		sessionLifecycle: livenessOver(userSessionStore, [FEDERATION]),
 		federationTokenStore: {
 			kind: "memory",
 			attach: async () => {},

@@ -23,7 +23,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-	AppConfigSchema,
 	createApp,
 	createMemoryWebAuthnCredentialStore,
 	createSymmetricKeyStore,
@@ -74,9 +73,6 @@ const stubWebAuthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	// A throttle limit high enough that the body-parser probes below are never
-	// denied; the throttle itself is covered by module.rateLimit.test.mts.
-	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
 
 /** The `oauthTokenSettings` slot webauthnModule requires, for the issuer above. */
@@ -412,15 +408,15 @@ describe("webauthnModule boot integration", () => {
 
 /**
  * The operator's path for `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN`: the
- * composition root parses its resolved HOCON with core's `AppConfigSchema`,
- * and boot parses `webauthn` with `webauthnConfigSchema`, the module's section
- * schema, which the module provides as the `webauthnConfig` slot.
+ * composition root hands boot its resolved HOCON, and boot parses `webauthn`
+ * with `webauthnConfigSchema`, the module's section schema, which the module
+ * provides as the `webauthnConfig` slot.
  *
  * `hoconWebauthn` is the `webauthn` section as the shipped reference.conf
  * resolves with these variables set: literals keep their types, every `${?VAR}`
- * arrives as a string, and the origin list is still one comma-separated string
- * after core's parse. Core's `reference-conf-drift.test.mts` pins that shape
- * against the real HOCON resolution; this package has no HOCON library.
+ * arrives as a string, and the origin list is one comma-separated string.
+ * Core's `reference-conf-drift.test.mts` pins that shape against the real
+ * HOCON resolution, and section.test.mts resolves the shipped reference.conf.
  */
 describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIGIN)", () => {
 	const ANDROID = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
@@ -428,7 +424,6 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 		challengeTtlMs: 120000,
 		attestationPreference: "none",
 		userVerification: "preferred",
-		rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
 		rpId: "example.com",
 		rpName: "Example App",
 		origin: `https://example.com,${ANDROID}`,
@@ -436,10 +431,6 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 	};
 
 	it("boots with both origins and the top origin the variables name", async () => {
-		const config = AppConfigSchema.parse({ ...coreConfig, webauthn: hoconWebauthn });
-		// AppConfigSchema passes the origin list on as the one string it is.
-		expect(config.webauthn?.origin).toBe(`https://example.com,${ANDROID}`);
-
 		let resolved: WebAuthnConfig | undefined;
 		const handle = await createApp({
 			modules: [
@@ -468,10 +459,8 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 				noopGrantPolicyModule,
 				activatorModule,
 			],
-			// The parse drops what the resolution captured of core's renamed
-			// variables; boot reads them beside the parsed sections.
 			bootstrapComponents: {
-				config: { ...config, "renamed-variables": coreConfig["renamed-variables"] },
+				config: withWebAuthnSection(coreConfig, hoconWebauthn),
 				pathResolver: (p: string) => p,
 				oauthTokenSettings: tokenSettings,
 			} as never,
@@ -526,16 +515,14 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 	);
 
 	it.each([true, false])(
-		"refuses it set to %j in a configuration a composition parsed with AppConfigSchema before the boot",
+		"refuses it set to %j beside a complete section, in the resolved configuration a composition hands the boot",
 		async (value) => {
-			const parsed = AppConfigSchema.parse({
-				...coreConfig,
-				webauthn: { allowCredentialsForKnownUser: value },
-			});
-			const refused = await refusedWith({
-				...parsed,
-				"renamed-variables": coreConfig["renamed-variables"],
-			});
+			const refused = await refusedWith(
+				withWebAuthnSection(coreConfig, {
+					...stubWebAuthnConfig,
+					allowCredentialsForKnownUser: value,
+				}),
+			);
 			expect(refused).toMatchObject({ name: "BootError", reason: "config-path-relocated" });
 			expect(refused.message).toContain("webauthn.allowCredentialsForKnownUser was removed");
 		},
@@ -590,13 +577,77 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 	});
 });
 
+/**
+ * `webauthn.rateLimit` is removed: the options route is guarded by the
+ * deployment's `rateLimiter` alone. A configuration still setting any key
+ * under it, at any value, and an environment still setting one of its
+ * variables (the current names and the older ones), refuse the boot.
+ */
+describe("the retired webauthn.rateLimit", () => {
+	async function refusedWith(config: Record<string, unknown>): Promise<Error> {
+		try {
+			const handle = await createApp({
+				modules: happyPathModules,
+				bootstrapComponents: {
+					config,
+					pathResolver: (p: string) => p,
+					oauthTokenSettings: tokenSettings,
+				} as never,
+			});
+			await handle.dispose();
+		} catch (error) {
+			return error as Error;
+		}
+		throw new Error("expected the boot to be refused");
+	}
+
+	it.each([
+		[{ authenticationOptions: { limit: 30, windowSeconds: 60 } }],
+		[{ authenticationOptions: { limit: "30" } }],
+	])("refuses a configuration setting it to %j, naming the key", async (value) => {
+		const refused = await refusedWith({
+			...coreConfig,
+			webauthn: { ...stubWebAuthnConfig, rateLimit: value },
+		});
+		expect(refused).toMatchObject({ name: "BootError", reason: "config-path-relocated" });
+		expect(refused.message).toMatch(/webauthn\.rateLimit\.authenticationOptions\.\w+ was removed/);
+	});
+
+	it("refuses an empty one as a key the section does not declare, naming it", async () => {
+		const refused = await refusedWith({
+			...coreConfig,
+			webauthn: { ...stubWebAuthnConfig, rateLimit: {} },
+		});
+		expect(refused).toMatchObject({ name: "BootError", reason: "config-validation-failed" });
+		expect(refused.message).toContain("webauthn");
+		expect(refused.message).toContain("rateLimit");
+	});
+
+	it.each([
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT",
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS",
+	])("refuses an environment setting %s, naming the variable", async (variable) => {
+		const refused = await refusedWith({
+			...coreConfig,
+			"renamed-variables": {
+				...coreConfig["renamed-variables"],
+				...renamedVariableCaptures({ modules: [webauthnModule], env: { [variable]: "30" } }),
+			},
+		});
+		expect(refused).toMatchObject({ name: "BootError", reason: "environment-variable-renamed" });
+		expect(refused.message).toContain(variable);
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Body-parser integration
 // ---------------------------------------------------------------------------
 
 /**
  * Each contributed router installs its own `express.json()` before its POST
- * handlers: createApp installs no global JSON parser, and oauthModule's router
+ * handlers: createApp installs no global JSON parser, and oauthEndpointsModule's router
  * parses only its own routes' bodies. Without it, `req.body` is `undefined`.
  * These tests mount `handle.router` on a bare express app and POST JSON.
  */

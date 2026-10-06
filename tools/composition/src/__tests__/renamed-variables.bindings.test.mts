@@ -88,8 +88,8 @@ let fullSet: FullSet | undefined;
  */
 async function declaringModules(booted: FullSet): Promise<readonly Module[]> {
 	const options = await fullSetOptions({ stores: "redis" });
-	const switches = resolveConfig(MULTI_ENV, options.reads);
-	const onRedis = composedModules(options.config ? options.config(switches) : switches, {
+	const switches = resolveConfig(MULTI_ENV);
+	const onRedis = composedModules(options.switches ? options.switches(switches) : switches, {
 		...options,
 		env: MULTI_ENV,
 		shippedRefreshTokenFamilyStore: true,

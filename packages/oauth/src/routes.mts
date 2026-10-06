@@ -23,7 +23,6 @@
 
 import {
 	type AccessTokenDenylist,
-	type AppConfig,
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
@@ -33,6 +32,7 @@ import {
 	createRateLimitGuard,
 	emitAuditEvent,
 	type FederationProvider,
+	type FederationSettings,
 	type FederationTokenStore,
 	formatObject,
 	type GrantHandlerResolver,
@@ -48,10 +48,10 @@ import {
 	type RefreshTokenFamilyRevocation,
 	type ReplaySeenSet,
 	readAccessTokenRevocationMode,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
+	type SessionLifecycle,
+	type SessionLifecycleStore,
+	type SessionLiveness,
 	type SessionRequirementResolver,
-	type SessionRPRegistry,
 	type SubjectRevocation,
 	tokenTypeForConfirmation,
 	type UserSessionStore,
@@ -166,7 +166,7 @@ const createIntrospectHandler = ({
 	accessTokenDenylist,
 	subjectRevocation,
 	refreshTokenFamilyRevocation,
-	userSessionStore,
+	sessionLifecycle,
 	auditSink,
 	logger,
 }: {
@@ -176,7 +176,8 @@ const createIntrospectHandler = ({
 	readonly accessTokenDenylist: AccessTokenDenylist | undefined;
 	readonly subjectRevocation: SubjectRevocation | undefined;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation | undefined;
-	readonly userSessionStore: UserSessionStore | undefined;
+	/** What answers whether the token's session is live; absent in a composition that keeps no sessions. */
+	readonly sessionLifecycle: SessionLifecycle | undefined;
 	readonly auditSink: AuditSink | undefined;
 	readonly logger: Logger;
 }): RequestHandler => {
@@ -265,19 +266,33 @@ const createIntrospectHandler = ({
 			// result, its `liveness_sid` (core's `livenessSidOf`): a derived
 			// token ends with the session it came from, as its subject token
 			// does.
+			//
+			// Core's session lifecycle answers, wherever sessions are kept: a
+			// session whose close has committed is not live, while its user
+			// session is still there.
 			const sid = livenessSidOf(payload as Record<string, unknown>);
-			if (sid !== null && userSessionStore) {
-				let userSession: Awaited<ReturnType<UserSessionStore["get"]>>;
+			if (sid !== null && sessionLifecycle) {
+				let liveness: SessionLiveness;
 				try {
-					userSession = await userSessionStore.get(sid);
+					liveness = await sessionLifecycle.liveness(sid);
 				} catch (cause) {
+					// A lifecycle filled by the host may throw: an outage all the same.
 					return answerStoreUnavailable(req, res, {
-						store: "user_session",
+						store: "session_lifecycle",
 						details: { sid },
 						cause,
 					});
 				}
-				if (!userSession) {
+				// Any answer other than `live` or `not_live` (core's lifecycle gives
+				// none, as it rejects on an outage) is answered as the outage.
+				if (liveness.outcome !== "live" && liveness.outcome !== "not_live") {
+					return answerStoreUnavailable(req, res, {
+						store: "session_lifecycle",
+						details: { sid },
+					});
+				}
+				// A live session of another subject is not this token's session.
+				if (liveness.outcome === "not_live" || liveness.session.sub !== payload.sub) {
 					emitAuditEvent(auditSink, {
 						timestamp: new Date(),
 						type: "introspect.session_invalid",
@@ -367,8 +382,8 @@ export const createOAuthRouter = async (
 	},
 	{
 		registry,
-		config,
 		section,
+		federationSettings,
 		clientRepository: registeredClients,
 		codeRepository,
 		keyStore,
@@ -379,10 +394,9 @@ export const createOAuthRouter = async (
 		accessTokenDenylist,
 		subjectRevocation,
 		userSessionStore,
-		sessionRPRegistry,
-		sessionFamilyIndex,
-		sessionFederationIndex,
+		sessionLifecycleStore,
 		federationTokenStore,
+		sessionLifecycle,
 		replaySeenSet,
 		consentStore,
 		pendingConsentStore,
@@ -404,19 +418,22 @@ export const createOAuthRouter = async (
 		 */
 		registry: Pick<GrantHandlerResolver, "get">;
 		/**
-		 * The configuration, for what the router reads beyond `oauth {}`: which
-		 * installed federation trusts its upstream IdP's `amr`. Without
-		 * `section`, its `oauth {}` too.
-		 */
-		config: AppConfig;
-		/**
 		 * `oauth {}` as the oauth module's schema parsed it: every `oauth.*`
 		 * setting the router reads — the issuer, the switches, the acr table,
 		 * the consent page, the Client ID Metadata Documents, what revocation
-		 * promises. `oauthModule` passes its own section; a router built by hand
-		 * without one reads the `oauth {}` its `config` carries.
+		 * promises. `oauthEndpointsModule` passes its own section; a router
+		 * built by hand without one is refused.
 		 */
-		section?: OAuthSection;
+		section: OAuthSection;
+		/**
+		 * Core's view of `core.federations` (the `federationSettings` slot),
+		 * for what the router reads beyond `oauth {}`: which installed
+		 * federation trusts its upstream IdP's `amr`, which decides the acr
+		 * entries `/authorize` can satisfy. `oauthEndpointsModule` passes the
+		 * slot; a router built by hand without one is refused. Tests build one
+		 * with core's `createTestFederationSettings`.
+		 */
+		federationSettings: FederationSettings;
 		clientRepository: ClientRepository;
 		/**
 		 * Where `/authorize` issues its codes. Required when `registry` holds
@@ -441,10 +458,17 @@ export const createOAuthRouter = async (
 		 */
 		subjectRevocation?: SubjectRevocation;
 		userSessionStore?: UserSessionStore;
-		sessionRPRegistry?: SessionRPRegistry;
-		sessionFamilyIndex?: SessionFamilyIndex;
-		sessionFederationIndex?: SessionFederationIndex;
+		/** The session lifecycle's record, which admission reads after a live session. */
+		sessionLifecycleStore?: SessionLifecycleStore;
 		federationTokenStore?: FederationTokenStore;
+		/**
+		 * Core's session lifecycle, required with a `userSessionStore`:
+		 * `/oauth/logout` ends the session through its `close`, and
+		 * introspection, userinfo and the federation-token route ask it whether
+		 * a token's session is live. A router built with the store and without
+		 * it is refused.
+		 */
+		sessionLifecycle?: SessionLifecycle;
 		/**
 		 * The `jti` single-use record for `private_key_jwt` client
 		 * assertions, consulted by every client-authenticated endpoint here.
@@ -484,7 +508,7 @@ export const createOAuthRouter = async (
 		 * Read **once when `createOAuthRouter` is called**, so it must already
 		 * answer every federation the composition installs: installed federations
 		 * decide which acr entries are satisfiable (`./acrValues.mts`), and a map
-		 * that fills later leaves those entries dropped. `oauthModule`'s map is
+		 * that fills later leaves those entries dropped. `oauthEndpointsModule`'s map is
 		 * filled by the boot planner before any route factory runs (federations
 		 * are name-keyed contributions, registered before `routes`). Read again
 		 * at request time by the federation logout and token routes.
@@ -495,7 +519,7 @@ export const createOAuthRouter = async (
 		 * 2026-09-28-session-admission): what every consumer of admission in
 		 * this router — `/authorize`, the consent step — reads its session
 		 * through, and what a step-up can add, which decides which acr entries
-		 * this composition can satisfy (`./acrValues.mts`). `oauthModule` passes
+		 * this composition can satisfy (`./acrValues.mts`). `oauthEndpointsModule` passes
 		 * the synthetic key `sessionRequirementResolver`, filled by the boot
 		 * planner before any route factory runs. A router built by hand without
 		 * one, or with one the planner (or `resolverForTests`) did not build, is
@@ -506,6 +530,16 @@ export const createOAuthRouter = async (
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
 	checkResolver(requirements, "createOAuthRouter");
+	if (!section) {
+		throw new RangeError(
+			"createOAuthRouter: section is required — oauth {} as the oauth module's schema parsed it (the module passes its own)",
+		);
+	}
+	if (!federationSettings) {
+		throw new RangeError(
+			"createOAuthRouter: federationSettings is required — core's view of core.federations (the module passes the slot), or createTestFederationSettings from @o3co/auth-provider-core/testing in a test",
+		);
+	}
 	// `/authorize` issues the codes the authorization_code grant redeems, so it
 	// is mounted exactly when that grant is registered — the registry
 	// `/oauth/token` dispatches against — and needs the code repository then.
@@ -515,14 +549,22 @@ export const createOAuthRouter = async (
 			"createOAuthRouter: the authorization_code grant is registered but no codeRepository is wired — /authorize issues its codes into it; wire one, or leave the grant out",
 		);
 	}
+	// Where a user-session store is wired, core's session lifecycle answers for
+	// every session this router reads, and joins and closes them.
+	if (userSessionStore !== undefined && sessionLifecycle === undefined) {
+		throw new Error(
+			"createOAuthRouter: userSessionStore is wired, but sessionLifecycle is not. Where a " +
+				"user-session store is wired, core's session lifecycle is required: introspection, " +
+				"userinfo, the federation-token route and logout read and end sessions through it. " +
+				"Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
+	}
 	const router = express.Router();
-	// Every `oauth.*` setting below is read from here, and from nowhere else.
-	const oauth: unknown = section ?? config.oauth;
-
+	// Every `oauth.*` setting below is read from `section`, and from nowhere else.
 	const { options, acrTable, canonicalIssuer, authorizationResponse, clientRepository } =
 		resolveRouterSettings({
-			section: oauth,
-			config,
+			section,
+			federationSettings,
 			authorizationEndpoint,
 			requirements,
 			getFederationProviders,
@@ -586,9 +628,10 @@ export const createOAuthRouter = async (
 					login: requireLoginEntry(loginEntry),
 					// The consent page, `oauth.consentPage.url`, read per request. The
 					// default lives in the package's reference.conf; a hand-built section
-					// without the key falls back the same way.
+					// without the key falls back the same way. An empty or blank url is
+					// the section schema's to refuse.
 					consentUrl: () =>
-						(oauth as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
+						(section as { consentPage?: { url?: string } } | undefined)?.consentPage?.url ??
 						"/consent",
 					consentStore,
 					pendingConsentStore,
@@ -598,6 +641,7 @@ export const createOAuthRouter = async (
 					// composition without session-backed login wires none), the
 					// subject-revocation boundary (applied when wired) and the resolver.
 					userSessionStore,
+					sessionLifecycleStore,
 					subjectRevocation,
 					requirements,
 				})
@@ -608,23 +652,20 @@ export const createOAuthRouter = async (
 	// POST /oauth/federation/:name/token.
 	// logout_token signing needs the issuer; it is the router-scope canonical one.
 
-	// Logout (back-channel logout_token signing requires issuer).
+	// Logout: mounted with the session stores, whose sessions the lifecycle
+	// (required beside them) closes.
 	const logoutSupported =
 		!!userSessionStore &&
-		!!sessionRPRegistry &&
-		!!sessionFamilyIndex &&
-		!!sessionFederationIndex &&
+		!!sessionLifecycle &&
 		!!federationTokenStore &&
 		!!refreshTokenFamilyRevocation;
 
 	// Federation-token endpoint forwards upstream; does NOT need our issuer.
-	// Gated like logoutSupported, though it consumes only some of these
-	// stores: createApp enforces that when ANY is wired, ALL are wired.
+	// Mounted with the session stores, whose sessions the lifecycle (required
+	// beside them) answers for.
 	const federationTokenSupported =
 		!!userSessionStore &&
-		!!sessionRPRegistry &&
-		!!sessionFamilyIndex &&
-		!!sessionFederationIndex &&
+		!!sessionLifecycle &&
 		!!federationTokenStore &&
 		!!refreshTokenFamilyRevocation;
 
@@ -687,7 +728,7 @@ export const createOAuthRouter = async (
 				accessTokenDenylist,
 				subjectRevocation,
 				refreshTokenFamilyRevocation,
-				userSessionStore,
+				sessionLifecycle,
 				auditSink,
 				logger,
 			}),
@@ -711,7 +752,7 @@ export const createOAuthRouter = async (
 	router.use(
 		userinfo.createRouter(express, {
 			keyStore,
-			userSessionStore,
+			...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
 			subjectRevocation,
@@ -733,11 +774,7 @@ export const createOAuthRouter = async (
 				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				userSessionStore: userSessionStore!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
-				sessionRPRegistry: sessionRPRegistry!,
-				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
-				sessionFamilyIndex: sessionFamilyIndex!,
-				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
-				sessionFederationIndex: sessionFederationIndex!,
+				sessionLifecycle: sessionLifecycle!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				federationTokenStore: federationTokenStore!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
@@ -758,9 +795,7 @@ export const createOAuthRouter = async (
 				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
 				refreshTokenFamilyRevocation: refreshTokenFamilyRevocation!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
-				userSessionStore: userSessionStore!,
-				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
-				sessionFederationIndex: sessionFederationIndex!,
+				sessionLifecycle: sessionLifecycle!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
 				federationTokenStore: federationTokenStore!,
 				clientRepository,
@@ -799,7 +834,7 @@ export const createOAuthRouter = async (
 			keyStore,
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
-			accessTokenRevocation: readAccessTokenRevocationMode({ oauth }),
+			accessTokenRevocation: readAccessTokenRevocationMode({ oauth: section }),
 			logger,
 			issuer: canonicalIssuer,
 			// private_key_jwt at /oauth/revoke, verified as at /oauth/token.
@@ -834,6 +869,7 @@ export const createOAuthRouter = async (
 				// The same reading `/authorize` makes, through admission with the
 				// same slots.
 				userSessionStore,
+				sessionLifecycleStore,
 				subjectRevocation,
 				requirements,
 			}),

@@ -24,14 +24,24 @@ import { DEFAULT_CLOCK_SKEW_MS, MFA_CLOCK_SKEW_ALLOWANCE_MS } from "@o3co/auth-p
 import { describe, expect, it } from "vitest";
 import { MFA_RECENT_WINDOW_SECONDS } from "#/config.mjs";
 import {
-	distrustedByFirstBinding,
+	createFirstBindingMark,
 	firstBindingMarkLifetimeMs,
-	firstBindingRetryAfterMs,
 	readFirstBindingMark,
 } from "#/firstBindingMark.mjs";
 import { MFA_TRANSACTION_TTL_SECONDS } from "#/transactions.mjs";
 
 const NOW = 1_800_000_010_000;
+/** The default `mfa.storeTimeoutMs`, and the factor-set lease it makes: 16 Store calls' time. */
+const STORE_TIMEOUT_MS = 5_000;
+const LEASE_MS = 80_000;
+/** The longest `mfa.storeTimeoutMs`: its lease is core's longest subject lease, ten minutes. */
+const LONGEST_STORE_TIMEOUT_MS = 37_500;
+/** The mark at the default settings: a factor-set lease of 16 × the 5000 ms Store timeout. */
+const MARK = createFirstBindingMark({
+	manageMaxAgeSeconds: 300,
+	transactionTtlSeconds: 600,
+	storeTimeoutMs: STORE_TIMEOUT_MS,
+});
 
 describe("the mark's lifetime", () => {
 	it("is max(mfa.manage.maxAgeSeconds, 2 × mfa.transactionTtlSeconds), twice the clock skew and one factor-set lease, in whole milliseconds", () => {
@@ -44,7 +54,7 @@ describe("the mark's lifetime", () => {
 			const lifetime = firstBindingMarkLifetimeMs({
 				manageMaxAgeSeconds,
 				transactionTtlSeconds,
-				leaseMs: 80_000,
+				storeTimeoutMs: STORE_TIMEOUT_MS,
 			});
 			expect(lifetime).toBe(expected + 2 * DEFAULT_CLOCK_SKEW_MS + 80_000);
 			expect(Number.isSafeInteger(lifetime)).toBe(true);
@@ -55,20 +65,19 @@ describe("the mark's lifetime", () => {
 		const lifetime = firstBindingMarkLifetimeMs({
 			manageMaxAgeSeconds: MFA_RECENT_WINDOW_SECONDS.min,
 			transactionTtlSeconds: MFA_TRANSACTION_TTL_SECONDS.min,
-			leaseMs: 600_000,
+			storeTimeoutMs: LONGEST_STORE_TIMEOUT_MS,
 		});
 		expect(lifetime - DEFAULT_CLOCK_SKEW_MS - 600_000).toBeGreaterThanOrEqual(60_000);
 	});
 
-	it("distrusts, for a write's window beyond the skew, an authentication later than the mark plus the skew: a sign-in made while the marked write was still landing", () => {
-		const mark = NOW;
-		const within = mark + DEFAULT_CLOCK_SKEW_MS + 1_000;
-		expect(distrustedByFirstBinding(within, mark)).toBe(false);
-		expect(distrustedByFirstBinding(within, mark, 80_000)).toBe(true);
-		expect(distrustedByFirstBinding(mark + DEFAULT_CLOCK_SKEW_MS + 80_001, mark, 80_000)).toBe(
-			false,
-		);
-		expect(firstBindingRetryAfterMs(mark, NOW, 80_000)).toBe(DEFAULT_CLOCK_SKEW_MS + 80_001);
+	it("answers the lifetime it was built with, and a read covers a mark noted since for that lifetime less the skew and the lease", () => {
+		const lifetime = firstBindingMarkLifetimeMs({
+			manageMaxAgeSeconds: 300,
+			transactionTtlSeconds: 600,
+			storeTimeoutMs: STORE_TIMEOUT_MS,
+		});
+		expect(MARK.lifetimeMs).toBe(lifetime);
+		expect(MARK.readCoversMs).toBe(lifetime - DEFAULT_CLOCK_SKEW_MS - LEASE_MS);
 	});
 
 	it("stays within a day, the most a store keeps a mark, at the longest mfa.manage.maxAgeSeconds and mfa.transactionTtlSeconds admit", () => {
@@ -76,9 +85,32 @@ describe("the mark's lifetime", () => {
 			firstBindingMarkLifetimeMs({
 				manageMaxAgeSeconds: MFA_RECENT_WINDOW_SECONDS.max,
 				transactionTtlSeconds: MFA_TRANSACTION_TTL_SECONDS.max,
-				leaseMs: 600_000,
+				storeTimeoutMs: LONGEST_STORE_TIMEOUT_MS,
 			}),
 		).toBeLessThanOrEqual(MFA_CLOCK_SKEW_ALLOWANCE_MS);
+	});
+});
+
+describe("its settings", () => {
+	it("take the factor-set lease from mfa.storeTimeoutMs as the factor set's writes do, and refuse one out of range, naming it", () => {
+		const settings = { manageMaxAgeSeconds: 300, transactionTtlSeconds: 600 };
+		expect(
+			createFirstBindingMark({ ...settings, storeTimeoutMs: 10_000 }).retryAfterMs(NOW, NOW),
+		).toBe(DEFAULT_CLOCK_SKEW_MS + 160_000 + 1);
+		for (const storeTimeoutMs of [Number.NaN, 0, -1, 1.5, LONGEST_STORE_TIMEOUT_MS + 1]) {
+			expect(
+				() => createFirstBindingMark({ ...settings, storeTimeoutMs }),
+				String(storeTimeoutMs),
+			).toThrow(/^mfa\.storeTimeoutMs: /);
+		}
+		for (const [key, value] of [
+			["manageMaxAgeSeconds", Number.NaN],
+			["transactionTtlSeconds", 0],
+		] as const) {
+			expect(() =>
+				createFirstBindingMark({ ...settings, storeTimeoutMs: STORE_TIMEOUT_MS, [key]: value }),
+			).toThrow(RangeError);
+		}
 	});
 });
 
@@ -107,17 +139,24 @@ describe("a store's answer", () => {
 });
 
 describe("which authentication the mark distrusts", () => {
-	it("one at or before the mark and the clock skew; not one a millisecond later, nor any without a mark", () => {
+	it("one at or before the mark, the clock skew and one factor-set lease — a sign-in made while the marked write may still have been landing; not one a millisecond later, nor any without a mark", () => {
 		const at = NOW - 60_000;
-		expect(distrustedByFirstBinding(at - 1, at)).toBe(true);
-		expect(distrustedByFirstBinding(at + DEFAULT_CLOCK_SKEW_MS, at)).toBe(true);
-		expect(distrustedByFirstBinding(at + DEFAULT_CLOCK_SKEW_MS + 1, at)).toBe(false);
-		expect(distrustedByFirstBinding(at - 1, null)).toBe(false);
+		expect(MARK.distrusts(at - 1, at)).toBe(true);
+		expect(MARK.distrusts(at + DEFAULT_CLOCK_SKEW_MS + 1_000, at)).toBe(true);
+		expect(MARK.distrusts(at + DEFAULT_CLOCK_SKEW_MS + LEASE_MS, at)).toBe(true);
+		expect(MARK.distrusts(at + DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 1, at)).toBe(false);
+		expect(MARK.distrusts(at - 1, null)).toBe(false);
 	});
 
 	it("one whose time cannot be read, whenever a mark stands", () => {
 		for (const authTimeMs of [Number.NaN, undefined]) {
-			expect(distrustedByFirstBinding(authTimeMs, NOW)).toBe(true);
+			expect(MARK.distrusts(authTimeMs, NOW)).toBe(true);
 		}
+	});
+
+	it("until the mark, the skew and the lease have passed: how long a fresh sign-in waits, never less than none", () => {
+		expect(MARK.retryAfterMs(NOW, NOW)).toBe(DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 1);
+		expect(MARK.retryAfterMs(NOW, NOW + DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 1)).toBe(0);
+		expect(MARK.retryAfterMs(NOW, NOW + 3_600_000)).toBe(0);
 	});
 });

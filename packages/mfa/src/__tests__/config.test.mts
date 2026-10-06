@@ -175,7 +175,7 @@ describe("the MFA settings this package reads", () => {
 		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
 	});
 
-	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, the routes' budget, recent MFA's window, the first binding's proof and a subject's factor limit — no factor's", () => {
+	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, recent MFA's window, the first binding's proof and a subject's factor limit — no factor's", () => {
 		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
 			"encryptionKeys",
 			"enrollment",
@@ -185,7 +185,6 @@ describe("the MFA settings this package reads", () => {
 			"maxFactorsPerSubject",
 			"mode",
 			"page",
-			"rateLimit",
 			"storeTimeoutMs",
 			"transactionTtlSeconds",
 		]);
@@ -425,6 +424,16 @@ describe("the development sample key", () => {
 				refusal(() => readSettings(sample())),
 				JSON.stringify(nodeEnv),
 			).toMatch(/the environment is "(production|staging)"/);
+		}
+	});
+
+	it("reads an empty or blank environment as no name, which does not lift NODE_ENV", () => {
+		vi.stubEnv("NODE_ENV", "production");
+		for (const environment of ["", "  "]) {
+			expect(
+				refusal(() => readSettings(sample(), { environment })),
+				JSON.stringify(environment),
+			).toContain('the environment is "production"');
 		}
 	});
 

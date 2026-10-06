@@ -28,17 +28,21 @@
 
 import { createSecretKey } from "node:crypto";
 import {
+	createInMemorySessionLifecycleStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type RefreshTokenFamilyRevocation,
 	type RefreshTokenFamilyRotation,
 	type RefreshTokenFamilyStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	createTestTokenBindingSettings,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
@@ -52,15 +56,6 @@ import {
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const CLIENT_ID = "client1";
-
-const config = {
-	oauth: {
-		jwt: { issuer: "localhost" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
-		grants: { refresh_token: { enabled: true } },
-	},
-} as unknown as GrantDependencies["config"];
 
 const refreshToken = (claims: Record<string, unknown> = {}) =>
 	new SignJWT({ sub: "u1", family_id: "fam-1", jti: "rt-1", azp: CLIENT_ID, ...claims })
@@ -92,10 +87,12 @@ const failingFamilyStore = (): RefreshTokenFamilyStore => {
 	};
 };
 
-const grant = (deps: Partial<GrantDependencies>, logger: MockLogger) =>
+const grant = (deps: Partial<RefreshTokenGrantDeps>, logger: MockLogger) =>
 	createRefreshTokenGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config,
+		// The grant verifies the presented token against the request's issuer.
+		oauthTokenSettings: createTestOAuthTokenSettings(),
+		tokenBindingSettings: createTestTokenBindingSettings(),
 		keyStore: createSymmetricKeyStore(SECRET),
 		logger,
 		...deps,
@@ -161,9 +158,10 @@ describe("refresh grant — a store outage is logged, not only answered", () => 
 			},
 			delete: async () => {},
 		} as unknown as UserSessionStore;
-		const { result } = await grant({ userSessionStore }, logger).handle(
-			await ctx({ sid: "sid-1" }),
-		);
+		const { result } = await grant(
+			{ userSessionStore, sessionLifecycleStore: createInMemorySessionLifecycleStore() },
+			logger,
+		).handle(await ctx({ sid: "sid-1" }));
 		expect(result).toMatchObject({
 			status: 503,
 			error: "temporarily_unavailable",

@@ -16,7 +16,9 @@
 
 /**
  * `POST /oauth/webauthn/authentication/options` is unauthenticated and drives a
- * challenge-store write per request, so it is guarded by a real rate limiter.
+ * challenge-store write per request. It is guarded by the deployment's
+ * `rateLimiter` when one is wired, under the route's tag and on the limits
+ * that limiter applies; with none, nothing in the module throttles it.
  *
  * The guard is exercised through the boot planner (`createApp` →
  * `handle.router`), not the route factory: what is under test is the WIRING,
@@ -27,18 +29,15 @@
 import {
 	type AuditEvent,
 	type AuditSink,
-	type BootError,
 	createApp,
 	createMemoryRateLimiter,
 	createSymmetricKeyStore,
-	type DeploymentMode,
 	defaultChallengeCeremonyModule,
 	defineModule,
 	type GrantPolicyHook,
 	type Logger,
 	type Module,
 	memoryChallengeStoreModule,
-	memoryRateLimiterModule,
 	memoryReplaySeenSetModule,
 	memoryWebAuthnCredentialStoreModule,
 	type RateLimiter,
@@ -66,14 +65,13 @@ const makeCoreConfig = (failMode: "open" | "closed" = "open") => {
 	};
 };
 
-const makeWebAuthnConfig = (limit: number): WebAuthnConfig => ({
+const makeWebAuthnConfig = (): WebAuthnConfig => ({
 	rpId: "example.com",
 	rpName: "Example App",
 	origin: ["https://example.com"],
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	rateLimit: { authenticationOptions: { limit, windowSeconds: 60 } },
 });
 
 const keyStoreModule = defineModule({
@@ -197,7 +195,7 @@ describe("webauthn authentication/options rate limit — shared limiter", () => 
 			name: "test:webauthn-rl-limiter",
 			provides: { rateLimiter: () => limiter },
 		});
-		const { handle, app } = await bootApp(makeWebAuthnConfig(999), [limiterModule]);
+		const { handle, app } = await bootApp(makeWebAuthnConfig(), [limiterModule]);
 
 		expect((await hit(app)).status).toBe(200);
 		expect((await hit(app)).status).toBe(200);
@@ -221,7 +219,7 @@ describe("webauthn authentication/options rate limit — shared limiter", () => 
 			name: "test:webauthn-rl-spy-limiter",
 			provides: { rateLimiter: () => limiter },
 		});
-		const { handle, app } = await bootApp(makeWebAuthnConfig(999), [limiterModule]);
+		const { handle, app } = await bootApp(makeWebAuthnConfig(), [limiterModule]);
 
 		await hit(app);
 
@@ -241,7 +239,7 @@ describe("webauthn authentication/options rate limit — shared limiter", () => 
 			name: "test:webauthn-rl-header-limiter",
 			provides: { rateLimiter: () => limiter },
 		});
-		const { handle, app } = await bootApp(makeWebAuthnConfig(999), [limiterModule]);
+		const { handle, app } = await bootApp(makeWebAuthnConfig(), [limiterModule]);
 
 		const res = await hit(app);
 
@@ -252,231 +250,63 @@ describe("webauthn authentication/options rate limit — shared limiter", () => 
 	});
 });
 
-describe("webauthn authentication/options rate limit — the configured budget on a bundled shared limiter", () => {
-	/**
-	 * The composition a scaled deployment has: the bundled limiter module in
-	 * the `rateLimiter` slot, its own `limits` silent about this route, and the
-	 * route's budget where the package documents it,
-	 * `webauthn.rateLimit.authenticationOptions`. The shared limiter must apply
-	 * that budget, not its `defaultLimit` (60 per 60 s).
-	 */
-	const composed = (explicit: Record<string, unknown> = {}) => ({
-		webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } },
-		"core-rate-limiter-memory": {
-			limits: explicit,
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-			maxBuckets: 10_000,
-		},
-	});
+describe("webauthn authentication/options rate limit — the limiter's own limits", () => {
+	it("applies the wired limiter's default when its limits are silent about the route", async () => {
+		const limiter = createMemoryRateLimiter({
+			limits: {},
+			defaultLimit: { limit: 3, windowSeconds: 60 },
+		});
+		const { handle, app } = await bootApp(makeWebAuthnConfig(), [
+			defineModule({ name: "test:webauthn-rl-default", provides: { rateLimiter: () => limiter } }),
+		]);
 
-	it("applies webauthn.rateLimit.authenticationOptions, not the limiter's default", async () => {
-		const { handle, app } = await bootApp(
-			makeWebAuthnConfig(2),
-			[memoryRateLimiterModule],
-			undefined,
-			undefined,
-			composed(),
-		);
-
-		const first = await hit(app);
-		expect(first.status).toBe(200);
-		expect(first.headers["ratelimit-limit"]).toBe("2");
-		expect((await hit(app)).status).toBe(200);
-		const denied = await hit(app);
-		expect(denied.status).toBe(429);
-		expect(denied.body).toMatchObject({ error: "rate_limited" });
-
-		await handle.dispose();
-	});
-
-	it("leaves an operator's explicit limits entry for the route in force over the budget the module contributes", async () => {
-		// An explicit `limits.webauthn-authentication-options` is a statement
-		// about this limiter; the contributed budget must not discard it.
-		const { handle, app } = await bootApp(
-			makeWebAuthnConfig(2),
-			[memoryRateLimiterModule],
-			undefined,
-			undefined,
-			composed({
-				[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: { limit: 3, windowSeconds: 60 },
-			}),
-		);
-
-		const first = await hit(app);
-		expect(first.headers["ratelimit-limit"]).toBe("3");
-		expect((await hit(app)).status).toBe(200);
-		expect((await hit(app)).status).toBe(200);
+		for (let i = 0; i < 3; i += 1) expect((await hit(app)).status).toBe(200);
 		expect((await hit(app)).status).toBe(429);
 
 		await handle.dispose();
 	});
 
-	it("applies the budget given as the strings HOCON substitutes", async () => {
+	it("claims the route's tag and contributes no budget for it", async () => {
+		const claim = webauthnModule.contributes?.rateLimitBudgets?.[
+			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG
+		] as ((deps: unknown) => unknown) | undefined;
+		expect(claim).toBeTypeOf("function");
+		expect(await claim?.({ section: makeWebAuthnConfig() })).toBeNull();
+	});
+});
+
+describe("webauthn authentication/options rate limit — no limiter wired", () => {
+	it("lets every request through: the module keeps no limiter of its own", async () => {
+		const { handle, app } = await bootApp(makeWebAuthnConfig(), []);
+
+		for (let i = 0; i < 40; i += 1) expect((await hit(app)).status).toBe(200);
+		const res = await hit(app);
+		expect(res.headers).not.toHaveProperty("ratelimit-limit");
+
+		await handle.dispose();
+	});
+
+	it('boots under "multi", with no per-process limiter to warn about', async () => {
+		const logger = spyLogger();
 		const { handle, app } = await bootApp(
-			makeWebAuthnConfig(2),
-			[memoryRateLimiterModule],
-			undefined,
-			undefined,
-			{
-				...composed(),
-				webauthn: { rateLimit: { authenticationOptions: { limit: "2", windowSeconds: "60" } } },
-			},
+			makeWebAuthnConfig(),
+			[defineModule({ name: "test:webauthn-rl-logger", provides: { logger: () => logger } })],
+			"open",
+			"multi",
 		);
-
-		expect((await hit(app)).headers["ratelimit-limit"]).toBe("2");
-		await handle.dispose();
-	});
-
-	it("refuses to boot on a budget no limiter can apply: core's composed schema refuses it first, by the key's path", async () => {
-		for (const authenticationOptions of [
-			{ limit: 30, windowSeconds: 0 },
-			{ limit: 1.5, windowSeconds: 60 },
-			{ limit: "thirty", windowSeconds: 60 },
-			{ limit: "", windowSeconds: 60 },
-			{ limit: 30, windowSeconds: 1e13 },
-		]) {
-			const err = await bootApp(
-				makeWebAuthnConfig(2),
-				[memoryRateLimiterModule],
-				undefined,
-				undefined,
-				{ ...composed(), webauthn: { rateLimit: { authenticationOptions } } },
-			).then(
-				() => undefined,
-				(caught: unknown) => caught as BootError,
-			);
-			expect(err?.reason, JSON.stringify(authenticationOptions)).toBe("config-validation-failed");
-			expect(err?.message, JSON.stringify(authenticationOptions)).toContain(
-				"webauthn.rateLimit.authenticationOptions",
-			);
-		}
-	});
-});
-
-describe("webauthn authentication/options rate limit — the section and the contributed budget", () => {
-	/**
-	 * A shared limiter applies the budget the module contributes from its
-	 * section's `webauthn.rateLimit.authenticationOptions`; the route's
-	 * per-process fallback and its headers read the same key. No module may
-	 * override the contributed budget, so the two agree and boot is silent.
-	 */
-	const EVENT = "webauthn_authentication_options_budget_mismatch";
-	const sharedLimiter = () =>
-		defineModule({
-			name: "test:webauthn-rl-shared",
-			provides: {
-				rateLimiter: () =>
-					createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } }),
-			},
-		});
-	const withLogger = (logger: Logger) =>
-		defineModule({ name: "test:webauthn-rl-mismatch-logger", provides: { logger: () => logger } });
-	const mismatchCalls = (logger: ReturnType<typeof spyLogger>) =>
-		logger.warn.mock.calls.filter((call) => call[1] === EVENT);
-
-	it("refuses the boot when the section gives no budget, naming the key", async () => {
-		const err = await bootApp(makeWebAuthnConfig(2), [sharedLimiter()], undefined, undefined, {
-			webauthn: { rateLimit: {} },
-		}).then(
-			() => undefined,
-			(caught: unknown) => caught as BootError,
-		);
-		expect(err?.reason).toBe("config-validation-failed");
-		expect(err?.message).toContain("webauthn.rateLimit.authenticationOptions");
-	});
-
-	it("is silent when a shared limiter is wired, the key as the strings HOCON substitutes included", async () => {
-		for (const authenticationOptions of [
-			{ limit: 2, windowSeconds: 60 },
-			{ limit: "2", windowSeconds: "60" },
-		]) {
-			const logger = spyLogger();
-			const { handle } = await bootApp(
-				makeWebAuthnConfig(2),
-				[withLogger(logger), sharedLimiter()],
-				undefined,
-				undefined,
-				{ webauthn: { rateLimit: { authenticationOptions } } },
-			);
-			expect(mismatchCalls(logger), JSON.stringify(authenticationOptions)).toEqual([]);
-			await handle.dispose();
-		}
-	});
-
-	it("refuses the boot when a module overrides the contributed budget", async () => {
-		const tightener = defineModule({
-			name: "test:webauthn-rl-tightener",
-			overrides: {
-				rateLimitBudgets: {
-					[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: () => ({ limit: 1, windowSeconds: 60 }),
-				},
-			},
-		});
-		const err = await bootApp(makeWebAuthnConfig(2), [sharedLimiter(), tightener]).then(
-			() => undefined,
-			(caught: unknown) => caught as BootError,
-		);
-		expect(err?.reason).toBe("contribution-kind-guarded");
-		expect(err?.message).toContain(WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG);
-	});
-
-	it("is silent when no shared limiter is wired: the fallback is built from the key", async () => {
-		const logger = spyLogger();
-		const { handle } = await bootApp(makeWebAuthnConfig(2), [withLogger(logger)]);
-		expect(mismatchCalls(logger)).toEqual([]);
-		await handle.dispose();
-	});
-});
-
-describe("webauthn authentication/options rate limit — mandatory fallback", () => {
-	it("still throttles when no `rateLimiter` component is wired", async () => {
-		const { handle, app } = await bootApp(makeWebAuthnConfig(2), []);
 
 		expect((await hit(app)).status).toBe(200);
-		expect((await hit(app)).status).toBe(200);
-		const denied = await hit(app);
-		expect(denied.status).toBe(429);
-		expect(denied.body).toMatchObject({ error: "rate_limited" });
-
-		await handle.dispose();
-	});
-
-	it("warns that the per-process fallback is in force, naming the spec", async () => {
-		const logger = spyLogger();
-		const loggerModule = defineModule({
-			name: "test:webauthn-rl-logger",
-			provides: { logger: () => logger },
-		});
-		const { handle } = await bootApp(makeWebAuthnConfig(7), [loggerModule]);
-
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ limit: 7, windowSeconds: 60 }),
-			"webauthn_authentication_options_rate_limiter_not_shared",
-		);
-
-		await handle.dispose();
-	});
-
-	it("does not warn when the shared limiter is wired", async () => {
-		const logger = spyLogger();
-		const limiter = createMemoryRateLimiter({
-			limits: {},
-			defaultLimit: { limit: 100, windowSeconds: 60 },
-		});
-		const { handle } = await bootApp(makeWebAuthnConfig(7), [
-			defineModule({ name: "test:webauthn-rl-logger-2", provides: { logger: () => logger } }),
-			defineModule({
-				name: "test:webauthn-rl-limiter-2",
-				provides: { rateLimiter: () => limiter },
-			}),
-		]);
-
 		expect(logger.warn).not.toHaveBeenCalledWith(
 			expect.anything(),
 			"webauthn_authentication_options_rate_limiter_not_shared",
 		);
 
 		await handle.dispose();
+	});
+
+	it("reads neither the deploymentMode slot nor the contributed budgets", () => {
+		expect(webauthnModule.requires).not.toContain("deploymentMode");
+		expect(webauthnModule.requires).not.toContain("rateLimitBudgetResolver");
 	});
 });
 
@@ -491,7 +321,7 @@ describe("webauthn authentication/options rate limit — limiter outage", () => 
 			},
 		};
 		const { handle, app } = await bootApp(
-			makeWebAuthnConfig(999),
+			makeWebAuthnConfig(),
 			[
 				defineModule({
 					name: "test:webauthn-rl-broken-limiter",
@@ -527,7 +357,7 @@ describe("webauthn authentication/options rate limit — limiter outage", () => 
 			},
 		};
 		const { handle, app } = await bootApp(
-			makeWebAuthnConfig(999),
+			makeWebAuthnConfig(),
 			[
 				defineModule({
 					name: "test:webauthn-rl-broken-limiter-open",
@@ -539,180 +369,6 @@ describe("webauthn authentication/options rate limit — limiter outage", () => 
 
 		expect((await hit(app)).status).toBe(200);
 
-		await handle.dispose();
-	});
-});
-
-// ---------------------------------------------------------------------------
-// The per-process fallback keeps its buckets per replica, which multiplies this
-// route's flood and enumeration budget by the replica count. With no shared
-// `rateLimiter`: `"multi"` refuses to boot, `"single"` is silent, unset warns.
-// ---------------------------------------------------------------------------
-
-describe("webauthn authentication/options rate limit — fallback under core.deployment.mode", () => {
-	it('refuses to boot under "multi" with no shared limiter, naming the route as replica-unsafe', async () => {
-		// The route factory throws; the planner wraps a factory throw as
-		// `contribute-factory-failed` and carries the module's own BootError as
-		// `cause`, which is where the reason and the route name live.
-		await expect(bootApp(makeWebAuthnConfig(7), [], "open", "multi")).rejects.toMatchObject({
-			name: "BootError",
-			reason: "contribute-factory-failed",
-			cause: {
-				name: "BootError",
-				reason: "replica-unsafe-adapter",
-				message: expect.stringContaining(OPTIONS_PATH),
-				details: { reason: "replica-unsafe-adapter", modules: ["webauthn"] },
-			},
-		});
-	});
-
-	it('boots under "multi" when a shared limiter is wired, without warning', async () => {
-		const logger = spyLogger();
-		const limiter = createMemoryRateLimiter({
-			limits: {},
-			defaultLimit: { limit: 100, windowSeconds: 60 },
-		});
-		const { handle } = await bootApp(
-			makeWebAuthnConfig(7),
-			[
-				defineModule({ name: "test:webauthn-rl-logger-3", provides: { logger: () => logger } }),
-				defineModule({
-					name: "test:webauthn-rl-limiter-3",
-					provides: { rateLimiter: () => limiter },
-				}),
-			],
-			"open",
-			"multi",
-		);
-		expect(logger.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"webauthn_authentication_options_rate_limiter_not_shared",
-		);
-		await handle.dispose();
-	});
-
-	it('is silent under "single": the operator has declared one replica', async () => {
-		const logger = spyLogger();
-		const { handle, app } = await bootApp(
-			makeWebAuthnConfig(7),
-			[defineModule({ name: "test:webauthn-rl-logger-4", provides: { logger: () => logger } })],
-			"open",
-			"single",
-		);
-		expect(logger.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"webauthn_authentication_options_rate_limiter_not_shared",
-		);
-		// Still guarded: the fallback limiter is in force, it is just not news.
-		expect((await hit(app)).status).toBe(200);
-		await handle.dispose();
-	});
-
-	it("keeps the warning when the mode is unset", async () => {
-		const logger = spyLogger();
-		const { handle } = await bootApp(makeWebAuthnConfig(7), [
-			defineModule({ name: "test:webauthn-rl-logger-5", provides: { logger: () => logger } }),
-		]);
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ limit: 7, windowSeconds: 60 }),
-			"webauthn_authentication_options_rate_limiter_not_shared",
-		);
-		await handle.dispose();
-	});
-});
-
-// ---------------------------------------------------------------------------
-// The mode comes from core's `deploymentMode` slot, which core fills from the
-// configuration's `core.deployment.mode`: the module reads nothing of `deployment`
-// itself.
-// ---------------------------------------------------------------------------
-
-describe("webauthn authentication/options rate limit — the deploymentMode slot", () => {
-	/** The authentication/options route's factory, run by hand with the slot as given. */
-	const buildOptionsRoute = (
-		deploymentMode: DeploymentMode,
-		deployment: Record<string, unknown>,
-		logger: Logger,
-		rateLimiter?: RateLimiter,
-	) => {
-		const deps = {
-			...(rateLimiter === undefined ? {} : { rateLimiter }),
-			section: makeWebAuthnConfig(7),
-			webauthnCredentialStore: {},
-			challengeStore: {},
-			challengeCeremony: {},
-			keyStore: {},
-			config: { ...makeCoreConfig(), core: { deployment } },
-			deploymentMode,
-			logger,
-		};
-		const routes = (webauthnModule.contributes?.routes ?? []) as unknown as ((deps: unknown) => {
-			id: string;
-		})[];
-		return routes
-			.map((factory) => factory(deps))
-			.find((route) => route.id === "webauthn-authentication-options");
-	};
-
-	it("requires the slot", () => {
-		expect(webauthnModule.requires).toContain("deploymentMode");
-	});
-
-	it("refuses a slot it cannot read, absent included, as a TypeError naming it — a shared limiter wired or not", () => {
-		const shared = createMemoryRateLimiter({
-			limits: {},
-			defaultLimit: { limit: 100, windowSeconds: 60 },
-		});
-		for (const rateLimiter of [undefined, shared]) {
-			for (const deploymentMode of [undefined, "MULTI", null]) {
-				expect(
-					() => buildOptionsRoute(deploymentMode as never, {}, spyLogger(), rateLimiter),
-					String(deploymentMode),
-				).toThrow(new TypeError('webauthn: deploymentMode must be "single", "multi" or "unset"'));
-			}
-		}
-	});
-
-	it('refuses the per-process fallback when the slot says "multi", whatever the configuration\'s deployment says', () => {
-		expect(() => buildOptionsRoute("multi", { mode: "single" }, spyLogger())).toThrow(
-			expect.objectContaining({
-				name: "BootError",
-				reason: "replica-unsafe-adapter",
-				details: { reason: "replica-unsafe-adapter", modules: ["webauthn"] },
-			}),
-		);
-	});
-
-	it('is silent when the slot says "single" and warns when it says "unset", whatever the configuration\'s deployment says', () => {
-		const single = spyLogger();
-		expect(buildOptionsRoute("single", { mode: "multi" }, single)?.id).toBe(
-			"webauthn-authentication-options",
-		);
-		expect(single.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"webauthn_authentication_options_rate_limiter_not_shared",
-		);
-		const unset = spyLogger();
-		buildOptionsRoute("unset", { mode: "multi" }, unset);
-		expect(unset.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ limit: 7, windowSeconds: 60 }),
-			"webauthn_authentication_options_rate_limiter_not_shared",
-		);
-	});
-
-	it("keeps the warning, through createApp, for an empty deployment section", async () => {
-		const logger = spyLogger();
-		const { handle } = await bootApp(
-			makeWebAuthnConfig(7),
-			[defineModule({ name: "test:webauthn-rl-logger-6", provides: { logger: () => logger } })],
-			"open",
-			undefined,
-			{ core: { ...makeCoreConfig().core, deployment: {} } },
-		);
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ limit: 7, windowSeconds: 60 }),
-			"webauthn_authentication_options_rate_limiter_not_shared",
-		);
 		await handle.dispose();
 	});
 });

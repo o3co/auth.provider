@@ -25,8 +25,13 @@
 import {
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
+	createInMemorySessionRPRegistry,
+	createSessionLifecycle,
 	createSymmetricKeyStore,
-	type GrantDependencies,
+	type FederationTokenStore,
 	type RefreshTokenFamilyRevocation,
 	type UserSession,
 	type UserSessionStore,
@@ -38,6 +43,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createRouter } from "#/routes/userinfo.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example.com";
@@ -70,7 +76,7 @@ const config = {
 		refreshToken: { expiresIn: 86400 },
 		grants: { authorization_code: { enabled: true } },
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const clientRepository: ClientRepository = {
 	findById: vi.fn().mockResolvedValue(null),
@@ -89,11 +95,30 @@ const refreshTokenFamilyRevocation = {
 	revokeFamily: vi.fn(async () => {}),
 } as unknown as RefreshTokenFamilyRevocation;
 
+/**
+ * Core's own lifecycle over the session store: the grant joins the code's
+ * session through it, and userinfo reads the session's liveness through it.
+ */
+const sessionLifecycle = createSessionLifecycle({
+	store: createInMemorySessionLifecycleStore(),
+	userSessionStore,
+	refreshTokenFamilyRevocation,
+	federationTokenStore: {
+		removeBySid: vi.fn(),
+		delete: vi.fn(),
+	} as unknown as FederationTokenStore,
+	sessionRPRegistry: createInMemorySessionRPRegistry(),
+	sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+	sessionFederationIndex: createInMemorySessionFederationIndex(),
+	retainMs: 0,
+	logger: { warn: () => undefined, error: () => undefined },
+});
+
 /** Exchange a code the way a confidential client does: no cookie on the request. */
 async function exchangeCodeWithoutCookie() {
 	const handler = createAuthorizationGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config,
+		...grantSettingsFrom(config),
 		keyStore,
 		clientRepository,
 		codeRepository: {
@@ -112,18 +137,7 @@ async function exchangeCodeWithoutCookie() {
 			removeByCode: vi.fn(),
 		} as unknown as CodeRepository,
 		userSessionStore,
-		sessionFamilyIndex: {
-			kind: "memory",
-			addFamilyId: vi.fn(async () => {}),
-			listFamilyIds: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		},
-		sessionRPRegistry: {
-			kind: "memory",
-			registerRP: vi.fn(async () => {}),
-			listRPs: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		},
+		sessionLifecycle,
 	} as unknown as Parameters<typeof createAuthorizationGrant>[0]);
 
 	// The session object a back-channel /token call sees: the code correlation
@@ -153,7 +167,7 @@ function buildUserinfoApp() {
 		createRouter(express, {
 			keyStore,
 			issuer: ISSUER,
-			userSessionStore,
+			sessionLifecycle,
 			refreshTokenFamilyRevocation,
 		}),
 	);

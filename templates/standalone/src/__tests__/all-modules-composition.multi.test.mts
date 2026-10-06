@@ -33,12 +33,14 @@ import { type Module, replicaUnsafeReason } from "@o3co/auth-provider-core";
 import * as redisPackage from "@o3co/auth-provider-redis";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readOwnLayers, resolveForBoot } from "#/configPath.mjs";
 import { standaloneRedisClientsModule } from "#/modules.mjs";
 import {
 	type Composition,
 	compose,
 	composedModules,
 	MULTI_ENV,
+	ownFiles,
 	resolveConfig,
 } from "./all-modules-composition.fixture.mjs";
 
@@ -128,6 +130,7 @@ const ALL_ON_REDIS_MODULES = [
 	"redis-federation-grant-store",
 	"redis-federation-grant-intent-store",
 	"redis-session-stores",
+	"core-session-lifecycle",
 	"redis-rate-limiter",
 	"redis-attempt-counter",
 	"redis-code-repository",
@@ -142,12 +145,13 @@ const ALL_ON_REDIS_MODULES = [
 
 describe('every module on, every shared store on Redis, core.deployment.mode = "multi"', () => {
 	it("lists every module, none declaring replica-unsafe state, and boots", async () => {
-		const config = resolveConfig(MULTI_ENV);
+		const own = readOwnLayers(ownFiles(MULTI_ENV), { env: MULTI_ENV });
+		const config = resolveConfig(MULTI_ENV, own);
 		const modules = composedModules(config, MULTI);
 		expect(modules.map((m) => m.name)).toEqual(ALL_ON_REDIS_MODULES);
-		// Each module's section at its name: a declaration made from the
-		// section is answered for it.
-		const sections = config as unknown as Record<string, unknown>;
+		// Each module's section at its name, as boot is handed it: a
+		// declaration made from the section is answered for it.
+		const sections = resolveForBoot(own, modules, config) as unknown as Record<string, unknown>;
 		for (const module of modules) {
 			expect(replicaUnsafeReason(module, sections[module.name]), module.name).toBeUndefined();
 		}

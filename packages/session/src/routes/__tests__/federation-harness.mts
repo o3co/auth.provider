@@ -28,7 +28,8 @@ import type {
 	FederationProvider,
 	FederationTokenStore,
 	Logger,
-	SessionFederationIndex,
+	SessionLifecycle,
+	SessionLifecycleStore,
 	SessionRequirementResolver,
 	SubjectRevocation,
 	SubjectSessionIndex,
@@ -38,6 +39,7 @@ import type {
 import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { vi } from "vitest";
+import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
@@ -176,8 +178,9 @@ export function makeSessionApp(
 
 		const originalEnd = res.end.bind(res);
 		res.end = ((...args: Parameters<typeof originalEnd>) => {
-			if (!res.headersSent) {
-				const current = (req as unknown as { session: Record<string, unknown> }).session;
+			const current = (req as unknown as { session?: Record<string, unknown> }).session;
+			// A route that dropped the cookie session names none.
+			if (!res.headersSent && current !== undefined) {
 				const attributes = current.cookie as SessionCookieAttributes;
 				res.cookie("sid", id, {
 					httpOnly: attributes.httpOnly,
@@ -217,16 +220,6 @@ export function makeUserSessionStore(): UserSessionStore & {
 	};
 }
 
-export function makeSessionFederationIndex(): SessionFederationIndex {
-	return {
-		kind: "memory",
-		addFederation: vi.fn(async () => {}),
-		listFederations: vi.fn(async () => []),
-		removeFederation: vi.fn(async () => {}),
-		removeBySid: vi.fn(async () => {}),
-	} as SessionFederationIndex;
-}
-
 export function makeFederationTokenStore(): FederationTokenStore & {
 	attach: ReturnType<typeof vi.fn>;
 	delete: ReturnType<typeof vi.fn>;
@@ -260,7 +253,8 @@ export type HarnessApp = {
 	records: HarnessRecordStore;
 	userSessionStore: ReturnType<typeof makeUserSessionStore>;
 	federationTokenStore: ReturnType<typeof makeFederationTokenStore>;
-	sessionFederationIndex: SessionFederationIndex;
+	/** The session lifecycle the router was handed: a fake whose members are spies, by default. */
+	sessionLifecycle: SessionLifecycle;
 };
 
 /**
@@ -276,6 +270,8 @@ export function buildFederationApp({
 	subjectSessionIndex,
 	requirements,
 	subjectRevocation,
+	sessionLifecycleStore,
+	sessionLifecycle,
 	auditSink,
 	logger,
 }: {
@@ -286,6 +282,8 @@ export function buildFederationApp({
 	/** The session requirements the link routes admit through; none by default. */
 	requirements?: SessionRequirementResolver;
 	subjectRevocation?: SubjectRevocation;
+	sessionLifecycleStore?: SessionLifecycleStore;
+	sessionLifecycle?: SessionLifecycle;
 	auditSink?: AuditSink;
 	logger?: Logger;
 }): HarnessApp {
@@ -294,7 +292,7 @@ export function buildFederationApp({
 	const app = makeSessionApp(store, records);
 	const userSessionStore = makeUserSessionStore();
 	const federationTokenStore = makeFederationTokenStore();
-	const sessionFederationIndex = makeSessionFederationIndex();
+	const lifecycle = sessionLifecycle ?? fakeSessionLifecycle();
 
 	app.use(
 		createRouter(express, {
@@ -306,9 +304,10 @@ export function buildFederationApp({
 			providerCallbackUrls,
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore,
-			sessionFederationIndex,
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			...(subjectRevocation ? { subjectRevocation } : {}),
+			...(sessionLifecycleStore ? { sessionLifecycleStore } : {}),
+			sessionLifecycle: lifecycle,
 			federationTokenStore,
 			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
 			requirements: requirements ?? resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
@@ -317,5 +316,12 @@ export function buildFederationApp({
 		}),
 	);
 
-	return { app, store, records, userSessionStore, federationTokenStore, sessionFederationIndex };
+	return {
+		app,
+		store,
+		records,
+		userSessionStore,
+		federationTokenStore,
+		sessionLifecycle: lifecycle,
+	};
 }

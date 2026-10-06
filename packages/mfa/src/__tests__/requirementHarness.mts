@@ -30,6 +30,7 @@ import {
 	type MfaFactorStore,
 	type StoreGeneration,
 } from "@o3co/auth-provider-core";
+import { createFirstBindingMark } from "#/firstBindingMark.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 
 /** The first-binding gate's inputs of a composition with no mail sender and no operator reset: no proof is asked, and none was given. */
@@ -44,9 +45,20 @@ export const SEALING = createMfaSealing({
 	ring: [{ id: "requirement-suite", key: randomBytes(32) }],
 });
 
-/** A transaction store that holds no subject's first-binding mark. */
+/** A factor-set write's lease at the default `mfa.storeTimeoutMs`, which the mark below is built with: 16 × 5000 ms. */
+export const FIRST_BINDING_LEASE_MS = 80_000;
+
+/** The first-binding mark at the default settings, as the module builds it. */
+export const FIRST_BINDING_MARK = createFirstBindingMark({
+	manageMaxAgeSeconds: 300,
+	transactionTtlSeconds: 600,
+	storeTimeoutMs: 5_000,
+});
+
+/** A transaction store that holds no subject's first-binding mark, and the mark it would be judged by. */
 export const NO_FIRST_BINDING_MARK = {
 	firstBindingAt: async () => null,
+	firstBindingMark: FIRST_BINDING_MARK,
 } as const;
 
 /** What a login records of an account that is not enrolled and has no address: a session's enrollment facts. */

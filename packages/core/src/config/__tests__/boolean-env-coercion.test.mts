@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
-import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * Every env-overridable boolean rides ONE coercion path, pinned at the field.
@@ -35,7 +35,7 @@ const federationOf = (parsed: Record<string, unknown>): Record<string, unknown> 
 	((parsed.core as { federations: Record<string, Record<string, unknown>> }).federations
 		.google as Record<string, unknown>) ?? {};
 
-/** Every boolean in `AppConfigSchema` that a `${?VAR}` can reach. */
+/** Every boolean in `CoreConfigSchema` that a `${?VAR}` can reach. */
 const ENV_OVERRIDABLE_BOOLEANS = [
 	{
 		key: "oauth.jwt.legacyTypAccept",
@@ -93,6 +93,21 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 		},
 		read: (parsed: Record<string, unknown>) => federationOf(parsed).trustUpstreamAmr,
 	},
+	{
+		// Whether a federation's callback alone meets a freshness ask. Set in
+		// config beside `enabled`; coerced as every boolean here is.
+		key: "core.federations.<name>.callbackMeetsFreshness",
+		envVar: "no variable wired; set in config",
+		set: (config: Record<string, unknown>, value: unknown) => {
+			config.core = {
+				...(config.core as object),
+				federations: {
+					google: { enabled: true, type: "google", callbackMeetsFreshness: value },
+				},
+			};
+		},
+		read: (parsed: Record<string, unknown>) => federationOf(parsed).callbackMeetsFreshness,
+	},
 ] as const;
 
 /**
@@ -125,7 +140,7 @@ function configWith(
 	field: (typeof ENV_OVERRIDABLE_BOOLEANS)[number],
 	value: unknown,
 ): Record<string, unknown> {
-	const config = makeValidAppConfig() as unknown as Record<string, unknown>;
+	const config = makeValidCoreConfig() as unknown as Record<string, unknown>;
 	field.set(config, value);
 	return config;
 }
@@ -135,7 +150,7 @@ describe("every env-overridable boolean uses one coercion path", () => {
 		describe(`${field.key} (${field.envVar})`, () => {
 			for (const [input, expected] of COERCIONS) {
 				it(`coerces ${JSON.stringify(input)} to ${expected}`, () => {
-					const result = AppConfigSchema.safeParse(configWith(field, input));
+					const result = CoreConfigSchema.safeParse(configWith(field, input));
 					expect(result.success, result.success ? "" : JSON.stringify(result.error.issues)).toBe(
 						true,
 					);
@@ -146,13 +161,13 @@ describe("every env-overridable boolean uses one coercion path", () => {
 
 			for (const input of REJECTED) {
 				it(`rejects ${JSON.stringify(input)} rather than guessing`, () => {
-					const result = AppConfigSchema.safeParse(configWith(field, input));
+					const result = CoreConfigSchema.safeParse(configWith(field, input));
 					expect(result.success).toBe(false);
 				});
 			}
 
 			it("names the accepted spellings when it rejects", () => {
-				const result = AppConfigSchema.safeParse(configWith(field, "on"));
+				const result = CoreConfigSchema.safeParse(configWith(field, "on"));
 				expect(result.success).toBe(false);
 				if (result.success) return;
 				expect(result.error.issues.map((issue) => issue.message).join("\n")).toMatch(
@@ -165,7 +180,7 @@ describe("every env-overridable boolean uses one coercion path", () => {
 	it("leaves an omitted optional boolean undefined rather than defaulting it", () => {
 		// The defaults live in reference.conf (ADR 2026-04-30), so the schema
 		// must not invent one when the key is absent.
-		const parsed = AppConfigSchema.parse(makeValidAppConfig());
+		const parsed = CoreConfigSchema.parse(makeValidCoreConfig());
 		expect(parsed.oauth.jwt.legacyTypAccept).toBeUndefined();
 		expect(parsed.oauth.requireEmailVerified).toBeUndefined();
 	});

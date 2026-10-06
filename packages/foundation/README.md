@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-Last updated: 2026-10-03
+Last updated: 2026-10-06
 
 The HTTP client of "the Store" — the deployment's own user service — for
 auth.provider. `HttpUserRepository` implements core's `UserRepository` port over
@@ -821,7 +821,8 @@ a test's configuration, holding the four URLs `urls` holds — a fake Store's
 `foundationUserRepositoryHttpConfig(urls, extra?)`, the user repository's
 `http` block, holding the Store URLs the `"http"` builder reads that `urls`
 holds — its MFA factor endpoints left behind — and `extra` as given, which a
-composition places with core's `withUserRepositoryHttp`.
+test hands to the `"http"` builder, or to `foundationMfaFactorStoreModule` as
+its `storeTransport`.
 
 ## Tests
 

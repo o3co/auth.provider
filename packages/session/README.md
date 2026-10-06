@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -11,7 +11,7 @@ routes — and every other route that reads `req.session` — run over.
 
 **Role.** The browser-facing half of authentication. Core owns the ports this
 package uses (`UserRepository`, `UserSessionStore`, `FederationTokenStore`,
-`SessionFederationIndex`, and the federation adapter contract) and implements no
+`SessionLifecycle`, and the federation adapter contract) and implements no
 route; this package is the driver of those ports for a browser. It has three
 responsibilities:
 
@@ -30,9 +30,8 @@ responsibilities:
    rules it is built from. The helpers an adapter builds its upstream requests
    with — `codeChallenge`, `callbackUrlForExchange`, `FederationClientSecret` /
    `resolveClientSecret` — are core's.
-3. **The browser session store** — `sessionStoreModule` (and
-   `sessionStoreModuleFor(config)`, the same module declaring its replica safety
-   from `config`) and `createSessionStoreFactory` / `registerBuiltinSessionStores`:
+3. **The browser session store** — `sessionStoreModule` and
+   `createSessionStoreFactory` / `registerBuiltinSessionStores`:
    the express-session middleware, its cookie and its store (memory, or Redis
    through `connect-redis`).
 
@@ -76,7 +75,7 @@ responsibilities:
   [`@o3co/auth-provider-redis`](../redis/README.md)) and who a user is (the
   Store behind `UserRepository`, e.g.
   [`@o3co/auth-provider-foundation`](../foundation/README.md));
-- token issuance, `POST /oauth/logout`'s cascade, upstream logout
+- token issuance, RP-initiated logout (`POST /oauth/logout`), upstream logout
   (`SupportsLogout`) and federation token refresh (`SupportsRefresh`) —
   [`@o3co/auth-provider-oauth`](../oauth/README.md);
 - delegated authorization (`SupportsDelegatedAuthorization`) —
@@ -163,7 +162,7 @@ const handle = await createApp({
     sessionModule,                // a const Module, not a factory
     googleFederationTypeModule(), // handles every core.federations entry of type "google"
     // ... modules providing userRepository, userSessionStore, federationTokenStore,
-    //     sessionFederationIndex
+    //     and sessionFederationIndex (for sessionLifecycleModule)
   ],
   bootstrapComponents: { config, pathResolver },
 });
@@ -280,15 +279,10 @@ What holds:
   parsed section: replica-unsafe when `session-store.storage.type` is
   `memory`, nothing for any other type. So core's replica-safety guard refuses
   it at boot by name with the other offenders, warns when
-  `core.deployment.mode` is unset, and says nothing under `"single"`.
-  `sessionStoreModuleFor(config)` is the same module declaring the same from
-  `config`, read when it is built, not from the section boot parses,
-  so list `sessionStoreModule`. The route factory refuses the combination too
-  when it runs (`replica-unsafe-adapter`), for a module built from a config
-  other than the one booted. Both forms require core's `deploymentMode`
-  slot, which core fills from `core.deployment.mode`, and read nothing of
-  `deployment` themselves; a slot value that is none of `single`, `multi`,
-  `unset` is a TypeError.
+  `core.deployment.mode` is unset, and says nothing under `"single"`. The guard
+  decides before any route is built, by the section the route mounts, so the
+  module reads no mode itself: it neither requires `deploymentMode` nor reads
+  `deployment`.
 - **The Redis store opens its own connection.** A `redis` (node-redis) client to
   `session-store.storage.redis.url` (with `password` when set), under `connect-redis`'s
   `RedisStore`. With a readiness registrar wired it registers the probe
@@ -360,7 +354,7 @@ signs as the module does, so tokens issued under that secret keep verifying.
 | GET | `/session/csrf` | Issue a double-submit CSRF token |
 | POST | `/session/login` | Password login |
 | POST | `/session/logout` | End the browser session — see [what it invalidates](#what-post-sessionlogout-invalidates) |
-| GET | `/session/oauth/federation/:name` | Start a federation (`?redirect_to=`, `?link=1`) |
+| GET | `/session/oauth/federation/:name` | Start a federation (`?redirect_to=`, `?link=1`, and the freshness hints `?prompt=` — only `login` counts — and `?max_age=`, a non-negative integer no larger than 2^53−1; a repeated or malformed hint is `400 invalid_request`) |
 | GET | `/session/oauth/federation/:name/callback` | Callback of a `query` federation; `405` (`Allow: POST`) for a `form_post` one |
 | POST | `/session/oauth/federation/:name/callback` | Callback of a `form_post` federation; `405` (`Allow: GET`) for a `query` one |
 
@@ -370,7 +364,7 @@ registers is `404`.
 The manifest ([`src/module.mts`](src/module.mts)):
 
 - `requires`: `userRepository`, `userSessionStore`,
-  `federationTokenStore`, `sessionFederationIndex`, `csrfTokenSigner` (what the
+  `federationTokenStore`, `csrfTokenSigner` (what the
   CSRF token is signed and checked with; the session store's module provides
   it), core's `federationSettings` — its view of `core.federations`, which
   core fills in every composition: each enabled entry's callback URL, and
@@ -403,8 +397,22 @@ The manifest ([`src/module.mts`](src/module.mts)):
   only this site's own pages), and throws without the first two.
   `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
   are `oauth`'s.
+- Not `sessionFederationIndex`: a link reads the session's federations from
+  core's session lifecycle. Keep its provider: `sessionLifecycleModule` and
+  the `federation-stores-incomplete` guard still require the slot; only
+  `sessionModule`'s own `requires` and the router option drop it.
 - `optional`: `logger`, `attemptCounter`, `auditSink`, `subjectSessionIndex`,
-  `subjectRevocation` (the boundary the linking routes' admission reads).
+  `subjectRevocation` (the boundary the linking routes' admission reads),
+  `sessionLifecycleStore` (core's session lifecycle port, which the linking
+  routes' admission reads after a live record: a session closing or closed
+  links nothing), `sessionLifecycle` (core's session lifecycle, which
+  `sessionLifecycleModule` fills: each login opens its session's lifecycle
+  record, a federation joins the session through it, and the logout closes
+  the session through it; `loginCompletionModule` takes it too). It is
+  optional to the manifest, but where `userSessionStore` is wired — always,
+  for this module — it is required: the route factories, and
+  `loginCompletionModule`'s provider, refuse the boot without it, naming
+  both slots. A sessionless composition (no user-session store) needs none.
   `auditSink` unwired must be declared with `core.declaredAbsent = ["auditSink"]`, and
   `subjectSessionIndex` and `subjectRevocation` unwired with
   `oauth.revocation.subject = "unsupported"`, or boot refuses.
@@ -455,7 +463,10 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `session.rateLimit.login` by core's attempt guard (`createAttemptGuard`) on
   the `attemptCounter` slot's counter. No rate limiter takes part: a limiter's
   `limits`, `defaultLimit` and `failMode` neither loosen nor replace it, and
-  the module claims the `login` prefix with no budget. A refused attempt is
+  the module claims the `login` prefix with core's
+  `verifierLimitClaim({ setting: "session.rateLimit.login" })`: no budget, so
+  no other module can set one, and the bundled limiter modules refuse a
+  `limits.login` entry, naming this key. A refused attempt is
   `429 rate_limited` with `Retry-After` and `Cache-Control: no-store`, and no
   `RateLimit-*` headers, which would tell a guesser how many guesses are left.
   A counter that throws, does not answer within two seconds, or answers
@@ -547,7 +558,12 @@ is not a non-empty string, or whose declared field holds what is not plain
 data, is refused by the snapshot; the login then answers `500` with nothing
 written. It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session-store.maxAge` after
-`authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
+`authTime`), its lifecycle record opened first in core's session lifecycle,
+required beside a `UserSessionStore` (one handed without it is a `TypeError`
+before anything is written; an `open` that fails, throws or is refused is the
+record's outage at `create` — reported with the lifecycle's own error when it
+rejects, with an error naming the session lifecycle otherwise — and a
+`create` that fails after the open closes the opened record again); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the
 regeneration; the express session's regeneration (session fixation); the
 caller's steps after it; `isAuthenticated`, `user`, `sid` and the primary's
@@ -558,16 +574,20 @@ which the caller answers as `503 temporarily_unavailable`.
 What holds:
 
 - **What only one path writes is a step it supplies, not a flag.** The
-  callback adds the federation's `sessionFederationIndex` entry before the
-  regeneration and the `federationTokenStore` attach after it, each with the
-  undo it declares; the password login adds nothing. A step is undone only
+  callback adds the `federationTokenStore` attach and then the federation's
+  join through the session lifecycle after the regeneration, the attach with
+  the undo it declares; the password login adds nothing. A step is undone only
   when its write completed.
 - **Every failure after the record exists rolls back in reverse order**,
-  best-effort: the caller's steps that completed, then the record, then its
-  subject-index entry last. From the regeneration on, the request's cookie
-  session is dropped too (`abandonCookieSession`), so express-session neither
-  saves the fresh session against the store that failed nor sets a cookie
-  naming it; before it, the cookie session is untouched. A rollback step that
+  best-effort: the caller's steps that completed, then the record — its
+  lifecycle record closed (`session_logout`), then the `UserSession` deleted;
+  a close that fails is reported as the record's `delete`, with the
+  lifecycle's own error when it rejects, with an error naming the session
+  lifecycle for any answer but `done` or `pending` — then its subject-index
+  entry last. From the regeneration on, the request's cookie session is
+  dropped too (`abandonCookieSession`), so express-session neither saves the fresh
+  session against the store that failed nor sets a cookie naming it; before
+  it, the cookie session is untouched. A rollback step that
   fails is reported and the rest still run.
 - **Each route logs in its own vocabulary.** The function reports — a store
   that could not answer, a rollback step that failed, an index write that
@@ -625,37 +645,20 @@ What holds:
 
 ### What `POST /session/logout` invalidates
 
-This provider has **two** logout endpoints and they do not invalidate the same
-things. Pick by what the session holds.
+Both logout endpoints, this one and `POST /oauth/logout`, end the session
+through core's session lifecycle, so they invalidate the same things.
 
 `POST /session/logout` — the browser's own logout, and the one a BFF /
-`auth.proxy` injection topology calls. It answers `200 {"message": "Logged out
-successfully"}` and invalidates:
+`auth.proxy` injection topology calls — closes the session through core's
+session lifecycle and destroys the express session. A router with a
+`UserSessionStore` requires the lifecycle beside it; a sessionless router
+(no store) has no record to close and destroys the express session alone.
 
-| What | Effect |
-|------|--------|
-| the express session | destroyed |
-| the `UserSession` record for the session's `sid` | deleted — this is what makes `/oauth/introspect` report `active: false` and `/oauth/userinfo` refuse a token minted by the `session` grant |
-| the `subjectSessionIndex` entry | removed, so `revokeAllForSubject` stops enumerating a dead `sid` |
-| `federationTokenStore` + `sessionFederationIndex` entries for the `sid` | removed, so upstream-IdP tokens are not left at rest |
-| **refresh-token families bound to the `sid`** | **not revoked** |
-
-That last row is the one to read twice. A browser that logged in here and then
-completed an `/authorize` → `authorization_code` flow holds a refresh token
-whose family this endpoint does **not** revoke; the refresh token keeps working
-until it expires. Use `POST /oauth/logout` with an `id_token_hint` for that
-session — it runs the full cascade (refresh-family revoke, RP registry,
-federation, session delete) and ends the browser session too.
-
-The boundary is structural: the cascade
-(`packages/oauth/src/logout/cascadeLogout.mts`) needs
-`refreshTokenFamilyRevocation`, `sessionFamilyIndex` and `sessionRPRegistry`,
-which this module declares none of, and `@o3co/auth-provider-session` does not
-import `@o3co/auth-provider-oauth` — they are siblings over core.
-
-The `session` grant issues no refresh token, so a deployment whose tokens all
-come from that grant has no family to revoke and `/session/logout` is
-sufficient on its own.
+The logout closes the session with `sessionLifecycle.close(sid, "session_logout")` (`sessionLifecycleModule` fills the slot). The close runs as `/oauth/logout`'s does, in order: it revokes the session's refresh-token families and removes its federation tokens, then tells its relying parties back-channel (through the notifier `oauthEndpointsModule` contributes), then removes the per-session indexes, then deletes the `UserSession`, and removes the subject-index entry last, so a close still pending keeps the sid where a subject-wide revocation finds it.
+- A close that committed answers the same `200` and destroys the express session, whether its work is `done` or still `pending`: from the commit on, no liveness read answers the session live, and a later close or the lifecycle's sweep resumes what is left. A `pending` close is audited as `logout.close_pending` (`subject`, `sid`), as `/oauth/logout` audits it.
+- A logout whose `UserSession` already lapsed has nothing to close: it answers `done` and destroys the express session, and the session's leftovers lapse with their TTL, as at `/oauth/logout`.
+- A close that did not commit, or a lifecycle that threw — whatever the error, a `RangeError` included — answers `503 temporarily_unavailable` and keeps the express session for a retry. That includes a close whose commit found no live record (the session's end had passed on the store's clock) and whose work, run at once with no record to save it in, failed: a retry runs it again. It is logged once as `session_logout_store_unavailable` (error, `store: "session_lifecycle"`, `step: "close"`, `sid`), carrying the error's projection when the lifecycle rejected; any answer but `done` or `pending` is the same outage, with no error to project.
+- A step of the close work that fails is core's `session_close_item_failed` (warn, with the `item`), and the close stays pending; alert on `item: "delete_user_session"`.
 
 **A copy the record was renewed away from.** Before it invalidates anything,
 the logout asks core's `cookieRenewedAway`: when the record the cookie names
@@ -664,24 +667,16 @@ a copy of it, from before a step-up renewed the session — the record is the
 renewed session's, so only this cookie session is destroyed and the answer is
 the same `200`. The renewed session stays live. When the record cannot be
 read, that is logged as `logout_user_session_read_failed` and the logout
-invalidates as above.
+closes the session as above.
 
-**Failure modes.** Every records step in the table above is best-effort and
-logged, never propagated: an outage of those stores must not turn a logout
-into a `5xx` that leaves the user holding a live cookie. The `UserSession` delete runs **first**, before the
-express session is destroyed and before the best-effort hygiene, so a
-federation-store outage cannot prevent the invalidation that matters. Failures
-are logged as `logout_user_session_delete_failed`,
-`logout_subject_session_index_remove_failed`,
-`logout_federation_token_remove_failed` and
-`logout_session_federation_index_remove_failed` — alert on the first. The one
-exception is the express session itself: if destroying it fails — the cookie
-store's outage — the user is not logged out, so the response is
+**The cookie session's destroy.** If destroying the express session fails —
+the cookie store's outage — the user is not logged out, so the response is
 `503 temporarily_unavailable`, logged once at error level as
 `session_logout_store_unavailable` (`store: "cookie_session"`, `step:
-"destroy"`, the `sid`), and the client retries; by then the records are
-already gone, so `/authorize` refuses the surviving cookie on its own account. A session carrying no `sid` has no records to invalidate
-and only the express session is destroyed.
+"destroy"`, the `sid`), and the client retries; by then the session's close has
+committed, so `/authorize` refuses the surviving cookie on its own account. A
+session carrying no `sid` has nothing to close and only the express session is
+destroyed.
 
 ### CSRF on the state-changing routes
 
@@ -735,7 +730,8 @@ Every session carries `authTime`, `amr` — RFC 8176 values naming how the user
 authenticated, as far as this provider vouches for it — and `authentication`,
 how the session was established (the MFA ADR's D9: the primary, which
 federation, what an untrusted upstream IdP asserted, when a second factor was
-verified). So `/authorize` can honour `max_age`, `prompt=login` and
+verified, and for a federated login when the upstream last authenticated the
+user, `upstreamAuthTime`). So `/authorize` can honour `max_age`, `prompt=login` and
 `acr_values`, and the id_token can say `auth_time`, `amr` and `acr` (the whole
 picture is in the [oauth package README](../oauth/README.md)). Core composes
 both for each login path (`passwordSessionAuthentication`,
@@ -744,7 +740,7 @@ both for each login path (`passwordSessionAuthentication`,
 | login path | `amr` | `authentication` |
 | --- | --- | --- |
 | `POST /session/login` | `["pwd"]` (core's `PASSWORD_AMR`) | primary `pwd` |
-| federation callback | `["fed"]` — `fed` is the deployment-defined marker for "through a federation", core's `FEDERATED_AMR`, which this package re-exports; RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. For a federation with `trustUpstreamAmr = true`, the upstream IdP's `amr` beside it | primary `fed`, the federation's name, and — unless the federation trusts its IdP — the IdP's `amr` as `upstreamAmr` |
+| federation callback | `["fed"]` — `fed` is the deployment-defined marker for "through a federation", core's `FEDERATED_AMR`, which this package re-exports; RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. For a federation with `trustUpstreamAmr = true`, the upstream IdP's `amr` beside it | primary `fed`, the federation's name, and — unless the federation trusts its IdP — the IdP's `amr` as `upstreamAmr`; `upstreamAuthTime`, the `auth_time` the adapter reports, or `null` when it reports none and the federation's `callbackMeetsFreshness` is `false` (the default), or nothing when that is `true` |
 | account linking (`?link=1`) | unchanged — a link is not a login | unchanged |
 
 **What an upstream IdP asserted counts only for a federation that trusts it**
@@ -785,8 +781,27 @@ offline lives until its `exp`. `revokeAllForSubject` needs
 has the procedure.
 
 Re-authentication is a *new* session: `POST /session/login` and the federation
-callback always create one with a fresh `authTime`, which is what `max_age` and
-`prompt=login` measure. A login page that bounces an already-authenticated
+callback always create one with a fresh `authTime`. What `max_age` and
+`prompt=login` measure is the session's freshness (core's `sessionFreshness`):
+`authTime`, or for a federated login the earlier of that and the upstream's
+recorded authentication. The federation start
+(`GET /session/oauth/federation/:name`) takes optional `prompt` and `max_age`
+hints — a space list in which only `login` counts, and a non-negative integer
+no larger than 2^53−1; anything else is `400 invalid_request` — and passes them to the adapter as its
+`ask`, which forwards only what its upstream documents. A start from a
+browser that already holds an application session, and is not a link, is a
+re-authentication and asks for a new login (`login: true`) whatever the hints
+say, so an upstream that honours it (the OIDC adapter forwards `prompt=login`)
+prompts the user again rather than answering from its own single sign-on —
+the cost is that a signed-in user who starts a federated login again sees the
+IdP's sign-in prompt. The callback records
+the upstream's `auth_time` the adapter reports (`authentication.upstreamAuthTime`)
+when it is an instant at or after the epoch no further ahead than
+`DEFAULT_CLOCK_SKEW_MS`; any other value the adapter reports is a failed
+exchange (`502 exchange_failed`, `federation_callback_exchange_failed`);
+when it reports none, a federation with `core.federations.<name>.callbackMeetsFreshness`
+`false` (the default) records `null`, never fresh, and one with `true` records
+nothing, so the session is as fresh as its `authTime`. A login page that bounces an already-authenticated
 browser straight back to `/authorize` is answered `login_required` there, not
 looped.
 
@@ -797,14 +812,14 @@ A federated identity is `<provider>:<sub>` — the federation's name and the IdP
 An account gains a second identity through an explicit, authenticated action:
 
 1. The browser already holds a session (`isAuthenticated`, a live `UserSession`).
-2. It starts the federation with `?link=1`: `GET /session/oauth/federation/<name>?link=1`, **from a link or a form on the deployment's own pages**. The start is a GET and the session cookie is `SameSite=Lax`, so without a check any page could send a signed-in user there, and paired with a login CSRF at the IdP the attacker's identity would be linked to the victim's account. The start therefore needs positive evidence: `Sec-Fetch-Site: same-origin`, or `none` (a typed URL or bookmark). `cross-site` is refused. `same-site` is not enough on its own — it covers every host on the registrable domain, including a user-controlled `blog.example.com` — so it, and a request with no `Sec-Fetch-Site` (an older browser), must name this origin or one on `session.csrf.trustedOrigins` in its `Referer`; a missing `Referer` is refused, because the navigating page picks its own referrer policy. An account page on a sibling host is therefore listed in `session.csrf.trustedOrigins`, and must not send `Referrer-Policy: no-referrer`. A refusal is `403 link_requires_trusted_origin`. Next, when the Store's repository does not implement `linkFederatedIdentity`, the start is `400 link_unsupported` — a fault of the composition, answered before the session is read, so it is the same whatever the session store is doing. The start then reads the session through core's [session admission](../core/src/session-admission/README.md) as `session.link`, graded `credential_change` — a linked identity is a new way into the account, so a registered requirement decides its recent-authentication rule here, where a step-up has a page to return to: a cookie that is not authenticated, carries no `sid` or no `user.id`, or whose `UserSession` is gone, past its `expiresAt`, another subject's, or covered by the subject-revocation boundary (when `subjectRevocation` is wired), and a requirement's `reauthenticate` or `unmet`, are `401 login_required`; a requirement's step-up is `403 step_up_required` with `error_description`, `requirement` and `page`, the requirement's registered step-up page as one absolute URL string — see [When the start answers a step-up](#when-the-start-answers-a-step-up); an outage of the session store, the boundary or a requirement is `503 temporarily_unavailable`, described by what failed (core's `describeAdmissionOutage`: "session store unavailable", "revocation store unavailable" or "session requirement unavailable"), logged once by admission (`session_admission_unavailable`, `action: "session.link"`). All of these come before the browser is sent anywhere.
+2. It starts the federation with `?link=1`: `GET /session/oauth/federation/<name>?link=1`, **from a link or a form on the deployment's own pages**. The start is a GET and the session cookie is `SameSite=Lax`, so without a check any page could send a signed-in user there, and paired with a login CSRF at the IdP the attacker's identity would be linked to the victim's account. The start therefore needs positive evidence: `Sec-Fetch-Site: same-origin`, or `none` (a typed URL or bookmark). `cross-site` is refused. `same-site` is not enough on its own — it covers every host on the registrable domain, including a user-controlled `blog.example.com` — so it, and a request with no `Sec-Fetch-Site` (an older browser), must name this origin or one on `session.csrf.trustedOrigins` in its `Referer`; a missing `Referer` is refused, because the navigating page picks its own referrer policy. An account page on a sibling host is therefore listed in `session.csrf.trustedOrigins`, and must not send `Referrer-Policy: no-referrer`. A refusal is `403 link_requires_trusted_origin`. Next, when the Store's repository does not implement `linkFederatedIdentity`, the start is `400 link_unsupported` — a fault of the composition, answered before the session is read, so it is the same whatever the session store is doing. The start then reads the session through core's [session admission](../core/src/session-admission/README.md) as `session.link`, graded `credential_change` — a linked identity is a new way into the account, so a registered requirement decides its recent-authentication rule here, where a step-up has a page to return to: a cookie that is not authenticated, carries no `sid` or no `user.id`, or whose `UserSession` is gone, past its `expiresAt`, another subject's, or covered by the subject-revocation boundary (when `subjectRevocation` is wired), and a requirement's `reauthenticate` or `unmet`, are `401 login_required`; a requirement's step-up is `403 step_up_required` with `error_description`, `requirement` and `page`, the requirement's registered step-up page as one absolute URL string — see [When the start answers a step-up](#when-the-start-answers-a-step-up); an outage of the session store, the session lifecycle store, the boundary or a requirement is `503 temporarily_unavailable`, described by what failed (core's `describeAdmissionOutage`: "session store unavailable", "session lifecycle store unavailable", "revocation store unavailable" or "session requirement unavailable"), logged once by admission (`session_admission_unavailable`, `action: "session.link"`). All of these come before the browser is sent anywhere.
 3. On the callback, after `state`, PKCE and `nonce` are checked exactly as for a login, the identity is resolved:
    - **nobody** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`. `ok` links it; the Store's `refused` is `403 link_refused`, its `conflict` is `409 identity_conflict`, each with the Store's `description` when it gives one, sent within RFC 6749's characters (`?` for any other).
    - **another account** → `409 identity_conflict`; the Store is not asked. Linking never merges accounts.
    - **this account** → nothing to link; the callback proceeds.
-4. The federation is attached to the **live** session — `sessionFederationIndex` and `federationTokenStore` under the current `sid` — and the browser is redirected as after a login. No new `UserSession` is minted and the express session is not regenerated: a link is not a login, and the session's claims envelope is unchanged (the next login through the new provider builds one the usual way).
+4. The federation is attached to the **live** session — `federationTokenStore` under the current `sid`, and a join through core's session lifecycle — and the browser is redirected as after a login. Whether the session already carries the federation is read from the lifecycle (`sessionLifecycle.federations`): a re-link that fails leaves a federation it lists in place, and a read that rejects or answers anything but `listed` is `503` before anything is written. The tokens are attached first and the federation then joins the session through the lifecycle, which records it: a session closed since its admission is refused `401 login_required` and the lifecycle removes those tokens. So is a session established before the lifecycle was installed, which has no lifecycle record and cannot be joined by a federation alone: it must sign in again, and a re-link of a federation it already carries removes that federation's tokens; a join it cannot answer is `503`, rolled back as below. No new `UserSession` is minted and the express session is not regenerated: a link is not a login, and the session's claims envelope is unchanged (the next login through the new provider builds one the usual way).
 
-The transaction records the session admission let link and its subject (`link: { sid, subject }` — the `sid` the cookie named, which is the key the record was read by, and the record's subject), and the callback links to *that* session's account: it reads the session through admission again, as `session.link_callback` (`use`) over the recorded `sid` and subject (core's `linkClaim`). A `form_post` federation's callback is a cross-site POST the application session cookie (`SameSite=Lax`) does not accompany, so the record is what binds it — Sign in with Apple links exactly as a `query` federation does — and a browser that presents a different authenticated session at the callback is refused `401 login_required`: the identity is never linked to whichever session the browser holds now. A session that is no longer live, whose record names another subject, that the revocation boundary covers, or that a requirement does not admit — a step-up included, since the callback comes from the IdP and has nowhere to return to — is `401 login_required` ("Linking a federated identity requires a live session"), and so is a transaction a start wrote before it recorded the subject: the user starts the link again. If attaching to the live session fails after the Store has linked, the half-attached federation is removed from the session best-effort (one the session already carried is left as it was, and nothing is removed when the session's federation list could not be read at all) and the callback answers `503`; the Store's link stands, and the next login through that federation lands on the account. Every store the link needs that cannot answer — the session read, the Store's `linkFederatedIdentity`, the index read or write, the token attach — is `503 temporarily_unavailable`, logged once at error level: the session read (the store, the boundary, a requirement — described as the link start's is) by admission as `session_admission_unavailable` with `store` and `action: "session.link_callback"`, never the `sid`; the others as `federation_link_store_unavailable` with `store`, `step`, the linking `sid` and the error's projection; a rollback step that fails is one `federation_cleanup_failed` warn.
+The transaction records the session admission let link and its subject (`link: { sid, subject }` — the `sid` the cookie named, which is the key the record was read by, and the record's subject), and the callback links to *that* session's account: it reads the session through admission again, as `session.link_callback` (`use`) over the recorded `sid` and subject (core's `linkClaim`). A `form_post` federation's callback is a cross-site POST the application session cookie (`SameSite=Lax`) does not accompany, so the record is what binds it — Sign in with Apple links exactly as a `query` federation does — and a browser that presents a different authenticated session at the callback is refused `401 login_required`: the identity is never linked to whichever session the browser holds now. A session that is no longer live, whose record names another subject, that the revocation boundary covers, or that a requirement does not admit — a step-up included, since the callback comes from the IdP and has nowhere to return to — is `401 login_required` ("Linking a federated identity requires a live session"), and so is a transaction a start wrote before it recorded the subject: the user starts the link again. If attaching to the live session fails after the Store has linked, the half-attached federation is removed from the session best-effort (one the session already carried is left as it was, and nothing is removed when the session's federation list could not be read at all) and the callback answers `503`; the Store's link stands, and the next login through that federation lands on the account. Every store the link needs that cannot answer — the session read, the Store's `linkFederatedIdentity`, the session lifecycle's read of the session's federations, the token attach — is `503 temporarily_unavailable`, logged once at error level: the session read (the store, the boundary, a requirement — described as the link start's is) by admission as `session_admission_unavailable` with `store` and `action: "session.link_callback"`, never the `sid`; the others as `federation_link_store_unavailable` with `store`, `step`, the linking `sid` and the error's projection; a rollback step that fails is one `federation_cleanup_failed` warn.
 
 Without `link=1`, an authenticated session that completes a federation whose identity the Store does not know is `401 unknown_user`. **There is no implicit linking** — a session cookie plus a stray identity is the login-CSRF shape, and `link=1` on an authenticated session is what makes the action the user's.
 
@@ -899,18 +914,18 @@ URL is exactly what the adapter returned.
    is `fed` — with `profile.amr` beside it for a trusted federation, else
    `profile.amr` kept in `authentication.upstreamAmr`
    ([above](#what-a-session-records-about-the-authentication)).
-5. **The session** is a new `UserSession` (lifetime `session-store.maxAge`), a
-   `subjectSessionIndex` entry when that is wired, a `sessionFederationIndex`
-   entry, and a regenerated express session —
-   [Establishing the session](#establishing-the-session), with the index entry
-   and the tokens below as the callback's own steps. Its establishment is the
+5. **The session** is a new `UserSession` (lifetime `session-store.maxAge`)
+   with its lifecycle record opened, a `subjectSessionIndex` entry when that
+   is wired, and a regenerated express session —
+   [Establishing the session](#establishing-the-session), with the tokens
+   below and the federation's join as the callback's own steps. Its establishment is the
    one core's `establishWithoutAsking` builds from the federation's own facts:
    no session requirement is asked at a federated login in this release (an
    interruption there would have to be a navigation), so a requirement that
    interrupts a password login does not interrupt it; the requirements'
    use-time admission applies to the session at each use. Any store the callback cannot do
-   without that fails — the Store's lookup, the `UserSession` or
-   `sessionFederationIndex` write, regenerating or saving the express session,
+   without that fails — the Store's lookup, the `UserSession` write or the
+   lifecycle's join, regenerating or saving the express session,
    attaching the tokens below, and before all of them retiring the ephemeral
    state (see [When a transaction is spent](#when-a-transaction-is-spent)) — is
    `503 temporarily_unavailable`, logged once at error level as
@@ -919,6 +934,14 @@ URL is exactly what the adapter returned.
    a rollback step that fails is one `federation_cleanup_failed` warn. A
    `subjectSessionIndex` write that fails is logged
    (`subject_session_index_write_failed`) and the login proceeds.
+   The federation joins the session through core's session lifecycle
+   (`sessionLifecycle`), after the tokens below are attached: a session
+   closed before the join commits is refused, the lifecycle removes the
+   tokens handed to it, and the callback answers `401 login_required` with
+   what it wrote rolled back, logging nothing (the session's close, not an
+   outage); a join the lifecycle cannot answer is `503` (store
+   `session_lifecycle`, step `join`). Every rollback
+   closes the session's lifecycle record before it deletes the `UserSession`.
 6. **Tokens** are attached to `federationTokenStore` under the new `sid` only
    when the profile carries an `accessToken`:
    - `accessToken`, `refreshToken` and `idToken` as the adapter returned them;

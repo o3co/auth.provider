@@ -25,15 +25,18 @@
 import {
 	type AppConfig,
 	admitPrimary,
+	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	createMemoryRateLimiter,
 	type DeploymentMode,
 	defineModule,
 	issuedRemediationActions,
 	type MfaFactor,
 	passwordPrimary,
 	passwordSessionAuthentication,
+	type RateLimiter,
 	readAcrTable,
 	requirementSession,
 	type SessionRequirement,
@@ -42,6 +45,8 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { coreConfigForTests, resolverForTests } from "@o3co/auth-provider-core/testing";
+import type { RequestHandler } from "express";
+import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
 import { mfaEmailFactorModule } from "#/email/module.mjs";
@@ -64,6 +69,9 @@ import {
 } from "./moduleHarness.mjs";
 import { factorRecord, stubFactor } from "./requirementHarness.mjs";
 import { addRecord, beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
+
+/** A budget well above any test's traffic. */
+const GENEROUS = { limit: 1000, windowSeconds: 60 } as const;
 
 afterEach(disposeAll);
 
@@ -120,6 +128,7 @@ describe("mfaModules", () => {
 			"logger",
 			"mailSender",
 			"rateLimiter",
+			"sessionLifecycleStore",
 			"subjectRevocation",
 			"userRepository",
 		]);
@@ -148,7 +157,7 @@ describe("mfaModules", () => {
 
 	it("reads its own section, mfa, at its name: the schema holds the whole section, mode to off, optional or required, and refuses a key it does not know", () => {
 		const section = mfaModule().section;
-		expect(section?.at).toBeUndefined();
+		expect(section).not.toHaveProperty("at");
 		expect(section?.reference?.href).toMatch(/\/config\/reference\.conf$/);
 		const schema = section?.schema;
 		if (schema === undefined) throw new Error("mfaModule declares no section");
@@ -602,66 +611,118 @@ describe("the factors' sections are the factors' modules' to read", () => {
 	});
 });
 
-describe("the MFA routes' flood guard without a shared rate limiter", () => {
-	const underMode = (deploymentMode: "single" | "multi" | undefined): AppConfig => ({
-		...configFor("required"),
-		...coreConfigForTests({
-			expected: ["mfa"],
-			declaredAbsent: ["auditSink", "rateLimiter"],
-			...(deploymentMode === undefined ? {} : { deploymentMode }),
-		}),
+describe("the MFA routes' flood guard", () => {
+	/** A limiter whose backend is down for the MFA routes' prefix, every other key allowed. */
+	const downForMfa = (failMode: "open" | "closed"): RateLimiter => {
+		const allowed = createMemoryRateLimiter({ limits: {}, defaultLimit: GENEROUS });
+		return {
+			kind: "test-down-for-mfa",
+			failMode,
+			defaultLimit: GENEROUS,
+			check: (key, ctx) =>
+				key.startsWith("mfa:")
+					? Promise.reject(new Error("backend down"))
+					: allowed.check(key, ctx),
+		};
+	};
+
+	/** What the MFA routes mount after, passing every request on. */
+	const sessionMiddlewareStandIn = defineModule({
+		name: "test:session-middleware",
+		contributes: {
+			routes: [
+				() => ({
+					id: "session-middleware",
+					mountPath: "/",
+					handler: ((_req, _res, next) => next()) as RequestHandler,
+				}),
+			],
+		},
 	});
 
-	it("builds a per-process limiter over mfa.rateLimit.routes, which refuses a POST past the budget, and says so once at warn when the deployment mode is unset", async () => {
-		const logger = spyLogger();
-		const factorStore = createMemoryMfaFactorStore();
-		const { record, secret } = await seedTotp(factorStore);
-		const config = configFor("required", {
-			rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
+	/** `count` wrong codes on one login's transaction: each status, in order. */
+	const wrongCodes = async (booted: Awaited<ReturnType<typeof boot>>, count: number) => {
+		const { record, secret } = await seedTotp(booted.factorStore);
+		const { agent, transaction } = await beginLogin(booted.app);
+		const statuses: number[] = [];
+		for (let n = 0; n < count; n++) {
+			statuses.push((await verify(agent, transaction, record.id, wrongCode(secret))).status);
+		}
+		return statuses;
+	};
+
+	it("limits by the wired limiter's own limits.mfa, answering 429 with Retry-After past it", async () => {
+		const booted = await boot({
+			rateLimiter: createMemoryRateLimiter({
+				limits: { mfa: { limit: 2, windowSeconds: 300 } },
+				defaultLimit: GENEROUS,
+			}),
 		});
-		const { app } = await boot({ config, factorStore, rateLimiter: null, logger });
-		const { agent, transaction } = await beginLogin(app);
+		const { record, secret } = await seedTotp(booted.factorStore);
+		const { agent, transaction } = await beginLogin(booted.app);
 
 		const statuses = [];
+		let last: Awaited<ReturnType<typeof verify>> | undefined;
 		for (let n = 0; n < 3; n++) {
-			statuses.push((await verify(agent, transaction, record.id, wrongCode(secret))).status);
+			last = await verify(agent, transaction, record.id, wrongCode(secret));
+			statuses.push(last.status);
 		}
 
 		expect(statuses).toEqual([401, 401, 429]);
-		const said = logger.warn.mock.calls.filter((c) => c[1] === "mfa_rate_limiter_not_shared");
-		expect(said).toEqual([[{ limit: 2, windowSeconds: 300 }, "mfa_rate_limiter_not_shared"]]);
+		expect(last?.body).toMatchObject({ error: "rate_limited" });
+		expect(last?.headers["retry-after"]).toBeDefined();
 	});
 
-	it("is silent under a single replica", async () => {
-		const logger = spyLogger();
-		await boot({ config: underMode("single"), rateLimiter: null, logger });
-		expect(events(logger, "warn")).not.toContain("mfa_rate_limiter_not_shared");
-	});
-
-	it("refuses the boot under several replicas, where a per-process count is no limit", async () => {
-		const err = await refusal({
-			config: underMode("multi"),
-			withoutLogin: true,
-			rateLimiter: null,
+	it("limits by the limiter's defaultLimit when its limits leave mfa out", async () => {
+		const booted = await boot({
+			rateLimiter: createMemoryRateLimiter({
+				limits: { login: GENEROUS },
+				defaultLimit: { limit: 2, windowSeconds: 300 },
+			}),
 		});
-		expect(err.reason).toBe("contribute-factory-failed");
-		expect((err.cause as Error).message).toContain("rateLimiter");
+		expect(await wrongCodes(booted, 3)).toEqual([401, 401, 429]);
 	});
 
-	it("refuses the boot when neither a rate limiter nor mfa.rateLimit.routes is there to limit the routes by, naming the key", async () => {
-		const err = await refusal({
-			config: configFor("required", { rateLimit: undefined }),
-			rateLimiter: null,
-		});
-		expect(err.reason).toBe("contribute-factory-failed");
-		expect((err.cause as Error).message).toMatch(/^mfa\.rateLimit\.routes is not set/);
+	it("answers 503 while the limiter is down under its failMode closed, and lets the POST through under open", async () => {
+		expect(await wrongCodes(await boot({ rateLimiter: downForMfa("closed") }), 1)).toEqual([503]);
+		expect(await wrongCodes(await boot({ rateLimiter: downForMfa("open") }), 1)).toEqual([401]);
 	});
 
-	it("is not built when the composition wires a shared rate limiter", async () => {
-		const logger = spyLogger();
-		await boot({ config: underMode(undefined), logger });
-		expect(events(logger, "warn")).not.toContain("mfa_rate_limiter_not_shared");
-	});
+	it.each(["single", "multi", undefined] as const)(
+		"lets every POST through, keeping no count of its own, when no limiter is wired (deployment mode %s)",
+		async (deploymentMode) => {
+			const logger = spyLogger();
+			const config: AppConfig = {
+				...configFor("required"),
+				...coreConfigForTests({
+					expected: ["mfa"],
+					declaredAbsent: ["auditSink", "rateLimiter"],
+					...(deploymentMode === undefined ? {} : { deploymentMode }),
+				}),
+			};
+			// The MFA routes alone: no login, which keeps a limit of its own, and no per-process session store.
+			const { app } = await boot({
+				config,
+				rateLimiter: null,
+				withoutLogin: true,
+				extraModules: [sessionMiddlewareStandIn],
+				logger,
+			});
+
+			const statuses = new Set<number>();
+			for (let n = 0; n < 61; n++) {
+				const res = await request(app)
+					.post("/session/mfa/verify")
+					.set("Host", "mfa.test")
+					.set("Origin", "http://mfa.test")
+					.send({ transaction_id: "unknown" });
+				statuses.add(res.status);
+			}
+
+			expect([...statuses]).toEqual([400]);
+			expect(events(logger, "warn").filter((event) => event.includes("rate_limit"))).toEqual([]);
+		},
+	);
 });
 
 describe("the development sample key", () => {
@@ -703,6 +764,7 @@ describe("the development sample key", () => {
 			mfaFactorStore: createMemoryMfaFactorStore(),
 			mfaTransactionStore: createMemoryMfaTransactionStore(),
 			userSessionStore: createInMemoryUserSessionStore(),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: resolverForTests([]),
 			logger: spyLogger(),
 		});

@@ -24,16 +24,12 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import {
-	makeValidAppConfig,
-	packageReferenceProblems,
-	userRepositoryHttpOf,
-	withUserRepositoryHttp,
-} from "@o3co/auth-provider-core/testing";
+import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { foundationMfaFactorStoreModule } from "#/index.mjs";
 import { FOUNDATION_MFA_FACTOR_STORE_SECTION } from "#/mfa/section.mjs";
+import { foundationUserRepositoryHttpConfig } from "#/testing/index.mjs";
 
 const REFERENCE = new URL("../../../config/reference.conf", import.meta.url);
 
@@ -67,7 +63,7 @@ describe("the package's reference.conf", () => {
 				reference: REFERENCE,
 				modules: [
 					foundationMfaFactorStoreModule({
-						storeTransport: userRepositoryHttpOf(withUserRepositoryHttp(makeValidAppConfig(), {})),
+						storeTransport: foundationUserRepositoryHttpConfig({}),
 					}),
 				],
 				read,

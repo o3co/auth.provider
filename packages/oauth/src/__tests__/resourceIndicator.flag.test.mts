@@ -40,10 +40,14 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/authorization.mjs";
-import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
+import {
+	type ClientCredentialsGrantDeps,
+	createClientCredentialsGrant,
+} from "#/grants/clientCredentials.mjs";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test setup
@@ -92,7 +96,7 @@ function makeRefreshDeps(
 		oauth: {
 			jwt: { secret: SECRET },
 			accessToken: { expiresIn: 3600 },
-			refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject" },
+			refreshToken: { expiresIn: 86400 },
 			grants: {
 				authorization_code: { enabled: true },
 				refresh_token: { enabled: true },
@@ -106,7 +110,7 @@ function makeRefreshDeps(
 	}
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config: base as unknown as GrantDependencies["config"],
+		...grantSettingsFrom(base),
 		keyStore,
 		...extra,
 	};
@@ -143,7 +147,7 @@ function makeAuthzDeps(
 	}
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-		config: base as unknown as GrantDependencies["config"],
+		...grantSettingsFrom(base),
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {
 			consumeByCode: vi
@@ -181,7 +185,7 @@ function makeAuthzCtx(bodyOverrides: Record<string, unknown> = {}): GrantContext
 function makeCCDeps(
 	extra: Partial<GrantDependencies> = {},
 	enableResourceIndicator?: boolean,
-): GrantDependencies {
+): ClientCredentialsGrantDeps {
 	const base = {
 		oauth: {
 			jwt: { issuer: "https://test.example" },
@@ -195,7 +199,7 @@ function makeCCDeps(
 		};
 	}
 	return {
-		config: base as unknown as GrantDependencies["config"],
+		...grantSettingsFrom(base),
 		keyStore,
 		...extra,
 	};

@@ -15,13 +15,45 @@
  */
 
 /**
- * The CORS origins of a held `httpSettings` slot, checked: what core's CORS
- * middleware reads when the slot's key is present, whatever a provider
- * answered. Core reads nothing else of it.
+ * Where core's CORS origins come from: the CORS origins of a held
+ * `httpSettings` slot, checked — what core's CORS middleware reads when the
+ * slot's key is present, whatever a provider answered; core reads nothing
+ * else of it — and the refusal of a configuration's `cors` section, which
+ * core never reads.
  */
 
+import { pathsSetBy, unreadSectionMessage } from "../config/removed-keys.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
 import { checkSerializedOrigin, describeSerializedOriginRejection } from "../net/origin.mjs";
+
+const UNREAD_CORS = unreadSectionMessage(
+	"cors",
+	"The CORS origins are handed to core in the httpSettings slot (cors.allowedOrigins), by the module that provides the slot: write them where that module reads them. Without the slot, no CORS is mounted.",
+);
+
+/**
+ * Why `config`'s top-level `cors` section refuses boot, or `undefined` when
+ * a loaded module's section is `cors` (`owned`, the top-level sections
+ * something loaded owns), which reads it, or when it sets nothing: absent,
+ * an own `undefined` (as the relocation refusal reads it), or a value
+ * `pathsSetBy` finds nothing in (`{}`, or only empty sections). Core reads
+ * its CORS origins from the `httpSettings` slot alone, so any other `cors`
+ * is read by nothing; a loaded module that relocates `cors` refuses it
+ * first, before parse, naming its own path. A section whose read throws
+ * refuses the same way. Names the section, never a value.
+ */
+export function unreadCorsSection(config: unknown, owned: ReadonlySet<string>): string | undefined {
+	if (owned.has("cors")) return undefined;
+	if (typeof config !== "object" || config === null || !Object.hasOwn(config, "cors")) {
+		return undefined;
+	}
+	try {
+		const cors: unknown = (config as Record<string, unknown>).cors;
+		return cors !== undefined && pathsSetBy(cors).length > 0 ? UNREAD_CORS : undefined;
+	} catch {
+		return UNREAD_CORS;
+	}
+}
 
 const WHY =
 	"Core's CORS middleware reads its origins from the httpSettings a composition holds, so a " +

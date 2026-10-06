@@ -21,7 +21,12 @@
  * refused at its path, never dropped.
  */
 
-import { MAX_DURATION_SECONDS, resolveAccessTokenLifetime } from "@o3co/auth-provider-core";
+import {
+	checkAcrValueName,
+	MAX_DURATION_SECONDS,
+	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
+} from "@o3co/auth-provider-core";
 import { parseString } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { oauthSectionSchema } from "#/section.mjs";
@@ -30,7 +35,7 @@ import { oauthSectionSchema } from "#/section.mjs";
 const valid = (): Record<string, unknown> => ({
 	jwt: { issuer: "https://auth.test", legacyTypAccept: false },
 	accessToken: { expiresIn: 3600 },
-	refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+	refreshToken: { expiresIn: 86400 },
 	oidcMode: "oidc-required",
 	requireEmailVerified: false,
 	requireGrantTypeAllowlist: false,
@@ -85,7 +90,7 @@ describe("the section parses what the package's reference loads to", () => {
 		const required = {
 			jwt: { issuer: "https://auth.test" },
 			accessToken: { expiresIn: 3600 },
-			refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 		};
 		expect(issuesOf(required)).toEqual([]);
@@ -146,17 +151,23 @@ describe("every level refuses a key it does not declare, at its path", () => {
 		},
 	);
 
+	it("does not declare oauth.jwt's flat key fields, which core retired and refuses naming what became of them", () => {
+		expect(issuesOf(withValue("jwt", { issuer: "https://auth.test", algorithm: "HS256" }))).toEqual(
+			[{ path: "jwt", message: 'Unrecognized key: "algorithm"', code: "unrecognized_keys" }],
+		);
+	});
+
 	it.each([
-		[
-			"oauth.jwt's flat key fields",
-			"jwt",
-			{ issuer: "https://auth.test", algorithm: "HS256" },
-			"algorithm",
-		],
 		[
 			"oauth.refreshToken.legacyTokenCompat",
 			"refreshToken.legacyTokenCompat",
 			false,
+			"legacyTokenCompat",
+		],
+		[
+			"oauth.refreshToken.legacyTokenCompat",
+			"refreshToken.legacyTokenCompat",
+			true,
 			"legacyTokenCompat",
 		],
 		[
@@ -165,13 +176,19 @@ describe("every level refuses a key it does not declare, at its path", () => {
 			false,
 			"allowUnmarkedClients",
 		],
+		[
+			"oauth.authorize.allowUnmarkedClients",
+			"authorize.allowUnmarkedClients",
+			true,
+			"allowUnmarkedClients",
+		],
 	])(
-		"does not declare %s, which core retired and refuses naming what became of it",
+		"does not declare %s, which the module's section declares removed (relocatedFrom) and boot refuses before parsing",
 		(_what, path, value, key) => {
 			const found = issuesOf(withValue(path, value));
 			expect(found).toEqual([
 				{
-					path: path === "jwt" ? "jwt" : path.slice(0, path.lastIndexOf(".")),
+					path: path.slice(0, path.lastIndexOf(".")),
 					message: `Unrecognized key: "${key}"`,
 					code: "unrecognized_keys",
 				},
@@ -316,6 +333,15 @@ describe("oauth.accessToken", () => {
 		}
 	});
 
+	it.each([0, -1])(
+		"refuses the deprecated expiresIn = %j standing alone at that key, and nothing built on it",
+		(expiresIn) => {
+			expect(issuesOf(withValue("accessToken", { expiresIn })).map((issue) => issue.path)).toEqual([
+				"accessToken.expiresIn",
+			]);
+		},
+	);
+
 	for (const key of ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const) {
 		for (const bad of [0, -1, MAX_DURATION_SECONDS + 1, ""]) {
 			it(`refuses ${key} = ${JSON.stringify(bad)} at that key, and nothing built on it`, () => {
@@ -331,23 +357,49 @@ describe("oauth.accessToken", () => {
 });
 
 describe("oauth.refreshToken", () => {
-	it("accepts legacyRtPolicy = reject, the only value, and refuses accept-with-warning", () => {
-		expect(issuesOf(withValue("refreshToken.legacyRtPolicy", "reject"))).toEqual([]);
-		expect(
-			issuesOf(withValue("refreshToken.legacyRtPolicy", "accept-with-warning")).map(
-				(issue) => issue.path,
-			),
-		).toEqual(["refreshToken.legacyRtPolicy"]);
+	it("reads a refreshToken carrying its lifetime alone as given", () => {
+		const parsed = oauthSectionSchema.parse(withValue("refreshToken", { expiresIn: 86400 })) as {
+			refreshToken: unknown;
+		};
+		expect(parsed.refreshToken).toEqual({ expiresIn: 86400 });
 	});
 
-	it.each(["accept", "reject"])("accepts unknownFamilyPolicy = %s", (policy) => {
-		expect(issuesOf(withValue("refreshToken.unknownFamilyPolicy", policy))).toEqual([]);
+	it("requires expiresIn", () => {
+		expect(issuesOf(withValue("refreshToken", {})).map((issue) => issue.path)).toEqual([
+			"refreshToken.expiresIn",
+		]);
 	});
 
-	it("refuses any other unknownFamilyPolicy", () => {
-		expect(
-			issuesOf(withValue("refreshToken.unknownFamilyPolicy", "warn")).map((issue) => issue.path),
-		).toEqual(["refreshToken.unknownFamilyPolicy"]);
+	it.each([1, 86_400, MAX_DURATION_SECONDS])(
+		"accepts expiresIn = %j, from one second to the ceiling",
+		(expiresIn) => {
+			expect(issuesOf(withValue("refreshToken.expiresIn", expiresIn))).toEqual([]);
+		},
+	);
+
+	// The rule is core's resolver's, which every grant that mints a refresh
+	// token reads the lifetime through: a hand-built configuration meets it
+	// there.
+	it.each([1, 86_400, MAX_DURATION_SECONDS, 0, -1, 1.5, Number.NaN, MAX_DURATION_SECONDS + 1])(
+		"judges expiresIn = %j as resolveRefreshTokenLifetime does",
+		(expiresIn) => {
+			const refused = issuesOf(withValue("refreshToken.expiresIn", expiresIn)).length > 0;
+			const resolve = () => resolveRefreshTokenLifetime({ oauth: { refreshToken: { expiresIn } } });
+			if (refused) expect(resolve).toThrow(RangeError);
+			else expect(resolve()).toBe(expiresIn);
+		},
+	);
+
+	it.each([
+		["unknownFamilyPolicy", "reject"],
+		["unknownFamilyPolicy", "accept"],
+		["unknownFamilyPolicy", "warn"],
+		["legacyRtPolicy", "reject"],
+		["legacyRtPolicy", "accept-with-warning"],
+	])("refuses %s = %j: a key the section no longer declares", (key, value) => {
+		const issues = issuesOf(withValue(`refreshToken.${key}`, value));
+		expect(issues.map((issue) => issue.path)).toEqual(["refreshToken"]);
+		expect(issues[0]?.message).toContain(`"${key}"`);
 	});
 
 	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "1.5", MAX_DURATION_SECONDS + 1])(
@@ -405,6 +457,91 @@ describe("oauth.authorize", () => {
 		expect(oauthSectionSchema.safeParse(withValue("authorize.acrValues", "urn:x")).success).toBe(
 			false,
 		);
+	});
+
+	it.each([
+		["a space", "urn:x pwd"],
+		["a tab", "urn:x\tpwd"],
+		["a newline", "urn:x\n"],
+		["a double quote", 'urn:"x"'],
+		["a backslash", "urn:x\\y"],
+		["a non-ASCII character", "urn:é"],
+	])("refuses a key holding %s at the key, in core's words", (_what, key) => {
+		expect(issuesOf(withValue("authorize.acrValues", { [key]: ["pwd"] }))).toEqual([
+			{ path: `authorize.acrValues.${key}`, message: checkAcrValueName(key), code: "custom" },
+		]);
+	});
+
+	it.each(["urn:x pwd", "urn:x\tpwd", 'urn:"x"', "urn:é"])(
+		"names %j at its full path in the refusal",
+		(key) => {
+			expect(
+				messagesAt(
+					withValue("authorize.acrValues", { [key]: ["pwd"] }),
+					`authorize.acrValues.${key}`,
+				),
+			).toEqual([expect.stringContaining(`oauth.authorize.acrValues key ${JSON.stringify(key)}`)]);
+		},
+	);
+
+	it("refuses every unusable key, beside a usable one and an entry refused for its value", () => {
+		const paths = issuesOf(
+			withValue("authorize.acrValues", {
+				"urn:x pwd": ["pwd"],
+				"urn:y\tz": ["pwd"],
+				"urn:ok": ["pwd"],
+				"urn:none": [],
+			}),
+		).map((issue) => issue.path);
+		expect(paths).toEqual(
+			expect.arrayContaining([
+				"authorize.acrValues.urn:x pwd",
+				"authorize.acrValues.urn:y\tz",
+				"authorize.acrValues.urn:none",
+			]),
+		);
+		expect(paths.some((path) => path.includes("urn:ok"))).toBe(false);
+	});
+
+	it("accepts a key of any printable ASCII but the space, the double quote and the backslash", () => {
+		const key = "urn:!#$%&'()*+,-./:;<=>?@[]^_`{|}~";
+		expect(issuesOf(withValue("authorize.acrValues", { [key]: ["pwd"] }))).toEqual([]);
+	});
+});
+
+describe("oauth.resourceIndicator", () => {
+	it("is absent when omitted: the schema invents no default", () => {
+		const parsed = oauthSectionSchema.parse(withValue("resourceIndicator", undefined)) as Record<
+			string,
+			unknown
+		>;
+		expect(parsed).not.toHaveProperty("resourceIndicator");
+	});
+
+	it("requires enabled once the level is set", () => {
+		expect(issuesOf(withValue("resourceIndicator", {})).map((issue) => issue.path)).toEqual([
+			"resourceIndicator.enabled",
+		]);
+	});
+});
+
+describe("oauth.consentPage", () => {
+	it.each(["/consent", "/consent/page?tenant=acme", "https://consent.example.com/page"])(
+		"accepts url = %j",
+		(url) => {
+			expect(issuesOf(withValue("consentPage.url", url))).toEqual([]);
+		},
+	);
+
+	it.each(["", " ", "\t", "\n "])("refuses the url %j, naming the path and its variable", (url) => {
+		expect(issuesOf(withValue("consentPage.url", url))).toEqual([
+			{
+				path: "consentPage.url",
+				message:
+					'oauth.consentPage.url must not be empty or blank: an exported-but-empty OAUTH_CONSENT_PAGE_URL reads as ""; unset it to keep the default, /consent, or set it to the consent page',
+				code: "custom",
+			},
+		]);
 	});
 });
 
@@ -484,6 +621,13 @@ describe("every boolean reads the string an environment variable carries", () =>
 			unknown
 		>;
 		expect(parsed.requireEmailVerified).toBeUndefined();
+	});
+
+	it("leaves an omitted jwt.legacyTypAccept undefined rather than defaulting it", () => {
+		const parsed = oauthSectionSchema.parse(withValue("jwt.legacyTypAccept", undefined)) as {
+			jwt: Record<string, unknown>;
+		};
+		expect(parsed.jwt.legacyTypAccept).toBeUndefined();
 	});
 });
 

@@ -20,15 +20,13 @@
  * the config parse, and emits `ValidatedManifests`; see `validateManifests`.
  */
 
-import { isDeepStrictEqual } from "node:util";
 import type { z } from "zod";
-import type { AppConfig } from "../config/application.schema.mjs";
+import { type AppConfig, CoreConfigSchema } from "../config/application.schema.mjs";
 import {
 	defineConfigKey,
 	isPlainConfigObject,
 	operatorPath,
 	overlayConfig,
-	TransitionalConfigSchema,
 } from "../config/composed.mjs";
 import { CORE_RELOCATIONS, type CoreRelocations } from "../config/core-relocations.mjs";
 import { environmentVariableFor } from "../config/environment-variable.mjs";
@@ -78,6 +76,7 @@ import {
 	federationTypeSnapshot,
 	parseFederationEntries,
 } from "./federation-entries.mjs";
+import { unreadCorsSection } from "./http-settings.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
 import {
 	checkReplicaSafety,
@@ -87,6 +86,7 @@ import {
 import type {
 	BootStage,
 	BootstrapMap,
+	ContributionContainer,
 	ContributionEntry,
 	ContributionKind,
 	ContributionKindMap,
@@ -211,12 +211,65 @@ function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
 	return federationTypeRegistration(value);
 }
 
+/** What a kind's container was read as, and how a refusal names it. */
+function containerAsRead(container: unknown): Pick<ContributionContainer, "shape" | "given"> {
+	if (Array.isArray(container)) return { shape: "list", given: "an array" };
+	if (isPlainConfigObject(container)) return { shape: "record", given: "a record" };
+	if (typeof container === "object" && container !== null) {
+		// A record is a plain object: an instance, a Map or an object with
+		// another prototype reads as one only through what it inherits.
+		return { shape: "other", given: `${describeValue(container)}, not a plain object` };
+	}
+	return { shape: "other", given: describeValue(container) };
+}
+
+/**
+ * One channel of a manifest — its `contributes` or `overrides`, read once by
+ * the caller — flattened: each kind's container as read, and its entries. An
+ * array files its entries under Symbol keys, an object under its names;
+ * whether either is the kind's shape is `checkContributionContainers`'s to
+ * judge, off `containers`.
+ */
+function normaliseChannel(
+	m: Module,
+	channel: "contributes" | "overrides",
+	map: unknown,
+): { readonly entries: ContributionEntry[]; readonly containers: ContributionContainer[] } {
+	const entries: ContributionEntry[] = [];
+	const containers: ContributionContainer[] = [];
+	for (const [kind, container] of Object.entries(map ?? {})) {
+		if (container === undefined) continue;
+		containers.push({ kind: kind as ContributionKind, channel, ...containerAsRead(container) });
+		if (Array.isArray(container)) {
+			for (const factory of container) {
+				entries.push({
+					kind: kind as ContributionKind,
+					key: Symbol(kind),
+					factory,
+					contributedBy: m.name,
+				});
+			}
+		} else if (container !== null && typeof container === "object") {
+			for (const [name, value] of Object.entries(container as Record<string, unknown>)) {
+				entries.push({
+					kind: kind as ContributionKind,
+					key: name,
+					factory: nameKeyedFactory(kind, name, value),
+					contributedBy: m.name,
+				});
+			}
+		}
+	}
+	return { entries, containers };
+}
+
 /**
  * Flatten a raw Module manifest into a NormalisedModule for fast lookup
  * by subsequent checks. Collects:
  * - `requires` / `optional` key arrays
  * - `providesKeys` from `Object.keys(module.provides ?? {})`
- * - `contributesEntries` / `overridesEntries` as flat ContributionEntry[]
+ * - `contributesEntries` / `overridesEntries` as flat ContributionEntry[],
+ *   and `containers`, each kind's container as read
  * - `lifecycleKeys` from `Object.keys(module.lifecycle ?? {})`
  *
  * @internal
@@ -231,53 +284,8 @@ function normaliseModule(m: Module): NormalisedModule {
 		? [...(authoritativeDeclared as readonly ComponentKey[])]
 		: [];
 
-	const contributesEntries: ContributionEntry[] = [];
-	for (const [kind, kindMap] of Object.entries(m.contributes ?? {})) {
-		if (Array.isArray(kindMap)) {
-			// List-shaped kinds: auditHooks, routes, grantPolicyHooks, grantMiddleware
-			for (const factory of kindMap) {
-				contributesEntries.push({
-					kind: kind as ContributionKind,
-					key: Symbol(kind),
-					factory,
-					contributedBy: m.name,
-				});
-			}
-		} else if (kindMap !== null && typeof kindMap === "object") {
-			// Name-keyed kinds: grants, tokenExchangeValidators, mfaFactors, …
-			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
-				contributesEntries.push({
-					kind: kind as ContributionKind,
-					key: name,
-					factory: nameKeyedFactory(kind, name, value),
-					contributedBy: m.name,
-				});
-			}
-		}
-	}
-
-	const overridesEntries: ContributionEntry[] = [];
-	for (const [kind, kindMap] of Object.entries(m.overrides ?? {})) {
-		if (Array.isArray(kindMap)) {
-			for (const factory of kindMap) {
-				overridesEntries.push({
-					kind: kind as ContributionKind,
-					key: Symbol(kind),
-					factory,
-					contributedBy: m.name,
-				});
-			}
-		} else if (kindMap !== null && typeof kindMap === "object") {
-			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
-				overridesEntries.push({
-					kind: kind as ContributionKind,
-					key: name,
-					factory: nameKeyedFactory(kind, name, value),
-					contributedBy: m.name,
-				});
-			}
-		}
-	}
+	const contributes = normaliseChannel(m, "contributes", m.contributes);
+	const overrides = normaliseChannel(m, "overrides", m.overrides);
 
 	const lifecycleKeys = Object.keys(m.lifecycle ?? {}) as ComponentKey[];
 
@@ -288,8 +296,9 @@ function normaliseModule(m: Module): NormalisedModule {
 		providesKeys,
 		authoritativeDeclared,
 		authoritativeKeys,
-		contributesEntries,
-		overridesEntries,
+		contributesEntries: contributes.entries,
+		overridesEntries: overrides.entries,
+		containers: [...contributes.containers, ...overrides.containers],
 		lifecycleKeys,
 	};
 }
@@ -298,23 +307,29 @@ function normaliseModule(m: Module): NormalisedModule {
 // Built-in contribution kinds — auto-wired by core; no collector required
 // ---------------------------------------------------------------------------
 
-const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
-	"grants",
-	"federations",
-	"federationRedirectPolicies",
-	"tokenExchangeValidators",
-	"mfaFactors",
-	"sessionRequirements",
-	"auditHooks",
-	"routes",
-	"grantPolicyHooks",
-	"grantMiddleware",
-	"tokenBindingMechanisms",
-	"discoveryMetadata",
-	"rateLimitBudgets",
-	"federationTypes",
-	"admissionActions",
-	"sessionCloseNotifiers",
+/**
+ * Core's contribution kinds, each with the container it takes: a record for
+ * a name-keyed kind, a list for a list-shaped one — the shapes of the
+ * collectors `createApp` seeds.
+ * @internal Exported for its test.
+ */
+export const BUILTIN_CONTRIBUTION_KINDS: ReadonlyMap<string, "record" | "list"> = new Map([
+	["grants", "record"],
+	["federations", "record"],
+	["federationRedirectPolicies", "record"],
+	["tokenExchangeValidators", "record"],
+	["mfaFactors", "record"],
+	["sessionRequirements", "record"],
+	["auditHooks", "list"],
+	["routes", "list"],
+	["grantPolicyHooks", "list"],
+	["grantMiddleware", "list"],
+	["tokenBindingMechanisms", "list"],
+	["discoveryMetadata", "list"],
+	["rateLimitBudgets", "record"],
+	["federationTypes", "record"],
+	["admissionActions", "record"],
+	["sessionCloseNotifiers", "record"],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -323,7 +338,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 
 /**
  * A `modules` entry that is a function is a module factory listed without
- * being called (`deviceGrantModule` for `deviceGrantModule({ config })`).
+ * being called (`someModule` for `someModule(options)`).
  * `Module` requires only `name`, which a function has, so the compiler
  * accepts it, and every later check would read it as a manifest that
  * declares nothing: boot would succeed with the module's grants, routes and
@@ -977,18 +992,13 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	}
 }
 
-/** What a container that is not a record is called in a refusal. */
-const containerShape = (container: unknown): string =>
-	container === null ? "null" : Array.isArray(container) ? "an array" : `a ${typeof container}`;
-
 /**
- * What a `rateLimitBudgets`, `federationTypes` or `admissionActions`
- * contribution or override must be, read off the manifest before any factory
- * runs:
+ * What a `rateLimitBudgets`, `federationTypes`, `admissionActions` or
+ * `sessionCloseNotifiers` contribution or override holds, read off the
+ * entries normalisation captured, which stage 4 applies, before any factory
+ * runs; each container is already its kind's shape
+ * (`checkContributionContainers`):
  *
- * - its container is a record keyed by prefix, type or action name
- *   (normalisation would file an array as list-shaped under Symbol keys, and
- *   skip a function or `null`);
  * - a prefix is not empty and holds no `:`, since a limiter key carries it
  *   before its first `:`, whatever the budget's factory answers;
  * - a prefix names no `Object.prototype` member (`constructor`, `__proto__`),
@@ -1005,61 +1015,35 @@ const containerShape = (container: unknown): string =>
  *   (`admissionActionProblem`); an action is registered by the module that
  *   admits it, so an override of one is refused as the kind guarded
  *   (`contribution-kind-guarded`);
- * - a `sessionCloseNotifiers` container is a record keyed by name, and no
- *   module overrides the kind (`contribution-kind-guarded`): the notifier is
- *   its contributor's, switched off only by not installing it. Both read off
- *   the entries normalisation captured, which stage 4 applies.
+ * - no module overrides `sessionCloseNotifiers` (`contribution-kind-guarded`):
+ *   the notifier is its contributor's, switched off only by not installing
+ *   it.
  *
- * Throws `contribution-malformed`; `name` is absent for a container.
+ * Throws `contribution-malformed`, naming the entry.
  * @internal
  */
-function checkContributionShapes(
-	rawModules: readonly Module[],
-	modules: readonly NormalisedModule[],
-): void {
+function checkContributionShapes(modules: readonly NormalisedModule[]): void {
 	const refuse = (
-		m: Module,
-		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions" | "sessionCloseNotifiers",
-		name: string | undefined,
+		m: NormalisedModule,
+		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions",
+		name: string,
 		channel: "contributes" | "overrides",
 		problem: string,
 	): never => {
 		throw new BootError({
-			message: `Module "${m.name}" ${channel} ${kind}${name === undefined ? "" : ` "${name}"`}: ${problem}.`,
+			message: `Module "${m.name}" ${channel} ${kind} "${name}": ${problem}.`,
 			reason: "contribution-malformed",
 			stage: "validateManifests",
-			details: {
-				reason: "contribution-malformed",
-				module: m.name,
-				kind,
-				...(name === undefined ? {} : { name }),
-				channel,
-				problem,
-			},
+			details: { reason: "contribution-malformed", module: m.name, kind, name, channel, problem },
 		});
 	};
 	const declaredVerifiers = declaredVerifierLimits(modules);
-	rawModules.forEach((m, index) => {
+	for (const m of modules) {
 		for (const channel of ["contributes", "overrides"] as const) {
-			const map = m[channel] as Readonly<Record<string, unknown>> | undefined;
-			for (const [kind, keyedBy] of [
-				["rateLimitBudgets", "prefix"],
-				["federationTypes", "type"],
-				["admissionActions", "action name"],
-			] as const) {
-				const container = map?.[kind];
-				if (container === undefined) continue;
-				if (typeof container !== "object" || container === null || Array.isArray(container)) {
-					refuse(
-						m,
-						kind,
-						undefined,
-						channel,
-						`the kind takes a record keyed by ${keyedBy}, not ${containerShape(container)}`,
-					);
-				}
-			}
-			for (const prefix of Object.keys(m[channel]?.rateLimitBudgets ?? {})) {
+			const entries = channel === "contributes" ? m.contributesEntries : m.overridesEntries;
+			for (const entry of entries) {
+				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+				const prefix = entry.key;
 				if (prefix.length === 0 || prefix.includes(":")) {
 					refuse(
 						m,
@@ -1079,11 +1063,7 @@ function checkContributionShapes(
 					);
 				}
 			}
-			const normalised = modules[index];
-			const entries =
-				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
-			// Read off the entries normalisation captured, which stage 4 applies.
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "sessionCloseNotifiers") continue;
 				if (channel === "overrides") {
 					throw new BootError({
@@ -1098,18 +1078,8 @@ function checkContributionShapes(
 						},
 					});
 				}
-				// Normalisation files a list under Symbol keys.
-				if (typeof entry.key !== "string") {
-					refuse(
-						m,
-						"sessionCloseNotifiers",
-						undefined,
-						channel,
-						"the kind takes a record keyed by name, not a list",
-					);
-				}
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (
 					channel !== "overrides" ||
 					entry.kind !== "rateLimitBudgets" ||
@@ -1135,13 +1105,13 @@ function checkContributionShapes(
 					},
 				});
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
 				const snapshot = verifierClaimSnapshots.get(entry.factory as object);
 				const problem = snapshot === undefined ? undefined : verifierClaimProblem(snapshot);
 				if (problem !== undefined) refuse(m, "rateLimitBudgets", entry.key, channel, problem);
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
 				if (channel === "overrides") {
 					throw new BootError({
@@ -1161,7 +1131,7 @@ function checkContributionShapes(
 				const problem = admissionActionProblem(entry.key, snapshot ?? entry.factory);
 				if (problem !== undefined) refuse(m, "admissionActions", entry.key, channel, problem);
 			}
-			for (const entry of entries ?? []) {
+			for (const entry of entries) {
 				if (entry.kind !== "federationTypes" || typeof entry.key !== "string") continue;
 				const snapshot = federationTypeSnapshot(entry.factory);
 				if (snapshot === undefined) {
@@ -1185,7 +1155,7 @@ function checkContributionShapes(
 				}
 			}
 		}
-	});
+	}
 }
 
 /**
@@ -1276,6 +1246,67 @@ function checkContributionKindCoverage(
 					kind,
 					contributedBy: unique,
 				},
+			});
+		}
+	}
+}
+
+/**
+ * The container `kind` takes: a record when its collector is name-keyed, a
+ * list when it is list-shaped — the collector's own `kind`, as stage 4
+ * dispatches on it, so a consumer's kinds are held to the same rule — or, for
+ * one of core's kinds with no collector in `contributionKinds`, its built-in
+ * shape. `undefined` for a kind nothing names a shape for.
+ */
+function containerTaken(
+	kind: string,
+	contributionKinds: ContributionKindMap | undefined,
+): "record" | "list" | undefined {
+	const collector =
+		contributionKinds !== undefined && Object.hasOwn(contributionKinds, kind)
+			? ((contributionKinds as Record<string, unknown>)[kind] as { kind?: unknown } | undefined)
+			: undefined;
+	switch (collector?.kind) {
+		case "name-keyed":
+			return "record";
+		case "list":
+		case "list-routes":
+			return "list";
+		default:
+			return BUILTIN_CONTRIBUTION_KINDS.get(kind);
+	}
+}
+
+/**
+ * Every kind's container, in `contributes` and in `overrides`, is the shape
+ * its kind takes (`containerTaken`): a record — a plain object — for a
+ * name-keyed kind, an array for a list-shaped one. Anything else is
+ * `contribution-malformed`, naming the module, the kind, the channel and
+ * what it was given: an array under a name-keyed kind would file its entries
+ * under Symbol keys no name-keyed check reads and no reader reaches, and a
+ * record under a list-shaped kind holds no list to append. Read off the
+ * containers normalisation read, once — the ones its entries came from. A
+ * kind no shape is known for has no container rule: the coverage check
+ * refuses its entries, if it has any.
+ * @internal
+ */
+function checkContributionContainers(
+	modules: readonly NormalisedModule[],
+	contributionKinds: ContributionKindMap | undefined,
+): void {
+	for (const m of modules) {
+		for (const { kind, channel, shape, given } of m.containers) {
+			const taken = containerTaken(kind, contributionKinds);
+			if (taken === undefined || taken === shape) continue;
+			const problem =
+				taken === "record"
+					? `the kind takes a record keyed by name, not ${given}`
+					: `the kind takes a list, not ${given}`;
+			throw new BootError({
+				message: `Module "${m.name}" ${channel} ${kind}: ${problem}.`,
+				reason: "contribution-malformed",
+				stage: "validateManifests",
+				details: { reason: "contribution-malformed", module: m.name, kind, channel, problem },
 			});
 		}
 	}
@@ -1563,6 +1594,14 @@ const FEDERATION_REQUIRED_STORES = [
 ] as const;
 
 /**
+ * The stores an enabled federation needs: all six when any
+ * `core.federations` entry is enabled, else none.
+ */
+function federationStoreSlotsOf(config: AppConfig): readonly ComponentKey[] {
+	return enabledFederationsOf(config).length > 0 ? FEDERATION_REQUIRED_STORES : [];
+}
+
+/**
  * If any `core.federations.<name>.enabled === true`, all six session,
  * federation and refresh-token-family slots must be wired. A missing one
  * makes federation routes either fail at runtime with an opaque 503 (the
@@ -1570,7 +1609,8 @@ const FEDERATION_REQUIRED_STORES = [
  * unexpected 404s (refreshTokenFamilyRevocation, per the `logoutSupported` /
  * `federationTokenSupported` gates in `packages/oauth/src/routes.mts`).
  * Refusing at boot makes both visible. Stage 1 counts a planned slot as
- * wired; stage 3 refuses one that holds `undefined`.
+ * wired; stage 2 builds every provider of one (`federationStoreSlots`), read
+ * or not; stage 3 refuses one that holds `undefined`.
  */
 export function checkFederationStoresWiring(
 	config: AppConfig,
@@ -2083,142 +2123,59 @@ function reservedKeyIssues(
  * Step 13: parses the configuration the composition root handed over
  * (`bootstrapComponents.config`) once, with every schema that reads it:
  *
- * 1. the transitional base (`TransitionalConfigSchema`): core's own sections
- *    and every section core's schema still mirrors for a package, each
- *    optional, so a mirrored section is validated whenever the configuration
- *    carries it, whether or not the module that reads it is loaded;
+ * 1. core's base (`CoreConfigSchema`): core's own sections. Every other
+ *    section is a module's, validated by that module's schema when it is
+ *    loaded and by nothing when it is not;
  * 2. laid over what was written (`overlayConfig`), so a key no schema
- *    declares is kept;
- * 3. then each module's `configSchema`, over the base's output rather than
- *    what was written (so it reads an environment variable's string as the
- *    base coerced it), each laid over the result the same way.
+ *    declares is kept.
  *
  * Returns the composed configuration, which becomes the `config` slot once
  * `parseModuleSections` writes each section back. Refused values make one
  * `config-validation-failed` naming each operator path: every reserved key
  * (`reservedKeyIssues`: an `Object.prototype` member's name, or
- * `prototype`), then the
- * base's issues alone when the base refuses (the module schemas have no
- * output to read), else every module schema's.
+ * `prototype`), a `cors` section that sets anything while no loaded module
+ * owns `cors` (`owned`; `unreadCorsSection`: core reads its CORS origins from
+ * the `httpSettings` slot alone), then the
+ * base's issues. No module is named: a module's own
+ * configuration is its section, parsed after this.
  * @internal
  */
-function validateAndComposeConfig(modules: readonly Module[], bootstrap: BootstrapMap): unknown {
-	const participants: { readonly module: string; readonly schemaPath?: string }[] = [];
+function validateAndComposeConfig(bootstrap: BootstrapMap, owned: ReadonlySet<string>): unknown {
 	const issues: z.core.$ZodIssue[] = [];
 	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
-	for (const m of modules) if (m.configSchema) participants.push({ module: m.name });
-
 	issues.push(...reservedKeyIssues(raw));
-	// Each parse through `parseSection`: a schema that throws instead of
-	// answering — an async refinement, a transform or a getter that throws —
-	// is one more issue naming whose schema it was, not an error escaping
-	// stage 1.
-	const base = parseSection(TransitionalConfigSchema, raw, "core's configuration schema");
-	// The modules' schemas read the base's output. Without one there is
-	// nothing for them to read: over what was written they would refuse the
-	// environment strings the base coerces, errors nobody made.
-	if ("issues" in base) issues.push(...(base.issues as z.core.$ZodIssue[]));
-	const overlaid = "data" in base ? overlayConfig(raw, base.data) : raw;
-
-	let composed = overlaid;
-	const outputs: { readonly module: string; readonly data: unknown }[] = [];
-	for (const m of "data" in base ? modules : []) {
-		if (!m.configSchema) continue;
-		const result = parseSection(m.configSchema, overlaid, `module "${m.name}"'s configSchema`);
-		if ("issues" in result) {
-			issues.push(...(result.issues as z.core.$ZodIssue[]));
-			continue;
-		}
-		outputs.push({ module: m.name, data: result.data });
-		composed = overlayConfig(composed, result.data);
+	const unreadCors = unreadCorsSection(raw, owned);
+	if (unreadCors !== undefined) {
+		issues.push({ code: "custom", path: ["cors"], message: unreadCors, input: undefined });
 	}
-	issues.push(...conflictingOutputs(outputs));
+	// Through `parseSection`: a parse that throws instead of answering — a
+	// getter in a configuration built in code that throws — is one more issue
+	// naming the schema, not an error escaping stage 1.
+	const base = parseSection(CoreConfigSchema, raw, "core's configuration schema");
+	if ("issues" in base) issues.push(...(base.issues as z.core.$ZodIssue[]));
 
 	if (issues.length > 0) {
 		throw new BootError({
 			message: `Config validation failed — ${issues.length} issue(s) found: ${namedIssues(issues)}.`,
 			reason: "config-validation-failed",
 			stage: "validateManifests",
-			details: {
-				reason: "config-validation-failed",
-				issues: issues as z.ZodIssue[],
-				modules: participants,
-			},
+			details: { reason: "config-validation-failed", issues: issues as z.ZodIssue[], modules: [] },
 		});
 	}
-	return composed;
+	return overlayConfig(raw, (base as { readonly data: unknown }).data);
 }
 
 /**
- * Every key two modules' `configSchema`s make different values of, as one
- * issue per path naming both modules, never the values (they may be secrets).
- * Outputs are laid over each other in module order, so a disagreement would
- * otherwise silently go to the module listed later. A leaf is a value that is
- * not a plain object (a list is one value). An object, even an empty one,
- * agrees with every other object at its path and disagrees with a leaf there.
- * Equal values (`isDeepStrictEqual`) agree.
- */
-function conflictingOutputs(
-	outputs: readonly { readonly module: string; readonly data: unknown }[],
-): z.core.$ZodIssue[] {
-	const leaves = new Map<string, { readonly module: string; readonly value: unknown }>();
-	const branches = new Map<string, string>();
-	const conflicts = new Map<
-		string,
-		{ readonly path: readonly string[]; readonly modules: [string, string] }
-	>();
-	// One issue per path, naming the first two modules that disagree there. The
-	// two are always different modules: an output visits each path once, and
-	// module names are unique.
-	const conflict = (path: readonly string[], first: string, second: string) => {
-		const key = JSON.stringify(path);
-		if (!conflicts.has(key)) conflicts.set(key, { path, modules: [first, second] });
-	};
-	const walk = (module: string, value: unknown, path: readonly string[]) => {
-		const key = JSON.stringify(path);
-		if (isPlainConfigObject(value)) {
-			// An object — an empty one too — agrees with every other object at
-			// its path, and with no value there: laid over each other, the later
-			// would win.
-			const leaf = leaves.get(key);
-			if (leaf !== undefined) conflict(path, leaf.module, module);
-			if (!branches.has(key)) branches.set(key, module);
-			for (const name of Object.keys(value)) walk(module, value[name], [...path, name]);
-			return;
-		}
-		const branch = branches.get(key);
-		if (branch !== undefined) conflict(path, branch, module);
-		const leaf = leaves.get(key);
-		if (leaf === undefined) leaves.set(key, { module, value });
-		else if (!isDeepStrictEqual(leaf.value, value)) conflict(path, leaf.module, module);
-	};
-	for (const { module, data } of outputs) walk(module, data, []);
-	return [...conflicts.values()].map(
-		({ path, modules: [first, second] }) =>
-			({
-				code: "custom",
-				path: [...path],
-				message: `module "${first}"'s configSchema and module "${second}"'s make different values of it`,
-				input: undefined,
-			}) as z.core.$ZodIssue,
-	);
-}
-
-/**
- * The top-level sections something loaded owns: every section core's
- * transitional base declares — its own, or one it mirrors — every top-level
- * key of a loaded module's `configSchema`, and the first key of every loaded
- * module's section path. What the configuration sets outside them is what
- * stage 1's notices name (`logConfigNotices`).
+ * The top-level sections something loaded owns: every section core's base
+ * declares and every loaded module's section, at its name. What the
+ * configuration sets outside them is what stage 1's notices name
+ * (`logConfigNotices`).
  * @internal
  */
 function ownedSections(modules: readonly Module[]): ReadonlySet<string> {
-	const owned = new Set<string>(Object.keys(TransitionalConfigSchema.shape));
-	for (const m of modules) {
-		for (const key of Object.keys(m.configSchema?.shape ?? {})) owned.add(key);
-		if (m.section !== undefined) owned.add(sectionSegmentsOf(m)[0] as string);
-	}
+	const owned = new Set<string>(Object.keys(CoreConfigSchema.shape));
+	for (const m of modules) if (m.section !== undefined) owned.add(m.name);
 	return owned;
 }
 
@@ -2226,66 +2183,30 @@ function ownedSections(modules: readonly Module[]): ReadonlySet<string> {
 // Step 13, second half — each module's own configuration section
 // ---------------------------------------------------------------------------
 
-/**
- * The dot-separated path a module's section is read at: its manifest's
- * `section.at`, or else the module's name, whole — a module's name is the
- * section's key as the manifest writes it, and is not split on dots.
- */
-function sectionPathOf(m: Module): string {
-	return m.section?.at ?? m.name;
-}
-
-/** The keys of a dot-separated section path; a module's own name is one key. */
-function sectionSegmentsOf(m: Module): readonly string[] {
-	return m.section?.at === undefined ? [m.name] : m.section.at.split(".");
-}
-
-/** What `writeConfigPath` writes to remove the key at the path. */
+/** What `writeSection` writes to remove the section. */
 const REMOVED: unique symbol = Symbol("removed");
 
-/** What stands in the way of writing a section back: the path, and what it holds. */
-interface WriteBlocked {
-	readonly blockedAt: readonly string[];
-	readonly holding: unknown;
-}
-
 /**
- * `target` with `value` laid over what is at `segments` (`overlayConfig`: a
- * key the value does not hold is kept, one it holds as `undefined` goes),
- * copied on the way down — no object of `target` is changed, and every object
- * on the path is a new one with the same prototype. `REMOVED` removes the key
- * at the path instead. A missing object on the path is created; anything else
- * on it — a scalar, a list, an instance — is where the write is blocked.
+ * `config` with `value` laid over the section at `name` (`overlayConfig`: a
+ * key the value does not hold is kept, one it holds as `undefined` goes), or
+ * with the section removed for `REMOVED`. A copy: `config` is not changed.
+ * The configuration is what `validateAndComposeConfig` answers —
+ * `overlayConfig`'s output, a plain object whatever the composition root
+ * handed over — so the copy is one too.
  */
-function writeConfigPath(
-	target: unknown,
-	segments: readonly string[],
-	value: unknown,
-	walked: readonly string[] = [],
-): { readonly written: unknown } | WriteBlocked {
-	// `value` may be `REMOVED`: the key at the path goes.
-	if (segments.length === 0)
-		return { written: value === REMOVED ? value : overlayConfig(target, value) };
-	if (target !== undefined && !isPlainConfigObject(target)) {
-		return { blockedAt: walked, holding: target };
+function writeSection(config: unknown, name: string, value: unknown): unknown {
+	const target = config as Record<string, unknown>;
+	const copy: Record<string, unknown> = {};
+	for (const key of Object.keys(target)) defineConfigKey(copy, key, target[key]);
+	if (value === REMOVED) delete copy[name];
+	else {
+		const current = Object.hasOwn(target, name) ? target[name] : undefined;
+		defineConfigKey(copy, name, overlayConfig(current, value));
 	}
-	const [key, ...rest] = segments as [string, ...string[]];
-	const current = target !== undefined && Object.hasOwn(target, key) ? target[key] : undefined;
-	const below = writeConfigPath(current, rest, value, [...walked, key]);
-	if (!("written" in below)) return below;
-	const copy: Record<string, unknown> =
-		target !== undefined && Object.getPrototypeOf(target) === null
-			? Object.setPrototypeOf({}, null)
-			: {};
-	if (target !== undefined) {
-		for (const name of Object.keys(target)) defineConfigKey(copy, name, target[name]);
-	}
-	if (below.written === REMOVED) delete copy[key];
-	else defineConfigKey(copy, key, below.written);
-	return { written: copy };
+	return copy;
 }
 
-/** How a blocked write's obstacle is named: its kind, never its value (it may be a secret). */
+/** How a value is named in a refusal: its kind, never the value (it may be a secret). */
 function kindOf(value: unknown): string {
 	if (value === null) return "null";
 	if (Array.isArray(value)) return "a list";
@@ -2295,25 +2216,22 @@ function kindOf(value: unknown): string {
 
 /**
  * Parses every declared section and writes each back into the configuration.
- * A module's section is read at its path out of the composed configuration
+ * A module's section is read at its name out of the composed configuration
  * (coerced where core's schema coerces, whole where no schema declares it)
  * and parsed synchronously with the section's schema.
  *
  * The module gets its schema's output as `deps.section`, deeply frozen
  * (`frozenSection`). The `config` slot gets the same output laid over what is
- * at the section's path (`overlayConfig`), so a narrower schema never strips
- * a loaded module's section. Every section is read before any is written,
- * and outer sections are written first, so an outer schema that keeps only
- * its own keys cannot drop an inner section, and the inner output lands
- * inside the outer's. An output of `undefined` removes what is written at
- * the path. A section whose path a scalar, a list or an instance blocks is
- * refused at its path.
+ * at the module's name (`writeSection`), so a narrower schema never strips a
+ * loaded module's section. An output of `undefined` removes what is written
+ * there.
  *
  * When a schema refuses its value, every section is still parsed, and one
  * `config-validation-failed` names them all; each issue's path is prefixed
  * with its section's, so it names the path the operator wrote, and
- * `details.modules` lists each refused module with its section path. Every
- * module in `modules` is parsed, whether or not a factory of it will run.
+ * `details.modules` lists each refused module with its section's path, its
+ * name. Every module in `modules` is parsed, whether or not a factory of it
+ * will run.
  * @internal
  */
 function parseModuleSections(
@@ -2323,51 +2241,31 @@ function parseModuleSections(
 	readonly config: unknown;
 	readonly sections: ReadonlyMap<string, { readonly value: unknown }>;
 } {
-	const parsed: {
-		readonly module: Module;
-		readonly segments: readonly string[];
-		readonly data: unknown;
-	}[] = [];
+	const parsed: { readonly module: Module; readonly data: unknown }[] = [];
 	const issues: z.ZodIssue[] = [];
 	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
-	const refuse = () => moduleSectionsRefusal(issues, refused);
 
 	for (const m of modules) {
 		if (m.section === undefined) continue;
-		const segments = sectionSegmentsOf(m);
-		const result = parseSection(m.section.schema, readConfigPath(composedConfig, segments));
+		const result = parseSection(m.section.schema, readConfigPath(composedConfig, [m.name]));
 		if ("data" in result) {
-			parsed.push({ module: m, segments, data: result.data });
+			parsed.push({ module: m, data: result.data });
 			continue;
 		}
 		for (const issue of result.issues) {
-			issues.push({ ...issue, path: [...segments, ...issue.path] } as z.ZodIssue);
+			issues.push({ ...issue, path: [m.name, ...issue.path] } as z.ZodIssue);
 		}
-		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
+		refused.push({ module: m.name, schemaPath: m.name });
 	}
-	if (issues.length > 0) throw refuse();
+	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
 
-	// Outer sections first; `sort` is stable, so equal depths keep module order.
 	let config = composedConfig;
-	const byDepth = [...parsed].sort((a, b) => a.segments.length - b.segments.length);
-	for (const { module, segments, data } of byDepth) {
+	for (const { module, data } of parsed) {
 		// A schema that made nothing of the value written there removes it; with
 		// nothing written there, there is nothing to write.
-		if (data === undefined && readConfigPath(config, segments) === undefined) continue;
-		const result = writeConfigPath(config, segments, data === undefined ? REMOVED : data);
-		if ("written" in result) {
-			config = result.written;
-			continue;
-		}
-		issues.push({
-			code: "custom",
-			path: [...segments],
-			// Never the root: boot's parse leaves the configuration a plain object.
-			message: `module "${module.name}"'s section cannot be written back: ${operatorPath(result.blockedAt)} holds ${kindOf(result.holding)}, not an object`,
-		} as z.ZodIssue);
-		refused.push({ module: module.name, schemaPath: sectionPathOf(module) });
+		if (data === undefined && readConfigPath(config, [module.name]) === undefined) continue;
+		config = writeSection(config, module.name, data === undefined ? REMOVED : data);
 	}
-	if (issues.length > 0) throw refuse();
 
 	const sections = new Map<string, { readonly value: unknown }>();
 	for (const { module, data } of parsed) sections.set(module.name, { value: frozenSection(data) });
@@ -2406,10 +2304,10 @@ function switchedOffModules(
 		}
 		issues.push({
 			code: "custom",
-			path: [...sectionSegmentsOf(m)],
+			path: [m.name],
 			message: `module "${m.name}"'s isEnabled did not answer whether its section switches it on: ${problem}`,
 		} as z.ZodIssue);
-		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
+		refused.push({ module: m.name, schemaPath: m.name });
 	}
 	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
 	return off;
@@ -2443,10 +2341,10 @@ function replicaSafetyAsRead(
 		const sectioned = m.section !== undefined;
 		issues.push({
 			code: "custom",
-			path: sectioned ? [...sectionSegmentsOf(m)] : [],
+			path: sectioned ? [m.name] : [],
 			message: `module "${m.name}"'s replicaSafety did not answer what ${sectioned ? "its section holds" : "it holds"} per replica: ${answer.problem}`,
 		} as z.ZodIssue);
-		refused.push(sectioned ? { module: m.name, schemaPath: sectionPathOf(m) } : { module: m.name });
+		refused.push(sectioned ? { module: m.name, schemaPath: m.name } : { module: m.name });
 	}
 	if (issues.length > 0) throw moduleSectionsRefusal(issues, refused);
 	return read;
@@ -2677,7 +2575,7 @@ interface SectionRelocation extends RelocatedPath {
 
 /**
  * The new path of a `relocatedFrom` entry: the section's path as it is read
- * today (`sectionSegmentsOf`) followed by the entry's path inside it — none
+ * (the module's name) followed by the entry's path inside it — none
  * for a list entry or a map entry of `""` — or `null` for an entry of
  * `null`, a key removed rather than moved.
  */
@@ -2689,16 +2587,14 @@ const relocationTarget = (
 
 /**
  * A module's `relocatedFrom` as relocations: each old path, and where it went
- * (`relocationTarget`). A section still read at a transitional `at` is bound
- * to no environment variable yet, and an entry written `{ to,
- * environmentVariable: null }` declares its new path bound to none, so their
- * relocations name none. Read after `checkModuleSectionPaths` held their
- * shape.
+ * (`relocationTarget`). An entry written `{ to, environmentVariable: null }`
+ * declares its new path bound to no variable, so its relocation names none.
+ * Read after `checkModuleSectionPaths` held their shape.
  */
 function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
 	const relocatedFrom = m.section?.relocatedFrom;
 	if (relocatedFrom === undefined) return [];
-	const section = sectionSegmentsOf(m);
+	const section = [m.name];
 	const entries: readonly (readonly [string, unknown])[] = Array.isArray(relocatedFrom)
 		? relocatedFrom.map((from: string) => [from, ""] as const)
 		: Object.entries(relocatedFrom);
@@ -2711,7 +2607,7 @@ function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
 			entry: from,
 			from: from.split("."),
 			to: relocationTarget(section, inside),
-			...(m.section?.at === undefined && !withoutVariable ? {} : { unbound: true }),
+			...(withoutVariable ? { unbound: true } : {}),
 			...(inside === "" ? { toSection: true } : {}),
 		};
 	});
@@ -2728,18 +2624,121 @@ function withCoreRelocations(modules: readonly Module[], core: CoreRelocations):
 }
 
 /**
+ * A module's section is at its name, and its configuration is its section: a
+ * manifest is plain data at run time, so one may still carry `configSchema`,
+ * or a `section` carrying `at`, whatever the value — `null`, `false` and the
+ * module's own name included. Either is refused rather than ignored, since
+ * ignoring it would hand the module its configuration somewhere other than
+ * where it reads it, unparsed by the schema it declared. The message names
+ * the module, the field and the module's name; `details.at` holds the `at`
+ * written (a string quoted in the message, anything else named by its type:
+ * rendering it could throw), or for `configSchema` the section's path, the
+ * module's name (`undefined` without a section). A field whose read throws
+ * (an accessor) is refused the same way, `details.at` `undefined`. Throws
+ * `module-section-path-invalid`.
+ */
+function refuseRemovedSectionFields(rawModules: readonly Module[]): void {
+	for (const m of rawModules) {
+		const unreadable = (field: string, thrown: unknown): BootError =>
+			new BootError({
+				message: `Module "${m.name}" declares ${field}, which could not be read (${failureSummary(thrown)}): a module's section is at its name, "${m.name}".`,
+				reason: "module-section-path-invalid",
+				stage: "validateManifests",
+				details: {
+					reason: "module-section-path-invalid",
+					module: m.name,
+					at: undefined,
+					problem: `reading ${field} threw`,
+				},
+			});
+		let configSchema: unknown;
+		try {
+			configSchema = (m as { readonly configSchema?: unknown }).configSchema;
+		} catch (thrown) {
+			throw unreadable("configSchema", thrown);
+		}
+		if (configSchema !== undefined) {
+			throw new BootError({
+				message: `Module "${m.name}" declares configSchema, which is removed: a module reads its configuration as its section, which is at its name, "${m.name}".`,
+				reason: "module-section-path-invalid",
+				stage: "validateManifests",
+				details: {
+					reason: "module-section-path-invalid",
+					module: m.name,
+					at: m.section === undefined ? undefined : m.name,
+					problem:
+						"configSchema is removed: a module reads its configuration as its section, at its name",
+				},
+			});
+		}
+		let at: unknown;
+		try {
+			at = (m.section as { readonly at?: unknown } | undefined)?.at;
+		} catch (thrown) {
+			throw unreadable("section.at", thrown);
+		}
+		if (at === undefined) continue;
+		const shown =
+			typeof at === "string"
+				? JSON.stringify(at)
+				: at === null
+					? "null"
+					: typeof at === "object"
+						? "an object"
+						: `a ${typeof at}`;
+		throw new BootError({
+			message: `Module "${m.name}" declares section.at (${shown}), which is removed: a module's section is at its name, "${m.name}".`,
+			reason: "module-section-path-invalid",
+			stage: "validateManifests",
+			details: {
+				reason: "module-section-path-invalid",
+				module: m.name,
+				at,
+				problem: "section.at is removed: a module's section is at its name",
+			},
+		});
+	}
+}
+
+/**
+ * No module is named after a key configuration cannot carry
+ * (`reservedKeyReason`: an `Object.prototype` member's name, or
+ * `prototype`): its section, at its name, would be such a key — refused
+ * wherever the configuration writes it, and found inherited where it does
+ * not. Throws `module-section-path-invalid`, naming the module.
+ */
+function refuseReservedModuleNames(rawModules: readonly Module[]): void {
+	for (const m of rawModules) {
+		const reason = reservedKeyReason(m.name);
+		if (reason === undefined) continue;
+		const problem = `the key its section is read at, its name, ${reason}, which configuration cannot carry`;
+		throw new BootError({
+			message: `Module "${m.name}" is named after a key configuration cannot carry: ${problem}.`,
+			reason: "module-section-path-invalid",
+			stage: "validateManifests",
+			details: {
+				reason: "module-section-path-invalid",
+				module: m.name,
+				at: m.section === undefined ? undefined : m.name,
+				problem,
+			},
+		});
+	}
+}
+
+/**
  * Every section path a manifest writes is one it can have written:
  *
- * - `section.at` is a dot-separated path of non-empty keys. A string is
- *   quoted in the message, anything else named by its type (rendering it
- *   could throw: a bigint, a cyclic object); the value is in `details.at`.
  * - `section.relocatedFrom` is a list of such paths, read at every index (a
  *   hole is refused, not skipped), or a plain map (prototype
  *   `Object.prototype` or `null`) from such paths to `""`, a path inside the
  *   section, `null` (removed), or `{ to, environmentVariable: null }` with
  *   `to` either of the first two, for a new path no variable binds.
- * - No old path is or holds a loaded module's section, its own or another's:
- *   a configuration setting that section would then be refused.
+ * - No old path is a loaded module's section, its own or another's: a
+ *   configuration setting that section would then be refused.
+ * - No old path is or lies under `core`, core's own section, unless core
+ *   declares it: a module does not relocate core's keys, whatever core's
+ *   declaration (`relocating`) holds.
  * - No two loaded modules claim overlapping old paths (the same one, or one
  *   under the other), since a key set there would have two new paths; one
  *   module may cover its own old path with a more specific one. The later
@@ -2750,65 +2749,45 @@ function withCoreRelocations(modules: readonly Module[], core: CoreRelocations):
  *   is is refused, and `problem` names the other old path and its module.
  *
  * `details.relocatedFrom` names the entry, or the value when it is neither
- * form or has a hole. Only a manifest's `section` declares a path to hold
- * against; a module read through `configSchema` alone declares none. Core's
- * own section's declaration is held with the modules', as module "core"
- * (`relocating`), so no loaded module is named `core` or reads its section
- * at or under `core`. No section is read at, and no old path lies under,
+ * form or has a hole. First `refuseRemovedSectionFields` holds each
+ * section at its module's name, and `refuseReservedModuleNames` each name to
+ * a key configuration can carry. Core's own section's declaration is held
+ * with the modules', as module "core" (`relocating`), so no loaded module is
+ * named `core`. No section is read at, and no old path lies under,
  * `renamed-variables`, the section reserved for the captures of renamed
  * variables. Then `declaredRenames` holds the variables renamed with the
- * moves, and `checkModuleSectionOwners` each loaded module's section to one
- * owner. Throws `module-section-path-invalid`.
+ * moves. Throws `module-section-path-invalid`.
  * @internal
  */
 function checkModuleSectionPaths(
 	rawModules: readonly Module[],
 	relocating: readonly Module[],
 ): void {
+	refuseRemovedSectionFields(rawModules);
+	refuseReservedModuleNames(rawModules);
 	for (const m of rawModules) {
-		const at: unknown = m.section?.at;
-		if (at === undefined || isKeyPath(at)) continue;
-		const shown = typeof at === "string" ? JSON.stringify(at) : `a ${typeof at}`;
+		if (m.name !== "core") continue;
+		const problem = `"core" is reserved: core's own section, and the name boot gives core's declarations`;
 		throw new BootError({
-			message: `Module "${m.name}" declares its section at ${shown}, which is not a dot-separated path of non-empty keys.`,
-			reason: "module-section-path-invalid",
-			stage: "validateManifests",
-			details: { reason: "module-section-path-invalid", module: m.name, at },
-		});
-	}
-	for (const m of rawModules) {
-		const core =
-			m.name === "core" || (m.section !== undefined && sectionSegmentsOf(m)[0] === "core");
-		if (!core) continue;
-		const problem =
-			m.name === "core"
-				? `"core" is reserved: core's own section, and the name boot gives core's declarations`
-				: "core is reserved for core's own section";
-		throw new BootError({
-			message: `Module "${m.name}" declares ${m.name === "core" ? "the name core" : `its section at "${sectionPathOf(m)}"`}: ${problem}.`,
+			message: `Module "${m.name}" declares the name core: ${problem}.`,
 			reason: "module-section-path-invalid",
 			stage: "validateManifests",
 			details: {
 				reason: "module-section-path-invalid",
 				module: m.name,
-				at: m.section === undefined ? undefined : sectionPathOf(m),
+				at: m.section === undefined ? undefined : m.name,
 				problem,
 			},
 		});
 	}
 	for (const m of rawModules) {
-		if (m.section === undefined || sectionSegmentsOf(m)[0] !== RENAMED_VARIABLES_SECTION) continue;
+		if (m.section === undefined || m.name !== RENAMED_VARIABLES_SECTION) continue;
 		const problem = `${RENAMED_VARIABLES_SECTION} is reserved for the captures of renamed variables`;
 		throw new BootError({
-			message: `Module "${m.name}" declares its section at "${sectionPathOf(m)}": ${problem}.`,
+			message: `Module "${m.name}" declares its section at "${m.name}": ${problem}.`,
 			reason: "module-section-path-invalid",
 			stage: "validateManifests",
-			details: {
-				reason: "module-section-path-invalid",
-				module: m.name,
-				at: sectionPathOf(m),
-				problem,
-			},
+			details: { reason: "module-section-path-invalid", module: m.name, at: m.name, problem },
 		});
 	}
 	const refusal = (m: Module, relocatedFrom: unknown, problem: string): BootError => {
@@ -2825,7 +2804,7 @@ function checkModuleSectionPaths(
 	};
 	const sections = relocating
 		.filter((m) => m.section !== undefined)
-		.map((m) => ({ module: m.name, path: sectionSegmentsOf(m) }));
+		.map((m) => ({ module: m.name, path: [m.name] }));
 	/** Whether `path` is `prefix` or lies under it. Keys are non-empty, so a shorter path never matches. */
 	const under = (path: readonly string[], prefix: readonly string[]): boolean =>
 		prefix.every((key, i) => path[i] === key);
@@ -2893,18 +2872,26 @@ function checkModuleSectionPaths(
 				);
 			}
 			const old = from.split(".");
+			// Core's pseudo-module alone relocates its own keys.
+			if (m.name !== "core" && old[0] === "core") {
+				throw refusal(
+					m,
+					from,
+					"it is or lies under core, core's own section, whose keys no module relocates",
+				);
+			}
+			// A section is one key, so an old path that reaches one is it.
 			const held = sections.find(({ path }) => under(path, old));
 			if (held !== undefined) {
-				const is = held.path.length === old.length ? "is" : "holds";
 				throw refusal(
 					m,
 					from,
 					held.module === m.name
-						? `it ${is} the path the section is read at, so every configuration that sets the section would be refused`
-						: `it ${is} the section of module "${held.module}", so every configuration that sets that section would be refused`,
+						? "it is the path the section is read at, so every configuration that sets the section would be refused"
+						: `it is the section of module "${held.module}", so every configuration that sets that section would be refused`,
 				);
 			}
-			const target = relocationTarget(sectionSegmentsOf(m), inside);
+			const target = relocationTarget([m.name], inside);
 			if (target !== null && overlaps(target, old)) {
 				throw refusal(
 					m,
@@ -2950,7 +2937,6 @@ function checkModuleSectionPaths(
 		);
 	}
 	declaredRenames(relocating);
-	checkModuleSectionOwners(rawModules);
 }
 
 /** A variable name as an environment carries one: a letter or `_`, then letters, digits and `_`. */
@@ -2995,21 +2981,17 @@ function renameOf(
 	}
 	const old = oldPath.split(".");
 	const moved = relocateKey(old, relocations);
-	if (moved === undefined && !isUnder(old, sectionSegmentsOf(m))) {
+	if (moved === undefined && !isUnder(old, [m.name])) {
 		return {
 			problem: `its old path "${oldPath}" lies under none of the paths the section moved from (relocatedFrom), nor in the section`,
 		};
 	}
 	if (moved?.to === null) return { from, oldPath, to: null, path: null };
-	const unbound = moved === undefined ? m.section?.at !== undefined : moved.relocation.unbound;
 	const path = moved?.to ?? oldPath;
 	const to = moved === undefined ? environmentVariableFor(old) : moved.environmentVariable;
-	if (unbound === true) {
+	if (moved?.relocation.unbound === true) {
 		return {
-			problem:
-				m.section?.at === undefined
-					? `its new path "${path}" is declared bound to no variable ({ to, environmentVariable: null }): no variable binds it`
-					: `its new path "${path}" lies under the section's transitional path, which no variable binds yet`,
+			problem: `its new path "${path}" is declared bound to no variable ({ to, environmentVariable: null }): no variable binds it`,
 		};
 	}
 	if (to === undefined) {
@@ -3186,36 +3168,6 @@ function checkRenamedEnvironmentVariables(
 }
 
 /**
- * A section has one owner: two modules whose sections are read at the
- * same path — the same keys, a module's name counting as one key — would
- * each be handed the other's configuration and each write it back. The later
- * module in `modules` is refused with `module-section-path-invalid`, and
- * `problem` names the earlier one. A section inside another module's is not
- * shared: it is written back inside the outer one (`parseModuleSections`).
- * @internal
- */
-function checkModuleSectionOwners(rawModules: readonly Module[]): void {
-	const owners = new Map<string, string>();
-	for (const m of rawModules) {
-		if (m.section === undefined) continue;
-		const key = JSON.stringify(sectionSegmentsOf(m));
-		const owner = owners.get(key);
-		if (owner === undefined) {
-			owners.set(key, m.name);
-			continue;
-		}
-		const at = sectionPathOf(m);
-		const problem = `module "${owner}" declares its section there too, and a section has one owner`;
-		throw new BootError({
-			message: `Module "${m.name}" declares its section at "${at}": ${problem}. Declare each module's section at a path of its own.`,
-			reason: "module-section-path-invalid",
-			stage: "validateManifests",
-			details: { reason: "module-section-path-invalid", module: m.name, at, problem },
-		});
-	}
-}
-
-/**
  * Where stage 1's warnings go — the replica-safety warning and the notices of
  * configuration nothing loaded reads (`logConfigNotices`), one rule for both:
  * the logger the composition root wired as a bootstrap component. A
@@ -3378,7 +3330,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	},
 	{
 		id: "module-section-paths",
-		spec: "issue #728 (a section's transitional path, the paths it moved from, the variables renamed with them, and its one owner)",
+		spec: "issue #728 (a section is at its module's name; the paths it moved from, and the variables renamed with them)",
 		run: (ctx) => checkModuleSectionPaths(ctx.rawModules, ctx.relocating),
 	},
 	{
@@ -3453,9 +3405,14 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		run: (ctx) => checkContributionKindCoverage(ctx.modules, ctx.contributionKinds),
 	},
 	{
+		id: "contribution-containers",
+		spec: "A2-β §5.1 step 5 (each kind's container is its collector's shape)",
+		run: (ctx) => checkContributionContainers(ctx.modules, ctx.contributionKinds),
+	},
+	{
 		id: "contribution-shapes",
 		spec: "issue #728 (a rate-limit prefix; a federation type's declaration)",
-		run: (ctx) => checkContributionShapes(ctx.rawModules, ctx.modules),
+		run: (ctx) => checkContributionShapes(ctx.modules),
 	},
 	{
 		id: "per-kind-contribute-duplicates",
@@ -3627,16 +3584,20 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		config === rawConfig
 			? bootstrapComponents
 			: { ...bootstrapComponents, config: config as BootstrapMap["config"] };
-	const composedConfig = validateAndComposeConfig(modules, parseInput);
+	const composedConfig = validateAndComposeConfig(parseInput, ownedSections(modules));
 	// Each module's own section, parsed out of that configuration by
 	// the module's schema and written back at its path — before any
 	// post-config row, which may assume the configuration is valid.
 	// A limiter section refuses the prefixes every loaded module claims as a
 	// verifier's, switched on or not: no switch is read before the parse.
-	const { config: parsedConfig, sections } = withVerifierLimitDeclarations(
+	const { config: writtenConfig, sections } = withVerifierLimitDeclarations(
 		declaredVerifierLimits(normalisedModules),
 		() => parseModuleSections(modules, composedConfig),
 	);
+	// The `config` slot, and what every later row and stage reads: a frozen
+	// copy (`frozenSection`), so no module changes what another — or core —
+	// reads, and the host's own objects are left as it made them.
+	const parsedConfig = frozenSection(writtenConfig);
 	const substitutedBootstrap: BootstrapMap = {
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],
@@ -3726,5 +3687,6 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 			switchedOn,
 			parsedConfig,
 		),
+		federationStoreSlots: federationStoreSlotsOf(parsedConfig as AppConfig),
 	};
 }

@@ -50,6 +50,7 @@ import { authenticateClient } from "./clientAuthentication.mjs";
 import { delegationRefusal } from "./delegation.mjs";
 import { GRANT_TYPE } from "./grantType.mjs";
 import { issueAccessToken } from "./issuance.mjs";
+import { liveSessionSubject } from "./sessionLiveness.mjs";
 import { issuedTarget, type RequestTargets, requestTargets } from "./targetCeilings.mjs";
 import { readTokenRequest, type TokenRequest } from "./tokenRequest.mjs";
 import {
@@ -70,7 +71,7 @@ export interface TokenExchangeDependencies
 			GrantDependencies,
 			"keyStore" | "logger" | "grantPolicy" | "refreshTokenFamilyRevocation" | "userSessionStore"
 		>,
-		ProviderDeps<"clientRepository"> {
+		ProviderDeps<"clientRepository", "sessionLifecycle"> {
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
 	/**
 	 * What the oauth module provides of `oauth {}`: the access-token lifetimes
@@ -90,6 +91,14 @@ export interface TokenExchangeDependencies
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycle === undefined) {
+		throw new Error(
+			"The token_exchange grant: userSessionStore is wired, but sessionLifecycle is not. " +
+				"Where a user-session store is wired, core's session lifecycle is required: the " +
+				"grant reads the liveness of a presented token's session through it. Install " +
+				"sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
+	}
 	// The lifetimes are read once, when the grant is built, so a hand-built value
 	// that breaks the contract fails the composition instead of every request after
 	// client authentication. Checked whole, never member by member.
@@ -384,7 +393,7 @@ async function presentedTokensRefusal(
 async function standingRefusal(
 	deps: Pick<
 		TokenExchangeDependencies,
-		"refreshTokenFamilyRevocation" | "userSessionStore" | "logger"
+		"refreshTokenFamilyRevocation" | "sessionLifecycle" | "logger"
 	>,
 	role: "subject" | "actor",
 	validated: ValidatedToken,
@@ -458,33 +467,37 @@ async function familyRefusal(
  * the same rule, keyed on the validator's `ValidatedToken.sid` (never
  * `claims.sid`, which a foreign issuer's token may carry).
  *
- * - No `sid`, or no `userSessionStore`: nothing to check (introspection passes
- *   the token too).
- * - No session under the `sid`, or one for another subject: `session_invalid`
- *   (`actor_token session_invalid` for the actor), as `invalid_request`.
- * - The store throws: `503 temporarily_unavailable`, logged once as
+ * - No `sid`, or no `sessionLifecycle` (a sessionless composition, which the
+ *   grant's construction holds to wiring no `userSessionStore` either):
+ *   nothing to check (introspection passes the token too).
+ * - Otherwise the lifecycle's `liveness` decides, so a session closing or
+ *   closed is refused from the closing commit on.
+ * - No live session under the `sid`, or one for another subject:
+ *   `session_invalid` (`actor_token session_invalid` for the actor), as
+ *   `invalid_request`.
+ * - A `liveness` that rejects, or an answer that is neither `live` nor
+ *   `not_live`: `503 temporarily_unavailable`, logged once as
  *   `token_exchange_session_store_unavailable`; an outage is never read as an
  *   ended or a live session.
  */
 async function sessionRefusal(
-	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "logger">,
+	deps: Pick<TokenExchangeDependencies, "sessionLifecycle" | "logger">,
 	role: "subject" | "actor",
 	validated: ValidatedToken,
 	{ sid }: ReportedBindings,
 ): Promise<GrantHandlerResult | null> {
-	const store = deps.userSessionStore;
-	if (sid === undefined || store === undefined) return null;
-	let live: boolean;
-	try {
-		// The session grant's rule: the record must be this token's
-		// subject's. A token naming another subject's session is not tied to
-		// it, and that session's liveness says nothing about this subject.
-		live = (await store.get(sid))?.sub === validated.sub;
-	} catch (err) {
-		(deps.logger ?? consoleLogger).error(
-			{ store: "user_session", step: "get", role, err: loggableError(err) },
-			"token_exchange_session_store_unavailable",
-		);
+	const lifecycle = deps.sessionLifecycle;
+	if (sid === undefined || lifecycle === undefined) return null;
+	const outage = (where: Readonly<Record<string, unknown>>, err?: unknown): GrantHandlerResult => {
+		const logger = deps.logger ?? consoleLogger;
+		if (err === undefined) {
+			logger.error({ ...where, role }, "token_exchange_session_store_unavailable");
+		} else {
+			logger.error(
+				{ ...where, role, err: loggableError(err) },
+				"token_exchange_session_store_unavailable",
+			);
+		}
 		return {
 			result: {
 				status: 503,
@@ -492,8 +505,19 @@ async function sessionRefusal(
 				errorDescription: forRole(role, "session store unavailable"),
 			},
 		};
+	};
+	// The session grant's rule: the session must be this token's subject's. A
+	// token naming another subject's session is not tied to it, and that
+	// session's liveness says nothing about this subject.
+	const where = { store: "session_lifecycle", step: "liveness" };
+	let session: Awaited<ReturnType<typeof liveSessionSubject>>;
+	try {
+		session = await liveSessionSubject(lifecycle, sid);
+	} catch (err) {
+		return outage(where, err);
 	}
-	if (live) return null;
+	if (session === "no_answer") return outage(where);
+	if (session !== "not_live" && session.subject === validated.sub) return null;
 	return invalidRequest(forRole(role, "session_invalid"));
 }
 

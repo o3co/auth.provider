@@ -21,7 +21,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig, withFederation, withInsecureSessionCookie } from "#/testing/index.mjs";
 
 describe("withInsecureSessionCookie", () => {
@@ -31,10 +31,6 @@ describe("withInsecureSessionCookie", () => {
 		const cookie = insecure["session-store"];
 		expect(cookie.secure).toBe(false);
 		expect(cookie.name.startsWith("__Host-")).toBe(false);
-		expect(AppConfigSchema.parse(insecure)["session-store"]).toMatchObject({
-			secure: false,
-			name: cookie.name,
-		});
 	});
 
 	it("writes nothing under the session module's section, where the cookie's keys refuse boot", () => {
@@ -68,7 +64,7 @@ describe("withFederation", () => {
 			clientSecret: "stub-secret",
 			callbackURL: "https://auth.test/session/oauth/federation/stub/callback",
 		});
-		expect(AppConfigSchema.parse(config).core?.federations?.stub).toMatchObject({ enabled: true });
+		expect(CoreConfigSchema.parse(config).core?.federations?.stub).toMatchObject({ enabled: true });
 		expect(config).not.toHaveProperty("federations");
 	});
 
@@ -78,7 +74,7 @@ describe("withFederation", () => {
 			callbackURL: "https://auth.test/corp",
 		});
 		expect(typed.core.federations.corp).toMatchObject({ enabled: true, type: "oidc" });
-		expect(AppConfigSchema.parse(typed).core?.federations?.corp).toMatchObject({ type: "oidc" });
+		expect(CoreConfigSchema.parse(typed).core?.federations?.corp).toMatchObject({ type: "oidc" });
 		// @ts-expect-error: an entry without a type is no entry core reads.
 		withFederation(makeValidAppConfig(), "stub", { callbackURL: "https://auth.test/stub" });
 	});

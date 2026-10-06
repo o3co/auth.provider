@@ -30,26 +30,31 @@
  * routes module's switch (`section.isEnabled`): off, the module registers
  * nothing — no route, admission action or rate-limit prefix — and reads none
  * of the feature's configuration or components.
+ *
+ * On, it provides `federationGrantPolicy` — what modules outside it read of
+ * the section — named `authoritative` and filled eagerly; off, it provides
+ * nothing, and a composition that holds no slot has grants off.
  */
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
+	checkFederationGrantPolicy,
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
 	defineModule,
-	describeAbsenceDeclaration,
-	durationFromEnv,
 	type FederationGrantConnection,
+	type FederationGrantPolicy,
 	type FederationGrantRefresher,
-	isAbsenceDeclared,
 	type ProviderDeps,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantAcquisitionLimits,
+	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,
 	type SupportsSessionsOnlyRevocation,
 	supportsDelegatedAuthorization,
 	type UserSessionStore,
 	wholeNumberFromEnv,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import {
@@ -59,6 +64,7 @@ import {
 } from "./acquisitionSettings.mjs";
 import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { createFederationGrantBackground, federationGrantsCleanupTailMs } from "./background.mjs";
+import { requireSessionLifecycleStore } from "./browserFlow.mjs";
 import {
 	createFederationGrantBrowserRouter,
 	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
@@ -69,8 +75,8 @@ import { resolveFederationGrantConnections } from "./connections.mjs";
 import { createFederationGrantRouter, FEDERATION_GRANTS_RATE_LIMIT_PREFIX } from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 
-/** A duration in whole units, read strictly from a number or a variable's decimal string. */
-const duration = (bounds: z.ZodNumber) => durationFromEnv(bounds).optional();
+/** A duration in whole units of at least `min`, read strictly from a number or a variable's decimal string. */
+const duration = (min: number) => wholeNumberInRangeFromEnv(min).optional();
 
 /** What a grant may be for: one entry of `federation-grants.connections`. Strict. */
 const connectionSchema = z
@@ -81,7 +87,7 @@ const connectionSchema = z
 		// No default for either: a guessed access-token maximum invents a
 		// residual-access policy, and a guessed boundary silently shares one.
 		boundary: z.string().min(1),
-		maxAccessTokenLifetime: durationFromEnv(z.number().int().positive()),
+		maxAccessTokenLifetime: wholeNumberInRangeFromEnv(1),
 		allowScopeSubsets: coerceBooleanFromEnv.optional(),
 		authorizationParams: z.record(z.string(), z.string()).optional(),
 		callbackURL: z.string().min(1).optional(),
@@ -102,22 +108,22 @@ export const federationGrantsConfigSchema = z
 		enabled: coerceBooleanFromEnv.optional(),
 		// Seconds. A new grant's lifetime, and the most an operator permits;
 		// the code's one-year ceiling still applies above it.
-		defaultExpiresIn: duration(z.number().int().positive()),
-		maxExpiresIn: duration(z.number().int().positive()),
+		defaultExpiresIn: duration(1),
+		maxExpiresIn: duration(1),
 		// Seconds. The retrieval's timings.
-		refreshBuffer: duration(z.number().int().nonnegative()),
-		ineligibleRetryAfter: duration(z.number().int().positive()),
-		refreshFailureBackoff: duration(z.number().int().nonnegative()),
+		refreshBuffer: duration(0),
+		ineligibleRetryAfter: duration(1),
+		refreshFailureBackoff: duration(0),
 		// Milliseconds, as the limits they become are.
-		upstreamTimeoutMs: duration(z.number().int().positive()),
-		upstreamHardTimeoutMs: duration(z.number().int().positive()),
-		refreshLockTtlMs: duration(z.number().int().positive()),
-		lockWaitMs: duration(z.number().int().nonnegative()),
-		persistRetryBudgetMs: duration(z.number().int().positive()),
+		upstreamTimeoutMs: duration(1),
+		upstreamHardTimeoutMs: duration(1),
+		refreshLockTtlMs: duration(1),
+		lockWaitMs: duration(0),
+		persistRetryBudgetMs: duration(1),
 		// The rotation budget: upstream refresh-token rotations a grant may
 		// take in a window, and the window in seconds.
 		rotationBudget: wholeNumberFromEnv(z.number().int().positive()).optional(),
-		rotationWindow: duration(z.number().int().positive()),
+		rotationWindow: duration(1),
 		// Whether a subject-wide revocation may be asked to leave this subject's
 		// established grants standing: an allowance the caller must use.
 		allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),
@@ -137,19 +143,31 @@ export const federationGrantsConfigSchema = z
 const unbound = (to: string) => ({ to, environmentVariable: null }) as const;
 
 const REQUIRES = [
-	"config",
 	"federationGrantBackground",
 	"clientRepository",
 	// The synthetic key every consumer of session admission takes: the browser
 	// half admits the browser's session through it at every step. Always
 	// present — the planner fills it.
 	"sessionRequirementResolver",
+	// What the oauth module provides of `oauth {}`: the issuer every route
+	// and the acquisition settings are built on. A composition without that
+	// module fills it.
+	"oauthTokenSettings",
+	// Core's view of `core.federations`, which boot fills: whether the
+	// federation a connection names is configured and on, and the issuer and
+	// client id a grant's identity is pinned to.
+	"federationSettings",
 ] as const;
 const OPTIONAL = [
 	"federationGrantStore",
 	"rateLimiter",
 	"auditSink",
 	"subjectRevocation",
+	// The session lifecycle port the browser flow's admission reads after a
+	// live record: a session closing or closed connects nothing. Required
+	// beside `userSessionStore` once grants are enabled
+	// (`requireSessionLifecycleStore`).
+	"sessionLifecycleStore",
 	"replaySeenSet",
 	"logger",
 	"federationProviders",
@@ -163,10 +181,6 @@ const OPTIONAL = [
 	// session module provides: required once grants are enabled
 	// (`requireCsrfGuard`).
 	"csrfGuard",
-	// What the oauth module provides of `oauth {}`: the issuer every route
-	// and the acquisition settings are built on. Read from the configuration
-	// when no module provides it.
-	"oauthTokenSettings",
 	// Where an enabled deployment registers the drain's tail.
 	"lifecycleRegistrar",
 ] as const;
@@ -186,14 +200,10 @@ export type FederationGrantsModuleDeps = ProviderDeps<
 
 /**
  * The issuer the routes and the acquisition settings are built on: the
- * `oauthTokenSettings` slot's when the composition holds it, the slot
- * read whole and checked first, otherwise `oauth.jwt.issuer` as the
- * configuration carries it.
+ * `oauthTokenSettings` slot's, the slot read whole and checked first.
  */
 const issuerOf = (deps: FederationGrantsModuleDeps): string =>
-	deps.oauthTokenSettings === undefined
-		? deps.config.oauth.jwt.issuer
-		: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).issuer;
+	checkOAuthTokenSettings(deps.oauthTokenSettings).issuer;
 
 /**
  * An enabled deployment with nowhere to keep grants would
@@ -291,19 +301,19 @@ const requireDelegatedCapability = (
 };
 
 /**
- * The audit sink is optional to wire, not optional to decide — here for the
- * events an operator needs most: every disclosure of a credential that works
- * while nobody is watching. The message is built from the shared policy so it
- * cannot drift from every other module's for the same slot.
+ * The `federationGrantPolicy` this module provides, from its parsed section:
+ * the switch, and the keep policy as core's `resolveFederationGrantKeepPolicy`
+ * reads it, never allowed while the switch is off. The value says what the
+ * switch says — `true` whenever boot asks, since boot asks only a module its
+ * section switches on. Held to core's
+ * check, which answers it frozen.
  */
-const requireAuditDecision = (deps: FederationGrantsModuleDeps): void => {
-	if (deps.auditSink !== undefined) return;
-	if (isAbsenceDeclared(deps.config, AUDIT_SINK_ABSENCE_POLICY)) return;
-	throw new Error(
-		"federationGrantsModule: federation-grants.enabled = true with no auditSink component. " +
-			`Wire one, or ${describeAbsenceDeclaration(AUDIT_SINK_ABSENCE_POLICY)} to declare the ` +
-			`capability absent on purpose. ${AUDIT_SINK_ABSENCE_POLICY.hint}`,
-	);
+const grantPolicyOf = (section: FederationGrantsModuleDeps["section"]): FederationGrantPolicy => {
+	const enabled = section?.enabled === true;
+	return checkFederationGrantPolicy({
+		enabled,
+		allowKeepOnSubjectRevocation: enabled && resolveFederationGrantKeepPolicy(section),
+	});
 };
 
 /** The authorizer the connect flow sends a user upstream with: the connection's provider's. */
@@ -429,7 +439,8 @@ export const federationGrantBackgroundModule = defineModule({
 export const federationGrantsModule = defineModule<
 	Requires,
 	Optional,
-	typeof federationGrantsConfigSchema
+	typeof federationGrantsConfigSchema,
+	"federationGrantPolicy"
 >({
 	name: "federation-grants",
 	// Each of the section's own keys moved from `federationGrants`; the grant
@@ -460,6 +471,28 @@ export const federationGrantsModule = defineModule<
 	},
 	requires: REQUIRES,
 	optional: OPTIONAL,
+	// The audit sink is optional to wire, not optional to decide — here for
+	// the events an operator needs most: every disclosure of a credential that
+	// works while nobody is watching. Core's declared-absence guard enforces
+	// it while the module is on; switched off, it attaches nothing.
+	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
+	// What modules outside this one read of `federation-grants {}`: whether
+	// grants are on, and the keep policy in force. They take the slot instead
+	// of reading the section.
+	provides: {
+		federationGrantPolicy: (deps) => grantPolicyOf(deps.section),
+	},
+	// One source while this module is on: its own code reads the section, so
+	// an `overrideComponents` entry for the slot would split what the slot's
+	// readers see from what the module does; boot refuses it
+	// (`authoritative-component-overridden`). Switched off, the module claims
+	// nothing, and a host may fill the slot itself.
+	authoritative: ["federationGrantPolicy"],
+	// Eager: filled whenever this module is installed and on, whether or not
+	// an activated module reads it, so that what the composition holds — its
+	// components included — says grants are on exactly when they are. An
+	// absent slot reads as grants off.
+	lifecycle: { federationGrantPolicy: { eager: true } },
 	contributes: {
 		// What the browser half admits.
 		admissionActions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
@@ -486,9 +519,11 @@ export const federationGrantsModule = defineModule<
 					federationGrantStore: store,
 				});
 				const limits = resolveFederationGrantRetrievalLimits(deps.section);
-				const connections = resolveFederationGrantConnections(deps.section, deps.config);
+				const connections = resolveFederationGrantConnections(
+					deps.section,
+					deps.federationSettings,
+				);
 				requireDelegatedCapability(deps, connections);
-				requireAuditDecision(deps);
 				// What creating a grant needs, refused here rather than at the end
 				// of somebody's consent: the consent page, a callback per connection
 				// on the provider's own origin, somewhere to lodge an intent, and —
@@ -555,7 +590,10 @@ export const federationGrantsModule = defineModule<
 					subjectRevocation: deps.subjectRevocation,
 					federationGrantStore: store,
 				});
-				const connections = resolveFederationGrantConnections(deps.section, deps.config);
+				const connections = resolveFederationGrantConnections(
+					deps.section,
+					deps.federationSettings,
+				);
 				const acquisition = resolveFederationGrantAcquisitionSettings(
 					deps.section,
 					connections,
@@ -563,6 +601,7 @@ export const federationGrantsModule = defineModule<
 					{ issuer: issuerOf(deps) },
 				);
 				const limits = resolveFederationGrantRetrievalLimits(deps.section);
+				requireSessionLifecycleStore(deps);
 				return {
 					id: "federation-grants-browser",
 					mountPath: FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
@@ -577,6 +616,7 @@ export const federationGrantsModule = defineModule<
 						// requirements it asks. Not the grants boundary, which the
 						// callback reads through `grantsBoundary`.
 						subjectRevocation: revocation,
+						sessionLifecycleStore: deps.sessionLifecycleStore,
 						requirements: deps.sessionRequirementResolver,
 						revocationSkewMs: limits.revocationSkewMs,
 						connections: acquisition.connections,

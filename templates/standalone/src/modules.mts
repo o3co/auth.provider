@@ -20,6 +20,7 @@ import {
 	createFederationTokenStoreFactory,
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
 	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
@@ -313,7 +314,7 @@ export const inMemorySessionStoresModule: Module = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it",
+			"user sessions, RP registrations, family indexes, the session lifecycle record and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, a close begun on one replica fences nothing on another, and a credential change enumerates and watermarks only the replica that handled it",
 	},
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
@@ -328,6 +329,9 @@ export const inMemorySessionStoresModule: Module = defineModule({
 		// other store on this branch.
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
 		subjectRevocation: () => createInMemorySubjectRevocation(),
+		// The session lifecycle's record, as the Redis branch provides it; read
+		// only where core's session lifecycle module is installed.
+		sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 	},
 });
 
@@ -364,7 +368,7 @@ export const inMemoryFederationTokenStoreModule: Module = defineModule({
  * route that emits a security event reads, with the sink the composition
  * root's `adapters.auditSink` names: the template's `"logger"` (its default)
  * or one of core's built-ins, with that sink's options from
- * `audit-sink.<name>`. The slot is `optional` on `oauthModule`,
+ * `audit-sink.<name>`. The slot is `optional` on `oauthEndpointsModule`,
  * `sessionModule` and `webauthnModule`, and `emitAuditEvent` is a no-op when
  * it is empty, so this module is always in the manifest; a name no builder is
  * registered under refuses boot. The sink's options moved from `audit.sink`.
@@ -396,28 +400,6 @@ export function auditSinkModuleFor(sink: string): Module {
 		},
 	});
 }
-
-/**
- * @deprecated Split into `inMemorySessionStoresModule` and
- * `inMemoryFederationTokenStoreModule`; use those. Kept for consumers that
- * imported `storesModule` from this file.
- */
-export const storesModule: Module = defineModule({
-	name: "stores",
-	// Everything this bundle provides lives in process memory, so a
-	// composition still on it is refused under `core.deployment.mode = "multi"`
-	// like the split modules it stands in for.
-	replicaSafety: {
-		unsafe: true,
-		reason:
-			"user sessions, RP registrations, family indexes, the subject-level revocation pair and upstream federation tokens fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others",
-	},
-	requires: ["config"] as const,
-	provides: {
-		...inMemorySessionStoresModule.provides,
-		...inMemoryFederationTokenStoreModule.provides,
-	},
-});
 
 /**
  * Shared ioredis clients module: opens ONE long-lived ioredis connection per
@@ -583,7 +565,7 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		},
 		// Required by `redisDeviceCodeStoreModule`. This template does not mount
 		// the device grant; the slot is provided anyway, so a deployment that
-		// adds `deviceGrantModule` with the Redis store is not refused at boot
+		// adds `deviceAuthorizationGrantModule` with the Redis store is not refused at boot
 		// (`missing-required-component`) for a client slot nothing provided.
 		deviceCodeStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)

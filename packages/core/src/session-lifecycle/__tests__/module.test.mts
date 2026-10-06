@@ -16,8 +16,8 @@
 
 /**
  * `sessionLifecycleModule` at boot: the slot it fills, the notifier a
- * composition with relying parties must wire, and the sweep it starts only
- * when `core.sessionLifecycle.sweepIntervalSeconds` is written.
+ * composition with relying parties must wire, and the sweep it starts every
+ * `core.sessionLifecycle.sweepIntervalSeconds` (60 unwritten; 0 turns it off).
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -173,7 +173,7 @@ describe("sessionLifecycleModule", () => {
 			message: expect.stringContaining(
 				"core-session-lifecycle: relying parties are served (the clientRepository slot is filled) " +
 					"and no sessionCloseNotifier is wired, so a closed session's relying parties would never " +
-					"be told. Install a module that contributes a sessionCloseNotifiers entry.",
+					"be told. Install a module that contributes a sessionCloseNotifiers entry (oauthEndpointsModule does).",
 			),
 		});
 	});
@@ -301,16 +301,34 @@ describe("sessionLifecycleModule", () => {
 			expect(counting.listings()).toBe(2);
 		});
 
-		it("does not sweep unless the interval is written", async () => {
+		it("sweeps every 60 seconds when the interval is not written", async () => {
 			vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
 			const counting = countingStore();
-			const handle = await boot({ overrides: { sessionLifecycleStore: counting.store } });
+			const handle = await boot({
+				overrides: { sessionLifecycleStore: counting.store },
+				activated: false,
+			});
+			await vi.advanceTimersByTimeAsync(59_999);
+			expect(counting.listings()).toBe(0);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(counting.listings()).toBe(1);
+			await handle.dispose();
+		});
+
+		it.each([0, "0"])("does not sweep with an interval of %j", async (value) => {
+			vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+			const counting = countingStore();
+			const handle = await boot({
+				sweepIntervalSeconds: value,
+				overrides: { sessionLifecycleStore: counting.store },
+				activated: false,
+			});
 			await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
 			expect(counting.listings()).toBe(0);
 			await handle.dispose();
 		});
 
-		it.each([0, -1, 1.5, "1e3", "", true, 2_147_484])(
+		it.each([-1, 1.5, "1e3", "", true, 2_147_484])(
 			"refuses to boot with an interval of %j, naming the key",
 			async (value) => {
 				await expect(boot({ sweepIntervalSeconds: value })).rejects.toThrow(SWEEP_KEY);

@@ -268,7 +268,7 @@ export interface MfaRoutesOptions {
 	/** What the regeneration of recovery codes reads beside the management's (`recoveryCodes.mts`). */
 	readonly recoveryCodes: Pick<
 		MfaRecoveryCodesOptions,
-		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMarkMs" | "leaseMs"
+		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMark"
 	>;
 }
 
@@ -342,8 +342,29 @@ const noStore: RequestHandler = (_req, res, next) => {
 	next();
 };
 
+/**
+ * Where a user-session store is wired, core's session lifecycle is required:
+ * admission reads the session's lifecycle record through the port, so a
+ * session closing or closed is admitted to nothing. Throws when the store is
+ * wired without the port.
+ */
+export function requireSessionLifecycleStore(
+	admission: Pick<AdmissionDeps, "userSessionStore" | "sessionLifecycleStore">,
+): void {
+	if (admission.userSessionStore !== undefined && admission.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"mfa: userSessionStore is wired, but sessionLifecycleStore is not. Where a user-session " +
+				"store is wired, core's session lifecycle is required: the MFA routes' admission reads " +
+				"the session's lifecycle record through it. Wire core's session lifecycle: a " +
+				"session-store module that fills sessionLifecycleStore (memorySessionStoresModule or " +
+				"redisSessionStoresModule) and sessionLifecycleModule.",
+		);
+	}
+}
+
 /** The MFA routes' router (see this file's header). */
 export function createMfaRouter(options: MfaRoutesOptions): Router {
+	requireSessionLifecycleStore(options.admission);
 	const {
 		coordinator,
 		admission,
@@ -362,8 +383,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 
 	/**
 	 * The session the request's cookie carries, admitted for `action`, and the
-	 * renewal nonce of the claim admission compared — what an escalation of
-	 * this session expects the record to hold.
+	 * record's renewal nonce as admission read it — what an escalation of this
+	 * session expects the record to hold. None for a record that holds none,
+	 * whatever the cookie session holds.
 	 */
 	const admitCookie = async (
 		req: Request,
@@ -374,9 +396,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	}> => {
 		// express-session's `req.session`, read without its type package.
 		const claim = cookieClaim(req as unknown as CookieCarrier);
+		const admitted = await admitSession(admission, { claim, action });
 		return {
-			admitted: await admitSession(admission, { claim, action }),
-			expectedRenewalNonce: claim.renewalNonce,
+			admitted,
+			expectedRenewalNonce: admitted.outcome === "admitted" ? admitted.renewalNonce : undefined,
 		};
 	};
 

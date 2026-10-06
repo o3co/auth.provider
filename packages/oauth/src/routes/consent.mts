@@ -57,6 +57,7 @@ import {
 	loggableError,
 	type PendingConsentRecord,
 	type PendingConsentStore,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type UserSessionStore,
@@ -66,7 +67,7 @@ import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
 import type { AuthorizationResponse } from "./authorizationResponse.mjs";
 
-/** The action the consent step admits, as `oauthModule` registers it. */
+/** The action the consent step admits, as `oauthEndpointsModule` registers it. */
 const CONSENT_ACTION = "oauth.consent" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
 
 /**
@@ -103,6 +104,8 @@ export interface ConsentRouterOptions {
 	 * later login inherits without being asked.
 	 */
 	readonly userSessionStore?: UserSessionStore;
+	/** The session lifecycle's record admission reads after a live session: closing is not live. */
+	readonly sessionLifecycleStore?: SessionLifecycleStore;
 	/** The subject-revocation boundary, applied to the live record when wired. */
 	readonly subjectRevocation?: SubjectRevocation;
 	/** The registered session requirements; required. */
@@ -147,12 +150,14 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		auditSink,
 		logger,
 		userSessionStore,
+		sessionLifecycleStore,
 		subjectRevocation,
 	} = opts;
 	// What admission reads for these endpoints: the router's slots as wired,
 	// and no acr table, since consent asks for no acr.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore,
+		sessionLifecycleStore,
 		subjectRevocation,
 		requirements: checkResolver(opts.requirements, "createConsentRouter", [CONSENT_ACTION]),
 		acrTable: {},

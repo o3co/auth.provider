@@ -27,19 +27,16 @@ import {
 //
 // No `keyof` containment, unlike the grant modules: this provider hands its
 // deps to no factory whole, but builds the options of
-// `createSubjectRevocationService` and `cascadeLogout` field by field, and
+// `createSubjectRevocationService` field by field, and
 // those keys are not slots. The typed callback is the whole of the guard.
 
 const REQUIRES = [
-	"config",
-	"userSessionStore",
-	"sessionRPRegistry",
-	"sessionFamilyIndex",
-	"sessionFederationIndex",
-	"refreshTokenFamilyRevocation",
-	"federationTokenStore",
+	// Core's session lifecycle, which closes each of the subject's sessions.
+	"sessionLifecycle",
 	// The session's lifetime, which the horizon is sized from.
 	"sessionCookiePolicy",
+	// The token lifetimes the horizon is sized from.
+	"oauthTokenSettings",
 ] as const;
 const OPTIONAL = [
 	"subjectSessionIndex",
@@ -47,9 +44,8 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
-	// The token lifetimes the horizon is sized from, read from the
-	// configuration without it.
-	"oauthTokenSettings",
+	// Whether grants are on and may be kept; absent, grants are off.
+	"federationGrantPolicy",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

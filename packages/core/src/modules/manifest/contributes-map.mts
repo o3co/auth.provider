@@ -148,8 +148,8 @@ export interface FederationTypeContribution<Deps, E = unknown> {
 	/**
 	 * The schema of an entry of this type: the keys the adapter reads. The keys
 	 * core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
-	 * `callbackURL`) are stripped first, so a strict schema names only the
-	 * type's keys.
+	 * `callbackMeetsFreshness`, `callbackURL`) are stripped first, so a strict
+	 * schema names only the type's keys.
 	 */
 	readonly entrySchema: z.ZodType<E>;
 	/**
@@ -313,8 +313,9 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * name it passes `admitSession` (`acme.export`), each declaring one of
 	 * core's grades. A declaration, not a factory: boot reads each once, at
 	 * stage 1. A name outside the grammar, a grade outside the grades (or
-	 * `remediation`, a requirement's), a container that is not a record and an
-	 * override refuse it there (`contribution-malformed`); a name two modules
+	 * `remediation`, a requirement's) and a container that is not a record
+	 * refuse it there (`contribution-malformed`), and an override too
+	 * (`contribution-kind-guarded`); a name two modules
 	 * register refuses it too (`duplicate-contribute`); a host may not supply
 	 * the collector (`contribution-kind-guarded`).
 	 */
@@ -340,7 +341,7 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	readonly grantPolicyHooks?: readonly GrantPolicyHookFactory<Deps>[];
 	/**
 	 * Express middleware mounted on the token endpoint (`/oauth/token` with the
-	 * bundled `oauthModule`) BEFORE grant dispatch: token binding, custom rate
+	 * bundled `oauthEndpointsModule`) BEFORE grant dispatch: token binding, custom rate
 	 * limiters, body pre-processing. `null`-returning factories are skipped.
 	 * List-shaped; mounted in module-registration order.
 	 *

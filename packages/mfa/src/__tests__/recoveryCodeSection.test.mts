@@ -100,7 +100,7 @@ describe("mfaRecoveryCodeFactorModule, which declares the section", () => {
 	it("is named after its section, reads it at its name, and declares the package's reference.conf", () => {
 		const module = mfaRecoveryCodeFactorModule;
 		expect(module.name).toBe("mfa-recovery-code-factor");
-		expect(module.section?.at).toBeUndefined();
+		expect(module.section).not.toHaveProperty("at");
 		expect(module.section?.reference?.href).toBe(new URL(`file://${REFERENCE}`).href);
 		expect(module.requires ?? []).toEqual([]);
 		expect(module.replicaSafety).toBeUndefined();

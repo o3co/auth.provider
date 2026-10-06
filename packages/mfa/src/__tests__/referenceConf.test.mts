@@ -147,15 +147,14 @@ describe("the package's reference.conf", () => {
 		});
 	});
 
-	it("defaults the MFA routes' budget, mfa.rateLimit.routes, to 60 requests per 300 seconds, which the module contributes under the mfa prefix", async () => {
+	it("ships no budget for the MFA routes: mfa.rateLimit is unset, and the module claims the mfa prefix with none", async () => {
 		const config = resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") });
-		const routes = (config.mfa as { rateLimit?: { routes?: unknown } }).rateLimit?.routes;
-		expect(routes).toEqual({ limit: 60, windowSeconds: 300 });
+		expect(config.mfa).not.toHaveProperty("rateLimit");
 		expect(
 			await mfaModule().contributes?.rateLimitBudgets?.[MFA_RATE_LIMIT_PREFIX]?.({
 				section: config.mfa,
 			} as never),
-		).toEqual({ limit: 60, windowSeconds: 300 });
+		).toBeNull();
 	});
 
 	it("defaults the first binding's proof, mfa.enrollment.requireEmailProof, to when-mail, which MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF sets", () => {

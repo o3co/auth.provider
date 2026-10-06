@@ -344,6 +344,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+federationTrustsUpstreamAmr\b/,
 	},
 	{
+		concept: "whether a federation's callback alone meets a freshness ask — callbackMeetsFreshness",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+federationCallbackMeetsFreshness\b/,
+	},
+	{
+		concept: "an upstream id_token's auth_time as an instant",
+		home: "packages/core/src/federations/upstream-auth-time.mts",
+		definition: /(?:function|const)\s+readUpstreamAuthTime\b/,
+	},
+	{
 		concept: "what a verified second factor makes of a session (the MFA ADR's D9)",
 		home: "packages/core/src/user-sessions/authentication.mts",
 		definition: /(?:function|const)\s+sessionAfterSecondFactor\b/,
@@ -704,6 +714,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+checkDeploymentMode\b/,
 	},
 	{
+		concept:
+			"the federation grants' switch and keep policy as a reader outside the module holds it — the check of the federationGrantPolicy slot",
+		home: "packages/core/src/federation-grants/policy.mts",
+		definition: /(?:function|const)\s+checkFederationGrantPolicy\b/,
+	},
+	{
 		concept: "a control character in configured text — C0, DEL or C1, but those a rule allows",
 		home: "packages/core/src/security/controlCharacters.mts",
 		definition: /(?:function|const)\s+hasControlCharacter\b/,
@@ -713,6 +729,17 @@ const VOCABULARY: readonly VocabularyRow[] = [
 			"an environment name as a development-only guard reads it — trimmed, lower case, production or staging whichever name says so",
 		home: "packages/core/src/deployment/environment.mts",
 		definition: /(?:function|const)\s+(?:readEnvironmentName|productionEnvironmentIn)\b/,
+	},
+	{
+		// A private copy of the guard under another name still lists the two
+		// names: an array of them, in either order and either quote, is the
+		// rule restated, wherever it is spread, wrapped in a Set or tested.
+		concept:
+			"the environment names a development-only guard refuses — production and staging, as one list",
+		home: "packages/core/src/deployment/environment.mts",
+		definition:
+			/\[\s*(["'`])production\1\s*,\s*(["'`])staging\2\s*,?\s*\]|\[\s*(["'`])staging\3\s*,\s*(["'`])production\4\s*,?\s*\]/,
+		homeMatches: 1,
 	},
 	{
 		concept: "an email address as the provider digests and compares it",
@@ -1854,8 +1881,8 @@ function sessionRecordReadSites(): Map<string, SessionRecordRead[]> {
 }
 
 /**
- * Core's configuration schema: the one schema that declares `deployment` —
- * under core's own section, and presence-only at the path it moved from.
+ * Core's configuration schema: the one schema that declares `deployment`,
+ * under core's own section.
  */
 const DEPLOYMENT_SCHEMA_HOME = "packages/core/src/config/application.schema.mts";
 
@@ -2498,7 +2525,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			Object.entries(deploymentTouchSites("schema")).map(([file, found]) => [file, found.length]),
 		);
 		expect(counts, "the section is core's: a module requires the deploymentMode slot").toEqual({
-			[DEPLOYMENT_SCHEMA_HOME]: 2,
+			[DEPLOYMENT_SCHEMA_HOME]: 1,
 		});
 	});
 
@@ -2513,6 +2540,31 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		for (const row of VOCABULARY) {
 			// The doc names the home path, so map and guard cannot drift apart.
 			expect(doc, `docs/design-vocabulary.md must name ${row.home}`).toContain(row.home);
+		}
+	});
+
+	it("flags a private list of the production environment names under any name, and not the names alone", () => {
+		const row = VOCABULARY.find(
+			({ concept }) =>
+				concept ===
+				"the environment names a development-only guard refuses — production and staging, as one list",
+		);
+		expect(row?.home).toBe("packages/core/src/deployment/environment.mts");
+		const definition = row?.definition ?? /$^/;
+		for (const copy of [
+			'const PROD = new Set(["production", "staging"]);',
+			"const blocked = ['staging', 'production'];",
+			"if ([`production`,\n  `staging`,\n].includes(env)) {}",
+		]) {
+			expect(definition.test(copy), copy).toBe(true);
+		}
+		for (const other of [
+			'type Name = "production" | "staging";',
+			'const only = ["production"];',
+			'const modes = ["production", "development"];',
+			'if (env === "production") {}',
+		]) {
+			expect(definition.test(other), other).toBe(false);
 		}
 	});
 

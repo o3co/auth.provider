@@ -17,15 +17,13 @@
 /**
  * Where a configuration path lands in a Zod schema: what
  * `schemasAtPath` finds through each shape a configuration schema takes, what
- * `outputKinds` can and cannot tell of a schema without running it, and what
- * `pickConfigSchema` reads through a record and refuses.
+ * `outputKinds` can and cannot tell of a schema without running it.
  */
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
 	outputKinds,
-	pickConfigSchema,
 	readsEnvironmentString,
 	schemaObjectLevels,
 	schemasAtPath,
@@ -97,54 +95,6 @@ describe("outputKinds — what a schema produces, when it can be told without ru
 	it("tells a preprocess by what it hands its schema, and a plain schema by its type", () => {
 		expect(outputKinds(z.preprocess((value) => value, z.boolean()))).toEqual(new Set(["boolean"]));
 		expect(outputKinds(z.number().optional())).toEqual(new Set(["number"]));
-	});
-});
-
-describe("pickConfigSchema — the schema of the paths read alone", () => {
-	const schema = z.object({
-		federations: z.record(
-			z.string(),
-			z.object({ enabled: z.coerce.boolean(), clientId: z.string() }),
-		),
-	});
-
-	it("reads a path through a record's entry, with the entry's own schema", () => {
-		const picked = pickConfigSchema(schema, ["federations.google.enabled"]);
-		expect(picked.parse({ federations: { google: { enabled: "true", clientId: 1 } } })).toEqual({
-			federations: { google: { enabled: true } },
-		});
-	});
-
-	it("refuses a path a union offers several schemas for, naming how many", () => {
-		const either = z.object({
-			a: z.union([z.object({ b: z.string() }), z.object({ b: z.number() })]),
-		});
-		expect(() => pickConfigSchema(either, ["a.b"])).toThrow(
-			new RangeError(
-				'cannot read "a.b": the configuration schema declares 2 schemas there — read a shorter path',
-			),
-		);
-	});
-
-	it("reads an absent ancestor of a picked path as the default the schema declares for it", () => {
-		const defaulted = z.object({
-			section: z.object({ mode: z.enum(["off", "on"]).default("off") }).default({ mode: "off" }),
-			other: z.object({ mode: z.enum(["off", "on"]) }).optional(),
-		});
-		const picked = pickConfigSchema(defaulted, ["section.mode", "other.mode"]);
-		expect(picked.parse({})).toEqual({ section: { mode: "off" } });
-		expect(picked.parse({ section: { mode: "on" }, other: { mode: "on" } })).toEqual({
-			section: { mode: "on" },
-			other: { mode: "on" },
-		});
-	});
-
-	it("refuses a path with an empty key", () => {
-		for (const path of ["federations..enabled", ".federations", "federations."]) {
-			expect(() => pickConfigSchema(schema, [path]), path).toThrow(
-				new RangeError(`cannot read "${path}": not a dot-separated path of non-empty keys`),
-			);
-		}
 	});
 });
 

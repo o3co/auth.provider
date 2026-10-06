@@ -92,7 +92,7 @@ function makeStubRouteCollector() {
 // ---------------------------------------------------------------------------
 
 describe("validateManifests — a module factory listed without being called", () => {
-	// A factory such as `deviceGrantModule({ config })` is assignable to
+	// A factory such as `lateModule({ config })` is assignable to
 	// `Module` uncalled: a function has a `name`, and that is the one field
 	// `Module` requires. Listed that way it would contribute nothing — no
 	// grant, no route, no check — and boot would succeed without a word.
@@ -807,18 +807,16 @@ describe("validateManifests — step 12: lifecycle-without-provides", () => {
 // ---------------------------------------------------------------------------
 
 describe("validateManifests — step 13: config-validation-failed", () => {
-	it("composes configSchemas and throws config-validation-failed on parse error", () => {
-		// Module-specific top-level key (`cfgModRetries`) chosen so it cannot
-		// visually collide with `http.port` from CoreConfigSchema's `minCoreConfig`.
+	it("parses each module's section and throws config-validation-failed on parse error", () => {
 		const m = defineModule({
 			name: "cfg-mod",
-			configSchema: z.object({ cfgModRetries: z.number() }),
+			section: { schema: z.object({ retries: z.number() }) },
 		});
 		try {
 			validateManifests({
 				modules: [m],
 				bootstrapComponents: {
-					config: { ...minCoreConfig, cfgModRetries: "not-a-number" } as never,
+					config: { ...minCoreConfig, "cfg-mod": { retries: "not-a-number" } } as never,
 					pathResolver: minBootstrap.pathResolver,
 				},
 			});
@@ -827,15 +825,15 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 			expect(err.reason).toBe("config-validation-failed");
 			if (err.details.reason === "config-validation-failed") {
 				expect(err.details.issues.length).toBeGreaterThan(0);
-				expect(err.details.modules.some((mod) => mod.module === "cfg-mod")).toBe(true);
+				expect(err.details.modules).toEqual([{ module: "cfg-mod", schemaPath: "cfg-mod" }]);
 			}
 			return;
 		}
 		expect.fail("should have thrown");
 	});
 
-	it("CoreConfigSchema is enforced even when zero modules declare configSchema", () => {
-		// With no module declaring a configSchema, CoreConfigSchema is still
+	it("CoreConfigSchema is enforced even when no module declares a section", () => {
+		// With no module declaring a section, CoreConfigSchema is still
 		// parsed: a config missing the required `oauth` object must throw
 		// `config-validation-failed`.
 		const noSchema = defineModule({ name: "no-schema" });
@@ -856,8 +854,7 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 			expect(err.reason).toBe("config-validation-failed");
 			if (err.details.reason === "config-validation-failed") {
 				expect(err.details.issues.length).toBeGreaterThan(0);
-				// participants list is empty (no module-declared schemas)
-				// but CoreConfigSchema's issues are still surfaced.
+				// Core's parse names no module, but its issues are surfaced.
 				expect(err.details.modules).toEqual([]);
 			}
 			return;
@@ -865,8 +862,8 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 		expect.fail("should have thrown");
 	});
 
-	it("propagates parsed config through bootstrapComponents even with zero configSchema modules", () => {
-		// With zero configSchema modules and a minimal valid config, the parsed
+	it("propagates parsed config through bootstrapComponents even with no sectioned module", () => {
+		// With no sectioned module and a minimal valid config, the parsed
 		// config (no schema-injected values: defaults live in hocon, ADR
 		// 2026-04-30) must still flow into bootstrapComponents intact.
 		const noSchema = defineModule({ name: "no-schema" });
@@ -991,19 +988,19 @@ describe("validateManifests — step 14: route-order-target-missing", () => {
 describe("validateManifests — step 13: parsed config carried forward in bootstrapComponents", () => {
 	it("substitutes the parsed config (with Zod defaults applied) into bootstrapComponents", () => {
 		// "myModule" is absent from the input config; the returned
-		// bootstrapComponents.config must carry the parsed value, with Zod's
-		// default applied, so downstream stages see it.
+		// bootstrapComponents.config must carry its section's parsed value,
+		// with Zod's default applied, so downstream stages see it.
 		const defaultTimeout = 42;
 		const m = defineModule({
-			name: "cfg",
-			configSchema: z.object({
-				myModule: z
+			name: "myModule",
+			section: {
+				schema: z
 					.object({
 						timeout: z.number().default(defaultTimeout),
 					})
 					.optional()
 					.default({ timeout: defaultTimeout }),
-			}),
+			},
 		});
 		// Pass a valid CoreConfigSchema-compatible config but omit "myModule".
 		const result = validateManifests({

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { expectTypeOf, test } from "vitest";
-import type { FederationProvider } from "#/federations/types.mjs";
+import type { FederationAsk, FederationProfile, FederationProvider } from "#/federations/types.mjs";
 
 test("FederationProvider has buildAuthorizationUrl", () => {
 	expectTypeOf<FederationProvider>().toHaveProperty("buildAuthorizationUrl");
@@ -37,4 +37,23 @@ test("FederationProvider does NOT have validateRedirect", () => {
 test("FederationProvider does NOT have resolveCallbackRedirect", () => {
 	type HasResolve = "resolveCallbackRedirect" extends keyof FederationProvider ? true : false;
 	expectTypeOf<HasResolve>().toEqualTypeOf<false>();
+});
+
+test("buildAuthorizationUrl takes an optional freshness ask, which only an OIDC upstream may honour", () => {
+	type Params = Parameters<FederationProvider["buildAuthorizationUrl"]>[0];
+	expectTypeOf<Params["ask"]>().toEqualTypeOf<FederationAsk | undefined>();
+	expectTypeOf<FederationAsk>().toEqualTypeOf<{
+		readonly login?: true;
+		readonly maxAgeSeconds?: number;
+	}>();
+	// A caller that asks nothing still compiles: the ask is optional.
+	expectTypeOf<{
+		redirectUri: string;
+		state: string;
+		codeVerifier: string;
+	}>().toExtend<Params>();
+});
+
+test("FederationProfile carries the upstream authentication instant as a Date, when it showed one", () => {
+	expectTypeOf<FederationProfile["authTime"]>().toEqualTypeOf<Date | undefined>();
 });

@@ -16,7 +16,6 @@
 
 import {
 	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
-	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
 	defineModule,
@@ -30,6 +29,7 @@ import {
 import express from "express";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
+import { createSessionCloseNotifier } from "./logout/sessionCloseNotifier.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
 import { createOAuthRouter } from "./routes.mjs";
@@ -40,15 +40,33 @@ export { oauthSectionSchema };
 
 /**
  * The module's section, `oauth`, strict at every level (`./section.mts`), with
- * the package's defaults: the consent page moved from `endpoints.consent.url`,
- * and `ENDPOINTS_CONSENT_URL` and the Client ID Metadata Documents'
- * `OAUTH_CIMD_*` variables renamed after their paths (`OAUTH_CONSENT_PAGE_URL`,
+ * the package's defaults: the consent page moved from `endpoints.consent.url`;
+ * three keys removed, each refusing boot set to a value, since the behaviour it
+ * switched no longer exists — `oauth.refreshToken.legacyRtPolicy` (a refresh
+ * token lacking `jti` or `family_id` while family rotation is wired is always
+ * refused), `oauth.refreshToken.legacyTokenCompat` (no v0.4.x refresh-token
+ * shape is accepted) and `oauth.authorize.allowUnmarkedClients` (`/authorize`
+ * refuses every client not marked `firstParty: true`); and
+ * `ENDPOINTS_CONSENT_URL` and the Client ID Metadata Documents' `OAUTH_CIMD_*`
+ * variables renamed after their paths (`OAUTH_CONSENT_PAGE_URL`,
  * `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`).
+ *
+ * `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` is not declared renamed here while
+ * core's own `reference.conf` binds it at `oauth.authorize.allowUnmarkedClients`:
+ * a variable declared renamed may be bound nowhere but its capture. Core's
+ * binding writes an exported value at that removed path, which this section's
+ * relocation refuses. The declaration replaces that binding when core's
+ * `reference.conf` stops setting `oauth {}`.
  */
 const SECTION = {
 	schema: oauthSectionSchema,
 	reference: new URL("../config/reference.conf", import.meta.url),
-	relocatedFrom: { "endpoints.consent.url": "consentPage.url" },
+	relocatedFrom: {
+		"endpoints.consent.url": "consentPage.url",
+		"oauth.refreshToken.legacyRtPolicy": null,
+		"oauth.refreshToken.legacyTokenCompat": null,
+		"oauth.authorize.allowUnmarkedClients": null,
+	},
 	renamedVariables: {
 		ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
 		OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",
@@ -80,8 +98,10 @@ const SECTION = {
 /**
  * Declarative manifest for the OAuth 2.0 endpoint suite: one module value,
  * `oauth`, which owns `oauth {}`. Every dependency flows through the typed DI
- * graph (`requires` / `optional`), and every `oauth.*` setting it reads comes
- * from its own section (`deps.section`).
+ * graph (`requires` / `optional`), every `oauth.*` setting it reads comes
+ * from its own section (`deps.section`), and what it reads of the
+ * federations from core's `federationSettings` slot; it reads nothing else of
+ * the configuration.
  *
  * Contributes one route, "oauth-endpoints" at `/oauth`, and a
  * `discoveryMetadata` slice (its issuer-relative endpoints and capability
@@ -91,10 +111,10 @@ const SECTION = {
  *
  * `grantPolicy.evaluate` gates `/oauth/token`, and
  * `refreshTokenFamilyRevocation.isFamilyRevoked` is read by introspect,
- * userinfo, the logout cascade and federation-token.
+ * userinfo and the federation routes.
  */
 export const oauthEndpointsModule: Module = defineModule<
-	| "config"
+	| "federationSettings"
 	| "clientRepository"
 	| "keyStore"
 	| "grantHandlerResolver"
@@ -107,10 +127,9 @@ export const oauthEndpointsModule: Module = defineModule<
 	| "accessTokenDenylist"
 	| "subjectRevocation"
 	| "userSessionStore"
-	| "sessionRPRegistry"
-	| "sessionFamilyIndex"
-	| "sessionFederationIndex"
+	| "sessionLifecycleStore"
 	| "federationTokenStore"
+	| "sessionLifecycle"
 	| "consentStore"
 	| "pendingConsentStore"
 	| "federationProviders"
@@ -123,7 +142,7 @@ export const oauthEndpointsModule: Module = defineModule<
 	name: "oauth",
 	section: SECTION,
 	requires: [
-		"config", // the acr table reads which installed federation trusts its upstream amr; every oauth.* setting is read from the section
+		"federationSettings", // core's view of core.federations: the acr table reads which installed federation trusts its upstream amr; every oauth.* setting is read from the section
 		"clientRepository",
 		"keyStore",
 		"grantHandlerResolver", // synthetic, auto-injected by boot planner
@@ -134,14 +153,13 @@ export const oauthEndpointsModule: Module = defineModule<
 		"rateLimiter", // oauth routes degrade gracefully without
 		"auditSink", // no events emitted when absent
 		"grantPolicy", // gates POST /oauth/token; allow-all when absent
-		"refreshTokenFamilyRevocation", // introspect/userinfo/logout cascade family-revocation check
+		"refreshTokenFamilyRevocation", // the introspect, userinfo and federation routes' family-revocation check
 		"accessTokenDenylist", // RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
 		"subjectRevocation", // per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
-		"userSessionStore", // this and the next three: the four session stores
-		"sessionRPRegistry",
-		"sessionFamilyIndex",
-		"sessionFederationIndex",
+		"userSessionStore", // the user session store; with it the router requires sessionLifecycle
+		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step
 		"federationTokenStore", // federation-token routes
+		"sessionLifecycle", // core's session lifecycle, required with a userSessionStore (the router refuses one without it): /oauth/logout closes the session through it, and introspection, userinfo and the federation-token route ask it whether a session is live
 		"consentStore", // the consent step for clients that are not first-party; such clients are refused without it
 		"pendingConsentStore", // where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 		"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
@@ -180,6 +198,18 @@ export const oauthEndpointsModule: Module = defineModule<
 	contributes: {
 		// What the router's /authorize and consent step admit.
 		admissionActions: OAUTH_ROUTER_ADMISSION_ACTIONS,
+		// How core's session lifecycle tells the relying parties of a closed
+		// session. A contribution, read when a close runs: this module is free
+		// to require the lifecycle without a cycle.
+		sessionCloseNotifiers: {
+			oauth: (deps) =>
+				createSessionCloseNotifier({
+					clientRepository: deps.clientRepository,
+					keyStore: deps.keyStore,
+					issuer: oauthTokenSettingsFrom(deps.section).issuer,
+					logger: deps.logger ?? consoleLogger,
+				}),
+		},
 		// The prefixes the endpoints limit under, claimed with no budget of
 		// their own: the limiter's `limits` entry or its default applies.
 		rateLimitBudgets: Object.fromEntries(
@@ -195,8 +225,8 @@ export const oauthEndpointsModule: Module = defineModule<
 				const registry = deps.grantHandlerResolver;
 				const { router } = await createOAuthRouter(express, {
 					registry,
-					config: deps.config,
 					section: deps.section,
+					federationSettings: deps.federationSettings,
 					clientRepository: deps.clientRepository,
 					codeRepository: deps.codeRepository,
 					keyStore: deps.keyStore,
@@ -207,10 +237,9 @@ export const oauthEndpointsModule: Module = defineModule<
 					accessTokenDenylist: deps.accessTokenDenylist,
 					subjectRevocation: deps.subjectRevocation,
 					userSessionStore: deps.userSessionStore,
-					sessionRPRegistry: deps.sessionRPRegistry,
-					sessionFamilyIndex: deps.sessionFamilyIndex,
-					sessionFederationIndex: deps.sessionFederationIndex,
+					sessionLifecycleStore: deps.sessionLifecycleStore,
 					federationTokenStore: deps.federationTokenStore,
+					sessionLifecycle: deps.sessionLifecycle,
 					replaySeenSet: deps.replaySeenSet,
 					consentStore: deps.consentStore,
 					pendingConsentStore: deps.pendingConsentStore,
@@ -242,7 +271,7 @@ export const oauthEndpointsModule: Module = defineModule<
 		discoveryMetadata: [
 			(
 				deps: ProviderDeps<
-					| "config"
+					| "federationSettings"
 					| "clientRepository"
 					| "keyStore"
 					| "grantHandlerResolver"
@@ -255,9 +284,7 @@ export const oauthEndpointsModule: Module = defineModule<
 					| "accessTokenDenylist"
 					| "subjectRevocation"
 					| "userSessionStore"
-					| "sessionRPRegistry"
-					| "sessionFamilyIndex"
-					| "sessionFederationIndex"
+					| "sessionLifecycle"
 					| "federationTokenStore"
 					| "federationProviders"
 					| "consentStore"
@@ -266,14 +293,13 @@ export const oauthEndpointsModule: Module = defineModule<
 					typeof oauthSectionSchema
 				>,
 			) => {
-				// Logout discovery fields are advertised only when every session store
-				// backing the logout cascade is wired. Issuer gating lives in core, so
-				// this is purely the store-presence check.
+				// Logout discovery fields are advertised only where the router mounts
+				// logout: the user session store, core's session lifecycle that closes
+				// its sessions, and the stores the routes read. Issuer gating lives in
+				// core, so this is purely the store-presence check.
 				const logoutSupported =
 					!!deps.userSessionStore &&
-					!!deps.sessionRPRegistry &&
-					!!deps.sessionFamilyIndex &&
-					!!deps.sessionFederationIndex &&
+					!!deps.sessionLifecycle &&
 					!!deps.federationTokenStore &&
 					!!deps.refreshTokenFamilyRevocation;
 				// `POST /oauth/revoke` is always mounted, but "mounted" and "can
@@ -347,7 +373,7 @@ export const oauthEndpointsModule: Module = defineModule<
 							vouchableAcrValues(
 								readAcrTable(deps.section.authorize?.acrValues),
 								deps.federationProviders,
-								deps.config,
+								deps.federationSettings,
 								stepUpReach(Array.from(deps.sessionRequirementResolver.entries(), ([, r]) => r)),
 							).table,
 						);
@@ -478,11 +504,3 @@ export const oauthEndpointsModule: Module = defineModule<
 		],
 	},
 });
-
-/**
- * The oauth module.
- *
- * @deprecated Use {@link oauthEndpointsModule}: the module is one value, and
- * this parameter was never read. Answers that value, whatever it is handed.
- */
-export const oauthModule = (_params?: { config: AppConfig }): Module => oauthEndpointsModule;

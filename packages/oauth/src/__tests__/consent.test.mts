@@ -49,6 +49,8 @@ import { authorizationServerRegistry } from "./_helpers/authorizationServerRegis
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectOutageLine } from "./_helpers/projectedLog.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "third-party-chat";
 const REDIRECT_URI = "https://chat.example/cb";
@@ -119,7 +121,7 @@ const makeApp = async (opts: {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
-		config: makeConfig(opts.consentUrl),
+		...routerInputsOf(makeConfig(opts.consentUrl)),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -129,7 +131,12 @@ const makeApp = async (opts: {
 			? {}
 			: { pendingConsentStore: pending }),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
-		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		...(opts.userSessionStore
+			? {
+					userSessionStore: opts.userSessionStore,
+					sessionLifecycle: livenessOver(opts.userSessionStore),
+				}
+			: {}),
 		logger,
 	});
 	// One session object for the whole test, so what `/authorize` parks is

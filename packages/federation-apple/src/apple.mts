@@ -35,6 +35,7 @@ import {
 	isLoopbackHostname,
 	type MappedClaims,
 	type RefreshedTokens,
+	readUpstreamAuthTime,
 	resolveClientSecret,
 	type SupportsClaimMapping,
 	type SupportsLogout,
@@ -361,6 +362,8 @@ export function buildAppleProvider(name: string, config: AppleProviderConfig): A
 		// mark this federation's state cookie SameSite=None; Secure.
 		responseMode: "form_post",
 
+		// A freshness ask (`params.ask`) is not forwarded: Apple's authorization
+		// request documents neither `prompt` nor `max_age`.
 		buildAuthorizationUrl(params: {
 			readonly redirectUri: string;
 			readonly state: string;
@@ -417,6 +420,12 @@ export function buildAppleProvider(name: string, config: AppleProviderConfig): A
 			if (typeof sub !== "string" || sub.length === 0) {
 				throw new Error(`Apple federation "${name}" id_token is missing the sub claim`);
 			}
+			const authTime = readUpstreamAuthTime(claims?.auth_time);
+			if (authTime === "invalid") {
+				throw new Error(
+					`Apple federation "${name}" id_token auth_time is not a usable instant (OIDC Core §2)`,
+				);
+			}
 
 			const email = typeof claims?.email === "string" ? claims.email : undefined;
 			// Apple's own marker wins; the relay domain answers only when Apple
@@ -437,6 +446,7 @@ export function buildAppleProvider(name: string, config: AppleProviderConfig): A
 				// the scope as sent (what it granted, RFC 6749 §5.1), and the
 				// token type — core's one reading for every adapter.
 				...federationTokenSnapshot(tokens, obtainedAt),
+				...(authTime === undefined ? {} : { authTime }),
 			};
 
 			if (isPrivateEmail !== undefined) {

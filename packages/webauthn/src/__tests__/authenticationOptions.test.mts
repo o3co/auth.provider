@@ -39,9 +39,6 @@ const BASE_CONFIG: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	rateLimit: {
-		authenticationOptions: { limit: 30, windowSeconds: 60 },
-	},
 };
 
 // ---------------------------------------------------------------------------
@@ -97,6 +94,24 @@ describe("POST /oauth/webauthn/authentication/options", () => {
 		expect(scope).toBe("webauthn:authentication");
 		expect(expiresAtMs).toBeGreaterThan(Date.now());
 		expect(expiresAtMs).toBeLessThanOrEqual(Date.now() + BASE_CONFIG.challengeTtlMs + 200);
+	});
+
+	it("records when it issued the challenge: the instant its expiry is one challenge lifetime after", async () => {
+		const challengeStore = createMemoryChallengeStore();
+		const issueSpy = vi.spyOn(challengeStore, "issue");
+		const { app } = buildApp(challengeStore);
+		const before = Date.now();
+
+		await post(app, {});
+
+		const [, challenge, expiresAtMs, issuedAtMs] = issueSpy.mock.calls[0] ?? [];
+		expect(typeof issuedAtMs).toBe("number");
+		expect(issuedAtMs).toBeGreaterThanOrEqual(before);
+		expect(issuedAtMs).toBeLessThanOrEqual(Date.now());
+		expect(expiresAtMs).toBe((issuedAtMs as number) + BASE_CONFIG.challengeTtlMs);
+		expect(
+			(await challengeStore.find("webauthn:authentication", challenge as string))?.issuedAtMs,
+		).toBe(issuedAtMs);
 	});
 
 	it("stores the challenge under 'webauthn:authentication' whatever the body names", async () => {

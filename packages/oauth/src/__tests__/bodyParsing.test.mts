@@ -31,9 +31,7 @@ import type {
 	FederationTokenStore,
 	PendingConsentStore,
 	RefreshTokenFamilyRevocation,
-	SessionFamilyIndex,
-	SessionFederationIndex,
-	SessionRPRegistry,
+	SessionLifecycle,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createSymmetricKeyStore } from "@o3co/auth-provider-core";
@@ -49,6 +47,7 @@ import { createOAuthRouter, oauthRoutePaths } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const config = {
 	oauth: {
@@ -87,16 +86,14 @@ const routerWith = async (surfaces: "all" | "none"): Promise<Router> => {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: surfaces === "all" ? authorizationServerRegistry() : new GrantRegistry(),
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("body-parsing-secret.at-least-32-bytes"),
 		...(surfaces === "all"
 			? {
 					userSessionStore: unused as UserSessionStore,
-					sessionRPRegistry: unused as SessionRPRegistry,
-					sessionFamilyIndex: unused as SessionFamilyIndex,
-					sessionFederationIndex: unused as SessionFederationIndex,
+					sessionLifecycle: unused as SessionLifecycle,
 					federationTokenStore: unused as FederationTokenStore,
 					refreshTokenFamilyRevocation: unused as RefreshTokenFamilyRevocation,
 					consentStore: unused as ConsentStore,
@@ -276,7 +273,7 @@ describe("the OAuth router's body parsing", () => {
 			loginEntry: createTestLoginEntry(),
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
-			config,
+			...routerInputsOf(config),
 			clientRepository,
 			codeRepository,
 			keyStore: createSymmetricKeyStore("body-parsing-secret.at-least-32-bytes"),

@@ -102,8 +102,12 @@ describe("each store's section read at its module's name, through the template's
 			].join("\n"),
 		});
 
+		// The operator's entry beside the template's own `limits.mfa`.
 		expect(sectionOf(composition, "core-rate-limiter-memory")).toEqual({
-			limits: { token: { limit: 7, windowSeconds: 60 } },
+			limits: {
+				mfa: { limit: 60, windowSeconds: 300 },
+				token: { limit: 7, windowSeconds: 60 },
+			},
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 			maxBuckets: 500,
 		});
@@ -443,8 +447,11 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 		CORE_DEPLOYMENT_MODE: "single",
 	};
 
-	/** What the template's reading refused the full set with, before boot. */
-	async function refusedBeforeBoot(options: FullSetOptions): Promise<RangeError> {
+	/**
+	 * What the template's own check refused the full set with, before boot: a
+	 * `BootError`, which each test pins to the template by its words.
+	 */
+	async function refusedBeforeBoot(options: FullSetOptions): Promise<BootError> {
 		const err = await composeFullSet(options).then(
 			async (composition) => {
 				await composition.handle.dispose();
@@ -452,33 +459,63 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 			},
 			(error: unknown) => error,
 		);
-		expect(err).toBeInstanceOf(RangeError);
-		return err as RangeError;
+		expect(err).toBeInstanceOf(BootError);
+		return err as BootError;
 	}
 
-	it("refuses boot, naming both keys and both variables and quoting no value", async () => {
-		const { message } = await refusedBeforeBoot(onRedis({ env: { [GRANT]: "t1:fg:" } }));
+	/** The template's own refusal of the intent store left at its default: one custom issue at its key. */
+	const LEFT_AT_DEFAULT = {
+		reason: "config-validation-failed",
+		message: expect.stringMatching(/is set off its default key prefix/),
+		details: {
+			issues: [{ code: "custom", path: ["redis-federation-grant-intent-store", "keyPrefix"] }],
+			modules: [{ module: "redis-federation-grant-intent-store" }],
+		},
+	};
+
+	it("refuses before boot, naming both keys and both variables and quoting no value", async () => {
+		const err = await refusedBeforeBoot(onRedis({ env: { [GRANT]: "t1:fg:" } }));
+		expect(err).toMatchObject(LEFT_AT_DEFAULT);
+		const { message } = err;
 		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");
 	});
 
-	it("grants kept in memory and intents on Redis: the grant store's variable refused the same", async () => {
-		const { message } = await refusedBeforeBoot(
+	it("grants kept in memory and intents on Redis: the grant store's variable refused the same, before boot", async () => {
+		const err = await refusedBeforeBoot(
 			onRedis({ env: { ...GRANTS_IN_MEMORY, [GRANT]: "t1:fg:" } }),
 		);
+		expect(err).toMatchObject(LEFT_AT_DEFAULT);
+		const { message } = err;
 		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");
 	});
 
-	it("grants kept in memory and intents on Redis: the grant store's key at its old path refused, naming the intent store's", async () => {
-		const { message } = await refusedBeforeBoot(
+	it("grants kept in memory and intents on Redis: the grant store's key at its old path refused before boot, naming the intent store's", async () => {
+		const { message, reason, details } = await refusedBeforeBoot(
 			onRedis({
 				env: GRANTS_IN_MEMORY,
 				operatorHocon: 'redisFederationGrantStore.keyPrefix = "t1:fg:"\n',
 			}),
 		);
+		// No loaded module relocates the old key: the refusal is the template's.
+		expect(reason).toBe("config-path-relocated");
+		expect(message).toMatch(
+			/^redisFederationGrantStore\.keyPrefix is set, and no installed module reads it/,
+		);
+		expect(details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "redis-federation-grant-intent-store",
+					from: "redisFederationGrantStore.keyPrefix",
+					to: "redis-federation-grant-intent-store.keyPrefix",
+					environmentVariable: INTENT,
+				},
+			],
+		});
 		expect(message).toContain("redisFederationGrantStore.keyPrefix");
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");
@@ -754,59 +791,22 @@ describe("a store variable renamed with the move, through the template's reading
 	);
 });
 
-describe("a WebAuthn rate-limit variable renamed to the name its path derives, through the template's reading", () => {
-	/** Each renamed variable: its old name, its new name, the path the new one binds, a value. */
-	const ROWS = [
-		{
-			from: "WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT",
-			to: "WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT",
-			path: "webauthn.rateLimit.authenticationOptions.limit",
-			value: "12",
-		},
-		{
-			from: "WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS",
-			to: "WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS",
-			path: "webauthn.rateLimit.authenticationOptions.windowSeconds",
-			value: "120",
-		},
+describe("a removed WebAuthn rate-limit variable, through the template's reading", () => {
+	/** The removed `webauthn.rateLimit`'s variables: its current names and their older ones. */
+	const VARIABLES = [
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT",
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS",
 	] as const;
 
-	it.each(ROWS)(
-		"$from set alone: refused, naming $to and $path",
-		async ({ from, to, path, value }) => {
-			const err = await refused({ env: { ...SINGLE_ENV, [from]: value } });
+	it.each(VARIABLES)("%s set at all: refused, naming it, and no value", async (from) => {
+		const err = await refused({ env: { ...SINGLE_ENV, [from]: "31" } });
 
-			expect(err.details).toEqual({
-				reason: "environment-variable-renamed",
-				renamed: [{ module: "webauthn", from, to, path, state: "unset" }],
-			});
-		},
-	);
-
-	it.each(ROWS)(
-		"$from set beside $to at a different value: refused, naming neither value",
-		async ({ from, to }) => {
-			const err = await refused({ env: { ...SINGLE_ENV, [from]: "31", [to]: "47" } });
-
-			expect(err.details).toMatchObject({ renamed: [{ from, to, state: "different" }] });
-			for (const value of ["31", "47"]) {
-				expect(JSON.stringify(err.details)).not.toContain(`"${value}"`);
-			}
-		},
-	);
-
-	it.each(ROWS)(
-		"$from set beside $to at the same value: boots, the value at $path",
-		async ({ from, to, path, value }) => {
-			const composition = await boot({ env: { ...SINGLE_ENV, [from]: value, [to]: value } });
-
-			const key = path.split(".").at(-1) as string;
-			const options = (
-				sectionOf(composition, "webauthn") as {
-					rateLimit: { authenticationOptions: Record<string, unknown> };
-				}
-			).rateLimit.authenticationOptions;
-			expect(String(options[key])).toBe(value);
-		},
-	);
+		expect(err.details).toEqual({
+			reason: "environment-variable-renamed",
+			renamed: [{ module: "webauthn", from, to: null, path: null, state: "removed" }],
+		});
+		expect(JSON.stringify(err.details)).not.toContain('"31"');
+	});
 });

@@ -27,6 +27,7 @@ import {
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
+	sessionLifecycleModule,
 } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
@@ -36,7 +37,7 @@ import {
 import {
 	type FederationRedirectPolicy,
 	sessionModule,
-	sessionStoreModuleFor,
+	sessionStoreModule,
 } from "@o3co/auth-provider-session";
 import express from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
@@ -134,9 +135,10 @@ async function boot(federations: Record<string, unknown>, options: BootOptions =
 		provides: { userRepository: () => repo } as never,
 	});
 	const modules = [
-		sessionStoreModuleFor(config),
+		sessionStoreModule,
 		sessionModule,
 		memorySessionStoresModule,
+		sessionLifecycleModule,
 		memoryFederationTokenStoreModule,
 		memoryRefreshTokenFamilyStoreModule,
 		defaultRefreshTokenFamilyRevocationModule,

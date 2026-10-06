@@ -30,8 +30,8 @@ import { defineModule } from "#/modules/manifest/index.mjs";
 import type { Module } from "#/modules/manifest/module-spec.mjs";
 import { sectionStrictnessProblems } from "#/testing/sectionStrictness.mjs";
 
-const sectioned = (name: string, schema: z.ZodType, at?: string): Module =>
-	defineModule({ name, section: at === undefined ? { schema } : { schema, at } }) as Module;
+const sectioned = (name: string, schema: z.ZodType): Module =>
+	defineModule({ name, section: { schema } }) as Module;
 
 const keeps = (path: string, module = "fixture") =>
 	`${path}: module "${module}"'s section schema does not refuse an unknown key`;
@@ -109,13 +109,13 @@ describe("sectionStrictnessProblems — the levels that keep an unknown key", ()
 		).toEqual([keeps("fixture.hosts.0"), keeps("fixture.limits.login"), keeps("fixture.limits")]);
 	});
 
-	it("names the section at its transitional path when the module declares `at`", () => {
+	it("reads the section at the module's name, never split on its dots", () => {
 		const stripping = z.object({ retries: z.number().optional() }).optional();
 		expect(
-			sectionStrictnessProblems([sectioned("fixture", stripping, "legacy.fixture")], {
-				tree: { legacy: { fixture: { retries: 1 } } },
+			sectionStrictnessProblems([sectioned("legacy.fixture", stripping)], {
+				tree: { "legacy.fixture": { retries: 1 }, legacy: { fixture: { retries: "x" } } },
 			}),
-		).toEqual([keeps("legacy.fixture")]);
+		).toEqual([keeps("legacy.fixture", "legacy.fixture")]);
 	});
 
 	it("skips a module without a section", () => {
@@ -230,6 +230,24 @@ describe("sectionStrictnessProblems — levels exempt by the caller", () => {
 			sectionStrictnessProblems([sectioned("counts", Counts)], {
 				tree: { counts: { login: 5 } },
 				exempt: { counts: "each key names a prefix the deployment chooses" },
+			}),
+		).toEqual([]);
+	});
+
+	it("reads an exemption of a dotted module's name as its section's root, one key", () => {
+		expect(
+			sectionStrictnessProblems([sectioned("fixture.section", Counts)], {
+				tree: { "fixture.section": { login: 5 } },
+				exempt: { "fixture.section": "each key names a prefix the deployment chooses" },
+			}),
+		).toEqual([]);
+		expect(
+			sectionStrictnessProblems([sectioned("fixture.section", Sinks)], {
+				tree: { "fixture.section": { splunk: { token: "t" } } },
+				exempt: {
+					"fixture.section": "each key names a sink the deployment registers",
+					"fixture.section.*": "each sink's builder holds its own options",
+				},
 			}),
 		).toEqual([]);
 	});

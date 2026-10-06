@@ -28,6 +28,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createSymmetricKeyStore,
 	type GrantContext,
@@ -37,6 +38,7 @@ import {
 	type GrantResult,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type SubjectRevocation,
 	type UserSession,
@@ -56,6 +58,8 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SID = "sid-1";
 const SUBJECT = "user-1";
@@ -132,6 +136,7 @@ const fixture = (
 const grant = (opts: {
 	userSessionStore?: UserSessionStore;
 	subjectRevocation?: SubjectRevocation;
+	sessionLifecycleStore?: SessionLifecycleStore;
 	requirements?: readonly SessionRequirement[];
 	logger?: MockLogger;
 	grantPolicy?: GrantPolicyHook;
@@ -145,6 +150,13 @@ const grant = (opts: {
 		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
+		// Core's session lifecycle port, required beside a user-session store.
+		...(opts.userSessionStore || opts.sessionLifecycleStore
+			? {
+					sessionLifecycleStore:
+						opts.sessionLifecycleStore ?? createInMemorySessionLifecycleStore(),
+				}
+			: {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 	});
@@ -169,6 +181,27 @@ const refused = async (
 };
 
 describe("the session grant on admission — what the session and its record decide", () => {
+	it("a session whose lifecycle record is closing is 400 invalid_grant session_invalid, its user session still there", async () => {
+		const store = createInMemorySessionLifecycleStore();
+		const live = record();
+		expect((await store.open(SID, SUBJECT, live.expiresAt)).outcome).toBe("opened");
+		const closing = await store.beginClose(SID, {
+			cause: "rp_logout",
+			steps: ["held_open"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+		expect(closing.outcome).toBe("closing");
+		const result = await refused(
+			grant({ userSessionStore: storeWith(live), sessionLifecycleStore: store }),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+	});
+
 	it("the subject-revocation boundary applies when subjectRevocation is wired: 400 invalid_grant", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
@@ -592,6 +625,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 					oauthTokenSettings: createTestOAuthTokenSettings(),
 					keyStore,
 					userSessionStore: store,
+					sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 					sessionRequirementResolver: resolverForTests(requirements, {
 						issuer: "https://issuer.test",
 						actions: OAUTH_ADMISSION_ACTIONS,
@@ -600,11 +634,12 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 		);
 		const { router } = await createOAuthRouter(express, {
 			registry,
-			config,
+			...routerInputsOf(config),
 			keyStore,
 			codeRepository,
 			clientRepository,
 			userSessionStore: store,
+			sessionLifecycle: livenessOver(store),
 			requirements: resolverForTests(requirements, {
 				issuer: "https://issuer.test",
 				actions: OAUTH_ADMISSION_ACTIONS,

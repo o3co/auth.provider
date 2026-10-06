@@ -7,9 +7,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { BootstrapMap } from "#/boot/types.mjs";
 import { BootError } from "#/boot/types.mjs";
 import { validateManifests } from "#/boot/validate-manifests.mjs";
+import { defineModule } from "#/modules/manifest/define-module.mjs";
 import type { RateLimiter } from "#/ratelimit/types.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { memoryRateLimiterModule } from "../module.mjs";
+import { verifierLimitClaim, withVerifierLimitDeclarations } from "../verifierLimits.mjs";
 
 /** The prefixes a verifier limits itself, and the setting each is made at. */
 const VERIFIER_PREFIXES = [
@@ -31,8 +33,9 @@ describe("memoryRateLimiterModule", () => {
 	});
 
 	it("is read at its own section, core-rate-limiter-memory", () => {
-		expect(memoryRateLimiterModule.section?.at).toBeUndefined();
-		expect(memoryRateLimiterModule.configSchema).toBeUndefined();
+		expect(memoryRateLimiterModule.name).toBe("core-rate-limiter-memory");
+		expect(memoryRateLimiterModule.section).not.toHaveProperty("at");
+		expect(memoryRateLimiterModule).not.toHaveProperty("configSchema");
 	});
 
 	it("defaults maxBuckets in its section's schema", () => {
@@ -85,12 +88,14 @@ describe("memoryRateLimiterModule", () => {
 	it.each(VERIFIER_PREFIXES)(
 		"refuses a limits entry for %s, a verifier's own limit, in its section's schema, naming the key and the setting",
 		(prefix, setting) => {
-			const parsed = memoryRateLimiterModule.section?.schema.safeParse({
-				limits: {
-					[prefix]: { limit: 5, windowSeconds: 60 },
-					token: { limit: 5, windowSeconds: 60 },
-				},
-			});
+			const parsed = withVerifierLimitDeclarations(new Map([[prefix, setting]]), () =>
+				memoryRateLimiterModule.section?.schema.safeParse({
+					limits: {
+						[prefix]: { limit: 5, windowSeconds: 60 },
+						token: { limit: 5, windowSeconds: 60 },
+					},
+				}),
+			);
 			expect(parsed?.success).toBe(false);
 			expect(parsed?.error?.issues).toEqual([
 				expect.objectContaining({
@@ -102,7 +107,7 @@ describe("memoryRateLimiterModule", () => {
 	);
 
 	it.each(VERIFIER_PREFIXES)(
-		"refuses boot on core-rate-limiter-memory.limits.%s, naming its path and the setting",
+		"refuses boot on core-rate-limiter-memory.limits.%s, naming its path and the setting its owner declared",
 		(prefix, setting) => {
 			const config = {
 				...makeValidCoreConfig(),
@@ -111,7 +116,13 @@ describe("memoryRateLimiterModule", () => {
 			let err: unknown;
 			try {
 				validateManifests({
-					modules: [memoryRateLimiterModule],
+					modules: [
+						memoryRateLimiterModule,
+						defineModule({
+							name: "verifier-owner",
+							contributes: { rateLimitBudgets: { [prefix]: verifierLimitClaim({ setting }) } },
+						}),
+					],
 					bootstrapComponents: {
 						config: config as never,
 						pathResolver: (s: string) => s,
@@ -124,6 +135,17 @@ describe("memoryRateLimiterModule", () => {
 			expect((err as BootError).reason).toBe("config-validation-failed");
 			expect((err as BootError).message).toContain(`core-rate-limiter-memory.limits.${prefix}`);
 			expect((err as BootError).message).toContain(setting);
+		},
+	);
+
+	it.each(VERIFIER_PREFIXES)(
+		"accepts a limits entry for %s in its section's schema when nothing declares it: only declarations count",
+		(prefix) => {
+			expect(
+				memoryRateLimiterModule.section?.schema.safeParse({
+					limits: { [prefix]: { limit: 5, windowSeconds: 60 } },
+				})?.success,
+			).toBe(true);
 		},
 	);
 

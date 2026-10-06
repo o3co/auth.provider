@@ -27,10 +27,16 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
 	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryAccessTokenDenylist,
+	createMemoryRefreshTokenFamilyStore,
+	createRefreshTokenFamilyRevocation,
+	createSessionLifecycle,
 	createSymmetricKeyStore,
+	type FederationTokenStore,
 	InMemoryCodeRepository,
 	passwordSessionAuthentication,
 } from "@o3co/auth-provider-core";
@@ -49,6 +55,8 @@ import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const ISSUER = "https://issuer.test";
 const SECRET = "code-amr-test-secret-32-bytes-long!!";
@@ -111,39 +119,57 @@ const world = async (
 	};
 	const sessionFamilyIndex = createInMemorySessionFamilyIndex();
 	const sessionRPRegistry = createInMemorySessionRPRegistry();
+	// Core's own lifecycle over the same stores: the grant joins the session
+	// through it, and the router reads and ends sessions through it.
+	const sessionLifecycle = createSessionLifecycle({
+		store: createInMemorySessionLifecycleStore(),
+		userSessionStore,
+		refreshTokenFamilyRevocation: createRefreshTokenFamilyRevocation({
+			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
+			accessTokenHorizonMs: 3_600_000,
+		}),
+		federationTokenStore: {
+			removeBySid: vi.fn(),
+			delete: vi.fn(),
+		} as unknown as FederationTokenStore,
+		sessionRPRegistry,
+		sessionFamilyIndex,
+		sessionFederationIndex: createInMemorySessionFederationIndex(),
+		retainMs: 0,
+		logger: { warn: () => undefined, error: () => undefined },
+	});
 	const registry = new GrantRegistry();
 	registry.register(
 		"authorization_code",
 		createAuthorizationGrant({
 			sessionRequirementResolver: requirements,
-			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			clientRepository,
 			codeRepository,
 			userSessionStore,
-			sessionFamilyIndex,
-			sessionRPRegistry,
+			sessionLifecycle,
 		}),
 	);
 	registry.register(
 		"refresh_token",
 		createRefreshTokenGrant({
-			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
 		registry,
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore,
 		userSessionStore,
-		sessionFamilyIndex,
-		sessionRPRegistry,
+		sessionLifecycle,
 		accessTokenDenylist: createMemoryAccessTokenDenylist(),
 		requirements,
 	});

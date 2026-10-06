@@ -26,9 +26,12 @@
  *   3. content type and body parsing, then `parserRefusals`;
  *   4. client authentication, before domain validation, so an unauthenticated
  *      caller learns nothing about a grant, not even from a refusal's timing;
- *   5. the handlers;
- *   6. everything this package does not serve, as a 404;
- *   7. `unexpectedErrors`, a logged 500 for what escaped every handler.
+ *   5. on a first-time lodging, when a limiter is wired, the throttle again,
+ *      keyed on the authenticated client: a lodging writes records for any
+ *      subject the client names, so the client is what a deployment bounds;
+ *   6. the handlers;
+ *   7. everything this package does not serve, as a 404;
+ *   8. `unexpectedErrors`, a logged 500 for what escaped every handler.
  *
  * Client authentication's lines carry `site: "federation_grants"`. Exported so
  * a composition root that mounts the handlers itself gets the same chain.
@@ -37,15 +40,25 @@
 import {
 	type ClientRepository,
 	checkCanonicalIssuer,
+	checkWithFailMode,
 	consoleLogger,
 	createRateLimitGuard,
+	createRateLimitPolicy,
 	describeIssuerRejection,
+	type FederationGrantLodgingClient,
 	type Logger,
 	type RateLimiter,
+	type RateLimitPolicy,
 	type ReplaySeenSet,
+	rateLimiterUnavailableEnvelope,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
-import express, { type ErrorRequestHandler, type RequestHandler, type Router } from "express";
+import express, {
+	type ErrorRequestHandler,
+	type RequestHandler,
+	type Response,
+	type Router,
+} from "express";
 import { createRouteDenialAudit } from "./denialAudit.mjs";
 import {
 	createFederationGrantCreateHandler,
@@ -61,7 +74,10 @@ import {
 	type FederationGrantTokenHandlerOptions,
 } from "./tokenRoute.mjs";
 
-/** The shared prefix both routes are throttled under: `federation_grants:ip:<ip>`. */
+/**
+ * The shared prefix the routes are throttled under: `federation_grants:ip:<ip>`,
+ * and a first-time lodging also `federation_grants:client:<client_id>`.
+ */
 export const FEDERATION_GRANTS_RATE_LIMIT_PREFIX = "federation_grants";
 
 /** At most 16 KiB of body — the same bound the OAuth routes use. */
@@ -73,7 +89,7 @@ const BODY_LIMIT_BYTES = 16 * 1024;
  * declared oversized body is refused unread and the bound holds even if
  * another module's parser under `/oauth` runs first (`body-parser` does not
  * parse a body twice, so the `limit` below would be skipped). See README,
- * "Beside `oauthModule`".
+ * "Beside `oauthEndpointsModule`".
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
 	const declared = Number(req.headers["content-length"]);
@@ -103,6 +119,49 @@ export const noStore: RequestHandler = (_req, res, next) => {
 export const notFound: RequestHandler = (_req, res) => {
 	res.status(404).json({ error: "not_found" });
 };
+
+/**
+ * The limiter asked under `federation_grants:client:<client_id>` once the
+ * client is authenticated. The budget is the limiter's, the outage policy
+ * core's; a refusal is answered as the IP throttle's, `rate_limited` /
+ * `provider`. A refusal, 429 or 503, drops the IP throttle's `RateLimit-*`
+ * headers, which describe a budget that allowed the request. A request with
+ * no authenticated client passes, for the handler to refuse.
+ */
+const withoutIpBudgetHeaders = (res: Response): void => {
+	for (const header of ["RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"]) {
+		res.removeHeader(header);
+	}
+};
+
+const clientThrottle =
+	(policy: RateLimitPolicy): RequestHandler =>
+	async (req, res, next) => {
+		const client = (req as { oauthClient?: FederationGrantLodgingClient }).oauthClient;
+		if (client === undefined) return next();
+		const { clientId } = client;
+		const ip = req.ip ?? "unknown";
+		const userAgent = req.get("user-agent");
+		const outcome = await checkWithFailMode(
+			policy,
+			`${FEDERATION_GRANTS_RATE_LIMIT_PREFIX}:client:${clientId}`,
+			{ ip, clientId, ...(userAgent === undefined ? {} : { userAgent }) },
+		);
+		if (outcome.status === "unavailable") {
+			if (outcome.failMode === "open") return next();
+			withoutIpBudgetHeaders(res);
+			res.status(503).json(rateLimiterUnavailableEnvelope());
+			return;
+		}
+		const { decision } = outcome;
+		if (decision.allowed) return next();
+		withoutIpBudgetHeaders(res);
+		const resetMs = decision.resetAt?.getTime();
+		if (resetMs !== undefined && Number.isFinite(resetMs)) {
+			res.setHeader("Retry-After", String(Math.max(0, Math.ceil((resetMs - Date.now()) / 1000))));
+		}
+		res.status(429).json({ error: "rate_limited", error_description: "provider" });
+	};
 
 /** Cache directives then correlation: the two things every exit carries. */
 const transport = (): Router => {
@@ -162,7 +221,7 @@ export const undecodablePath = (error: unknown): boolean =>
  * will. It recognises body-parser's `http-errors` (`expose` with a 4xx
  * `status`, then `type`) and an undecodable path, and is only applied where
  * these are the errors that can arrive (`parserRefusals`). See README,
- * "Beside `oauthModule`".
+ * "Beside `oauthEndpointsModule`".
  */
 export const parserRefusal = (
 	error: unknown,
@@ -327,7 +386,21 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	router.post("/:grantId/revoke", createFederationGrantRevokeHandler(options));
 	if (options.acquisition !== undefined) {
 		const lodging = { ...options, acquisition: options.acquisition };
-		router.post("/", createFederationGrantCreateHandler(lodging));
+		const createHandler = createFederationGrantCreateHandler(lodging);
+		if (options.rateLimiter === undefined) {
+			router.post("/", createHandler);
+		} else {
+			const policy = createRateLimitPolicy(
+				{
+					limiter: options.rateLimiter,
+					tag: FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
+					...(options.logger === undefined ? {} : { logger: options.logger }),
+					...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+				},
+				"createFederationGrantRouter",
+			);
+			router.post("/", clientThrottle(policy), createHandler);
+		}
 		router.post("/:grantId/reauthorize", createFederationGrantReauthorizeHandler(lodging));
 	}
 	router.use(notFound);

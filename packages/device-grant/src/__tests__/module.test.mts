@@ -34,6 +34,7 @@ import type {
 import {
 	BootError,
 	createApp,
+	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
@@ -53,16 +54,16 @@ import {
 import express from "express";
 import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
-import {
-	deviceAuthorizationGrantModule,
-	deviceGrantConfigSchema,
-	deviceGrantModule,
-} from "#/module.mjs";
+import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { LIVE_AUTH_TIME_MS, liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 import { shippedDeviceGrantSection } from "./shippedSection.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -134,6 +135,8 @@ interface Overrides {
 	/** Filled into the `attemptCounter` slot. */
 	readonly attemptCounter?: AttemptCounter;
 	readonly withUserSessionStore?: boolean;
+	/** Leave the `sessionLifecycleStore` slot unfilled; core's session lifecycle wires it beside the user-session store. */
+	readonly withSessionLifecycleStore?: boolean;
 	readonly withCsrfGuard?: boolean;
 	/** Leave the audit sink's absence undeclared: no `auditSink` in `core.declaredAbsent`. */
 	readonly withoutAuditDeclaration?: boolean;
@@ -170,6 +173,9 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 		...(overrides.withUserSessionStore === false
 			? {}
 			: { userSessionStore: createInMemoryUserSessionStore() }),
+		...(overrides.withSessionLifecycleStore === false || overrides.withUserSessionStore === false
+			? {}
+			: { sessionLifecycleStore: createInMemorySessionLifecycleStore() }),
 		// The verification route's CSRF guard is the `csrfGuard` slot, which
 		// the session module provides: core's double stands in for it.
 		...(overrides.withCsrfGuard === false ? {} : { csrfGuard: createTestCsrfGuard() }),
@@ -228,24 +234,6 @@ const ENABLED = {
 };
 
 describe("the device-grant module — boot", () => {
-	it("refuses the deprecated factory listed uncalled, `modules: [deviceGrantModule]`", async () => {
-		// The compiler does not catch it: a function has a `name`, the one
-		// field `Module` requires. Listed that way the module would contribute
-		// nothing and boot succeed, with no grant, no route and none of the
-		// refusals below. Core refuses any such entry.
-		await expect(
-			createApp({
-				modules: [deviceGrantModule as unknown as Module],
-				bootstrapComponents: makeBoot({ deviceGrant: ENABLED }),
-			}),
-		).rejects.toMatchObject({
-			reason: "module-factory-not-called",
-			message: expect.stringMatching(
-				/module entry "deviceGrantModule" is a function — call it with its arguments/,
-			),
-		});
-	});
-
 	it("boots disabled without any of the required settings", async () => {
 		// Installing the package must not turn on a grant, and a deployment
 		// that leaves it off must never trip settings it does not use.
@@ -331,6 +319,21 @@ describe("the device-grant module — boot", () => {
 		// trusts the cookie alone.
 		await expect(boot({ deviceGrant: ENABLED, withUserSessionStore: false })).rejects.toThrow(
 			/enabled = true requires a userSessionStore component/,
+		);
+	});
+
+	it("refuses to boot enabled with a userSessionStore and no sessionLifecycleStore, naming both slots", async () => {
+		const err = await boot({ deviceGrant: ENABLED, withSessionLifecycleStore: false }).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught as BootError,
+		);
+		expect(err, "boot must be refused").toBeInstanceOf(BootError);
+		expect(err?.reason).toBe("contribute-factory-failed");
+		expect(err?.message).toMatch(
+			/device-grant: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 
@@ -420,38 +423,58 @@ describe("the device-grant module — boot", () => {
 		await handle.dispose();
 	});
 
-	it("refuses to boot without a device code store, naming the config key", async () => {
-		// Optional to wire, not optional to decide: a composition with no
-		// store cannot authorize any device at all, so the failure belongs at
-		// boot rather than on the first request.
+	it("refuses to boot enabled without a device code store, naming the component", async () => {
+		// Optional to wire, required once the grant is on: a composition with
+		// no store cannot authorize any device at all, so the failure belongs at
+		// boot rather than on the first request, beside `rateLimiter` and
+		// `verificationUri`.
 		await expect(boot({ deviceGrant: ENABLED, withStore: false })).rejects.toThrow(
-			/device-grant\.store/,
+			/enabled = true requires a deviceCodeStore component/,
 		);
 	});
 
-	it("boots with the grant off and no store, with or without the declaration: a switched-off module declares no absence policy", async () => {
-		for (const deviceGrant of [{ enabled: false }, { enabled: false, store: "unsupported" }]) {
-			const handle = await boot({ deviceGrant, withStore: false, withoutAuditDeclaration: true });
-			await handle.dispose();
-		}
+	it("boots with the grant off and no store, declaring nothing: a switched-off module requires nothing", async () => {
+		const handle = await boot({
+			deviceGrant: { enabled: false },
+			withStore: false,
+			withoutAuditDeclaration: true,
+		});
+		await handle.dispose();
 	});
 
-	it("refuses to boot enabled with the store declared absent, naming the component", async () => {
-		// `store = "unsupported"` says why the slot is empty; it does not make
-		// the grant work without one. An enabled grant with no store would
-		// boot and mount endpoints that throw on the first request; the
-		// refusal belongs at boot, beside `rateLimiter` and `verification-uri`.
-		// The phrase is the module's own, not the stage-1 policy message,
-		// which also names `deviceCodeStore`.
-		await expect(
-			boot({ deviceGrant: { ...ENABLED, store: "unsupported" }, withStore: false }),
-		).rejects.toThrow(/enabled = true requires a deviceCodeStore component/);
-	});
+	it.each([
+		["off", "unsupported", { enabled: false }],
+		["off", "redis", { enabled: false }],
+		["on", "unsupported", ENABLED],
+		["on", true, ENABLED],
+	])(
+		"refuses device-grant.store with the grant %s, at %j, as a removed key",
+		async (_, store, deviceGrant) => {
+			// No value of it declares anything: the grant needs a store while on
+			// and nothing while off. Ignored, a stale line would read as a
+			// decision the deployment still makes.
+			const refusal = await boot({ deviceGrant: { ...deviceGrant, store } }).then(
+				async (handle) => {
+					await handle.dispose();
+					return undefined;
+				},
+				(err: unknown) => err as { reason?: unknown; message?: string; details?: unknown },
+			);
+			expect(refusal).toMatchObject({
+				name: "BootError",
+				reason: "config-path-relocated",
+				details: {
+					relocated: [{ module: "device-grant", from: "device-grant.store", to: null }],
+				},
+			});
+			expect(refusal?.message).toMatch(/device-grant\.store was removed/);
+		},
+	);
 
-	it("boots with everything wired, without oauthModule", async () => {
+	it("boots with everything wired, without oauthEndpointsModule", async () => {
 		// The routes declare no ordering edge — each module under `/oauth`
 		// parses its own body — so nothing here needs another module's route
-		// to exist. The composition beside oauthModule is composition.test.mts.
+		// to exist. The composition beside oauthEndpointsModule is composition.test.mts.
 		const handle = await boot({ deviceGrant: ENABLED });
 		await handle.dispose();
 	});
@@ -609,6 +632,7 @@ describe("the device-grant module — the route it actually contributes", () => 
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		userSessionStore: liveSessionStore(),
+		sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 		// The `csrfGuard` slot: core's double, which accepts this origin.
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
@@ -1678,7 +1702,7 @@ describe("the device-grant module — disabled surface", () => {
 		// Observable behaviour matches "not installed": with nothing
 		// registered, the token endpoint answers `unsupported_grant_type` and
 		// `grant_types_supported` does not name the grant — both pinned beside
-		// `oauthModule` in composition.test.mts. A refusing handler registered
+		// `oauthEndpointsModule` in composition.test.mts. A refusing handler registered
 		// in its place was advertised as a supported grant.
 		const handle = await boot({ deviceGrant: { enabled: false } });
 		try {
@@ -1708,6 +1732,8 @@ describe("the device-grant module — disabled surface", () => {
 
 describe("the device-grant module — the access-token lifetime", () => {
 	it("mints the default lifetime of the oauthTokenSettings slot and ignores an expires_in request parameter", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		// The module hands the grant its lifetime at composition, from the
 		// slot the oauth module provides.
 		const approvedStore = {
@@ -1756,6 +1782,8 @@ describe("the device-grant module — the access-token lifetime", () => {
 	});
 
 	it("reads no lifetime from the configuration: the slot's is minted whatever `oauth.accessToken` says", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		// The oauth module owns `oauth {}` and provides what others read of it;
 		// a composition without it fills the slot.
 		const store = {

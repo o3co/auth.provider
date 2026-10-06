@@ -77,7 +77,6 @@ export {
 	withFederation,
 	withInsecureSessionCookie,
 } from "./fixtures/sessionConfig.mjs";
-export { userRepositoryHttpOf, withUserRepositoryHttp } from "./fixtures/userRepository.mjs";
 export {
 	type CoreConfigForTestsOptions,
 	coreConfigForTests,
@@ -138,6 +137,11 @@ export {
 	type DeploymentModeContractInput,
 	deploymentModeContract,
 } from "./slots/deploymentMode.mjs";
+export {
+	createTestFederationGrantPolicy,
+	type FederationGrantPolicyContractInput,
+	federationGrantPolicyContract,
+} from "./slots/federationGrantPolicy.mjs";
 export {
 	createTestFederationSettings,
 	type FederationSettingsContractInput,

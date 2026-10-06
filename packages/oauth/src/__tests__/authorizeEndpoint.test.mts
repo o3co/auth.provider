@@ -46,7 +46,11 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestFederationSettings,
+	createTestLoginEntry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -60,6 +64,8 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -70,12 +76,8 @@ const REDIRECT_URI = "https://app.example/cb";
 const VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url");
 
-const makeConfig = (
-	oauthOverrides: Record<string, unknown>,
-	federations: Record<string, unknown> = {},
-): AppConfig =>
+const makeConfig = (oauthOverrides: Record<string, unknown>): AppConfig =>
 	({
-		core: { federations },
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
@@ -120,7 +122,8 @@ const makeApp = async (opts: {
 	logger?: Logger;
 	/**
 	 * Install one federation, as a federation module's contribution would —
-	 * `"trusted"` with `core.federations.google.trustUpstreamAmr = true` (the MFA
+	 * `"trusted"` with core's `federationSettings` holding its upstream `amr`
+	 * as counting (`core.federations.google.trustUpstreamAmr = true`, the MFA
 	 * ADR's D13), `"untrusted"` with the switch absent.
 	 */
 	federation?: "trusted" | "untrusted";
@@ -164,12 +167,12 @@ const makeApp = async (opts: {
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
-		config: makeConfig(
-			opts.oauth ?? {},
+		...routerInputsOf(makeConfig(opts.oauth ?? {})),
+		federationSettings: createTestFederationSettings(
 			opts.federation === "trusted"
-				? { google: { type: "google", enabled: true, trustUpstreamAmr: true } }
+				? { google: { type: "google", trustsUpstreamAmr: true } }
 				: opts.federation === "untrusted"
-					? { google: { type: "google", enabled: true } }
+					? { google: { type: "google" } }
 					: {},
 		),
 		clientRepository,
@@ -177,7 +180,12 @@ const makeApp = async (opts: {
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
-		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		...(opts.userSessionStore
+			? {
+					userSessionStore: opts.userSessionStore,
+					sessionLifecycle: livenessOver(opts.userSessionStore),
+				}
+			: {}),
 		// The session module's entry for the page, unless the test hands one.
 		loginEntry: opts.loginEntry ?? createTestLoginEntry(opts.loginUrl ?? "/login"),
 		...(opts.logger ? { logger: opts.logger } : {}),
@@ -770,6 +778,43 @@ describe("/authorize — policy evaluation edges", () => {
 			const params = redirectParams(await authorize(app, baseQuery));
 			expect(params.get("error")).toBe("access_denied");
 			expect(params.get("error_description")).toBe("no");
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ error: logged },
+				"authorize_policy_deny_error_malformed",
+			);
+		},
+	);
+
+	it.each([
+		["a Symbol", Symbol("code"), "(symbol)"],
+		["an object with no prototype", Object.create(null), "(object)"],
+		[
+			"an object whose toString throws",
+			{
+				toString: () => {
+					throw new Error("no");
+				},
+			},
+			"(object)",
+		],
+		["a number", 7, "(number)"],
+	])(
+		"answers access_denied for a deny code that is %s, logging its type and not the value",
+		async (_label, code, logged) => {
+			const logger = createMockLogger();
+			const { app } = await makeApp({
+				logger,
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () => ({
+						outcome: "deny",
+						error: code as string,
+						errorDescription: "no",
+					}),
+				},
+			});
+			const params = redirectParams(await authorize(app, baseQuery));
+			expect(params.get("error")).toBe("access_denied");
 			expect(logger.warn).toHaveBeenCalledWith(
 				{ error: logged },
 				"authorize_policy_deny_error_malformed",
@@ -2002,6 +2047,178 @@ describe("/authorize — step-up and re-authentication", () => {
 		});
 	});
 
+	describe("a federated session's freshness is the earlier of its establishment and the upstream's authentication", () => {
+		/** A federated session established at `at().authTime`, whose upstream showed `at().upstream`. */
+		const federatedStore = (
+			at: () => { readonly authTime: Date; readonly upstream: Date | null | undefined },
+		): UserSessionStore =>
+			({
+				kind: "memory",
+				create: vi.fn(async () => {}),
+				get: vi.fn(async (sid: string): Promise<UserSession | null> => {
+					const { authTime, upstream } = at();
+					return sid === SID
+						? {
+								sid: SID,
+								sub: "user-1",
+								authTime,
+								createdAt: authTime,
+								expiresAt: new Date(Date.now() + 3_600_000),
+								claims: {},
+								amr: ["fed"],
+								authentication: {
+									primary: "fed",
+									federation: "google",
+									upstreamAmr: undefined,
+									mfaAt: undefined,
+									...(upstream === undefined ? {} : { upstreamAuthTime: upstream }),
+								},
+							}
+						: null;
+				}),
+				delete: vi.fn(async () => {}),
+			}) as unknown as UserSessionStore;
+
+		it("answers login_required, without a second trip, when the callback came back with an upstream authentication older than the ask", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(10), upstream: minutesAgo(10) as Date | null };
+			const harness = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			// The callback established the session anew; the upstream answered
+			// from its own older login.
+			state.authTime = await reauthenticatedNow();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("error")).toBe("login_required");
+			expect(createCode).not.toHaveBeenCalled();
+		});
+
+		it("answers login_required, without a second trip, when max_age's trip came back with an upstream authentication older than the ask", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(10), upstream: minutesAgo(10) as Date | null };
+			const harness = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "60" }));
+			state.authTime = await reauthenticatedNow();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("error")).toBe("login_required");
+			expect(createCode).not.toHaveBeenCalled();
+		});
+
+		it("is satisfied by an upstream authentication made after the ask", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(10), upstream: minutesAgo(10) as Date | null };
+			const harness = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			state.upstream = await reauthenticatedNow();
+			state.authTime = await reauthenticatedNow();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("sends a session whose upstream authentication is older than max_age on a login trip, and answers login_required under prompt=none", async () => {
+			const state = { authTime: minutesAgo(1), upstream: minutesAgo(120) as Date | null };
+			const harness = await makeApp({ session, userSessionStore: federatedStore(() => state) });
+			loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "600" }));
+			const silent = await authorize(harness.app, {
+				...baseQuery,
+				prompt: "none",
+				max_age: "600",
+			});
+			expect(redirectParams(silent).get("error")).toBe("login_required");
+		});
+
+		it("reads a session whose upstream showed no authentication time as stale for any max_age", async () => {
+			const state = { authTime: minutesAgo(1), upstream: null };
+			const harness = await makeApp({ session, userSessionStore: federatedStore(() => state) });
+			loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
+		});
+
+		it("reads a session whose upstream showed no time as never meeting a login ask", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(10), upstream: null };
+			const harness = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			state.authTime = await reauthenticatedNow();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("error")).toBe("login_required");
+		});
+
+		it("meets a login ask with an upstream authentication in the ask's second, and not with one a second earlier", async () => {
+			// An upstream `auth_time` is whole seconds: a re-login in the ask's
+			// second is shown as that second's start.
+			vi.useFakeTimers({ toFake: ["Date"] });
+			try {
+				for (const [upstream, expected] of [
+					["2026-09-13T12:00:00.000Z", "code"],
+					["2026-09-13T11:59:59.000Z", "error"],
+				] as const) {
+					vi.setSystemTime(new Date("2026-09-13T12:00:00.800Z"));
+					const state = {
+						authTime: new Date("2026-09-13T11:50:00.000Z"),
+						upstream: new Date("2026-09-13T11:50:00.000Z") as Date | null,
+					};
+					const harness = await makeApp({
+						session,
+						userSessionStore: federatedStore(() => state),
+						createCode: mintingCode(),
+					});
+					const back = loginRedirectTo(
+						await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+					);
+					vi.setSystemTime(new Date("2026-09-13T12:00:02.000Z"));
+					state.authTime = new Date("2026-09-13T12:00:01.500Z");
+					state.upstream = new Date(upstream);
+					const params = redirectParams(
+						await request(harness.app).get(back.pathname + back.search),
+					);
+					expect(params.has(expected), upstream).toBe(true);
+					if (expected === "error") expect(params.get("error")).toBe("login_required");
+				}
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("reads a federated session that records no upstream time as fresh as its establishment", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(1), upstream: undefined };
+			const { app } = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const res = await authorize(app, { ...baseQuery, max_age: "600" });
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("passes a federated session whose upstream authentication is within max_age", async () => {
+			const createCode = mintingCode();
+			const state = { authTime: minutesAgo(1), upstream: minutesAgo(5) as Date | null };
+			const { app } = await makeApp({
+				session,
+				userSessionStore: federatedStore(() => state),
+				createCode,
+			});
+			const res = await authorize(app, { ...baseQuery, max_age: "600" });
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+	});
+
 	describe("prompt=none stays silent", () => {
 		it("answers login_required for a stale session instead of a login redirect", async () => {
 			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(5)) });
@@ -2293,7 +2510,7 @@ describe("/authorize — the acr table at boot", () => {
 		const { router } = await createOAuthRouter(express, {
 			loginEntry: createTestLoginEntry(),
 			registry: authorizationServerRegistry(),
-			config: makeConfig({ authorize: { acrValues } }),
+			...routerInputsOf(makeConfig({ authorize: { acrValues } })),
 			requirements: resolverForTests(
 				[
 					{

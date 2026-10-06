@@ -14,12 +14,7 @@
  * limitations under the License.
  */
 
-import type { z } from "zod";
-import type {
-	AppConfig,
-	CoreConfig,
-	fullSectionsSchema,
-} from "../../config/application.schema.mjs";
+import type { CoreConfig } from "../../config/application.schema.mjs";
 import { CORE_RELOCATIONS } from "../../config/core-relocations.mjs";
 import { RENAMED_VARIABLES_SECTION } from "../../config/removed-keys.mjs";
 import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
@@ -27,9 +22,9 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
 
 /**
  * Minimal schema-valid config factories for tests that parse `CoreConfigSchema`
- * or `AppConfigSchema` without the HOCON load pipeline. Defaults live only in
- * `reference.conf` (ADR 2026-04-30), so each call site would otherwise invent
- * this shape. For production defaults, parse `reference.conf` through the test
+ * or hand `createApp` a configuration without the HOCON load pipeline.
+ * Defaults live only in `reference.conf` (ADR 2026-04-30), so each call site
+ * would otherwise invent this shape. For production defaults, parse `reference.conf` through the test
  * harness.
  *
  * Deliberate divergences from the `reference.conf` files:
@@ -45,12 +40,10 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  * modules declare renamed, `null` (`renamed-variables`), which boot requires
  * of any configuration.
  *
- * `satisfies CoreConfig` / `AppConfig` type-checks the result while keeping
- * literal types, so tests assign it without casts. Each call returns a fresh,
- * mutable object.
+ * `satisfies CoreConfig` type-checks core's sections while keeping literal
+ * types; the other packages' sections are typed as written, since their
+ * schemas are their own packages'. Each call returns a fresh, mutable object.
  */
-
-type FullSectionsConfig = z.infer<typeof fullSectionsSchema>;
 
 /** What {@link coreConfigForTests} states in core's own section. */
 export interface CoreConfigForTestsOptions {
@@ -64,7 +57,7 @@ export interface CoreConfigForTestsOptions {
 	readonly federations?: NonNullable<NonNullable<CoreConfig["core"]>["federations"]>;
 	/** The slots this composition runs without on purpose (`core.declaredAbsent`); none by default. */
 	readonly declaredAbsent?: readonly string[];
-	/** `core.sessionLifecycle.sweepIntervalSeconds`, as written; left unstated (no sweep) by default. */
+	/** `core.sessionLifecycle.sweepIntervalSeconds`, as written; left unstated (a sweep every 60 seconds) by default. */
 	readonly sessionLifecycleSweepIntervalSeconds?: unknown;
 }
 
@@ -118,7 +111,7 @@ function grantSwitchesForTests() {
 				// unless the deployment explicitly enables M2M.
 			},
 		},
-	} satisfies Pick<FullSectionsConfig, "oauth-session" | "oauth-authorization">;
+	};
 }
 
 export function makeValidCoreConfig() {
@@ -138,11 +131,7 @@ export function makeValidCoreConfig() {
 			// the shipped literal sits on the deprecated `expiresIn`, and
 			// `resolveAccessTokenLifetime` reads it as a 3600 s default and max.
 			accessToken: { expiresIn: 3600 },
-			refreshToken: {
-				expiresIn: 86400,
-				unknownFamilyPolicy: "reject",
-				legacyRtPolicy: "reject",
-			},
+			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 			// Declares both subject-level revocation slots absent: this fixture
 			// has none, on purpose. A test of the declared-absence guard removes
@@ -177,7 +166,7 @@ export function makeValidFullSections() {
 			loginPage: { url: "/login" },
 			rateLimit: { login: { windowMs: 900000, limit: 20 } },
 		},
-	} satisfies FullSectionsConfig;
+	};
 }
 
 export function makeValidAppConfig() {
@@ -190,5 +179,5 @@ export function makeValidAppConfig() {
 		// unfilled and undeclared once a module reads it. A test of the
 		// declared-absence guard removes the entries.
 		...coreConfigForTests({ declaredAbsent: ["auditSink", "rateLimiter"] }),
-	} satisfies AppConfig;
+	};
 }

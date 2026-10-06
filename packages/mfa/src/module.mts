@@ -22,25 +22,25 @@
  * module bound to them), `userSessionStore`, `sessionRequirementResolver`,
  * `csrfGuard` (every MFA POST runs it), `loginCompletion` (a verified second
  * factor finishes the login through it) and `deploymentMode` (the development
- * sample key and the routes' per-process limiter are refused under `multi`,
- * so a mode read as absent must not lift that); reads `rateLimiter`,
- * `auditSink` and `subjectRevocation` (each absence declared; the routes'
- * admission of a signed-in session, and every use of a login's transaction,
- * reads the boundary), `logger`,
+ * sample key is refused under `multi`, so a mode read as absent must not lift
+ * that); reads `rateLimiter` — what limits the routes, which pass every
+ * request through without one — `auditSink` and `subjectRevocation` (each
+ * absence declared; the routes' admission of a signed-in session, and every
+ * use of a login's transaction, reads the boundary), `logger`,
  * `mailSender` — where the account-email proof and a factor's codes go — and
  * `userRepository`, for the enrollment witness's write alone
- * (`markMfaEnrolled`). Nothing it keeps forks per replica; without a shared
- * `rateLimiter` its routes' limiter does, refused under `multi`, warned about
- * when the mode is unset.
+ * (`markMfaEnrolled`). Nothing it keeps forks per replica.
  *
  * Reads its own section, `mfa` — the mode, its settings and the step-up
  * page, `mfa.page.url` — and the deployment mode from the `deploymentMode`
  * slot. The page's old path, `endpoints.mfa.url`, refuses the boot naming
  * the new one, and so does `ENDPOINTS_MFA_URL` unless `MFA_PAGE_URL` carries
- * the same value.
+ * the same value. `mfa.rateLimit` is removed: setting it refuses the boot.
  *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
- * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
+ * `mfa.mode` is `off` or unset, when no `sessionLifecycleStore` is wired beside
+ * the user-session store (core's session lifecycle is required where one is
+ * wired), when the package's settings are unusable (naming
  * the key), when `mfa.page.url` is unset, or when
  * `mfa.enrollment.requireEmailProof` is `always` and no `mailSender` is wired —
  * nobody could give the proof, so nobody could bind (the MFA ADR's D20). It
@@ -56,9 +56,8 @@
  * (`mfa_first_binding_without_email_proof`); and when the directory cannot
  * write the witness (`mfa_enrollment_witness_unwritable`).
  *
- * Contributes `mfa.rateLimit.routes` as the budget of the `mfa` prefix every
- * `/session/mfa` POST limits under, for every limiter to read; none when the
- * section gives none.
+ * Claims the `mfa` prefix every `/session/mfa` POST limits under, with no
+ * budget of its own: the wired limiter's `limits` and `defaultLimit` decide.
  *
  * Contributes `mfa.manage`, graded `credential_change`, as the admission
  * action its routes admit a signed-in session's enrollment, rename or removal
@@ -83,13 +82,9 @@
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	type AuditSink,
-	BootError,
-	checkDeploymentMode,
 	checkResolver,
 	consoleLogger,
-	createMemoryRateLimiter,
 	createRateLimitGuard,
-	type DeploymentMode,
 	defineModule,
 	isHintToken,
 	issuedRemediationActions,
@@ -98,8 +93,6 @@ import {
 	type MfaFactorResolver,
 	type Module,
 	type RateLimiter,
-	type RateLimitSpec,
-	requireUsableConfiguredRateLimitSpec,
 	type SessionRequirement,
 	type StepUpPage,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
@@ -114,16 +107,15 @@ import {
 	boundedRecoverySetFloor,
 	createMfaFactorSet,
 	createMfaSubjectLeases,
-	leaseMsFor,
 	type MfaSubjectLeases,
 } from "./factorSet.mjs";
-import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
+import { createFirstBindingMark, type FirstBindingMark } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { createMfaLockRecovery } from "./lockRecovery.mjs";
 import { mailFailureOf } from "./mail.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
-import { createMfaRouter } from "./routes.mjs";
+import { createMfaRouter, requireSessionLifecycleStore } from "./routes.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
 import { createLoginTransactions } from "./transactions.mjs";
@@ -143,22 +135,10 @@ export const MFA_ROUTES_ID = "mfa-routes";
 const MFA_ROUTES_MOUNT_PATH = "/session/mfa";
 
 /**
- * The key prefix every `/session/mfa` POST limits under (`mfa:ip:<ip>`), the
- * flood guard of ADR 2026-09-25-multi-factor-authentication. No `:`.
+ * The key prefix every `/session/mfa` POST limits under on the wired limiter
+ * (`mfa:ip:<ip>`), which the module claims with no budget. No `:`.
  */
 export const MFA_RATE_LIMIT_PREFIX = "mfa";
-
-/**
- * `mfa.rateLimit.routes` as the MFA routes' budget, `null` when not given;
- * read as a coercing schema reads it, and a `RangeError` naming the key when
- * no limiter can apply it.
- */
-function routesBudget(section: unknown): RateLimitSpec | null {
-	const given = (section as { rateLimit?: { routes?: unknown } } | null | undefined)?.rateLimit
-		?.routes;
-	if (given === undefined) return null;
-	return requireUsableConfiguredRateLimitSpec("mfa.rateLimit.routes", given);
-}
 
 /** What a composition root tells the MFA module that its configuration cannot. */
 export interface MfaModuleOptions {
@@ -180,6 +160,8 @@ export interface MfaBootState {
 	readonly requirement: SessionRequirement;
 	/** The enrollment witness over the composition's directory. */
 	readonly witness: MfaEnrollmentWitness;
+	/** The one first-binding mark every reader of this boot judges by. */
+	readonly firstBindingMark: FirstBindingMark;
 	readonly logger: Logger;
 }
 
@@ -298,52 +280,22 @@ function stepUpPageOf(section: unknown): StepUpPage {
 }
 
 /**
- * The guard every MFA POST runs, under the `mfa` prefix: over the shared
- * `rateLimiter`, or — with none wired — a per-process limiter over `budget`,
- * which several replicas would each count apart: refused under `multi`,
- * said once at warn when the mode is unset.
+ * The guard every MFA POST runs: the wired `rateLimiter` under the `mfa`
+ * prefix, its 429 and its outage policy core's; without one, every request
+ * passes.
  */
 function mfaFloodGuard(options: {
 	readonly rateLimiter: RateLimiter | undefined;
-	readonly budget: RateLimitSpec | null;
-	readonly deploymentMode: DeploymentMode;
 	readonly logger: Logger;
 	readonly auditSink: AuditSink | undefined;
 }): RequestHandler {
-	const { budget, logger, auditSink } = options;
-	let limiter = options.rateLimiter;
-	if (limiter === undefined) {
-		if (budget === null) {
-			throw new RangeError(
-				"mfa.rateLimit.routes is not set and no rateLimiter is wired: the MFA routes would run unlimited (the package's reference.conf ships 60 per 300 s)",
-			);
-		}
-		const replicas = checkDeploymentMode(options.deploymentMode, "mfa routes: deploymentMode");
-		if (replicas === "multi") {
-			throw new BootError({
-				stage: "applyContributions",
-				reason: "replica-unsafe-adapter",
-				message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for the MFA routes: each replica would count ${budget.limit} per ${budget.windowSeconds}s apart, so the limit is really ${budget.limit} times the replicas. Wire a shared rateLimiter (adapters.rateLimiter = "redis" in the standalone template), or set core.deployment.mode = "single".`,
-				details: { reason: "replica-unsafe-adapter", modules: ["mfa"] },
-			});
-		}
-		if (replicas !== "single") {
-			logger.warn(
-				{ limit: budget.limit, windowSeconds: budget.windowSeconds },
-				"mfa_rate_limiter_not_shared",
-			);
-		}
-		limiter = createMemoryRateLimiter({
-			limits: { [MFA_RATE_LIMIT_PREFIX]: budget },
-			defaultLimit: budget,
-		});
-	}
+	const { rateLimiter, logger, auditSink } = options;
+	if (rateLimiter === undefined) return (_req, _res, next) => next();
 	return createRateLimitGuard({
-		limiter,
+		limiter: rateLimiter,
 		tag: MFA_RATE_LIMIT_PREFIX,
 		logger,
 		...(auditSink === undefined ? {} : { auditSink }),
-		...(budget === null ? {} : { headerFallback: budget }),
 	});
 }
 
@@ -362,7 +314,13 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "csrfGuard"
 		| "loginCompletion"
 		| "deploymentMode",
-		"rateLimiter" | "auditSink" | "subjectRevocation" | "logger" | "mailSender" | "userRepository",
+		| "rateLimiter"
+		| "auditSink"
+		| "subjectRevocation"
+		| "sessionLifecycleStore"
+		| "logger"
+		| "mailSender"
+		| "userRepository",
 		typeof mfaSectionSchema,
 		"mfaSubjectLeases"
 	>({
@@ -375,7 +333,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		section: {
 			schema: mfaSectionSchema,
 			reference: new URL("../config/reference.conf", import.meta.url),
-			relocatedFrom: { "endpoints.mfa.url": "page.url" },
+			relocatedFrom: { "endpoints.mfa.url": "page.url", "mfa.rateLimit": null },
 			renamedVariables: { ENDPOINTS_MFA_URL: "endpoints.mfa.url" },
 		},
 		requires: [
@@ -392,6 +350,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"rateLimiter",
 			"auditSink",
 			"subjectRevocation",
+			"sessionLifecycleStore",
 			"logger",
 			"mailSender",
 			"userRepository",
@@ -414,9 +373,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		},
 		contributes: {
 			admissionActions: MFA_ADMISSION_ACTIONS,
-			rateLimitBudgets: {
-				[MFA_RATE_LIMIT_PREFIX]: (deps) => routesBudget(deps.section),
-			},
+			rateLimitBudgets: { [MFA_RATE_LIMIT_PREFIX]: () => null },
 			sessionRequirements: {
 				mfa: (deps) => {
 					const mode: MfaMode = deps.section?.mode ?? "off";
@@ -425,6 +382,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							'mfa.mode is "off" (or unset) while the MFA module is installed: remove the MFA module, or set mfa.mode to "required" or "optional"',
 						);
 					}
+					requireSessionLifecycleStore(deps);
 					const settings = readMfaSettings(deps.section, {
 						...options,
 						deploymentMode: deps.deploymentMode,
@@ -467,6 +425,11 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						logger.warn({ slot: "userRepository" }, "mfa_enrollment_witness_unwritable");
 					}
 					const sealing = createMfaSealing({ ring: settings.encryptionKeys, logger });
+					const firstBindingMark = createFirstBindingMark({
+						manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
+						transactionTtlSeconds: settings.transactionTtlSeconds,
+						storeTimeoutMs: settings.storeTimeoutMs,
+					});
 					const requirement = createMfaRequirement({
 						mode,
 						factors: deps.mfaFactorResolver,
@@ -486,6 +449,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 						firstBindingAt: (subject, nowMs) =>
 							deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+						firstBindingMark,
 						recoverySetFloor: boundedRecoverySetFloor(
 							deps.mfaTransactionStore,
 							settings.storeTimeoutMs,
@@ -498,6 +462,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						sealing,
 						requirement,
 						witness,
+						firstBindingMark,
 						logger,
 					});
 					return requirement;
@@ -505,9 +470,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			},
 			routes: [
 				(deps) => {
-					const { mode, settings, sealing, requirement, witness, logger } = mfaBootState(
-						deps.mfaFactorResolver,
-					);
+					const { mode, settings, sealing, requirement, witness, firstBindingMark, logger } =
+						mfaBootState(deps.mfaFactorResolver);
 					checkInstalledFactors(deps.mfaFactorResolver, mode);
 					// The subject's records as read, and the writes the witness follows: one per boot.
 					const factorSet = createMfaFactorSet({
@@ -576,11 +540,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
 								requireEmailProof: settings.enrollment.requireEmailProof,
 								sessionProofSeconds: settings.manage.maxAgeSeconds,
-								firstBindingMarkMs: firstBindingMarkLifetimeMs({
-									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
-									transactionTtlSeconds: settings.transactionTtlSeconds,
-									leaseMs: leaseMsFor(settings.storeTimeoutMs),
-								}),
+								firstBindingMark,
 								...(deps.subjectRevocation === undefined
 									? {}
 									: { subjectRevocation: deps.subjectRevocation }),
@@ -594,6 +554,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							admission: {
 								userSessionStore: deps.userSessionStore,
 								subjectRevocation: deps.subjectRevocation,
+								sessionLifecycleStore: deps.sessionLifecycleStore,
 								requirements,
 								acrTable: {},
 								logger,
@@ -605,8 +566,6 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							csrfGuard: deps.csrfGuard,
 							floodGuard: mfaFloodGuard({
 								rateLimiter: deps.rateLimiter,
-								budget: routesBudget(deps.section),
-								deploymentMode: deps.deploymentMode,
 								logger,
 								auditSink: deps.auditSink,
 							}),
@@ -624,12 +583,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
 								firstBindingAt: (subject, nowMs) =>
 									deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
-								firstBindingMarkMs: firstBindingMarkLifetimeMs({
-									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
-									transactionTtlSeconds: settings.transactionTtlSeconds,
-									leaseMs: leaseMsFor(settings.storeTimeoutMs),
-								}),
-								leaseMs: leaseMsFor(settings.storeTimeoutMs),
+								firstBindingMark,
 							},
 						}),
 					};

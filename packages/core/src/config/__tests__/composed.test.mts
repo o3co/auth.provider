@@ -15,24 +15,12 @@
  */
 
 /**
- * The transitional base of boot's one composed parse, and the reader a
- * composition root uses before it knows its modules: core's own sections and
- * every section core's schema still mirrors for a package, each optional,
- * with the coercions they always had — laid over what was written, so a key
- * no schema declares is kept.
+ * How boot's one composed parse lays a schema's parse over what was written,
+ * so a key no schema declares is kept.
  */
 
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import { AppConfigSchema } from "../application.schema.mjs";
-import { overlayConfig, readTransitionalConfig, TransitionalConfigSchema } from "../composed.mjs";
-
-/** A resolved configuration: core's sections, plus whatever `extra` adds at the top. */
-const resolved = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
-	...makeValidCoreConfig(),
-	...extra,
-});
+import { overlayConfig } from "../composed.mjs";
 
 /** `value` frozen all the way down, so a change to it throws. */
 function deepFreeze<T>(value: T): T {
@@ -42,177 +30,6 @@ function deepFreeze<T>(value: T): T {
 	}
 	return value;
 }
-
-describe("TransitionalConfigSchema — core's sections, and every mirrored one optional", () => {
-	it("requires none of the sections core mirrors for another package", () => {
-		expect(TransitionalConfigSchema.safeParse(resolved()).success).toBe(true);
-		// Nor does the schema a composition root pre-parsed with: every section
-		// it mirrors is optional.
-		expect(AppConfigSchema.safeParse(resolved()).success).toBe(true);
-	});
-
-	it("declares every section AppConfigSchema declares, with the same schema", () => {
-		expect(Object.keys(TransitionalConfigSchema.shape).sort()).toEqual(
-			Object.keys(AppConfigSchema.shape).sort(),
-		);
-	});
-});
-
-describe("readTransitionalConfig — the switches a composition root reads before its modules", () => {
-	it("reads an environment variable's string as the value its section's schema makes of it", () => {
-		const config = readTransitionalConfig(
-			resolved({
-				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } },
-				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
-			}),
-			["oauth.nonce", "webauthn"],
-		);
-		expect(config.oauth.nonce?.maxLength).toBe(128);
-		expect(config.webauthn?.rateLimit?.authenticationOptions).toEqual({
-			limit: 120,
-			windowSeconds: 60,
-		});
-	});
-
-	it("parses only the paths it reads: every other key stays as written, and is not checked", () => {
-		const config = readTransitionalConfig(
-			resolved({
-				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
-				core: { deployment: { mode: "several" } },
-			}),
-			["webauthn.rateLimit.authenticationOptions.limit"],
-		) as unknown as {
-			webauthn: { rateLimit: { authenticationOptions: Record<string, unknown> } };
-			core: unknown;
-		};
-		expect(config.webauthn.rateLimit.authenticationOptions.limit).toBe(120);
-		expect(config.webauthn.rateLimit.authenticationOptions.windowSeconds).toBe("60");
-		expect(config.core).toEqual({ deployment: { mode: "several" } });
-	});
-
-	it("leaves out the captures of renamed variables: they reach no switch and no module factory", () => {
-		const config = readTransitionalConfig(
-			resolved({ "renamed-variables": { LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: null } }),
-			["oauth.nonce"],
-		);
-		expect(config).not.toHaveProperty("renamed-variables");
-	});
-
-	it("does not refuse a section a package's reference completes, unless it reads it", () => {
-		// Before the modules are known, the WebAuthn package's reference is not
-		// layered: its `windowSeconds` is missing, and boot, which layers it,
-		// accepts what the operator wrote.
-		const partial = resolved({
-			webauthn: { rateLimit: { authenticationOptions: { limit: 10 } } },
-		});
-		expect(TransitionalConfigSchema.safeParse(partial).success).toBe(false);
-		expect(() => readTransitionalConfig(partial, ["oauth.code", "oauth.grants"])).not.toThrow();
-	});
-
-	it("refuses a value it reads that the schema refuses, naming each path the operator wrote", () => {
-		let thrown: unknown;
-		try {
-			readTransitionalConfig(
-				resolved({
-					oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "not-a-number" } },
-					core: { deployment: { mode: "several" } },
-				}),
-				["oauth.nonce.maxLength", "core.deployment.mode"],
-			);
-		} catch (err) {
-			thrown = err;
-		}
-		expect(thrown).toBeInstanceOf(RangeError);
-		expect((thrown as Error).message).toMatch(/oauth\.nonce\.maxLength: /);
-		expect((thrown as Error).message).toMatch(/core\.deployment\.mode: /);
-		expect((thrown as Error).cause).toBeInstanceOf(z.ZodError);
-	});
-
-	it("refuses a configuration a read of which throws, as a RangeError, rather than letting the error escape", () => {
-		const nonce = {
-			get maxLength(): number {
-				throw new Error("the length getter broke");
-			},
-		};
-		let thrown: unknown;
-		try {
-			readTransitionalConfig(resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce } }), [
-				"oauth.nonce.maxLength",
-			]);
-		} catch (err) {
-			thrown = err;
-		}
-		expect(thrown).toBeInstanceOf(RangeError);
-		expect((thrown as Error).message).toMatch(/threw instead of answering/);
-		// The error it threw is carried, not flattened into the message.
-		expect(((thrown as Error).cause as Error).message).toBe("the length getter broke");
-		expect((thrown as Error).message).not.toMatch(/the length getter broke/);
-	});
-
-	it("refuses a configuration that is not an object, naming the configuration itself", () => {
-		expect(() => readTransitionalConfig("oauth.nonce.maxLength = 3000", ["oauth.nonce"])).toThrow(
-			/^Config validation failed — 1 issue\(s\) found: \(the configuration\): /,
-		);
-	});
-
-	it("refuses to read a path the schema does not declare as one schema", () => {
-		expect(() => readTransitionalConfig(resolved(), ["nowhere.at.all"])).toThrow(
-			/cannot read "nowhere\.at\.all"/,
-		);
-	});
-
-	it("refuses to read a path under a value the schema transforms whole, naming the path to read instead", () => {
-		// `oauth.accessToken` is parsed as one value and transformed: the
-		// deprecated `expiresIn` takes `defaultExpiresIn`'s value. Read beneath
-		// the transform, a key would be what was written, not what boot makes
-		// of it (3600 where boot has 900).
-		expect(() => readTransitionalConfig(resolved(), ["oauth.accessToken.expiresIn"])).toThrow(
-			/cannot read "oauth\.accessToken\.expiresIn".*read "oauth\.accessToken"/,
-		);
-		const accessToken = { defaultExpiresIn: 900, expiresIn: 3600 };
-		const config = readTransitionalConfig(
-			resolved({ oauth: { ...makeValidCoreConfig().oauth, accessToken } }),
-			["oauth.accessToken"],
-		);
-		expect(config.oauth.accessToken.expiresIn).toBe(900);
-	});
-
-	it("reads a path under a value the schema only preprocesses", () => {
-		// `oauth.jwt` is a `z.preprocess` (a legacy-field refusal) around an
-		// object: its keys are read as the object parses them.
-		const config = readTransitionalConfig(resolved(), ["oauth.jwt.issuer"]);
-		expect(config.oauth.jwt.issuer).toBe(makeValidCoreConfig().oauth.jwt.issuer);
-	});
-
-	it("covers a path under another it reads", () => {
-		const config = readTransitionalConfig(
-			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } } }),
-			["oauth.nonce", "oauth.nonce.maxLength"],
-		);
-		expect(config.oauth.nonce).toEqual({ maxLength: 128 });
-	});
-
-	it("keeps what no schema declares, at the top and under a section it reads", () => {
-		const config = readTransitionalConfig(
-			resolved({
-				widget: { size: "3" },
-				oauth: { ...makeValidCoreConfig().oauth, fixtureWidget: { enabled: "true" } },
-			}),
-			["oauth"],
-		) as unknown as { widget: unknown; oauth: { fixtureWidget: unknown } };
-		expect(config.widget).toEqual({ size: "3" });
-		expect(config.oauth.fixtureWidget).toEqual({ enabled: "true" });
-	});
-
-	it("changes nothing it was given", () => {
-		const given = deepFreeze(
-			resolved({ widget: { size: "3" }, core: { deployment: { mode: "single" } } }),
-		);
-		const before = JSON.stringify(given);
-		expect(() => readTransitionalConfig(given, ["oauth.nonce", "core.deployment"])).not.toThrow();
-		expect(JSON.stringify(given)).toBe(before);
-	});
-});
 
 describe("overlayConfig — a parse laid over what was written", () => {
 	it("merges objects key by key, the upper value winning, a key only the lower has kept", () => {
@@ -242,6 +59,18 @@ describe("overlayConfig — a parse laid over what was written", () => {
 		const url = new URL("https://idp.example/");
 		expect(overlayConfig({ a: { href: "x" } }, { a: url })).toEqual({ a: url });
 		expect((overlayConfig({ a: { href: "x" } }, { a: url }) as { a: unknown }).a).toBe(url);
+	});
+
+	it("changes neither input", () => {
+		const under = deepFreeze({ a: { kept: 1, both: "raw" }, widget: { size: "3" } });
+		const over = deepFreeze({ a: { both: 2 }, b: { added: true } });
+		const before = JSON.stringify([under, over]);
+		expect(overlayConfig(under, over)).toEqual({
+			a: { kept: 1, both: 2 },
+			widget: { size: "3" },
+			b: { added: true },
+		});
+		expect(JSON.stringify([under, over])).toBe(before);
 	});
 
 	it("keeps a key named __proto__ as a key", () => {

@@ -24,16 +24,14 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type AppConfig, AppConfigSchema, coreReference } from "@o3co/auth-provider-core";
+import { BootError } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { readAdapters } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
 import { readOwnLayers, readSwitches, resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { type Adapters, repositoriesSectionSchema } from "../sections.mjs";
-import { createRecordingLogger } from "./all-modules-composition.fixture.mjs";
 
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -64,18 +62,6 @@ function composeAppEnvironment(rel: string): Map<string, string | null> {
 	return env;
 }
 
-/** Resolve the shipped config layers under a given environment, as `src/app.mts` does. */
-function resolveWith(env: Record<string, string>, configEnv = "production"): AppConfig {
-	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
-	return validate(
-		parseFile(envConfPath, { env })
-			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
-		AppConfigSchema,
-	);
-}
-
 /** The template's own layers under `env`, over its own reference, unparsed. */
 function ownResolved(
 	env: Record<string, string>,
@@ -86,6 +72,14 @@ function ownResolved(
 		.withFallback(parseFile(applicationConfPath, { env }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 		.toObject() as Record<string, unknown>;
+}
+
+/** `session-store.storage.type` as the template's own layers resolve it under `env`. */
+function sessionStorageTypeWith(env: Record<string, string>): unknown {
+	const section = ownResolved(env)["session-store"] as
+		| { readonly storage?: { readonly type?: unknown } }
+		| undefined;
+	return section?.storage?.type;
 }
 
 /** The adapters phase one reads under `env`. */
@@ -330,7 +324,7 @@ describe("the compose files put a store and its lifetime-sibling on the same bac
 			// Resolved through the real config layers, not read off the file:
 			// what matters is the value the process ends up with, whether the
 			// compose stated it or `config/application.conf` did.
-			expect(resolveWith(env)["session-store"]?.storage?.type).toBe("redis");
+			expect(sessionStorageTypeWith(env)).toBe("redis");
 			expect(adaptersWith(env).userSessionStores).toBe("redis");
 		});
 	}
@@ -341,7 +335,7 @@ describe("the compose files put a store and its lifetime-sibling on the same bac
 		// token store is deliberately absent: this template ships every
 		// federation disabled, so nothing writes to it, and turning it on needs
 		// an AES key the compose file must not invent.
-		expect(resolveWith(env)["session-store"]?.storage?.type).toBe("redis");
+		expect(sessionStorageTypeWith(env)).toBe("redis");
 		expect(adaptersWith(env)).toMatchObject({
 			userSessionStores: "redis",
 			codeRepository: "redis",
@@ -375,12 +369,13 @@ describe("the production compose leaves MFA on, for the deployment to decide", (
 
 		let err: unknown;
 		try {
-			buildModules(switches, { environment: configEnv, logger: createRecordingLogger() });
+			buildModules(switches, { environment: configEnv });
 		} catch (caught) {
 			err = caught;
 		}
-		expect(err).toBeInstanceOf(RangeError);
-		expect((err as RangeError).message).toContain("MFA_MODE=off");
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain("MFA_MODE=off");
 	});
 });
 

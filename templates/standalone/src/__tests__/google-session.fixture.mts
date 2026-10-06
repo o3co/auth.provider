@@ -16,7 +16,7 @@
 
 /**
  * A browser session with Google linked, on the standalone composed as a
- * deployment does: `oauthModule`, the session module and the real Google
+ * deployment does: `oauthEndpointsModule`, the session module and the real Google
  * adapter — the Google federation type `buildModules` lists, handed the
  * shipped `core.federations.google` entry — booted through `createApp` under
  * the shipped configuration.
@@ -34,7 +34,6 @@
 import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
-	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -49,18 +48,17 @@ import {
 } from "@o3co/auth-provider-core";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { expect } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
-import { resolveConfigPaths, type Switches } from "#/configPath.mjs";
+import { resolveConfigPaths } from "#/configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
+	type BothPhases,
+	bothPhasesOf,
 	capturedRenames,
 	libraryLayers,
-	rootSectionsOf,
-	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -123,19 +121,17 @@ const GOOGLE_ENV: Readonly<Record<string, string>> = {
 	CORE_FEDERATIONS_GOOGLE_CALLBACK_URL: GOOGLE_CALLBACK,
 };
 
-function resolveConfig(google: GoogleWiring): Switches {
+function resolveConfig(google: GoogleWiring): BothPhases {
 	const env: Record<string, string> = { ...ENV, ...GOOGLE_ENV };
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env })
 		.withFallback(parseFile(applicationConfPath, { env }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 		.withFallback(libraryLayers(env));
-	const config = validate(layers, AppConfigSchema);
+	const config = bothPhasesOf(layers, env);
 	const endSessionEndpoint = google === "shipped" ? undefined : google.endSessionEndpoint;
 	const federations = config.core?.federations;
 	return {
-		...sectionsCoreDoesNotDeclare(layers),
-		...rootSectionsOf(layers, env),
 		...config,
 		...(endSessionEndpoint === undefined
 			? {}
@@ -148,10 +144,9 @@ function resolveConfig(google: GoogleWiring): Switches {
 						},
 					},
 				}),
-		// What the resolution captured of core's renamed variables, which the
-		// schema's parse drops.
+		// What the resolution captured of the renamed variables.
 		"renamed-variables": capturedRenames(env),
-	} as Switches;
+	} as BothPhases;
 }
 
 const testRepositoriesModule = defineModule({

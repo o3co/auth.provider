@@ -17,9 +17,11 @@
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import {
 	type AppConfig,
+	BootError,
 	type DeploymentMode,
 	defineModule,
 	type FederationTokenStore,
+	memoryRateLimiterModule,
 	type SessionFederationIndex,
 	type SessionRequirement,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
@@ -43,6 +45,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { sessionModule } from "#/module.mjs";
 import { withSessionCaptures } from "./_helpers/sections.mjs";
+import { fakeSessionLifecycle, sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs (typed-slot const Modules)
@@ -158,7 +161,8 @@ const stubFederationModule = federationTypeForTests("stub", {
 	provider: () => stubFederationProvider,
 });
 
-const baseTestModules = [
+/** The session module and the stores it requires, without core's session lifecycle. */
+const withoutLifecycle = [
 	sessionModule,
 	userRepositoryModule,
 	userSessionStoreModule,
@@ -171,6 +175,8 @@ const baseTestModules = [
 	sessionFamilyIndexModule,
 	refreshTokenFamilyRevocationModule,
 ];
+
+const baseTestModules = [...withoutLifecycle, sessionLifecycleTestModule()];
 
 // ---------------------------------------------------------------------------
 // Static manifest assertions: declarative shape only; the HTTP and boot
@@ -187,7 +193,7 @@ describe("sessionModule (static manifest)", () => {
 		expect(sessionModule.requires).toContain("federationSettings");
 		expect(sessionModule.requires).not.toContain("config");
 		expect(sessionModule.optional ?? []).not.toContain("config");
-		expect(sessionModule.configSchema).toBeUndefined();
+		expect(sessionModule).not.toHaveProperty("configSchema");
 	});
 
 	it("declares its dep set in `requires`, without the oauth package's sessionRPRegistry, sessionFamilyIndex or refreshTokenFamilyRevocation", () => {
@@ -197,23 +203,24 @@ describe("sessionModule (static manifest)", () => {
 				"userRepository",
 				"userSessionStore",
 				"federationTokenStore",
-				"sessionFederationIndex",
 				"csrfTokenSigner",
 				"federationProviders",
 				"federationRedirectPolicyResolver",
 			]),
 		);
+		// A link reads the federations a session joined from core's session
+		// lifecycle; the per-session index is not this module's.
+		expect(sessionModule.requires).not.toContain("sessionFederationIndex");
+		expect(sessionModule.optional ?? []).not.toContain("sessionFederationIndex");
 		// `sessionRPRegistry` and `sessionFamilyIndex` are oauth-package concerns
 		// and MUST NOT appear in sessionModule.requires.
 		expect(sessionModule.requires).not.toContain("sessionRPRegistry");
 		expect(sessionModule.requires).not.toContain("sessionFamilyIndex");
-		// …and this is also the pin on how far `POST /session/logout` cascades.
-		// It invalidates the `UserSession` record, the subject index and the
-		// federation pair — every store in the list above. It does NOT revoke
-		// refresh-token families: that needs these three keys, and reaching
-		// them would mean depending on `@o3co/auth-provider-oauth` (a
-		// forbidden sibling edge) or writing a second `cascadeLogout`. A widened
-		// cascade must widen this list first, deliberately, not by accident.
+		// …and this is also the pin on what `POST /session/logout` reaches
+		// itself: nothing of a session's teardown. Core's session lifecycle
+		// closes the session — revoking its refresh-token families among the
+		// rest — so this module needs none of these keys. One that reads them
+		// must widen this list first, deliberately, not by accident.
 		expect(sessionModule.requires).not.toContain("refreshTokenFamilyRevocation");
 		expect(sessionModule.optional ?? []).not.toContain("refreshTokenFamilyRevocation");
 	});
@@ -344,6 +351,50 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		});
 	});
 
+	it("refuses to boot with userSessionStore wired and no sessionLifecycle, naming both slots", async () => {
+		const refusal = await createTestApp({
+			modules: withoutLifecycle,
+			bootstrapComponents: {
+				config: withSessionCaptures(makeValidAppConfig()),
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(refusal, "boot must be refused").toBeInstanceOf(BootError);
+		expect(refusal).toMatchObject({
+			reason: "contribute-factory-failed",
+			details: { module: "session", kind: "routes" },
+		});
+		const message = String(
+			(refusal as BootError).cause instanceof Error
+				? ((refusal as BootError).cause as Error).message
+				: "",
+		);
+		expect(message).toMatch(/userSessionStore is wired, but sessionLifecycle is not/);
+		expect(message).toMatch(/sessionLifecycleModule/);
+	});
+
+	it("boots with userSessionStore and sessionLifecycle both wired", async () => {
+		const handle = await createTestApp({
+			modules: baseTestModules,
+			bootstrapComponents: {
+				config: withSessionCaptures(makeValidAppConfig()),
+				pathResolver: (s: string) => s,
+			} as never,
+		});
+		await handle.dispose();
+	});
+
+	it("takes sessionLifecycleStore as an optional slot: the lifecycle port the link routes' admission reads", () => {
+		expect(sessionModule.optional).toContain("sessionLifecycleStore");
+		expect(sessionModule.requires).not.toContain("sessionLifecycleStore");
+	});
+
 	it("takes subjectRevocation as an optional slot, under the one subject-revocation policy it attaches for subjectSessionIndex", () => {
 		expect(sessionModule.optional).toContain("subjectRevocation");
 		expect(sessionModule.requires).not.toContain("subjectRevocation");
@@ -406,6 +457,7 @@ describe("sessionModule — the link routes are a consumer of session admission"
 				linkFederatedIdentity: async () => ({ ok: true, user: { id: "user-1" } }),
 			},
 			userSessionStore: { ...makeUserSessionStore(), get: async () => record },
+			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			// Boot registers each page on oauth.jwt.issuer — the valid config's.
@@ -492,6 +544,7 @@ describe("sessionModule — the password login is a consumer of session admissio
 				authenticateByToken: async () => null,
 			},
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			csrfTokenSigner: createTestCsrfTokenSigner(),
@@ -585,6 +638,7 @@ describe("sessionModule — the login's attempt limit reads the deploymentMode s
 			logger,
 			userRepository: fakeUserRepository,
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			sessionRequirementResolver: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
@@ -611,6 +665,33 @@ describe("sessionModule — the login's attempt limit reads the deploymentMode s
 			expect.objectContaining({ tag: "login" }),
 			"attempt_counter_not_shared",
 		);
+	});
+
+	it("through createApp, refuses a limiter section's limits.login, naming session.rateLimit.login", async () => {
+		// The login's attempt limit is the module's own setting; the module's
+		// claim declares it, so no limiter's limits may loosen it.
+		const base = makeValidAppConfig();
+		const err = await createTestApp({
+			modules: [...baseTestModules, memoryRateLimiterModule],
+			bootstrapComponents: {
+				config: withSessionCaptures({
+					...base,
+					[memoryRateLimiterModule.name]: {
+						limits: { login: { limit: 50, windowSeconds: 60 } },
+						defaultLimit: { limit: 60, windowSeconds: 60 },
+						maxBuckets: 100,
+					},
+				}),
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			() => undefined,
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain(`${memoryRateLimiterModule.name}.limits.login`);
+		expect((err as BootError).message).toContain("set session.rateLimit.login instead");
 	});
 
 	it("through createApp, boots under core.deployment.mode = multi on the attemptCounter slot's counter, without a warning", async () => {

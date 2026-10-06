@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
+	BootError,
 	createApp,
 	type Module,
 	moduleReferences,
@@ -27,8 +28,9 @@ import {
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
+import { federationGrantsModule } from "@o3co/auth-provider-federation-grants";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
-import { oauthModule } from "@o3co/auth-provider-oauth";
+import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
@@ -38,6 +40,7 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
+	resolveLayers,
 	type Switches,
 } from "../configPath.mjs";
 import { httpModule, keyStoreModule, templateReference } from "../modules.mjs";
@@ -46,8 +49,8 @@ import { httpModule, keyStoreModule, templateReference } from "../modules.mjs";
  * Boots the shipped config with EVERY documented override supplied the way an
  * operator supplies one: as a string.
  *
- * HOCON substitutes `${?VAR}` as a string, always. `app.mts` reads its switches
- * with core's transitional reader and hands `createApp` what it resolved,
+ * HOCON substitutes `${?VAR}` as a string, always. `app.mts` reads its own
+ * switches with the template's schema and hands `createApp` what it resolved,
  * which boot parses once with plain Zod, so every schema leaf must read the
  * string itself. This suite reads through that path: `readSwitches` for what
  * is read before boot, `resolveForBoot` and `createApp` for the configuration
@@ -101,7 +104,6 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// purpose, with a different value: the new variable must win.
 	OAUTH_ACCESS_TOKEN_EXPIRES_IN: "3600",
 	OAUTH_REFRESH_TOKEN_EXPIRES_IN: "86400",
-	OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "reject",
 	OAUTH_OIDC_MODE: "dual",
 	OAUTH_REVOCATION_ACCESS_TOKEN: "denylist",
 	OAUTH_REVOCATION_SUBJECT: "unsupported",
@@ -134,6 +136,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_SESSION_ENABLED: "false",
 	OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "reject",
 	OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED: "false",
 
@@ -308,7 +311,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
  */
 const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 	OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS:
-		"#330 tombstone — any value must fail boot with migration instructions",
+		"#330 tombstone — any value must fail boot, refused as a removed key",
 	DEPLOYMENT_MODE:
 		"renamed CORE_DEPLOYMENT_MODE, and only captured — set alone, or to another value, it fails boot",
 	MEMORY_RATE_LIMITER_MAX_BUCKETS:
@@ -331,6 +334,8 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"renamed OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED, and only captured — set alone, or to another value, it fails boot",
 	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED:
 		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY, and only captured — set alone, or to another value, it fails boot",
 	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED:
 		"renamed OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED, and only captured — set alone, or to another value, it fails boot",
 	OAUTH_GRANTS_JWT_BEARER_ENABLED:
@@ -669,6 +674,13 @@ function sessionStoreSection(config: AppConfig): {
 	>;
 }
 
+/** `federation-grants {}` as the federation-grants module parses it. */
+function federationGrantsSection(config: AppConfig): { readonly enabled?: boolean } {
+	const schema = federationGrantsModule.section?.schema;
+	if (schema === undefined) throw new Error("the federation-grants module declares no section");
+	return schema.parse(config["federation-grants"]) as ReturnType<typeof federationGrantsSection>;
+}
+
 /** `session {}` as the session module parses it. */
 function sessionSection(config: AppConfig): { readonly csrf?: { readonly ttlSeconds: number } } {
 	const schema = sessionModule.section?.schema;
@@ -691,7 +703,7 @@ function oauthSection(config: AppConfig): {
 	readonly consentPage?: { readonly url: string };
 	readonly clientIdMetadataDocuments?: Readonly<Record<string, unknown>>;
 } {
-	const schema = oauthModule({ config }).section?.schema;
+	const schema = oauthEndpointsModule.section?.schema;
 	if (schema === undefined) throw new Error("the oauth module declares no section");
 	return schema.parse(config.oauth) as ReturnType<typeof oauthSection>;
 }
@@ -762,7 +774,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.core?.federations?.oidc?.enabled).toBe(true);
 		// A leftover string here would be read as "on" by a truthiness check
 		// and as "off" by `=== true`, for a feature whose whole default is off.
-		expect(config["federation-grants"]?.enabled).toBe(true);
+		expect(federationGrantsSection(config).enabled).toBe(true);
 	});
 
 	it("turns every non-boolean override into its declared type", async () => {
@@ -1052,9 +1064,11 @@ describe("the shipped config boots with every documented override supplied as a 
 		const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
 		// Each module's section at its name: a declaration made from the
 		// section is answered for it.
-		const switches = readShippedSwitches(UMBRELLA_E2E_ENV);
-		const sections = switches as unknown as Record<string, unknown>;
-		for (const module of buildModules(switches)) {
+		const own = readOwnLayers(ownFiles("production"), { env: UMBRELLA_E2E_ENV });
+		const switches = readSwitches(own);
+		const modules = buildModules(switches);
+		const sections = resolveForBoot(own, modules, switches) as unknown as Record<string, unknown>;
+		for (const module of modules) {
 			expect(replicaUnsafeReason(module, sections[module.name]), module.name).toBeUndefined();
 		}
 	});
@@ -1187,15 +1201,20 @@ describe("the shipped config boots with every documented override supplied as a 
 
 		it("refuses MFA_MODE that is none of the three before boot, naming mfaMode", async () => {
 			const env = { ...DOCUMENTED_ENV, MFA_MODE: "on" };
-			expect(() => readShippedSwitches(env)).toThrow(RangeError);
+			expect(() => readShippedSwitches(env)).toThrow(BootError);
 			await expect(bootParsed(env)).rejects.toThrow(/mfaMode/);
 		});
 
 		for (const mode of ["optional", "required"] as const) {
 			it(`reads MFA_MODE=${mode} as the switch that installs MFA, expecting mfa`, () => {
-				const switches = readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: mode });
+				const own = readOwnLayers(ownFiles("production"), {
+					env: { ...DOCUMENTED_ENV, MFA_MODE: mode },
+				});
+				const switches = readSwitches(own);
 				expect(switches.mfaMode).toBe(mode);
-				expect(expectedSessionRequirements(switches)).toEqual({
+				const shipped = (resolveLayers(own, []).core as { sessionRequirements?: unknown })
+					.sessionRequirements;
+				expect(expectedSessionRequirements(shipped, switches.mfaMode)).toEqual({
 					expected: ["mfa"],
 					secondFactorAuthority: "mfa",
 				});

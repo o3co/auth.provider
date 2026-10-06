@@ -20,10 +20,9 @@
  * and it holds only their sections, which their section schemas parse
  * without losing a path —
  * core's `packageReferenceProblems`, the check every package with defaults
- * runs over its own file. The two rate-limit variables are named after the
- * paths they set; their old names are declared renamed and bound nowhere. The
- * removed `allowCredentialsForKnownUser` is declared removed, and its variable
- * is bound nowhere.
+ * runs over its own file. The removed `allowCredentialsForKnownUser` and
+ * `rateLimit` are declared removed, and their variables, the older rate-limit
+ * names included, are captured and bound nowhere.
  */
 
 import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
@@ -42,10 +41,14 @@ describe("the package's config/reference.conf", () => {
 
 	it("is read at the section named after its module", () => {
 		expect(
-			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
+			modules.map((module) => [
+				module.name,
+				module.section !== undefined,
+				Object.hasOwn(module.section ?? {}, "at"),
+			]),
 		).toEqual([
-			["webauthn", true, undefined],
-			["webauthn-mfa-factor", true, undefined],
+			["webauthn", true, false],
+			["webauthn-mfa-factor", true, false],
 		]);
 	});
 
@@ -70,18 +73,23 @@ describe("the package's config/reference.conf", () => {
 		]);
 	});
 
-	it("declares the two rate-limit variables renamed to the names their paths derive, and the removed key's variable", () => {
+	it("declares each removed key's variables, the older rate-limit names included", () => {
 		expect(webauthnModule.section?.renamedVariables).toEqual({
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT: "webauthn.rateLimit.authenticationOptions.limit",
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS:
+				"webauthn.rateLimit.authenticationOptions.windowSeconds",
+			WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT:
+				"webauthn.rateLimit.authenticationOptions.limit",
+			WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS:
 				"webauthn.rateLimit.authenticationOptions.windowSeconds",
 			WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER: "webauthn.allowCredentialsForKnownUser",
 		});
 	});
 
-	it("declares allowCredentialsForKnownUser removed, and binds its variable nowhere", () => {
+	it("declares allowCredentialsForKnownUser and rateLimit removed, and binds their variables nowhere", () => {
 		expect(webauthnModule.section?.relocatedFrom).toEqual({
 			"webauthn.allowCredentialsForKnownUser": null,
+			"webauthn.rateLimit": null,
 		});
 		const tree = read(new URL(REFERENCE).pathname, {
 			WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER: "true",
@@ -90,12 +98,16 @@ describe("the package's config/reference.conf", () => {
 	});
 
 	it.each([
-		["WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT", "limit"],
-		["WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS", "windowSeconds"],
-	])("reads %s at webauthn.rateLimit.authenticationOptions.%s", (variable, key) => {
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT",
+		"WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT",
+		"WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS",
+	])("binds %s nowhere in the section, and captures it", (variable) => {
 		const tree = read(new URL(REFERENCE).pathname, { [variable]: "7" }) as {
-			webauthn: { rateLimit: { authenticationOptions: Record<string, unknown> } };
+			webauthn: Record<string, unknown>;
+			"renamed-variables": Record<string, unknown>;
 		};
-		expect(tree.webauthn.rateLimit.authenticationOptions[key]).toBe("7");
+		expect(tree.webauthn).not.toHaveProperty("rateLimit");
+		expect(tree["renamed-variables"][variable]).toBe("7");
 	});
 });

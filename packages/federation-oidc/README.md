@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-oidc
 
-Last updated: 2026-10-03
+Last updated: 2026-10-06
 
 Generic OpenID Connect federation provider for `auth.provider`: any
 OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
@@ -28,7 +28,7 @@ profile, a refresh and a delegated exchange contain; and the schema of an
 
 **Does not own:** the contract (core); the `core.federations` map, the keys
 core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
-`callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier /
+`callbackMeetsFreshness`, `callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier /
 `nonce` generation, the redirect-allowlist rules and claim precedence
 ([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
 Store); the refresh and logout routes that call this adapter
@@ -68,11 +68,11 @@ and fills no slot. The module requires no dependency.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
-    sessionStoreModuleFor(config),
+    sessionStoreModule,
     sessionModule,
     oidcFederationTypeModule(),
     // ... composition-root modules supplying userRepository + the session stores
@@ -124,7 +124,8 @@ Two issuers, two sections, two callbacks — that is the whole of multi-IdP
 support.
 
 An entry is flat, and its schema is strict: the keys core owns (`enabled`,
-`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+`type`, `trustUpstreamAmr`, `callbackMeetsFreshness`, `callbackURL`) and the keys
+below, nothing else.
 The schema is `oidcEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
 does not name — a typo, or a nested `oidc { ... }` section — refuses boot
 with `config-validation-failed` at `core.federations.<name>`, naming the key;
@@ -146,7 +147,7 @@ the schema fills in no default.
 | `endpoints` | no | `authorizationEndpoint`, `tokenEndpoint`, `jwksUri`, `userinfoEndpoint`, `endSessionEndpoint`. Applied over the discovered metadata; the first three are mandatory when `discovery = false`. |
 | `idTokenSignedResponseAlg` | no | Pin the id_token JWS algorithm. Otherwise the issuer's advertised `id_token_signing_alg_values_supported` is trusted. With `discovery = false` nothing is advertised, and `openid-client` then accepts `RS256` only — so an IdP that signs with ES256 or EdDSA needs this set, or every login fails. `none` and symmetric algorithms are never accepted against a JWKS. |
 | `userInfo` | no | Default: call UserInfo when the issuer publishes an endpoint. `false` builds the profile from the id_token alone; `true` refuses boot if there is no endpoint. |
-| `clockToleranceSeconds` | no | Skew tolerated on `exp` / `iat`. Passed to `openid-client` only when set; its own default is 30. |
+| `clockToleranceSeconds` | no | Skew tolerated on `exp` / `nbf`. Passed to `openid-client` only when set; its own default is 30. When wider than core's skew (five minutes), it also widens how far ahead this adapter accepts an id_token's `auth_time`; the session still records one only within core's skew. |
 | `clientUrl` | in practice | Where the browser lands after a login whose start carried no `redirect_to`. Without it such a login ends in `500 misconfiguration` after the session has been saved — so it is needed unless every start carries a `redirect_to` and `authCallbackUrl` is set. |
 | `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package README](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
 
@@ -182,7 +183,10 @@ front of the operator.
 1. **Authorization request** — `authorization_code` with PKCE S256, `state`
    and `nonce`. All three are minted by the session routes per transaction and
    stored in the session; the provider refuses to build a request without a
-   nonce (OIDC Core §3.1.3.7).
+   nonce (OIDC Core §3.1.3.7). A freshness ask from the session routes is
+   forwarded as OIDC Core §3.1.2.1 defines it: `prompt=login` when it asks for
+   a new login, `max_age` when it names one (a value that is not a whole
+   number of seconds, at least 0, is refused). Nothing is sent without one.
 2. **Code exchange** — at `token_endpoint`, authenticated with the configured
    method, `redirect_uri` echoing the callback and `code_verifier` closing the
    PKCE loop. Before it, the callback's `iss` parameter (RFC 9207) is compared
@@ -196,9 +200,19 @@ front of the operator.
    minute of the last fetch, so an IdP that rotates keys must publish the new
    key before signing with it, which every IdP does); `iss` equal to the
    configured issuer; `aud` containing the client id — with more than one
-   audience, `azp` must be present and equal the client id; `exp` and `iat` within tolerance; `nonce` equal to the
+   audience, `azp` must be present and equal the client id; `exp` and `nbf` within tolerance; `nonce` equal to the
    transaction's; `at_hash` recomputed from the access token when the claim is
    present (OIDC Core §3.3.2.11). A response without an id_token is refused.
+   An `auth_time` that is not a non-negative number, or lies further ahead
+   than the clock skew tolerated between hosts — or than
+   `clockToleranceSeconds` when that is wider — is refused; a fraction is
+   floored to its second (core's `readUpstreamAuthTime`). The session routes
+   then record such an instant only within `DEFAULT_CLOCK_SKEW_MS` of their
+   clock and refuse one further ahead as a failed exchange (`502
+   exchange_failed`), so a wider `clockToleranceSeconds` governs only this
+   adapter's own refusal. The adapter does
+   not pass `max_age` to the library's own check: whether a session meets an
+   ask is core's judgement (#1084; wired by a later PR).
 4. **UserInfo** — when enabled, fetched with the access token and bound to the
    id_token's `sub`; a mismatch is refused. UserInfo values fill `email`,
    `emailVerified`, `name`, `picture` and `groups`, falling back to the
@@ -229,9 +243,24 @@ What `exchangeCode` returns:
 | `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when the response carried no `expires_in`**, which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
 | `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when none. The delegated capability below reads the raw answer instead and refuses such a lifetime: a grant's eligibility judges the lifetime a token was issued with, where a login's expiry only says when a refresh is due |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased), recorded by the session router verbatim |
+| `authTime` | the verified id_token's `auth_time` as a `Date`; absent when the id_token carries none. Never read from UserInfo |
 
 The token fields are core's `federationTokenSnapshot`, the one reading every
 bundled adapter gives a token response.
+
+### Freshness: `prompt=login`, `max_age` and an MFA first binding
+
+`/authorize`'s `prompt=login` and `max_age`, and the MFA module's first
+binding (a recent primary), judge a federated session by when the upstream
+last authenticated the user: the `authTime` above. A conforming IdP answers a
+forwarded `max_age` with `auth_time` (OIDC Core §3.1.2.1), so it meets those
+asks when it re-authenticates the user. An IdP whose id_token carries no
+`auth_time` meets none of them while `core.federations.<name>.callbackMeetsFreshness`
+is `false`, the default; set it to `true` for such an IdP to count the callback
+itself as the authentication, which is the behaviour before 0.17.0. A login
+started from a browser that is already signed in is a re-authentication, so
+the session routes ask for `prompt=login` and the IdP prompts the user again
+rather than answering from its own single sign-on.
 
 ### Optional capabilities
 

@@ -18,20 +18,21 @@
  * The libraries' layers beneath the template's own files, for a test that
  * resolves its configuration by hand: the `reference.conf` of every package
  * the template composes a module from, core's last, as `app.mts` layers them;
- * and what that resolution captures of the renamed variables.
+ * the resolution handed to both phases at once; and what that resolution
+ * captures of the renamed variables.
  */
 
 import { fileURLToPath } from "node:url";
 import {
-	AppConfigSchema,
+	type AppConfig,
 	memoryRateLimiterModule,
 	moduleReferences,
 } from "@o3co/auth-provider-core";
 import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import {
-	oauthAuthorizationModule,
-	oauthModule,
+	oauthAuthorizationGrantsModule,
+	oauthEndpointsModule,
 	oauthSessionGrantModule,
 } from "@o3co/auth-provider-oauth";
 import {
@@ -42,8 +43,8 @@ import {
 } from "@o3co/auth-provider-redis";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
-import { ADAPTERS_SECTION, readAdapters } from "../adapters.mjs";
-import { MFA_SWITCH, readMfaSwitch } from "../mfaSwitch.mjs";
+import { readAdapters } from "../adapters.mjs";
+import { readSwitches, type Switches } from "../configPath.mjs";
 import {
 	httpModule,
 	inMemoryCodeRepositoryModule,
@@ -53,13 +54,13 @@ import {
 	standaloneRedisClientsModule,
 	templateReference,
 } from "../modules.mjs";
-import type { Adapters, MfaSwitch } from "../sections.mjs";
+import { type Adapters, isPlainSection } from "../sections.mjs";
 
-/** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
+/** The oauth package's modules: none reads the configuration it is handed. */
 const OAUTH_MODULES = [
-	oauthModule({ config: {} as never }),
+	oauthEndpointsModule,
 	oauthSessionGrantModule,
-	oauthAuthorizationModule({ config: {} as never }),
+	oauthAuthorizationGrantsModule,
 ];
 
 /** The modules the template composes that declare a renamed variable. */
@@ -97,23 +98,46 @@ export function libraryLayers(env: Readonly<Record<string, string>>): Config {
 	);
 }
 
+/** Phase one's switches laid over the configuration boot parses. */
+export type BothPhases = Switches & AppConfig;
+
 /**
- * What a test that parses `layers` with `AppConfigSchema` lays beside that
- * parse: every top-level section core's schema does not declare — the
- * template's own modules' among them — as written, which the parse drops;
- * not the composition root's `adapters`, which boot is never handed
- * (`adaptersOf`).
+ * `switches` laid over `resolved`, the configuration boot parses, as a test
+ * that hands one object to both phases does: the composition root's own keys
+ * beside the sections, and `federation-grants.enabled` written as phase one
+ * decided it into the section as resolved. Boot is so handed phase one's
+ * boolean, not the value as written, unlike `app.mts`; boot's refusal of a
+ * written value phase one installs the modules for is pinned in
+ * `two-phase-config.test.mts`.
  */
-export function sectionsCoreDoesNotDeclare(layers: Config): Record<string, unknown> {
-	const raw = layers.toObject() as Record<string, unknown>;
-	return Object.fromEntries(
-		Object.entries(raw).filter(
-			([key]) =>
-				!Object.hasOwn(AppConfigSchema.shape, key) &&
-				key !== "renamed-variables" &&
-				key !== ADAPTERS_SECTION &&
-				key !== MFA_SWITCH,
-		),
+export function withSwitches(
+	resolved: Readonly<Record<string, unknown>>,
+	switches: Switches,
+): BothPhases {
+	const grants = resolved["federation-grants"];
+	return {
+		...resolved,
+		...switches,
+		"federation-grants": {
+			...(isPlainSection(grants) ? grants : {}),
+			...switches["federation-grants"],
+		},
+	} as unknown as BothPhases;
+}
+
+/**
+ * A resolution — `layers`, the template's `config/reference.conf` among them,
+ * under `env` — as a test that resolves by hand hands it to both phases at
+ * once: the configuration as resolved and unparsed, which boot parses as
+ * `app.mts` hands it on, with what phase one reads of it (`readSwitches`)
+ * laid over it — the composition root's `adapters` and `mfaMode`, the Store
+ * transport settings, and `federation-grants.enabled` as phase one decides
+ * it.
+ */
+export function bothPhasesOf(layers: Config, env: Readonly<Record<string, string>>): BothPhases {
+	return withSwitches(
+		layers.toObject() as Record<string, unknown>,
+		readSwitches({ config: layers, env }),
 	);
 }
 
@@ -124,25 +148,6 @@ export function sectionsCoreDoesNotDeclare(layers: Config): Record<string, unkno
  */
 export function adaptersOf(layers: Config, env: Readonly<Record<string, string>>): Adapters {
 	return readAdapters(layers.toObject() as Record<string, unknown>, env);
-}
-
-/**
- * What phase one reads from a resolution beside core's switches —
- * `layers`, the template's `config/reference.conf` among them, under `env` —
- * as `readSwitches` reads it: the composition root's `adapters` and
- * `mfaMode`, and the Store transport settings.
- */
-export function rootSectionsOf(
-	layers: Config,
-	env: Readonly<Record<string, string>>,
-): { readonly adapters: Adapters; readonly mfaMode: MfaSwitch; readonly storeTransport: unknown } {
-	const raw = layers.toObject() as Record<string, unknown>;
-	const repositories = raw.repositories as { user?: { http?: unknown } } | undefined;
-	return {
-		adapters: readAdapters(raw, env),
-		mfaMode: readMfaSwitch(raw, env),
-		storeTransport: repositories?.user?.http,
-	};
 }
 
 /** The adapters the template ships, as its `config/reference.conf` sets them with no environment. */

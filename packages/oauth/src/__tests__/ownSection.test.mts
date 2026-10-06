@@ -19,7 +19,8 @@
  * schema declares the whole section, boot refuses a key the section does not
  * declare at its path, and what the module derives from the section — the
  * token settings it provides, the discovery slice, the router's issuer — is
- * read from the section boot handed it (`deps.section`), not from the
+ * read from the section boot handed it (`deps.section`), and what it reads of
+ * the federations from core's `federationSettings` slot, never from the
  * configuration.
  */
 
@@ -36,13 +37,14 @@ import {
 	memoryAccessTokenDenylistModule,
 } from "@o3co/auth-provider-core";
 import {
+	createTestFederationSettings,
 	GrantRegistry,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { describe, expect, it } from "vitest";
-import { oauthEndpointsModule, oauthModule } from "#/module.mjs";
+import { oauthEndpointsModule } from "#/module.mjs";
 import { resolveRouterSettings } from "#/routerSettings.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { type OAuthSection, oauthSectionSchema } from "#/section.mjs";
@@ -79,9 +81,12 @@ describe("the oauth module is one module value", () => {
 		expect(oauthEndpointsModule.section?.schema).toBe(oauthSectionSchema);
 	});
 
-	it("is what the deprecated oauthModule answers, whatever it is handed", () => {
-		expect(oauthModule({ config: fixture() })).toBe(oauthEndpointsModule);
-		expect(oauthModule({ config: {} as never })).toBe(oauthEndpointsModule);
+	it("requires core's federationSettings and never the whole configuration", () => {
+		expect(oauthEndpointsModule.requires).toContain("federationSettings");
+		expect([
+			...(oauthEndpointsModule.requires ?? []),
+			...(oauthEndpointsModule.optional ?? []),
+		]).not.toContain("config");
 	});
 });
 
@@ -131,10 +136,46 @@ describe("what the module derives, it derives from its section", () => {
 		expect(meta.metadata).toMatchObject({ acr_values_supported: ["urn:from-section"] });
 	});
 
+	it("reads which installed federation trusts its upstream amr from federationSettings, not core.federations", async () => {
+		const factory = oauthEndpointsModule.contributes?.discoveryMetadata?.[0];
+		if (factory === undefined) throw new Error("the oauth module contributes no discoveryMetadata");
+		const grants = new Map([["authorization_code", {}]]);
+		const advertised = async (trustsUpstreamAmr: boolean, config: unknown) =>
+			(
+				await factory({
+					...(config === undefined ? {} : { config }),
+					section: sectionOf({
+						authorize: { acrValues: { "urn:pwd": ["pwd"], "urn:phr": [["hwk"]] } },
+					}),
+					federationSettings: createTestFederationSettings({
+						google: { type: "google", trustsUpstreamAmr },
+					}),
+					federationProviders: new Map([["google", {}]]),
+					grantHandlerResolver: {
+						get: (grantType: string) => grants.get(grantType),
+						entries: () => grants.entries(),
+					} as unknown as GrantHandlerResolver,
+					sessionRequirementResolver: resolverForTests([]),
+				} as never)
+			).metadata?.acr_values_supported;
+		// A configuration whose core.federations says the opposite is unread.
+		const distrusting = {
+			...misleadingConfig(),
+			core: { federations: { google: { type: "google", enabled: true, trustUpstreamAmr: false } } },
+		};
+		const trusting = {
+			...misleadingConfig(),
+			core: { federations: { google: { type: "google", enabled: true, trustUpstreamAmr: true } } },
+		};
+		expect(await advertised(true, distrusting)).toEqual(["urn:pwd", "urn:phr"]);
+		expect(await advertised(false, trusting)).toEqual(["urn:pwd"]);
+		expect(await advertised(true, undefined)).toEqual(["urn:pwd", "urn:phr"]);
+	});
+
 	it("builds the router's issuer from the section it is handed", () => {
 		const settings = resolveRouterSettings({
 			section: sectionOf({ jwt: { issuer: "https://section.test" } }),
-			config: misleadingConfig(),
+			federationSettings: createTestFederationSettings(),
 			authorizationEndpoint: false,
 			requirements: resolverForTests([]),
 			getFederationProviders: () => undefined,
@@ -146,24 +187,45 @@ describe("what the module derives, it derives from its section", () => {
 		expect(settings.canonicalIssuer).toBe("https://section.test");
 	});
 
-	it("builds the router from the section it is handed, the configuration's oauth {} unread", async () => {
-		const build = (section?: OAuthSection) =>
+	it("builds the router from the section it is handed, and from nothing else", async () => {
+		const build = (options: { section?: OAuthSection; federationSettings?: unknown }) =>
 			createOAuthRouter(express, {
 				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
-				// No issuer here: a router that read it would refuse to build.
-				config: { ...fixture(), oauth: {} } as unknown as AppConfig,
-				...(section === undefined ? {} : { section }),
+				...(options as { section: OAuthSection; federationSettings: never }),
 				clientRepository: new InMemoryClientRepository(new Map()),
 				keyStore: createSymmetricKeyStore("oauth-own-section-test.at-least-32-bytes"),
 			});
-		await expect(build()).rejects.toThrow(/oauth\.jwt\.issuer/);
+		const federationSettings = createTestFederationSettings();
+		// No section: refused, naming it — there is no configuration to fall back on.
+		await expect(build({ federationSettings })).rejects.toThrow(
+			/^createOAuthRouter: section is required — /,
+		);
+		await expect(build({ federationSettings })).rejects.toBeInstanceOf(RangeError);
 		// "denylist" with no denylist wired refuses the build: read from the
-		// section too.
-		await expect(build(sectionOf())).rejects.toThrow(/accessTokenRevocation is "denylist"/);
+		// section, while a configuration handed beside it that says
+		// "unsupported" is not read.
 		await expect(
-			build(sectionOf({ revocation: { accessToken: "unsupported" } })),
+			build({ section: sectionOf(), federationSettings, config: misleadingConfig() } as never),
+		).rejects.toThrow(/accessTokenRevocation is "denylist"/);
+		await expect(
+			build({
+				section: sectionOf({ revocation: { accessToken: "unsupported" } }),
+				federationSettings,
+			}),
 		).resolves.toHaveProperty("router");
+	});
+
+	it("refuses to build without federationSettings, core's view of the federations", async () => {
+		await expect(
+			createOAuthRouter(express, {
+				requirements: resolverForTests([]),
+				registry: new GrantRegistry(),
+				section: sectionOf({ revocation: { accessToken: "unsupported" } }),
+				clientRepository: new InMemoryClientRepository(new Map()),
+				keyStore: createSymmetricKeyStore("oauth-own-section-test.at-least-32-bytes"),
+			} as never),
+		).rejects.toThrow(/^createOAuthRouter: federationSettings is required — /);
 	});
 });
 

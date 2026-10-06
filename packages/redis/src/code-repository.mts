@@ -68,7 +68,7 @@ export class RedisCodeRepository implements CodeRepository {
 	constructor(client: CodeRepositoryClient, opts: RedisCodeRepositoryOptions = {}) {
 		this.client = client;
 		this.keyPrefix = opts.keyPrefix ?? DEFAULT_KEY_PREFIX;
-		// Direct-construction guard: the module configSchema already rejects
+		// Direct-construction guard: the module's section schema already rejects
 		// non-positive integers, but a direct
 		// `new RedisCodeRepository(client, { defaultExpiresIn: 0 })` would
 		// otherwise reach Redis with a bad PX argument. Rejected here so the

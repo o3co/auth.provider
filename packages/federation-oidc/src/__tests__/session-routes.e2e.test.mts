@@ -25,13 +25,14 @@ import {
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
+	sessionLifecycleModule,
 } from "@o3co/auth-provider-core";
 import {
 	coreConfigForTests,
 	makeValidAppConfig,
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -99,9 +100,10 @@ async function boot(
 	});
 
 	const modules = [
-		sessionStoreModuleFor(config),
+		sessionStoreModule,
 		sessionModule,
 		memorySessionStoresModule,
+		sessionLifecycleModule,
 		memoryFederationTokenStoreModule,
 		memoryRefreshTokenFamilyStoreModule,
 		defaultRefreshTokenFamilyRevocationModule,

@@ -148,12 +148,26 @@ function expectOneCleanupFailureLine(
 	expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
 }
 
+/**
+ * The fixture's configuration less the oauth package's grant switches
+ * (`oauth-session`, `oauth-authorization`): no module here reads them, so
+ * boot would name them as ignored.
+ */
+function withoutGrantSwitches(): Record<string, unknown> {
+	const {
+		"oauth-session": _session,
+		"oauth-authorization": _authorization,
+		...config
+	} = makeValidCoreConfig();
+	return config;
+}
+
 // Per ADR 2026-04-30-config-schema-strict-defaults-from-hocon, defaults live
 // in HOCON and validateAndComposeConfig parses CoreConfigSchema, so the
 // fixture supplies a minimal schema-valid baseline (it diverges from
 // reference.conf on purpose; see makeValidCoreConfig).
 const minBoot = {
-	config: makeValidCoreConfig() as never,
+	config: withoutGrantSwitches() as never,
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BootstrapMap;
 
@@ -456,6 +470,97 @@ describe("createApp — 6. stage 6 error: route-order-cycle → stage: assembleA
 			reason: "route-order-cycle",
 			stage: "assembleApp",
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 6b. A refusal after stage 3 runs the providers' lifecycle cleanups once
+// ---------------------------------------------------------------------------
+
+describe("createApp — 6b. a refusal after stage 3 runs the providers' lifecycle cleanups", () => {
+	/**
+	 * Two providers whose lifecycle cleanups record their names, materialised
+	 * A then B (B requires A's slot).
+	 */
+	function providersWithCleanups(cleaned: string[]): ReturnType<typeof defineModule>[] {
+		return [
+			defineModule({
+				name: "ProvA",
+				provides: { slotCA: () => 1 },
+				lifecycle: { slotCA: { eager: true, cleanup: () => void cleaned.push("A") } },
+			}),
+			defineModule({
+				name: "ProvB",
+				requires: ["slotCA"] as never,
+				provides: { slotCB: () => "b" },
+				lifecycle: { slotCB: { eager: true, cleanup: () => void cleaned.push("B") } },
+			}),
+		];
+	}
+
+	const routeOf = (id: string, before: string) => ({
+		mountPath: `/${id}`,
+		handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+		id,
+		before: [before],
+	});
+
+	it.each([
+		{
+			stage: "assembleApp",
+			reason: "route-order-cycle",
+			modules: [
+				defineModule({
+					name: "RoutesCycleMod",
+					contributes: {
+						routes: [routeOf("route-a", "route-b"), routeOf("route-b", "route-a")],
+					},
+				}),
+			],
+		},
+		{
+			stage: "applyContributions",
+			reason: "override-target-missing",
+			// Stage 1 sees the target contributed; the pre-scan finds it switched off.
+			modules: [
+				defineModule({
+					name: "GrantsOwner",
+					contributes: { grants: { "urn:off": () => null } },
+				}),
+				defineModule({
+					name: "Overrider",
+					overrides: {
+						grants: { "urn:off": () => ({ handle: async () => ({}) }) as never },
+					},
+				}),
+			],
+		},
+		{
+			stage: "applyContributions",
+			reason: "contribute-factory-failed",
+			modules: [
+				defineModule({
+					name: "FailContribMod",
+					contributes: {
+						grants: {
+							"urn:fail-grant": () => {
+								throw new Error("contribution boom");
+							},
+						},
+					},
+				}),
+			],
+		},
+	])("$stage $reason: each cleanup runs once, in reverse", async ({ stage, reason, modules }) => {
+		const cleaned: string[] = [];
+
+		const promise = createApp({
+			modules: [...providersWithCleanups(cleaned), ...modules],
+			bootstrapComponents: minBoot,
+		});
+
+		await expect(promise).rejects.toMatchObject({ reason, stage });
+		expect(cleaned).toEqual(["B", "A"]);
 	});
 });
 

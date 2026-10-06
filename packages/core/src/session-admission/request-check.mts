@@ -27,6 +27,7 @@
 
 import type { AuditSink } from "../audit/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import type { SessionLifecycleStore } from "../user-sessions/lifecycle/types.mjs";
 import type { SubjectRevocation, UserSessionStore } from "../user-sessions/types.mjs";
 import type { AcrTable } from "./acr.mjs";
 import type { AdmissionAction } from "./actions.mjs";
@@ -36,6 +37,7 @@ import {
 	type AdmissionDeps,
 	type AdmissionRequest,
 	isIssuedAction,
+	issuedActionsOf,
 	type SessionClaim,
 	type SessionRequirementResolver,
 } from "./requirement.mjs";
@@ -62,7 +64,8 @@ const isStringList = (value: unknown): value is readonly string[] =>
  * each other dependency off `deps`) read once and copied, so a getter
  * answering one thing to the check and another to the steps changes
  * nothing, and a requirement cannot reach the caller's objects. The session
- * store, the revocation boundary and the audit sink are not read here:
+ * store, the lifecycle store, the revocation boundary and the audit sink are
+ * not read here:
  * `readLiveSession` calls each reader in the guarded step that uses it, so
  * a read that throws never escapes admission — a store's is `unavailable`,
  * the sink's fails as the audit it was read for. Each reader reads `deps`
@@ -77,6 +80,7 @@ export interface CheckedRequest {
 	readonly requirements: SessionRequirementResolver;
 	readonly readUserSessionStore: () => UserSessionStore | undefined;
 	readonly readSubjectRevocation: () => SubjectRevocation | undefined;
+	readonly readSessionLifecycleStore: () => SessionLifecycleStore | undefined;
 	readonly acrTable: AcrTable;
 	readonly logger: Logger | undefined;
 	readonly readAuditSink: () => AuditSink | undefined;
@@ -99,8 +103,10 @@ function readOnce<T>(read: () => T): () => T {
 /**
  * The action a request names: a registered action by its name — the object
  * registration made, so the grade is never the caller's to restate — or a
- * remediation core issued to a requirement, by its identity. Both are core's
- * vocabulary, so a log line names either.
+ * remediation core issued to one of these requirements, by its identity. Both
+ * are core's vocabulary, so a log line names either. A remediation issued to
+ * a requirement this resolver does not hold (another composition's, another
+ * boot's) is refused as a literal or a copy is.
  */
 function checkedAction(asked: unknown, requirements: SessionRequirementResolver): AdmissionAction {
 	if (typeof asked === "string") {
@@ -112,14 +118,22 @@ function checkedAction(asked: unknown, requirements: SessionRequirementResolver)
 		}
 		return registered;
 	}
-	// The issued object keeps its identity: that is what step 5 checks.
-	if (isIssuedAction(asked)) return asked;
+	// The issued object keeps its identity: step 5 lets it skip the requirements.
+	if (
+		isIssuedAction(asked) &&
+		// Every registered copy was issued its actions ({} when it declared none).
+		[...requirements.entries()].some(([, r]) =>
+			Object.values(issuedActionsOf(r) as object).includes(asked),
+		)
+	) {
+		return asked;
+	}
 	throw new RangeError(
-		"admitSession: the action is a registered action's name, or a remediation core issued to a requirement (issuedRemediationActions)",
+		"admitSession: the action is a registered action's name, or a remediation core issued to one of these requirements (issuedRemediationActions)",
 	);
 }
 
-/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once, and the readers of the two stores and the audit sink. */
+/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once, and the readers of the three stores and the audit sink. */
 export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
 	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
 	const requirements = checkResolver(deps.requirements);
@@ -170,6 +184,7 @@ export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): Ch
 		requirements,
 		readUserSessionStore: readOnce(() => deps.userSessionStore),
 		readSubjectRevocation: readOnce(() => deps.subjectRevocation),
+		readSessionLifecycleStore: readOnce(() => deps.sessionLifecycleStore),
 		acrTable,
 		logger,
 		readAuditSink: readOnce(() => deps.auditSink),

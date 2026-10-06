@@ -36,7 +36,8 @@ import {
 	loggableError,
 	readUserSnapshot,
 	type SessionClaim,
-	type SessionFederationIndex,
+	type SessionLifecycle,
+	type SessionLifecycleStore,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type SubjectSessionIndex,
@@ -126,7 +127,8 @@ export const createRouter = (
 		userSessionStore,
 		subjectSessionIndex,
 		subjectRevocation,
-		sessionFederationIndex,
+		sessionLifecycleStore,
+		sessionLifecycle,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		federationTransactionTtlMs = DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
@@ -162,7 +164,15 @@ export const createRouter = (
 		 * sessions were revoked can link until it expires.
 		 */
 		subjectRevocation?: SubjectRevocation;
-		sessionFederationIndex: SessionFederationIndex;
+		/** The session lifecycle port the link routes' admission reads after a live record, when wired. */
+		sessionLifecycleStore?: SessionLifecycleStore | undefined;
+		/**
+		 * Core's session lifecycle: a federated login opens the session's
+		 * lifecycle record in it, and a federation joins a session through it.
+		 * Required, as `userSessionStore` is: a router built without it is
+		 * refused.
+		 */
+		sessionLifecycle?: SessionLifecycle | undefined;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
 		/**
@@ -193,13 +203,17 @@ export const createRouter = (
 ): Router => {
 	checkResolver(requirements, "federation routes", Object.keys(SESSION_ADMISSION_ACTIONS));
 	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
-	if (!sessionFederationIndex) throw new Error("federation routes require sessionFederationIndex");
 	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");
 	if (!userRepository) throw new Error("federation routes require userRepository");
 	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
 	if (!federationSettings) throw new Error("federation routes require federationSettings");
 	if (!federationTransactionCookieName) {
 		throw new Error("federation routes require federationTransactionCookieName");
+	}
+	if (!sessionLifecycle) {
+		throw new Error(
+			"federation routes: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it, and a federation joins a session through it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
 	}
 
 	const router = express.Router();
@@ -213,6 +227,7 @@ export const createRouter = (
 			{
 				userSessionStore,
 				subjectRevocation,
+				sessionLifecycleStore,
 				requirements,
 				acrTable: NO_ACR_TABLE,
 				logger: log,
@@ -234,13 +249,24 @@ export const createRouter = (
 		]),
 	);
 
+	// Whether each installed federation's callback alone meets a freshness ask,
+	// read once at composition from core's reading of `callbackMeetsFreshness`,
+	// as `trustsUpstreamAmr` is.
+	const callbackMeetsFreshness = new Map<string, boolean>(
+		[...federationProviders.keys()].map((name) => [
+			name,
+			Object.hasOwn(federationSettings, name) &&
+				federationSettings[name]?.callbackMeetsFreshness === true,
+		]),
+	);
+
 	const ctx: FederationRouterContext = {
 		federationProviders,
 		federationRedirectPolicyResolver,
 		providerCallbackUrls,
 		userRepository,
-		sessionFederationIndex,
 		federationTokenStore,
+		sessionLifecycle,
 		federationTransactionTtlMs,
 		auditSink,
 		logger,
@@ -281,7 +307,7 @@ export const createRouter = (
 			log,
 		);
 		if (identity === null) return;
-		const { profile, identityToken, user, lifetime } = identity;
+		const { profile, identityToken, user, lifetime, upstreamAuthTime } = identity;
 
 		// An explicit link request completes or is refused here; it never falls
 		// through to the login path below: a link is not a login.
@@ -327,14 +353,13 @@ export const createRouter = (
 			mappedClaims: supportsClaimMapping(provider) ? provider.mapClaims(profile) : undefined,
 		});
 
-		// `establishSession` writes the login's tail. This callback adds two
-		// steps — the federation's index entry before the regeneration and the
-		// upstream tokens after it, each undone in reverse when a later write
-		// fails — and logs in this router's vocabulary. The index entry is not
-		// atomic with the record: a failed `addFederation` rolls the record back
-		// and the user logs in again (an atomic compound call would re-couple
-		// the stores). Regeneration comes after the record and index exist and
-		// before tokens or session fields are written.
+		// `establishSession` writes the login's tail. This callback adds its
+		// steps after the regeneration — the upstream tokens, then the
+		// lifecycle's join — the tokens undone when a later write fails, and
+		// logs in this router's vocabulary. A failed write rolls the session
+		// back, its lifecycle record closed, and the user logs in again.
+		// Regeneration comes after the record exists and before tokens or
+		// session fields are written.
 		const accessToken = profile.accessToken;
 		const attachTokens: ReadonlyArray<EstablishSessionStep<FederationStore, FederationStoreStep>> =
 			accessToken
@@ -382,40 +407,58 @@ export const createRouter = (
 				federation: fed.name,
 				upstreamAmr: upstreamAmrOf(profile),
 				trusted: trustsUpstreamAmr.get(fed.name) === true,
+				// The upstream's authentication time (the verified id_token's
+				// `auth_time`), and whether this federation's callback alone meets a
+				// freshness ask when there is none; core records either as it reads them.
+				...(upstreamAuthTime === undefined ? {} : { upstreamAuthTime }),
+				callbackMeetsFreshness: callbackMeetsFreshness.get(fed.name) === true,
 				authTime: new Date(),
 				redirectTo: undefined,
 				request: loginRequestFacts(req),
 			},
 			{ logger: log },
 		);
+		// The federation joins the session through core's session lifecycle
+		// after its tokens are attached: a session closed before the join is
+		// refused, and the lifecycle removes the tokens handed to it.
+		let closed = false;
+		const joined: EstablishSessionStep<FederationStore, FederationStoreStep> = {
+			store: "session_lifecycle",
+			step: "join",
+			run: async ({ sid }) => {
+				const answer = await sessionLifecycle.join(sid, { federation: provider.name });
+				if (answer.outcome === "joined") return;
+				closed = answer.outcome === "refused";
+				throw new Error(`the session lifecycle answered ${answer.outcome} to the join`);
+			},
+		};
 		const established = await establishSession<FederationStore, FederationStoreStep>(
 			establishment,
 			{
 				req,
 				userSessionStore,
 				...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+				sessionLifecycle,
 				sessionTtlMs,
-				beforeRegenerate: [
-					{
-						store: "session_federation_index",
-						step: "add",
-						run: ({ sid, expiresAt }) =>
-							sessionFederationIndex.addFederation(sid, provider.name, expiresAt),
-						undo: {
-							step: "remove_by_sid",
-							run: ({ sid }) => sessionFederationIndex.removeBySid(sid),
-						},
-					},
-				],
-				afterRegenerate: attachTokens,
+				afterRegenerate: [...attachTokens, joined],
 				reporter: ({ sid }) => {
 					// Rebind: from this point onward, every log call carries
 					// `provider` AND `sid` — the lines the tail emits, and this
 					// callback's own after it.
 					log = log.child({ sid });
 					return {
-						storeUnavailable: (store, step, cause) =>
-							logStoreUnavailable(log, "federation_callback_store_unavailable", store, step, cause),
+						// A refused join is the session's close, not an outage.
+						storeUnavailable: (store, step, cause) => {
+							if (!closed) {
+								logStoreUnavailable(
+									log,
+									"federation_callback_store_unavailable",
+									store,
+									step,
+									cause,
+								);
+							}
+						},
 						cleanupFailed: (store, step, cause) => logCleanupFailed(log, store, step, cause),
 						subjectIndexWriteFailed: (cause) =>
 							log.error(
@@ -427,6 +470,12 @@ export const createRouter = (
 			},
 		);
 		if (established.outcome === "unavailable") {
+			if (closed) {
+				return res.status(401).json({
+					error: "login_required",
+					error_description: "The session ended before the sign-in completed",
+				});
+			}
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 

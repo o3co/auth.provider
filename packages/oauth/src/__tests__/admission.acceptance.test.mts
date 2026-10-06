@@ -27,6 +27,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createSymmetricKeyStore,
 	type SessionRequirement,
 	type UserSession,
@@ -46,6 +47,9 @@ import { createSessionGrant } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const ISSUER = "https://issuer.test";
 const SECRET = "acceptance-test-secret-32-bytes-long!";
@@ -60,7 +64,7 @@ const config = {
 	oauth: {
 		jwt: { issuer: ISSUER, secret: SECRET },
 		accessToken: { expiresIn: 300 },
-		refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject" },
+		refreshToken: { expiresIn: 86400 },
 		oidcMode: "dual",
 		grants: { session: { enabled: true }, refresh_token: { enabled: true } },
 	},
@@ -151,26 +155,29 @@ const buildApp = async (requirement: SessionRequirement) => {
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);
 	registry.register(
 		"refresh_token",
 		createRefreshTokenGrant({
-			config,
+			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
 		registry,
-		config,
+		...routerInputsOf(config),
 		clientRepository,
 		codeRepository,
 		keyStore,
 		userSessionStore,
+		sessionLifecycle: livenessOver(userSessionStore),
 		requirements,
 	});
 	const records = new Map<string, unknown>();

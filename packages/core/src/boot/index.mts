@@ -29,6 +29,7 @@ export {
 	replicaUnsafeReason,
 } from "./replica-safety.mjs";
 export type {
+	ActivationSeed,
 	AppHandle,
 	AuthoritativeComponentOverriddenDetails,
 	AuthoritativeWithoutProvidesDetails,
@@ -47,6 +48,7 @@ export type {
 	ContributeAndOverrideSameKeyDetails,
 	ContributeFactoryFailedDetails,
 	ContributionCollectorMap,
+	ContributionContainer,
 	ContributionEntry,
 	ContributionKind,
 	ContributionKindGuardedDetails,

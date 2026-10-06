@@ -43,6 +43,7 @@ import {
 import { CompactSign } from "jose";
 import { describe, expect, it } from "vitest";
 import { createJwtBearerGrant } from "#/grants/jwtBearer.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 const AS = "https://auth.example";
 const IDP = "https://idp.example";
@@ -65,7 +66,7 @@ const client: AuthenticatedClient = {
 
 const grant = () =>
 	createJwtBearerGrant({
-		config,
+		...grantSettingsFrom(config),
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		assertionVerifier: createRegistryAssertionVerifier({
 			registry: createMemoryAssertionIssuerRegistry([

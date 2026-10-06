@@ -61,7 +61,7 @@ const OPTIONAL = [
 	// opaque `null` would pre-empt the grant's answer.
 	"refreshTokenFamilyRevocation",
 	// The grant enforces the fail-closed grant-policy gate, as the sibling
-	// grants in oauthAuthorizationModule do; undeclared, token exchange would
+	// grants in oauthAuthorizationGrantsModule do; undeclared, token exchange would
 	// silently sit outside it.
 	"grantPolicy",
 	// Forwarded to the JWT verifier so its rejection and aud-skip warnings
@@ -75,12 +75,17 @@ const OPTIONAL = [
 	// declare `oauth.revocation.accessToken = "unsupported"`.
 	"accessTokenDenylist",
 	"subjectRevocation",
-	// Read by the grant alone (`sessionRefusal` in grant.mts): a subject or
-	// actor token carrying a `sid` is refused once its session has ended, and
-	// the issued token carries the subject's `sid`, so the logout that ends
-	// the one ends the other. Optional as it is on `oauthModule`: without a
-	// store no surface judges a `sid`.
+	// Read by the grant's construction alone: where a user-session store is
+	// wired, `sessionLifecycle` is required beside it, or the grant refuses to
+	// build. Optional as it is on `oauthEndpointsModule`: without a store no
+	// surface judges a `sid`.
 	"userSessionStore",
+	// Core's session lifecycle, read by the grant alone (`sessionRefusal` in
+	// grant.mts): a subject or actor token carrying a `sid` is refused once
+	// its `liveness` is not live, from the closing commit on, and the issued
+	// token carries the subject's `sid`, so the logout that ends the one ends
+	// the other.
+	"sessionLifecycle",
 ] as const;
 
 type Requires = (typeof REQUIRES)[number];
@@ -118,7 +123,7 @@ export const tokenExchangeModule: Module = defineModule<
 	},
 	requires: REQUIRES,
 	optional: OPTIONAL,
-	// Same policies as oauthModule: an unfilled denylist slot must be declared
+	// Same policies as oauthEndpointsModule: an unfilled denylist slot must be declared
 	// with oauth.revocation.accessToken = "unsupported", and an unfilled
 	// subject-revocation slot with oauth.revocation.subject = "unsupported",
 	// or a credential change silently invalidates nothing already issued.

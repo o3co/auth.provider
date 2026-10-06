@@ -18,6 +18,7 @@ import {
 	type AppHandle,
 	type ClientRepository,
 	createApp,
+	createInMemoryUserSessionStore,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
 	evaluateGrantPolicy,
@@ -46,6 +47,10 @@ import {
 	signSelfIssuedAccessToken,
 	tokenSettings,
 } from "./fixtures.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -226,7 +231,7 @@ describe("token_exchange — integration", () => {
 
 	it("declares no configSchema: it reads its own section and the slots it declares", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
-		expect(tokenExchangeModule.configSchema).toBeUndefined();
+		expect(tokenExchangeModule).not.toHaveProperty("configSchema");
 		expect(tokenExchangeModule.requires).not.toContain("config");
 		expect(tokenExchangeModule.optional ?? []).not.toContain("config");
 	});
@@ -246,7 +251,7 @@ describe("token_exchange — integration", () => {
 	// reads `deps.grantPolicy` in grant.mts to enforce fail-closed
 	// policy decisions on exchange requests. Other OAuth grants
 	// (createAuthorizationGrant / createRefreshTokenGrant) declare grantPolicy
-	// in oauthAuthorizationModule.optional; without declaring it here as well,
+	// in oauthAuthorizationGrantsModule's optional slots; without declaring it here as well,
 	// token-exchange would silently sit outside the policy gate while sibling
 	// grants are enforced — a structural inconsistency in the gate's coverage.
 	it("declares grantPolicy in optional so the grant-policy gate reaches token-exchange", async () => {
@@ -297,6 +302,8 @@ describe("tokenExchangeModule booted without the oauth module", () => {
 		});
 
 	it("boots from the slot a host fills, holding a subject token to its issuer and minting its lifetime, not the configuration's", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		handle = await boot({
 			config: configWith(),
 			oauthTokenSettings: createTestOAuthTokenSettings({
@@ -319,6 +326,21 @@ describe("tokenExchangeModule booted without the oauth module", () => {
 		expect(result.status).toBe(200);
 		if (!("tokens" in result)) return;
 		expect(result.tokens.expires_in).toBe(120);
+	});
+
+	it("refuses to boot with userSessionStore wired and no sessionLifecycle, naming both slots", async () => {
+		await expect(
+			boot({
+				config: configWith(),
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+				userSessionStore: createInMemoryUserSessionStore(),
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-token-exchange" },
+			message: expect.stringMatching(/userSessionStore is wired, but sessionLifecycle is not/),
+		});
 	});
 
 	it("is refused at boot when nothing fills oauthTokenSettings, naming the slot", async () => {
@@ -1884,7 +1906,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 describe("absence policy", () => {
 	it("carries the shared ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY constant, by identity", async () => {
 		// Identity, not shape: the declared-absence guard refuses modules whose
-		// policies for one key disagree; sharing oauthModule's constant makes
+		// policies for one key disagree; sharing oauthEndpointsModule's constant makes
 		// disagreement impossible by construction.
 		const { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } = await import("@o3co/auth-provider-core");
 		const { tokenExchangeModule } = await import("#/module.mjs");
@@ -1895,11 +1917,11 @@ describe("absence policy", () => {
 });
 
 describe("tokenExchangeModule's contributions read oauthTokenSettings, never the configuration", () => {
-	// Beside oauthModule the slot is derived from the same `oauth {}` the
+	// Beside oauthEndpointsModule the slot is derived from the same `oauth {}` the
 	// configuration carries, and nothing substitutes it, so the two cannot
 	// disagree there. Which one a contribution reads shows only here, where
 	// the deps hand it a configuration that disagrees with the slot — as a
-	// composition without oauthModule, which fills the slot itself, may.
+	// composition without oauthEndpointsModule, which fills the slot itself, may.
 	const SLOT_ISSUER = "https://slot.example";
 	const configWith = (jwt: Record<string, unknown> = {}) => {
 		const base = makeValidAppConfig();
@@ -1992,6 +2014,8 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings, never the
 	});
 
 	it("mints the slot's default lifetime, not the configuration's", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const factory = tokenExchangeModule.contributes?.grants?.[TOKEN_EXCHANGE_GRANT_TYPE];
 		if (factory === undefined) throw new Error("the module contributes no token_exchange grant");
 		const grant = (factory as (deps: unknown) => GrantHandler)({

@@ -19,11 +19,13 @@
  * slot. Phase one reads it alone, before the modules are chosen, with the
  * template's own schema; boot is never handed it. The paths the selections
  * moved from, and the variables renamed with them, are refused here, before
- * any module is chosen, in the words boot refuses a module's in: a renamed
- * variable set alone, or beside its new name at a different value, is
+ * any module is chosen, in the words and under the reasons boot refuses a
+ * module's with (`config-path-relocated`, `environment-variable-renamed`): a
+ * renamed variable set alone, or beside its new name at a different value, is
  * refused, naming the variables and never a value.
  */
 
+import { configRefused, issuesAt, pathsRelocated } from "./bootRefusal.mjs";
 import { refuseRenamedVariables } from "./rootRenames.mjs";
 import { type Adapters, adaptersSchema } from "./sections.mjs";
 
@@ -102,30 +104,40 @@ function valueAt(config: unknown, path: string): unknown {
 /**
  * `adapters` from `resolved` — the template's own layers over its
  * `config/reference.conf` — under `env`, the environment they were
- * substituted with, parsed with the template's schema. Refuses, with a
- * `RangeError`, a selection still written at the path it moved from, naming
- * its new path and variable; then a variable renamed with one
- * (`refuseRenamedVariables`); then a value or a key the schema refuses,
- * naming its path under `adapters`.
+ * substituted with, parsed with the template's schema. Refuses, each with a
+ * `BootError` (`bootRefusal.mts`), a selection still written at the path it
+ * moved from, naming its new path and variable (`config-path-relocated`);
+ * then a variable renamed with one (`refuseRenamedVariables`); then a value
+ * or a key the schema refuses, naming its path under `adapters`
+ * (`config-validation-failed`).
  */
 export function readAdapters(
 	resolved: Readonly<Record<string, unknown>>,
 	env: Readonly<Record<string, string>>,
 ): Adapters {
 	const moved = MOVED.filter(([from]) => valueAt(resolved, from) !== undefined).map(
-		([from, key]) => {
-			const to = `${ADAPTERS_SECTION}.${key}`;
-			return `${from} has moved to ${to}; see CHANGELOG. Write it there (environment variable ${VARIABLES[key]}) and remove this field from your config (or unset the environment variable that sets it).`;
-		},
+		([from, key]) => ({
+			module: ADAPTERS_SECTION,
+			from,
+			to: `${ADAPTERS_SECTION}.${key}`,
+			environmentVariable: VARIABLES[key],
+		}),
 	);
 	if (moved.length > 0) {
-		throw new RangeError(
-			`Configuration sets ${moved.length} path(s) that moved: ${moved.join(" ")}`,
+		throw pathsRelocated(
+			`Configuration sets ${moved.length} path(s) that moved: ${moved
+				.map(
+					({ from, to, environmentVariable }) =>
+						`${from} has moved to ${to}; see CHANGELOG. Write it there (environment variable ${environmentVariable}) and remove this field from your config (or unset the environment variable that sets it).`,
+				)
+				.join(" ")}`,
+			moved,
 		);
 	}
 	refuseRenamedVariables(
 		env,
 		RENAMED.map(([from, key]) => ({
+			module: ADAPTERS_SECTION,
 			from,
 			to: VARIABLES[key],
 			path: `${ADAPTERS_SECTION}.${key}`,
@@ -133,17 +145,17 @@ export function readAdapters(
 	);
 	const result = adaptersSchema.safeParse(resolved[ADAPTERS_SECTION]);
 	if (!result.success) {
-		const issues = result.error.issues;
-		throw new RangeError(
+		const issues = issuesAt([ADAPTERS_SECTION], result.error.issues);
+		throw configRefused(
 			`Config validation failed — ${issues.length} issue(s) found: ${issues
 				.map((issue) => {
 					const unknown =
 						issue.code === "unrecognized_keys" ? ` ${JSON.stringify(issue.keys)}` : "";
-					const path = [ADAPTERS_SECTION, ...issue.path.map(String)].join(".");
-					return `${path}: ${issue.message}${unknown}`;
+					return `${issue.path.map(String).join(".")}: ${issue.message}${unknown}`;
 				})
 				.join("; ")}`,
-			{ cause: result.error },
+			issues,
+			[{ module: ADAPTERS_SECTION, schemaPath: ADAPTERS_SECTION }],
 		);
 	}
 	return result.data;

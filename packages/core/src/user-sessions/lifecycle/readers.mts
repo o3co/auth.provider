@@ -325,6 +325,11 @@ export function checkSessionCloseRequest(request: SessionCloseRequest): SessionC
 }
 
 /** A sid or sub the port admits: 1 to 512 UTF-16 code units, no lone surrogate; a RangeError otherwise. */
+/** Whether `value` is a key the port admits: 1 to `SESSION_LIFECYCLE_MAX_KEY_LENGTH` characters, no lone surrogate. */
+export function isSessionLifecycleKey(value: unknown): value is string {
+	return isKey(value);
+}
+
 export function checkSessionLifecycleKey(value: string, name: string): string {
 	if (!isKey(value)) {
 		throw new RangeError(

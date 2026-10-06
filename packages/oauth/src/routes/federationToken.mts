@@ -17,8 +17,8 @@
 /**
  * The federation token route: the handler, which runs the stages in order and
  * stops at the first that answers, and the caller's standing (refresh family,
- * session, client, linked federation), whose session read core's
- * session-admission drift guard pins to this file.
+ * session, client, linked federation). Whether the session is live and which
+ * federations it joined are read from core's session lifecycle.
  */
 
 import {
@@ -26,6 +26,8 @@ import {
 	emitAuditEvent,
 	logClientRepositoryUnavailable,
 	loggableError,
+	type SessionFederations,
+	type SessionLiveness,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
@@ -39,6 +41,7 @@ import {
 import { readRecord, serveStored } from "./federationTokenRecord.mjs";
 import { refreshStoredTokens } from "./federationTokenRefresh.mjs";
 import { REFRESH_FLOOR_MS } from "./federationTokenRefreshAnswer.mjs";
+import { createRefreshBackoff } from "./federationTokenRefreshBackoff.mjs";
 import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
@@ -58,7 +61,7 @@ const checkCallerStanding = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
 ): Promise<boolean> => {
-	const { opts, req, res, name, federation, logger, storeUnavailable } = ctx;
+	const { opts, req, res, name, federation, logger } = ctx;
 	const { familyId, sid, azp, sub } = caller;
 
 	// Step 5: family revocation, fail-closed. A throw is `503`, never `401
@@ -98,19 +101,40 @@ const checkCallerStanding = async (
 		return false;
 	}
 
-	// Step 6: Load session. null → 401 invalid_token. Throw → 503.
-	let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
+	// Step 6: the session must be live. Not live → 401 invalid_token; an
+	// outage → 503. Core's session lifecycle answers, so a session whose close
+	// has committed is not live.
+	let liveness: SessionLiveness;
 	try {
-		session = await opts.userSessionStore.get(sid);
+		liveness = await opts.sessionLifecycle.liveness(sid);
 	} catch (error) {
-		storeUnavailable(federation, "user_session", "get", error);
+		// A lifecycle filled by the host may throw: an outage all the same.
+		logger.error(
+			{ federation, store: "session_lifecycle", step: "liveness", err: loggableError(error) },
+			"federation_token_store_unavailable",
+		);
 		res.status(503).json({
 			error: "temporarily_unavailable",
 			error_description: "session store unavailable",
 		});
 		return false;
 	}
-	if (!session) {
+	// Any answer other than `live` or `not_live` (core's lifecycle gives none,
+	// as it rejects on an outage) is answered as the outage.
+	if (liveness.outcome !== "live" && liveness.outcome !== "not_live") {
+		logger.error(
+			{ federation, store: "session_lifecycle", step: "liveness" },
+			"federation_token_store_unavailable",
+		);
+		res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		return false;
+	}
+	// A live session of another subject is not this token's session.
+	const live = liveness.outcome === "live" && liveness.session.sub === sub;
+	if (!live) {
 		res.setHeader(
 			"WWW-Authenticate",
 			'Bearer error="invalid_token", error_description="session not found"',
@@ -122,18 +146,37 @@ const checkCallerStanding = async (
 		return false;
 	}
 
-	// The federation index, read for step 8's membership check.
-	let federations: ReadonlyArray<string>;
+	// The federations the session joined, read for step 8's membership check.
+	// One a federation logout disconnected stays listed with its tokens
+	// removed; step 9 answers it as a federation with no tokens.
+	let listed: SessionFederations;
 	try {
-		federations = await opts.sessionFederationIndex.listFederations(sid);
+		listed = await opts.sessionLifecycle.federations(sid);
 	} catch (error) {
-		storeUnavailable(federation, "session_federation_index", "list", error);
+		logger.error(
+			{ federation, store: "session_lifecycle", step: "federations", err: loggableError(error) },
+			"federation_token_store_unavailable",
+		);
 		res.status(503).json({
 			error: "temporarily_unavailable",
 			error_description: "session store unavailable",
 		});
 		return false;
 	}
+	// Any answer other than `listed` (core's lifecycle gives none, as it
+	// rejects on an outage) is answered as the outage.
+	if (listed.outcome !== "listed") {
+		logger.error(
+			{ federation, store: "session_lifecycle", step: "federations" },
+			"federation_token_store_unavailable",
+		);
+		res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		return false;
+	}
+	const federations = listed.federations;
 
 	// Step 7: Client must exist AND have allowedAzpForFederationToken === true.
 	let client: Awaited<ReturnType<typeof opts.clientRepository.findById>>;
@@ -223,6 +266,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			`federation token route: maxTokenLifetimeMs must be a whole number of milliseconds greater than refreshBufferMs (${refreshBufferMs}) and at most ${MAX_MAX_TOKEN_LIFETIME_DAYS} days (${MAX_MAX_TOKEN_LIFETIME_MS}), got ${opts.maxTokenLifetimeMs === undefined ? `the default ${DEFAULT_MAX_TOKEN_LIFETIME_MS}` : String(opts.maxTokenLifetimeMs)}; with a refreshBufferMs of 24 h or more, pass a larger maxTokenLifetimeMs`,
 		);
 	}
+	const refreshBackoff = createRefreshBackoff();
 	const router = express.Router();
 
 	router.post("/federation/:name/token", async (req: Request, res: Response) => {
@@ -249,6 +293,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			storeUnavailable,
 			refreshBufferMs,
 			maxTokenLifetimeMs,
+			refreshBackoff,
 		};
 		const caller = await identifyCaller(ctx);
 		if (caller === null) return;

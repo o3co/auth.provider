@@ -88,11 +88,7 @@ const config: AppConfig & Record<string, unknown> = {
 			issuer: "https://auth.test",
 		},
 		accessToken: { expiresIn: 3600 },
-		refreshToken: {
-			expiresIn: 86400,
-			unknownFamilyPolicy: "reject" as const,
-			legacyRtPolicy: "reject" as const,
-		},
+		refreshToken: { expiresIn: 86400 },
 		grants: {},
 		oidcMode: "oidc-required",
 		// No `authorize` section: the first-party invariant is unconditional.
@@ -317,14 +313,11 @@ describe("standalone smoke test", () => {
 			},
 		};
 		const handle = await createApp({
-			modules: buildModules(
-				{ ...switches, oauth: issuerConfig.oauth },
-				{
-					keyStoreModule: testKeyStoreModule,
-					repositoriesModule: testRepositoriesModule,
-					refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
-				},
-			),
+			modules: buildModules(switches, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			}),
 			bootstrapComponents: { config: issuerConfig, pathResolver: (s) => s },
 		});
 		handleRef = handle;
@@ -449,7 +442,7 @@ describe("standalone smoke test", () => {
 			});
 			const names = modules.map((m) => m.name);
 			expect(names).toContain("redis-session-stores");
-			expect(names).not.toContain("stores");
+			expect(names).not.toContain("standalone-in-memory-session-stores");
 			expect(names).toContain("redis-clients");
 		});
 

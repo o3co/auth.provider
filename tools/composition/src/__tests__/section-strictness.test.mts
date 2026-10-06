@@ -62,7 +62,6 @@ const EXEMPT: Readonly<Record<string, string>> = {
  * full sets do not call is built in `BUILT`.
  */
 const FACTORIES: Readonly<Record<string, readonly string[]>> = {
-	"@o3co/auth-provider-device-grant:deviceGrantModule": ["device-grant"],
 	"@o3co/auth-provider-federation-apple:appleFederationTypeModule": [],
 	"@o3co/auth-provider-federation-github:githubFederationTypeModule": [],
 	"@o3co/auth-provider-federation-google:googleFederationTypeModule": [],
@@ -75,12 +74,8 @@ const FACTORIES: Readonly<Record<string, readonly string[]>> = {
 		"mfa-recovery-code-factor",
 		"mfa-email-factor",
 	],
-	"@o3co/auth-provider-oauth:oauthAuthorizationModule": ["oauth-authorization"],
-	"@o3co/auth-provider-oauth:oauthModule": ["oauth"],
-	"@o3co/auth-provider-oauth:oauthSessionModule": ["oauth-session"],
 	"@o3co/auth-provider-redis:redisFederationGrantStoreModuleFor": ["redis-federation-grant-store"],
 	"@o3co/auth-provider-redis:redisFederationTokenStoreModuleFor": ["redis-federation-token-store"],
-	"@o3co/auth-provider-session:sessionStoreModuleFor": ["session-store"],
 	"@o3co/auth-provider-standard:standardDevelopmentMailSenderModule": [],
 	"@o3co/auth-provider-webauthn:webauthnSessionSubjectModule": [],
 };
@@ -105,9 +100,8 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 const isModule = (value: unknown): value is Module =>
 	isPlainObject(value) && typeof value.name === "string";
 
-/** Where `module`'s section sits. */
-const sectionPath = (module: Module): string[] =>
-	module.section?.at === undefined ? [module.name] : module.section.at.split(".");
+/** Where `module`'s section sits: at the module's name. */
+const sectionPath = (module: Module): string[] => [module.name];
 
 function valueAt(tree: unknown, path: readonly string[]): unknown {
 	let cursor: unknown = tree;

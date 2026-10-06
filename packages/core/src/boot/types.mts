@@ -148,7 +148,26 @@ export interface NormalisedModule {
 	readonly authoritativeKeys: readonly ComponentKey[];
 	readonly contributesEntries: readonly ContributionEntry[];
 	readonly overridesEntries: readonly ContributionEntry[];
+	/**
+	 * Each kind's container in `contributes` and `overrides`, as it was read,
+	 * once: stage 1 holds it to its kind's shape. A container that is
+	 * `undefined` is not listed.
+	 */
+	readonly containers: readonly ContributionContainer[];
 	readonly lifecycleKeys: readonly ComponentKey[];
+}
+
+/**
+ * What a kind's container in a module's `contributes` or `overrides` was read
+ * as: `record` for a plain object, `list` for an array, `other` for anything
+ * else, and `given`, how a refusal names it (`a record`, `an array`, `null`,
+ * `a function`, `a Map`, …).
+ */
+export interface ContributionContainer {
+	readonly kind: ContributionKind;
+	readonly channel: "contributes" | "overrides";
+	readonly shape: "record" | "list" | "other";
+	readonly given: string;
 }
 
 /**
@@ -199,6 +218,12 @@ export interface ValidatedManifests {
 	 * refuses any that holds `undefined` once its sources have answered.
 	 */
 	readonly undeclaredAbsenceSlots: readonly UndeclaredAbsenceSlot[];
+	/**
+	 * The stores an enabled `core.federations` entry needs, or none when no
+	 * entry is enabled. Stage 2 builds the provider of each that no host map
+	 * fills, read or not; stage 3 refuses any that holds no value.
+	 */
+	readonly federationStoreSlots: readonly ComponentKey[];
 }
 
 /** A slot that must hold a value: its absence policy is in force and undeclared. */
@@ -245,12 +270,25 @@ export interface ProviderActivation {
 	readonly module: string;
 	readonly componentKey: ComponentKey;
 	/**
-	 * True when this entry is in the activation closure only as a seed:
-	 * `lifecycle[componentKey].eager === true`, or a slot core reads. Used by
-	 * diagnostics; does not change runtime behaviour.
+	 * True when this entry is in the activation closure only as an eager or
+	 * core-read seed (`seededBy` is `eager` or `core-read`):
+	 * `lifecycle[componentKey].eager === true`, or a slot core reads. A
+	 * `federation-store` seed is left out on purpose: its provider is built
+	 * because the configuration needs the slot, not as an eager component.
+	 * Used by diagnostics; does not change runtime behaviour.
 	 */
 	readonly eager: boolean;
+	/**
+	 * Why a provider no active module reads is built, when that is the only
+	 * reason: `eager` (`lifecycle[componentKey].eager`), `core-read` (a slot
+	 * core reads), `federation-store` (a store an enabled federation needs).
+	 * Absent for a provider an active module reads. Diagnostics only.
+	 */
+	readonly seededBy?: ActivationSeed;
 }
+
+/** What put a provider into the activation closure without a reader. */
+export type ActivationSeed = "eager" | "core-read" | "federation-store";
 
 /**
  * Output of stage 2 (planBoot). The intermediate representation carrying
@@ -795,10 +833,10 @@ export type BootErrorReason =
 // ---------------------------------------------------------------------------
 
 /**
- * A `modules` entry is a function — a module factory such as
- * `deviceGrantModule` listed without being called. `Module` requires only a
- * `name`, which every function has, so the compiler accepts it; boot would
- * otherwise take it as a manifest that contributes nothing.
+ * A `modules` entry is a function — a module factory listed without being
+ * called. `Module` requires only a `name`, which every function has, so the
+ * compiler accepts it; boot would otherwise take it as a manifest that
+ * contributes nothing.
  */
 export interface ModuleFactoryNotCalledDetails {
 	readonly reason: "module-factory-not-called";
@@ -1056,10 +1094,11 @@ export type ReservedComponentKeyDetails =
 	  };
 
 /**
- * A section path a manifest cannot have written: an `at` that is not a
- * dot-separated path of non-empty keys (or not a string), or one another
- * loaded module's section is read at too, since a section has one owner
- * (`problem` names that module); or a `relocatedFrom` that is neither a list
+ * A section a manifest cannot declare: a manifest still carrying
+ * `configSchema` or `section.at`, since a module's section is at its name and
+ * its configuration is its section, or a module named after a section core
+ * reserves (`core`, `renamed-variables`) — `problem` says which; or a
+ * `relocatedFrom` that is neither a list
  * of such paths nor a map from them to paths inside the section (`""` for the
  * section itself), or whose old path is or holds a loaded module's section
  * (`problem` says what is wrong); or a `renamedVariables` entry boot cannot
@@ -1069,9 +1108,13 @@ export type ModuleSectionPathInvalidDetails =
 	| {
 			readonly reason: "module-section-path-invalid";
 			readonly module: string;
-			/** The `at` the manifest wrote, or the path its section is read at when that is shared. */
+			/**
+			 * The `section.at` the manifest wrote, whatever its value; otherwise
+			 * the path its section is read at, its name, or `undefined` for a
+			 * module without a section.
+			 */
 			readonly at: unknown;
-			/** What is wrong with the path, when it is well formed but shared. */
+			/** What is wrong with the manifest. */
 			readonly problem?: string;
 	  }
 	| {
@@ -1158,10 +1201,9 @@ export interface ConfigValidationFailedDetails {
 	 */
 	readonly issues: readonly z.ZodIssue[];
 	/**
-	 * The composed parse: the modules whose configSchema participated, with
-	 * no `schemaPath`. A section's parse: the modules whose section was
-	 * refused, each with `schemaPath`, the dot-separated path its section is
-	 * read at.
+	 * Core's parse: none. A section's parse: the modules whose section was
+	 * refused, each with `schemaPath`, the path its section is read at — the
+	 * module's name — or none when a module without a section is named.
 	 */
 	readonly modules: readonly { readonly module: string; readonly schemaPath?: string }[];
 }
@@ -1371,25 +1413,21 @@ export interface ContributionKindGuardedDetails {
 
 /**
  * A contribution whose container, key or value its kind cannot take, found on
- * the manifest at stage 1, before any factory runs: a
- * `rateLimitBudgets`, `federationTypes` or `admissionActions` container that
- * is not a record (an array, a function, `null`) — `name` then absent — a
- * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
- * carries it — or names an `Object.prototype` member, a `federationTypes`
- * declaration that is not an object with a Zod `entrySchema` and a
- * `factory`, an `admissionActions` entry whose name, declaration or grade
- * registration refuses, or a `sessionCloseNotifiers` container that is a list
- * (as normalisation read it) — `name` then absent. `problem` says which.
+ * the manifest at stage 1, before any factory runs: a container that is not
+ * its kind's shape — a record for a kind whose collector is name-keyed, an
+ * array for a list-shaped one, core's kinds and a consumer's alike, as
+ * normalisation read it — `name` then absent; a `rateLimitBudgets` prefix
+ * that is empty or holds `:` — no limiter key carries it — or names an
+ * `Object.prototype` member, a `federationTypes` declaration that is not an
+ * object with a Zod `entrySchema`, a `factory` and a `redirectPolicy`, or an `admissionActions`
+ * entry whose name, declaration or grade registration refuses. `problem`
+ * says which, and for a container what it was given.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
 	readonly module: string;
-	readonly kind:
-		| "rateLimitBudgets"
-		| "federationTypes"
-		| "admissionActions"
-		| "sessionCloseNotifiers";
-	/** The prefix, type, action name or notifier name; absent when the container itself is refused. */
+	readonly kind: ContributionKind;
+	/** The prefix, type or action name; absent when the container itself is refused. */
 	readonly name?: string;
 	readonly channel: "contributes" | "overrides";
 	readonly problem: string;

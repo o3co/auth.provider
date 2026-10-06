@@ -271,24 +271,35 @@ test("section.schema is a Zod schema", () => {
 	});
 });
 
-test("a section declares its reference.conf, a transitional path and the paths it moves from", () => {
+test("a section declares its reference.conf and the paths it moves from", () => {
 	defineModule({
 		name: "relocating",
 		section: {
 			schema: RetrySection,
 			reference: new URL("../config/reference.conf", import.meta.url),
-			at: "legacy.relocating",
 			relocatedFrom: ["older.relocating"],
 		},
 	});
 	expectTypeOf<ModuleSection["schema"]>().toEqualTypeOf<SectionSchema>();
 	expectTypeOf<ModuleSection["reference"]>().toEqualTypeOf<URL | undefined>();
-	expectTypeOf<ModuleSection["at"]>().toEqualTypeOf<string | undefined>();
 	expectTypeOf<ModuleSection["relocatedFrom"]>().toEqualTypeOf<
 		| readonly string[]
 		| Readonly<Record<string, string | null | RelocationWithoutVariable>>
 		| undefined
 	>();
+});
+
+test("a section is at its module's name: neither it nor the manifest names another path", () => {
+	defineModule({
+		name: "elsewhere",
+		// @ts-expect-error — a section has no `at`
+		section: { schema: RetrySection, at: "legacy.elsewhere" },
+	});
+	defineModule({
+		name: "composed",
+		// @ts-expect-error — a manifest has no `configSchema`
+		configSchema: z.object({ composed: RetrySection }),
+	});
 });
 
 test("a relocatedFrom map entry may declare its new path bound to no variable", () => {

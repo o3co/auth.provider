@@ -39,7 +39,7 @@ import { describe, expect, it, vi } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
-import { withOauthCaptures } from "./_helpers/sections.mjs";
+import { routerInputsOf, withOauthCaptures } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -94,7 +94,7 @@ async function buildApp(
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
-		config: mockConfig,
+		...routerInputsOf(mockConfig),
 		clientRepository: mockClientRepository,
 		codeRepository: mockCodeRepository,
 		keyStore,
@@ -414,14 +414,14 @@ describe("/introspect — token_type + access-only enforcement", () => {
 });
 
 // ---------------------------------------------------------------------------
-// oauthModule — refreshTokenFamilyRevocation composition via createTestApp
+// oauthEndpointsModule — refreshTokenFamilyRevocation composition via createTestApp
 //
-// oauthModule is booted via the boot planner; refreshTokenFamilyRevocation
+// oauthEndpointsModule is booted via the boot planner; refreshTokenFamilyRevocation
 // flows through the DI graph into createOAuthRouter's typed deps, and the
 // family-revoke cascade must fire.
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — refreshTokenFamilyRevocation composition via createTestApp", () => {
+describe("oauthEndpointsModule — refreshTokenFamilyRevocation composition via createTestApp", () => {
 	it("threads refreshTokenFamilyRevocation through to /introspect so family revocation returns active:false", async () => {
 		const familyId = "fam-module-revoked";
 		const token = await makeAccessToken({ family_id: familyId });
@@ -432,7 +432,7 @@ describe("oauthModule — refreshTokenFamilyRevocation composition via createTes
 		};
 
 		// refreshTokenFamilyRevocation flows through the DI graph as a typed slot;
-		// oauthModule reads it from typed deps and forwards to createOAuthRouter.
+		// oauthEndpointsModule reads it from typed deps and forwards to createOAuthRouter.
 		const refreshTokenFamilyRevocationModule = defineModule({
 			name: "test:refresh-token-family-revocation",
 			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
@@ -463,7 +463,7 @@ describe("oauthModule — refreshTokenFamilyRevocation composition via createTes
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
-				// oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthEndpointsModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				// Issuer is configured, so the discovery presence contract requires

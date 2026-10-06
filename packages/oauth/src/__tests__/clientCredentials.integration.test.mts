@@ -40,6 +40,8 @@ import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "#/middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -99,12 +101,12 @@ async function buildApp(clientRepo: ClientRepository): Promise<express.Express> 
 	const registry = new GrantRegistry();
 	registry.register(
 		"client_credentials",
-		createClientCredentialsGrant({ config: fullConfig, keyStore }),
+		createClientCredentialsGrant({ ...grantSettingsFrom(fullConfig), keyStore }),
 	);
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
 		registry,
-		config: fullConfig,
+		...routerInputsOf(fullConfig),
 		clientRepository: clientRepo,
 		codeRepository: codeRepoStub,
 		keyStore,
@@ -313,12 +315,12 @@ describe("client_credentials — private_key_jwt client authentication at /oauth
 		const registry = new GrantRegistry();
 		registry.register(
 			"client_credentials",
-			createClientCredentialsGrant({ config: fullConfig, keyStore }),
+			createClientCredentialsGrant({ ...grantSettingsFrom(fullConfig), keyStore }),
 		);
 		const { router } = await createOAuthRouter(express, {
 			requirements: resolverForTests([]),
 			registry,
-			config: fullConfig,
+			...routerInputsOf(fullConfig),
 			clientRepository: jwtClientRepo(),
 			codeRepository: codeRepoStub,
 			keyStore,
@@ -332,7 +334,7 @@ describe("client_credentials — private_key_jwt client authentication at /oauth
 		// The coupling a composition inherits when it installs a seen-set for
 		// another consumer, such as DPoP's proofs. Same client, same keys, same
 		// assertion shape; only the seen-set differs. (Discovery follows the
-		// same condition: oauthModule advertises private_key_jwt iff a
+		// same condition: oauthEndpointsModule advertises private_key_jwt iff a
 		// replaySeenSet is wired — pinned in discovery-contribution.test.mts.)
 		const send = async (app: express.Express) =>
 			request(app)

@@ -15,23 +15,29 @@
  */
 import { createSecretKey } from "node:crypto";
 import {
+	createInMemorySessionLifecycleStore,
+	createInMemoryUserSessionStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRevocation,
 	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type GrantPolicyHook,
 	type Logger,
 	type RefreshTokenFamilyRotation,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 // Vitest mock-shaped Logger that satisfies the interface; tests pass a fresh
 // `vi.fn()` for `warn` and inspect its calls. Other levels are vi.fn() so
@@ -57,24 +63,17 @@ const mockConfig = {
 	oauth: {
 		jwt: { secret: SECRET },
 		accessToken: { expiresIn: 3600 },
-		refreshToken: {
-			expiresIn: 86400,
-			// Default policy for unknown_family is "reject".
-			unknownFamilyPolicy: "reject",
-			// Default policy for tokens lacking jti or family_id when rotation
-			// is wired is "reject".
-			legacyRtPolicy: "reject",
-		},
+		refreshToken: { expiresIn: 86400 },
 		grants: {
 			session: { enabled: true },
 			authorization_code: { enabled: true },
 			refresh_token: { enabled: true },
 		},
 	},
-} as unknown as GrantDependencies["config"];
+};
 
 const mockDeps: RefreshTokenGrantDeps = {
-	config: mockConfig,
+	...grantSettingsFrom(mockConfig),
 	keyStore,
 	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 };
@@ -104,6 +103,27 @@ const DEFAULT_AUTH_CLIENT = {
 	clientId: DEFAULT_CLIENT_ID,
 	tokenEndpointAuthMethod: "client_secret_basic" as const,
 };
+
+describe("createRefreshTokenGrant — where a user-session store is wired, core's session lifecycle is required", () => {
+	it("refuses to build with userSessionStore wired and no sessionLifecycleStore, naming both slots", () => {
+		expect(() =>
+			createRefreshTokenGrant({ ...mockDeps, userSessionStore: createInMemoryUserSessionStore() }),
+		).toThrow(
+			/^The refresh_token grant: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*sessionLifecycleModule\.$/,
+		);
+	});
+
+	it("builds sessionless, with neither wired, and with both wired", () => {
+		expect(() => createRefreshTokenGrant(mockDeps)).not.toThrow();
+		expect(() =>
+			createRefreshTokenGrant({
+				...mockDeps,
+				userSessionStore: createInMemoryUserSessionStore(),
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			}),
+		).not.toThrow();
+	});
+});
 
 describe("createRefreshTokenGrant", () => {
 	describe("handle", () => {
@@ -258,16 +278,18 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			// `expires_in` is the time left when answered: read on a frozen clock.
+			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 			// Only the current keys are configured, so a grant reading the
 			// deprecated `expiresIn` would mint a token with no `exp` at all.
 			const handler = createRefreshTokenGrant({
 				...mockDeps,
-				config: {
+				...grantSettingsFrom({
 					oauth: {
 						...mockConfig.oauth,
 						accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
 					},
-				} as unknown as GrantDependencies["config"],
+				}),
 			});
 			const { result } = await handler.handle({
 				body: { refresh_token: await makeRefreshToken(), expires_in: "7200" },
@@ -740,12 +762,12 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("is refused when it is built with a lifetime that is not a positive whole number of seconds, and no token is spent", async () => {
-			// The schema refuses such a value at boot; a configuration built by
-			// hand never meets it. `generateToken` refuses it too, but only after
-			// the rotation has committed — the presented token spent and no token
-			// issued in its place — and read per request, even a check
-			// ahead of the rotation answers every request with a 500. The grant
-			// reads both lifetimes when it is built instead.
+			// Boot refuses such a slot; one filled by hand never meets it.
+			// `generateToken` refuses it too, but only after the rotation has
+			// committed — the presented token spent and no token issued in its
+			// place — and read per request, even a check ahead of the rotation
+			// answers every request with a 500. The grant reads both lifetimes
+			// from the slot when it is built instead.
 			const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
 			// A revoked family is kept for as long as the access tokens it could
 			// have minted are accepted: the store wrappers take that horizon.
@@ -774,38 +796,37 @@ describe("createRefreshTokenGrant", () => {
 				metadata: {},
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
-			const withOAuth = (over: Record<string, unknown>): RefreshTokenGrantDeps => ({
+			const withSettings = (over: Record<string, unknown>): RefreshTokenGrantDeps => ({
 				...mockDeps,
-				config: {
-					...mockConfig,
-					oauth: { ...mockConfig.oauth, ...over },
-				} as GrantDependencies["config"],
+				oauthTokenSettings: { ...mockDeps.oauthTokenSettings, ...over } as never,
 				refreshTokenFamilyRotation: rotation,
 				refreshTokenFamilyRevocation: revocation,
 			});
 
 			const broken: Record<string, unknown>[] = [
-				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: 1.5 } },
-				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: Number.NaN } },
-				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: 0 } },
-				{ accessToken: { expiresIn: 1.5 } },
+				{ refreshTokenExpiresIn: 1.5 },
+				{ refreshTokenExpiresIn: Number.NaN },
+				{ refreshTokenExpiresIn: 0 },
+				{ accessTokenLifetime: { defaultExpiresIn: 1.5, maxExpiresIn: 3600 } },
 			];
 			for (const over of broken) {
 				let refused: unknown;
 				let handler: ReturnType<typeof createRefreshTokenGrant> | undefined;
 				try {
-					handler = createRefreshTokenGrant(withOAuth(over));
+					handler = createRefreshTokenGrant(withSettings(over));
 				} catch (err) {
 					refused = err;
 				}
 				await handler?.handle(ctx).catch(() => undefined);
 				expect(refused, JSON.stringify(over)).toBeInstanceOf(RangeError);
-				expect((refused as Error).message).toMatch(/oauth\.(refreshToken|accessToken)\.expiresIn/);
+				expect((refused as Error).message).toMatch(
+					/oauthTokenSettings\.(refreshTokenExpiresIn|accessTokenLifetime)/,
+				);
 			}
 
-			// Nothing was spent: the same token still refreshes under a sound
-			// configuration, rather than reading as a replay.
-			const { result } = await createRefreshTokenGrant(withOAuth({})).handle(ctx);
+			// Nothing was spent: the same token still refreshes under sound
+			// settings, rather than reading as a replay.
+			const { result } = await createRefreshTokenGrant(withSettings({})).handle(ctx);
 			expect(result.status).toBe(200);
 		});
 
@@ -1164,24 +1185,22 @@ describe("createRefreshTokenGrant", () => {
 				.sign(secretKey);
 		}
 
-		function configWithUnknownPolicy(policy: "accept" | "reject"): GrantDependencies["config"] {
+		/** The grant over an unknown family, built with `policy` as its unknownFamilyPolicy. */
+		function depsWithPolicy(policy: unknown, warn = vi.fn()): RefreshTokenGrantDeps {
 			return {
-				...mockConfig,
-				oauth: {
-					...mockConfig.oauth,
-					refreshToken: {
-						...mockConfig.oauth.refreshToken,
-						unknownFamilyPolicy: policy,
-					},
-				},
-			} as unknown as GrantDependencies["config"];
-		}
-
-		it("returns 400 invalid_grant for unknown_family with default policy", async () => {
-			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
+				logger: makeStubLogger(warn),
+				...(policy === undefined
+					? {}
+					: { unknownFamilyPolicy: policy as RefreshTokenGrantDeps["unknownFamilyPolicy"] }),
 			};
+		}
+
+		it("rejects an unknown family when no policy is handed over: absent reads as reject", async () => {
+			const warn = vi.fn();
+			const deps = depsWithPolicy(undefined, warn);
+			expect(deps).not.toHaveProperty("unknownFamilyPolicy");
 			const rt = await makeRtWithFamily();
 
 			const { result } = await createRefreshTokenGrant(deps).handle({
@@ -1193,21 +1212,17 @@ describe("createRefreshTokenGrant", () => {
 			if (!("error" in result)) expect.fail("Expected error in result");
 			expect(result.error).toBe("invalid_grant");
 			expect(result.errorDescription).toBe("unknown_family");
+			expect(warn).toHaveBeenCalledWith(
+				expect.objectContaining({ familyId: "fam-unknown" }),
+				"unknown_family_rejected",
+			);
 		});
 
 		it("issues tokens with unknownFamilyPolicy=accept, and warns that it did", async () => {
 			const warn = vi.fn();
-			const logger = makeStubLogger(warn);
-			const deps: RefreshTokenGrantDeps = {
-				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-				config: configWithUnknownPolicy("accept"),
-				keyStore: mockDeps.keyStore,
-				refreshTokenFamilyRotation: unknownFamilyRotation,
-				logger,
-			};
 			const rt = await makeRtWithFamily("fam-legacy");
 
-			const { result } = await createRefreshTokenGrant(deps).handle({
+			const { result } = await createRefreshTokenGrant(depsWithPolicy("accept", warn)).handle({
 				...baseCtx,
 				body: { refresh_token: rt },
 			});
@@ -1219,19 +1234,17 @@ describe("createRefreshTokenGrant", () => {
 			);
 		});
 
-		it("returns 400 with explicit unknownFamilyPolicy=reject", async () => {
+		it.each([
+			["reject", "reject"],
+			["any other string", "warn"],
+			["accept in another case", "ACCEPT"],
+			["null", null],
+			["true", true],
+		])("rejects an unknown family under %s: only accept accepts", async (_what, policy) => {
 			const warn = vi.fn();
-			const logger = makeStubLogger(warn);
-			const deps: RefreshTokenGrantDeps = {
-				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-				config: configWithUnknownPolicy("reject"),
-				keyStore: mockDeps.keyStore,
-				refreshTokenFamilyRotation: unknownFamilyRotation,
-				logger,
-			};
 			const rt = await makeRtWithFamily("fam-unknown");
 
-			const { result } = await createRefreshTokenGrant(deps).handle({
+			const { result } = await createRefreshTokenGrant(depsWithPolicy(policy, warn)).handle({
 				...baseCtx,
 				body: { refresh_token: rt },
 			});
@@ -1243,6 +1256,38 @@ describe("createRefreshTokenGrant", () => {
 				expect.objectContaining({ familyId: "fam-unknown" }),
 				"unknown_family_rejected",
 			);
+			expect(warn).not.toHaveBeenCalledWith(
+				expect.anything(),
+				"unknown_family_accepted_legacy_mode",
+			);
+		});
+
+		it("reads the policy once, when it is built: a later change to its deps decides nothing", async () => {
+			const deps = { ...depsWithPolicy(undefined) };
+			const handler = createRefreshTokenGrant(deps);
+			(deps as { unknownFamilyPolicy?: string }).unknownFamilyPolicy = "accept";
+			const rt = await makeRtWithFamily();
+
+			const { result } = await handler.handle({ ...baseCtx, body: { refresh_token: rt } });
+
+			expect(result.status).toBe(400);
+		});
+
+		it("reads no policy from a configuration handed over beside it", async () => {
+			const config = {
+				oauth: {
+					...mockConfig.oauth,
+					refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "accept" },
+				},
+			};
+			const rt = await makeRtWithFamily();
+
+			const { result } = await createRefreshTokenGrant({
+				...depsWithPolicy(undefined),
+				config,
+			} as never).handle({ ...baseCtx, body: { refresh_token: rt } });
+
+			expect(result.status).toBe(400);
 		});
 
 		it("still answers replay_detected, not unknown_family, for a replayed outcome", async () => {
@@ -1683,12 +1728,7 @@ describe("createRefreshTokenGrant", () => {
 		function depsWithAudiencePolicy(evaluate: GrantPolicyHook["evaluate"]): RefreshTokenGrantDeps {
 			return {
 				...mockDeps,
-				config: {
-					oauth: {
-						...mockDeps.config.oauth,
-						resourceIndicator: { enabled: true },
-					},
-				} as unknown as GrantDependencies["config"],
+				oauthTokenSettings: createTestOAuthTokenSettings({ resourceIndicatorEnabled: true }),
 				grantPolicy: createStubPolicy(evaluate),
 				// allowedAudiences lives on the authenticatedClient in the ctx — set per-test.
 			};
@@ -1782,7 +1822,11 @@ describe("createRefreshTokenGrant", () => {
 				amr: undefined,
 				authentication: undefined,
 			}));
-			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = {
+				...mockDeps,
+				userSessionStore: store,
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			};
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -1808,7 +1852,11 @@ describe("createRefreshTokenGrant", () => {
 		it("returns 400 invalid_grant when userSessionStore.get returns null", async () => {
 			const token = await makeRefreshToken({ sid: "sid-dead" });
 			const store = createStubUserSessionStore(async (_sid) => null);
-			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = {
+				...mockDeps,
+				userSessionStore: store,
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			};
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -1830,7 +1878,11 @@ describe("createRefreshTokenGrant", () => {
 			const store = createStubUserSessionStore(async (_sid) => {
 				throw new Error("redis down");
 			});
-			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = {
+				...mockDeps,
+				userSessionStore: store,
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			};
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -2567,6 +2619,7 @@ describe("refresh carries how the user authenticated", () => {
 		};
 		const { at, rt } = await refresh(await presentedWith({ sid: "sid-1", amr: ["pwd"] }), {
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 		});
 		expect(at.sub).toBe("u1");
 		expect(at).not.toHaveProperty("auth_time");

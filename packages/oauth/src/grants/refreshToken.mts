@@ -20,6 +20,7 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	boundPolicyAudience,
+	checkOAuthTokenSettings,
 	checkResolver,
 	deriveAudienceFromResources,
 	describeAdmissionOutage,
@@ -39,9 +40,6 @@ import {
 	type ProviderDeps,
 	readIssuedScope,
 	readSpaceDelimitedParameter,
-	resolveAccessTokenLifetime,
-	resolveRefreshTokenLifetime,
-	resolveTokenBindingSettings,
 	tokenClaim,
 	unrepresentedResources,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
@@ -53,6 +51,7 @@ import {
 import type { JWTPayload } from "jose";
 import { stepUpRefusal } from "../admission.mjs";
 import type { REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
+import { bindConfidentialClientRefreshTokensFrom } from "./tokenBindingRule.mjs";
 
 /**
  * Subtracted from the family ceiling a rotation reports before the refresh
@@ -65,11 +64,15 @@ const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
 /**
  * What the refresh grant reads. `sessionRequirementResolver` and `auditSink`
  * feed admission of the token's session; the resolver is required, and a
- * factory built without one is refused.
+ * factory built without one is refused. The lifetimes, `legacyTypAccept` and
+ * the resource-indicator switch come from the `oauthTokenSettings` slot, and
+ * the refresh-token binding rule from core's `tokenBindingSettings`. It
+ * reads nothing of the configuration: `unknownFamilyPolicy` is the module's
+ * `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, handed over
+ * as the section parsed it.
  */
 export type RefreshTokenGrantDeps = Pick<
 	GrantDependencies,
-	| "config"
 	| "keyStore"
 	| "logger"
 	| "grantPolicy"
@@ -78,7 +81,17 @@ export type RefreshTokenGrantDeps = Pick<
 	| "subjectRevocation"
 	| "userSessionStore"
 > &
-	ProviderDeps<"sessionRequirementResolver", "auditSink">;
+	ProviderDeps<
+		"sessionRequirementResolver" | "oauthTokenSettings" | "tokenBindingSettings",
+		"auditSink" | "sessionLifecycleStore"
+	> & {
+		/**
+		 * What a refresh token whose family no record holds gets: issued only
+		 * under `"accept"`, a migration window's setting; anything else, absent
+		 * included, refuses it.
+		 */
+		readonly unknownFamilyPolicy?: "accept" | "reject";
+	};
 
 /**
  * The token endpoint's answer to an admission that does not refresh, or
@@ -117,22 +130,45 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 };
 
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
-	const { config, keyStore, logger, subjectRevocation } = deps;
+	const { keyStore, logger, subjectRevocation } = deps;
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"The refresh_token grant: userSessionStore is wired, but sessionLifecycleStore is not. " +
+				"Where a user-session store is wired, core's session lifecycle is required: the grant " +
+				"admits the token's session through its lifecycle record. Wire core's session " +
+				"lifecycle: a session-store module that fills sessionLifecycleStore " +
+				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
+		);
+	}
+	// Read once, here. Only `"accept"` issues for an unknown family: any other
+	// value a hand-built deps carries refuses, as absent does.
+	const acceptUnknownFamily = deps.unknownFamilyPolicy === "accept";
 	// What admission reads for the token's session; no acr table, since a
 	// refresh asks for no acr.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
+		sessionLifecycleStore: deps.sessionLifecycleStore,
 		subjectRevocation,
 		requirements: checkResolver(deps.sessionRequirementResolver, "createRefreshTokenGrant"),
 		acrTable: {},
 		logger,
 		auditSink: deps.auditSink,
 	};
-	// Read once at construction, so an invalid hand-built configuration is
-	// refused before any request — not after client authentication and the
-	// rotation have spent the presented token.
-	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
-	const requestedRefreshExpiresIn = resolveRefreshTokenLifetime(config);
+	// The token settings are read once, here, from the `oauthTokenSettings`
+	// slot alone, checked whole first: a hand-built value the check refuses,
+	// or none, fails at composition, naming the slot, before any request —
+	// not after client authentication and the rotation have spent the
+	// presented token.
+	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
+	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
+	const requestedRefreshExpiresIn = tokenSettings.refreshTokenExpiresIn;
+	const { legacyTypAccept, resourceIndicatorEnabled } = tokenSettings;
+	// The refresh-token binding rule, read once from core's
+	// `tokenBindingSettings` slot.
+	const bindConfidentialClients = bindConfidentialClientRefreshTokensFrom(
+		deps.tokenBindingSettings,
+		"createRefreshTokenGrant",
+	);
 
 	/**
 	 * The presented token's verification, with its refusal as the token
@@ -154,7 +190,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			const verified = await verifyJwt(refreshTokenValue, keyStore, {
 				type: "refresh_token",
 				expectedIssuer: issuer ?? "",
-				legacyTypAccept: config.oauth.jwt.legacyTypAccept ?? false,
+				legacyTypAccept,
 				// No access-token jti denylist: refresh tokens are revoked through
 				// the family store. The subject watermark is the backstop for a
 				// partial revocation cascade; a rotated token carries a fresh
@@ -420,7 +456,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 
 			// Read under the flag alone: with no policy wired, issuing the client
 			// id in answer to a `resource` request would violate RFC 8707 §2.
-			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
 			const requestedResource = resourceIndicatorEnabled
 				? extractResourceParam(body as Record<string, unknown>)
 				: null;
@@ -566,8 +601,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// environment variable). Off by default because a bound token pins
 			// the client to one key or certificate for its lifetime, so rotating
 			// it mid-lifetime breaks refresh.
-			const bindConfidentialClients =
-				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 			const bindNewRefreshToken =
 				(bindingIsDpop || bindingIsMtls) &&
 				presentedConfirmation !== undefined &&
@@ -728,8 +761,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 								},
 							};
 						}
-						const policy = config.oauth.refreshToken.unknownFamilyPolicy ?? "reject";
-						if (policy === "reject") {
+						if (!acceptUnknownFamily) {
 							logger?.warn(
 								{
 									familyId: newFamilyId,

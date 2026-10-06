@@ -20,10 +20,9 @@ import {
 	cookieClaim,
 	createInMemoryUserSessionStore,
 	type DeploymentMode,
-	type FederationTokenStore,
 	type Logger,
 	newRenewalNonce,
-	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SubjectSessionIndex,
 	type UserRepository,
 	type UserSessionStore,
@@ -32,6 +31,7 @@ import { createTestCsrfTokenSigner, resolverForTests } from "@o3co/auth-provider
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { createCsrfProtection } from "#/csrf.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
@@ -178,8 +178,8 @@ function buildApp(
 		userRepository?: UserRepository;
 		userSessionStore?: UserSessionStore;
 		subjectSessionIndex?: SubjectSessionIndex;
-		federationTokenStore?: FederationTokenStore;
-		sessionFederationIndex?: SessionFederationIndex;
+		/** With a `userSessionStore` and none given, a fresh fake. */
+		sessionLifecycle?: SessionLifecycle;
 		logger?: Logger;
 		/**
 		 * Fields the express-session bag already carries when the request
@@ -206,8 +206,7 @@ function buildApp(
 		} as unknown as UserRepository,
 		userSessionStore,
 		subjectSessionIndex,
-		federationTokenStore,
-		sessionFederationIndex,
+		sessionLifecycle = userSessionStore === undefined ? undefined : fakeSessionLifecycle(),
 		logger,
 		initialSession,
 		sessionTtlMs,
@@ -271,8 +270,7 @@ function buildApp(
 		requirements: resolverForTests([]),
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
 		...(subjectSessionIndex !== undefined ? { subjectSessionIndex } : {}),
-		...(federationTokenStore !== undefined ? { federationTokenStore } : {}),
-		...(sessionFederationIndex !== undefined ? { sessionFederationIndex } : {}),
+		...(sessionLifecycle !== undefined ? { sessionLifecycle } : {}),
 		...(logger !== undefined ? { logger } : {}),
 		...(sessionTtlMs !== undefined ? { sessionTtlMs } : {}),
 	});
@@ -320,6 +318,7 @@ describe("Session routes — POST /session/login", () => {
 					authenticateByToken: vi.fn(),
 				} as unknown as UserRepository,
 				userSessionStore: store,
+				sessionLifecycle: fakeSessionLifecycle(),
 				sessionTtlMs: 3600_000,
 			});
 
@@ -482,6 +481,7 @@ describe("Session routes — POST /session/login", () => {
 					authenticateByToken: vi.fn(),
 				} as unknown as UserRepository,
 				userSessionStore: throwingStore,
+				sessionLifecycle: fakeSessionLifecycle(),
 				sessionTtlMs: 3600_000,
 			});
 
@@ -699,6 +699,7 @@ describe("Session routes — POST /session/login", () => {
 		it("session regeneration failure returns the 503 temporarily_unavailable envelope (no `message`)", async () => {
 			const { app } = buildApp({
 				userSessionStore: makeUserSessionStore(),
+				sessionLifecycle: fakeSessionLifecycle(),
 				sessionTtlMs: 3600_000,
 				regenerateError: new Error("regenerate failed"),
 			});
@@ -910,11 +911,61 @@ function makeSubjectSessionIndex(override?: Partial<SubjectSessionIndex>): Subje
 	};
 }
 
+describe("Session routes — the session lifecycle, where it is installed", () => {
+	const lifecycleAnswering = (outcome: "opened" | Error) => {
+		const open = vi.fn(async () => {
+			if (outcome instanceof Error) throw outcome;
+			return { outcome };
+		});
+		return { open, lifecycle: { open } as unknown as SessionLifecycle };
+	};
+
+	it("a login opens the session's lifecycle record for the record's sid, subject and end", async () => {
+		const store = makeUserSessionStore();
+		const { open, lifecycle } = lifecycleAnswering("opened");
+		const { app } = buildApp({
+			userSessionStore: store,
+			sessionLifecycle: lifecycle,
+			sessionTtlMs: 3600_000,
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(200);
+		const created = store.sessions[0] as { sid: string; sub: string; expiresAt: Date };
+		expect(open).toHaveBeenCalledExactlyOnceWith(created.sid, {
+			sub: "u-1",
+			expiresAt: created.expiresAt,
+		});
+	});
+
+	it("a login whose lifecycle record cannot be opened is a 503, with no session record", async () => {
+		const store = makeUserSessionStore();
+		const { lifecycle } = lifecycleAnswering(new Error("lifecycle store down"));
+		const { app, capturedSession } = buildApp({
+			userSessionStore: store,
+			sessionLifecycle: lifecycle,
+			sessionTtlMs: 3600_000,
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(503);
+		expect(store.sessions).toEqual([]);
+		expect(capturedSession.current).not.toHaveProperty("isAuthenticated");
+	});
+});
+
 describe("Session routes — subject session index", () => {
 	it("records the sid against the subject on a successful login", async () => {
 		const index = makeSubjectSessionIndex();
 		const { app } = buildApp({
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			subjectSessionIndex: index,
 			sessionTtlMs: 3600_000,
 		});
@@ -943,6 +994,7 @@ describe("Session routes — subject session index", () => {
 		});
 		const { app } = buildApp({
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			subjectSessionIndex: index,
 			sessionTtlMs: 3600_000,
 		});
@@ -958,6 +1010,7 @@ describe("Session routes — subject session index", () => {
 		const index = makeSubjectSessionIndex();
 		const { app } = buildApp({
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			subjectSessionIndex: index,
 			sessionTtlMs: 3600_000,
 			regenerateError: new Error("regenerate failed"),
@@ -982,6 +1035,7 @@ describe("Session routes — subject session index", () => {
 		});
 		const { app } = buildApp({
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			subjectSessionIndex: index,
 			sessionTtlMs: 3600_000,
 			regenerateError: new Error("regenerate failed"),
@@ -997,6 +1051,7 @@ describe("Session routes — subject session index", () => {
 	it("logs in normally when no index is wired", async () => {
 		const { app } = buildApp({
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			sessionTtlMs: 3600_000,
 		});
 
@@ -1016,7 +1071,7 @@ describe("Session routes — subject session index", () => {
  * token minted from the session would otherwise stay live for its full
  * lifetime. See README, What `POST /session/logout` invalidates.
  */
-describe("Session routes — POST /session/logout invalidates the session record", () => {
+describe("Session routes — POST /session/logout closes the session through the session lifecycle", () => {
 	/** A logged-in bag: what a prior `POST /session/login` leaves behind. */
 	const loggedIn = (sid = "sid-1") => ({
 		isAuthenticated: true,
@@ -1024,35 +1079,14 @@ describe("Session routes — POST /session/logout invalidates the session record
 		user: { id: "u-1", username: "alice" },
 	});
 
-	const silentLogger = () =>
-		({
-			trace: vi.fn(),
-			debug: vi.fn(),
-			info: vi.fn(),
-			warn: vi.fn(),
-			error: vi.fn(),
-			fatal: vi.fn(),
-			child: vi.fn(),
-		}) as unknown as Logger & { error: ReturnType<typeof vi.fn> };
-
-	it("deletes the UserSession record named by req.session.sid", async () => {
+	it("closes the session named by req.session.sid, and deletes nothing itself", async () => {
 		const store = makeLiveUserSessionStore(["sid-1"]);
-		const { app } = buildApp({ userSessionStore: store, initialSession: loggedIn() });
-
-		const res = await logoutRequest(app);
-
-		expect(res.status).toBe(200);
-		expect(res.body).toMatchObject({ message: "Logged out successfully" });
-		// The record the liveness checks in `/oauth/introspect` and
-		// `/oauth/userinfo` resolve is gone, so a token carrying this `sid`
-		// stops being honoured.
-		expect(store.live.has("sid-1")).toBe(false);
-	});
-
-	it("removes the subject-index entry, as the login rollback path already does", async () => {
+		const deleteSpy = vi.spyOn(store, "delete");
 		const removeSid = vi.fn().mockResolvedValue(undefined);
+		const sessionLifecycle = fakeSessionLifecycle();
 		const { app } = buildApp({
-			userSessionStore: makeLiveUserSessionStore(["sid-1"]),
+			userSessionStore: store,
+			sessionLifecycle,
 			subjectSessionIndex: {
 				kind: "memory",
 				addSid: vi.fn(),
@@ -1066,42 +1100,15 @@ describe("Session routes — POST /session/logout invalidates the session record
 		const res = await logoutRequest(app);
 
 		expect(res.status).toBe(200);
-		// Leaving the entry would have `revokeAllForSubject` enumerate a
-		// sid that no longer exists.
-		expect(removeSid).toHaveBeenCalledWith("u-1", "sid-1");
-	});
-
-	it("removes the federation token store and federation index entries for the sid", async () => {
-		const removeFederationTokens = vi.fn().mockResolvedValue(undefined);
-		const removeFederationIndex = vi.fn().mockResolvedValue(undefined);
-		const { app } = buildApp({
-			userSessionStore: makeLiveUserSessionStore(["sid-1"]),
-			federationTokenStore: {
-				kind: "memory",
-				attach: vi.fn(),
-				get: vi.fn(),
-				removeBySid: removeFederationTokens,
-			} as unknown as FederationTokenStore,
-			sessionFederationIndex: {
-				kind: "memory",
-				addFederation: vi.fn(),
-				listFederations: vi.fn(),
-				removeFederation: vi.fn(),
-				removeBySid: removeFederationIndex,
-			} as unknown as SessionFederationIndex,
-			initialSession: loggedIn(),
-		});
-
-		const res = await logoutRequest(app);
-
-		expect(res.status).toBe(200);
-		expect(removeFederationTokens).toHaveBeenCalledWith("sid-1");
-		expect(removeFederationIndex).toHaveBeenCalledWith("sid-1");
+		expect(res.body).toMatchObject({ message: "Logged out successfully" });
+		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith("sid-1", "session_logout");
+		expect(deleteSpy).not.toHaveBeenCalled();
+		expect(removeSid).not.toHaveBeenCalled();
 	});
 
 	it("logs out cleanly in a composition wiring no userSessionStore", async () => {
-		// The backward-compatible shape: no stores at all, nothing to
-		// invalidate, and the endpoint still has to end the browser session.
+		// The sessionless shape: no stores at all, nothing to close, and the
+		// endpoint still has to end the browser session.
 		const { app } = buildApp({ initialSession: loggedIn() });
 
 		const res = await logoutRequest(app);
@@ -1110,11 +1117,11 @@ describe("Session routes — POST /session/logout invalidates the session record
 		expect(res.body).toMatchObject({ message: "Logged out successfully" });
 	});
 
-	it("takes no store action when the session carries no sid", async () => {
-		const store = makeLiveUserSessionStore(["sid-1"]);
-		const deleteSpy = vi.spyOn(store, "delete");
+	it("closes nothing when the session carries no sid", async () => {
+		const sessionLifecycle = fakeSessionLifecycle();
 		const { app } = buildApp({
-			userSessionStore: store,
+			userSessionStore: makeLiveUserSessionStore(["sid-1"]),
+			sessionLifecycle,
 			// A deployment whose own login route sets `isAuthenticated` without
 			// recording a `sid` — a supported wiring. There is no record to name.
 			initialSession: { isAuthenticated: true, user: { id: "u-1" } },
@@ -1123,124 +1130,17 @@ describe("Session routes — POST /session/logout invalidates the session record
 		const res = await logoutRequest(app);
 
 		expect(res.status).toBe(200);
-		expect(deleteSpy).not.toHaveBeenCalled();
-		expect(store.live.has("sid-1")).toBe(true);
+		expect(sessionLifecycle.close).not.toHaveBeenCalled();
 	});
 
-	it("still logs the browser out, and logs the failure, when the store delete throws", async () => {
-		const logger = silentLogger();
-		const { app } = buildApp({
-			userSessionStore: {
-				kind: "memory",
-				create: vi.fn(),
-				get: vi.fn(),
-				delete: vi.fn().mockRejectedValue(new Error("store down")),
-			} as unknown as UserSessionStore,
-			logger,
-			initialSession: loggedIn(),
-		});
-
-		const res = await logoutRequest(app);
-
-		// A store outage must not turn a logout into a 5xx that leaves the user
-		// holding a live cookie: the cookie is the half this endpoint can always
-		// deliver, and `/authorize`'s liveness check covers the residue.
-		expect(res.status).toBe(200);
-		expect(res.body).toMatchObject({ message: "Logged out successfully" });
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ sid: "sid-1" }),
-			"logout_user_session_delete_failed",
-		);
-	});
-
-	it("does not let a federation-store outage stop the primary invalidation", async () => {
-		const logger = silentLogger();
-		const store = makeLiveUserSessionStore(["sid-1"]);
-		const { app } = buildApp({
-			userSessionStore: store,
-			federationTokenStore: {
-				kind: "memory",
-				attach: vi.fn(),
-				get: vi.fn(),
-				removeBySid: vi.fn().mockRejectedValue(new Error("federation store down")),
-			} as unknown as FederationTokenStore,
-			logger,
-			initialSession: loggedIn(),
-		});
-
-		const res = await logoutRequest(app);
-
-		expect(res.status).toBe(200);
-		// Primary invalidation runs FIRST and is not conditional on the
-		// best-effort hygiene that follows it.
-		expect(store.live.has("sid-1")).toBe(false);
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ sid: "sid-1" }),
-			"logout_federation_token_remove_failed",
-		);
-	});
-
-	// The two index removals are the remaining best-effort steps of
-	// `invalidateSessionRecords`. Both are hygiene rather than containment —
-	// the `UserSession` is already gone by the time they run — so the contract
-	// they have to keep is that the failure is visible and costs the caller
-	// nothing.
-	it("does not let a subject-index outage stop the primary invalidation", async () => {
-		const logger = silentLogger();
-		const store = makeLiveUserSessionStore(["sid-1"]);
-		const { app } = buildApp({
-			userSessionStore: store,
-			subjectSessionIndex: {
-				addSid: vi.fn(),
-				removeSid: vi.fn().mockRejectedValue(new Error("subject index down")),
-				pruneExpiredAndList: vi.fn(),
-			} as unknown as SubjectSessionIndex,
-			logger,
-			initialSession: loggedIn(),
-		});
-
-		const res = await logoutRequest(app);
-
-		expect(res.status).toBe(200);
-		expect(store.live.has("sid-1")).toBe(false);
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ sid: "sid-1", sub: "u-1" }),
-			"logout_subject_session_index_remove_failed",
-		);
-	});
-
-	it("does not let a federation-index outage stop the primary invalidation", async () => {
-		const logger = silentLogger();
-		const store = makeLiveUserSessionStore(["sid-1"]);
-		const { app } = buildApp({
-			userSessionStore: store,
-			sessionFederationIndex: {
-				addFederation: vi.fn(),
-				removeFederation: vi.fn(),
-				listFederations: vi.fn(),
-				removeBySid: vi.fn().mockRejectedValue(new Error("federation index down")),
-			} as unknown as SessionFederationIndex,
-			logger,
-			initialSession: loggedIn(),
-		});
-
-		const res = await logoutRequest(app);
-
-		expect(res.status).toBe(200);
-		expect(store.live.has("sid-1")).toBe(false);
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ sid: "sid-1" }),
-			"logout_session_federation_index_remove_failed",
-		);
-	});
-
-	it("answers 503 when the cookie destroy itself fails", async () => {
+	it("answers 503 when the cookie destroy itself fails, the session already closed", async () => {
 		// If the browser session survives, the logout did not happen from the
 		// browser's point of view — and the cookie store that could not destroy
 		// it is an outage, so the answer tells the client to retry.
-		const store = makeLiveUserSessionStore(["sid-1"]);
+		const sessionLifecycle = fakeSessionLifecycle();
 		const { app } = buildApp({
-			userSessionStore: store,
+			userSessionStore: makeLiveUserSessionStore(["sid-1"]),
+			sessionLifecycle,
 			destroyError: new Error("destroy failed"),
 			initialSession: loggedIn(),
 		});
@@ -1249,9 +1149,7 @@ describe("Session routes — POST /session/logout invalidates the session record
 
 		expect(res.status).toBe(503);
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
-		// The record still went, so the token minted from this session is dead
-		// even though the cookie survived.
-		expect(store.live.has("sid-1")).toBe(false);
+		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith("sid-1", "session_logout");
 	});
 });
 
@@ -1306,6 +1204,7 @@ describe("Session routes — POST /session/logout from a cookie session the reco
 			const store = await escalated(nonce);
 			const { app, capturedSession } = buildApp({
 				userSessionStore: store,
+				sessionLifecycle: fakeSessionLifecycle(),
 				initialSession: signedIn(stale),
 			});
 			const res = await logoutRequest(app);
@@ -1318,15 +1217,20 @@ describe("Session routes — POST /session/logout from a cookie session the reco
 		}
 	});
 
-	it("the renewed session itself logs out as any session does: the record is deleted", async () => {
+	it("the renewed session itself logs out as any session does: the session is closed", async () => {
 		const nonce = newRenewalNonce();
 		const store = await escalated(nonce);
-		const { app } = buildApp({ userSessionStore: store, initialSession: signedIn(nonce) });
+		const sessionLifecycle = fakeSessionLifecycle();
+		const { app } = buildApp({
+			userSessionStore: store,
+			sessionLifecycle,
+			initialSession: signedIn(nonce),
+		});
 		expect((await logoutRequest(app)).status).toBe(200);
-		expect(await store.get("sid-1")).toBeNull();
+		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith("sid-1", "session_logout");
 	});
 
-	it("a record that cannot be read is logged, and the logout invalidates as before", async () => {
+	it("a record that cannot be read is logged, and the logout closes the session as before", async () => {
 		const live = makeLiveUserSessionStore(["sid-1"]);
 		const store = {
 			...live,
@@ -1343,9 +1247,15 @@ describe("Session routes — POST /session/logout from a cookie session the reco
 			fatal: vi.fn(),
 			child: vi.fn(),
 		} as unknown as Logger & { error: ReturnType<typeof vi.fn> };
-		const { app } = buildApp({ userSessionStore: store, initialSession: signedIn(), logger });
+		const sessionLifecycle = fakeSessionLifecycle();
+		const { app } = buildApp({
+			userSessionStore: store,
+			sessionLifecycle,
+			initialSession: signedIn(),
+			logger,
+		});
 		expect((await logoutRequest(app)).status).toBe(200);
-		expect(live.live.has("sid-1")).toBe(false);
+		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith("sid-1", "session_logout");
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({ sid: "sid-1" }),
 			"logout_user_session_read_failed",
@@ -1481,6 +1391,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		};
 		const { app } = buildApp({
 			userSessionStore: store,
+			sessionLifecycle: fakeSessionLifecycle(),
 			regenerateError: new Error("cookie store down"),
 			logger: logger as unknown as Logger,
 			deploymentMode,
@@ -1544,6 +1455,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		};
 		const { app } = buildApp({
 			userSessionStore: store,
+			sessionLifecycle: fakeSessionLifecycle(),
 			saveError: new Error("cookie store down"),
 			logger: logger as unknown as Logger,
 			deploymentMode,
@@ -1569,6 +1481,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		const logger = spyLogger();
 		const { app } = buildApp({
 			userSessionStore: makeLiveUserSessionStore(["sid-1"]),
+			sessionLifecycle: fakeSessionLifecycle(),
 			destroyError: new Error("cookie store down"),
 			initialSession: { isAuthenticated: true, sid: "sid-1", user: { id: "u-1" } },
 			logger: logger as unknown as Logger,
@@ -1595,6 +1508,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		const store = makeUserSessionStore();
 		const { app } = buildApp({
 			userSessionStore: store,
+			sessionLifecycle: fakeSessionLifecycle(),
 			subjectSessionIndex: makeSubjectSessionIndex({
 				addSid: vi.fn().mockRejectedValue(new Error("subject index down")),
 			}),

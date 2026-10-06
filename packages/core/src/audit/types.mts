@@ -70,6 +70,9 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"introspect.session_invalid",
 	"introspect.store_unavailable",
 	"logout.cascade_failed",
+	// A logout whose session's close committed with its work still pending:
+	// answered as done, the lifecycle finishing the work.
+	"logout.close_pending",
 	"logout.family_revoked",
 	"logout.success",
 	// Multi-factor authentication (the MFA ADR's D28), the MFA package's;
@@ -209,7 +212,7 @@ export const AUDIT_SINK_ABSENCE_POLICY = {
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge (optional slot)
 //
-// Declared here so oauthModule can list "auditSink" in its `optional` array
+// Declared here so oauthEndpointsModule can list "auditSink" in its `optional` array
 // and the DI graph types deps.auditSink as AuditSink | undefined. Optional to
 // wire, not to decide: an unfilled slot must be listed in
 // core.declaredAbsent or boot refuses (AUDIT_SINK_ABSENCE_POLICY).

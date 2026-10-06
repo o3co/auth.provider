@@ -17,11 +17,13 @@
 /**
  * An `oauthTokenSettings` a host fills (through `bootstrapComponents` or
  * `overrideComponents`) may not name a token lifetime longer than the one
- * core resolves from the configuration. The default refresh-token family
- * modules and the subject revocation boundary size their retention from the
- * configuration and cannot read the slot, so a grant minting on a longer slot
- * lifetime would outlive the record that revokes its token
- * (docs/adapter-surface.md, `oauthTokenSettings`). Boot refuses the pair,
+ * core resolves from the configuration. Readers that cannot read the slot
+ * size revoking records from the configuration — the default refresh-token
+ * family modules a revoked family's record from the access-token maximum, the
+ * session lifecycle a closing session's record from the refresh-token
+ * lifetime — so a grant minting on a longer slot lifetime would outlive the
+ * record that revokes its token (docs/adapter-surface.md,
+ * `oauthTokenSettings`). Boot refuses the pair,
  * naming the member and both values: a host map at stage 1, before any
  * provider runs, and a value a module provides as it enters the component
  * map at stage 3, before any consumer reads it (`token-settings-slot.test.mts`
@@ -127,7 +129,7 @@ describe("a host-filled oauthTokenSettings is held to the configuration's lifeti
 	});
 
 	it("refuses a slot a module provides that outlasts the configuration's, as it is materialised", async () => {
-		// Not oauthModule, whose provider resolves its lifetimes from the same
+		// Not oauthEndpointsModule, whose provider resolves its lifetimes from the same
 		// configuration: another module, advertising a longer refresh token.
 		const booting = createApp({
 			modules: [

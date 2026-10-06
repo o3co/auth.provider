@@ -18,7 +18,8 @@
  * A subject-wide revocation, and what a grant disclosure makes of it.
  *
  * Core writes the two boundaries and orchestrates, `@o3co/auth-provider-oauth`
- * wires the service over the session cascade, and this package compares a
+ * wires the service over core's session lifecycle, which closes each session,
+ * and this package compares a
  * grant against the boundary on every disclosure. Each is tested alone
  * elsewhere; these run the real service against the real route in one composed
  * application, to show the three agree. Two claims:
@@ -38,14 +39,22 @@ import type {
 	ClientRepository,
 	FederationProvider,
 	MemoryFederationGrantStore,
+	SessionLifecycle,
+	SessionLifecycleStore,
 	SubjectRevocationService,
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
+	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
+	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
+	createInMemoryUserSessionStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
+	createSessionLifecycle,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 	resolveSubjectRevocationHorizonMs,
@@ -57,7 +66,7 @@ import {
 	federationTypeForTests,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
-import { cascadeLogout, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
+import { subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -113,7 +122,7 @@ const shared = () => ({
 	federationGrantStore: createMemoryFederationGrantStore(),
 });
 
-/** What `cascadeLogout` fans out to. Nothing here logs anyone in; the sessions are the service's business. */
+/** The stores a session's close reaches. Nothing here logs anyone in; the sessions are the service's business. */
 const CASCADE_STORES = {
 	userSessionStore: { delete: async () => undefined },
 	sessionRPRegistry: { removeBySid: async () => undefined },
@@ -122,6 +131,28 @@ const CASCADE_STORES = {
 	federationTokenStore: { removeBySid: async () => undefined },
 	refreshTokenFamilyRevocation: { revokeFamily: async () => undefined },
 };
+
+/**
+ * Core's session lifecycle, which the service closes each of the subject's
+ * sessions through, over in-memory stores and the stubs' family revocation,
+ * and its store in the `sessionLifecycleStore` slot beside it.
+ */
+const sessionLifecycleSlots = () => {
+	const store = createInMemorySessionLifecycleStore();
+	return { sessionLifecycleStore: store, sessionLifecycle: sessionLifecycleOver(store) };
+};
+
+const sessionLifecycleOver = (store: SessionLifecycleStore) =>
+	createSessionLifecycle({
+		store,
+		userSessionStore: createInMemoryUserSessionStore(),
+		refreshTokenFamilyRevocation: CASCADE_STORES.refreshTokenFamilyRevocation as never,
+		federationTokenStore: CASCADE_STORES.federationTokenStore as never,
+		sessionRPRegistry: createInMemorySessionRPRegistry(),
+		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+		sessionFederationIndex: createInMemorySessionFederationIndex(),
+		retainMs: 3_600_000,
+	});
 
 interface BootOptions {
 	/** Stores and boundaries to compose over, for a second deployment on the first one's state. */
@@ -186,6 +217,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 				defaultLimit: { limit: 100, windowSeconds: 60 },
 			}),
 			...CASCADE_STORES,
+			...sessionLifecycleSlots(),
 			// The service sizes the boundary from the lifetimes it has to
 			// outlive: the session's is the session store's slot.
 			sessionCookiePolicy,
@@ -321,6 +353,26 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 		await handle.dispose();
 	});
 
+	it("keeps grants exactly when the federationGrantPolicy this module provides allows it", async () => {
+		// The service reads the switch and the keep policy from the slot, not
+		// from the section: what it honours is what the slot says.
+		for (const allowKeep of [true, false]) {
+			const { handle, service } = await boot(allowKeep);
+			expect(handle.components.federationGrantPolicy).toEqual({
+				enabled: true,
+				allowKeepOnSubjectRevocation: allowKeep,
+			});
+
+			const result = await service.revokeAllForSubject({
+				subject: SUBJECT,
+				federationGrants: "keep",
+			});
+
+			expect(result.federationGrants.applied).toBe(allowKeep ? "keep" : "revoke");
+			await handle.dispose();
+		}
+	});
+
 	it("ends it through the boundary alone, with no grant pass at all", async () => {
 		// The case the backstop exists for. A grant-unaware caller passes no
 		// grant store, so nothing enumerates the subject's grants — and the
@@ -352,18 +404,16 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 	it("is not what an ordinary logout does", async () => {
 		// A logout ends a session. A grant outlives the session it was agreed
 		// through — that is the whole of what a federation grant is — so the
-		// four-store cascade `/oauth/logout` runs must leave it, and its
-		// credential, exactly as they were. The composition here has the grant
-		// store in it, so a cascade that grew a path to it would fail this.
-		// `/session/logout` runs its own hygiene, not this cascade; the two HTTP
-		// endpoints are driven, on the standalone, in
+		// close a logout runs through core's session lifecycle must leave it,
+		// and its credential, exactly as they were. The composition here has
+		// the grant store in it, so a close that grew a path to it would fail
+		// this. The two HTTP logout endpoints are driven, on the standalone, in
 		// `templates/standalone/src/__tests__/federation-grants-survive-logout.test.mts`.
 		const { handle, app, federationGrantStore } = await boot(true);
+		const lifecycle = (handle.components as { readonly sessionLifecycle: SessionLifecycle })
+			.sessionLifecycle;
 
-		const result = await cascadeLogout({
-			sid: "sid",
-			...(CASCADE_STORES as unknown as Omit<Parameters<typeof cascadeLogout>[0], "sid">),
-		});
+		const result = await lifecycle.close("sid", "rp_logout");
 		expect(result.outcome).toBe("done");
 
 		const grant = await federationGrantStore.find("g-1", new Date());

@@ -34,11 +34,10 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import { federationsOf } from "@o3co/auth-provider-core";
+import { type AppConfig, federationsOf } from "@o3co/auth-provider-core";
 import type express from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { Switches } from "#/configPath.mjs";
 import {
 	ALICE,
 	AS_LISTED,
@@ -115,7 +114,7 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-mfa":
 		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule) and mfaResetModule, under MFA_MODE (mfa-switch.test.mts)",
 	"@o3co/auth-provider-oauth":
-		"oauthModule, oauthSessionGrantModule, oauthAuthorizationModule, subjectRevocationServiceModule",
+		"oauthEndpointsModule, oauthSessionGrantModule, oauthAuthorizationGrantsModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
 	"@o3co/auth-provider-session": "sessionModule, sessionStoreModule",
 	"@o3co/auth-provider-standard":
@@ -131,7 +130,7 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
  * here, through this file's fixture.
  */
 const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
-	"@o3co/auth-provider-device-grant": "deviceGrantModule",
+	"@o3co/auth-provider-device-grant": "deviceAuthorizationGrantModule",
 	"@o3co/auth-provider-dpop": "dpopModule",
 	"@o3co/auth-provider-federation-apple": "appleFederationTypeModule",
 	"@o3co/auth-provider-federation-github": "githubFederationTypeModule",
@@ -196,6 +195,7 @@ const ALL_ON_MODULES = [
 	"core-federation-grant-store-memory",
 	"core-federation-grant-intent-store-memory",
 	"standalone-in-memory-session-stores",
+	"core-session-lifecycle",
 	"core-rate-limiter-memory",
 	"standalone-in-memory-code-repository",
 	"core-access-token-denylist-memory",
@@ -242,7 +242,11 @@ describe("every module the template can turn on boots together", () => {
 		// The shipped entries are named after their types.
 		expect([...(handle.components.federationProviders?.keys() ?? [])].sort()).toEqual(types);
 
-		const grants = modules.flatMap((m) => contributionNames(m, "grants")).sort();
+		// What boot registered: a module's grant switched off by its section
+		// answers `null` and registers nothing.
+		const grants = [...(handle.components.grantHandlerResolver?.entries() ?? [])]
+			.map(([grantType]) => grantType)
+			.sort();
 		expect(grants).toEqual(ENABLED_GRANTS);
 		const discovery = await request(app).get("/.well-known/openid-configuration");
 		expect([...discovery.body.grant_types_supported].sort()).toEqual(grants);
@@ -386,18 +390,21 @@ describe("discovery", () => {
 	});
 
 	/** The grant connections dropped: they name the OIDC federation. */
-	const withoutConnections = (config: Switches): Switches =>
+	const withoutConnections = (config: AppConfig): AppConfig =>
 		({
 			...config,
-			"federation-grants": { ...config["federation-grants"], connections: {} },
-		}) as Switches;
+			"federation-grants": {
+				...(config["federation-grants"] as Record<string, unknown>),
+				connections: {},
+			},
+		}) as AppConfig;
 
 	const FEATURE_SWITCHES: ReadonlyArray<
 		readonly [
 			feature: string,
 			variable: string,
 			path: string,
-			config: ((config: Switches) => Switches) | undefined,
+			config: ((config: AppConfig) => AppConfig) | undefined,
 		]
 	> = [
 		["federation grants", "FEDERATION_GRANTS_ENABLED", "/oauth/federation-grants", undefined],
@@ -578,13 +585,13 @@ describe("every module's primary route answers in the one app", () => {
 	knownDefect(
 		"a federation enabled from the documented variables alone either refuses to boot or completes a login",
 		async () => {
-			const withoutLanding = (config: Switches): Switches => {
+			const withoutLanding = (config: AppConfig): AppConfig => {
 				const federations = federationsOf(config) as Record<string, Record<string, unknown>>;
 				const { clientUrl: _dropped, ...oidc } = federations.oidc ?? {};
 				return {
 					...config,
 					core: { ...config.core, federations: { ...federations, oidc } },
-				} as unknown as Switches;
+				} as unknown as AppConfig;
 			};
 			let composed: Composition;
 			try {
@@ -608,7 +615,7 @@ describe("every module's primary route answers in the one app", () => {
 		},
 	);
 
-	it("a federation grant is lodged, beside oauthModule under /oauth", async () => {
+	it("a federation grant is lodged, beside oauthEndpointsModule under /oauth", async () => {
 		const { app } = await boot();
 		const res = await lodgeGrant(app);
 		expect(res.status).toBe(201);
@@ -650,7 +657,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])(
 		});
 
 		it.each(TRANSFERS)(
-			"federation grants keep their 16 KiB bound beneath oauthModule's /oauth, a body sent %s",
+			"federation grants keep their 16 KiB bound beneath oauthEndpointsModule's /oauth, a body sent %s",
 			async (_transfer, send) => {
 				for (const type of [JSON_TYPE, FORM_TYPE]) {
 					const body =
@@ -822,6 +829,16 @@ const oidcCallback = async (app: express.Express, outage: Outage, c: Composition
 const VERIFIER_WARN =
 	"core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) writes its own `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) beside the route's error line: two lines for one outage (the runbook's outage table documents both)";
 
+/** The CSRF token the session middleware set in `cookies`, for a request that mutates. */
+const csrfTokenOf = (cookies: readonly string[]): string => {
+	const cookie = cookies.find((c) => /^[^=]*\.csrf=/.test(c));
+	if (cookie === undefined) throw new Error("the login reissued no CSRF cookie");
+	return decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1).split(";")[0] ?? "");
+};
+
+const ROLLBACK_CLOSE_LOGS =
+	"a login that fails after its record's open closes that record (`packages/session/src/establish-session.mts`), and the close's own work meets the same outage: core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) warns `session_close_item_failed` for the item and keeps the close pending for its sweep, a second line for one outage. At the OIDC federation callback with the session federation index down, the rollback's lifecycle close cannot commit and rejects, and the login's cleanup logs `federation_cleanup_failed` (warn) for it: that one line. Both cases are removed with the lifecycle's bridge (#1030, 14a), after which the rollback close no longer meets the per-session stores' outage";
+
 const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "oauth-authorization",
@@ -925,6 +942,47 @@ const OUTAGES: readonly OutageCase[] = [
 		unrelatedWarns: ["jwt_verify_aud_skipped"],
 	},
 	{
+		module: "oauth",
+		slot: "sessionLifecycleStore",
+		surface: "/oauth/userinfo",
+		run: async (app, outage) => {
+			const { access_token } = await webTokens(app);
+			outage.down = true;
+			return request(app).get("/oauth/userinfo").set("Authorization", `Bearer ${access_token}`);
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "userinfo_store_unavailable",
+		unrelatedWarns: ["jwt_verify_aud_skipped"],
+	},
+	{
+		module: "oauth",
+		slot: "sessionLifecycleStore",
+		surface: "POST /oauth/logout",
+		run: async (app, outage) => {
+			const { id_token } = await webTokens(app);
+			outage.down = true;
+			return request(app).post("/oauth/logout").type("form").send({ id_token_hint: id_token });
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "logout_store_unavailable",
+		unrelatedWarns: ["jwt_verify_aud_skipped"],
+	},
+	{
+		module: "session",
+		slot: "sessionLifecycleStore",
+		surface: "POST /session/logout",
+		run: async (app, outage) => {
+			const { cookies } = await login(app);
+			outage.down = true;
+			return request(app)
+				.post("/session/logout")
+				.set("Cookie", cookies)
+				.set("x-csrf-token", csrfTokenOf(cookies));
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_logout_store_unavailable",
+	},
+	{
 		module: "oauth-session",
 		slot: "userSessionStore",
 		surface: "the session grant",
@@ -980,6 +1038,7 @@ const OUTAGES: readonly OutageCase[] = [
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "login_store_unavailable",
+		defects: { "no-warn": ROLLBACK_CLOSE_LOGS },
 	},
 	{
 		module: "session",
@@ -1040,6 +1099,7 @@ const OUTAGES: readonly OutageCase[] = [
 		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "federation_callback_store_unavailable",
+		defects: { "no-warn": ROLLBACK_CLOSE_LOGS },
 	},
 	{
 		module: "session",
@@ -1048,6 +1108,8 @@ const OUTAGES: readonly OutageCase[] = [
 		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "federation_callback_store_unavailable",
+		defects: { "no-warn": ROLLBACK_CLOSE_LOGS },
+		defectWarns: ["federation_cleanup_failed"],
 	},
 	{
 		module: "core (rate-limit guard)",

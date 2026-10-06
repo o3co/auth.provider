@@ -24,11 +24,16 @@
  * an environment variable carries.
  *
  * Core's schema declares the same keys, with the same rules and messages,
- * until it stops declaring `oauth {}`; boot parses the section with core's
- * first. Core alone holds what it retired from the section: the keys it
- * refuses naming what became of them (`oauth.jwt`'s flat key fields,
- * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`),
- * and the paths other modules' sections moved from (`oauth.grants`,
+ * until it stops declaring `oauth {}`, and two more it keeps optional:
+ * `oauth.refreshToken.unknownFamilyPolicy`, which moved to the
+ * oauth-authorization module's section, and `oauth.refreshToken.legacyRtPolicy`,
+ * which this module refuses as removed. Boot parses the section with core's
+ * first. The module refuses its removed keys (`legacyRtPolicy`,
+ * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`)
+ * before either schema parses, from its manifest's `relocatedFrom`. Core alone
+ * holds the rest of what it retired from the section: `oauth.jwt`'s flat key
+ * fields, which it refuses naming what became of them, and the paths other
+ * modules' sections moved from (`oauth.grants`,
  * `oauth.dpop`, `oauth.jwt.signingKey`, …). A key set under one of those
  * paths refuses boot naming its new path, before any section is parsed, while
  * a loaded module declares that it moved there; otherwise this section refuses
@@ -39,6 +44,7 @@
 
 import {
 	type AccessTokenConfig,
+	checkAcrValueName,
 	checkCanonicalIssuer,
 	coerceBooleanFromEnv,
 	describeIssuerRejection,
@@ -153,14 +159,6 @@ const refreshTokenSchema = z
 		// Positive and bounded: the rule `resolveRefreshTokenLifetime` holds a
 		// hand-built configuration to.
 		expiresIn: lifetimeSecondsSchema,
-		// Policy for a refresh token whose `family_id` matches no family record.
-		// `"reject"` is the safe choice; `"accept"` is only for a time-bounded
-		// migration window.
-		unknownFamilyPolicy: z.enum(["accept", "reject"]),
-		// A refresh token lacking `jti` or `family_id` while family rotation is
-		// wired is rejected. `"reject"` is the only value, so a stale
-		// `accept-with-warning` refuses boot on this field.
-		legacyRtPolicy: z.enum(["reject"]),
 	})
 	.strict();
 
@@ -173,6 +171,24 @@ const refreshTokenSchema = z
 const acrAlternativeSchema = z.array(z.string().min(1)).min(1);
 const acrRequirementSchema = z.union([acrAlternativeSchema, z.array(acrAlternativeSchema).min(1)]);
 
+/**
+ * `oauth.authorize.acrValues`: each key an acr value a request can name, held
+ * to core's `checkAcrValueName` and refused under the key in its words. The
+ * keys are judged whenever the table is a record, beside any entry refused
+ * for its value, so one boot names every key to fix.
+ */
+const acrValuesSchema = z.record(z.string().min(1), acrRequirementSchema).superRefine(
+	(table, ctx) => {
+		for (const name of Object.keys(table)) {
+			const refusal = checkAcrValueName(name);
+			if (refusal !== null) ctx.addIssue({ code: "custom", message: refusal, path: [name] });
+		}
+	},
+	{
+		when: ({ value }) => typeof value === "object" && value !== null && !Array.isArray(value),
+	},
+);
+
 /** `oauth.authorize`: the acr table. */
 const authorizeSchema = z
 	.object({
@@ -180,8 +196,7 @@ const authorizeSchema = z
 		// for, each mapped to the RFC 8176 `amr` values that satisfy it.
 		// `/authorize` answers `acr_values` from this table alone, and discovery
 		// advertises its keys, less the entries nothing installed can satisfy.
-		// Each key is an acr value, so the table holds any.
-		acrValues: z.record(z.string().min(1), acrRequirementSchema).optional(),
+		acrValues: acrValuesSchema.optional(),
 	})
 	.strict()
 	.optional();
@@ -232,9 +247,19 @@ export const oauthSectionSchema = z
 		/**
 		 * The deployment-owned page a client that is not first-party is sent to
 		 * with `?challenge=<id>`: a path or an absolute URL, which may carry a
-		 * query of its own.
+		 * query of its own. Never empty or blank: such a url would send the browser to
+		 * `?challenge=<id>` relative to `/oauth/authorize`, and an exported but
+		 * empty variable is a mistake to name, not an unset one to default.
 		 */
-		consentPage: z.object({ url: z.string() }).strict().optional(),
+		consentPage: z
+			.object({
+				url: z.string().refine((url) => url.trim() !== "", {
+					message:
+						'oauth.consentPage.url must not be empty or blank: an exported-but-empty OAUTH_CONSENT_PAGE_URL reads as ""; unset it to keep the default, /consent, or set it to the consent page',
+				}),
+			})
+			.strict()
+			.optional(),
 		/**
 		 * A `client_id` that is the https URL of the client's own registration
 		 * (draft-ietf-oauth-client-id-metadata-document). Off by default. The

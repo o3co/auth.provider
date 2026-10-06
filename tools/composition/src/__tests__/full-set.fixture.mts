@@ -92,7 +92,6 @@ import {
 	createRecordingMailSender,
 	type FakeIdp,
 	type RecordingMailSender,
-	withUserRepositoryHttp,
 } from "@o3co/auth-provider-core/testing";
 import {
 	DEVICE_CODE_GRANT_TYPE,
@@ -289,6 +288,19 @@ export function browser() {
 /** Which store backs each added feature: memory on one replica, Redis on several. */
 export type Stores = "memory" | "redis";
 
+/**
+ * A copy of `config` whose user repository settings, the template's
+ * `repositories.user.http`, are `http`, every other key kept.
+ */
+function withUserHttp<C extends object>(config: C, http: Readonly<Record<string, unknown>>): C {
+	const repositories = (config as { repositories?: { user?: Readonly<Record<string, unknown>> } })
+		.repositories;
+	return {
+		...config,
+		repositories: { ...repositories, user: { ...repositories?.user, http: { ...http } } },
+	};
+}
+
 /** The settings with no default, laid over the resolved config for `features`. */
 function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 	const c = config as unknown as {
@@ -306,9 +318,8 @@ function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 		...config,
 		// A deployment that installs MFA declares it — as the template does
 		// from a mode other than `off` — and one that adds requirements of its
-		// own declares them beside it, over the template's `[]`. Applied to
-		// phase one's switches and again to the configuration as resolved, so
-		// each name is kept once.
+		// own declares them beside it, over what the template hands boot, each
+		// name kept once.
 		core: {
 			...c.core,
 			federations: {
@@ -486,13 +497,18 @@ function requirementModules(
 			},
 		};
 		return defineModule<
-			"sessionCookiePolicy" | "userSessionStore" | "sessionRequirementResolver" | "csrfGuard",
+			| "sessionCookiePolicy"
+			| "userSessionStore"
+			| "sessionLifecycle"
+			| "sessionRequirementResolver"
+			| "csrfGuard",
 			"subjectSessionIndex" | "logger"
 		>({
 			name: spec.module,
 			requires: [
 				"sessionCookiePolicy",
 				"userSessionStore",
+				"sessionLifecycle",
 				"sessionRequirementResolver",
 				"csrfGuard",
 			],
@@ -574,6 +590,7 @@ function requirementModules(
 							const established = await establishSession(admission.establishment, {
 								req,
 								userSessionStore: deps.userSessionStore,
+								sessionLifecycle: deps.sessionLifecycle,
 								...(deps.subjectSessionIndex
 									? { subjectSessionIndex: deps.subjectSessionIndex }
 									: {}),
@@ -845,7 +862,7 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	 */
 	readonly credentialStore?: Module;
 	/** Adjust the resolved config after the features are laid over it. */
-	readonly adjust?: (config: Switches) => Switches;
+	readonly adjust?: (config: AppConfig) => AppConfig;
 	/** The subjects whose login both fixture requirements interrupt; none by default. */
 	readonly interruptLogins?: readonly string[];
 	/** Where the fixture requirements record each ceremony they open; a list of the boot's own by default. */
@@ -926,7 +943,7 @@ export async function fullSetOptions(
 				options.mfaFactorStoreAt === undefined
 					? featured
 					: { ...featured, ...foundationMfaFactorStoreConfig(options.mfaFactorStoreAt) };
-			const users = userHttp === undefined ? stored : withUserRepositoryHttp(stored, userHttp);
+			const users = userHttp === undefined ? stored : withUserHttp(stored, userHttp);
 			return options.adjust ? options.adjust(users) : users;
 		},
 		// The Store-backed factor store is handed the user repository's

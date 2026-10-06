@@ -232,17 +232,11 @@ export {
 	type AccessTokenLifetimeSource,
 	type AccessTokenRevocationMode,
 	type AppConfig,
-	AppConfigSchema,
 	type CoreConfig,
 	CoreConfigSchema,
 	// The four spellings an environment variable may say a boolean in,
 	// for the packages outside core that read a section this file declares.
 	coerceBooleanFromEnv,
-	composeConfigSchema,
-	// A duration read strictly from a number or the decimal string a variable
-	// carries, for the packages outside core that declare a section's schema.
-	durationFromEnv,
-	fullSectionsSchema,
 	isLifetimeSeconds,
 	// The hop ceiling `http.trustProxy` is held to, which the
 	// `httpSettings` contract suite holds the slot's value to as well.
@@ -251,18 +245,14 @@ export {
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
-	// Any other whole number read strictly from a number or a string of
-	// decimal digits a variable carries, for the packages outside core that
-	// declare a section's schema.
+	// A whole number read strictly from a number or a string of decimal
+	// digits a variable carries, for the packages outside core that declare a
+	// section's schema.
 	wholeNumberFromEnv,
 	// The same reader held to a range, refusing with one message that names
 	// the range and the form.
 	wholeNumberInRangeFromEnv,
 } from "./config/application.schema.mjs";
-// Transitional: the switches that choose a composition root's modules, read
-// before it knows them. `createApp` takes the resolved configuration itself,
-// and parses it once.
-export { readTransitionalConfig } from "./config/composed.mjs";
 // How a configured value is read where its owning schema did not run, and how
 // a refusal quotes it.
 export { configuredNumber, shownConfigValue } from "./config/configuredValue.mjs";
@@ -391,6 +381,7 @@ export type {
 	DelegatedTokens,
 	EndSessionRequest,
 	EndSessionResult,
+	FederationAsk,
 	FederationProfile,
 	MappedClaims,
 	RefreshedTokens,
@@ -409,6 +400,7 @@ export {
 	supportsLogout,
 	supportsRefresh,
 } from "./federations/types.mjs";
+export { readUpstreamAuthTime } from "./federations/upstream-auth-time.mjs";
 // The authentication claims a token may carry
 export {
 	authTimeAt,
@@ -804,7 +796,6 @@ export type {
 	AuditHookFactory,
 	ComponentKey,
 	ComponentMap,
-	ConfigSchema,
 	Contributed,
 	ContributesMap,
 	ExchangeTokenValidator,
@@ -1227,11 +1218,14 @@ export type {
 export {
 	createSessionLifecycle,
 	type SessionCloseOutcome,
+	type SessionFederations,
 	type SessionJoinOutcome,
 	type SessionJoinRequest,
 	type SessionLifecycle,
 	type SessionLifecycleOptions,
 	type SessionLiveness,
+	type SessionOpenOutcome,
+	type SessionOpenRequest,
 	type SessionResumeReport,
 } from "./session-lifecycle/service.mjs";
 // The token-exchange validator port. `ExchangeTokenValidator` is
@@ -1247,9 +1241,11 @@ export type { OAuthTokenSettings } from "./token-settings/types.mjs";
 // How a session was established and what this provider vouches for, read one
 // way by every consumer of a session.
 export {
+	authenticationFreshness,
 	checkSecondFactorEvent,
 	expectsRenewalNonce,
 	federatedSessionAuthentication,
+	federationCallbackMeetsFreshness,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	type RecordedAuthentication,
@@ -1261,6 +1257,7 @@ export {
 	requirementSessionFromAmr,
 	sessionAfterSecondFactor,
 	sessionAuthentication,
+	sessionFreshness,
 	vouchedAmr,
 } from "./user-sessions/authentication.mjs";
 // What a session's enrollment facts may hold, read one way by every store.
@@ -1623,6 +1620,13 @@ export {
 	memoryFederationGrantIntentStoreModule,
 	memoryFederationGrantStoreModule,
 } from "./federation-grants/module.mjs";
+// What modules outside the federation-grants module read of its section —
+// the switch and the keep policy — through the `federationGrantPolicy` slot,
+// and the check a reader holds the slot to.
+export {
+	checkFederationGrantPolicy,
+	type FederationGrantPolicy,
+} from "./federation-grants/policy.mjs";
 export {
 	assertFederationGrantRetrievalLimits,
 	type FederationGrantAuditEvent,
@@ -1744,6 +1748,12 @@ export {
 } from "./sealing/keyRing.mjs";
 
 // ===========================================================================
+// Plain JSON — the one rule for a value JSON gives back as it is, and its copy
+// ===========================================================================
+
+export { copyPlainJson, type PlainJsonCopy } from "./json/plainJson.mjs";
+
+// ===========================================================================
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628)
 // ===========================================================================
 
@@ -1765,15 +1775,14 @@ export {
 	type DeviceAuthorizationReading,
 	readDeviceAuthorization,
 } from "./device-authorization/reading.mjs";
-export {
-	type ApproveDeviceAuthorizationInput,
-	type CreateDeviceAuthorizationInput,
-	DEVICE_CODE_STORE_ABSENCE_POLICY,
-	type DeviceAuthorization,
-	type DeviceAuthorizationStatus,
-	type DeviceCodeStore,
-	type DeviceDecisionOutcome,
-	type DevicePollOutcome,
+export type {
+	ApproveDeviceAuthorizationInput,
+	CreateDeviceAuthorizationInput,
+	DeviceAuthorization,
+	DeviceAuthorizationStatus,
+	DeviceCodeStore,
+	DeviceDecisionOutcome,
+	DevicePollOutcome,
 } from "./device-authorization/types.mjs";
 export {
 	formatUserCode,

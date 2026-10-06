@@ -25,8 +25,7 @@
  *
  * - shipped: every package on, as the full set boots it;
  * - configured: each owner's own key set by an operator
- *   (`session.rateLimit.login`, `device-grant.rateLimit`,
- *   `webauthn.rateLimit.authenticationOptions`, `mfa.rateLimit.routes`);
+ *   (`session.rateLimit.login`, `device-grant.rateLimit`);
  * - declared: the same, and every prefix but a verifier's also declared in
  *   the limiter's own `limits`, which wins; `login` and `device_verification`
  *   stay their owners', since a limiter's `limits` may not name them;
@@ -36,8 +35,11 @@
  *   not installed, or installed and switched off (the device grant), sets no
  *   budget.
  *
- * `token` has no owner: the limiter's `defaultLimit`, or its own `limits`
- * entry. `login` and `device_verification` are claimed with no budget: their
+ * `token` has no owner, and `webauthn-authentication-options` an owner that
+ * claims it with no budget: the limiter's `defaultLimit`, or its own `limits`
+ * entry. `mfa`'s owner claims it with no budget too: the limiter's own
+ * `limits` entry, which the template's reference.conf ships. `login` and
+ * `device_verification` are claimed with no budget: their
  * owners count attempts on the attempt counter, against
  * `session.rateLimit.login` and `device-grant.rateLimit`, so the limiter
  * holds only its `defaultLimit` for each prefix, whatever the owner's key
@@ -100,19 +102,19 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		offConfigured: spec(60, 60),
 	},
 	"webauthn-authentication-options": {
-		shipped: spec(30, 60),
-		configured: spec(11, 30),
+		shipped: spec(60, 60),
+		configured: spec(60, 60),
 		declared: spec(9, 15),
 		off: spec(60, 60),
 		offConfigured: spec(60, 60),
 	},
 	mfa: {
-		// `mfa.rateLimit.routes` ships 60 per 300 s.
+		// The template's reference.conf gives both limiters `limits.mfa`, 60 per 300 s.
 		shipped: spec(60, 300),
-		configured: spec(13, 240),
+		configured: spec(60, 300),
 		declared: spec(6, 75),
-		off: spec(60, 60),
-		offConfigured: spec(60, 60),
+		off: spec(60, 300),
+		offConfigured: spec(60, 300),
 	},
 	token: {
 		shipped: spec(60, 60),
@@ -127,8 +129,6 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 const OWNERS_KEYS = `
 session.rateLimit.login { windowMs = 60000, limit = 7 }
 device-grant.rateLimit { limit = 3, windowSeconds = 120 }
-webauthn.rateLimit.authenticationOptions { limit = 11, windowSeconds = 30 }
-mfa.rateLimit.routes { limit = 13, windowSeconds = 240 }
 `;
 
 /** The limiter's own section's name. */

@@ -19,8 +19,9 @@
  * Minting a code for any registered client once `req.session.isAuthenticated`
  * is true is defensible only in a pure first-party OP; one semi-trusted client
  * would turn the endpoint into an account-linking vector. The removed
- * `oauth.authorize.allowUnmarkedClients` flag has no effect: the schema
- * rejects it at boot, and hand-built configs bypass the schema, so the handler
+ * `oauth.authorize.allowUnmarkedClients` flag has no effect: boot refuses it,
+ * as a path the oauth module's manifest declares removed, before any schema
+ * runs; a hand-built config handed to the router bypasses boot, so the handler
  * must not read it either.
  *
  * Not pinned: "forced navigation is impossible" — it is not. A client marked
@@ -53,6 +54,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { routerInputsOf } from "./_helpers/sections.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -113,7 +115,7 @@ const makeApp = async (opts: {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
-		config: makeConfig(opts.staleAllowUnmarkedClients ?? false),
+		...routerInputsOf(makeConfig(opts.staleAllowUnmarkedClients ?? false)),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -262,7 +264,7 @@ describe("/authorize first-party invariant, through a file-backed registry", () 
 			loginEntry: createTestLoginEntry(),
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry,
-			config: makeConfig(false),
+			...routerInputsOf(makeConfig(false)),
 			clientRepository,
 			codeRepository: {
 				createCode: async () =>

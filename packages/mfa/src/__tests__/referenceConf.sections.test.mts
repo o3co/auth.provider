@@ -80,11 +80,11 @@ describe("the package's config/reference.conf", () => {
 	];
 
 	it("is read at each module's name: mfa, mfa-totp-factor, mfa-recovery-code-factor and mfa-email-factor", () => {
-		expect(modules.map((module) => module.section?.at)).toEqual([
-			undefined,
-			undefined,
-			undefined,
-			undefined,
+		expect(modules.map((module) => Object.hasOwn(module.section ?? {}, "at"))).toEqual([
+			false,
+			false,
+			false,
+			false,
 		]);
 		expect(modules.map((module) => module.name)).toEqual([
 			"mfa",
@@ -123,9 +123,12 @@ describe("the package's config/reference.conf", () => {
 		);
 	});
 
-	it("declares on the MFA module's manifest the page's old path, endpoints.mfa.url, and its variable, ENDPOINTS_MFA_URL; binds MFA_PAGE_URL at mfa.page.url and the old name in its capture alone", () => {
+	it("declares on the MFA module's manifest the page's old path, endpoints.mfa.url, and its variable, ENDPOINTS_MFA_URL, and the removed mfa.rateLimit; binds MFA_PAGE_URL at mfa.page.url and the old name in its capture alone", () => {
 		const section = mfaModule().section;
-		expect(section?.relocatedFrom).toEqual({ "endpoints.mfa.url": "page.url" });
+		expect(section?.relocatedFrom).toEqual({
+			"endpoints.mfa.url": "page.url",
+			"mfa.rateLimit": null,
+		});
 		expect(section?.renamedVariables).toEqual({ ENDPOINTS_MFA_URL: "endpoints.mfa.url" });
 		expect(bindings().filter((binding) => binding.startsWith("MFA_PAGE_URL "))).toEqual([
 			"MFA_PAGE_URL at mfa.page.url",

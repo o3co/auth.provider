@@ -42,6 +42,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
@@ -68,6 +69,7 @@ import {
 	ACQUISITION_LOGIN_PAGE,
 	acquisitionCsrfGuard,
 	acquisitionLoginEntry,
+	acquisitionTokenSettings,
 	callbackUrlFor,
 } from "./acquisitionFixture.mjs";
 
@@ -133,7 +135,7 @@ const clientRepository: ClientRepository = {
 		id === CLIENT_ID && secret === SECRET ? (client as never) : null,
 };
 
-/** The oauthTokenSettings the composition holds, when a test puts them there; none by default. */
+/** The oauthTokenSettings the composition holds, when a test puts them there; the fixture's on the test issuer by default. */
 let tokenSettings: OAuthTokenSettings | undefined;
 
 /** The csrfGuard the composition holds, when a test puts one there; core's double by default. */
@@ -297,10 +299,11 @@ const boot = async (
 			},
 			pathResolver: (s: string) => s,
 			...(logger === undefined ? {} : { logger }),
-			...(tokenSettings === undefined ? {} : { oauthTokenSettings: tokenSettings }),
+			oauthTokenSettings: tokenSettings ?? acquisitionTokenSettings(),
 			clientRepository,
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			// The login page and the CSRF policy, which the session module
 			// provides in a real composition.
 			loginEntry: acquisitionLoginEntry(),

@@ -792,7 +792,13 @@ interface ReplicaBootOptions {
 }
 
 const bootReplica = async (opts: ReplicaBootOptions) => {
-	const base = makeValidCoreConfig();
+	// Less the oauth package's grant switches: no module here reads them, and
+	// boot would name them at warn, beside what these tests watch for.
+	const {
+		"oauth-session": _session,
+		"oauth-authorization": _authorization,
+		...base
+	} = makeValidCoreConfig();
 	const bootstrapComponents = {
 		config: {
 			...base,

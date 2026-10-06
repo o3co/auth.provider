@@ -149,13 +149,20 @@ describe("the switch is the template's own key, mfaMode, bound to MFA_MODE", () 
 		}
 	});
 
-	it("refuses an MFA_MODE that is none of the three before boot, a RangeError naming mfaMode and MFA_MODE that quotes nothing of it", async () => {
+	it("refuses an MFA_MODE that is none of the three before boot, a config-validation-failed BootError naming mfaMode and MFA_MODE that quotes nothing of it", async () => {
 		const err = await refusal(boot({ env: on("required", { MFA_MODE: "sentinel-mode" }) }));
-		expect(err).toBeInstanceOf(RangeError);
-		expect(err).not.toBeInstanceOf(BootError);
-		expect((err as RangeError).message).toContain("mfaMode");
-		expect((err as RangeError).message).toContain("MFA_MODE");
-		expect((err as RangeError).message).not.toContain("sentinel-mode");
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "config-validation-failed",
+			details: {
+				issues: [{ path: ["mfaMode"] }],
+				modules: [{ module: "mfaMode", schemaPath: "mfaMode" }],
+			},
+		});
+		expect((err as BootError).message).toContain("mfaMode");
+		expect((err as BootError).message).toContain("MFA_MODE");
+		expect((err as BootError).message).not.toContain("sentinel-mode");
+		expect(JSON.stringify((err as BootError).details)).not.toContain("sentinel-mode");
 	});
 
 	it.each([
@@ -171,12 +178,16 @@ describe("the switch is the template's own key, mfaMode, bound to MFA_MODE", () 
 					operatorHocon: `mfaMode = "${written}"\n`,
 				}),
 			);
-			expect(err).toBeInstanceOf(RangeError);
-			expect(err).not.toBeInstanceOf(BootError);
-			const message = (err as RangeError).message;
+			expect(err).toBeInstanceOf(BootError);
+			expect(err).toMatchObject({
+				reason: "config-validation-failed",
+				details: { issues: [{ code: "custom", path: ["mfaMode"] }] },
+			});
+			const message = (err as BootError).message;
 			expect(message).toContain("mfaMode");
 			expect(message).toContain("MFA_MODE");
 			expect(message).not.toMatch(/"(?:off|optional|required)"/);
+			expect(JSON.stringify((err as BootError).details)).not.toMatch(/(?:off|optional|required)"/);
 		},
 	);
 
@@ -338,8 +349,18 @@ describe("the MFA stores in memory: development and test alone", () => {
 
 	it("refuses both, before boot, under the name production: the shipped selection, naming each setting and its variable", async () => {
 		const err = await refusal(compose({ env: on("required"), environment: "production" }));
-		expect(err).toBeInstanceOf(RangeError);
-		const message = (err as RangeError).message;
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "config-validation-failed",
+			details: {
+				issues: [
+					{ code: "custom", path: ["adapters", "mfaFactorStore"] },
+					{ code: "custom", path: ["adapters", "mfaTransactionStore"] },
+				],
+				modules: [{ module: "adapters", schemaPath: "adapters" }],
+			},
+		});
+		const message = (err as BootError).message;
 		for (const named of [
 			"adapters.mfaFactorStore",
 			"ADAPTERS_MFA_FACTOR_STORE",
@@ -357,9 +378,12 @@ describe("the MFA stores in memory: development and test alone", () => {
 				environment: "production",
 			}),
 		);
-		expect(err).toBeInstanceOf(RangeError);
-		expect((err as RangeError).message).toContain("ADAPTERS_MFA_TRANSACTION_STORE");
-		expect((err as RangeError).message).not.toContain("ADAPTERS_MFA_FACTOR_STORE");
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).details).toMatchObject({
+			issues: [{ path: ["adapters", "mfaTransactionStore"] }],
+		});
+		expect((err as BootError).message).toContain("ADAPTERS_MFA_TRANSACTION_STORE");
+		expect((err as BootError).message).not.toContain("ADAPTERS_MFA_FACTOR_STORE");
 	});
 
 	it.each(["CONFIG_ENV", "NODE_ENV"])(
@@ -367,14 +391,15 @@ describe("the MFA stores in memory: development and test alone", () => {
 		async (variable) => {
 			vi.stubEnv(variable, "production");
 			const err = await refusal(boot({ env: on("required") }));
-			expect(err).toBeInstanceOf(RangeError);
-			expect((err as RangeError).message).toContain("ADAPTERS_MFA_FACTOR_STORE");
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).message).toContain("ADAPTERS_MFA_FACTOR_STORE");
 		},
 	);
 
 	it("refuses them under a name that is neither development nor test", async () => {
 		const err = await refusal(compose({ env: on("required"), environment: "staging-eu" }));
-		expect(err).toBeInstanceOf(RangeError);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
 	});
 
 	it.each(["development", "test"])("lets them in under %s", async (environment) => {
@@ -539,8 +564,15 @@ describe("mfa.storeTimeoutMs", () => {
 		const err = await refusal(
 			boot({ env: on("optional", { ...IN_THE_STORE, REPOSITORIES_USER_HTTP_TIMEOUT: "8000" }) }),
 		);
-		expect(err).toBeInstanceOf(RangeError);
-		const message = (err as RangeError).message;
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "config-validation-failed",
+			details: {
+				issues: [{ code: "custom", path: ["mfa", "storeTimeoutMs"] }],
+				modules: [{ module: "mfa", schemaPath: "mfa" }],
+			},
+		});
+		const message = (err as BootError).message;
 		for (const named of [
 			"mfa.storeTimeoutMs",
 			"MFA_STORE_TIMEOUT_MS",
@@ -625,7 +657,6 @@ async function bootShipped(
 	const modules = adjustModules(
 		buildModules(switches, {
 			environment,
-			logger,
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		}),
 	);
@@ -720,8 +751,8 @@ describe("the shipped configuration with nothing set about MFA", () => {
 		await bootShipped(unset(SHIPPED_ENV), "production").catch((caught: unknown) => {
 			err = caught;
 		});
-		expect(err).toBeInstanceOf(RangeError);
-		const message = (err as RangeError).message;
+		expect(err).toBeInstanceOf(BootError);
+		const message = (err as BootError).message;
 		for (const named of [
 			"ADAPTERS_MFA_FACTOR_STORE",
 			"ADAPTERS_MFA_TRANSACTION_STORE",
@@ -757,8 +788,15 @@ describe("under CONFIG_ENV=development", () => {
 				err = caught;
 			},
 		);
-		expect(err).toBeInstanceOf(RangeError);
-		const message = (err as RangeError).message;
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "config-validation-failed",
+			details: { issues: [{ code: "custom", path: ["mfa", "encryptionKeys"] }] },
+		});
+		const details = JSON.stringify((err as BootError).details);
+		expect(details).not.toContain(MFA_KEY);
+		expect(details).not.toContain(MFA_DEVELOPMENT_SAMPLE_KEY);
+		const message = (err as BootError).message;
 		expect(message).toContain("MFA_ENCRYPTION_KEY");
 		expect(message).toContain("mfa.encryptionKeys");
 		expect(message).not.toContain(MFA_KEY);

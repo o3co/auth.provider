@@ -297,9 +297,12 @@ it.
 `mfaFactorContract(input)` holds a factor, whatever its kind, to what the
 MFA coordinator relies on: a kind a hint can carry; `amrValues` it can vouch
 for — no primary's marker, no `mfa` — and `amrFor` answering at least one of
-them; boolean flags; state and data that survive the JSON round trip sealing
-puts them through, and are handed back after it; a code an enrollment or a
-challenge asks to be mailed only for the call's purpose —
+them; boolean flags; state, data and an enrollment's or a challenge's
+response that are each a plain object surviving the JSON round trip sealing
+puts them through, and handed back after it; `ok` the literal `true` on a
+completion or a verification that succeeds, and `false` on a refusal, with a
+reason its type names; a code an enrollment or a challenge asks to be mailed
+only for the call's purpose —
 `email_factor_enrollment` for an enrollment, `login_code` for a challenge —
 never empty, with an expiry after the call's time when it gives one, another
 code at each challenge, and in no form in the page's response; a login code
@@ -344,10 +347,13 @@ hold two credentials.
 A code and an address are looked for in the
 strings an answer holds as a reader decodes them — object keys, map and set
 entries included — in any case, an address with its percent-escapes decoded
-too, never in its JSON text, so no escaping hides one. It enrolls at one instant and verifies an hour later,
-every call made for the account's `User.id` as its subject; state and data
-are held to the rule the coordinator seals them by — JSON values JSON gives
-back as they are, in plain or null-prototype objects.
+too, never in its JSON text, so no escaping hides one. It enrolls at one
+instant and verifies an hour later, every call made for the account's
+`User.id` as its subject; state, data and a response are held to the rule
+the coordinator takes them by, core's `copyPlainJson` — a plain or
+null-prototype object of JSON values JSON gives back as they are, no `-0`,
+every own key an enumerable string, a list's own keys exactly its indices,
+an own getter read once.
 
 ```typescript
 import { mfaFactorContract } from "@o3co/auth-provider-test-kit";
@@ -575,7 +581,9 @@ It holds the store to: `null` for a sid never opened; an opened record read
 back active and whole; a repeated open with the same subject and end writing
 nothing, and any other open of the sid, or one whose end has passed, refused;
 a join answered `joined` at a new generation, a participant joined again
-replaced rather than repeated; `missing`, creating nothing, for a sid with no
+replaced rather than repeated; participants answered in the order each first
+joined, a repeat join not moving one, and the closing snapshot keeping that
+order; `missing`, creating nothing, for a sid with no
 record; a close that moves the record to `closing` in one commit, its
 participants the snapshot and one work item per step and per participant of
 the listed kinds; no join landing once the close has committed, and, of a
@@ -702,7 +710,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`conditionalWrite.contract.test.mts`](src/conditionalWrite/__tests__/conditionalWrite.contract.test.mts) | both suites over a reference record store, whose writes take a lock per key, and a reference set store, each serving two instances over one backend and keeping retention deadlines on a clock of its own, which `forceExpire` moves; every case refuses a store broken one way (a write that skips the lock, an unconditional delete among them, a counter or a digest as the generation, a torn versioned read, a write on `conflict`, a create that upserts a held id, a reset or a last removal that leaves no tombstone, a reset in two steps, a store that ignores its own deadline, a set revived from its tombstone that keeps the tombstone's deadline, a re-create after expiry at a generation seen before, a reset's tombstone that never expires, of a set written or never written, a re-create after it answering the tombstone's generation, a race winner answering a stale generation under contention, an outage answered as absent, writes that skip the expiry check, a second instance reading from a cache, a member update that changes nothing, a value or a member shared with the caller, or only a member after the first, among them); stores answering frozen values, listing members in another order, or labelling a losing write from a read taken before their lock pass; an undeclared hook's or member's cases left out and named; a declared one missing fails its case; items of another scope fail the case |
 | [`federationTokenStoreConditional.contract.test.mts`](src/federationTokens/__tests__/federationTokenStoreConditional.contract.test.mts) | the federation token store's binding over core's in-process store; a store without the conditional members refused by every case; a `get` that answers another record than `getVersioned`, a replace that moves a sibling federation's generation, a `removeBySid` that leaves a federation of the session or reaches another session's, a replace that restores a record a logout removed, and a store that drops `obtainedAt`, leaves an unset one out or answers it as `null`, each refused by the case that names it; the outage and expiry cases named as not run when undeclared |
 | [`attemptCounter.contract.test.mts`](src/attempts/__tests__/attemptCounter.contract.test.mts) | the attempt counter's suite over core's in-process counter, on a fake clock and on the real one; each broken counter — one that applies a limit of its own, counts every key as one or only a key's first segment, never ends a window or ends it late or far late, is not atomic, keeps the limit a key's window started with, starts a new window when a spec changes the window, or only when it lengthens it, counts refused attempts, answers `remaining` one off, a refusal with attempts remaining or `resetAt` as a number, counts a key or spec it should reject or a key past 512 characters, or answers an outage as an allowed attempt — refused by the case that names it; the outage case run only when declared, failing when declared and not given, and otherwise named as not run |
-| [`sessionLifecycleStore.contract.test.mts`](src/sessionLifecycle/__tests__/sessionLifecycleStore.contract.test.mts) | the session lifecycle store's suite over core's in-process store, on a fake clock with every hook and on the real one with none; each broken store — one that answers a record never opened, drops a participant's data or repeats one, answers `opened` over another record or for an end already past, creates a record for a sid with none, leaves the participants' work or the snapshot out of a close, answers `joined` after the close committed, checks the state and writes in a later step, commits a repeated close again or starts its work over, ignores the generation of a completion, answers a malformed one as a conflict or answers `updated` for a race it lost, hands out the participants it holds, stays closing with nothing pending, answers a closed record as active, lists records not closing or past its limit, ignores its cursor, answers a record with its `close` left out, a field of its own (enumerable, hidden or a symbol) or as a class instance, answers a repeated open `opened` past the session's end, answers malformed, hands out the record it holds, closes another sid, ignores the session's end, lapses a closing record with the session rather than its work, keeps part of a record past its retention, or answers an outage as `missing`, `null` or `closed` — refused by the case that names it; an undeclared hook's cases named as not run, and a declared one missing failing its case |
+| [`sessionLifecycleStore.contract.test.mts`](src/sessionLifecycle/__tests__/sessionLifecycleStore.contract.test.mts) | the session lifecycle store's suite over core's in-process store, on a fake clock with every hook and on the real one with none; each broken store — one that answers a record never opened, drops a participant's data or repeats one, answers participants by their bytes or moves one joined again to the end, answers `opened` over another record or for an end already past, creates a record for a sid with none, leaves the participants' work or the snapshot out of a close, answers `joined` after the close committed, checks the state and writes in a later step, commits a repeated close again or starts its work over, ignores the generation of a completion, answers a malformed one as a conflict or answers `updated` for a race it lost, hands out the participants it holds, stays closing with nothing pending, answers a closed record as active, lists records not closing or past its limit, ignores its cursor, answers a record with its `close` left out, a field of its own (enumerable, hidden or a symbol) or as a class instance, answers a repeated open `opened` past the session's end, answers malformed, hands out the record it holds, closes another sid, ignores the session's end, lapses a closing record with the session rather than its work, keeps part of a record past its retention, or answers an outage as `missing`, `null` or `closed` — refused by the case that names it; an undeclared hook's cases named as not run, and a declared one missing failing its case |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; a create or a removal of one record without `expectedGeneration` refused `400` and writing nothing, the reset still applied; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, a record held into a set dropping its generation, `400` for an expected generation or a `deadlineMs` that is none, a late conditional write answered `408` and not applied while one before its deadline is, a deadline checked on the request clock and never the tombstones', and one winner among concurrent conditional writes |
 
 ## See also

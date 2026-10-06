@@ -23,7 +23,6 @@ import {
 	type DeploymentMode,
 	decodeSealingKey,
 	defineModule,
-	durationFromEnv,
 	type FederationGrant,
 	type FederationGrantAuthorization,
 	type FederationGrantCredentials,
@@ -42,6 +41,7 @@ import {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 	SEALING_KEY_BYTES,
+	wholeNumberInRangeFromEnv,
 	withinFederationGrantLifetimeCeiling,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -1066,14 +1066,10 @@ export function createRedisFederationGrantStore(
 export const redisFederationGrantStoreSectionSchema = z
 	.object({
 		keyPrefix: z.string().default("fg:"),
-		listingAllowanceMs: durationFromEnv(
-			z.number().int().nonnegative().max(MAX_DURATION_MS),
-		).optional(),
+		listingAllowanceMs: wholeNumberInRangeFromEnv(0, MAX_DURATION_MS).optional(),
 		// One year at most, as every duration an operator writes; the store's
 		// constructor is the second line.
-		tombstoneRetention: durationFromEnv(
-			z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
-		).optional(),
+		tombstoneRetention: wholeNumberInRangeFromEnv(0, MAX_DURATION_SECONDS).optional(),
 		encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
 		encryptionKeys: z
 			.array(z.object({ id: z.string().min(1), key: z.string().min(1) }).strict())

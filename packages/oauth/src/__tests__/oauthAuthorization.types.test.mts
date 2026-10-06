@@ -18,10 +18,11 @@ import type {
 	AssertionVerifier,
 	CodeRepository,
 	GrantPolicyHook,
+	OAuthTokenSettings,
 	ProviderDeps,
+	TokenBindingSettings,
 	UserRepository,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import type { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
@@ -30,7 +31,7 @@ import type { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import type { createSessionGrant } from "#/grants/session.mjs";
 import {
 	type OAuthAuthorizationModuleDeps,
-	oauthAuthorizationModule,
+	oauthAuthorizationGrantsModule,
 } from "#/oauthAuthorization.mjs";
 
 // A module's contribution callbacks read only the slots it
@@ -40,7 +41,13 @@ import {
 // proves nothing about them. The `if (false as boolean)` blocks keep the
 // negative assertions from executing.
 
-const REQUIRES = ["config", "clientRepository", "keyStore", "sessionRequirementResolver"] as const;
+const REQUIRES = [
+	"clientRepository",
+	"keyStore",
+	"sessionRequirementResolver",
+	"oauthTokenSettings",
+	"tokenBindingSettings",
+] as const;
 const OPTIONAL = [
 	"codeRepository",
 	"auditSink",
@@ -51,20 +58,19 @@ const OPTIONAL = [
 	"userRepository",
 	"grantPolicy",
 	"userSessionStore",
-	"sessionRPRegistry",
-	"sessionFamilyIndex",
-	"sessionFederationIndex",
+	"sessionLifecycle",
+	"sessionLifecycleStore",
 	"logger",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("oauthAuthorizationModule's deps are the slots it declares", () => {
+describe("oauthAuthorizationGrantsModule's deps are the slots it declares", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		// `.branded` because ProviderDeps is an intersection of two mapped types.
 		expectTypeOf<OAuthAuthorizationModuleDeps>().branded.toEqualTypeOf<Declared>();
 		// The runtime declaration is the same list, so the pin above cannot
 		// drift from what the boot planner actually injects.
-		const module = oauthAuthorizationModule({ config: makeValidAppConfig() });
+		const module = oauthAuthorizationGrantsModule;
 		expect([...(module.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(module.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
 	});
@@ -126,9 +132,18 @@ describe("the grant factories declare the slots they read", () => {
 		// could read a slot no module had declared for it.
 		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("grantPolicy");
 		expectTypeOf<RefreshDeps>().not.toHaveProperty("sessionRPRegistry");
+		// The authorization_code grant joins the session through the lifecycle alone.
+		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("sessionFamilyIndex");
+		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("sessionRPRegistry");
 		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<SessionDeps>().not.toHaveProperty("codeRepository");
+		// No grant reads the whole configuration: each reads its settings from
+		// slots, and the refresh grant its unknown-family policy from the section.
+		expectTypeOf<RefreshDeps>().not.toHaveProperty("config");
+		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("config");
+		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("config");
+		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("config");
 		if (false as boolean) {
 			const deps = {} as ClientCredentialsDeps;
 			// @ts-expect-error — client_credentials reads no session store
@@ -143,7 +158,11 @@ describe("the grant factories declare the slots they read", () => {
 		// alone lets a grant read an optional slot its module never declared
 		// and see `undefined` forever. The key sets close that gap.
 		expectTypeOf<keyof AuthorizationDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
-		expectTypeOf<keyof RefreshDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
+		// The refresh grant's one key beyond the slots is the section's policy,
+		// which the module hands over itself.
+		expectTypeOf<Exclude<keyof RefreshDeps, "unknownFamilyPolicy">>().toMatchTypeOf<
+			keyof OAuthAuthorizationModuleDeps
+		>();
 		expectTypeOf<keyof JwtBearerDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
 		expectTypeOf<keyof ClientCredentialsDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
 		expect(true).toBe(true);
@@ -159,6 +178,16 @@ describe("the grant factories declare the slots they read", () => {
 		expectTypeOf<ClientCredentialsDeps>().toHaveProperty("grantPolicy");
 		expectTypeOf<SessionDeps>().toHaveProperty("userSessionStore");
 		expectTypeOf<SessionDeps>().toHaveProperty("grantPolicy");
+		expectTypeOf<AuthorizationDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
+		expectTypeOf<RefreshDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
+		expectTypeOf<JwtBearerDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
+		expectTypeOf<ClientCredentialsDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
+		expectTypeOf<AuthorizationDeps["tokenBindingSettings"]>().toEqualTypeOf<TokenBindingSettings>();
+		expectTypeOf<RefreshDeps["tokenBindingSettings"]>().toEqualTypeOf<TokenBindingSettings>();
+		// The refresh grant's unknown-family policy, as the module's section parses it.
+		expectTypeOf<RefreshDeps["unknownFamilyPolicy"]>().toEqualTypeOf<
+			"accept" | "reject" | undefined
+		>();
 		expect(true).toBe(true);
 	});
 });

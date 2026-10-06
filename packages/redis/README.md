@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -34,8 +34,9 @@ every replica shares, and the manifest that puts it in the port's slot.
   conformance suites hold these adapters to them ([Contract tests](#contract-tests));
 - the flows built on the stores: refresh-token rotation and revocation
   (`RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation`) are core's,
-  over whichever `RefreshTokenFamilyStore` is wired; the logout cascade and
-  subject-wide revocation belong to core and the route packages;
+  over whichever `RefreshTokenFamilyStore` is wired; a session's close (core's
+  session lifecycle) and subject-wide revocation belong to core and the route
+  packages;
 - the connection: the composition root opens the ioredis `Redis` instance,
   chooses its options and attaches its `error` listener;
 - the `express-session` store behind the browser cookie. That is
@@ -208,7 +209,13 @@ Each one implements a port core declares; the slot name is in parentheses.
   a first binding) as a key of its own, left out when the session recorded
   none: an envelope without it reads as a session with none, a malformed one
   is refused as corrupt, and a release before this one ignores the key. A
-  step-up keeps it as it was. The `SessionFamilyIndex` has the session-end
+  step-up keeps it as it was. Inside `authentication`, a federated session's
+  `upstreamAuthTime` is stored as `upstreamAuthTimeMs`: epoch milliseconds,
+  or `null` when the upstream showed no time, left out when none was
+  recorded. Any other value reads the envelope as corrupt. A release before
+  this one reads it as none recorded, and its step-up keeps it.
+
+  The `SessionFamilyIndex` has the session-end
   capability (core's `SupportsSessionEnd`) when it is given an
   `endedKeyPrefix` and a `SessionFamilyIndexClient` with `writeEndedMark` and
   `hasEndedMark`, which `makeIoredisClients` provides, and which the module
@@ -426,7 +433,9 @@ Each adapter ships in up to two forms:
   form, `redisFederationTokenStoreModuleFor` and
   `redisFederationGrantStoreModuleFor`, for a composition root that selects its
   config by a name other than `NODE_ENV` (the standalone's `CONFIG_ENV`): the
-  plaintext guard reads that name in addition to `NODE_ENV`, and the
+  plaintext guard reads that name in addition to `NODE_ENV`, each trimmed
+  and in lower case as core's `productionEnvironmentIn` reads it (so
+  `Production` or `"staging\n"` refuses plaintext as surely), and the
   replica count from core's `deploymentMode` slot, which both modules require
   and core fills from `core.deployment.mode` — `"multi"` refuses plaintext in every
   environment. A composition root that builds either store itself passes
@@ -480,7 +489,7 @@ Each adapter ships in up to two forms:
 | `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redis-federation-token-store` | `redisFederationTokenStoreBuilder` |
 | `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redis-federation-grant-store` (`keyPrefix`, `listingAllowanceMs`, `tombstoneRetention`, `encryptionMode`, `encryptionKeys`) | — |
 | `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redis-federation-grant-intent-store` (`keyPrefix`, default `fg:`) | — |
-| `redisRateLimiterModule` | `rateLimiterClient`, `rateLimitBudgetResolver` | `rateLimiter` | `redis-rate-limiter` | `redisRateLimiterBuilder` |
+| `redisRateLimiterModule` | `rateLimiterClient` | `rateLimiter` | `redis-rate-limiter` | `redisRateLimiterBuilder` |
 | `redisAttemptCounterModule` | `attemptCounterClient` | `attemptCounter` | `redis-attempt-counter` (`keyPrefix`, default `attempt:`) | — |
 | `redisCodeRepositoryModule` | `codeRepositoryClient` | `codeRepository` | `redisCodeRepository` | `redisCodeRepositoryBuilder` |
 | `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redis-device-code-store` | `redisDeviceCodeStoreBuilder` |
@@ -501,14 +510,13 @@ the first command.
 
 The rate limiter takes a key's budget from core's one lookup,
 `createRateLimitBudgetLookup`: its own `redis-rate-limiter.limits` entry for the
-key's prefix, else the budget the prefix's owning module contributed
-(`rateLimitBudgetResolver`, read and checked at each check), else its
-`defaultLimit`, which it declares (`RateLimiter.defaultLimit`). Its `limits`
-may not name `login` or `device_verification`, a verifier's own attempt limit
-set at `session.rateLimit.login` and `device-grant.rateLimit`: the section
-refuses such an entry, and the contributed budget applies in its place.
-`redisRateLimiterBuilder` reads no contributed budget, and takes its `limits`
-as given.
+key's prefix, else its `defaultLimit`, which it declares
+(`RateLimiter.defaultLimit`). The modules that key a limiter claim their
+prefixes with no budget of their own, so neither the module nor
+`redisRateLimiterBuilder`, which takes its `limits` as given, reads one. Its
+`limits` may not name `login` or `device_verification`, a verifier's own
+attempt limit set at `session.rateLimit.login` and `device-grant.rateLimit`
+and counted on the attempt counter: the section refuses such an entry.
 `redisRateLimiterModule` answers `redis-rate-limiter.failMode`, its own key, as
 the limiter's outage policy (`RateLimiter.failMode`), which the guard applies
 while Redis cannot answer; a value other than `"open"` or `"closed"` refuses
@@ -1314,7 +1322,13 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   whole. The hash's fields are listed in
   [`src/clients/session-lifecycle.mts`](src/clients/session-lifecycle.mts); a
   participant's data is kept as a JSON string, so every string the port
-  admits reads back as written.
+  admits reads back as written. Each participant's join ordinal is kept beside
+  it, written in the join's script when it first joins and kept by a repeat
+  join, so participants are answered in the order each first joined, as the
+  port promises; a participant with no ordinal is answered after those with
+  one, by its item's bytes. The reader refuses a record with a field outside
+  that list, so a new field needs a reader that tolerates it deployed before
+  any writer that writes it.
 - **Sixteen fixed shards.** A record lives at
   `${keyPrefix}{lc:<shard>}:s:<sid>` (`ss:lc:` by default; `<sid>` is base64url
   of its JSON), where `<shard>` is the 32-bit FNV-1a hash of the sid's UTF-8
@@ -1345,8 +1359,9 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   own step: an entry whose record is no longer closing (it lapsed while
   closing, say) is dropped there. The cursor is a plain sid.
 - **Assumptions.** Acknowledged writes are not rolled back, and the server
-  runs `maxmemory-policy` `noeviction`. An evicted record lets a closed
-  session be opened and joined again; an evicted replay key lets a resent
+  runs `maxmemory-policy` `noeviction`. An evicted active or closing record
+  drops a live session's fence or loses its pending work; an evicted replay
+  key lets a resent
   write apply again; an evicted index hides a closing record. The boot check,
   `checkSessionLifecycleEviction` in
   [`src/internal/session-lifecycle-eviction.mts`](src/internal/session-lifecycle-eviction.mts),

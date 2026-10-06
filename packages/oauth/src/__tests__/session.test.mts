@@ -14,12 +14,21 @@
  * limitations under the License.
  */
 
-import { createSymmetricKeyStore, type GrantContext } from "@o3co/auth-provider-core";
+import {
+	createInMemorySessionLifecycleStore,
+	createInMemoryUserSessionStore,
+	createSymmetricKeyStore,
+	type GrantContext,
+} from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 type SessionGrantDeps = Parameters<typeof createSessionGrant>[0];
 
@@ -69,6 +78,8 @@ describe("createSessionGrant — the token settings it mints with, read when it 
 	});
 
 	it("reads nothing of a whole configuration it is handed", async () => {
+		// `expires_in` is the time left when answered: read on a frozen clock.
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		// Settings at a configuration's paths that the slot contradicts: only
 		// the slot's are read.
 		const config = {
@@ -88,6 +99,28 @@ describe("createSessionGrant — the token settings it mints with, read when it 
 
 		if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
 		expect(result.tokens.expires_in).toBe(3600);
+	});
+});
+
+describe("createSessionGrant — where a user-session store is wired, core's session lifecycle is required", () => {
+	it("refuses to build with userSessionStore wired and no sessionLifecycleStore, naming both slots", () => {
+		expect(() =>
+			createSessionGrant(makeDeps({ userSessionStore: createInMemoryUserSessionStore() })),
+		).toThrow(
+			/^oauth-session: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
+		);
+	});
+
+	it("builds sessionless, with neither wired, and with both wired", () => {
+		expect(() => createSessionGrant(makeDeps())).not.toThrow();
+		expect(() =>
+			createSessionGrant(
+				makeDeps({
+					userSessionStore: createInMemoryUserSessionStore(),
+					sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+				}),
+			),
+		).not.toThrow();
 	});
 });
 
@@ -172,6 +205,8 @@ describe("createSessionGrant", () => {
 		});
 
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			// `expires_in` is the time left when answered: read on a frozen clock.
+			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 			const handler = createSessionGrant(
 				makeDeps({
 					oauthTokenSettings: createTestOAuthTokenSettings({
@@ -625,6 +660,7 @@ describe("createSessionGrant — a session store that cannot answer is logged, n
 		const longId = "c".repeat(256);
 		const handler = createSessionGrant({
 			...makeDeps(),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			userSessionStore: {
 				kind: "broken",
 				create: async () => {},
@@ -667,6 +703,7 @@ describe("createSessionGrant — a session store that cannot answer is logged, n
 		);
 		const handler = createSessionGrant({
 			...makeDeps(),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			userSessionStore: {
 				kind: "broken",
 				create: async () => {},

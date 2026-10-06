@@ -17,47 +17,49 @@
 /**
  * The module that builds core's subject revocation service.
  *
- * It lives here, not in core, because tearing one session down is
- * `cascadeLogout`, an ordered four-store sequence this package owns, and core
- * cannot import it without inverting the package dependency.
+ * Each of the subject's sessions is closed through core's session lifecycle
+ * for `subject_revocation`: the close revokes the session's families and
+ * tells its relying parties.
  *
- * Installed explicitly, not folded into `oauthModule`: those routes work in a
- * deployment with no session stores at all, and requiring the whole cascade
- * from the module that serves `/oauth/token` would break such deployments.
+ * Installed explicitly, not folded into `oauthEndpointsModule`: those routes
+ * work in a deployment with no session stores at all, and requiring the
+ * session lifecycle from the module that serves `/oauth/token` would break
+ * such deployments.
+ *
+ * It reads no configuration: the lifetimes come from the `oauthTokenSettings`
+ * and `sessionCookiePolicy` slots, and whether grants are on and may be kept
+ * from the `federationGrantPolicy` slot.
  */
 
 import {
 	type AuditEvent,
 	type AuditSink,
 	auditErrorText,
+	checkFederationGrantPolicy,
+	checkOAuthTokenSettings,
 	createSubjectRevocationService,
 	defineModule,
 	type FederationGrantAuditEvent,
-	type FederationGrantSettings,
+	type FederationGrantPolicy,
 	type Logger,
 	loggableError,
 	type ProviderDeps,
 	recordAuditEvent,
 	requireFederationGrantSubjectRevocation,
-	resolveFederationGrantKeepPolicy,
 	resolveSubjectRevocationHorizonMs,
 } from "@o3co/auth-provider-core";
-import { cascadeLogoutUnmarked } from "./cascadeLogout.mjs";
 
 const NAME = "subjectRevocationServiceModule";
 
 const REQUIRES = [
-	"config",
-	// The four-store cascade, plus the two stores `cascadeLogout` fans out to.
-	"userSessionStore",
-	"sessionRPRegistry",
-	"sessionFamilyIndex",
-	"sessionFederationIndex",
-	"refreshTokenFamilyRevocation",
-	"federationTokenStore",
+	// Core's session lifecycle, which closes each of the subject's sessions.
+	"sessionLifecycle",
 	// The session's lifetime, which the boundary must outlive: the session
 	// store's, and core reads it from no configuration key.
 	"sessionCookiePolicy",
+	// The token lifetimes the boundary must outlive: the oauth module's, and
+	// a composition without that module fills the slot itself.
+	"oauthTokenSettings",
 ] as const;
 /**
  * What turns "this subject" into sessions, and what outlives them, are
@@ -73,9 +75,10 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
-	// The token lifetimes the boundary must outlive, read from the
-	// configuration when the composition does not hold them.
-	"oauthTokenSettings",
+	// Whether grants are on and may be kept: the federation-grants module's,
+	// provided while it is on. Absent, grants are off — unless a grant store
+	// is wired, which the provider refuses rather than read as off.
+	"federationGrantPolicy",
 ] as const;
 
 /**
@@ -86,20 +89,37 @@ type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
 export type SubjectRevocationServiceModuleDeps = ProviderDeps<Requires, Optional>;
 
-/**
- * The two keys this reads of the federation-grants module's section — whether
- * grants exist at all, and whether keeping one is allowed — as the
- * configuration carries it; core's composed parse coerces `enabled`.
- */
-const grantsSection = (
-	deps: SubjectRevocationServiceModuleDeps,
-): (FederationGrantSettings & { readonly enabled?: unknown }) | undefined =>
-	(deps.config as { "federation-grants"?: FederationGrantSettings & { enabled?: unknown } })[
-		"federation-grants"
-	];
+/** Grants off, and nothing to keep: what a composition that holds no `federationGrantPolicy` has. */
+const GRANTS_OFF: FederationGrantPolicy = Object.freeze({
+	enabled: false,
+	allowKeepOnSubjectRevocation: false,
+});
 
-const grantsEnabled = (deps: SubjectRevocationServiceModuleDeps): boolean =>
-	grantsSection(deps)?.enabled === true;
+/**
+ * The federation grants' switch and keep policy, from the slot held to its
+ * contract. No slot is grants off, except beside a grant store: that store
+ * says grants may exist, and reading them as off would skip it in a
+ * subject-wide revocation that reported itself complete. Grants off with a
+ * store wired is a value the host states, not one read from an absence.
+ */
+const grantPolicyOf = (deps: SubjectRevocationServiceModuleDeps): FederationGrantPolicy => {
+	if (deps.federationGrantPolicy !== undefined) {
+		return checkFederationGrantPolicy(deps.federationGrantPolicy);
+	}
+	if (deps.federationGrantStore !== undefined) {
+		throw new Error(
+			`${NAME}: a federationGrantStore component is wired, but the composition holds no ` +
+				"federationGrantPolicy, so whether federation grants are on cannot be read. Read as " +
+				"off, a subject-wide revocation would end the sessions and the tokens, report itself " +
+				"complete, and skip the grants in that store. Install the federation-grants module " +
+				"(federationGrantsModule) and switch it on (federation-grants.enabled = true), which " +
+				"provides federationGrantPolicy; or, to keep grants off with the store wired, put " +
+				"federationGrantPolicy { enabled: false, allowKeepOnSubjectRevocation: false } in " +
+				"bootstrapComponents.",
+		);
+	}
+	return GRANTS_OFF;
+};
 
 /**
  * What ended a grant, told to the deployment's sink.
@@ -169,7 +189,9 @@ const auditor = (
  * The refusals are here rather than at request time because each is structural
  * — what a component *is* — and a subject revocation is the wrong moment to
  * discover that the grants it should have ended had nowhere to be read from.
- * They apply only when grants are enabled.
+ * They apply only when grants are enabled, except one: a grant store wired
+ * with no `federationGrantPolicy` is refused, since grants could not be read
+ * as off without leaving that store's grants standing.
  */
 export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 	name: "subject-revocation-service",
@@ -186,7 +208,7 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 	lifecycle: { subjectRevocationService: { eager: true } },
 	provides: {
 		subjectRevocationService: (deps: SubjectRevocationServiceModuleDeps) => {
-			const enabled = grantsEnabled(deps);
+			const { enabled, allowKeepOnSubjectRevocation } = grantPolicyOf(deps);
 			const store = deps.federationGrantStore;
 			if (enabled && store === undefined) {
 				throw new Error(
@@ -207,47 +229,37 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 			return createSubjectRevocationService({
 				subjectSessionIndex: deps.subjectSessionIndex,
 				subjectRevocation,
-				// No `expiresAt`: this path reads no session, so the cascade lists
-				// the families and writes no ended mark. Without a
-				// `subjectRevocation` boundary, a code exchanged at the same moment
-				// can leave its family unrevoked; with one, the subject watermark
-				// covers it.
+				// Core's session lifecycle closes each session for
+				// `subject_revocation`, run after the boundary is stamped: it
+				// revokes the session's families, a code exchanged after its
+				// closing commit included, and tells the relying parties. Only
+				// `done` counts the session revoked; a `pending` close has work
+				// left, and the sid stays in the index for a retry, which resumes
+				// or restarts its close, since the close removes the subject's
+				// index entry last. A close that finds neither a lifecycle record
+				// nor a user session runs no work and answers `done`; the subject
+				// boundary covers that sid's tokens, and its per-session entries
+				// lapse. The revocation waits on each session's back-channel
+				// notices, sessions in sequence, so unreachable relying parties
+				// slow it and leave it `complete: false` until a retry.
 				cascadeSession: async (sid: string) => ({
-					// The cascade answers with its own union, and its `step`
-					// is what makes a failure retryable. What this needs is the
-					// one bit the helper's loop branches on; the detail is
-					// already in the log the cascade wrote.
-					ok:
-						(
-							await cascadeLogoutUnmarked({
-								sid,
-								refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
-								federationTokenStore: deps.federationTokenStore,
-								userSessionStore: deps.userSessionStore,
-								sessionRPRegistry: deps.sessionRPRegistry,
-								sessionFamilyIndex: deps.sessionFamilyIndex,
-								sessionFederationIndex: deps.sessionFederationIndex,
-								...(deps.logger === undefined ? {} : { logger: deps.logger }),
-							})
-						).outcome === "done",
+					ok: (await deps.sessionLifecycle.close(sid, "subject_revocation")).outcome === "done",
 				}),
 				// The boundary must outlive the longest-lived thing it covers,
 				// which this module can read and the service cannot: the token
-				// lifetimes from `oauthTokenSettings` when the composition holds
-				// it, otherwise the configuration's, and the session's from
-				// `sessionCookiePolicy`.
-				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config, {
-					...(deps.oauthTokenSettings === undefined
-						? {}
-						: { tokenSettings: deps.oauthTokenSettings }),
+				// lifetimes from `oauthTokenSettings` and the session's from
+				// `sessionCookiePolicy`. No configuration: core's helper reads
+				// one only when it is handed no token settings.
+				watermarkTtlMs: resolveSubjectRevocationHorizonMs(undefined, {
+					tokenSettings: checkOAuthTokenSettings(deps.oauthTokenSettings),
 					sessionCookie: deps.sessionCookiePolicy,
 				}),
 				...(enabled && store !== undefined ? { federationGrantStore: store } : {}),
-				// Gated on the feature: an allowance to keep grants in a
-				// deployment that has none is an allowance over nothing, and
-				// letting it through would make the service refuse an adapter
-				// that a grantless deployment has every right to use.
-				allowKeep: enabled && resolveFederationGrantKeepPolicy(grantsSection(deps)),
+				// False whenever grants are off, which the slot's contract holds:
+				// an allowance to keep grants in a deployment that has none is
+				// an allowance over nothing, and would make the service refuse
+				// an adapter that a grantless deployment has every right to use.
+				allowKeep: allowKeepOnSubjectRevocation,
 				...(deps.auditSink === undefined
 					? {}
 					: { federationGrantAudit: auditor(deps.auditSink, deps.logger) }),
