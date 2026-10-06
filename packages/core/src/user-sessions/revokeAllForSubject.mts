@@ -29,9 +29,8 @@ import { stampSubjectBoundary } from "./stampSubjectBoundary.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
 /**
- * Per-session teardown, supplied by the caller: `cascadeLogout`, the ordered
- * store cascade for one session, lives in `@o3co/auth-provider-oauth`, which
- * core cannot import without inverting the package dependency. This helper
+ * Per-session teardown, supplied by the caller (the subject revocation
+ * service closes each session through core's session lifecycle). This helper
  * decides only which sessions, and in what order relative to the watermark.
  */
 export type CascadeSession = (sid: string) => Promise<{ readonly ok: boolean }>;

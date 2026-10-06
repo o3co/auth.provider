@@ -30,11 +30,6 @@ export {
 	type BroadcastRP,
 	broadcastBackchannelLogout,
 } from "./logout/broadcastBackchannel.mjs";
-export type {
-	CascadeLogoutOptions,
-	CascadeLogoutResult,
-} from "./logout/cascadeLogout.mjs";
-export { cascadeLogout } from "./logout/cascadeLogout.mjs";
 export {
 	type FrontchannelRP,
 	type RenderFrontchannelLogoutHtmlOptions,

@@ -19,6 +19,8 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	checkRedirectUri,
+	createInMemorySessionLifecycleStore,
+	createSessionLifecycle,
 	createSymmetricKeyStore,
 	type FederationProvider,
 	type FederationTokenStore,
@@ -26,6 +28,7 @@ import {
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SessionRPRegistry,
 	type UserSession,
 	type UserSessionStore,
@@ -34,6 +37,7 @@ import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { createSessionCloseNotifier } from "#/logout/sessionCloseNotifier.mjs";
 import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import {
@@ -214,6 +218,8 @@ interface BuildAppOpts {
 	fetchImpl?: typeof fetch;
 	logger?: Logger;
 	auditSink?: AuditSink;
+	/** A session lifecycle in place of core's over the stores above. */
+	sessionLifecycle?: SessionLifecycle;
 	/**
 	 * The express-session bag the request carries. Absent by default, which is
 	 * the shape the rest of this suite runs in (no session middleware mounted)
@@ -264,6 +270,30 @@ function makeBrowserSession(
 	return session;
 }
 
+/**
+ * A session lifecycle whose `close` answers `answer`, over a live session
+ * that joined `google`: for a case that drives the route's answer to a close.
+ */
+function closing(answer: Awaited<ReturnType<SessionLifecycle["close"]>>): SessionLifecycle {
+	return {
+		open: vi.fn(async () => ({ outcome: "opened" as const })),
+		join: vi.fn(async () => ({ outcome: "joined" as const })),
+		close: vi.fn(async () => answer),
+		liveness: vi.fn(async () => ({ outcome: "live" as const, session: baseSession })),
+		federations: vi.fn(async () => ({ outcome: "listed" as const, federations: ["google"] })),
+		resumePending: vi.fn(async () => ({ done: 0, pending: 0, unavailable: 0 })),
+	};
+}
+
+/**
+ * A session lifecycle a host fills, whose `step` read rejects with `error`;
+ * the session is otherwise live and joined `google`.
+ */
+function rejecting(step: "liveness" | "federations", error: unknown): SessionLifecycle {
+	const lifecycle = closing({ outcome: "done", rps: [], federations: [] });
+	return { ...lifecycle, [step]: vi.fn().mockRejectedValue(error) };
+}
+
 function buildApp(opts: BuildAppOpts = {}) {
 	const app = express();
 	if (opts.browserSession) {
@@ -273,19 +303,69 @@ function buildApp(opts: BuildAppOpts = {}) {
 			next();
 		});
 	}
+	const userSessionStore = opts.sessionStore ?? makeSessionStore();
+	const refreshTokenFamilyRevocation = opts.refreshFamilyRevocation ?? makeFamilyRevocation();
+	const federationTokenStore = opts.fedTokenStore ?? makeFedTokenStore();
+	const sessionRPRegistry = opts.sessionRPRegistry ?? makeSessionRPRegistry();
+	// A relying party the session joined is registered as a client: the close
+	// answers its id, and the notifier and the front-channel page read its
+	// registration. Its registration carries what the registry recorded of it
+	// at the join, under what the case's repository answers; one the
+	// repository does not know is the recorded one alone. Read once.
+	let joined: Promise<ReadonlyMap<string, object>> | undefined;
+	const joinedClients = () => {
+		joined ??= sessionRPRegistry
+			.listRPs("sid-1")
+			.then((rps) => new Map(rps.map((rp) => [rp.clientId, rp])))
+			.catch(() => new Map());
+		return joined;
+	};
+	const baseClients = opts.clientRepo ?? makeClientRepo();
+	const clientRepository: ClientRepository = {
+		...baseClients,
+		findById: async (clientId) => {
+			const registered = await baseClients.findById(clientId);
+			const recorded = (await joinedClients()).get(clientId);
+			if (recorded === undefined) return registered ?? null;
+			if (registered === null || registered === undefined) {
+				return recorded as Awaited<ReturnType<ClientRepository["findById"]>>;
+			}
+			return { ...recorded, ...registered } as Awaited<ReturnType<ClientRepository["findById"]>>;
+		},
+	};
+	// Stub fetchImpl so back-channel notices never make real network calls.
+	const fetchImpl = opts.fetchImpl ?? vi.fn().mockResolvedValue({ ok: true, status: 200 });
+	// Core's session lifecycle over the same stores, its notifier oauth's own.
+	const notifier = createSessionCloseNotifier({
+		clientRepository,
+		keyStore,
+		issuer: "https://auth.example.com",
+		fetchImpl: fetchImpl as typeof fetch,
+	});
+	const sessionLifecycle =
+		opts.sessionLifecycle ??
+		createSessionLifecycle({
+			store: createInMemorySessionLifecycleStore(),
+			userSessionStore,
+			refreshTokenFamilyRevocation,
+			federationTokenStore,
+			sessionRPRegistry,
+			sessionFamilyIndex: opts.sessionFamilyIndex ?? makeSessionFamilyIndex(),
+			sessionFederationIndex: opts.sessionFederationIndex ?? makeSessionFederationIndex(),
+			notifier: () => notifier,
+			retainMs: 3_600_000,
+			logger: opts.logger ?? { warn: () => undefined, error: () => undefined },
+		});
 	const router = createRouter(express, {
 		keyStore,
 		issuer: "https://auth.example.com",
-		userSessionStore: opts.sessionStore ?? makeSessionStore(),
-		sessionRPRegistry: opts.sessionRPRegistry ?? makeSessionRPRegistry(),
-		sessionFamilyIndex: opts.sessionFamilyIndex ?? makeSessionFamilyIndex(),
-		sessionFederationIndex: opts.sessionFederationIndex ?? makeSessionFederationIndex(),
-		refreshTokenFamilyRevocation: opts.refreshFamilyRevocation ?? makeFamilyRevocation(),
-		federationTokenStore: opts.fedTokenStore ?? makeFedTokenStore(),
-		clientRepository: opts.clientRepo ?? makeClientRepo(),
+		userSessionStore,
+		sessionLifecycle,
+		refreshTokenFamilyRevocation,
+		federationTokenStore,
+		clientRepository,
 		getFederationProviders: opts.getFederationProviders ?? (() => undefined),
-		// Stub fetchImpl so broadcast never makes real network calls
-		fetchImpl: opts.fetchImpl ?? vi.fn().mockResolvedValue({ ok: true }),
+		fetchImpl: fetchImpl as typeof fetch,
 		logger: opts.logger,
 		auditSink: opts.auditSink,
 	});
@@ -328,7 +408,7 @@ function expectLogoutConfirmation(res: Awaited<ReturnType<typeof getLogout>>) {
 
 describe("POST /oauth/logout", () => {
 	describe("happy path", () => {
-		it("valid id_token_hint + session → cascadeLogout called, returns JSON { logged_out: true }", async () => {
+		it("valid id_token_hint + session → the session is closed, returns JSON { logged_out: true }", async () => {
 			const sessionStore = makeSessionStore();
 			const refreshFamilyRevocation = makeFamilyRevocation();
 			const fedTokenStore = makeFedTokenStore();
@@ -339,29 +419,11 @@ describe("POST /oauth/logout", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body).toEqual({ logged_out: true });
-			// cascadeLogout step 1: revokeFamily called for each familyId
+			// The close revokes each family, deletes the session and clears its
+			// federation tokens.
 			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
-			// cascadeLogout step 3: session deleted
 			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
-			// cascadeLogout step 2: federation tokens cleared
 			expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
-		});
-
-		it("marks the session ended once, in a family index with the session-end capability, with the session's own expiresAt, and the cascade revokes the families that mark read", async () => {
-			const sessionFamilyIndex = {
-				...makeSessionFamilyIndex(),
-				endSession: vi.fn(async (_sid: string, _expiresAt: Date) => ["fam-1"]),
-				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
-			};
-			const refreshFamilyRevocation = makeFamilyRevocation();
-			const app = buildApp({ sessionFamilyIndex, refreshFamilyRevocation });
-
-			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
-
-			expect(res.status).toBe(200);
-			expect(sessionFamilyIndex.endSession.mock.calls).toEqual([["sid-1", baseSession.expiresAt]]);
-			expect(sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
-			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 		});
 
 		it("ends the session in a family index with the session-end capability before it lists the relying parties", async () => {
@@ -380,99 +442,6 @@ describe("POST /oauth/logout", () => {
 			const listed = (sessionRPRegistry.listRPs as ReturnType<typeof vi.fn>).mock
 				.invocationCallOrder[0] as number;
 			expect(ended).toBeLessThan(listed);
-		});
-
-		it("a session end that fails before the listing is 503, logged once, with no relying party listed", async () => {
-			const logger = createMockLogger();
-			const sessionFamilyIndex = {
-				...makeSessionFamilyIndex(),
-				endSession: vi.fn(async () => {
-					throw storeReplyError();
-				}),
-				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
-			};
-			const sessionRPRegistry = makeSessionRPRegistry();
-			const app = buildApp({ sessionFamilyIndex, sessionRPRegistry, logger });
-
-			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
-
-			expect(res.status).toBe(503);
-			expect(sessionRPRegistry.listRPs).not.toHaveBeenCalled();
-			expectOutageLine(logger, "logout_store_unavailable", {
-				store: "session_family_index",
-				step: "endSession",
-				left: "unknown",
-			});
-		});
-
-		it("a failed session end is audited as logout.cascade_failed at step 1, naming the store and what it left", async () => {
-			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
-			const sessionFamilyIndex = {
-				...makeSessionFamilyIndex(),
-				endSession: vi.fn(async () => {
-					throw storeReplyError();
-				}),
-				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
-			};
-			const app = buildApp({ sessionFamilyIndex, auditSink });
-
-			expect((await postLogout(app, { id_token_hint: await mintIdToken() })).status).toBe(503);
-			expect(auditSink.record).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "logout.cascade_failed",
-					details: { sid: "sid-1", step: 1, store: "session_family_index", left: "unknown" },
-				}),
-			);
-		});
-
-		it("a relying-party listing that fails after the session end is 503, logged and audited as half-ended", async () => {
-			const logger = createMockLogger();
-			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
-			const sessionFamilyIndex = {
-				...makeSessionFamilyIndex(),
-				endSession: vi.fn(async () => ["fam-1"]),
-				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
-			};
-			const sessionRPRegistry = makeSessionRPRegistry({
-				listRPs: vi.fn(async () => {
-					throw storeReplyError();
-				}),
-			});
-			const app = buildApp({ sessionFamilyIndex, sessionRPRegistry, logger, auditSink });
-
-			expect((await postLogout(app, { id_token_hint: await mintIdToken() })).status).toBe(503);
-			expectOutageLine(logger, "logout_store_unavailable", {
-				store: "session_rp_registry",
-				step: "list",
-				left: "half_ended",
-			});
-			expect(auditSink.record).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "logout.cascade_failed",
-					details: { sid: "sid-1", step: 1, store: "session_rp_registry", left: "half_ended" },
-				}),
-			);
-		});
-
-		it("a relying-party listing that fails without the session-end capability is 503, logged as unchanged, and not audited", async () => {
-			const logger = createMockLogger();
-			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
-			const sessionRPRegistry = makeSessionRPRegistry({
-				listRPs: vi.fn(async () => {
-					throw storeReplyError();
-				}),
-			});
-			const app = buildApp({ sessionRPRegistry, logger, auditSink });
-
-			expect((await postLogout(app, { id_token_hint: await mintIdToken() })).status).toBe(503);
-			expectOutageLine(logger, "logout_store_unavailable", {
-				store: "session_rp_registry",
-				step: "list",
-				left: "unchanged",
-			});
-			expect(auditSink.record).not.toHaveBeenCalledWith(
-				expect.objectContaining({ type: "logout.cascade_failed" }),
-			);
 		});
 
 		it("confirmed=1 form-submission shape (hint + confirmed + state) completes hint-based logout, not 400", async () => {
@@ -534,7 +503,7 @@ describe("POST /oauth/logout", () => {
 	});
 
 	describe("session missing (defensive no-op)", () => {
-		it("userSessionStore.get → null → 200 JSON, cascadeLogout NOT called", async () => {
+		it("userSessionStore.get → null → 200 JSON, nothing closed", async () => {
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(null) });
 			const refreshFamilyRevocation = makeFamilyRevocation();
 			const app = buildApp({ sessionStore, refreshFamilyRevocation });
@@ -613,21 +582,6 @@ describe("POST /oauth/logout", () => {
 
 			expect(res.status).toBe(400);
 			expect(res.body.error).toBe("invalid_request");
-		});
-	});
-
-	describe("cascadeLogout returns failed (step 1: revokeFamily throws)", () => {
-		it("returns 503 temporarily_unavailable", async () => {
-			const refreshFamilyRevocation = makeFamilyRevocation({
-				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
-			});
-			const app = buildApp({ refreshFamilyRevocation });
-			const token = await mintIdToken();
-
-			const res = await postLogout(app, { id_token_hint: token });
-
-			expect(res.status).toBe(503);
-			expect(res.body.error).toBe("temporarily_unavailable");
 		});
 	});
 
@@ -1270,7 +1224,11 @@ describe("POST /oauth/logout", () => {
 				sessionRPRegistry,
 				fetchImpl,
 				browserSession,
-				clientRepo: makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) }),
+				// The registration read for the redirect fails; the relying party's,
+				// read later by the lifecycle's notifier, answers.
+				clientRepo: makeClientRepo({
+					findById: vi.fn().mockRejectedValueOnce(storeReplyError()).mockResolvedValue(null),
+				}),
 				logger,
 			});
 
@@ -1593,130 +1551,6 @@ describe("POST /oauth/logout", () => {
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("temporarily_unavailable");
 		});
-
-		for (const [store, override] of [
-			[
-				"session_rp_registry",
-				{
-					sessionRPRegistry: makeSessionRPRegistry({
-						listRPs: vi.fn().mockRejectedValue(storeReplyError()),
-					}),
-				},
-			],
-			[
-				"session_federation_index",
-				{
-					sessionFederationIndex: makeSessionFederationIndex({
-						listFederations: vi.fn().mockRejectedValue(storeReplyError()),
-					}),
-				},
-			],
-		] as const) {
-			it(`logs a ${store} that cannot answer once, at error level, naming it`, async () => {
-				const logger = createMockLogger();
-				const app = buildApp({ ...override, logger });
-				const res = await postLogout(app, { id_token_hint: await mintIdToken() });
-				expect(res.status).toBe(503);
-				expectOutageLine(logger, "logout_store_unavailable", { store, step: "list" });
-			});
-		}
-	});
-
-	describe("both reverse-index reads fail", () => {
-		it("logs one error line naming the registry, the federation index's failure carried beside it", async () => {
-			const logger = createMockLogger();
-			const federationIndexDown = Object.assign(new Error("connect ECONNREFUSED 10.0.0.8:6379"), {
-				code: "ECONNREFUSED",
-			});
-			const app = buildApp({
-				sessionRPRegistry: makeSessionRPRegistry({
-					listRPs: vi.fn().mockRejectedValue(storeReplyError()),
-				}),
-				sessionFederationIndex: makeSessionFederationIndex({
-					listFederations: vi.fn().mockRejectedValue(federationIndexDown),
-				}),
-				logger,
-			});
-			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
-			expect(res.status).toBe(503);
-			const line = expectOutageLine(logger, "logout_store_unavailable", {
-				store: "session_rp_registry",
-				step: "list",
-			});
-			// Not dropped: the second store's failure, projected, on the same line.
-			expect(line.alsoUnavailable).toEqual({
-				store: "session_federation_index",
-				err: expect.objectContaining({ name: "Error", code: "ECONNREFUSED" }),
-			});
-			expect((line.alsoUnavailable as { err: unknown }).err).not.toBeInstanceOf(Error);
-		});
-	});
-
-	describe("the logout cascade fails (fail-closed)", () => {
-		for (const [label, override, cascadeStep] of [
-			[
-				"its fanout context cannot be read (step 1)",
-				{
-					sessionFamilyIndex: makeSessionFamilyIndex({
-						listFamilyIds: vi.fn().mockRejectedValue(storeReplyError()),
-					}),
-				},
-				1,
-			],
-			[
-				"the session record cannot be deleted (step 4)",
-				{
-					sessionStore: makeSessionStore({ delete: vi.fn().mockRejectedValue(storeReplyError()) }),
-				},
-				4,
-			],
-		] as const) {
-			it(`logs it once, at error level, when ${label}`, async () => {
-				const logger = createMockLogger();
-				const app = buildApp({ ...override, logger });
-				const res = await postLogout(app, { id_token_hint: await mintIdToken() });
-				expect(res.status).toBe(503);
-				expect(res.body.error_description).toBe("logout cascade failed");
-				expectOutageLine(logger, "logout_store_unavailable", {
-					store: "logout_cascade",
-					cascadeStep,
-					failures: 1,
-				});
-			});
-		}
-
-		it("logs a fanout failure (step 2) once at error level, each failed operation structured at warn", async () => {
-			const logger = createMockLogger();
-			const app = buildApp({
-				refreshFamilyRevocation: makeFamilyRevocation({
-					revokeFamily: vi.fn().mockRejectedValue(storeReplyError()),
-				}),
-				logger,
-			});
-			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
-			expect(res.status).toBe(503);
-			expect(logger.error).toHaveBeenCalledTimes(1);
-			expect(logger.error).toHaveBeenCalledWith(
-				expect.objectContaining({
-					store: "logout_cascade",
-					cascadeStep: 2,
-					failures: 1,
-					err: expect.objectContaining({ name: "ReplyError" }),
-				}),
-				"logout_store_unavailable",
-			);
-			// The per-operation detail: object-first, never a template string.
-			expect(logger.warn.mock.calls.filter(([first]) => typeof first === "string")).toEqual([]);
-			expect(logger.warn).toHaveBeenCalledWith(
-				expect.objectContaining({
-					operation: "revoke_family",
-					familyId: "fam-1",
-					err: expect.objectContaining({ name: "ReplyError" }),
-				}),
-				"logout_cascade_operation_failed",
-			);
-			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
-		});
 	});
 
 	describe("Cache-Control / Pragma headers", () => {
@@ -1731,11 +1565,8 @@ describe("POST /oauth/logout", () => {
 			expect(res.headers.pragma).toBe("no-cache");
 		});
 
-		it("503 cascade failure sets Cache-Control: no-store and Pragma: no-cache", async () => {
-			const refreshFamilyRevocation = makeFamilyRevocation({
-				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
-			});
-			const app = buildApp({ refreshFamilyRevocation });
+		it("503 on a close that cannot commit sets Cache-Control: no-store and Pragma: no-cache", async () => {
+			const app = buildApp({ sessionLifecycle: closing({ outcome: "unavailable" }) });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
@@ -2388,7 +2219,8 @@ describe("POST /oauth/federation/:name/logout", () => {
 				clientId: "client-1",
 			});
 			expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
-			expect(sessionFederationIndex.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+			// The federation stays listed as having joined the session.
+			expect(sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
 		});
 
 		// The same gap on this route: an entry a custom ClientRepository holds
@@ -2769,7 +2601,7 @@ describe("POST /oauth/federation/:name/logout", () => {
 				const logger = createMockLogger();
 				const res = await postFedLogout(
 					buildFedLogoutApp({
-						sessionStore: makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+						sessionLifecycle: rejecting("liveness", storeReplyError()),
 						logger,
 					}),
 					encodeURIComponent(raw),
@@ -2777,7 +2609,7 @@ describe("POST /oauth/federation/:name/logout", () => {
 				);
 				expect(res.status).toBe(503);
 				const line = expectOutageLine(logger, "federation_logout_store_unavailable", {
-					store: "user_session",
+					store: "session_lifecycle",
 				});
 				const logged = String(line.federation);
 				expect(logged.length).toBeLessThanOrEqual(200);
@@ -2786,43 +2618,22 @@ describe("POST /oauth/federation/:name/logout", () => {
 			});
 		}
 
-		it("the session read", async () => {
-			const logger = createMockLogger();
-			const res = await postFedLogout(
-				buildFedLogoutApp({
-					sessionStore: makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
-					logger,
-				}),
-				"google",
-				await mintAccessToken(),
-			);
-			expect(res.status).toBe(503);
-			expectOutageLine(logger, "federation_logout_store_unavailable", {
-				federation: "google",
-				store: "user_session",
-				step: "get",
+		for (const step of ["liveness", "federations"] as const) {
+			it(`the session lifecycle's ${step} read`, async () => {
+				const logger = createMockLogger();
+				const res = await postFedLogout(
+					buildFedLogoutApp({ sessionLifecycle: rejecting(step, storeReplyError()), logger }),
+					"google",
+					await mintAccessToken(),
+				);
+				expect(res.status).toBe(503);
+				expectOutageLine(logger, "federation_logout_store_unavailable", {
+					federation: "google",
+					store: "session_lifecycle",
+					step,
+				});
 			});
-		});
-
-		it("the federation index read", async () => {
-			const logger = createMockLogger();
-			const res = await postFedLogout(
-				buildFedLogoutApp({
-					sessionFederationIndex: makeSessionFederationIndex({
-						listFederations: vi.fn().mockRejectedValue(storeReplyError()),
-					}),
-					logger,
-				}),
-				"google",
-				await mintAccessToken(),
-			);
-			expect(res.status).toBe(503);
-			expectOutageLine(logger, "federation_logout_store_unavailable", {
-				federation: "google",
-				store: "session_federation_index",
-				step: "list",
-			});
-		});
+		}
 
 		it("the token store's read", async () => {
 			const logger = createMockLogger();
@@ -2859,27 +2670,6 @@ describe("POST /oauth/federation/:name/logout", () => {
 				federation: "google",
 				store: "federation_token",
 				step: "delete",
-			});
-		});
-
-		it("the federation link's removal", async () => {
-			const logger = createMockLogger();
-			const res = await postFedLogout(
-				buildFedLogoutApp({
-					sessionFederationIndex: makeSessionFederationIndex({
-						listFederations: vi.fn(async () => googleFederations),
-						removeFederation: vi.fn().mockRejectedValue(storeReplyError()),
-					}),
-					logger,
-				}),
-				"google",
-				await mintAccessToken(),
-			);
-			expect(res.status).toBe(503);
-			expectOutageLine(logger, "federation_logout_store_unavailable", {
-				federation: "google",
-				store: "session_federation_index",
-				step: "remove",
 			});
 		});
 	});
@@ -3095,34 +2885,10 @@ describe("audit events", () => {
 			);
 		});
 	});
-
-	describe("logout.cascade_failed", () => {
-		it("emits on 503 cascade failure", async () => {
-			const auditSink: AuditSink = {
-				kind: "mock",
-				record: vi.fn().mockResolvedValue(undefined),
-			};
-			const refreshFamilyRevocation = makeFamilyRevocation({
-				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
-			});
-			const app = buildApp({ auditSink, refreshFamilyRevocation });
-			const token = await mintIdToken();
-
-			const res = await postLogout(app, { id_token_hint: token });
-
-			expect(res.status).toBe(503);
-			expect(auditSink.record).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "logout.cascade_failed",
-					details: expect.objectContaining({ sid: "sid-1", step: 2 }),
-				}),
-			);
-		});
-	});
 });
 
 /**
- * `/oauth/logout` must end the browser session too. The cascade deletes the
+ * `/oauth/logout` must end the browser session too. The close deletes the
  * `UserSession` record; a surviving express-session would keep satisfying
  * `req.session.isAuthenticated` at `/authorize`, minting codes carrying the
  * dead `sid` that `/token` refuses: a login loop for up to `session.maxAge`.
@@ -3309,22 +3075,6 @@ describe("POST /oauth/logout — browser session", () => {
 		expect(res.body).toEqual({ logged_out: true });
 		expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
 		expect(logger.warn).toHaveBeenCalled();
-		expect(browserSession.destroyed).toBe(false);
-	});
-
-	it("does NOT destroy the browser session when the cascade failed", async () => {
-		// A 503 invites a retry; leaving the cookie in place is what lets the
-		// retry identify the same session.
-		const browserSession = makeBrowserSession({ sid: "sid-1" });
-		const refreshFamilyRevocation = makeFamilyRevocation({
-			revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
-		});
-		const app = buildApp({ browserSession, refreshFamilyRevocation });
-		const token = await mintIdToken();
-
-		const res = await postLogout(app, { id_token_hint: token });
-
-		expect(res.status).toBe(503);
 		expect(browserSession.destroyed).toBe(false);
 	});
 });

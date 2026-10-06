@@ -39,9 +39,6 @@ import {
 	type FederationTokenStore,
 	type KeyStore,
 	type RefreshTokenFamilyRevocation,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
-	type SessionRPRegistry,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -170,25 +167,6 @@ async function buildApp(lookup: "up" | "down"): Promise<Harness> {
 		accessTokenDenylist: denylist,
 		userSessionStore,
 		sessionLifecycle: livenessOver(userSessionStore, [FEDERATION]),
-		sessionRPRegistry: {
-			kind: "memory",
-			registerRP: async () => {},
-			listRPs: async () => [],
-			removeBySid: async () => {},
-		} as unknown as SessionRPRegistry,
-		sessionFamilyIndex: {
-			kind: "memory",
-			addFamilyId: async () => {},
-			listFamilyIds: async () => [],
-			removeBySid: async () => {},
-		} as unknown as SessionFamilyIndex,
-		sessionFederationIndex: {
-			kind: "memory",
-			addFederation: async () => {},
-			listFederations: async () => [FEDERATION],
-			removeFederation: async () => {},
-			removeBySid: async () => {},
-		} as unknown as SessionFederationIndex,
 		federationTokenStore: {
 			kind: "memory",
 			attach: async () => {},

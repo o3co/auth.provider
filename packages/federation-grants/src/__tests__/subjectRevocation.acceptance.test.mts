@@ -38,6 +38,7 @@ import type {
 	ClientRepository,
 	FederationProvider,
 	MemoryFederationGrantStore,
+	SessionLifecycle,
 	SubjectRevocationService,
 } from "@o3co/auth-provider-core";
 import {
@@ -63,7 +64,7 @@ import {
 	federationTypeForTests,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
-import { cascadeLogout, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
+import { subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -119,7 +120,7 @@ const shared = () => ({
 	federationGrantStore: createMemoryFederationGrantStore(),
 });
 
-/** What `cascadeLogout` fans out to. Nothing here logs anyone in; the sessions are the service's business. */
+/** The stores a session's close reaches. Nothing here logs anyone in; the sessions are the service's business. */
 const CASCADE_STORES = {
 	userSessionStore: { delete: async () => undefined },
 	sessionRPRegistry: { removeBySid: async () => undefined },
@@ -395,18 +396,16 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 	it("is not what an ordinary logout does", async () => {
 		// A logout ends a session. A grant outlives the session it was agreed
 		// through — that is the whole of what a federation grant is — so the
-		// four-store cascade `/oauth/logout` runs must leave it, and its
-		// credential, exactly as they were. The composition here has the grant
-		// store in it, so a cascade that grew a path to it would fail this.
-		// `/session/logout` runs its own hygiene, not this cascade; the two HTTP
-		// endpoints are driven, on the standalone, in
+		// close a logout runs through core's session lifecycle must leave it,
+		// and its credential, exactly as they were. The composition here has
+		// the grant store in it, so a close that grew a path to it would fail
+		// this. The two HTTP logout endpoints are driven, on the standalone, in
 		// `templates/standalone/src/__tests__/federation-grants-survive-logout.test.mts`.
 		const { handle, app, federationGrantStore } = await boot(true);
+		const lifecycle = (handle.components as { readonly sessionLifecycle: SessionLifecycle })
+			.sessionLifecycle;
 
-		const result = await cascadeLogout({
-			sid: "sid",
-			...(CASCADE_STORES as unknown as Omit<Parameters<typeof cascadeLogout>[0], "sid">),
-		});
+		const result = await lifecycle.close("sid", "rp_logout");
 		expect(result.outcome).toBe("done");
 
 		const grant = await federationGrantStore.find("g-1", new Date());

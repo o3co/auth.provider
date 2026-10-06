@@ -225,8 +225,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	/**
 	 * The answer for a session that ended while the tokens were being issued:
 	 * `session_invalidated`, logged at warn (subject change or otherwise) with
-	 * the `sid` and the client for SIEM correlation with `cascadeLogout`'s
-	 * audit events, and never a code identifier (`CodeData` has no stable jti,
+	 * the `sid` and the client for SIEM correlation with the logout's audit
+	 * events, and never a code identifier (`CodeData` has no stable jti,
 	 * and the raw `code` is secret).
 	 */
 	const sessionInvalidated = (

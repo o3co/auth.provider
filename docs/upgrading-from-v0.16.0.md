@@ -1168,9 +1168,42 @@ modules fills them.
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
   sets another interval, and `0` turns it off. It is stopped on dispose,
   and its timer never keeps the process alive.
+- **BREAKING: the oauth logout routes close sessions through core's session
+  lifecycle only** (#1030). `GET`/`POST /oauth/logout` ends the session with
+  `sessionLifecycle.close`; the cascade over the per-session stores is gone.
+  - The logout routes are mounted, and discovery advertises
+    `end_session_endpoint`, where `userSessionStore`, `sessionLifecycle`,
+    `federationTokenStore` and `refreshTokenFamilyRevocation` are wired.
+    `createOAuthRouter` no longer takes `sessionRPRegistry`,
+    `sessionFamilyIndex` or `sessionFederationIndex`, and
+    `oauthEndpointsModule` no longer declares them; drop them from a router
+    you build by hand.
+  - `POST /oauth/federation/:name/logout` reads whether the session is live
+    and which federations it joined from the lifecycle. It now answers
+    `401 invalid_token` ("session not found") for a live session of a subject
+    other than the access token's `sub`, where it disconnected before. It
+    removes the federation's tokens and leaves the federation listed as
+    having joined the session: the federation-token route then answers it
+    `404 federation_not_linked`, and the session's close may end it upstream
+    again, which is idempotent.
+  - Log lines and audit details that described the cascade are gone:
+    `logout_store_unavailable` with `store: "session_family_index"`,
+    `"session_rp_registry"`, `"session_federation_index"` or
+    `"logout_cascade"`, and its `cascadeStep`, `failures`, `left` and
+    `alsoUnavailable` fields; the warns `logout_cascade_operation_failed` and
+    `logout_cascade_cleanup_failed`; `logout.cascade_failed`'s `step` and
+    `left` (it now carries `store: "session_lifecycle"` alone, for a close
+    that could not commit); and the `"logout cascade failed"` description on
+    the `503`. `federation_logout_store_unavailable` carries
+    `store: "session_lifecycle"` (`step: "liveness"` or `"federations"`) where
+    it carried `"user_session"` or `"session_federation_index"`. Move an
+    alert keyed on the old values.
 
 ### Exports removed, and signatures changed
 
+- **`cascadeLogout`, `CascadeLogoutOptions` and `CascadeLogoutResult`** are
+  removed from `@o3co/auth-provider-oauth` (#1030). A session is ended
+  through core's session lifecycle: `sessionLifecycle.close(sid, cause)`.
 - **Core's public entries no longer export 42 undocumented names** (#1234):
   tuning defaults (most `DEFAULT_MEMORY_*` sweep and size defaults —
   `DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES` stays —
