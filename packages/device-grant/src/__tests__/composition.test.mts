@@ -1218,7 +1218,10 @@ describe("the device-grant module beside oauthEndpointsModule — an approval ne
 		// here too — otherwise a deployment requiring a verified email would
 		// find those two gated and this path open.
 		const base = makeConfig(ENABLED);
-		const config = { ...base, oauth: { ...base.oauth, requireEmailVerified: true } } as AppConfig;
+		const config = {
+			...base,
+			oauth: { ...(base.oauth as object), requireEmailVerified: true },
+		} as AppConfig;
 		const { handle, app } = await bootWith(config, modules);
 		try {
 			const unverified = await startWithCodes(app);

@@ -30,6 +30,7 @@ import {
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 import { coreConfigForTests } from "@o3co/auth-provider-core/testing";
+import type { OAuthSection } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
@@ -308,8 +309,8 @@ describe("standalone smoke test", () => {
 		const issuerConfig: AppConfig = {
 			...config,
 			oauth: {
-				...config.oauth,
-				jwt: { ...config.oauth.jwt, issuer: "https://auth.example.com" },
+				...(config.oauth as OAuthSection),
+				jwt: { ...(config.oauth as OAuthSection).jwt, issuer: "https://auth.example.com" },
 			},
 		};
 		const handle = await createApp({
@@ -616,7 +617,7 @@ describe("standalone smoke test", () => {
 				subject: "u1",
 				expiresIn: 3600,
 				tokenType: "at+jwt",
-				issuer: config.oauth.jwt.issuer,
+				issuer: (config.oauth as OAuthSection).jwt.issuer,
 			},
 		);
 

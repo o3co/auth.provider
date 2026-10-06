@@ -104,7 +104,7 @@ Nothing secret lives in `clients.yaml` for such a client.
 
 **What this does not do.** It does not make `/authorize` safe against forced navigation for a client that *is* first-party — that remains the accepted model here. What it prevents is a client that should never have been trusted with a silent code being registered into that position by accident.
 
-**Unmarked registrations.** A registration without the field is not first-party: on the defaults it is refused at `/authorize` until you mark it, with no admit-with-warning window. Mark every client you operate before pointing it at `/authorize`. `oauth.authorize.allowUnmarkedClients` is not a setting: a config or environment that sets it (`OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) fails at boot rather than being silently ignored: the oauth module refuses it as a removed key (`config-path-relocated`). Mark your clients, then delete the key and unset the variable.
+**Unmarked registrations.** A registration without the field is not first-party: on the defaults it is refused at `/authorize` until you mark it, with no admit-with-warning window. Mark every client you operate before pointing it at `/authorize`. `oauth.authorize.allowUnmarkedClients` is not a setting: a config or environment that sets it (`OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) fails at boot rather than being silently ignored: the oauth module refuses the key as removed (`config-path-relocated`), and the variable as one bound to a removed key (`environment-variable-renamed`). Mark your clients, then delete the key and unset the variable.
 
 ## Multi-replica deployments
 

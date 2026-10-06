@@ -548,7 +548,13 @@ describe("the factors' sections are the factors' modules' to read", () => {
 	/** An issuer with no host a TOTP issuer could default to: an IPv6 literal would put a colon in the otpauth label. */
 	const NO_TOTP_HOST = "https://[2001:db8::1]";
 	const withIssuer = (config: ReturnType<typeof configFor>, issuer: string) =>
-		({ ...config, oauth: { ...config.oauth, jwt: { ...config.oauth.jwt, issuer } } }) as never;
+		({
+			...config,
+			oauth: {
+				...(config.oauth as { jwt: object }),
+				jwt: { ...(config.oauth as { jwt: object }).jwt, issuer },
+			},
+		}) as never;
 
 	it("boots without the TOTP factor's module over another package's counting factor, though no TOTP issuer could be derived: a composition without TOTP is never refused over it", async () => {
 		const { handle } = await boot({
