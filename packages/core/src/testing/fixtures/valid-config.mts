@@ -135,10 +135,9 @@ export function makeValidCoreConfig() {
 			jwt: {
 				issuer: "https://auth.test",
 			},
-			// The shape `reference.conf` loads to when no lifetime is overridden:
-			// the shipped literal sits on the deprecated `expiresIn`, and
-			// `resolveAccessTokenLifetime` reads it as a 3600 s default and max.
-			accessToken: { expiresIn: 3600 },
+			// A 3600 s default, which `resolveAccessTokenLifetime` also reads as
+			// the max, since no `maxExpiresIn` is set.
+			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			// Declares both subject-level revocation slots absent: this fixture
 			// has none, on purpose. A test of the declared-absence guard removes

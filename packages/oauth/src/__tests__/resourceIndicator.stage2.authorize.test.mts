@@ -90,7 +90,7 @@ async function buildApp(opts: {
 	const config = {
 		oauth: {
 			jwt: { issuer: "https://auth.example" },
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 			...(opts.enabled !== undefined && { resourceIndicator: { enabled: opts.enabled } }),

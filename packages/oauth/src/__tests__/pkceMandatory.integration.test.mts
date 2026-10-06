@@ -58,7 +58,7 @@ const makeConfig = (oauthOverrides: Record<string, unknown> = {}): AppConfig =>
 	({
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
-			accessToken: { expiresIn: 300 },
+			accessToken: { defaultExpiresIn: 300 },
 			refreshToken: { expiresIn: 3600 },
 			// `dual` so a request without `openid` reaches the PKCE gate instead
 			// of tripping the OIDC scope gate first.

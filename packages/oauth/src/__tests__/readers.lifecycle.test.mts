@@ -160,7 +160,7 @@ function recordingSink() {
 
 describe("/oauth/introspect through the session lifecycle", () => {
 	const config = {
-		oauth: { jwt: { issuer: ISSUER }, accessToken: { expiresIn: 3600 }, grants: {} },
+		oauth: { jwt: { issuer: ISSUER }, accessToken: { defaultExpiresIn: 3600 }, grants: {} },
 		rateLimit: { failMode: "open" as const },
 		endpoints: { login: { url: "/login" } },
 	} as unknown as AppConfig;

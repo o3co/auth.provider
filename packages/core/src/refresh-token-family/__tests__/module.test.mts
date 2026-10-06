@@ -98,7 +98,7 @@ describe("the default family modules, over a configuration that resolves no acce
 		[defaultRefreshTokenFamilyRotationModule, "refreshTokenFamilyRotation"],
 		[defaultRefreshTokenFamilyRevocationModule, "refreshTokenFamilyRevocation"],
 	] as const)("%#: %s refuses to be built, naming the key", async (module, slot) => {
-		for (const oauth of [undefined, { accessToken: { expiresIn: "3600" } }]) {
+		for (const oauth of [undefined, { accessToken: { defaultExpiresIn: "3600" } }]) {
 			const err = await createApp({
 				modules: [memoryRefreshTokenFamilyStoreModule, module, requiring(slot)],
 				bootstrapComponents: {

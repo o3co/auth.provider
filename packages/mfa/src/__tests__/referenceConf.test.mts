@@ -81,7 +81,7 @@ interface Resolved {
  */
 const OAUTH_SECTION = `oauth {
   jwt.issuer = \${?OAUTH_JWT_ISSUER}
-  accessToken.expiresIn = 3600
+  accessToken.defaultExpiresIn = 3600
   refreshToken.expiresIn = 86400
 }`;
 

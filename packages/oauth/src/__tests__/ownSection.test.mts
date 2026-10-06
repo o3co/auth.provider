@@ -68,7 +68,7 @@ const misleadingConfig = (): AppConfig =>
 		oauth: {
 			...(fixture().oauth as object),
 			jwt: { issuer: "https://config.test" },
-			accessToken: { expiresIn: 60 },
+			accessToken: { defaultExpiresIn: 60 },
 			revocation: { accessToken: "unsupported" },
 			clientIdMetadataDocuments: { enabled: true },
 			authorize: { acrValues: { "urn:from-config": ["pwd"] } },

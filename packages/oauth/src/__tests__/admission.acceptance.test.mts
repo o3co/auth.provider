@@ -62,7 +62,7 @@ const CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url
 const config = {
 	oauth: {
 		jwt: { issuer: ISSUER, secret: SECRET },
-		accessToken: { expiresIn: 300 },
+		accessToken: { defaultExpiresIn: 300 },
 		refreshToken: { expiresIn: 86400 },
 		oidcMode: "dual",
 		grants: { session: { enabled: true }, refresh_token: { enabled: true } },

@@ -76,7 +76,7 @@ const makeConfig = (oauthOverrides: Record<string, unknown> = {}): AppConfig =>
 	({
 		oauth: {
 			jwt: { issuer: ISSUER },
-			accessToken: { expiresIn: 300 },
+			accessToken: { defaultExpiresIn: 300 },
 			oidcMode: "dual",
 			grants: {},
 			...oauthOverrides,

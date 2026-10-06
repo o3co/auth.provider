@@ -95,7 +95,7 @@ const config: AppConfig & Record<string, unknown> = {
 		jwt: {
 			issuer: "https://auth.test",
 		},
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		oidcMode: "oidc-required",
 	},

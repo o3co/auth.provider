@@ -67,7 +67,7 @@ const secretKey = createSecretKey(Buffer.from(SECRET));
 const config = {
 	oauth: {
 		jwt: { issuer: ISSUER },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: { session: { enabled: true } },
 	},

@@ -44,7 +44,7 @@ const secretKey = createSecretKey(Buffer.from(SECRET));
 const mockConfig = {
 	oauth: {
 		jwt: { issuer: "https://auth.example" },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 	},
 	endpoints: {

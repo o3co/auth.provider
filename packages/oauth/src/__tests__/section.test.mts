@@ -34,7 +34,7 @@ import { oauthSectionSchema } from "#/section.mjs";
 /** A section every key of which is valid: what the package's reference loads to, with an issuer. */
 const valid = (): Record<string, unknown> => ({
 	jwt: { issuer: "https://auth.test", legacyTypAccept: false },
-	accessToken: { expiresIn: 3600 },
+	accessToken: { defaultExpiresIn: 3600 },
 	refreshToken: { expiresIn: 86400 },
 	oidcMode: "oidc-required",
 	requireEmailVerified: false,
@@ -89,7 +89,7 @@ describe("the section parses what the package's reference loads to", () => {
 	it("needs no optional level", () => {
 		const required = {
 			jwt: { issuer: "https://auth.test" },
-			accessToken: { expiresIn: 3600 },
+			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			oidcMode: "oidc-required",
 		};

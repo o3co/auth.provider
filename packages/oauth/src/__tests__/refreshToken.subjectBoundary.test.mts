@@ -54,7 +54,7 @@ const SUBJECT = "u1";
 const config = {
 	oauth: {
 		jwt: { secret: SECRET },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: { refresh_token: { enabled: true } },
 	},

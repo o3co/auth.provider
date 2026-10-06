@@ -41,7 +41,7 @@ const CLIENT_ID = "c-1";
 const baseConfig = {
 	oauth: {
 		jwt: { issuer: "https://test.example" },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 	},
 };

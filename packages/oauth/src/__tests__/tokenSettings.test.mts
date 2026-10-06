@@ -137,7 +137,7 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 		// resolves its lifetimes with the resolvers that check compares with.
 		const alias = () => {
 			const base = fixture();
-			return { ...base, oauth: { ...base.oauth, accessToken: { expiresIn: 7200 } } };
+			return { ...base, oauth: { ...base.oauth, accessToken: { defaultExpiresIn: 7200 } } };
 		};
 		for (const config of [fixture(), everySwitchOn(), alias()]) {
 			const settings = oauthTokenSettingsFrom(config.oauth);

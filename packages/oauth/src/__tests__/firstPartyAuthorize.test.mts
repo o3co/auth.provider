@@ -63,7 +63,7 @@ const makeConfig = (staleAllowUnmarkedClients: boolean): AppConfig =>
 	({
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
-			accessToken: { expiresIn: 300 },
+			accessToken: { defaultExpiresIn: 300 },
 			// A schema-validated config cannot carry the removed flag, but a
 			// hand-built one can — injecting it here pins that the stale key is
 			// inert rather than merely absent from fixtures.

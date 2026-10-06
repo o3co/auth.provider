@@ -82,7 +82,7 @@ const publicClient = {
 const mockConfig = {
 	oauth: {
 		jwt: { secret: "test-secret-mtls-ac" },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {
 			authorization_code: { enabled: true },

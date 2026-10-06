@@ -61,7 +61,7 @@ const CLIENT_SECRET = "rp-secret";
 const config = {
 	oauth: {
 		jwt: { issuer: ISSUER },
-		accessToken: { expiresIn: 3600 },
+		accessToken: { defaultExpiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: { client_credentials: { enabled: true } },
 	},

@@ -49,7 +49,7 @@ const REDIRECT_URI = "https://app.example/cb";
 const BASIC = `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")}`;
 
 const config = {
-	oauth: { jwt: { issuer: "https://issuer.example" }, accessToken: { expiresIn: 300 } },
+	oauth: { jwt: { issuer: "https://issuer.example" }, accessToken: { defaultExpiresIn: 300 } },
 	rateLimit: { failMode: "open" as const },
 	endpoints: { login: { url: "/login" } },
 } as unknown as AppConfig;
