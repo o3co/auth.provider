@@ -393,9 +393,10 @@ function refuseModuleAtRootSections(modules: readonly Module[]): void {
  * written over the resolved section when there is one to write, and the
  * `mfa` section and the `oauth` acr table as the template's MFA switch
  * decides them (`mfaSectionForBoot`, `oauthForBoot`). Left out: `adapters`
- * and `mfaMode`, the composition root's own keys, which phase one consumed. A section a loaded package's `reference.conf` sets for a module
- * the composition does not load is handed on as resolved: boot tells it
- * apart by the configuration's defaults (`configDefaultsFor`).
+ * and `mfaMode`, the composition root's own keys, which phase one consumed.
+ * A section a loaded package's `reference.conf` sets for a module the
+ * composition does not load is handed on as resolved: boot tells it apart by
+ * the configuration's defaults (`configDefaultsFor`).
  *
  * Refuses, with a `RangeError`, a module whose section is a section of the
  * composition root's (`refuseModuleAtRootSections`), what

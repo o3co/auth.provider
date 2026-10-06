@@ -126,9 +126,12 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     boot, `config-validation-failed` naming `federation-grants.enabled`, where
     it was a `RangeError` before boot. A `core.sessionRequirements` boot's
     schema refuses — `expected` not a list of names, or a key core does not
-    declare — is refused the same way at its path. With MFA on, a written
-    `core.sessionRequirements.secondFactorAuthority` other than `mfa` is
-    still a `RangeError` before boot.
+    declare — is refused the same way at its path, and so is a bad
+    access-token lifetime (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`,
+    `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`, `OAUTH_ACCESS_TOKEN_EXPIRES_IN`),
+    which the template no longer reads before boot either. With MFA on, a
+    written `core.sessionRequirements.secondFactorAuthority` other than `mfa`
+    is still a `RangeError` before boot.
   - `buildModules`' `overrides.logger` is removed: it carried only that
     warning. Drop it from your call; `app.mts` passes `{ environment }`.
   - For code of a fork's own: `SWITCHES`, `readSwitches`' second argument
@@ -138,8 +141,10 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     at boot (`deps.section`); code that read another key from what
     `readSwitches` answers reads it at boot, from the parsed configuration.
     `expectedSessionRequirements` takes the resolved
-    `core.sessionRequirements` and the MFA switch, and answers `undefined`
-    where `resolveForBoot` hands the section on as written.
+    `core.sessionRequirements` and the MFA switch, and answers
+    `SessionRequirements | undefined` — `undefined` where `resolveForBoot`
+    hands the section on as written — and the exported `SessionRequirements`
+    type no longer includes `undefined`.
 - Install MFA only through `MFA_MODE`
   ([Turning MFA on](#turning-mfa-on)).
 - **MFA is on by default** in the new `config/reference.conf`

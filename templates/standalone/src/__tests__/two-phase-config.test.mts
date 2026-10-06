@@ -181,6 +181,40 @@ describe("phase one reads federation-grants.enabled as the federation-grants mod
 		expect(switches["federation-grants"]?.enabled).toBe(enabled);
 	});
 
+	it.each([
+		'federation-grants = "x"',
+		"federation-grants = null",
+		"federation-grants.enabled = 1",
+		"federation-grants.enabled = null",
+	])("installs the modules for %s, which the module's schema refuses", (hocon) => {
+		const operator = operatorLayer(`${hocon}\n`);
+		const own = readOwnLayers([operator, ...ownFiles("production")], {
+			env: { ...REQUIRED_ENV, MFA_MODE: "off" },
+		});
+		const resolved = resolveLayers(own, moduleReferences(federationGrantsModules));
+		expect(federationGrantsConfigSchema.safeParse(resolved["federation-grants"]).success).toBe(
+			false,
+		);
+		const switches = readSwitches(own);
+		expect(switches["federation-grants"]?.enabled).toBe(true);
+		expect(
+			buildModules(switches, { environment: "production" }).map((module) => module.name),
+		).toContain("federation-grants");
+	});
+
+	it("leaves the modules out for an empty section at the old path, federationGrants {}, which sets nothing", () => {
+		const operator = operatorLayer("federationGrants {}\n");
+		const switches = readSwitches(
+			readOwnLayers([operator, ...ownFiles("production")], {
+				env: { ...REQUIRED_ENV, MFA_MODE: "off" },
+			}),
+		);
+		expect(switches["federation-grants"]?.enabled).toBe(false);
+		expect(
+			buildModules(switches, { environment: "production" }).map((module) => module.name),
+		).not.toContain("federation-grants");
+	});
+
 	it("reads the switch unwritten as off", () => {
 		const operator = operatorLayer('mfaMode = "off"\n');
 		const switches = readSwitches(readOwnLayers([operator], { env: {} }));

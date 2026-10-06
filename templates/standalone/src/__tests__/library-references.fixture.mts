@@ -105,7 +105,10 @@ export type BothPhases = Switches & AppConfig;
  * `switches` laid over `resolved`, the configuration boot parses, as a test
  * that hands one object to both phases does: the composition root's own keys
  * beside the sections, and `federation-grants.enabled` written as phase one
- * decided it into the section as resolved.
+ * decided it into the section as resolved. Boot is so handed phase one's
+ * boolean, not the value as written, unlike `app.mts`; boot's refusal of a
+ * written value phase one installs the modules for is pinned in
+ * `two-phase-config.test.mts`.
  */
 export function withSwitches(
 	resolved: Readonly<Record<string, unknown>>,
