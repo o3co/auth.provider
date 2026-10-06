@@ -43,7 +43,7 @@
  *   login's continuation, or the session's sign-in as admission read it —
  *   since its `User`'s recorded witness may be stale. A completion checks
  *   whenever the records it lists allow a first binding, whatever admission
- *   saw before it.
+ *   saw before it, and again under the subject's lease.
  * - The subject's generation is read where the enrollment begins — before the
  *   session's admission, or at a login's begin — and carried, sealed, in the
  *   pending enrollment (`factorSet.mts`). A completion's writes run whole
@@ -78,8 +78,11 @@
  *   written and the transaction standing — a first one refused there
  *   beside a record the read before the lease did not find is
  *   `first_binding_conflict`, which the routes audit; for a first binding
- *   notes the subject's first-binding mark — a note that fails refuses it,
- *   nothing written — consumes the transaction, writes the factor. Every write of the
+ *   reads the subject's first-binding mark again — one that distrusts the
+ *   authentication refuses it as at the start, one that cannot be read is an
+ *   outage, nothing written and the transaction standing — and notes it — a
+ *   note that fails refuses it, nothing written — consumes the transaction,
+ *   writes the factor. Every write of the
  *   subject's factor set is fenced on that read (`factorSet.mts`): a factor
  *   whose write finds the set changed since — another write landed, which
  *   under the lease only a writer past its own lease can make — is not
@@ -708,9 +711,23 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					return { outcome: "first_binding_conflict", ...about };
 				}
 				if (refusedNow !== undefined) return refusedNow;
-				// Noted before the factor is written: a first binding the mark misses
-				// would leave a stale session trusted.
 				if (first) {
+					// Read again under the lease: the read before it covers a mark noted
+					// before the completion began, this one a mark noted since. A mark
+					// stands more than twice a transaction's lifetime, so one noted since
+					// and already lapsed means this transaction has ended too, which the
+					// consumption below finds.
+					let distrusted: Awaited<ReturnType<typeof kit.firstBindingDistrust>>;
+					try {
+						distrusted = await writes.read(() =>
+							kit.firstBindingDistrust(tx.subject, authTimeOf(tx, call)),
+						);
+					} catch (cause) {
+						return outage("mfa_transaction", "firstBindingAt", cause);
+					}
+					if (distrusted !== undefined) return distrusted;
+					// Noted before the factor is written: a first binding the mark misses
+					// would leave a stale session trusted.
 					const unnoted = await writes.run(
 						() => kit.noteFirstBinding(tx.subject),
 						(cause) => outage("mfa_transaction", "noteFirstBinding", cause),
