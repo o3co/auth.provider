@@ -3167,7 +3167,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 			errorDescription: "session linking unavailable",
 		});
 		expect(logger.warn).not.toHaveBeenCalled();
-		// The error is on the lifecycle's own line; the grant's names the step only.
+		// The defensive fallback has no error to project: the grant's line names the step only.
 		expect(logger.error.mock.calls).toEqual([
 			[
 				{ store: "session_lifecycle", step: "join", clientId: "client1" },

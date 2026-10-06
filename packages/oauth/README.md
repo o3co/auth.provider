@@ -625,7 +625,7 @@ The federation stays listed as having joined the session: the lifecycle keeps wh
 
 If the IdP end-session call throws, local state is already cleared; the response is `200 {"disconnected": true}` and an audit event `federation.logout.idp_unreachable` is emitted for operator visibility.
 
-Returns `404 {"error": "federation_not_linked"}` when the named federation is not in the session. A keystore or a store that cannot answer — the family check included — is `503 temporarily_unavailable`, never `401 invalid_token`, logged once at error level as `federation_logout_store_unavailable` with `store` and `step` (or `token_verification_unavailable` for the keystore). The lifecycle's is `store: "session_lifecycle"`, `step: "liveness"` or `"federations"`: with no `err` when it answered `unavailable`, which it logs itself, and with the error's projection when it threw.
+Returns `404 {"error": "federation_not_linked"}` when the named federation is not in the session. A keystore or a store that cannot answer — the family check included — is `503 temporarily_unavailable`, never `401 invalid_token`, logged once at error level as `federation_logout_store_unavailable` with `store` and `step` (or `token_verification_unavailable` for the keystore). The lifecycle's is `store: "session_lifecycle"`, `step: "liveness"` or `"federations"`: when it rejects — with its store's error or any other (a `RangeError` included) — with the error's projection; any answer other than `live` / `not_live` or `listed` takes the same path, as a defensive fallback, with no `err`.
 
 ### Discovery metadata
 

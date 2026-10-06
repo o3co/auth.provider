@@ -107,7 +107,7 @@ async function buildApp(opts: { userSessionStore?: UserSessionStore; auditSink?:
 			? {
 					userSessionStore: opts.userSessionStore,
 					// A lifecycle the host fills, whose read rejects when the store throws.
-					sessionLifecycle: livenessOver(opts.userSessionStore, [], { onOutage: "reject" }),
+					sessionLifecycle: livenessOver(opts.userSessionStore),
 				}
 			: {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),

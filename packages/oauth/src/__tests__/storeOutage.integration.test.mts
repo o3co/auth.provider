@@ -158,7 +158,7 @@ async function buildApp(stores: Stores = {}): Promise<Harness> {
 		userSessionStore,
 		// A lifecycle the host fills, whose reads reject when the session store
 		// cannot answer.
-		sessionLifecycle: livenessOver(userSessionStore, [FEDERATION], { onOutage: "reject" }),
+		sessionLifecycle: livenessOver(userSessionStore, [FEDERATION]),
 		federationTokenStore: {
 			kind: "memory",
 			attach: async () => {},

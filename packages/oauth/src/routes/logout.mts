@@ -289,8 +289,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 	/**
 	 * The federation logout's `503` for the session lifecycle that could not
 	 * answer `step`: one error line, carrying the error's projection when the
-	 * lifecycle threw (one a host fills may); an `unavailable` answer the
-	 * lifecycle has logged itself.
+	 * lifecycle rejected; without `err` for the defensive fallback on any
+	 * answer the step does not act on.
 	 */
 	const federationLogoutLifecycleUnavailable = (
 		res: Response,
@@ -750,8 +750,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 		// The close did not commit, or whether it did could not be read: the
 		// route's one line for its 503, with the error's projection when the
-		// lifecycle rejected with its store's error (an `unavailable` answer's
-		// error is on the lifecycle's own line).
+		// lifecycle rejected; without `err` for the defensive fallback on any
+		// answer other than `done` or `pending`.
 		const closeUnavailable = (thrown?: { readonly error: unknown }): LogoutEnd => {
 			(opts.logger ?? console).error(
 				{

@@ -159,9 +159,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	};
 	/**
 	 * The session lifecycle's outage at the join, said once at error on the
-	 * grant's line: with the error's projection when the lifecycle rejected
-	 * with its store's error; an `unavailable` answer's error is on the
-	 * lifecycle's own line.
+	 * grant's line: with the error's projection when the lifecycle rejected;
+	 * without `err` for any other answer than `joined` or `refused`, the
+	 * defensive fallback.
 	 */
 	const lifecycleUnavailable = (clientId: string, thrown?: { readonly error: unknown }): void => {
 		logger?.error(

@@ -68,9 +68,9 @@ export const createIntrospectUnavailableAnswers = ({
 	 * error's projection — never the error, which can carry what the store
 	 * was sent — and audited as `introspect.store_unavailable`, whose `cause`
 	 * is core's `auditedError` (the error's name and code, never its message);
-	 * the log line carries the rest. Core's session lifecycle answers its
-	 * outage with no error, which it logs itself: that line and event carry
-	 * none, unless the lifecycle threw.
+	 * the log line carries the rest. Core's session lifecycle rejects on its
+	 * outage, and that error is projected; the defensive fallback on any other
+	 * answer has no error, so that line and event carry none.
 	 */
 	const answerStoreUnavailable = (
 		req: Request,
@@ -84,7 +84,7 @@ export const createIntrospectUnavailableAnswers = ({
 			| {
 					readonly store: "session_lifecycle";
 					readonly details: Readonly<Record<string, string>>;
-					/** Present when the lifecycle threw; absent when it answered `unavailable`. */
+					/** Present when the lifecycle rejected; absent for the defensive fallback on any other answer. */
 					readonly cause?: unknown;
 			  },
 	): Response => {

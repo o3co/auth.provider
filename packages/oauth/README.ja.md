@@ -619,7 +619,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 
 答えられないキーストアやストア — ファミリーの確認を含む — は `401 invalid_token` ではなく `503 temporarily_unavailable` になる。
 
-指定のフェデレーションがセッションに無ければ `404 {"error": "federation_not_linked"}` を返す。答えられないストアは `503 temporarily_unavailable` で、`store` と `step` 付きの `federation_logout_store_unavailable` として error レベルで 1 回だけログに出す。ライフサイクルのものは `store: "session_lifecycle"`、`step: "liveness"` または `"federations"` で、`unavailable` と答えたとき（ライフサイクル自身がログに出す）は `err` を持たず、例外を投げたときはエラーの射影を持つ。
+指定のフェデレーションがセッションに無ければ `404 {"error": "federation_not_linked"}` を返す。答えられないストアは `503 temporarily_unavailable` で、`store` と `step` 付きの `federation_logout_store_unavailable` として error レベルで 1 回だけログに出す。ライフサイクルのものは `store: "session_lifecycle"`、`step: "liveness"` または `"federations"` で、reject したとき（ストアのエラーでもそれ以外でも。`RangeError` を含む）はエラーの射影を持つ。`live` / `not_live` や `listed` 以外の答えも防御的なフォールバックとして同じ経路をたどり、`err` を持たない。
 
 ### ディスカバリーメタデータ
 

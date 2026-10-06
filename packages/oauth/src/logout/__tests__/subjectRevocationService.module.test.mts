@@ -42,6 +42,7 @@ import {
 	type RefreshTokenFamilyRevocation,
 	resolveSubjectRevocationHorizonMs,
 	type SessionCloseNotice,
+	type SessionCloseOutcome,
 	type SessionLifecycle,
 	type SubjectRevocation,
 	type SubjectRevocationService,
@@ -56,6 +57,7 @@ import {
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
+import { outsideAnswer } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { oauthTokenSettingsFrom } from "#/tokenSettings.mjs";
 import { subjectRevocationServiceModule } from "../subjectRevocationService.mjs";
 
@@ -205,16 +207,17 @@ describe("subjectRevocationServiceModule", () => {
 	});
 
 	describe("the close of each session", () => {
-		/** A lifecycle whose close answers `outcome`, recording each call and what it was called after. */
-		const lifecycleAnswering = (
-			outcome: "done" | "pending" | "unavailable",
-			order: string[] = [],
-		) => {
-			const close = vi.fn(async (sid: string, cause: string) => {
+		/**
+		 * A lifecycle whose close answers `outcome` — `outside`: an answer outside
+		 * the outcomes the service acts on — recording each call and what it was
+		 * called after.
+		 */
+		const lifecycleAnswering = (outcome: "done" | "pending" | "outside", order: string[] = []) => {
+			const close = vi.fn(async (sid: string, cause: string): Promise<SessionCloseOutcome> => {
 				order.push(`close:${sid}:${cause}`);
-				return outcome === "unavailable"
-					? ({ outcome } as const)
-					: ({ outcome, rps: [], federations: [] } as const);
+				return outcome === "outside"
+					? outsideAnswer<SessionCloseOutcome>()
+					: { outcome, rps: [], federations: [] };
 			});
 			return { close, lifecycle: { close } as unknown as SessionLifecycle };
 		};
@@ -262,7 +265,7 @@ describe("subjectRevocationServiceModule", () => {
 			expect(order).toEqual(["stamp", "stamp", "close:sid-1:subject_revocation"]);
 		});
 
-		it.each(["pending", "unavailable"] as const)(
+		it.each(["pending", "outside"] as const)(
 			"reads a close answering %s as a session not revoked: the report is not complete, and the sid stays for a retry",
 			async (outcome) => {
 				const index = createInMemorySubjectSessionIndex();

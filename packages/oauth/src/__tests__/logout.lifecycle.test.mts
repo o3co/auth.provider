@@ -313,7 +313,7 @@ describe("/oauth/logout through the session lifecycle: the close's answer", () =
 		expect(browserSession.destroyed).toBe(true);
 	});
 
-	it("unavailable: 503, audited as logout.cascade_failed, one error line, and the browser session kept for a retry", async () => {
+	it("an answer outside the close's outcomes: 503, audited as logout.cascade_failed, one error line, and the browser session kept for a retry", async () => {
 		const lifecycle = fakeLifecycle({
 			close: vi.fn(async () => outsideAnswer<never>()),
 		});
