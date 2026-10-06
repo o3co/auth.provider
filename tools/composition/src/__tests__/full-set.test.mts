@@ -2092,7 +2092,7 @@ describe("token exchange: an exchanged token reaches none of the capabilities it
 const WEBAUTHN_OPTIONS = "/oauth/webauthn/authentication/options";
 
 const LIFECYCLE_LOGS =
-	"core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) logs the store's failure at warn (`session_lifecycle_unavailable`, with the error's projection) and answers `unavailable`; the consumer's error line names the step but carries no projection: two lines for one outage, the cause on the warn";
+	"core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) logs the store's failure at warn (`session_lifecycle_unavailable`, with the error's projection) and answers `unavailable`; the consumer's error line names the step but carries no projection: two lines for one outage, the cause on the warn. Fixed before 0.17.0 by the PR that removes the lifecycle's bridge (#1030, 14a), which restores one error line, the consumer's, with the projection";
 
 const OUTAGES: readonly OutageCase<FullSet>[] = [
 	{

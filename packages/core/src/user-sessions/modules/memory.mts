@@ -53,8 +53,8 @@ export const memorySessionStoresModule = defineModule({
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
 		subjectRevocation: (deps: { readonly logger?: Logger }) =>
 			createInMemorySubjectRevocation({ logger: deps.logger ?? consoleLogger }),
-		// Read only by the session lifecycle module, which nothing installs by
-		// default.
+		// Read only by the session lifecycle module, which the standalone
+		// template installs.
 		sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 	} as never,
 });

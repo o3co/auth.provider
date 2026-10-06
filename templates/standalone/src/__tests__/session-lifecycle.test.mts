@@ -139,7 +139,7 @@ describe("the template, which composes the session lifecycle module", () => {
 	});
 
 	it("opens a federated login's session in the lifecycle, through the session module's federation routes", async () => {
-		const { app, handle, upstreams } = await compose({});
+		const { app, handle, upstreams } = await compose();
 		try {
 			const callback = await (await federatedCallback(app, "oidc", upstreams.oidc))();
 			expect(callback.status).toBe(302);

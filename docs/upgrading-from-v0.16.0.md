@@ -130,9 +130,13 @@ rather than `workspace:*`, and refresh the lockfile. Then:
   session through it. So `/session/logout` now revokes the session's
   refresh-token families and tells its relying parties, as `/oauth/logout`
   does, and answers `503 temporarily_unavailable` when the close cannot
-  commit, keeping the cookie for a retry. The lifecycle's sweep resumes a
-  close left pending every 60 seconds (`core.sessionLifecycle.sweepIntervalSeconds`;
-  `0` turns it off).
+  commit, keeping the cookie for a retry. It now waits on the relying
+  parties' back-channel notices, each bounded by the notifier's timeout; a
+  notice that fails still answers `200`, audited `logout.close_pending`, and
+  the close is resumed later by a later close or the lifecycle's sweep,
+  every 60 seconds (`core.sessionLifecycle.sweepIntervalSeconds`; `0` turns
+  it off; see the runbook's
+  [`session_lifecycle_sweep_*` row](operator-runbook.md#page--a-dependency-is-down-or-a-guarantee-is-not-being-met)).
 
 ## Configuration
 

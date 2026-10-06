@@ -104,4 +104,27 @@ describe("POST /session/logout with the session lifecycle module", () => {
 			await handle.dispose();
 		}
 	});
+
+	it("answers 503 when the close cannot commit, and the cookie still admits the session for a retry", async () => {
+		const { app, handle } = await compose();
+		try {
+			const { cookies } = await login(app);
+			const components = handle.components as Record<string, unknown>;
+			const store = components.sessionLifecycleStore as SessionLifecycleStore;
+			vi.spyOn(store, "beginClose").mockRejectedValue(new Error("lifecycle store down"));
+
+			const res = await request(app)
+				.post("/session/logout")
+				.set("Cookie", cookies)
+				.set("x-csrf-token", csrfTokenOf(cookies));
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			// The session is still live and its cookie still admits it.
+			const authorized = await authorize(app, cookies);
+			expect(codeFrom(authorized)).toEqual(expect.any(String));
+		} finally {
+			await handle.dispose();
+		}
+	});
 });

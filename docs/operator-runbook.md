@@ -667,7 +667,7 @@ is bound to the subject, the factor id and the kind, not the version.
 There are two, they differ, and the difference is one you have to choose
 against — a session logged out at the wrong endpoint keeps a live credential.
 
-| | `POST /session/logout` | `POST /session/logout`, with core's session lifecycle | `POST /oauth/logout` |
+| | `POST /session/logout`, without core's session lifecycle (a composition of your own) | `POST /session/logout`, with core's session lifecycle (the standalone template) | `POST /oauth/logout` |
 |---|---|---|---|
 | Who calls it | the browser; the BFF / `auth.proxy` injection topology | the same | an RP, with an `id_token_hint` |
 | express-session cookie | destroyed | destroyed once the close commits; kept on a `503` | destroyed, but only when the request's own cookie names the `sid` being logged out |
