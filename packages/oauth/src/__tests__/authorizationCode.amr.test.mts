@@ -154,6 +154,7 @@ const world = async (
 			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);

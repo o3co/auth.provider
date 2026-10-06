@@ -23,6 +23,7 @@
 
 import {
 	type AuthenticatedClient,
+	createInMemorySessionLifecycleStore,
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantPolicyHook,
@@ -285,6 +286,7 @@ describe("session grant — the minting instant", () => {
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore: createSymmetricKeyStore("session-policy-test-secret-32-bytes"),
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			grantPolicy: {
 				kind: "slow",
 				evaluate: async () => {

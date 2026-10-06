@@ -44,6 +44,7 @@ import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAcce
 import {
 	ISSUER,
 	keyStore,
+	livenessOver,
 	makeFamilyRevocation,
 	signSelfIssuedAccessToken,
 	tokenSettings,
@@ -111,7 +112,12 @@ function buildGrant(
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 		...(overrides.logger ? { logger: overrides.logger } : {}),
 		...(overrides.userSessionStore ? { userSessionStore: overrides.userSessionStore } : {}),
-		...(overrides.sessionLifecycle ? { sessionLifecycle: overrides.sessionLifecycle } : {}),
+		// A user-session store is wired with core's session lifecycle beside it.
+		...(overrides.sessionLifecycle
+			? { sessionLifecycle: overrides.sessionLifecycle }
+			: overrides.userSessionStore
+				? { sessionLifecycle: livenessOver(overrides.userSessionStore) }
+				: {}),
 		...(overrides.section ? { section: overrides.section } : {}),
 	});
 }
@@ -1982,6 +1988,39 @@ describe("createTokenExchangeGrant — the resources a refusal logs are the call
 	});
 });
 
+describe("createTokenExchangeGrant — where a user-session store is wired, core's session lifecycle is required", () => {
+	const build = (wiring: {
+		userSessionStore?: UserSessionStore;
+		sessionLifecycle?: SessionLifecycle;
+	}) =>
+		createTokenExchangeGrant({
+			oauthTokenSettings: tokenSettings,
+			keyStore,
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
+			tokenExchangeValidatorResolver: new Map(),
+			clientRepository: mockClientRepository(),
+			...wiring,
+		});
+
+	it("refuses to build with userSessionStore wired and no sessionLifecycle, naming both slots", () => {
+		expect(() => build({ userSessionStore: createInMemoryUserSessionStore() })).toThrow(
+			/userSessionStore is wired, but sessionLifecycle is not[\s\S]*Install sessionLifecycleModule/,
+		);
+	});
+
+	it("builds sessionless, with neither wired, and with both wired", () => {
+		expect(() => build({})).not.toThrow();
+		expect(() =>
+			build({
+				userSessionStore: createInMemoryUserSessionStore(),
+				sessionLifecycle: {
+					liveness: async () => ({ outcome: "not_live" }),
+				} as unknown as SessionLifecycle,
+			}),
+		).not.toThrow();
+	});
+});
+
 describe("createTokenExchangeGrant — the session behind a sid-carrying token", () => {
 	// A token minted from a browser session carries its `sid`, and a logout
 	// ends it: introspection, `/userinfo` and the refresh grant all read the
@@ -2126,8 +2165,8 @@ describe("createTokenExchangeGrant — the session behind a sid-carrying token",
 			errorDescription: "session store unavailable",
 		});
 		expectOutageLine(logger, "token_exchange_session_store_unavailable", {
-			store: "user_session",
-			step: "get",
+			store: "session_lifecycle",
+			step: "liveness",
 			role: "subject",
 			err: expect.objectContaining({ name: "ReplyError" }),
 		});
@@ -2428,8 +2467,8 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 			errorDescription: "actor_token session store unavailable",
 		});
 		expectOutageLine(logger, "token_exchange_session_store_unavailable", {
-			store: "user_session",
-			step: "get",
+			store: "session_lifecycle",
+			step: "liveness",
 			role: "actor",
 		});
 	});
@@ -2461,6 +2500,7 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 			tokenExchangeValidatorResolver: new Map([[ACCESS_TOKEN_TYPE, foreign]]),
 			clientRepository: mockClientRepository(),
 			userSessionStore: store,
+			sessionLifecycle: livenessOver(store),
 		});
 		const { result } = await exchange(g, { subject_token: "opaque-foreign-token" });
 		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);

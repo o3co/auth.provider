@@ -34,6 +34,7 @@ import type {
 import {
 	BootError,
 	createApp,
+	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
@@ -134,6 +135,8 @@ interface Overrides {
 	/** Filled into the `attemptCounter` slot. */
 	readonly attemptCounter?: AttemptCounter;
 	readonly withUserSessionStore?: boolean;
+	/** Leave the `sessionLifecycleStore` slot unfilled; core's session lifecycle wires it beside the user-session store. */
+	readonly withSessionLifecycleStore?: boolean;
 	readonly withCsrfGuard?: boolean;
 	/** Leave the audit sink's absence undeclared: no `auditSink` in `core.declaredAbsent`. */
 	readonly withoutAuditDeclaration?: boolean;
@@ -170,6 +173,9 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 		...(overrides.withUserSessionStore === false
 			? {}
 			: { userSessionStore: createInMemoryUserSessionStore() }),
+		...(overrides.withSessionLifecycleStore === false || overrides.withUserSessionStore === false
+			? {}
+			: { sessionLifecycleStore: createInMemorySessionLifecycleStore() }),
 		// The verification route's CSRF guard is the `csrfGuard` slot, which
 		// the session module provides: core's double stands in for it.
 		...(overrides.withCsrfGuard === false ? {} : { csrfGuard: createTestCsrfGuard() }),
@@ -313,6 +319,21 @@ describe("the device-grant module — boot", () => {
 		// trusts the cookie alone.
 		await expect(boot({ deviceGrant: ENABLED, withUserSessionStore: false })).rejects.toThrow(
 			/enabled = true requires a userSessionStore component/,
+		);
+	});
+
+	it("refuses to boot enabled with a userSessionStore and no sessionLifecycleStore, naming both slots", async () => {
+		const err = await boot({ deviceGrant: ENABLED, withSessionLifecycleStore: false }).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught as BootError,
+		);
+		expect(err, "boot must be refused").toBeInstanceOf(BootError);
+		expect(err?.reason).toBe("contribute-factory-failed");
+		expect(err?.message).toMatch(
+			/device-grant: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 
@@ -611,6 +632,7 @@ describe("the device-grant module — the route it actually contributes", () => 
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		userSessionStore: liveSessionStore(),
+		sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 		// The `csrfGuard` slot: core's double, which accepts this origin.
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).

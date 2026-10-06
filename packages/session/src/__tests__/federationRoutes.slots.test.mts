@@ -36,7 +36,6 @@ import {
 	makeFederationTokenStore,
 	makePermissivePolicy,
 	makeSessionApp,
-	makeSessionFederationIndex,
 	makeUserRepository,
 	makeUserSessionStore,
 } from "../routes/__tests__/federation-harness.mjs";
@@ -98,7 +97,6 @@ function federationRoutes(deps: {
 		userRepository: makeUserRepository(),
 		userSessionStore: makeUserSessionStore(),
 		sessionLifecycle: fakeSessionLifecycle(),
-		sessionFederationIndex: makeSessionFederationIndex(),
 		federationTokenStore: makeFederationTokenStore(),
 		sessionCookiePolicy: createTestSessionCookiePolicy(
 			deps.sessionCookieName === undefined ? {} : { name: deps.sessionCookieName },

@@ -74,7 +74,11 @@ import { jsonError, noStoreNoReferrer, plain } from "./browserAnswers.mjs";
 import { createCallbackHandler } from "./browserCallback.mjs";
 import { createConnectHandler } from "./browserConnect.mjs";
 import { createConsentAnswerHandler } from "./browserConsentAnswer.mjs";
-import { createBrowserFlow, type FederationGrantBrowserRouterOptions } from "./browserFlow.mjs";
+import {
+	createBrowserFlow,
+	type FederationGrantBrowserRouterOptions,
+	requireSessionLifecycleStore,
+} from "./browserFlow.mjs";
 import { CALLBACK, CONNECT, CONSENT } from "./browserJudgement.mjs";
 import { createPendingConsentHandler } from "./browserPendingConsent.mjs";
 import { createRequestIdMiddleware } from "./requestId.mjs";
@@ -121,6 +125,7 @@ export function createFederationGrantBrowserRouter(
 			`createFederationGrantBrowserRouter: issuer ${describeIssuerRejection(issuerRejection)} — it is oauth.jwt.issuer`,
 		);
 	}
+	requireSessionLifecycleStore(options);
 	const flow = createBrowserFlow(options, requirements, subjectRevocation);
 	const router = express.Router();
 

@@ -27,6 +27,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createSymmetricKeyStore,
 	type SessionRequirement,
 	type UserSession,
@@ -154,6 +155,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);
@@ -163,6 +165,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);

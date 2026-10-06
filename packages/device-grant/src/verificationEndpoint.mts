@@ -258,9 +258,36 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 * composition that declared subject-level revocation absent has none.
 	 */
 	readonly subjectRevocation?: SubjectRevocation;
-	/** The session lifecycle port admission reads after a live record, when wired. */
+	/**
+	 * Required beside `userSessionStore` (core's session lifecycle is required
+	 * where a user-session store is wired): the session lifecycle port
+	 * admission reads after a live record, so a session closing or closed
+	 * approves nothing. Without it the handler refuses to build.
+	 */
 	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 }
+
+/**
+ * Throws where a user-session store is wired without the session lifecycle
+ * port: admission would skip the lifecycle record, and a closing session
+ * could approve.
+ */
+export const requireSessionLifecycleStore = (
+	deps: Pick<DeviceVerificationHandlerOptions, "sessionLifecycleStore"> & {
+		readonly userSessionStore?: UserSessionStore | undefined;
+	},
+): void => {
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"device-grant: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
+				"user-session store is wired, core's session lifecycle is required: " +
+				"POST /oauth/device/verification admits the session behind the cookie through its " +
+				"lifecycle record. Wire core's session lifecycle: a session-store module that fills " +
+				"sessionLifecycleStore (memorySessionStoresModule or redisSessionStoresModule) and " +
+				"sessionLifecycleModule.",
+		);
+	}
+};
 
 export const createDeviceVerificationHandler = (
 	options: DeviceVerificationHandlerOptions,
@@ -274,6 +301,7 @@ export const createDeviceVerificationHandler = (
 				"the live UserSession behind the cookie's sid before it is answered",
 		);
 	}
+	requireSessionLifecycleStore(options);
 	// Likewise the resolver — missing, or one the planner did not build:
 	// refused here, not answered 500 on every request.
 	const requirements = checkResolver(

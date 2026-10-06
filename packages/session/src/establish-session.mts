@@ -111,9 +111,10 @@ export interface EstablishedRecord {
 }
 
 /**
- * A write the caller makes beside the record — a federation's index entry,
- * its upstream tokens — named as its log lines name it: `store` and `step`
- * for a `run` that fails, `undo.step` for an undo that fails.
+ * A write the caller makes beside the record — a federation's upstream
+ * tokens, its join through the session lifecycle — named as its log lines
+ * name it: `store` and `step` for a `run` that fails, `undo.step` for an
+ * undo that fails.
  */
 export interface EstablishSessionStep<S extends string = string, T extends string = string> {
 	readonly store: S;

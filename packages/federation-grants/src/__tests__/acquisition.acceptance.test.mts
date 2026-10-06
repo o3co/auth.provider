@@ -42,6 +42,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
@@ -302,6 +303,7 @@ const boot = async (
 			clientRepository,
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			// The login page and the CSRF policy, which the session module
 			// provides in a real composition.
 			loginEntry: acquisitionLoginEntry(),

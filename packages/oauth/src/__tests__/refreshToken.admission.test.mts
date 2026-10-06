@@ -136,6 +136,22 @@ const refreshToken = (claims: Record<string, unknown> = {}): Promise<string> =>
 		.setExpirationTime("24h")
 		.sign(createSecretKey(Buffer.from(SECRET)));
 
+/**
+ * A lifecycle store holding `SID`'s record, active for `SUBJECT` until an
+ * hour from now: the session a login opened. Seeded before its first read.
+ */
+const openedLifecycleStore = (): SessionLifecycleStore => {
+	const store = createInMemorySessionLifecycleStore();
+	const opened = store.open(SID, SUBJECT, new Date(Date.now() + 3_600_000));
+	return {
+		...store,
+		read: async (sid) => {
+			await opened;
+			return store.read(sid);
+		},
+	};
+};
+
 const makeGrant = (opts: {
 	userSessionStore?: UserSessionStore;
 	sessionLifecycleStore?: SessionLifecycleStore;
@@ -170,8 +186,14 @@ const makeGrant = (opts: {
 			issuer: "https://issuer.test",
 			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
-		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
-		...(opts.sessionLifecycleStore ? { sessionLifecycleStore: opts.sessionLifecycleStore } : {}),
+		// Core's session lifecycle port, required beside a user-session store:
+		// by default one holding the session's record, active.
+		...(opts.userSessionStore
+			? {
+					userSessionStore: opts.userSessionStore,
+					sessionLifecycleStore: opts.sessionLifecycleStore ?? openedLifecycleStore(),
+				}
+			: {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 	});

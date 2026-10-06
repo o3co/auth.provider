@@ -29,6 +29,7 @@ import {
 	type AuditSink,
 	BootError,
 	createApp,
+	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
@@ -43,6 +44,7 @@ import {
 	type RateLimiter,
 	type SessionFederationIndex,
 	type SessionLifecycle,
+	type SessionLifecycleStore,
 	type SubjectRevocation,
 	type UserRepository,
 	type UserSessionStore,
@@ -313,6 +315,12 @@ export interface BootOptions {
 	readonly factorStore?: MfaFactorStore;
 	readonly transactionStore?: MfaTransactionStore;
 	readonly userSessionStore?: UserSessionStore | null;
+	/**
+	 * The session lifecycle port the MFA routes' admission reads, which a
+	 * composition with a user-session store wires beside it; an in-memory one
+	 * by default, none when `null`.
+	 */
+	readonly sessionLifecycleStore?: SessionLifecycleStore | null;
 	/** The composition's rate limiter; one that allows every test's traffic by default, none when `null`. */
 	readonly rateLimiter?: RateLimiter | null;
 	/** Where the composition's audit events go; the configuration declares none by default. */
@@ -346,6 +354,7 @@ export interface Booted {
 	readonly factorStore: MfaFactorStore;
 	readonly transactionStore: MfaTransactionStore;
 	readonly userSessionStore: UserSessionStore | null;
+	readonly sessionLifecycleStore: SessionLifecycleStore | null;
 }
 
 /** The modules of the composition `options` describes. */
@@ -354,6 +363,7 @@ export function modulesFor(options: BootOptions = {}): {
 	readonly factorStore: MfaFactorStore;
 	readonly transactionStore: MfaTransactionStore;
 	readonly userSessionStore: UserSessionStore | null;
+	readonly sessionLifecycleStore: SessionLifecycleStore | null;
 } {
 	const factorStore = options.factorStore ?? createMemoryMfaFactorStore();
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
@@ -361,6 +371,10 @@ export function modulesFor(options: BootOptions = {}): {
 		options.userSessionStore === undefined
 			? createInMemoryUserSessionStore()
 			: options.userSessionStore;
+	const sessionLifecycleStore =
+		options.sessionLifecycleStore === undefined
+			? createInMemorySessionLifecycleStore()
+			: options.sessionLifecycleStore;
 	const rateLimiter =
 		options.rateLimiter === undefined ? generousRateLimiter() : options.rateLimiter;
 	return {
@@ -389,6 +403,13 @@ export function modulesFor(options: BootOptions = {}): {
 						providing("test:user-session-store", { userSessionStore: () => userSessionStore }),
 						sessionLifecycleOver(userSessionStore),
 					]),
+			...(sessionLifecycleStore === null
+				? []
+				: [
+						providing("test:session-lifecycle-store", {
+							sessionLifecycleStore: () => sessionLifecycleStore,
+						}),
+					]),
 			providing("test:mfa-factor-store", { mfaFactorStore: () => factorStore }),
 			providing("test:mfa-transaction-store", { mfaTransactionStore: () => transactionStore }),
 			...(options.tokenIssuer === null ? [] : [oauthTokenSettingsFor(options.tokenIssuer)]),
@@ -400,6 +421,7 @@ export function modulesFor(options: BootOptions = {}): {
 		factorStore,
 		transactionStore,
 		userSessionStore,
+		sessionLifecycleStore,
 	};
 }
 
