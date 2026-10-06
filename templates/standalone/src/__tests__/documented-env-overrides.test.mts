@@ -101,9 +101,6 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// --- oauth tokens / policy ----------------------------------------
 	OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "900",
 	OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN: "7200",
-	// Deprecated alias of the default. Exported alongside the new variable on
-	// purpose, with a different value: the new variable must win.
-	OAUTH_ACCESS_TOKEN_EXPIRES_IN: "3600",
 	OAUTH_REFRESH_TOKEN_EXPIRES_IN: "86400",
 	OAUTH_OIDC_MODE: "dual",
 	OAUTH_REVOCATION_ACCESS_TOKEN: "denylist",
@@ -313,6 +310,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 	OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS:
 		"the variable of a removed key, and only captured — any value fails boot",
+	OAUTH_ACCESS_TOKEN_EXPIRES_IN:
+		"renamed OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN, and only captured — set alone, or to another value, it fails boot",
 	DEPLOYMENT_MODE:
 		"renamed CORE_DEPLOYMENT_MODE, and only captured — set alone, or to another value, it fails boot",
 	MEMORY_RATE_LIMITER_MAX_BUCKETS:
@@ -794,13 +793,14 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(http.readinessTimeoutMs).toBe(1500);
 		expect(http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
 		expect(config.core?.federations?.google?.accessType).toBe("online");
-		// The new default wins over the deprecated variable, and the parsed
-		// config mirrors it onto the old key for readers that predate the split.
 		expect(resolveAccessTokenLifetime({ oauth: oauthSection(config) })).toEqual({
 			defaultExpiresIn: 900,
 			maxExpiresIn: 7200,
 		});
-		expect(oauthSection(config).accessToken.expiresIn).toBe(900);
+		expect(oauthSection(config).accessToken).toEqual({
+			defaultExpiresIn: 900,
+			maxExpiresIn: 7200,
+		});
 		expect(oauthSection(config).refreshToken.expiresIn).toBe(86400);
 		expect(sessionStoreSection(config).maxAge).toBe(3600000);
 		expect(sessionSection(config).csrf?.ttlSeconds).toBe(7200);
@@ -1200,7 +1200,6 @@ describe("the shipped config boots with every documented override supplied as a 
 		for (const name of [
 			"OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
 			"OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN",
-			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
 		]) {
 			it(`refuses an empty ${name} rather than minting already-expired tokens`, async () => {
 				await expect(bootParsed({ ...DOCUMENTED_ENV, [name]: "" })).rejects.toMatchObject({
@@ -1230,6 +1229,33 @@ describe("the shipped config boots with every documented override supplied as a 
 				});
 			});
 		}
+
+		it("refuses OAUTH_ACCESS_TOKEN_EXPIRES_IN set alone, naming OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN", async () => {
+			const { OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: _new, ...env } = DOCUMENTED_ENV;
+			const booting = bootParsed({ ...env, OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900" });
+			await expect(booting).rejects.toMatchObject({ reason: "environment-variable-renamed" });
+			await expect(booting).rejects.toThrow(
+				/OAUTH_ACCESS_TOKEN_EXPIRES_IN was renamed OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN/,
+			);
+		});
+
+		it("refuses OAUTH_ACCESS_TOKEN_EXPIRES_IN beside its new name set to another value", async () => {
+			await expect(
+				bootParsed({ ...DOCUMENTED_ENV, OAUTH_ACCESS_TOKEN_EXPIRES_IN: "3600" }),
+			).rejects.toMatchObject({ reason: "environment-variable-renamed" });
+		});
+
+		it("boots with OAUTH_ACCESS_TOKEN_EXPIRES_IN beside its new name set to the same value, reading the new name", async () => {
+			const config = await bootParsed({
+				...DOCUMENTED_ENV,
+				OAUTH_ACCESS_TOKEN_EXPIRES_IN:
+					DOCUMENTED_ENV.OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN as string,
+			});
+			expect(oauthSection(config).accessToken).toEqual({
+				defaultExpiresIn: 900,
+				maxExpiresIn: 7200,
+			});
+		});
 
 		it("refuses DEPLOYMENT_MODE set alone, naming CORE_DEPLOYMENT_MODE", async () => {
 			const { CORE_DEPLOYMENT_MODE: _new, ...env } = DOCUMENTED_ENV;

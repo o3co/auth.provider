@@ -25,7 +25,7 @@ import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 export interface OAuthConfigForTestsOptions {
 	/** `oauth.jwt.issuer`; core's test issuer unless given. */
 	readonly issuer?: string;
-	/** `oauth.accessToken.expiresIn`, in seconds; 3600 unless given. */
+	/** `oauth.accessToken.defaultExpiresIn`, in seconds; 3600 unless given. */
 	readonly accessTokenExpiresIn?: number;
 	/** `oauth.refreshToken.expiresIn`, in seconds; 86400 unless given. */
 	readonly refreshTokenExpiresIn?: number;
@@ -71,7 +71,7 @@ export function oauthConfigForTests(options: OAuthConfigForTestsOptions = {}) {
 				...oauth.accessToken,
 				...(options.accessTokenExpiresIn === undefined
 					? {}
-					: { expiresIn: options.accessTokenExpiresIn }),
+					: { defaultExpiresIn: options.accessTokenExpiresIn }),
 			},
 			refreshToken: {
 				...oauth.refreshToken,

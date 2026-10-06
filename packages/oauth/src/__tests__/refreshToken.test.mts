@@ -281,8 +281,7 @@ describe("createRefreshTokenGrant", () => {
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
 			// `expires_in` is the time left when answered: read on a frozen clock.
 			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
-			// Only the current keys are configured, so a grant reading the
-			// deprecated `expiresIn` would mint a token with no `exp` at all.
+			// The lifetime is read through `resolveAccessTokenLifetime`.
 			const handler = createRefreshTokenGrant({
 				...mockDeps,
 				...grantSettingsFrom({

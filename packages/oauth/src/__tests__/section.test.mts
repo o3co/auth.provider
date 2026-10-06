@@ -182,6 +182,7 @@ describe("every level refuses a key it does not declare, at its path", () => {
 			true,
 			"allowUnmarkedClients",
 		],
+		["oauth.accessToken.expiresIn", "accessToken.expiresIn", 3600, "expiresIn"],
 	])(
 		"does not declare %s, which the module's section declares removed (relocatedFrom) and boot refuses before parsing",
 		(_what, path, value, key) => {
@@ -243,35 +244,29 @@ describe("oauth.accessToken", () => {
 		(oauthSectionSchema.parse(withValue("accessToken", accessToken)) as { accessToken: unknown })
 			.accessToken;
 
-	it("keeps the deprecated alias working on its own, leaving the new keys absent", () => {
-		expect(parseAccessToken({ expiresIn: 900 })).toEqual({ expiresIn: 900 });
-	});
-
-	it("mirrors defaultExpiresIn onto expiresIn", () => {
-		expect(parseAccessToken({ defaultExpiresIn: 600 })).toEqual({
-			defaultExpiresIn: 600,
-			expiresIn: 600,
-		});
-	});
-
-	it("overwrites a differing expiresIn with defaultExpiresIn", () => {
-		expect(parseAccessToken({ expiresIn: 3600, defaultExpiresIn: 600 })).toEqual({
-			defaultExpiresIn: 600,
-			expiresIn: 600,
-		});
+	it("reads defaultExpiresIn as given, adding no other key", () => {
+		expect(parseAccessToken({ defaultExpiresIn: 600 })).toEqual({ defaultExpiresIn: 600 });
 	});
 
 	it("keeps maxExpiresIn as given", () => {
 		expect(parseAccessToken({ defaultExpiresIn: 600, maxExpiresIn: 3600 })).toEqual({
 			defaultExpiresIn: 600,
 			maxExpiresIn: 3600,
-			expiresIn: 600,
 		});
 	});
 
 	it("is idempotent, so a configuration parsed twice is unchanged", () => {
-		const once = parseAccessToken({ expiresIn: 3600, defaultExpiresIn: 600, maxExpiresIn: 900 });
+		const once = parseAccessToken({ defaultExpiresIn: 600, maxExpiresIn: 900 });
 		expect(parseAccessToken(once)).toEqual(once);
+	});
+
+	it("does not read expiresIn as the default, beside defaultExpiresIn or alone", () => {
+		expect(issuesOf(withValue("accessToken", { defaultExpiresIn: 600, expiresIn: 600 }))).toEqual([
+			{ path: "accessToken", message: 'Unrecognized key: "expiresIn"', code: "unrecognized_keys" },
+		]);
+		expect(messagesAt(withValue("accessToken", { expiresIn: 600 }), "accessToken")).toEqual([
+			'Unrecognized key: "expiresIn"',
+		]);
 	});
 
 	it("refuses a default above the max at maxExpiresIn, naming both keys", () => {
@@ -287,24 +282,13 @@ describe("oauth.accessToken", () => {
 		]);
 	});
 
-	it("refuses a default read from the deprecated alias above the max, saying where it came from", () => {
-		expect(
-			messagesAt(
-				withValue("accessToken", { expiresIn: 3600, maxExpiresIn: 1800 }),
-				"accessToken.maxExpiresIn",
-			),
-		).toEqual([
-			"oauth.accessToken.defaultExpiresIn (3600, read from the deprecated oauth.accessToken.expiresIn) must not exceed oauth.accessToken.maxExpiresIn (1800): lower the default or raise the max",
-		]);
-	});
-
 	it.each([{}, { maxExpiresIn: 600 }])(
-		"refuses %j at defaultExpiresIn: neither the default nor its alias is set",
+		"refuses %j at defaultExpiresIn: the default is not set",
 		(accessToken) => {
 			expect(
 				messagesAt(withValue("accessToken", accessToken), "accessToken.defaultExpiresIn"),
 			).toEqual([
-				"oauth.accessToken.defaultExpiresIn is required (OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN); the deprecated oauth.accessToken.expiresIn is still read in its place",
+				"oauth.accessToken.defaultExpiresIn is required (OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN)",
 			]);
 		},
 	);
@@ -312,14 +296,10 @@ describe("oauth.accessToken", () => {
 	// The rules are core's resolver's, which every grant reads the lifetime
 	// through: what one refuses the other refuses, in the same words.
 	it.each([
-		[{ expiresIn: 900 }],
 		[{ defaultExpiresIn: 600 }],
-		[{ defaultExpiresIn: 600, expiresIn: 3600 }],
 		[{ defaultExpiresIn: 600, maxExpiresIn: 600 }],
 		[{ defaultExpiresIn: 600, maxExpiresIn: 3600 }],
 		[{ defaultExpiresIn: 7200, maxExpiresIn: 3600 }],
-		[{ expiresIn: 3600, maxExpiresIn: 1800 }],
-		[{ defaultExpiresIn: 600, expiresIn: 3600, maxExpiresIn: 900 }],
 		[{}],
 		[{ maxExpiresIn: 600 }],
 	])("refuses %j exactly as resolveAccessTokenLifetime does", (accessToken) => {
@@ -333,16 +313,7 @@ describe("oauth.accessToken", () => {
 		}
 	});
 
-	it.each([0, -1])(
-		"refuses the deprecated expiresIn = %j standing alone at that key, and nothing built on it",
-		(expiresIn) => {
-			expect(issuesOf(withValue("accessToken", { expiresIn })).map((issue) => issue.path)).toEqual([
-				"accessToken.expiresIn",
-			]);
-		},
-	);
-
-	for (const key of ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const) {
+	for (const key of ["defaultExpiresIn", "maxExpiresIn"] as const) {
 		for (const bad of [0, -1, MAX_DURATION_SECONDS + 1, ""]) {
 			it(`refuses ${key} = ${JSON.stringify(bad)} at that key, and nothing built on it`, () => {
 				const input = withValue("accessToken", {
@@ -639,9 +610,8 @@ describe("every number reads decimal digits alone", () => {
 		],
 		[
 			"accessToken.maxExpiresIn",
-			(value) => withValue("accessToken", { expiresIn: 60, maxExpiresIn: value }),
+			(value) => withValue("accessToken", { defaultExpiresIn: 60, maxExpiresIn: value }),
 		],
-		["accessToken.expiresIn", (value) => withValue("accessToken", { expiresIn: value })],
 		["refreshToken.expiresIn", (value) => withValue("refreshToken.expiresIn", value)],
 		["nonce.maxLength", (value) => withValue("nonce", { maxLength: value })],
 	];

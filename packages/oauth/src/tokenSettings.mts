@@ -25,8 +25,8 @@
  *
  * - the issuer as written, held to core's `checkCanonicalIssuer` — the oauth
  *   router refuses the same issuer at construction;
- * - the lifetimes through core's `resolveAccessTokenLifetime` (the
- *   deprecated `expiresIn` read in its place) and `resolveRefreshTokenLifetime`;
+ * - the lifetimes through core's `resolveAccessTokenLifetime` and
+ *   `resolveRefreshTokenLifetime`;
  * - every switch on only when it is `true`.
  *
  * The token-binding settings under `core.tokenBinding` are not among them:
@@ -54,7 +54,6 @@ export interface OAuthTokenSection {
 	readonly accessToken?: {
 		readonly defaultExpiresIn?: unknown;
 		readonly maxExpiresIn?: unknown;
-		readonly expiresIn?: unknown;
 	};
 	readonly refreshToken?: { readonly expiresIn?: unknown };
 	readonly resourceIndicator?: { readonly enabled?: unknown };

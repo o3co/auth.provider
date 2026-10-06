@@ -25,7 +25,9 @@
  * variable, refuse boot as removed. The refresh grant's unknown-family policy
  * sits beside its switch, moved from `oauth.refreshToken`; `legacyRtPolicy`,
  * `legacyTokenCompat` and `oauth.authorize.allowUnmarkedClients` refuse boot
- * as removed.
+ * as removed. The access-token default is `oauth.accessToken.defaultExpiresIn`
+ * alone: `oauth.accessToken.expiresIn` refuses boot as moved there, and its
+ * variable as renamed.
  */
 
 import { readFileSync } from "node:fs";
@@ -40,6 +42,7 @@ import {
 	jwksModule,
 	type Module,
 	moduleReferences,
+	type OAuthTokenSettings,
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
@@ -165,6 +168,7 @@ describe("the package's config/reference.conf", () => {
 			"oauth-authorization.grants.jwtBearer.enabled",
 		],
 		["OAUTH_CONSENT_PAGE_URL", "oauth.consentPage.url"],
+		["OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN", "oauth.accessToken.defaultExpiresIn"],
 		["OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED", "oauth.clientIdMetadataDocuments.enabled"],
 		[
 			"OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES",
@@ -186,6 +190,7 @@ describe("the package's config/reference.conf", () => {
 		"ENDPOINTS_CONSENT_URL",
 		"OAUTH_CIMD_ENABLED",
 		"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS",
+		"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
 	])("binds %s in its capture alone", (variable) => {
 		expect(bindings().filter((binding) => binding.startsWith(`${variable} `))).toEqual([
 			`${variable} at renamed-variables.${variable}`,
@@ -194,21 +199,23 @@ describe("the package's config/reference.conf", () => {
 });
 
 describe("the paths the settings moved from, on the manifests", () => {
-	it("oauth: the consent page from endpoints.consent.url, legacyRtPolicy, legacyTokenCompat and allowUnmarkedClients removed with allowUnmarkedClients' variable, and the Client ID Metadata Documents' variables renamed in place", () => {
+	it("oauth: the consent page from endpoints.consent.url, the access-token default from oauth.accessToken.expiresIn with its variable, legacyRtPolicy, legacyTokenCompat and allowUnmarkedClients removed with allowUnmarkedClients' variable, and the Client ID Metadata Documents' variables renamed in place", () => {
 		const section = everyModule()[0]?.section;
 		expect(section?.relocatedFrom).toEqual({
 			"endpoints.consent.url": "consentPage.url",
+			"oauth.accessToken.expiresIn": "accessToken.defaultExpiresIn",
 			"oauth.refreshToken.legacyRtPolicy": null,
 			"oauth.refreshToken.legacyTokenCompat": null,
 			"oauth.authorize.allowUnmarkedClients": null,
 		});
 		expect(section?.renamedVariables).toMatchObject({
 			ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
+			OAUTH_ACCESS_TOKEN_EXPIRES_IN: "oauth.accessToken.expiresIn",
 			OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",
 			OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "oauth.clientIdMetadataDocuments.maxConcurrentFetches",
 			OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "oauth.authorize.allowUnmarkedClients",
 		});
-		expect(Object.keys(section?.renamedVariables ?? {})).toHaveLength(14);
+		expect(Object.keys(section?.renamedVariables ?? {})).toHaveLength(15);
 	});
 
 	it("oauth-session: the switch from oauth.grants.session", () => {
@@ -707,12 +714,141 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			"oauth-authorization",
 			"oauth-authorization.grants.refreshToken.unknownFamilyPolicy",
 		],
+		[
+			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
+			"OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
+			"oauth",
+			"oauth.accessToken.defaultExpiresIn",
+		],
 	])("refuses %s set alone, naming %s", async (from, to, module, path) => {
 		const err = await refusal((config) => config, { [from]: "true" });
 
 		expect(err.details).toMatchObject({
 			reason: "environment-variable-renamed",
 			renamed: [{ module, from, to, path, state: "unset" }],
+		});
+	});
+
+	describe("the access-token default, moved from oauth.accessToken.expiresIn to defaultExpiresIn", () => {
+		const MOVED = {
+			module: "oauth",
+			from: "oauth.accessToken.expiresIn",
+			to: "oauth.accessToken.defaultExpiresIn",
+			environmentVariable: "OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
+		};
+
+		it.each([
+			["alone", { expiresIn: 900 }],
+			["beside defaultExpiresIn set to the same value", { defaultExpiresIn: 900, expiresIn: 900 }],
+			["as null beside defaultExpiresIn", { defaultExpiresIn: 3600, expiresIn: null }],
+		])(
+			"refuses oauth.accessToken.expiresIn %s, naming its new path and variable",
+			async (_, accessToken) => {
+				const err = await refusal((config) => oauthWith(config, { accessToken }));
+
+				expect(err.details).toEqual({ reason: "config-path-relocated", relocated: [MOVED] });
+			},
+		);
+
+		it.each(["900", ""])(
+			"refuses OAUTH_ACCESS_TOKEN_EXPIRES_IN = %j exported alone, naming its new name",
+			async (value) => {
+				const err = await refusal((config) => config, { OAUTH_ACCESS_TOKEN_EXPIRES_IN: value });
+
+				expect(err.details).toEqual({
+					reason: "environment-variable-renamed",
+					renamed: [
+						{
+							module: "oauth",
+							from: "OAUTH_ACCESS_TOKEN_EXPIRES_IN",
+							to: "OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
+							path: "oauth.accessToken.defaultExpiresIn",
+							state: "unset",
+						},
+					],
+				});
+			},
+		);
+
+		it("refuses OAUTH_ACCESS_TOKEN_EXPIRES_IN beside its new name set to another value", async () => {
+			const err = await refusal((config) => config, {
+				OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900",
+				OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "600",
+			});
+
+			expect(err.details).toEqual({
+				reason: "environment-variable-renamed",
+				renamed: [
+					{
+						module: "oauth",
+						from: "OAUTH_ACCESS_TOKEN_EXPIRES_IN",
+						to: "OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
+						path: "oauth.accessToken.defaultExpiresIn",
+						state: "different",
+					},
+				],
+			});
+		});
+
+		it("boots with OAUTH_ACCESS_TOKEN_EXPIRES_IN beside its new name set to the same value, minting the new name's", async () => {
+			const seen: { settings?: OAuthTokenSettings } = {};
+			const reader = defineModule({
+				name: "test:token-settings-reader",
+				requires: ["oauthTokenSettings"],
+				contributes: {
+					routes: [
+						(deps) => {
+							seen.settings = deps.oauthTokenSettings;
+							return {
+								id: "test-token-settings-reader",
+								mountPath: "/__test_token_settings_reader__",
+								handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+							};
+						},
+					],
+				},
+			});
+			const { modules, config } = composition((c) =>
+				oauthWith(
+					withGrants(c as never, {
+						authorizationCode: false,
+						refreshToken: false,
+						clientCredentials: false,
+					}) as Record<string, unknown>,
+					{
+						accessToken: { defaultExpiresIn: 900 },
+						revocation: { accessToken: "unsupported", subject: "unsupported" },
+					},
+				),
+			);
+			const handle = await createApp({
+				modules: [...modules, jwksModule, reader],
+				bootstrapComponents: {
+					config: {
+						...config,
+						"renamed-variables": {
+							...(config["renamed-variables"] as object),
+							OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900",
+							OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "900",
+						},
+					},
+					pathResolver: (s: string) => s,
+				} as never,
+			});
+			expect(seen.settings?.accessTokenLifetime).toEqual({
+				defaultExpiresIn: 900,
+				maxExpiresIn: 900,
+			});
+			await handle.dispose();
+		});
+
+		it("binds OAUTH_ACCESS_TOKEN_EXPIRES_IN at no path under oauth {} in either reference", () => {
+			for (const reference of [coreReference(), REFERENCE]) {
+				const layered = parseFile(fileURLToPath(reference), {
+					env: { OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900" },
+				}).toObject() as { oauth?: { accessToken?: Record<string, unknown> } };
+				expect(layered.oauth?.accessToken?.expiresIn).toBeUndefined();
+			}
 		});
 	});
 

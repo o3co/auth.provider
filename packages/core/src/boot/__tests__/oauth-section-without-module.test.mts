@@ -68,7 +68,7 @@ const pathsOf = (err: BootError): string[] =>
 /** What core reads, as the oauth package's reference sets it under an environment. */
 const READ = {
 	jwt: { issuer: "https://auth.test" },
-	accessToken: { defaultExpiresIn: 600, maxExpiresIn: 900, expiresIn: 3600 },
+	accessToken: { defaultExpiresIn: 600, maxExpiresIn: 900 },
 	refreshToken: { expiresIn: 86400 },
 	revocation: { accessToken: "unsupported", subject: "unsupported" },
 };
@@ -114,6 +114,11 @@ describe("oauth {} with no loaded module whose section it is", () => {
 			"oauth.revocation.sessions.mode",
 		],
 		["a key only the oauth endpoints module reads", { oidcMode: "dual" }, "oauth.oidcMode"],
+		[
+			"a key the oauth endpoints module declares moved, accessToken.expiresIn",
+			{ accessToken: { defaultExpiresIn: 600, expiresIn: 3600 } },
+			"oauth.accessToken.expiresIn",
+		],
 	])("refuses %s, naming the path and the module, never the value", async (_, oauth, path) => {
 		const err = await refusal(withOAuth(oauth));
 		expect(err.reason).toBe("config-validation-failed");
@@ -180,7 +185,7 @@ describe("what core reads of oauth {} without its module, by its segments, and t
 
 	it.each([
 		["jwt.issuer", "https://auth.test"],
-		["accessToken.expiresIn", 3600],
+		["accessToken.defaultExpiresIn", 3600],
 		["revocation.subject", "unsupported"],
 	])(
 		"refuses the literal key %j, which no dotted path it spells makes one core reads",

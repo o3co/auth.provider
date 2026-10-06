@@ -41,7 +41,10 @@ export { oauthSectionSchema };
 /**
  * The module's section, `oauth`, strict at every level (`./section.mts`), with
  * the package's defaults: the consent page moved from `endpoints.consent.url`;
- * three keys removed, each refusing boot set to a value, since the behaviour it
+ * the access-token default moved from `oauth.accessToken.expiresIn` to
+ * `oauth.accessToken.defaultExpiresIn`, its variable,
+ * `OAUTH_ACCESS_TOKEN_EXPIRES_IN`, renamed with it
+ * (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`); three keys removed, each refusing boot set to a value, since the behaviour it
  * switched no longer exists — `oauth.refreshToken.legacyRtPolicy` (a refresh
  * token lacking `jti` or `family_id` while family rotation is wired is always
  * refused), `oauth.refreshToken.legacyTokenCompat` (no v0.4.x refresh-token
@@ -57,12 +60,14 @@ const SECTION = {
 	reference: new URL("../config/reference.conf", import.meta.url),
 	relocatedFrom: {
 		"endpoints.consent.url": "consentPage.url",
+		"oauth.accessToken.expiresIn": "accessToken.defaultExpiresIn",
 		"oauth.refreshToken.legacyRtPolicy": null,
 		"oauth.refreshToken.legacyTokenCompat": null,
 		"oauth.authorize.allowUnmarkedClients": null,
 	},
 	renamedVariables: {
 		ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
+		OAUTH_ACCESS_TOKEN_EXPIRES_IN: "oauth.accessToken.expiresIn",
 		OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",
 		OAUTH_CIMD_ALLOWED_SCOPES: "oauth.clientIdMetadataDocuments.allowedScopes",
 		OAUTH_CIMD_ALLOWED_AUDIENCES: "oauth.clientIdMetadataDocuments.allowedAudiences",

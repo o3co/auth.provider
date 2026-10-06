@@ -16,9 +16,11 @@
 
 /**
  * `oauthConfigForTests`, on the package's testing entry: the `oauth` section
- * a test lays over a configuration, here its acr table.
+ * a test lays over a configuration, here its acr table and the access-token
+ * lifetime.
  */
 
+import { resolveAccessTokenLifetime } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { resolveOAuthOptions } from "#/resolveOAuthOptions.mjs";
@@ -37,5 +39,14 @@ describe("oauthConfigForTests", () => {
 		expect(fragment.oauth.authorize?.acrValues["urn:o3co:acr:phr"]).not.toBe(alternatives);
 		const config = { ...makeValidAppConfig(), ...fragment };
 		expect(Object.keys(resolveOAuthOptions(config.oauth).acrValues)).toEqual(Object.keys(table));
+	});
+
+	it("lays accessTokenExpiresIn at oauth.accessToken.defaultExpiresIn, the lifetime every grant mints", () => {
+		const fragment = oauthConfigForTests({ accessTokenExpiresIn: 900 });
+		expect(fragment.oauth.accessToken).toEqual({ defaultExpiresIn: 900 });
+		expect(resolveAccessTokenLifetime(fragment)).toEqual({
+			defaultExpiresIn: 900,
+			maxExpiresIn: 900,
+		});
 	});
 });

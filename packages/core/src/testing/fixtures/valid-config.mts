@@ -135,8 +135,9 @@ export function makeValidCoreConfig() {
 			jwt: {
 				issuer: "https://auth.test",
 			},
-			// A 3600 s default, which `resolveAccessTokenLifetime` also reads as
-			// the max, since no `maxExpiresIn` is set.
+			// The shape the oauth package's `reference.conf` loads to when no
+			// lifetime is overridden: a 3600 s default, which
+			// `resolveAccessTokenLifetime` also reads as the max.
 			accessToken: { defaultExpiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
 			// Declares both subject-level revocation slots absent: this fixture
