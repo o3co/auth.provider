@@ -1199,6 +1199,14 @@ modules fills them.
     grant no longer reads `sessionRPRegistry` or `sessionFamilyIndex`, and
     `oauthAuthorizationGrantsModule` no longer declares them, nor
     `sessionFederationIndex`.
+  - The `refresh_token` grant (`oauthAuthorizationGrantsModule`) is refused
+    the same way when no `sessionLifecycleStore` (the port core's
+    session-store modules fill, which `sessionLifecycleModule` requires) is
+    wired beside its `userSessionStore`: `contribute-factory-failed`, the
+    message naming both slots, and `createRefreshTokenGrant` throws the same
+    refusal. The grant's admission reads the token's session lifecycle
+    record, so a session closing or closed refreshes nothing. A composition
+    whose session-store module fills both is unaffected.
   - Introspection, `/oauth/userinfo` and `POST /oauth/federation/:name/token`
     read a session through the lifecycle alone. Their outage lines no longer
     carry `store: "user_session"`, nor (the federation-token route)
