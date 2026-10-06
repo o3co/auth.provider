@@ -44,6 +44,7 @@ import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAcce
 import {
 	ISSUER,
 	keyStore,
+	livenessOver,
 	makeFamilyRevocation,
 	signSelfIssuedAccessToken,
 	tokenSettings,
@@ -114,7 +115,13 @@ function buildGrant(wiring: Wiring = {}) {
 		clientRepository,
 		...(wiring.grantPolicy ? { grantPolicy: wiring.grantPolicy } : {}),
 		...(wiring.logger ? { logger: wiring.logger } : {}),
-		...(wiring.userSessionStore ? { userSessionStore: wiring.userSessionStore } : {}),
+		// A user-session store is wired with core's session lifecycle beside it.
+		...(wiring.userSessionStore
+			? {
+					userSessionStore: wiring.userSessionStore,
+					sessionLifecycle: livenessOver(wiring.userSessionStore),
+				}
+			: {}),
 	});
 }
 
@@ -353,7 +360,7 @@ describe("token exchange — the presented tokens are checked again after the po
 			});
 			expect(run.result).toEqual(outage(forRole(role, "session store unavailable")));
 			expect(run.event).toBe("token_exchange_session_store_unavailable");
-			expect(run.store).toBe("user_session");
+			expect(run.store).toBe("session_lifecycle");
 		});
 
 		it.each(["subject", "actor"] as const)("the family store, for the %s_token", async (role) => {
