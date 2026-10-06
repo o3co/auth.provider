@@ -145,7 +145,8 @@ export interface MfaModuleOptions {
 	/**
 	 * The name the deployment selected its configuration by — the standalone
 	 * passes `CONFIG_ENV || NODE_ENV` — read beside `NODE_ENV` by the
-	 * development sample key's refusal.
+	 * development sample key's refusal, which accepts the key only where each
+	 * name set says development or test, with at least one set.
 	 */
 	readonly environment?: string;
 }
