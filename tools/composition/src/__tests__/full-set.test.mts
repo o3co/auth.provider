@@ -2091,6 +2091,9 @@ describe("token exchange: an exchanged token reaches none of the capabilities it
 
 const WEBAUTHN_OPTIONS = "/oauth/webauthn/authentication/options";
 
+const LIFECYCLE_LOGS =
+	"core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) logs the store's failure at warn (`session_lifecycle_unavailable`, with the error's projection) and answers `unavailable`; the consumer's error line names the step but carries no projection: two lines for one outage, the cause on the warn";
+
 const OUTAGES: readonly OutageCase<FullSet>[] = [
 	{
 		module: "device-grant",
@@ -2245,6 +2248,7 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "token_exchange_session_store_unavailable",
 		unrelatedWarns: ["jwt_verify_aud_skipped"],
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "webauthn",

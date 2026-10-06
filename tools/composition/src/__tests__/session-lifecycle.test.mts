@@ -15,18 +15,19 @@
  */
 
 /**
- * Every workspace package booted together with core's session lifecycle
- * module added: the composition serves relying parties, so boot holds it to
- * a session-close notifier, which the oauth module contributes.
+ * Every workspace package booted together, the template's composition with
+ * core's session lifecycle module in it: the composition serves relying
+ * parties, so boot holds it to a session-close notifier, which the oauth
+ * module contributes.
  */
 
-import { type SessionLifecycle, sessionLifecycleModule } from "@o3co/auth-provider-core";
+import type { SessionLifecycle } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { composeFullSet } from "./full-set.fixture.mjs";
 
-describe("the full set with the session lifecycle module", () => {
+describe("the full set, which composes the session lifecycle module", () => {
 	it("boots, the oauth module's notifier contributed", async () => {
-		const { handle } = await composeFullSet({ modules: [sessionLifecycleModule] });
+		const { handle } = await composeFullSet();
 		try {
 			const lifecycle = handle.components.sessionLifecycle as SessionLifecycle | undefined;
 			expect(lifecycle).toBeDefined();
