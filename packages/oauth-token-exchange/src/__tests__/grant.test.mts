@@ -2144,6 +2144,10 @@ describe("createTokenExchangeGrant — the session rule through the session life
 		claims: {},
 		...passwordSessionAuthentication(),
 	});
+	/** A liveness answering an outcome the lifecycle's types do not declare. */
+	const undeclaredLiveness = (async () => ({
+		outcome: "undeclared",
+	})) as unknown as () => Promise<SessionLiveness>;
 	/** A lifecycle whose liveness answers `answer` for every sid, and records what it was asked. */
 	const lifecycleAnswering = (answer: () => Promise<SessionLiveness>) => {
 		const asked: string[] = [];
@@ -2203,9 +2207,9 @@ describe("createTokenExchangeGrant — the session rule through the session life
 		expect(theirs.result).toMatchObject({ status: 400, errorDescription: "session_invalid" });
 	});
 
-	it("answers a lifecycle that cannot answer, or throws, with 503, logged at error, and issues nothing", async () => {
+	it("answers a lifecycle that answers an outcome it does not declare, or throws, with 503, logged at error, and issues nothing", async () => {
 		for (const [answer, thrown] of [
-			[async (): Promise<SessionLiveness> => ({ outcome: "unavailable" }), false],
+			[undeclaredLiveness, false],
 			[
 				async (): Promise<SessionLiveness> => {
 					throw new Error("lifecycle down");
@@ -2232,7 +2236,7 @@ describe("createTokenExchangeGrant — the session rule through the session life
 				expect.objectContaining({ store: "session_lifecycle", step: "liveness", role: "subject" }),
 				"token_exchange_session_store_unavailable",
 			);
-			// An `unavailable` answer carries no error; a throw is projected.
+			// An answer that is not a success carries no error; a throw is projected.
 			const [fields] = logger.error.mock.calls.at(-1) as [Record<string, unknown>];
 			if (thrown) {
 				expect(fields.err).toEqual(expect.objectContaining({ name: "Error" }));
@@ -2291,9 +2295,9 @@ describe("createTokenExchangeGrant — the session rule through the session life
 			});
 		});
 
-		it("answers an actor's lifecycle that cannot answer, or throws, with 503 naming the actor, logged with the actor's role", async () => {
+		it("answers an actor's lifecycle that answers an outcome it does not declare, or throws, with 503 naming the actor, logged with the actor's role", async () => {
 			for (const answer of [
-				async (): Promise<SessionLiveness> => ({ outcome: "unavailable" }),
+				undeclaredLiveness,
 				async (): Promise<SessionLiveness> => {
 					throw new Error("lifecycle down");
 				},
