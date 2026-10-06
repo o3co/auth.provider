@@ -996,6 +996,8 @@ const REDIS_STORE_WHY =
 	"the Redis store copying the record to and from its envelope, and the step-up write";
 const CODE_AMR_STORE_WHY =
 	"a code repository copying the code record's amr in and out: what /authorize filled with vouchedAmr, never a session record";
+const CODE_AUTHENTICATION_STORE_WHY =
+	"a code repository copying the code record's authentication to and from its stored form: what /authorize recorded of the session it admitted, never a session record";
 const DEVICE_CODE_AMR_STORE_WHY =
 	"a device-code store copying an approval's amr in and out: what device verification filled with vouchedAmr, never a session record";
 
@@ -1314,6 +1316,18 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		read: "code.amr",
 		count: 1,
 		why: "readCodeAtExchange reads a code record's amr — what /authorize filled with vouchedAmr — once, for the requirements the exchange asks: a code record, never a session record",
+	},
+	{
+		file: "packages/redis/src/code-repository.mts",
+		read: "{authentication}=(parameter)",
+		count: 1,
+		why: CODE_AUTHENTICATION_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/code-repository.mts",
+		read: "p.authentication",
+		count: 1,
+		why: CODE_AUTHENTICATION_STORE_WHY,
 	},
 	// A device approval's amr: what the approving session vouched for at
 	// device verification (`vouchedAmr`), carried on the record to the poll.
