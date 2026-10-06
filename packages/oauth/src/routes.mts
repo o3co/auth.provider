@@ -559,6 +559,15 @@ export const createOAuthRouter = async (
 				"Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
 		);
 	}
+	if (userSessionStore !== undefined && sessionLifecycleStore === undefined) {
+		throw new Error(
+			"createOAuthRouter: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
+				"user-session store is wired, core's session lifecycle is required: /authorize and the " +
+				"consent step admit the session through its lifecycle record. Wire core's session " +
+				"lifecycle: a session-store module that fills sessionLifecycleStore " +
+				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
+		);
+	}
 	const router = express.Router();
 	// Every `oauth.*` setting below is read from `section`, and from nowhere else.
 	const { options, acrTable, canonicalIssuer, authorizationResponse, clientRepository } =

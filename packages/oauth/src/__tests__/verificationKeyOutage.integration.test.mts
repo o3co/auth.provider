@@ -53,7 +53,7 @@ import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
-import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
+import { lifecycleStoreOver, livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example.com";
@@ -167,6 +167,7 @@ async function buildApp(lookup: "up" | "down"): Promise<Harness> {
 		accessTokenDenylist: denylist,
 		userSessionStore,
 		sessionLifecycle: livenessOver(userSessionStore, [FEDERATION]),
+		sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 		federationTokenStore: {
 			kind: "memory",
 			attach: async () => {},

@@ -30,6 +30,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type RefreshTokenFamilyRevocation,
@@ -148,10 +149,12 @@ async function buildApp(userSessionStore: UserSessionStore) {
 	} as unknown as RefreshTokenFamilyRevocation;
 
 	// The browser's session, opened in the lifecycle as a login opens it.
+	const sessionLifecycleStore = createInMemorySessionLifecycleStore();
 	const sessionLifecycle = lifecycleOver({
 		userSessionStore,
 		refreshTokenFamilyRevocation,
 		federationTokenStore,
+		store: sessionLifecycleStore,
 	});
 	const established = await userSessionStore.get(SID);
 	if (established !== null) {
@@ -168,6 +171,7 @@ async function buildApp(userSessionStore: UserSessionStore) {
 		keyStore,
 		userSessionStore,
 		sessionLifecycle,
+		sessionLifecycleStore,
 		federationTokenStore,
 		refreshTokenFamilyRevocation,
 	});

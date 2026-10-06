@@ -54,7 +54,7 @@ import {
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
-import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
+import { lifecycleStoreOver, livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example.com";
@@ -159,6 +159,7 @@ async function buildApp(stores: Stores = {}): Promise<Harness> {
 		// A lifecycle the host fills, whose reads reject when the session store
 		// cannot answer.
 		sessionLifecycle: livenessOver(userSessionStore, [FEDERATION]),
+		sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 		federationTokenStore: {
 			kind: "memory",
 			attach: async () => {},

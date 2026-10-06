@@ -128,6 +128,15 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				"@o3co/auth-provider-core beside the session stores.",
 		);
 	}
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"The authorization_code grant: userSessionStore is wired, but sessionLifecycleStore is not. " +
+				"Where a user-session store is wired, core's session lifecycle is required: the grant " +
+				"admits the code's session through its lifecycle record. Wire core's session " +
+				"lifecycle: a session-store module that fills sessionLifecycleStore " +
+				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
+		);
+	}
 	// The client's logout metadata is snapshotted into the session RP
 	// registry, so the record is read through core's client-record boundary:
 	// a record it refuses rejects the lookup, answered as the store's outage.

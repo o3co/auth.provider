@@ -24,7 +24,11 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
-import { livenessOver, openedLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
+import {
+	lifecycleStoreOver,
+	livenessOver,
+	openedLifecycleStore,
+} from "./_helpers/sessionLifecycle.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
 	COMPOUND_MTLS_BINDING,
@@ -107,7 +111,11 @@ async function buildApp(
 		clientRepository,
 		...(store === undefined
 			? {}
-			: { userSessionStore: store, sessionLifecycle: livenessOver(store) }),
+			: {
+					userSessionStore: store,
+					sessionLifecycle: livenessOver(store),
+					sessionLifecycleStore: lifecycleStoreOver(store),
+				}),
 	});
 	const app = express();
 	app.use((req, _res, next) => {
