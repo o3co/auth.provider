@@ -64,6 +64,7 @@ import {
 } from "./acquisitionSettings.mjs";
 import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { createFederationGrantBackground, federationGrantsCleanupTailMs } from "./background.mjs";
+import { requireSessionLifecycleStore } from "./browserFlow.mjs";
 import {
 	createFederationGrantBrowserRouter,
 	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
@@ -163,7 +164,9 @@ const OPTIONAL = [
 	"auditSink",
 	"subjectRevocation",
 	// The session lifecycle port the browser flow's admission reads after a
-	// live record: a session closing or closed connects nothing.
+	// live record: a session closing or closed connects nothing. Required
+	// beside `userSessionStore` once grants are enabled
+	// (`requireSessionLifecycleStore`).
 	"sessionLifecycleStore",
 	"replaySeenSet",
 	"logger",
@@ -598,6 +601,7 @@ export const federationGrantsModule = defineModule<
 					{ issuer: issuerOf(deps) },
 				);
 				const limits = resolveFederationGrantRetrievalLimits(deps.section);
+				requireSessionLifecycleStore(deps);
 				return {
 					id: "federation-grants-browser",
 					mountPath: FEDERATION_GRANTS_BROWSER_MOUNT_PATH,

@@ -40,6 +40,7 @@ import type {
 	FederationProvider,
 	MemoryFederationGrantStore,
 	SessionLifecycle,
+	SessionLifecycleStore,
 	SubjectRevocationService,
 } from "@o3co/auth-provider-core";
 import {
@@ -133,11 +134,17 @@ const CASCADE_STORES = {
 
 /**
  * Core's session lifecycle, which the service closes each of the subject's
- * sessions through, over in-memory stores and the stubs' family revocation.
+ * sessions through, over in-memory stores and the stubs' family revocation,
+ * and its store in the `sessionLifecycleStore` slot beside it.
  */
-const sessionLifecycle = () =>
+const sessionLifecycleSlots = () => {
+	const store = createInMemorySessionLifecycleStore();
+	return { sessionLifecycleStore: store, sessionLifecycle: sessionLifecycleOver(store) };
+};
+
+const sessionLifecycleOver = (store: SessionLifecycleStore) =>
 	createSessionLifecycle({
-		store: createInMemorySessionLifecycleStore(),
+		store,
 		userSessionStore: createInMemoryUserSessionStore(),
 		refreshTokenFamilyRevocation: CASCADE_STORES.refreshTokenFamilyRevocation as never,
 		federationTokenStore: CASCADE_STORES.federationTokenStore as never,
@@ -210,7 +217,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 				defaultLimit: { limit: 100, windowSeconds: 60 },
 			}),
 			...CASCADE_STORES,
-			sessionLifecycle: sessionLifecycle(),
+			...sessionLifecycleSlots(),
 			// The service sizes the boundary from the lifetimes it has to
 			// outlive: the session's is the session store's slot.
 			sessionCookiePolicy,

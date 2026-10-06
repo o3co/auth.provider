@@ -74,7 +74,12 @@ export interface FederationGrantBrowserRouterOptions {
 	 * authenticated after. The grants boundary is `grantsBoundary`.
 	 */
 	readonly subjectRevocation: SubjectRevocation;
-	/** The session lifecycle port admission reads after a live record, when wired. */
+	/**
+	 * The session lifecycle port admission reads after a live record, so a
+	 * session closing or closed connects nothing. Required beside
+	 * `userSessionStore`: core's session lifecycle is required where a
+	 * user-session store is wired.
+	 */
 	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 	/**
 	 * The `sessionRequirementResolver` the boot planner built (`resolverForTests` in
@@ -159,6 +164,25 @@ export interface BrowserFlow {
 		outcome: string,
 		intent?: FederationGrantIntent,
 	) => void;
+}
+
+/**
+ * Throws where a user-session store is wired without the session lifecycle
+ * port: admission would skip the lifecycle record, and a closing session
+ * could connect.
+ */
+export function requireSessionLifecycleStore(deps: {
+	readonly userSessionStore?: UserSessionStore | undefined;
+	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
+}): void {
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"federation-grants: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
+				"user-session store is wired, core's session lifecycle is required: the connect flow " +
+				"admits the session behind the cookie through its lifecycle record. Install " +
+				"sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
+	}
 }
 
 /**
