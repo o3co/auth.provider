@@ -74,6 +74,38 @@ export type LiveSession =
 export const renewedAway = (bound: unknown, presented: string | undefined): boolean =>
 	bound != null && (!isRenewalNonce(bound) || bound !== presented);
 
+/**
+ * The record's declared fields, each read by name once, and nothing else of
+ * it; an optional field read as `undefined` is left out. Admission reads
+ * only this copy, so a store's accessor answers one value throughout.
+ */
+const copyRecord = (record: UserSession): UserSession => {
+	const {
+		sid,
+		sub,
+		authTime,
+		createdAt,
+		expiresAt,
+		claims,
+		amr,
+		authentication,
+		enrollmentFacts,
+		renewalNonce,
+	} = record;
+	return {
+		sid,
+		sub,
+		authTime,
+		createdAt,
+		expiresAt,
+		claims,
+		amr,
+		authentication,
+		...(enrollmentFacts === undefined ? {} : { enrollmentFacts }),
+		...(renewalNonce === undefined ? {} : { renewalNonce }),
+	};
+};
+
 /** The one read of a session record admission makes: the store's answer, or its rejection. */
 export const readRecord = (
 	store: UserSessionStore,
@@ -97,14 +129,16 @@ export async function readLiveSession(
 		return { answer: { outcome: "not_live", reason: "no_subject" } };
 	}
 
-	// Step 2: the live read. The store is read off `deps` once, in the same
-	// guarded section as the record: a read that throws is its outage.
+	// Step 2: the live read. The store is read off `deps` once, and the
+	// record copied once, in the same guarded section: a read that throws is
+	// its outage.
 	let userSessionStore: UserSessionStore | undefined;
 	let record: UserSession | null | undefined;
 	try {
 		userSessionStore = checked.readUserSessionStore();
 		if (userSessionStore !== undefined && presented.sid !== undefined) {
-			record = await readRecord(userSessionStore, presented.sid);
+			const read = await readRecord(userSessionStore, presented.sid);
+			record = read == null ? read : copyRecord(read);
 		}
 	} catch (err) {
 		return { answer: unavailable("user_session" satisfies AdmissionInfrastructureStore, err) };
@@ -162,8 +196,6 @@ export async function readLiveSession(
 	// id a concurrent request saved back after the renewal holds another or
 	// none. A record without one is bound to nothing; other carriers hold no
 	// cookie session to compare.
-	// Read once: a store's accessor cannot answer one value to the check, and
-	// another to the comparison or to the consumer.
 	const bound: unknown = session === null ? undefined : session.renewalNonce;
 	if (session !== null && presented.carrier === "cookie") {
 		// A value that is not a nonce binds the record to no cookie session,
