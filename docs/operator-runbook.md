@@ -1271,10 +1271,7 @@ ADR's D5, D21, D24).
   returns stays until the process restarts — express-session's memory store
   reaps a record only when it is read — bounded by the `/authorize` rate
   limit and the 8 KB cap. The ask's store failing is
-  `authorize_reauth_ask_store_unavailable`. During a rolling upgrade from a
-  release that spent the ask when it read it, a replica on that release
-  can spend it before consent resumes the request: the user is asked to
-  log in again once.
+  `authorize_reauth_ask_store_unavailable`.
 - **Notices to the account holder: required, and yours.** The provider sends
   none. It records audit events (`auditSink`), and the deployment reads them
   and tells the account holder — by mail, a chat message, anything — of every
@@ -2694,6 +2691,15 @@ lists every breaking change since, and which of the steps below each needs.
 
 ### Rolling out
 
+- **From v0.16.0, upgrade in one coordinated step: no rolling upgrade.** Stop
+  every v0.16.0 replica (drain its traffic), delete what v0.16.0 wrote that
+  the new release no longer reads, then start the new release on every
+  replica (`docs/upgrading-from-v0.16.0.md`, "Rolling out across a mixed
+  fleet", has the keys). v0.16.0 records a session's relying parties and
+  refresh-token families in the per-session stores, and the new release ends
+  a session from its lifecycle record alone: a v0.16.0 replica serving beside
+  it hands out tokens whose logout tells no relying party and revokes no
+  family. The mixed-fleet notes below do not apply to that step.
 - The image is `node:26-alpine`, digest-pinned, with `tini` and a `runtime`
   stage that carries compiled JS and production dependencies only
   (`templates/standalone/Dockerfile`). `pnpm install --frozen-lockfile` means
@@ -2712,10 +2718,11 @@ lists every breaking change since, and which of the steps below each needs.
   period (`templates/standalone/src/shutdown.mts`).
 - Under `CORE_DEPLOYMENT_MODE=multi`, a mixed fleet during the roll is fine for
   every Redis-backed store — the schemas below are what decide whether the
-  *older* release can read what the *newer* one wrote. The one exception is
-  v0.16.0, which moves DPoP onto the replay seen-set: its replay records
-  change keys, so a mixed fleet opens a replay window (see the DPoP note in
-  [Before you upgrade](#before-you-upgrade)).
+  *older* release can read what the *newer* one wrote. The exceptions are
+  v0.16.0, which moves DPoP onto the replay seen-set (its replay records
+  change keys, so a mixed fleet opens a replay window; see the DPoP note in
+  [Before you upgrade](#before-you-upgrade)), and the release after v0.16.0,
+  which is not rolled onto at all (above).
 - An authorization code carries the `amr` its `/authorize` vouched for, and
   `/token` stamps that, not the session record's. A mixed fleet issues and
   redeems codes across releases for at most one code lifetime

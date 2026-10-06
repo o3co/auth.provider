@@ -31,7 +31,10 @@ describes.
    the users your Store answers.
 3. Update code that implements a port or calls an API that changed, and run
    the conformance suites.
-4. Roll the whole fleet onto the new release.
+4. Upgrade the whole fleet onto the new release in one coordinated step:
+   stop every v0.16.0 replica, then start the new one
+   ([Rolling out](#rolling-out-across-a-mixed-fleet)); a rolling upgrade from
+   v0.16.0 is not supported.
 5. Only then decide on MFA, with `optional` before `required`.
 
 ## Your scaffold
@@ -219,8 +222,8 @@ Every setting now lives under the name of the module that owns it (#728).
 An old path refuses the boot, naming the new one and the variable bound to
 it, while the module that owns it is loaded. A renamed variable refuses the
 boot when it is set alone or beside its new name at a different value; set
-to the same value as its new name, it boots, so a fleet can carry both
-through a rolling upgrade. Sections are strict: a key a module's section
+to the same value as its new name, it boots, so an environment can carry
+both while it moves. Sections are strict: a key a module's section
 does not declare refuses the boot, naming its path, where it used to be
 dropped — [Values read more strictly](#values-read-more-strictly) lists the
 sections that still accept one.
@@ -1309,9 +1312,6 @@ modules fills them.
   there is logged as `federation_link_store_unavailable` with
   `store: "session_lifecycle"`, `step: "federations"`, in place of
   `store: "session_federation_index"`, `step: "list"` and `"remove"`.
-  Keep its provider: `sessionLifecycleModule` and the
-  `federation-stores-incomplete` guard still require the slot; only
-  `sessionModule`'s own `requires` and the router option drop it.
 - **BREAKING: every failed close at `POST /session/logout` is an outage.** A
   logout whose `sid` the session lifecycle cannot hold now answers
   `503 temporarily_unavailable` and keeps the cookie, as any close the
@@ -1900,41 +1900,45 @@ are the template README's
 
 ## Rolling out across a mixed fleet
 
-[Operator runbook §7, Rolling out](operator-runbook.md#rolling-out) has the
-detail; what a mixed fleet of v0.16.0 and this release does:
+**A rolling upgrade from v0.16.0 is not supported: upgrade the fleet in one
+coordinated step, with no mixed fleet** (#1030). v0.16.0 records the relying
+parties and refresh-token families a session joins in the per-session stores
+(`sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`); this
+release records them in the session's lifecycle record and ends a session
+from that record alone. A v0.16.0 replica serving beside this release, for
+example redeeming a code a new replica issued, writes what it hands out where
+this release's logout does not look: that logout tells no relying party of it
+and leaves its family unrevoked. So:
+
+1. Stop every v0.16.0 replica, draining its traffic.
+2. With none running, delete what v0.16.0 wrote that this release no longer
+   reads. The per-session stores' keys (`ss:rp:*`, `ss:fi:*`, `ss:fi-ended:*`,
+   `ss:fed:*`, under the prefixes your deployment sets;
+   [operator runbook, Key families](operator-runbook.md#key-families)
+   lists the keyspace) are safe to delete. Deleting the refresh-token families
+   (`rtfam:*`) is recommended: every refresh token bound to a v0.16.0 session
+   is refused anyway ([every user signs in again](#passkeys-users-and-sessions)),
+   and with its family gone a refresh token without a `sid` is refused too,
+   unless `oauth-authorization.grants.refreshToken.unknownFamilyPolicy` is
+   `"accept"`.
+3. Start this release on every replica, every package at the same release.
+
+What carries across the step:
 
 - **Upgrade every package together, onto the same release:** core and every
   adapter package at one release in each replica.
-- **The federation-grant rotation budget binds once no v0.16.0 replica
-  remains** (#1032). A v0.16.0 replica takes no rotation, so the refreshes it
-  makes are not counted against a grant's budget; its writes keep the
-  `rotations` a newer replica counted.
-
-- **Codes cross releases** for at most one code lifetime. A code a v0.16.0
-  replica issued, redeemed by this release, yields tokens without `amr`, and
-  its refresh family carries none until it ends or the user signs in again;
-  under `MFA_MODE` (template) / `mfa.mode` `required` it is refused at its
-  first refresh. A deployment for which that matters revokes the families
-  issued during the roll, or calls `revokeAllForSubject`, once the fleet is
-  upgraded. Under
-  `oauth-authorization.grants.refreshToken.unknownFamilyPolicy = "accept"` a
-  token with no family record has no such bound.
-- **Do not turn `MFA_MODE` (template) / `mfa.mode` on until no v0.16.0
-  replica remains** — with the template's default, keep `MFA_MODE=off` set
-  for the roll ([Your scaffold](#your-scaffold)): an older
-  replica redeeming a code stamps the record's `amr`, a step-up's included,
-  and one older than the renewal nonce admits an old cookie put back after a
-  step-up.
-- **The re-authentication ask.** A v0.16.0 replica spends the ask when it
-  reads it, so consent after a login trip can ask for a second login once
-  ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
-- **Fix the client records the boundary refuses before the roll.** During
-  it, such a client alternates between `200` from v0.16.0 replicas and `503`
-  from new ones ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
-- **Sessions a v0.16.0 replica establishes are refused by this release**
-  (#1030): they have no lifecycle record, which reads as closed
-  ([above](#passkeys-users-and-sessions)). A user signed in through an older
-  replica during the roll signs in again once a new replica serves them.
+- **The federation-grant rotation budget counts from the upgrade** (#1032).
+  v0.16.0 took no rotation, so the refreshes it made are not counted against
+  a grant's budget.
+- **Codes do not cross the step.** A code v0.16.0 issued and nobody redeemed
+  names a session with no lifecycle record, so its exchange is refused, and
+  the relying party authorizes again.
+- **Keep `MFA_MODE` (template) / `mfa.mode` off for the first start**, as
+  [Your scaffold](#your-scaffold) says, and turn it on as
+  [Turning MFA on](#turning-mfa-on) says.
+- **Fix the client records the boundary refuses before the upgrade.** From
+  it, such a client is answered `503`
+  ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
 - **Federated sessions** live at the upgrade stamp `["fed"]` until the user
   logs in again ([operator runbook §7](operator-runbook.md#before-you-upgrade),
   step 3).
