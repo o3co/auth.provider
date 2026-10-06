@@ -611,6 +611,8 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 	});
 
 	it("mounts the cookie its provider built, a later module's write to config's session-store refused", async () => {
+		// The mounted cookie comes from the policy the provider built, never from a
+		// later read of config; the frozen config slot now guarantees it as well.
 		const config = configWith({ name: "auth.session", secure: false }) as AppConfig;
 		const seen: { policy?: SessionCookiePolicy; write?: string } = {};
 		const handle = await createApp({
