@@ -15,9 +15,9 @@
  */
 
 /**
- * The template's composition with core's session lifecycle module added:
- * it serves relying parties, so boot holds it to a session-close notifier,
- * which the oauth module contributes.
+ * The template composes core's session lifecycle module: it serves relying
+ * parties, so boot holds it to a session-close notifier, which the oauth
+ * module contributes.
  */
 
 import {
@@ -26,7 +26,6 @@ import {
 	type SessionLifecycle,
 	type SessionLifecycleStore,
 	type SubjectSessionIndex,
-	sessionLifecycleModule,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import request from "supertest";
@@ -51,9 +50,9 @@ afterEach(() => {
 const claimsOf = (token: string): Record<string, unknown> =>
 	JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
 
-describe("the template with the session lifecycle module", () => {
+describe("the template, which composes the session lifecycle module", () => {
 	it("boots, the oauth module's notifier contributed", async () => {
-		const { handle } = await compose({ extraModules: () => [sessionLifecycleModule] });
+		const { handle } = await compose();
 		try {
 			const lifecycle = handle.components.sessionLifecycle as SessionLifecycle | undefined;
 			expect(lifecycle).toBeDefined();
@@ -70,7 +69,6 @@ describe("the template with the session lifecycle module", () => {
 
 	it("tells a relying party that joined, through the oauth module's notifier, when the session closes", async () => {
 		const { handle } = await compose({
-			extraModules: () => [sessionLifecycleModule],
 			extraClients: {
 				"rp-bc": {
 					tokenEndpointAuthMethod: "client_secret_basic",
@@ -127,7 +125,7 @@ describe("the template with the session lifecycle module", () => {
 	});
 
 	it("opens a password login's session in the lifecycle, active with nothing joined yet", async () => {
-		const { app, handle } = await compose({ extraModules: () => [sessionLifecycleModule] });
+		const { app, handle } = await compose();
 		try {
 			expect((await login(app)).res.status).toBe(200);
 			const components = handle.components as Record<string, unknown>;
@@ -143,9 +141,7 @@ describe("the template with the session lifecycle module", () => {
 	});
 
 	it("joins a federated login's federation to the session's lifecycle record, beside its tokens, through the session module's federation routes", async () => {
-		const { app, handle, upstreams } = await compose({
-			extraModules: () => [sessionLifecycleModule],
-		});
+		const { app, handle, upstreams } = await compose();
 		try {
 			const callback = await (await federatedCallback(app, "oidc", upstreams.oidc))();
 			expect(callback.status).toBe(302);
@@ -168,7 +164,7 @@ describe("the template with the session lifecycle module", () => {
 	});
 
 	it("joins a code exchange's relying party and family to the session's lifecycle record", async () => {
-		const { app, handle } = await compose({ extraModules: () => [sessionLifecycleModule] });
+		const { app, handle } = await compose();
 		try {
 			const tokens = await webTokens(app);
 			const claims = claimsOf(tokens.refresh_token ?? "");
@@ -187,7 +183,7 @@ describe("the template with the session lifecycle module", () => {
 	});
 
 	it("closes the session through the lifecycle at /oauth/logout: the record closed, the session and its refresh token gone", async () => {
-		const { app, handle } = await compose({ extraModules: () => [sessionLifecycleModule] });
+		const { app, handle } = await compose();
 		try {
 			const tokens = await webTokens(app);
 			const sid = String(claimsOf(tokens.refresh_token ?? "").sid);

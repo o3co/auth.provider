@@ -667,7 +667,7 @@ is bound to the subject, the factor id and the kind, not the version.
 There are two, they differ, and the difference is one you have to choose
 against — a session logged out at the wrong endpoint keeps a live credential.
 
-| | `POST /session/logout` | `POST /session/logout`, with core's session lifecycle | `POST /oauth/logout` |
+| | `POST /session/logout`, without core's session lifecycle (a composition of your own) | `POST /session/logout`, with core's session lifecycle (the standalone template) | `POST /oauth/logout` |
 |---|---|---|---|
 | Who calls it | the browser; the BFF / `auth.proxy` injection topology | the same | an RP, with an `id_token_hint` |
 | express-session cookie | destroyed | destroyed once the close commits; kept on a `503` | destroyed, but only when the request's own cookie names the `sid` being logged out |
@@ -685,7 +685,9 @@ already does. Without the lifecycle, only `/oauth/logout` stops a **refresh**
 token: if the session completed an `/authorize` → `authorization_code` flow,
 call that one. With it, `/session/logout` revokes the families too. The
 `session` grant issues no refresh token, so a deployment whose tokens all come
-from it is fully served by `/session/logout` either way.
+from it is fully served by `/session/logout` either way. The standalone
+template composes core's session lifecycle, so both of its logout endpoints
+close the session through it.
 
 Neither endpoint reaches a resource server that validates the JWT offline —
 signature and `exp`, no introspection call. Such a consumer cannot observe a

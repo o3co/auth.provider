@@ -26,7 +26,6 @@ import {
 	readVersionedSessionLifecycle,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
-	sessionLifecycleModule,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import request from "supertest";
@@ -51,7 +50,6 @@ const csrfTokenOf = (cookies: readonly string[]): string => {
 describe("POST /session/logout with the session lifecycle module", () => {
 	it("revokes the session's families, tells its relying parties and closes its record", async () => {
 		const { app, handle } = await compose({
-			extraModules: () => [sessionLifecycleModule],
 			extraClients: {
 				"rp-bc": {
 					tokenEndpointAuthMethod: "client_secret_basic",
@@ -102,6 +100,29 @@ describe("POST /session/logout with the session lifecycle module", () => {
 			expect(await sessions.get(sid)).toBeNull();
 			const store = components.sessionLifecycleStore as SessionLifecycleStore;
 			expect(readVersionedSessionLifecycle(await store.read(sid))?.value.state).toBe("closed");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("answers 503 when the close cannot commit, and the cookie still admits the session for a retry", async () => {
+		const { app, handle } = await compose();
+		try {
+			const { cookies } = await login(app);
+			const components = handle.components as Record<string, unknown>;
+			const store = components.sessionLifecycleStore as SessionLifecycleStore;
+			vi.spyOn(store, "beginClose").mockRejectedValue(new Error("lifecycle store down"));
+
+			const res = await request(app)
+				.post("/session/logout")
+				.set("Cookie", cookies)
+				.set("x-csrf-token", csrfTokenOf(cookies));
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			// The session is still live and its cookie still admits it.
+			const authorized = await authorize(app, cookies);
+			expect(codeFrom(authorized)).toEqual(expect.any(String));
 		} finally {
 			await handle.dispose();
 		}

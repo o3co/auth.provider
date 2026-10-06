@@ -130,6 +130,7 @@ const ALL_ON_REDIS_MODULES = [
 	"redis-federation-grant-store",
 	"redis-federation-grant-intent-store",
 	"redis-session-stores",
+	"core-session-lifecycle",
 	"redis-rate-limiter",
 	"redis-attempt-counter",
 	"redis-code-repository",

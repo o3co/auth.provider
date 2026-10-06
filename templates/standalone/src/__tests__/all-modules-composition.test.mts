@@ -195,6 +195,7 @@ const ALL_ON_MODULES = [
 	"core-federation-grant-store-memory",
 	"core-federation-grant-intent-store-memory",
 	"standalone-in-memory-session-stores",
+	"core-session-lifecycle",
 	"core-rate-limiter-memory",
 	"standalone-in-memory-code-repository",
 	"core-access-token-denylist-memory",
@@ -825,6 +826,16 @@ const oidcCallback = async (app: express.Express, outage: Outage, c: Composition
 const VERIFIER_WARN =
 	"core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) writes its own `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) beside the route's error line: two lines for one outage (the runbook's outage table documents both)";
 
+/** The CSRF token the session middleware set in `cookies`, for a request that mutates. */
+const csrfTokenOf = (cookies: readonly string[]): string => {
+	const cookie = cookies.find((c) => /^[^=]*\.csrf=/.test(c));
+	if (cookie === undefined) throw new Error("the login reissued no CSRF cookie");
+	return decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1).split(";")[0] ?? "");
+};
+
+const LIFECYCLE_LOGS =
+	"core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) logs the store's failure at warn (`session_lifecycle_unavailable`, with the error's projection) and answers `unavailable`; the consumer's error line names the step but carries no projection: two lines for one outage, the cause on the warn. Fixed before 0.17.0 by the PR that removes the lifecycle's bridge (#1030, 14a), which restores one error line, the consumer's, with the projection";
+
 const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "oauth-authorization",
@@ -841,6 +852,7 @@ const OUTAGES: readonly OutageCase[] = [
 		run: codeExchange,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "authorization_grant_store_unavailable",
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth-authorization",
@@ -849,6 +861,7 @@ const OUTAGES: readonly OutageCase[] = [
 		run: codeExchange,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "authorization_grant_store_unavailable",
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth",
@@ -926,6 +939,50 @@ const OUTAGES: readonly OutageCase[] = [
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "userinfo_store_unavailable",
 		unrelatedWarns: ["jwt_verify_aud_skipped"],
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
+	},
+	{
+		module: "oauth",
+		slot: "sessionLifecycleStore",
+		surface: "/oauth/userinfo",
+		run: async (app, outage) => {
+			const { access_token } = await webTokens(app);
+			outage.down = true;
+			return request(app).get("/oauth/userinfo").set("Authorization", `Bearer ${access_token}`);
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "userinfo_store_unavailable",
+		unrelatedWarns: ["jwt_verify_aud_skipped"],
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
+	},
+	{
+		module: "oauth",
+		slot: "sessionLifecycleStore",
+		surface: "POST /oauth/logout",
+		run: async (app, outage) => {
+			const { id_token } = await webTokens(app);
+			outage.down = true;
+			return request(app).post("/oauth/logout").type("form").send({ id_token_hint: id_token });
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "logout_store_unavailable",
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
+	},
+	{
+		module: "session",
+		slot: "sessionLifecycleStore",
+		surface: "POST /session/logout",
+		run: async (app, outage) => {
+			const { cookies } = await login(app);
+			outage.down = true;
+			return request(app)
+				.post("/session/logout")
+				.set("Cookie", cookies)
+				.set("x-csrf-token", csrfTokenOf(cookies));
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_logout_store_unavailable",
+		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth-session",
@@ -1051,6 +1108,7 @@ const OUTAGES: readonly OutageCase[] = [
 		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "federation_callback_store_unavailable",
+		defects: { "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "core (rate-limit guard)",

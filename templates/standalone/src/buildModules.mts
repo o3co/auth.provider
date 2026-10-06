@@ -24,6 +24,7 @@ import {
 	memoryFederationGrantStoreModule,
 	memoryRateLimiterModule,
 	memoryReplaySeenSetModule,
+	sessionLifecycleModule,
 } from "@o3co/auth-provider-core";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
@@ -328,6 +329,12 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		...federationGrantStoreModules,
 		...federationGrantIntentStoreModules,
 		...sessionStoresModules,
+		// Core's session lifecycle, over the session stores' lifecycle store:
+		// a login opens its session's record, a code exchange joins its relying
+		// party and family to it, and both logout endpoints close it, which
+		// revokes the families and tells the relying parties. Its sweep resumes
+		// a close left pending.
+		sessionLifecycleModule,
 		...rateLimiterModules,
 		...attemptCounterModules,
 		...codeRepositoryModules,

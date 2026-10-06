@@ -21,11 +21,7 @@
  * introspection, userinfo and the session grant all refuse it.
  */
 
-import {
-	type SessionLifecycle,
-	sessionLifecycleModule,
-	type UserSessionStore,
-} from "@o3co/auth-provider-core";
+import type { SessionLifecycle, UserSessionStore } from "@o3co/auth-provider-core";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -49,7 +45,6 @@ const claimsOf = (token: string): Record<string, unknown> =>
 describe("a session whose close is pending on a failed relying-party notice", () => {
 	it("is refused by introspection, userinfo and the session grant, its user session still there", async () => {
 		const { app, handle } = await compose({
-			extraModules: () => [sessionLifecycleModule],
 			extraClients: {
 				"rp-down": {
 					tokenEndpointAuthMethod: "client_secret_basic",
@@ -131,7 +126,6 @@ describe("a session whose close is pending on a failed relying-party notice", ()
 
 	it("an RP-initiated logout whose notice fails answers success, and its session is refused by introspection, userinfo and the session grant", async () => {
 		const { app, handle } = await compose({
-			extraModules: () => [sessionLifecycleModule],
 			extraClients: {
 				"rp-down": {
 					tokenEndpointAuthMethod: "client_secret_basic",

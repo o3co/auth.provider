@@ -165,8 +165,8 @@ index kept in the same atomic step as the record.
 
 **D8. The service and its answers.** `SessionLifecycle`
 (`src/session-lifecycle/service.mts`) fills the `sessionLifecycle`
-slot through `sessionLifecycleModule`, which nothing installs until the
-callers switch. `open(sid, { sub, expiresAt })`, called where a session is
+slot through `sessionLifecycleModule`, which the standalone template
+installs. `open(sid, { sub, expiresAt })`, called where a session is
 established, writes its record active and answers `opened` (a repeat for the
 same subject and end too), `refused` or `unavailable`: the service is the
 port's one writer, so no caller opens a record through the port.
