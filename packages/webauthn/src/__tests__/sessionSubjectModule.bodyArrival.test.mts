@@ -191,24 +191,33 @@ async function setup(options: { readonly preset?: WebAuthnSubject } = {}) {
 	/**
 	 * Posts the registration in two halves, running `between` once the first
 	 * half is sent and the headers have reached the server, to `path`; answers
-	 * the response's status and body.
+	 * the response's status and body. With `emptyChunked`, the request is
+	 * chunked with no content type and no data: its headers first, and only
+	 * its terminating chunk after `between`.
 	 */
-	const post = async (between: () => Promise<void>, path: string = VERIFY) => {
+	const post = async (
+		between: () => Promise<void>,
+		path: string = VERIFY,
+		emptyChunked = false,
+	) => {
 		const req = http.request({
 			host: "127.0.0.1",
 			port,
 			method: "POST",
 			path,
-			headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
+			headers: emptyChunked
+				? { "transfer-encoding": "chunked" }
+				: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
 		});
 		const response = once(req, "response") as Promise<[http.IncomingMessage]>;
-		const half = Math.floor(body.length / 2);
-		req.write(body.slice(0, half));
+		const half = emptyChunked ? 0 : Math.floor(body.length / 2);
+		if (emptyChunked) req.flushHeaders();
+		else req.write(body.slice(0, half));
 		await headersArrived.promise;
 		// Whatever admission does on the headers alone has run by now.
 		await Promise.race([lifecycleRead.promise, new Promise((r) => setTimeout(r, 100))]);
 		await between();
-		req.end(body.slice(half));
+		req.end(emptyChunked ? undefined : body.slice(half));
 		const [res] = await response;
 		let text = "";
 		res.setEncoding("utf8");
@@ -319,4 +328,36 @@ describe("webauthnSessionSubjectModule — on every path the registration routes
 			}
 		},
 	);
+});
+
+describe("webauthnSessionSubjectModule — admission once an empty chunked body has ended", () => {
+	const OPTIONS = "/oauth/webauthn/registration/options";
+
+	it("answers the options of a session that stays active until the body ends", async () => {
+		const { post, close } = await setup();
+		try {
+			const res = await post(async () => {}, OPTIONS, true);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(200);
+		} finally {
+			close();
+		}
+	});
+
+	it("answers 401 for a session that closes before the body ends", async () => {
+		const { post, closeSession, close } = await setup();
+		try {
+			const res = await post(
+				async () => {
+					await closeSession();
+				},
+				OPTIONS,
+				true,
+			);
+
+			expect(res.status).toBe(401);
+		} finally {
+			close();
+		}
+	});
 });

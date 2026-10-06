@@ -40,7 +40,7 @@ import {
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import express, { type RequestHandler, type Response } from "express";
-import { jsonBody, refuseBodyNotJson } from "./internal/jsonBody.mjs";
+import { wholeBody } from "./internal/jsonBody.mjs";
 import type { WebAuthnSubject } from "./request.mjs";
 
 /** The id of the module's one route. */
@@ -230,11 +230,12 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 					// body has arrived, with the routes' own parser and limit: a
 					// session that closes while the body is still arriving registers
 					// nothing, and the routes' parser leaves the parsed body as it is.
-					// A body the parser would not read is refused before admission.
+					// Any other body is read to its end too, within the same limit,
+					// and refused before admission when it has bytes.
 					const router = express.Router();
 					for (const path of ["/options", "/verify"]) {
 						const route = express.Router();
-						route.post("/", refuseBodyNotJson, jsonBody(), admitRegistration);
+						route.post("/", ...wholeBody(), admitRegistration);
 						router.use(path, route);
 					}
 					return {

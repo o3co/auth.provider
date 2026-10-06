@@ -26,6 +26,8 @@
  * no subject otherwise, so the routes answer their `401`.
  */
 
+import { once } from "node:events";
+import net, { type AddressInfo } from "node:net";
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	createInMemorySessionLifecycleStore,
@@ -651,5 +653,108 @@ describe("webauthnSessionSubjectModule — the deployment's mapper is held to th
 		expect(context.reason).toBe("threw");
 		expect(context.err).not.toBeInstanceOf(Error);
 		expect(context.err).toMatchObject({ name: "Error" });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The body's framing
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends `head` — the request line and headers, without `Host` and
+ * `Connection` — then `body`, exactly as given, over a socket; answers the
+ * status and the body, parsed when it is JSON.
+ */
+async function rawPost(app: express.Express, head: readonly string[], body = "") {
+	const server = app.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	try {
+		const { port } = server.address() as AddressInfo;
+		const socket = net.connect(port, "127.0.0.1");
+		await once(socket, "connect");
+		socket.write([...head, "Host: 127.0.0.1", "Connection: close", "", ""].join("\r\n") + body);
+		const chunks: Buffer[] = [];
+		for await (const chunk of socket) chunks.push(chunk as Buffer);
+		const text = Buffer.concat(chunks).toString("utf8");
+		const payload = text.slice(text.indexOf("\r\n\r\n") + 4);
+		let parsed: unknown = payload;
+		try {
+			parsed = JSON.parse(payload);
+		} catch {
+			// Not JSON: answered as text.
+		}
+		return { status: Number(text.split(" ")[1]), body: parsed as Record<string, unknown> };
+	} finally {
+		server.close();
+	}
+}
+
+const OPTIONS_LINE = "POST /oauth/webauthn/registration/options HTTP/1.1";
+const CHUNKED = "Transfer-Encoding: chunked";
+
+describe("webauthnSessionSubjectModule — the body's framing", () => {
+	it.each([
+		[
+			"a chunked JSON body",
+			[OPTIONS_LINE, "Content-Type: application/json", CHUNKED],
+			"1\r\n{\r\n1\r\n}\r\n0\r\n\r\n",
+		],
+		["an empty chunked body with no content type", [OPTIONS_LINE, CHUNKED], "0\r\n\r\n"],
+		["Content-Length: 00 with no content type", [OPTIONS_LINE, "Content-Length: 00"], ""],
+		["a request with no body framing at all", [OPTIONS_LINE], ""],
+		[
+			"a JSON body with a charset parameter",
+			[OPTIONS_LINE, "Content-Type: application/json; charset=utf-8", "Content-Length: 2"],
+			"{}",
+		],
+	] as const)("admits %s", async (_what, head, body) => {
+		const { app, get } = setup();
+		const res = await rawPost(app, head, body);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+		expect(get).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		[
+			"a body sent as application/*+json, which the routes' parser does not read",
+			[OPTIONS_LINE, "Content-Type: application/vnd.example+json", "Content-Length: 2"],
+			"{}",
+		],
+		["a chunked body with no content type", [OPTIONS_LINE, CHUNKED], "2\r\n{}\r\n0\r\n\r\n"],
+		[
+			"a body with a non-JSON content type",
+			[OPTIONS_LINE, "Content-Type: text/plain", "Content-Length: 02"],
+			"{}",
+		],
+	] as const)(
+		"refuses %s with 400 invalid_request, with no session read",
+		async (_what, head, body) => {
+			const { app, get } = setup();
+			const res = await rawPost(app, head, body);
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({ error: "invalid_request" });
+			expect(get).not.toHaveBeenCalled();
+		},
+	);
+
+	it("refuses a chunked body with no content type over the routes' 100kb limit with 413, with no session read", async () => {
+		const { app, get } = setup();
+		const big = "x".repeat(110_000);
+		const res = await rawPost(
+			app,
+			[OPTIONS_LINE, CHUNKED],
+			`${big.length.toString(16)}\r\n${big}\r\n0\r\n\r\n`,
+		);
+		expect(res.status).toBe(413);
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("leaves a subject an earlier middleware set for an empty chunked request from a browser that is not signed in", async () => {
+		const { app, get } = setup({ session: {}, preset: { userId: "bearer-user" } });
+		const res = await rawPost(app, [OPTIONS_LINE, CHUNKED], "0\r\n\r\n");
+		expect(res.status).toBe(200);
+		expect(res.body.subject).toEqual({ userId: "bearer-user" });
+		expect(get).not.toHaveBeenCalled();
 	});
 });
