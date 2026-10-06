@@ -18,7 +18,9 @@
  * The token mint: the issued access token's `act`, scope, audience and binding, and
  * its lifetime, the requested or the default one clamped to the maximum and never
  * past the subject token's own expiry. A subject token that has already expired is
- * refused, never minted from.
+ * refused, never minted from. The subject's `acr`, `amr` and `auth_time` are carried
+ * only from a token this provider's own validator verified for the issuer minting;
+ * the actor's never are.
  */
 
 import {
@@ -38,6 +40,7 @@ import {
 import { buildActClaim } from "./act.mjs";
 import { invalidRequest } from "./answers.mjs";
 import type { ReportedBindings } from "./tokenValidation.mjs";
+import { verifiedAuthenticationOf } from "./validator/selfIssuedAccessToken.mjs";
 
 /** What the issued token is minted from. */
 export interface Issuance {
@@ -121,6 +124,7 @@ export async function issueAccessToken(
 			// with it. The actor's session is not carried.
 			[LIVENESS_SID_CLAIM]: subjectBindings.sid,
 			act,
+			...carriedAuthentication(subjectValidated, ctx.issuer, issuedAt),
 		}),
 		{
 			expiresIn,
@@ -154,4 +158,27 @@ export async function issueAccessToken(
 		};
 	}
 	return { accessToken, expiresIn: remaining };
+}
+
+/**
+ * The subject's `acr`, `amr` and `auth_time` the issued token carries: only
+ * from an answer the built-in validator gave for a token verified against the
+ * issuer minting, else none. `auth_time` is never later than the subject's own
+ * `iat` nor than this issuance.
+ */
+function carriedAuthentication(
+	subjectValidated: ValidatedToken,
+	issuer: string | undefined,
+	issuedAt: number,
+): { readonly acr?: string; readonly amr?: readonly string[]; readonly auth_time?: number } {
+	const verified = verifiedAuthenticationOf(subjectValidated);
+	if (verified === undefined || issuer === undefined || verified.issuer !== issuer) return {};
+	const { acr, amr, authTime, issuedAt: subjectIssuedAt } = verified;
+	return {
+		...(acr !== undefined ? { acr } : {}),
+		...(amr !== undefined ? { amr: [...amr] } : {}),
+		...(authTime !== undefined
+			? { auth_time: Math.min(authTime, subjectIssuedAt ?? issuedAt, issuedAt) }
+			: {}),
+	};
 }
