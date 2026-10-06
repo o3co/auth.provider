@@ -123,8 +123,8 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     alert on that line sees nothing now.
   - A `federation-grants.enabled` (`FEDERATION_GRANTS_ENABLED`) that does not
     read as a boolean installs the federation-grants modules and is refused at
-    boot, `config-validation-failed` naming `federation-grants.enabled`, where
-    it was a `RangeError` before boot. A `core.sessionRequirements` boot's
+    boot, `config-validation-failed` naming `federation-grants.enabled`. A
+    `core.sessionRequirements` boot's
     schema refuses — `expected` not a list of names, or a key core does not
     declare — is refused the same way at its path, and so is a bad
     access-token lifetime (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`,
@@ -132,9 +132,10 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     which the template no longer reads before boot either. With MFA on, a
     written `core.sessionRequirements.secondFactorAuthority` other than `mfa`
     is still refused before boot.
-  - What the template refuses before boot is a `BootError` under the reason
-    boot raises for the same case, where it was a `RangeError` with no
-    reason; the messages are unchanged. An adapter selection at its old path
+  - What the template refuses of the configuration before boot — reading
+    `adapters`, `mfaMode` and `logging`, and building what `resolveForBoot`
+    hands boot — is a `BootError` under the reason boot raises for the same
+    case, so an alert keyed on that reason sees it. An adapter selection at its old path
     (`rateLimiter.adapter`, …), and `redisFederationGrantStore.keyPrefix`
     where no loaded module reads it, are `config-path-relocated`; an old
     adapter variable (`RATE_LIMITER_ADAPTER`, …) or `FEDERATIONS_*` variable
@@ -145,8 +146,11 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     `core.sessionRequirements.secondFactorAuthority`, the Redis intent
     store's key prefix — are `config-validation-failed`, each issue at its
     key's path; a module of your own named `adapters` or `mfaMode` is
-    `module-section-path-invalid`. An alert keyed on a boot error's reason
-    now sees every refusal to start.
+    `module-section-path-invalid`. Some failures to start still carry no
+    reason: a `CONFIG_ENV` (or `NODE_ENV`) naming a file outside `config/`
+    (a plain `Error`), a missing `config/<env>.conf` or a file HOCON cannot
+    parse (the HOCON library's error), and a failure after boot, such as a
+    port the listener cannot bind.
   - `buildModules`' `overrides.logger` is removed: it carried only that
     warning. Drop it from your call; `app.mts` passes `{ environment }`.
   - For code of a fork's own: `SWITCHES`, `readSwitches`' second argument

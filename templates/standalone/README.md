@@ -339,12 +339,16 @@ boot (`deps.section`), never when it is built. The log level is read before boot
 the `logging` module's section, with that module's schema, over the template's
 `reference.conf` (`readLogging`): the logger exists before boot, since the
 template logs while it reads its configuration and chooses its modules.
-Every refusal the template raises before boot — in phase one, and as it
-builds what it hands boot below — is a `BootError` under the reason boot
-raises for the same case (`config-path-relocated`,
-`environment-variable-renamed`, `config-validation-failed`,
-`module-section-path-invalid`; [`src/bootRefusal.mts`](src/bootRefusal.mts)),
-so an alert on a boot error's reason sees it too. Then it hands `createApp` the configuration as resolved over every
+What the template refuses of the configuration before boot — `adapters`,
+`mfaMode` and `logging` in phase one, and what it builds for boot below
+(`resolveForBoot`) — is a `BootError` under the reason boot raises for the
+same case (`config-path-relocated`, `environment-variable-renamed`,
+`config-validation-failed`, `module-section-path-invalid`;
+[`src/bootRefusal.mts`](src/bootRefusal.mts)), so an alert on a boot error's
+reason sees it too. Not every failure to start carries a reason: a
+`CONFIG_ENV` naming a file outside `config/` is a plain `Error`, a missing
+`{ENV}.conf` or a file HOCON cannot parse is the HOCON library's error, and
+a failure after boot, such as a port the listener cannot bind, is its own. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed, with
 `core.sessionRequirements` as the MFA switch expects it written in — the
 configuration's list with `mfa` added when the switch installs MFA; a value

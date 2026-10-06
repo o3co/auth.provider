@@ -23,7 +23,8 @@
  *
  * The details name a module as boot does. A key of the composition root's
  * own — the `adapters` section, the `mfaMode` switch — is named after itself,
- * as boot names core's own section "core": no module may take either name.
+ * as boot names core's own section "core": a module with a section under
+ * either name is refused (`resolveForBoot`), so the name points at the key.
  */
 
 import {

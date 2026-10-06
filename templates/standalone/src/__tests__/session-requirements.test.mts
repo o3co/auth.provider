@@ -271,13 +271,22 @@ describe("what the template hands boot of the mfa section", () => {
 		}
 	});
 
-	it("is refused through the composition as through phase two, under the switch off", async () => {
+	it("is refused through the composition as through phase two: by the template before boot, under the switch off", async () => {
 		const err = await refusal(compose({ operatorHocon: 'mfa.mode = "required"\n' }));
 		expect(err).toBeInstanceOf(BootError);
+		// The template's own check, not a schema's: one custom issue, in its words.
+		const message = /^mfa\.mode is written in the configuration and differs from mfaMode/;
 		expect(err).toMatchObject({
 			reason: "config-validation-failed",
-			details: { issues: [{ path: ["mfa", "mode"] }] },
+			message: expect.stringMatching(message),
+			details: {
+				issues: [
+					{ code: "custom", path: ["mfa", "mode"], message: expect.stringMatching(message) },
+				],
+				modules: [{ module: "mfa", schemaPath: "mfa" }],
+			},
 		});
+		expect((err as BootError).details).toMatchObject({ issues: { length: 1 } });
 		expect((err as BootError).message).toContain("mfaMode");
 	});
 });
