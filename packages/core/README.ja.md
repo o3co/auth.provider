@@ -63,7 +63,7 @@ const handle = await createApp({
 const config = handle.components.config; // boot がパースしたもの
 ```
 
-core のスキーマが宣言しないセクション — モジュールのもの、またはモジュールのセクションの移動元のパス — を検証するのはモジュールです。モジュールが読み込まれていれば、そのスキーマが環境変数の文字列も含めて読みます。読み込まれていなければ何も読みません: `config` スロットに書かれたまま残り、上記のとおり名前が出ますが、core が拒否することはありません。セクションの移動元のパスが拒否される（`config-path-relocated`）のは、読み込まれたモジュールがその移動を宣言している間か、core が自身のセクションについて宣言している（`CORE_RELOCATIONS`）場合だけです。CORS のリストの旧パス `cors` は、読み込まれたモジュールがそれを移動したとき（standalone テンプレートの `http` がそうします）だけ拒否され、それ以外では無視されたセクションとして名前が出ます。core は構成の CORS のオリジンを `httpSettings` スロットからだけ読むためです。core 自身のセクションは、composition root が boot の前に `readCoreSection(resolved)`（[`src/config/core-section.mts`](src/config/core-section.mts)）で読みます: `core {}` だけを、boot がパースするのと同じ厳格なスキーマで読み、同じ文言で拒否し、ほかのセクションは読みません。
+core のスキーマが宣言しないセクション — モジュールのもの、またはモジュールのセクションの移動元のパス — を検証するのはモジュールです。モジュールが読み込まれていれば、そのスキーマが環境変数の文字列も含めて読みます。読み込まれていなければ何も読みません: `config` スロットに書かれたまま残り、上記のとおり名前が出ますが、core が拒否することはありません。セクションの移動元のパスが拒否される（`config-path-relocated`）のは、読み込まれたモジュールがその移動を宣言している間か、core が自身のセクションについて宣言している（`CORE_RELOCATIONS`）場合だけです。`cors` は例外です: core は構成の CORS のオリジンを `httpSettings` スロットからだけ読むので、何かを設定する `cors` セクションはブートを拒否します（`config-validation-failed`、スロットを示します）。読み込まれたモジュール自身のセクションが `cors` である場合は、そのモジュールが読むので拒否しません。また、それを移動する読み込まれたモジュールがあれば、そのモジュールが自分のパスを示して先に拒否します（standalone テンプレートの `http` がそうします。`config-path-relocated`）。何も設定しない空の `cors {}` はブートします。core 自身のセクションは、composition root が boot の前に `readCoreSection(resolved)`（[`src/config/core-section.mts`](src/config/core-section.mts)）で読みます: `core {}` だけを、boot がパースするのと同じ厳格なスキーマで読み、同じ文言で拒否し、ほかのセクションは読みません。
 
 `config` スロットの型 `AppConfig` は `CoreConfig & Readonly<Record<string, unknown>>` です: core のセクションには型があり、ほかのセクションはすべて `unknown` です。モジュールは自分のセクションを、スキーマで型づけされた `deps.section` として読みます。
 
@@ -338,7 +338,7 @@ core が自分でマウントするもの（この順）: レスポンスを読�
 
 ## CORS
 
-`corsMw`（`src/middleware/cors.mts`）がレスポンスを読ませるオリジンは、`httpSettings` スロットの `cors.allowedOrigins` です — standalone テンプレートの `http` モジュールが `http.cors.allowedOrigins` から提供します。`httpSettings` を持たない構成は CORS をマウントしません。`assembleApp` はこのミドルウェアを**最初に** — 他のすべてのミドルウェアとルート contribution より前に — マウントします。空のリスト（既定）なら何もマウントしません: CORS ヘッダーも `Vary` も付きません。契約に反するオリジンを持つスロット（`checkSerializedOrigin` が拒否するエントリー、または文字列のリストでないもの）は、メンバーとインデックスを示す `RangeError` で boot を拒否します。
+`corsMw`（`src/middleware/cors.mts`）がレスポンスを読ませるオリジンは、`httpSettings` スロットの `cors.allowedOrigins` です — standalone テンプレートの `http` モジュールが `http.cors.allowedOrigins` から提供します。`httpSettings` を持たない構成は CORS をマウントしません。設定の `cors` セクションを読むものはなく、何かを設定する `cors` はブートを拒否します（上記）。`assembleApp` はこのミドルウェアを**最初に** — 他のすべてのミドルウェアとルート contribution より前に — マウントします。空のリスト（既定）なら何もマウントしません: CORS ヘッダーも `Vary` も付きません。契約に反するオリジンを持つスロット（`checkSerializedOrigin` が拒否するエントリー、または文字列のリストでないもの）は、メンバーとインデックスを示す `RangeError` で boot を拒否します。
 
 ### 対象ルート
 

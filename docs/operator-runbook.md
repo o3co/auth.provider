@@ -2622,19 +2622,16 @@ lists every breaking change since, and which of the steps below each needs.
      for a key store of your own beside `key-store.local` among them.
    - **Core reads no `cors` section.** It reads CORS origins from the
      `httpSettings` slot alone. A configuration that still writes
-     `cors.allowedOrigins` refuses to start where a loaded module relocates
-     it (the standalone template's `http` module names
-     `http.cors.allowedOrigins`). In a composition of your own with no such
-     module it starts, the value unread — where it used to refuse to start —
-     and the only signal is one `warn` line naming `cors`, never its value:
-     `config_sections_ignored`, or `config_sections_not_loaded` where the
-     composition hands boot `configDefaults` that hold a `cors` section. That
-     line goes only to the logger bootstrapped beside the configuration
-     (`bootstrapComponents.logger`); without one, it starts silently. Move
-     the origins to the module that provides `httpSettings`. One with no
-     `httpSettings` provider mounts no CORS. The `cors_allowed_origins_unreadable` warning
-     is gone, as the module that provides the slot refuses such a value at
-     boot.
+     `cors.allowedOrigins` refuses to start in every composition: a loaded
+     module that relocates it names its new path (the standalone template's
+     `http` module names `http.cors.allowedOrigins`); without one, core
+     refuses it (`config-validation-failed`), naming `cors` and the slot,
+     never the value — unless a loaded module's own section is `cors`, which
+     reads it. Move the origins to where the module that provides
+     `httpSettings` reads them. An empty `cors {}` sets nothing and starts.
+     A composition with no `httpSettings` provider mounts no CORS. The
+     `cors_allowed_origins_unreadable` warning is gone, as the module that
+     provides the slot refuses such a value at boot.
    - **Messages name the new paths.** `core.federations.<name>…` for the
      federation checks, `key-store.local.*` and `KEY_STORE_LOCAL_*` for the key
      store's, `REPOSITORIES_USER_HTTP_BEARER_TOKEN` for the Store credential's:

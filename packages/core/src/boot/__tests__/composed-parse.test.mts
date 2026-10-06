@@ -573,7 +573,8 @@ describe("another package's section, its module not loaded", () => {
 	// Core's base declares core's sections alone: a section another package's
 	// module reads, or a path one moved from, is validated by that module when
 	// it is loaded and by nothing when it is not. Kept as written, and named
-	// as nothing loaded reads it.
+	// as nothing loaded reads it. `cors` is the exception, refused whenever it
+	// sets anything (core-section.test.mts).
 	it.each([
 		["webauthn", { userVerification: "optional", challengeTtlMs: "not-a-lifetime" }],
 		["federation-grants", { enabled: "sometimes", maxExpiresIn: "not-a-duration" }],
@@ -582,7 +583,6 @@ describe("another package's section, its module not loaded", () => {
 		["session", { loginPage: { url: "" }, secret: "moved" }],
 		["session-store", { storage: { type: 42 }, maxAge: "0" }],
 		["rateLimit", { login: { windowMs: 0 }, failMode: "sometimes" }],
-		["cors", { allowedOrigins: ["https://app.example"] }],
 		["endpoints", { login: { url: "/login" } }],
 		["repositories", { client: { type: "yaml" } }],
 		["audit", { sink: { type: "splunk-hec" } }],
