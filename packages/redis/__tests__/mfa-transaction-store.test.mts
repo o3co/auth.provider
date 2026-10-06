@@ -54,6 +54,7 @@ import {
 } from "#/ioredis/scripts/mfa.mjs";
 import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
 import { createRedisMfaTransactionStore } from "#/mfa-transaction-store.mjs";
+import { runMfaEmailProofRequirementContract } from "./adapters.mfa-email-proof-requirement.contract.mjs";
 import { runMfaTransactionStoreContract } from "./adapters.mfa-transaction-store.contract.mjs";
 import { serverClock, serverPasses, testRedis } from "./support/redis.mjs";
 
@@ -121,7 +122,8 @@ const alternating = async (keyPrefix: string): Promise<MfaTransactionStore> => {
 		noteExemptSuccess: (subject, nowMs, policy) => pick().noteExemptSuccess(subject, nowMs, policy),
 		requireEmailProofAtNextBinding: (subject) => pick().requireEmailProofAtNextBinding(subject),
 		emailProofRequiredAtNextBinding: (subject) => pick().emailProofRequiredAtNextBinding(subject),
-		consumeEmailProofRequirement: (subject) => pick().consumeEmailProofRequirement(subject),
+		consumeEmailProofRequirement: (subject, consume) =>
+			pick().consumeEmailProofRequirement(subject, consume),
 		recordSessionEmailProof: (subject, sid, provedAtMs, untilMs) =>
 			pick().recordSessionEmailProof(subject, sid, provedAtMs, untilMs),
 		sessionEmailProofAt: (subject, sid, nowMs) => pick().sessionEmailProofAt(subject, sid, nowMs),
@@ -140,6 +142,10 @@ const alternating = async (keyPrefix: string): Promise<MfaTransactionStore> => {
 };
 
 runMfaTransactionStoreContract(async () => alternating(freshPrefix()), {
+	expiry: { now: serverClock(first), passed: serverPasses(first) },
+});
+
+runMfaEmailProofRequirementContract(async () => alternating(freshPrefix()), {
 	expiry: { now: serverClock(first), passed: serverPasses(first) },
 });
 
@@ -253,6 +259,20 @@ async function resetSubject(store: MfaTransactionStore, subject: string): Promis
 	const answer = await applied(store, subject);
 	if (answer.outcome !== "applied")
 		throw new Error(`expected the reset applied: ${answer.outcome}`);
+}
+
+/** The email-proof requirement consumed under a lease of its own, released after: the answer. */
+async function consumeUnderLease(store: MfaTransactionStore, subject: string): Promise<unknown> {
+	const lease = await store.acquireSubjectLease(subject, {
+		ttlMs: 60_000,
+		generation: await store.subjectGeneration(subject),
+	});
+	if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
+	try {
+		return await store.consumeEmailProofRequirement(subject, { leaseToken: lease.token });
+	} finally {
+		await store.releaseSubjectLease(subject, lease.token);
+	}
 }
 
 /** The absolute deadline of `key` on the server's clock, in epoch ms; -1 for none, -2 for no key. */
@@ -1285,8 +1305,38 @@ describe("createRedisMfaTransactionStore — the email proof at the next first b
 		expect((await first().keys(`${prefix}*`)).sort()).toEqual(
 			[key, `${prefix}recovery:{${keyPart("user-1")}}`].sort(),
 		);
-		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
+		expect(await consumeUnderLease(store, "user-1")).toEqual({ outcome: "consumed" });
 		expect(await first().exists(key)).toBe(0);
+	});
+
+	it("clears nothing when a consume held in flight lands after a later reset under a lease of its own", async () => {
+		const prefix = freshPrefix();
+		const client = makeIoredisMfaTransactionStoreClient(first());
+		let land = (): void => {};
+		const landed = new Promise<void>((resolve) => {
+			land = resolve;
+		});
+		// The consume's command held back, as a driver resending it after a reconnect would.
+		const delayed: MfaTransactionStoreClient = {
+			...client,
+			consumeEmailProof: async (...args) => {
+				await landed;
+				return client.consumeEmailProof(...args);
+			},
+		};
+		const binding = await createRedisMfaTransactionStore({ client: delayed, keyPrefix: prefix });
+		const store = await storeAt(prefix);
+		await store.requireEmailProofAtNextBinding("user-1");
+		const lease = await binding.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
+		if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
+		const consume = binding.consumeEmailProofRequirement("user-1", { leaseToken: lease.token });
+		// The binding's lease ends; the reset sets the requirement under a lease of its own.
+		expect(await binding.releaseSubjectLease("user-1", lease.token)).toBe(true);
+		await resetSubject(store, "user-1");
+		await store.requireEmailProofAtNextBinding("user-1");
+		land();
+		expect(await consume).toEqual({ outcome: "refused", reason: "lease_not_held" });
+		expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
 	});
 });
 
@@ -1369,7 +1419,7 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 		await store.requireEmailProofAtNextBinding("user-1");
 		await store.reserveSubjectAttempt("user-1", now, POLICY);
 		await resetSubject(store, "user-1");
-		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
+		expect(await consumeUnderLease(store, "user-1")).toEqual({ outcome: "consumed" });
 		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
 		expect((await first().keys(`${prefix}*`)).sort()).toEqual(
 			[proofKey(prefix, "user-1", "sid-1"), `${prefix}recovery:{${keyPart("user-1")}}`].sort(),
@@ -1618,7 +1668,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		await store.requireEmailProofAtNextBinding("user-1");
 		await store.reserveSubjectAttempt("user-1", now, POLICY);
 		await resetSubject(store, "user-1");
-		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
+		expect(await consumeUnderLease(store, "user-1")).toEqual({ outcome: "consumed" });
 		expect(await store.firstBindingAt("user-1", now)).toBe(now);
 		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
 		expect((await first().keys(`${prefix}*`)).sort()).toEqual(

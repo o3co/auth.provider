@@ -609,10 +609,20 @@ describe("the SMTP sender's envelope", () => {
 		expect((await relay.relayed()).map(({ to }) => to)).toEqual([["jörg@example.com"]]);
 	});
 
+	it("sends to a local part in the case it is written", async () => {
+		const relay = await relayWith({ auth: true });
+		const answer = await senderAt(relay.port, { user: "mailer", password: "relay-password" }).send(
+			mailTo("Alice.Doe@example.com"),
+		);
+		expect(mailSendOutcome(answer)).toBe("delivered");
+		expect(relay.commands().map(({ line }) => line)).toContain("RCPT TO:<Alice.Doe@example.com>");
+		expect((await relay.relayed()).map(({ to }) => to)).toEqual([["Alice.Doe@example.com"]]);
+	});
+
 	it("refuses, before any connection, a recipient that is not one addr-spec in its normalised spelling", async () => {
 		const relay = await relayWith();
 		for (const to of [
-			"Alice@example.com",
+			"alice@Example.com",
 			" alice@example.com",
 			"alice@example.com, bob@example.com",
 			"Alice <alice@example.com>",

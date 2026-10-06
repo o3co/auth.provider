@@ -29,9 +29,11 @@ import type {
 	MfaTransactionStore,
 } from "#/mfa/transactionStore.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { runMfaEmailProofRequirementContract } from "./emailProofRequirement.contract.mjs";
 import { runMfaTransactionStoreContract } from "./transactionStore.contract.mjs";
 
 runMfaTransactionStoreContract(async () => createMemoryMfaTransactionStore());
+runMfaEmailProofRequirementContract(async () => createMemoryMfaTransactionStore());
 
 const POLICY: MfaLockoutPolicy = {
 	threshold: 5,
@@ -89,6 +91,14 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => ({
 describe("the in-process MfaTransactionStore", () => {
 	it("is kind memory", () => {
 		expect(createMemoryMfaTransactionStore().kind).toBe("memory");
+	});
+
+	it("still takes the unleased consume, until it is removed: true for the one that cleared it, false after", async () => {
+		const store = createMemoryMfaTransactionStore();
+		await store.requireEmailProofAtNextBinding("user-1");
+		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
+		expect(await store.consumeEmailProofRequirement("user-1")).toBe(false);
+		expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
 	});
 
 	it("hands out copies: changing a returned transaction changes nothing it holds", async () => {

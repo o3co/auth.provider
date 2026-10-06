@@ -15,21 +15,22 @@
  */
 
 /**
- * An email address as the provider digests and compares it, one reading for
- * the coordinator and the email factor alike: two spellings of one mailbox
- * read the same, and a value that is no address reads as none.
+ * An email address as the provider digests, compares and delivers to it, one
+ * reading for the coordinator and the email factor alike: two spellings of
+ * one mailbox read the same, the local part keeps its case, and a value that
+ * is no address reads as none.
  */
 
 import { describe, expect, it } from "vitest";
 import { normaliseMailAddress } from "#/index.mjs";
 
 describe("normaliseMailAddress", () => {
-	it("reads one mailbox the same whatever its case, the whitespace around it, its Unicode form or its domain's spelling", () => {
+	it("reads one mailbox the same whatever its domain's case, the whitespace around it, its Unicode form or its domain's spelling", () => {
 		const same = [
 			"alice@example.com",
-			"Alice@Example.COM",
+			"alice@Example.COM",
 			"  alice@example.com\t",
-			"ALICE@EXAMPLE.COM\n",
+			"alice@EXAMPLE.COM\n",
 		];
 		for (const address of same) {
 			expect(normaliseMailAddress(address), JSON.stringify(address)).toBe("alice@example.com");
@@ -39,6 +40,15 @@ describe("normaliseMailAddress", () => {
 		// A domain in Unicode and in its ASCII form (IDNA) is one domain.
 		expect(normaliseMailAddress("user@bücher.example")).toBe("user@xn--bcher-kva.example");
 		expect(normaliseMailAddress("user@XN--BCHER-KVA.example")).toBe("user@xn--bcher-kva.example");
+	});
+
+	it("keeps the local part as it is written: its case is the mailbox's, never lowered", () => {
+		expect(normaliseMailAddress("Alice@Example.COM")).toBe("Alice@example.com");
+		expect(normaliseMailAddress("  ALICE@EXAMPLE.COM\n")).toBe("ALICE@example.com");
+		expect(normaliseMailAddress('"A,B"@Example.com')).toBe('"A,B"@example.com');
+		expect(normaliseMailAddress("Alice@example.com")).not.toBe(
+			normaliseMailAddress("alice@example.com"),
+		);
 	});
 
 	it("keeps apart what are two mailboxes", () => {
@@ -118,7 +128,7 @@ describe("normaliseMailAddress", () => {
 	});
 
 	it("reads what an addr-spec may hold: every atext character but the routing operators, a quoted local part with an escaped character, UTF-8 letters, and the longest local part and label", () => {
-		expect(normaliseMailAddress("o'Brien+Tag@example.com")).toBe("o'brien+tag@example.com");
+		expect(normaliseMailAddress("o'Brien+Tag@example.com")).toBe("o'Brien+Tag@example.com");
 		expect(normaliseMailAddress("a#$&'*+-/=?^_`{|}~@example.com")).toBe(
 			"a#$&'*+-/=?^_`{|}~@example.com",
 		);
@@ -131,16 +141,18 @@ describe("normaliseMailAddress", () => {
 		expect(normaliseMailAddress(`${local}@${label}.com`)).toBe(`${local}@${label}.com`);
 	});
 
-	it("spells the local part as it reads it after lower-casing: in NFC, and within 64 octets", () => {
-		// A capital with no precomposed form lowers to one that has it.
-		expect(normaliseMailAddress("J\u030C@example.com")).toBe("\u01F0@example.com");
-		expect(normaliseMailAddress("\u01F0@example.com")).toBe("\u01F0@example.com");
-		// Two octets each before lower-casing, three after.
-		expect(normaliseMailAddress(`${"\u0130".repeat(32)}@example.com`)).toBeUndefined();
-		expect(normaliseMailAddress(`${"\u023A".repeat(22)}@example.com`)).toBeUndefined();
-		expect(normaliseMailAddress(`${"\u023A".repeat(21)}@example.com`)).toBe(
-			`${"\u2C65".repeat(21)}@example.com`,
+	it("spells the local part in NFC, its case kept, and holds it within 64 octets as it is spelled", () => {
+		// A capital with no precomposed form stays decomposed; a small one composes.
+		expect(normaliseMailAddress("J\u030C@example.com")).toBe("J\u030C@example.com");
+		expect(normaliseMailAddress("j\u030C@example.com")).toBe("\u01F0@example.com");
+		// Two octets each as written, three once lower-cased: the written spelling is what counts.
+		expect(normaliseMailAddress(`${"\u0130".repeat(32)}@example.com`)).toBe(
+			`${"\u0130".repeat(32)}@example.com`,
 		);
+		expect(normaliseMailAddress(`${"\u023A".repeat(32)}@example.com`)).toBe(
+			`${"\u023A".repeat(32)}@example.com`,
+		);
+		expect(normaliseMailAddress(`${"\u023A".repeat(33)}@example.com`)).toBeUndefined();
 	});
 
 	it("reads what it answers as itself: a second pass changes nothing, at the octet limit too", () => {
@@ -148,8 +160,9 @@ describe("normaliseMailAddress", () => {
 			"J\u030C@example.com",
 			"\u01F0@example.com",
 			`${"a".repeat(64)}@example.com`,
-			`${"\u023A".repeat(21)}@example.com`,
-			`${"\u0130".repeat(21)}@example.com`,
+			`${"\u023A".repeat(32)}@example.com`,
+			`${"\u0130".repeat(32)}@example.com`,
+			"Alice@Example.COM",
 			`"${"A".repeat(62)}"@Example.COM`,
 			`${"b".repeat(63)}@${"c".repeat(63)}.example`,
 		]) {

@@ -338,7 +338,7 @@ export const inMemorySessionStoresModule: Module = defineModule({
  * the `adapters.userSessionStores` selection.
  *
  * The memory adapter comes through core's factory: that is where its
- * "dev/test only" boot warning lives.
+ * "dev/test only" boot warning lives, said on the composition's `logger`.
  */
 export const inMemoryFederationTokenStoreModule: Module = defineModule({
 	name: "standalone-in-memory-federation-token-store",
@@ -347,10 +347,11 @@ export const inMemoryFederationTokenStoreModule: Module = defineModule({
 		reason:
 			"upstream federation tokens fork per replica — a token stored by the replica that completed the federation callback is missing on the others, so a session cannot refresh its upstream token from another replica, and logout removes only the tokens the replica it lands on can see",
 	},
+	optional: ["logger"] as const,
 	provides: {
-		federationTokenStore: async () => {
+		federationTokenStore: async ({ logger }) => {
 			const factory = createFederationTokenStoreFactory();
-			registerBuiltinFederationTokenStores(factory);
+			registerBuiltinFederationTokenStores(factory, logger);
 			return factory.create({ type: "memory" });
 		},
 	},

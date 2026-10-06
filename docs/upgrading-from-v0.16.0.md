@@ -1960,7 +1960,13 @@ with what a store of yours records and refuses. Per port:
   or `remove` (#1121, #1179, #1236). An `MfaTransactionStore` answers
   `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
-  and the [test kit](../packages/test-kit/README.md).
+  and the [test kit](../packages/test-kit/README.md). An
+  `MfaTransactionStoreClient` of your own, written against a 0.17 release
+  candidate, implements `consumeEmailProof(keys, leaseToken)` in place of
+  `consumeEmailProof(key)`: it removes the email-proof requirement at
+  `keys.proof` only while the lease at `keys.lease` holds `leaseToken`, in one
+  atomic step, and answers `{ held: false }` or `{ held: true, removed }`.
+  `makeIoredisMfaTransactionStoreClient` provides it.
 - **A second factor of your own (`MfaFactor`)** answers each challenge's and
   enrollment start's `response` as a plain JSON-shaped object — no class
   instance, list or `-0`, every own key an enumerable string, at any depth —
@@ -2079,6 +2085,22 @@ if you run a Store, then go `optional` — users enroll at their own pace — an
 of a user with no counting factor is asked to log in again, and that login
 binds their first factor.
 
+**Email factors enrolled on a 0.17.0 pre-release, for an address whose local
+part has upper-case letters, are enrolled again.** The provider now keeps an
+address's local part in the case the user record holds it, and lower-cases
+only the domain (`normaliseMailAddress`): a code goes to the local part as it
+is written, and the digest an email factor records is of that spelling. A
+factor such a pre-release enrolled for `Alice@example.com` recorded the
+digest of `alice@example.com`, so it now reads as `address_changed`: no
+login code is sent for it. The user enrolls a replacement factor first — the
+address again, or another factor — and then removes the stale one; under
+`mfa.mode = "required"` removing it while it is the only counting factor is
+`409 mfa_last_factor`, since neither it nor a recovery set stands in for a
+usable counting factor. A user with no other usable factor gives the recent
+MFA the enrollment needs with a recovery code, or an operator resets the
+subject ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
+Factors for addresses whose local part is all lower case are not affected.
+
 ### The standalone template
 
 `MFA_MODE` binds the template's own key, `mfaMode` (#1245), default
@@ -2094,6 +2116,13 @@ Turning it on — or leaving the default on — needs:
 - **`MFA_ENCRYPTION_KEY`**, canonical base64 of 32 bytes
   (`openssl rand -base64 32`). In development, write your own key in
   `config/development.conf` rather than exporting it beside the sample key.
+  The sample key is accepted only in an explicit development or test
+  environment: the name the configuration was selected by and `NODE_ENV`,
+  each where set, must say `development` or `test`, and at least one must be
+  set. A composition that uses the sample key outside an explicit development
+  or test environment — under another name such as `prod` or `local`, or
+  under no name at all — refuses to boot. Some pre-release builds accepted
+  it there.
 - **`MFA_PAGE_URL`** (default `/mfa`): your MFA page, on the issuer's origin.
   The template ships none; what it keeps is
   [The MFA page's contract](../packages/mfa/README.md#the-mfa-pages-contract).
@@ -2132,7 +2161,9 @@ are the template README's
    table. The page is `mfa.page.url` (`MFA_PAGE_URL`): `endpoints.mfa.url` and
    `ENDPOINTS_MFA_URL`, which some pre-release builds read, refuse the boot.
 3. Set `MFA_ENCRYPTION_KEY`, and `STANDARD_SMTP_MAIL_SENDER_*` where mail is
-   sent. There is no `MFA_NOTICES`: notices to the account holder are yours,
+   sent. The development sample key boots only where `mfaModule({ environment })`
+   and `NODE_ENV`, each where set, say `development` or `test`, with at least
+   one set. There is no `MFA_NOTICES`: notices to the account holder are yours,
    built from the audit events
    ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
 4. Make the Redis the factor store uses durable; give the Store `mfaEnrolled`

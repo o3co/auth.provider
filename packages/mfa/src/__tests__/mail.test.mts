@@ -34,7 +34,7 @@ import { createMfaSealing } from "#/sealing.mjs";
 const NOW = 1_900_000_000_000;
 const NOT_AFTER = NOW + 600_000;
 const ADDRESS = "Alice@Example.COM";
-const NORMALISED = "alice@example.com";
+const NORMALISED = "Alice@example.com";
 
 const sealing = createMfaSealing({ ring: [{ id: "k1", key: randomBytes(32) }] });
 const digests = sealing.digestsFor("mailed");
@@ -116,6 +116,17 @@ describe("sendMfaMail — a login code", () => {
 		expect(outcome).toEqual({ outcome: "address_mismatch" });
 		expect(keep).not.toHaveBeenCalled();
 		expect(sender.sent).toEqual([]);
+	});
+
+	it("reads the digest of the address with its local part in another case as a mismatch — nothing kept, nothing sent", async () => {
+		for (const recorded of ["alice@example.com", "ALICE@example.com"]) {
+			const sender = createRecordingMailSender();
+			const { keep } = keeping();
+			const outcome = await send({ sender, keep, mail: loginCode(digests.digest([recorded])) });
+			expect(outcome, recorded).toEqual({ outcome: "address_mismatch" });
+			expect(keep).not.toHaveBeenCalled();
+			expect(sender.sent).toEqual([]);
+		}
 	});
 
 	it("reads a digest that is null, or no keyed digest, as a mismatch — never throws, never sends", async () => {
@@ -297,7 +308,7 @@ describe("sendMfaMail — a code that stands in for a factor", () => {
 describe("maskMailAddress", () => {
 	it("shows the first character of the local part and the domain, as the provider spells the address", () => {
 		expect(maskMailAddress("kate@example.com")).toBe("k***@example.com");
-		expect(maskMailAddress("  Kate@Example.COM ")).toBe("k***@example.com");
+		expect(maskMailAddress("  Kate@Example.COM ")).toBe("K***@example.com");
 		expect(maskMailAddress("a@example.com")).toBe("a***@example.com");
 		expect(maskMailAddress("ünal@bücher.example")).toBe("ü***@xn--bcher-kva.example");
 		expect(maskMailAddress('"kate.doe"@example.com')).toBe("k***@example.com");

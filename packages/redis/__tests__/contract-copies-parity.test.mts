@@ -70,6 +70,11 @@ const COPIES: ReadonlyArray<{
 		runners: [["runMfaTransactionStoreContract", "mfa-transaction-store.test.mts"]],
 	},
 	{
+		core: "mfa/__tests__/emailProofRequirement.contract.mts",
+		copy: "adapters.mfa-email-proof-requirement.contract.mts",
+		runners: [["runMfaEmailProofRequirementContract", "mfa-transaction-store.test.mts"]],
+	},
+	{
 		core: "refresh-token-family/__tests__/adapters.contract.mts",
 		copy: "adapters.refresh-token-family.contract.mts",
 		runners: [["runRefreshTokenFamilyStoreContract", "refresh-token-family.test.mts"]],

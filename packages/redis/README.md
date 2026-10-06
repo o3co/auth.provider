@@ -1208,7 +1208,8 @@ do not read (`t:<digest>` among them) is ignored and goes with the keys, and
 a transaction hash's `sends` and `lastSentAtMs`, where present, are not read:
 neither loosens a limit the store keeps. The email-proof requirement is a key of
 its own with no TTL: an applied recovery leaves it, and consuming it is one
-`DEL`.
+script that checks the subject's lease and removes it, so a consume that
+reaches the server after its lease ended removes nothing.
 
 **Recovery, the generation, the lease and the floor.** `authorizeSubjectRecovery`
 and `applySubjectRecovery` are one script each. An authorization is a field of

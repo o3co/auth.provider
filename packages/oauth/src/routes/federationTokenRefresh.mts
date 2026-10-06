@@ -36,6 +36,7 @@ import { readRefreshAnswer } from "./federationTokenRefreshAnswer.mjs";
 import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
 import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
 import { recordRefresh } from "./federationTokenRefreshRecord.mjs";
+import { checkSessionLive } from "./federationTokenSession.mjs";
 
 /** Step 11. `read` is the record as read before the lock. */
 export const refreshStoredTokens = async (
@@ -111,8 +112,11 @@ export const refreshStoredTokens = async (
 			if (fresh === null) return res;
 			if (!refreshIsDue(ctx, fresh.value)) {
 				// Another caller refreshed, or the token is not due: served as on
-				// the fast path, without calling the IdP. Awaited inside the
-				// `try`, so the lock is released after the answer.
+				// the fast path, without calling the IdP, but only while the
+				// session is still live, since the lock wait spans the other
+				// caller's upstream call. Awaited inside the `try`, so the lock is
+				// released after the answer.
+				if (!(await checkSessionLive(ctx, caller))) return res;
 				return await serveStored(ctx, caller, fresh);
 			}
 			current = fresh;

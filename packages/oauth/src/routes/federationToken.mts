@@ -27,7 +27,6 @@ import {
 	logClientRepositoryUnavailable,
 	loggableError,
 	type SessionFederations,
-	type SessionLiveness,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
@@ -43,6 +42,7 @@ import { refreshStoredTokens } from "./federationTokenRefresh.mjs";
 import { REFRESH_FLOOR_MS } from "./federationTokenRefreshAnswer.mjs";
 import { createRefreshBackoff } from "./federationTokenRefreshBackoff.mjs";
 import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
+import { checkSessionLive } from "./federationTokenSession.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
 
@@ -101,50 +101,8 @@ const checkCallerStanding = async (
 		return false;
 	}
 
-	// Step 6: the session must be live. Not live → 401 invalid_token; an
-	// outage → 503. Core's session lifecycle answers, so a session whose close
-	// has committed is not live.
-	let liveness: SessionLiveness;
-	try {
-		liveness = await opts.sessionLifecycle.liveness(sid);
-	} catch (error) {
-		// A lifecycle filled by the host may throw: an outage all the same.
-		logger.error(
-			{ federation, store: "session_lifecycle", step: "liveness", err: loggableError(error) },
-			"federation_token_store_unavailable",
-		);
-		res.status(503).json({
-			error: "temporarily_unavailable",
-			error_description: "session store unavailable",
-		});
-		return false;
-	}
-	// Any answer other than `live` or `not_live` (core's lifecycle gives none,
-	// as it rejects on an outage) is answered as the outage.
-	if (liveness.outcome !== "live" && liveness.outcome !== "not_live") {
-		logger.error(
-			{ federation, store: "session_lifecycle", step: "liveness" },
-			"federation_token_store_unavailable",
-		);
-		res.status(503).json({
-			error: "temporarily_unavailable",
-			error_description: "session store unavailable",
-		});
-		return false;
-	}
-	// A live session of another subject is not this token's session.
-	const live = liveness.outcome === "live" && liveness.session.sub === sub;
-	if (!live) {
-		res.setHeader(
-			"WWW-Authenticate",
-			'Bearer error="invalid_token", error_description="session not found"',
-		);
-		res.status(401).json({
-			error: "invalid_token",
-			error_description: "session not found",
-		});
-		return false;
-	}
+	// Step 6: the session must be live.
+	if (!(await checkSessionLive(ctx, caller))) return false;
 
 	// The federations the session joined, read for step 8's membership check.
 	// One a federation logout disconnected stays listed with its tokens
