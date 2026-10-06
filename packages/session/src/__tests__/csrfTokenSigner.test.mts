@@ -33,7 +33,6 @@ import {
 	type FederationProvider,
 	type FederationTokenStore,
 	type Module,
-	type SessionFederationIndex,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -262,17 +261,6 @@ const fakeFederationTokenStore = (): FederationTokenStore =>
 		async delete() {},
 	}) as unknown as FederationTokenStore;
 
-const fakeSessionFederationIndex = (): SessionFederationIndex =>
-	({
-		kind: "memory",
-		async addFederation() {},
-		async listFederations() {
-			return [];
-		},
-		async removeFederation() {},
-		async removeBySid() {},
-	}) as unknown as SessionFederationIndex;
-
 /** The session cookie over plain HTTP, as the `sessionCookiePolicy` slot carries it. */
 const COOKIE = createTestSessionCookiePolicy({ name: "auth.session", secure: false });
 
@@ -285,11 +273,6 @@ const stores = () => [
 	sessionLifecycleTestModule(),
 	providing("test:user-session-store", "userSessionStore", fakeUserSessionStore()),
 	providing("test:federation-token-store", "federationTokenStore", fakeFederationTokenStore()),
-	providing(
-		"test:session-federation-index",
-		"sessionFederationIndex",
-		fakeSessionFederationIndex(),
-	),
 ];
 
 /** A cookie session that keeps nothing, where the session store's module is not loaded: the session routes read `req.session`. */
@@ -515,7 +498,6 @@ describe("the session module reads no session-store.secret", () => {
 			userSessionStore: fakeUserSessionStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: fakeFederationTokenStore(),
-			sessionFederationIndex: fakeSessionFederationIndex(),
 			federationProviders: new Map([["stub", stub]]),
 			federationRedirectPolicyResolver: new Map([
 				[

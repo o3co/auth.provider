@@ -1439,6 +1439,29 @@ modules fills them.
 - **`cascadeLogout`, `CascadeLogoutOptions` and `CascadeLogoutResult`** are
   removed from `@o3co/auth-provider-oauth` (#1030). A session is ended
   through core's session lifecycle: `sessionLifecycle.close(sid, cause)`.
+- **BREAKING: core no longer has the per-session store ports (#1030).**
+  Core's session lifecycle record holds what they held. Removed from
+  `@o3co/auth-provider-core`: the ports `SessionRPRegistry`,
+  `SessionFamilyIndex` and `SessionFederationIndex`, the session-end
+  capability `SupportsSessionEnd` and its guard `supportsSessionEnd`, the
+  in-process stores `createInMemorySessionRPRegistry`,
+  `createInMemorySessionFamilyIndex` and `createInMemorySessionFederationIndex`,
+  the factory builders `createSessionRPRegistryFactory`,
+  `createSessionFamilyIndexFactory` and `createSessionFederationIndexFactory`
+  with their aliases `SessionRPRegistryFactory`, `SessionFamilyIndexFactory`
+  and `SessionFederationIndexFactory`, and the `ComponentMap` slots
+  `sessionRPRegistry`, `sessionFamilyIndex` and `sessionFederationIndex`
+  (also gone from `GrantDependencies`). `memorySessionStoresModule` no longer
+  provides those slots. `RegisteredRP` stays: a join names one
+  (`SessionJoinRequest.rp`). A module of your own that provides or requires
+  one of the slots drops it.
+- **BREAKING: session admission requires the lifecycle store beside a
+  user-session store (#1030).** `admitSession` handed a `userSessionStore`
+  and no `sessionLifecycleStore` answers a live session
+  `unavailable` (`session_lifecycle`), logged once as
+  `session_admission_unavailable`, instead of reading it as before. Every
+  bundled consumer already refuses to build without it; a caller of your own
+  passes the `sessionLifecycleStore` slot in `AdmissionDeps`.
 - **BREAKING: `@o3co/auth-provider-redis` no longer has adapters for the
   three per-session stores (#1030).** Core's session lifecycle holds what
   the RP registry, the refresh-token family index and the federation index
@@ -1711,8 +1734,9 @@ with what a store of yours records and refuses. Per port:
 - **A `loginCompletion` of your own** implements `renewSession` (#923), the
   renewal of a signed-in session's id a step-up finishes with: the
   [session README](../packages/session/README.md#renewing-a-signed-in-sessions-id).
-- **`SessionRPRegistry`.** A resolved `registerRP` is visible to every later
-  `listRPs` on that sid: no replica or eventually consistent reads (#1155).
+- **`SessionRPRegistry`, `SessionFamilyIndex`, `SessionFederationIndex`.**
+  The ports are removed (#1030, above): an adapter of your own for them has
+  nothing to implement and nothing reads it.
 - **`DeviceCodeStore`.** Record `approvedAtMs`, and what
   `recordableDeviceApproval({ amr, authTime }, nowMs)` answers (#1093).
 - **`FederationTokenStore`.** Implement the conditional members

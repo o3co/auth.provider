@@ -40,6 +40,7 @@ import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createFederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
+import { openingLifecycleStore } from "../../__tests__/_helpers/sessionLifecycle.mjs";
 
 /** The settings of a composition whose `core.federations` declares none. */
 const NO_FEDERATIONS = createTestFederationSettings();
@@ -286,6 +287,7 @@ function buildStatelessApp({
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
+			sessionLifecycleStore: openingLifecycleStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
 		}),
@@ -367,6 +369,7 @@ function buildCallbackApp({
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
+			sessionLifecycleStore: openingLifecycleStore(),
 			sessionLifecycle: sessionLifecycle ?? fakeSessionLifecycle(),
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),

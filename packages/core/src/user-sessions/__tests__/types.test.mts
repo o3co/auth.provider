@@ -22,12 +22,6 @@ import type {
 	RegisteredRP,
 	SessionAuthentication,
 	SessionEnrollmentFacts,
-	SessionFamilyIndex,
-	SessionFamilyIndexFactory,
-	SessionFederationIndex,
-	SessionFederationIndexFactory,
-	SessionRPRegistry,
-	SessionRPRegistryFactory,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -52,7 +46,7 @@ test("UserSessionStore does NOT expose registerRP/linkFamily/updateClaims/remove
 	expectTypeOf<UserSessionStore>().not.toHaveProperty("removeFederation");
 });
 
-test("CreateUserSessionInput drops federations field (now in SessionFederationIndex)", () => {
+test("CreateUserSessionInput drops federations field (now in the session lifecycle)", () => {
 	expectTypeOf<CreateUserSessionInput>().toEqualTypeOf<{
 		readonly sid: string;
 		readonly sub: string;
@@ -87,61 +81,18 @@ test("UserSession value type has no activeRPs/familyIds/federations fields", () 
 	}>();
 });
 
-test("SessionRPRegistry.registerRP requires expiresAt: Date positional argument", () => {
-	expectTypeOf<SessionRPRegistry["registerRP"]>().toEqualTypeOf<
-		(sid: string, rp: RegisteredRP, expiresAt: Date) => Promise<void>
-	>();
-	expectTypeOf<SessionRPRegistry["listRPs"]>().toEqualTypeOf<
-		(sid: string) => Promise<ReadonlyArray<RegisteredRP>>
-	>();
-	expectTypeOf<SessionRPRegistry["removeBySid"]>().toEqualTypeOf<(sid: string) => Promise<void>>();
-});
-
-test("SessionFamilyIndex.addFamilyId requires expiresAt", () => {
-	expectTypeOf<SessionFamilyIndex["addFamilyId"]>().toEqualTypeOf<
-		(sid: string, familyId: string, expiresAt: Date) => Promise<void>
-	>();
-	expectTypeOf<SessionFamilyIndex["listFamilyIds"]>().toEqualTypeOf<
-		(sid: string) => Promise<ReadonlyArray<string>>
-	>();
-});
-
-test("SessionFederationIndex has 4 methods including per-element remove", () => {
-	expectTypeOf<SessionFederationIndex["addFederation"]>().toEqualTypeOf<
-		(sid: string, federationName: string, expiresAt: Date) => Promise<void>
-	>();
-	expectTypeOf<SessionFederationIndex["listFederations"]>().toEqualTypeOf<
-		(sid: string) => Promise<ReadonlyArray<string>>
-	>();
-	expectTypeOf<SessionFederationIndex["removeFederation"]>().toEqualTypeOf<
-		(sid: string, federationName: string) => Promise<void>
-	>();
-	expectTypeOf<SessionFederationIndex["removeBySid"]>().toEqualTypeOf<
-		(sid: string) => Promise<void>
-	>();
-});
-
-test("ComponentMap declaration-merge: 4 store slots, all optional", () => {
+test("ComponentMap declaration-merge: the user-session store slot is optional, and the per-session store slots are gone", () => {
 	expectTypeOf<ComponentMap["userSessionStore"]>().toEqualTypeOf<UserSessionStore | undefined>();
-	expectTypeOf<ComponentMap["sessionRPRegistry"]>().toEqualTypeOf<SessionRPRegistry | undefined>();
-	expectTypeOf<ComponentMap["sessionFamilyIndex"]>().toEqualTypeOf<
-		SessionFamilyIndex | undefined
-	>();
-	expectTypeOf<ComponentMap["sessionFederationIndex"]>().toEqualTypeOf<
-		SessionFederationIndex | undefined
-	>();
+	expectTypeOf<ComponentMap>().not.toHaveProperty("sessionRPRegistry");
+	expectTypeOf<ComponentMap>().not.toHaveProperty("sessionFamilyIndex");
+	expectTypeOf<ComponentMap>().not.toHaveProperty("sessionFederationIndex");
 });
 
-test("Factory aliases are AdapterFactory<T> over the 4 stores", () => {
+test("Factory alias is AdapterFactory<T> over the user-session store", () => {
 	// Plan code used `toMatchTypeOf<{ register: (name, builder: unknown) => void }>()` but
 	// that fails under strict function types (arrow-syntax parameter contravariance). Use
 	// toEqualTypeOf<AdapterFactory<T>> which directly asserts the alias relationship.
 	expectTypeOf<UserSessionStoreFactory>().toEqualTypeOf<AdapterFactory<UserSessionStore>>();
-	expectTypeOf<SessionRPRegistryFactory>().toEqualTypeOf<AdapterFactory<SessionRPRegistry>>();
-	expectTypeOf<SessionFamilyIndexFactory>().toEqualTypeOf<AdapterFactory<SessionFamilyIndex>>();
-	expectTypeOf<SessionFederationIndexFactory>().toEqualTypeOf<
-		AdapterFactory<SessionFederationIndex>
-	>();
 });
 
 test("RegisteredRP exposes immutable fields, every logout field a required key that may be undefined", () => {

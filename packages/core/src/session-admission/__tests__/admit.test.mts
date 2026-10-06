@@ -51,6 +51,7 @@ import { issuedRemediationActions } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
+import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 /** The issuer each resolver here registers its pages on. */
@@ -152,6 +153,7 @@ const met = (name: string, over: Partial<SessionRequirement> = {}): SessionRequi
 
 const deps = (over: Partial<AdmissionDeps> = {}): AdmissionDeps => ({
 	userSessionStore: holding(session()),
+	sessionLifecycleStore: openedLifecycleStore(),
 	subjectRevocation: undefined,
 	requirements: resolverForTests([], { actions: TEST_ACTIONS }),
 	acrTable: readAcrTable({}),

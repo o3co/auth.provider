@@ -63,6 +63,7 @@ import { describe, expect, it, type Mock, vi } from "vitest";
 import { createRecoveryCodeFactor } from "#/recovery/factor.mjs";
 import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
+import { openingLifecycleStore } from "./lifecycleRecords.mjs";
 import {
 	FACTORS,
 	FIRST_BINDING_MARK,
@@ -1046,6 +1047,7 @@ describe("credential_change through admission, under each mode", () => {
 		admitSession(
 			{
 				userSessionStore: storeHolding(session),
+				sessionLifecycleStore: openingLifecycleStore(session.sub),
 				subjectRevocation: undefined,
 				requirements: resolverForTests(requirements, {
 					issuer: ISSUER,
@@ -1163,6 +1165,7 @@ describe("admit — through admission, over a store that records a step-up, a re
 		admitSession(
 			{
 				userSessionStore: storeHolding(session),
+				sessionLifecycleStore: openingLifecycleStore(session.sub),
 				subjectRevocation: undefined,
 				requirements: resolverForTests([requirement], { issuer: ISSUER, actions: ACTIONS }),
 				acrTable: readAcrTable({}),

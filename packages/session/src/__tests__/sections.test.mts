@@ -33,7 +33,6 @@ import {
 	type FederationTokenStore,
 	MAX_DURATION_MS,
 	moduleReferences,
-	type SessionFederationIndex,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -452,15 +451,6 @@ const STORES = [
 		async removeBySid() {},
 		async delete() {},
 	} as unknown as FederationTokenStore),
-	providing("test:session-federation-index", "sessionFederationIndex", {
-		kind: "memory",
-		async addFederation() {},
-		async listFederations() {
-			return [];
-		},
-		async removeFederation() {},
-		async removeBySid() {},
-	} as unknown as SessionFederationIndex),
 ];
 
 describe("boot, over a configuration that captures the modules' renamed variables", () => {

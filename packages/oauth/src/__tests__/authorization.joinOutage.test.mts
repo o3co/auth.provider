@@ -43,7 +43,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-import { joiningLifecycle } from "./_helpers/sessionLifecycle.mjs";
+import { joiningLifecycle, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client1";
 const REDIRECT_URI = "https://rp.example/cb";
@@ -108,6 +108,7 @@ describe("createAuthorizationGrant — a join that rejects after the family is r
 			clientRepository: { findById: async () => client, authenticate: async () => null },
 			userSessionStore,
 			sessionLifecycle: lifecycle,
+			sessionLifecycleStore: openingLifecycleStore(SUBJECT),
 			refreshTokenFamilyRotation: { ...rotation, register },
 			refreshTokenFamilyRevocation: { revokeFamily } as unknown as RefreshTokenFamilyRevocation,
 			logger,

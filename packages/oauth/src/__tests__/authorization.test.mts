@@ -35,7 +35,12 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
-import { joiningLifecycle, outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
+import {
+	joiningLifecycle,
+	lifecycleStoreOver,
+	openingLifecycleStore,
+	outsideAnswer,
+} from "./_helpers/sessionLifecycle.mjs";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -1325,6 +1330,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1385,6 +1391,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1446,6 +1453,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const { result } = await createAuthorizationGrant(deps).handle({
@@ -1491,6 +1499,7 @@ describe("createAuthorizationGrant", () => {
 					...(userSessionStore
 						? {
 								userSessionStore,
+								sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 								sessionLifecycle: joiningLifecycle().lifecycle,
 							}
 						: {}),
@@ -1600,6 +1609,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1646,6 +1656,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1871,6 +1882,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode } /* no sid */)),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1950,6 +1962,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz", ...validCode })),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -2029,6 +2042,7 @@ describe("createAuthorizationGrant", () => {
 							},
 							async delete() {},
 						},
+						sessionLifecycleStore: openingLifecycleStore("u1"),
 						sessionLifecycle: lifecycle,
 					};
 					const handler = createAuthorizationGrant(deps);
@@ -2104,6 +2118,7 @@ describe("createAuthorizationGrant", () => {
 							},
 							async delete() {},
 						},
+						sessionLifecycleStore: openingLifecycleStore("u1"),
 						sessionLifecycle: lifecycle,
 						...(wired ? { logger } : {}),
 					});
@@ -2338,6 +2353,7 @@ describe("createAuthorizationGrant", () => {
 						vi.fn().mockResolvedValue({ code: "abc", sid: "session-gone", ...validCode }),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -2376,6 +2392,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode })),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -2429,6 +2446,7 @@ describe("createAuthorizationGrant", () => {
 						throwingClientRepo,
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -2499,6 +2517,7 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-toctou", ...validCode })),
 			userSessionStore,
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: lifecycle,
 			logger,
 		};
@@ -2575,6 +2594,7 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-blip", ...validCode })),
 			userSessionStore,
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
@@ -2659,6 +2679,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: makeStore("sid-259", "u-259"),
+			sessionLifecycleStore: openingLifecycleStore("u-259"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
@@ -2695,6 +2716,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: makeStore("sid-259", "u-259"),
+			sessionLifecycleStore: openingLifecycleStore("u-259"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
@@ -2754,6 +2776,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: store,
+			sessionLifecycleStore: openingLifecycleStore("u-259"),
 			sessionLifecycle: lifecycle,
 		};
 
@@ -2802,6 +2825,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: store,
+			sessionLifecycleStore: openingLifecycleStore("u-259"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 
@@ -3085,6 +3109,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 			userSessionStore: sessionStore(async () => {
 				throw outage();
 			}),
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
@@ -3152,6 +3177,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 				if (reads === 1) return liveSession("sid-1");
 				throw outage();
 			}),
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
@@ -3171,6 +3197,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 				authenticate: vi.fn(),
 			}),
 			userSessionStore: sessionStore(async () => liveSession("sid-1")),
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
@@ -3190,6 +3217,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		const handler = createAuthorizationGrant({
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			userSessionStore: sessionStore(async () => liveSession("sid-1")),
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle(outsideAnswer<SessionJoinOutcome>()).lifecycle,
 			refreshTokenFamilyRotation: {
 				register,

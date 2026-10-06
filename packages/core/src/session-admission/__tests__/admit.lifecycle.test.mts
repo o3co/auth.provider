@@ -17,9 +17,9 @@
 /**
  * Admission's read of the session lifecycle: after the live record, the
  * lifecycle port's record for its sid — one closing or closed, or none,
- * is `not_live` (`closing`); no store handed keeps the reading as it was; a
- * store that cannot answer, or answers outside its types, is `unavailable`
- * (`session_lifecycle`).
+ * is `not_live` (`closing`); a user-session store handed without one is
+ * `unavailable` (`session_lifecycle`), as is a store that cannot answer, or
+ * answers outside its types.
  */
 
 import { describe, expect, it } from "vitest";
@@ -85,6 +85,7 @@ const logger = {
 
 const deps = (over: Partial<AdmissionDeps> = {}): AdmissionDeps => ({
 	userSessionStore,
+	sessionLifecycleStore: undefined,
 	subjectRevocation: undefined,
 	requirements: resolverForTests([], { actions: TEST_ACTIONS }),
 	acrTable: readAcrTable({}),
@@ -168,8 +169,33 @@ describe("admission's read of the session lifecycle", () => {
 		});
 	});
 
-	it("reads as before where no lifecycle store is handed", async () => {
-		expect((await admitSession(deps(), cookie())).outcome).toBe("admitted");
+	it("is unavailable (session_lifecycle) where a user-session store is handed and no lifecycle store, logged once", async () => {
+		lines.length = 0;
+		expect(await admitSession(deps({ sessionLifecycleStore: undefined }), cookie())).toEqual({
+			outcome: "unavailable",
+			store: "session_lifecycle",
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({
+			level: "error",
+			message: "session_admission_unavailable",
+			fields: { store: "session_lifecycle", action: "test.use" },
+		});
+	});
+
+	it("reads no lifecycle where no user-session store is handed", async () => {
+		const token: AdmissionRequest = {
+			claim: tokenClaim({ sid: SID, sub: SUB, amr: ["pwd"] }),
+			action: "test.use",
+		};
+		expect(
+			(
+				await admitSession(
+					deps({ userSessionStore: undefined, sessionLifecycleStore: undefined }),
+					token,
+				)
+			).outcome,
+		).toBe("admitted");
 	});
 
 	it("does not read the lifecycle when the user session is gone", async () => {

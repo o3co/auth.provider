@@ -28,6 +28,8 @@
 
 import assert from "node:assert/strict";
 import { requirementSession } from "../../user-sessions/authentication.mjs";
+import { createInMemorySessionLifecycleStore } from "../../user-sessions/lifecycle/memory.mjs";
+import type { SessionLifecycleStore } from "../../user-sessions/lifecycle/types.mjs";
 import type { UserSession, UserSessionStore } from "../../user-sessions/types.mjs";
 import { readAcrTable } from "../acr.mjs";
 import { type ActionGrade, ADMISSION_GRADES } from "../actions.mjs";
@@ -94,6 +96,13 @@ const storeAnswering = (answer: UserSession | null): UserSessionStore => ({
 	get: async () => answer,
 	delete: async () => {},
 });
+
+/** The lifecycle store a login opened `contract-sid`'s record in: a session with no record reads as closed. */
+const openedLifecycle = async (): Promise<SessionLifecycleStore> => {
+	const store = createInMemorySessionLifecycleStore();
+	await store.open("contract-sid", "contract-subject", liveSession().expiresAt);
+	return store;
+};
 
 const claim = () =>
 	cookieClaim({
@@ -205,6 +214,7 @@ export function sessionRequirementContract(
 				const admission = await admitSession(
 					{
 						userSessionStore: storeAnswering(null),
+						sessionLifecycleStore: await openedLifecycle(),
 						subjectRevocation: undefined,
 						requirements: resolverForTests([requirement], {
 							...(issuer === undefined ? {} : { issuer }),
@@ -222,6 +232,7 @@ export function sessionRequirementContract(
 				await admitSession(
 					{
 						userSessionStore: storeAnswering(liveSession()),
+						sessionLifecycleStore: await openedLifecycle(),
 						subjectRevocation: undefined,
 						requirements: resolverForTests([requirement], {
 							...(issuer === undefined ? {} : { issuer }),
@@ -254,6 +265,7 @@ export function sessionRequirementContract(
 				const admission = await admitSession(
 					{
 						userSessionStore: storeAnswering(liveSession()),
+						sessionLifecycleStore: await openedLifecycle(),
 						subjectRevocation: undefined,
 						requirements,
 						acrTable: readAcrTable({}),
@@ -326,6 +338,7 @@ export function sessionRequirementContract(
 				const admission = await admitPrimary(
 					{
 						userSessionStore: undefined,
+						sessionLifecycleStore: undefined,
 						subjectRevocation: undefined,
 						requirements: resolverForTests([requirement], issuer === undefined ? {} : { issuer }),
 						acrTable: readAcrTable({}),

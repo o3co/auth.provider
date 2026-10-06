@@ -15,19 +15,10 @@
  */
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type {
-	SessionFamilyIndex,
-	SessionFamilyIndexFactory,
-	SessionFederationIndex,
-	SessionFederationIndexFactory,
-	SessionRPRegistry,
-	SessionRPRegistryFactory,
-	UserSessionStore,
-	UserSessionStoreFactory,
-} from "./types.mjs";
+import type { UserSessionStore, UserSessionStoreFactory } from "./types.mjs";
 
 /**
- * AdapterFactory builders for the four user-session stores: `register`
+ * AdapterFactory builder for the user-session store: `register`
  * throws on a duplicate, `replace` is the explicit override, and there is
  * no `freeze()`. For compositions that pick an adapter by name from
  * configuration (e.g. `SESSION_BACKEND=redis`); the bundled modules
@@ -37,21 +28,4 @@ export function createUserSessionStoreFactory(): UserSessionStoreFactory {
 	return createAdapterFactory<UserSessionStore>("UserSessionStore");
 }
 
-export function createSessionRPRegistryFactory(): SessionRPRegistryFactory {
-	return createAdapterFactory<SessionRPRegistry>("SessionRPRegistry");
-}
-
-export function createSessionFamilyIndexFactory(): SessionFamilyIndexFactory {
-	return createAdapterFactory<SessionFamilyIndex>("SessionFamilyIndex");
-}
-
-export function createSessionFederationIndexFactory(): SessionFederationIndexFactory {
-	return createAdapterFactory<SessionFederationIndex>("SessionFederationIndex");
-}
-
-export type {
-	SessionFamilyIndexFactory,
-	SessionFederationIndexFactory,
-	SessionRPRegistryFactory,
-	UserSessionStoreFactory,
-};
+export type { UserSessionStoreFactory };

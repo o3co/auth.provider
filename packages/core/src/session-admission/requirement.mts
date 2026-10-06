@@ -144,8 +144,9 @@ export interface AdmissionDeps {
 	/**
 	 * The consumer's `sessionLifecycleStore` slot, read after a live record:
 	 * its record closing or closed, or no record for the sid (an absent record
-	 * reads as closed), is `not_live` (`closing`). Absent, the session is read
-	 * as it was without one.
+	 * reads as closed), is `not_live` (`closing`). Required where
+	 * `userSessionStore` is handed: without it a live record is `unavailable`
+	 * (`session_lifecycle`).
 	 */
 	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 	/** The synthetic key `sessionRequirementResolver`; only the boot planner and `resolverForTests` build one. */
@@ -882,8 +883,8 @@ export type Admission =
 			readonly outcome: "not_live";
 			/**
 			 * `renewed`: the record is bound to another cookie session, one a renewal moved it to.
-			 * `closing`: the session's lifecycle record is closing or closed, or absent
-			 * where a lifecycle store is wired (an absent record reads as closed).
+			 * `closing`: the session's lifecycle record is closing or closed, or
+			 * absent (an absent record reads as closed).
 			 */
 			readonly reason:
 				| "no_subject"

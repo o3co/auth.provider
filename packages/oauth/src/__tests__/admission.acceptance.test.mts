@@ -179,6 +179,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 		keyStore,
 		userSessionStore,
 		sessionLifecycle: livenessOver(userSessionStore),
+		sessionLifecycleStore: lifecycleRecords,
 		requirements,
 	});
 	const records = new Map<string, unknown>();

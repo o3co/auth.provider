@@ -160,6 +160,7 @@ describe("a login whose User's groups is an ORM's list logs in, its claims' grou
 		};
 		const deps: AdmissionDeps = {
 			userSessionStore: undefined,
+			sessionLifecycleStore: undefined,
 			subjectRevocation: undefined,
 			requirements: resolverForTests([verifier], { issuer: "https://auth.test" }),
 			acrTable: readAcrTable({}),
@@ -387,6 +388,7 @@ const recordingLogger = () => {
 /** Admission over no requirement: a login is established as it is built. */
 const depsWith = (logger: Logger | undefined): AdmissionDeps => ({
 	userSessionStore: undefined,
+	sessionLifecycleStore: undefined,
 	subjectRevocation: undefined,
 	requirements: resolverForTests([], { issuer: "https://auth.test" }),
 	acrTable: readAcrTable({}),

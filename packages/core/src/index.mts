@@ -1266,12 +1266,7 @@ export {
 	readEnrollmentFacts,
 	recordableEnrollmentFacts,
 } from "./user-sessions/enrollmentFacts.mjs";
-export {
-	createSessionFamilyIndexFactory,
-	createSessionFederationIndexFactory,
-	createSessionRPRegistryFactory,
-	createUserSessionStoreFactory,
-} from "./user-sessions/factory.mjs";
+export { createUserSessionStoreFactory } from "./user-sessions/factory.mjs";
 // The session lifecycle (active → closing → closed): the port, its readers
 // and its in-process store; the service, its module and the relying-party
 // notifier contract. Nothing installs the module yet.
@@ -1310,9 +1305,6 @@ export {
 	type SessionParticipantKind,
 	sessionCloseItemOf,
 } from "./user-sessions/lifecycle/types.mjs";
-export { createInMemorySessionFamilyIndex } from "./user-sessions/memory/sessionFamilyIndex.mjs";
-export { createInMemorySessionFederationIndex } from "./user-sessions/memory/sessionFederationIndex.mjs";
-export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";
 // Subject-keyed session index + per-subject access-token watermark, and
 // the orchestrator a credential-change flow calls after writing the new secret.
 export { createInMemorySubjectRevocation } from "./user-sessions/memory/subjectRevocation.mjs";
@@ -1353,9 +1345,8 @@ export {
 // ---------------------------------------------------------------------------
 // User sessions
 // ---------------------------------------------------------------------------
-// Backing client interfaces (UserSessionStoreClient, SessionRPRegistryClient
-// (+Multi), SessionSidSortedSetClient (+Multi)) live in
-// @o3co/auth-provider-redis.
+// The backing client interfaces (UserSessionStoreClient and the others) live
+// in @o3co/auth-provider-redis.
 export type {
 	CreateUserSessionInput,
 	MailAddressFact,
@@ -1363,18 +1354,11 @@ export type {
 	SecondFactorEvent,
 	SessionAuthentication,
 	SessionEnrollmentFacts,
-	SessionFamilyIndex,
-	SessionFamilyIndexFactory,
-	SessionFederationIndex,
-	SessionFederationIndexFactory,
-	SessionRPRegistry,
-	SessionRPRegistryFactory,
 	SubjectRevocation,
 	SubjectRevocationFactory,
 	SubjectSessionIndex,
 	SubjectSessionIndexFactory,
 	SupportsSecondFactorUpdate,
-	SupportsSessionEnd,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -1383,7 +1367,6 @@ export type {
 export {
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	supportsSecondFactorUpdate,
-	supportsSessionEnd,
 } from "./user-sessions/types.mjs";
 
 // ---------------------------------------------------------------------------

@@ -18,9 +18,6 @@ import { consoleLogger } from "../../logging/consoleLogger.mjs";
 import type { Logger } from "../../logging/Logger.mjs";
 import { defineModule } from "../../modules/manifest/define-module.mjs";
 import { createInMemorySessionLifecycleStore } from "../lifecycle/memory.mjs";
-import { createInMemorySessionFamilyIndex } from "../memory/sessionFamilyIndex.mjs";
-import { createInMemorySessionFederationIndex } from "../memory/sessionFederationIndex.mjs";
-import { createInMemorySessionRPRegistry } from "../memory/sessionRPRegistry.mjs";
 import { createInMemorySubjectRevocation } from "../memory/subjectRevocation.mjs";
 import { createInMemorySubjectSessionIndex } from "../memory/subjectSessionIndex.mjs";
 import { createInMemoryUserSessionStore } from "../memory/userSessionStore.mjs";
@@ -39,22 +36,18 @@ export const memorySessionStoresModule = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it",
+			"user sessions, their lifecycle records and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it",
 	},
 	optional: ["logger"] as const,
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
-		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
-		sessionFamilyIndex: () => createInMemorySessionFamilyIndex(),
-		sessionFederationIndex: () => createInMemorySessionFederationIndex(),
 		// Subject-keyed index + access-token watermark. Bundled here with
 		// the other memory session stores so a single-node deployment gets
 		// subject-level revocation by installing the module it already installs.
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
 		subjectRevocation: (deps: { readonly logger?: Logger }) =>
 			createInMemorySubjectRevocation({ logger: deps.logger ?? consoleLogger }),
-		// Read only by the session lifecycle module, which the standalone
-		// template installs.
+		// Written by the session lifecycle module alone; read by admission too.
 		sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 	} as never,
 });

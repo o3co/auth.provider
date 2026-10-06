@@ -49,6 +49,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
+import { openingLifecycleStore } from "./lifecycleRecords.mjs";
 import {
 	FACTORS,
 	factorRecord,
@@ -119,6 +120,7 @@ const claim = () =>
  */
 const deps = (row: MergeRow): AdmissionDeps => ({
 	userSessionStore: mergeSessionStore(row),
+	sessionLifecycleStore: openingLifecycleStore("user-1"),
 	subjectRevocation: undefined,
 	requirements: resolverForTests(
 		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors)],

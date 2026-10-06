@@ -50,7 +50,7 @@ import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectOutageLine } from "./_helpers/projectedLog.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
-import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
+import { livenessOver, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "third-party-chat";
 const REDIRECT_URI = "https://chat.example/cb";
@@ -135,6 +135,7 @@ const makeApp = async (opts: {
 			? {
 					userSessionStore: opts.userSessionStore,
 					sessionLifecycle: livenessOver(opts.userSessionStore),
+					sessionLifecycleStore: openingLifecycleStore("user-1"),
 				}
 			: {}),
 		logger,

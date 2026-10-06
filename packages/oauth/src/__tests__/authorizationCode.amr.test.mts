@@ -153,6 +153,7 @@ const world = async (
 			codeRepository,
 			userSessionStore,
 			sessionLifecycle,
+			sessionLifecycleStore,
 		}),
 	);
 	registry.register(
@@ -174,6 +175,7 @@ const world = async (
 		keyStore,
 		userSessionStore,
 		sessionLifecycle,
+		sessionLifecycleStore,
 		accessTokenDenylist: createMemoryAccessTokenDenylist(),
 		requirements,
 	});

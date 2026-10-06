@@ -27,7 +27,6 @@ import type {
 	AttemptCounter,
 	FederationProvider,
 	FederationTokenStore,
-	SessionFederationIndex,
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -78,18 +77,7 @@ const stores = [
 		async removeBySid() {},
 		async delete() {},
 	} as unknown as FederationTokenStore),
-	providing("test:session-federation-index", "sessionFederationIndex", {
-		kind: "memory",
-		async addFederation() {},
-		async listFederations() {
-			return [];
-		},
-		async removeFederation() {},
-		async removeBySid() {},
-	} as unknown as SessionFederationIndex),
 	// oauth-package slots the boot validator asks for once a federation is enabled.
-	providing("test:session-rp-registry", "sessionRPRegistry", { kind: "stub" }),
-	providing("test:session-family-index", "sessionFamilyIndex", { kind: "stub" }),
 	providing("test:refresh-token-family-revocation", "refreshTokenFamilyRevocation", {
 		kind: "stub",
 	}),
