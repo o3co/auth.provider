@@ -933,6 +933,7 @@
 . isClientRecordRefused value
 . isCompoundConfirmation value
 . isConsumedMfaTransaction value
+. isDevelopmentEnvironment value
 . isEmailVerified value
 . isEstablishment value
 . isFederationUpstreamOutage value
