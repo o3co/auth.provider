@@ -32,9 +32,12 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createInMemorySubjectRevocation,
+	createMemoryRefreshTokenFamilyStore,
+	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantError,
+	type RefreshTokenFamilyRevocation,
 	type RequirementInput,
 	type RequirementVerdict,
 	type SessionRequirement,
@@ -135,6 +138,8 @@ const makeGrant = (opts: {
 	duringJoin?: () => Promise<void>;
 	grantedScope?: readonly string[];
 	sid?: string | undefined;
+	/** Wires a refresh-token family rotation and a revocation that records each revoked family. */
+	families?: boolean;
 }) => {
 	const codeRepository = {
 		consumeByCode: vi.fn(async () =>
@@ -160,6 +165,12 @@ const makeGrant = (opts: {
 		await opts.duringJoin?.();
 		return { outcome: "joined" };
 	});
+	const rotation = createRefreshTokenFamilyRotation({
+		refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
+		accessTokenHorizonMs: 3_600_000,
+	});
+	const register = vi.fn(rotation.register);
+	const revokeFamily = vi.fn(async (_familyId: string) => {});
 	const keyStore = createSymmetricKeyStore("test-secret");
 	const sign = keyStore.sign.bind(keyStore);
 	const signed = vi.spyOn(keyStore, "sign").mockImplementation(async (options) => {
@@ -183,6 +194,12 @@ const makeGrant = (opts: {
 				}
 			: {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
+		...(opts.families
+			? {
+					refreshTokenFamilyRotation: { ...rotation, register },
+					refreshTokenFamilyRevocation: { revokeFamily } as unknown as RefreshTokenFamilyRevocation,
+				}
+			: {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.auditEvents
 			? {
@@ -193,7 +210,7 @@ const makeGrant = (opts: {
 				}
 			: {}),
 	});
-	return { handler, signed, join, keyStore };
+	return { handler, signed, join, keyStore, register, revokeFamily };
 };
 
 const ctx = (session: Record<string, unknown> = {}): GrantContext => ({
@@ -479,6 +496,26 @@ describe("the authorization_code grant on admission — the revalidation", () =>
 			expect.objectContaining({ store: "user_session", action: "oauth.code_exchange" }),
 			"session_admission_unavailable",
 		);
+	});
+});
+
+describe("the authorization_code grant — a refusal at the revalidation", () => {
+	it.each([
+		["a session gone", null],
+		["a subject changed", record({ sub: "someone-else" })],
+		["an outage", new Error("redis down")],
+	] as const)("%s revokes the family it registered and issues no token", async (_, second) => {
+		const { handler, join, register, revokeFamily } = makeGrant({
+			families: true,
+			userSessionStore: storeAnswering(record(), second),
+		});
+		const result = await refused(handler);
+		expect(result).not.toHaveProperty("tokens");
+		expect(join).not.toHaveBeenCalled();
+		expect(register).toHaveBeenCalledTimes(1);
+		const familyId = register.mock.calls[0]?.[1];
+		expect(revokeFamily).toHaveBeenCalledTimes(1);
+		expect(revokeFamily).toHaveBeenCalledWith(familyId);
 	});
 });
 
