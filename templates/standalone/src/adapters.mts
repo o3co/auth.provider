@@ -21,7 +21,7 @@
  * moved from, and the variables renamed with them, are refused here, before
  * any module is chosen, in the words and under the reasons boot refuses a
  * module's with (`config-path-relocated`, `environment-variable-renamed`): a
- * renamed variable set alone, or beside its new name at a different value, is
+ * renamed variable set, alone or beside its new name at any value, is
  * refused, naming the variables and never a value.
  */
 

@@ -311,139 +311,139 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 	OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS:
 		"the variable of a removed key, and only captured — any value fails boot",
 	OAUTH_ACCESS_TOKEN_EXPIRES_IN:
-		"renamed OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN, and only captured — set at any value, beside its new name or not, it fails boot",
 	DEPLOYMENT_MODE:
-		"renamed CORE_DEPLOYMENT_MODE, and only captured — set alone, or to another value, it fails boot",
+		"renamed CORE_DEPLOYMENT_MODE, and only captured — set at any value, beside its new name or not, it fails boot",
 	MEMORY_RATE_LIMITER_MAX_BUCKETS:
-		"renamed CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS, and only captured — set alone, or to another value, it fails boot",
+		"renamed CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS, and only captured — set at any value, beside its new name or not, it fails boot",
 	RATE_LIMIT_FAIL_MODE:
-		"renamed REDIS_RATE_LIMITER_FAIL_MODE, and only captured — set alone, or to another value, it fails boot",
+		"renamed REDIS_RATE_LIMITER_FAIL_MODE, and only captured — set at any value, beside its new name or not, it fails boot",
 	REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX:
-		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX, and only captured — set alone, or to another value, it fails boot",
+		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX, and only captured — set at any value, beside its new name or not, it fails boot",
 	REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT:
-		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT, and only captured — set alone, or to another value, it fails boot",
+		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT, and only captured — set at any value, beside its new name or not, it fails boot",
 	FEDERATION_GRANTS_ENCRYPTION_MODE:
-		"renamed REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE, and only captured — set alone, or to another value, it fails boot",
+		"renamed REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_TOKEN_BINDING_DISPATCH_POLICY:
-		"renamed CORE_TOKEN_BINDING_DISPATCH_POLICY, and only captured — set alone, or to another value, it fails boot",
+		"renamed CORE_TOKEN_BINDING_DISPATCH_POLICY, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS:
-		"renamed CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS, and only captured — set alone, or to another value, it fails boot",
+		"renamed CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_GRANTS_SESSION_ENABLED:
-		"renamed OAUTH_SESSION_ENABLED, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_SESSION_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED:
-		"renamed OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED:
-		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY:
-		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED:
-		"renamed OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_GRANTS_JWT_BEARER_ENABLED:
-		"renamed OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot",
 	ENDPOINTS_CONSENT_URL:
-		"renamed OAUTH_CONSENT_PAGE_URL, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CONSENT_PAGE_URL, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_ENABLED:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_ALLOWED_SCOPES:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_ALLOWED_AUDIENCES:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_ALLOWED_HOSTS:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_DENIED_HOSTS:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_DENIED_HOSTS, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_DENIED_HOSTS, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_MAX_BYTES:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_BYTES, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_BYTES, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_TIMEOUT_MS:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_TIMEOUT_MS, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_TIMEOUT_MS, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_CACHE_MAX_AGE_MS:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_CACHE_MAX_AGE_MS, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_CACHE_MAX_AGE_MS, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_MAX_CACHE_ENTRIES:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CACHE_ENTRIES, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CACHE_ENTRIES, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_STALE_IF_ERROR_MS:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_NEGATIVE_CACHE_MS:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_CIMD_MAX_CONCURRENT_FETCHES:
-		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES, and only captured — set alone, or to another value, it fails boot",
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256:
 		"the authorization-code grant's pkce block was removed, and this is only captured — set at all, it fails boot",
 	ENDPOINTS_LOGIN_URL:
-		"renamed SESSION_LOGIN_PAGE_URL, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_LOGIN_PAGE_URL, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_SECRET:
-		"renamed SESSION_STORE_SECRET, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_SECRET, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_NAME:
-		"renamed SESSION_STORE_NAME, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_NAME, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_MAX_AGE:
-		"renamed SESSION_STORE_MAX_AGE, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_MAX_AGE, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_SECURE:
-		"renamed SESSION_STORE_SECURE, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_SECURE, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_SAME_SITE:
-		"renamed SESSION_STORE_SAME_SITE, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_SAME_SITE, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_DOMAIN:
-		"renamed SESSION_STORE_DOMAIN, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_DOMAIN, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_STORAGE_TYPE:
-		"renamed SESSION_STORE_STORAGE_TYPE, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_STORAGE_TYPE, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_STORAGE_REDIS_URL:
-		"renamed SESSION_STORE_STORAGE_REDIS_URL, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_STORAGE_REDIS_URL, and only captured — set at any value, beside its new name or not, it fails boot",
 	SESSION_STORAGE_REDIS_PASSWORD:
-		"renamed SESSION_STORE_STORAGE_REDIS_PASSWORD, and only captured — set alone, or to another value, it fails boot",
+		"renamed SESSION_STORE_STORAGE_REDIS_PASSWORD, and only captured — set at any value, beside its new name or not, it fails boot",
 	LOG_LEVEL:
-		"renamed LOGGING_LEVEL, and only captured — set alone, or to another value, it fails boot",
+		"renamed LOGGING_LEVEL, and only captured — set at any value, beside its new name or not, it fails boot",
 	CORS_ALLOWED_ORIGINS:
-		"renamed HTTP_CORS_ALLOWED_ORIGINS, and only captured — set alone, or to another value, it fails boot",
+		"renamed HTTP_CORS_ALLOWED_ORIGINS, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_JWT_SIGNING_KEY_PROVIDER:
-		"renamed KEY_STORE_PROVIDER, and only captured — set alone, or to another value, it fails boot",
+		"renamed KEY_STORE_PROVIDER, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_JWT_ALGORITHM:
-		"renamed KEY_STORE_LOCAL_ALGORITHM, and only captured — set alone, or to another value, it fails boot",
+		"renamed KEY_STORE_LOCAL_ALGORITHM, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_JWT_KID:
-		"renamed KEY_STORE_LOCAL_KID, and only captured — set alone, or to another value, it fails boot",
+		"renamed KEY_STORE_LOCAL_KID, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_JWT_SECRET:
-		"renamed KEY_STORE_LOCAL_SECRET, and only captured — set alone, or to another value, it fails boot",
+		"renamed KEY_STORE_LOCAL_SECRET, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_JWT_PRIVATE_KEY_PATH:
-		"renamed KEY_STORE_LOCAL_PRIVATE_KEY_PATH, and only captured — set alone, or to another value, it fails boot",
+		"renamed KEY_STORE_LOCAL_PRIVATE_KEY_PATH, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_JWT_PUBLIC_KEY_PATH:
-		"renamed KEY_STORE_LOCAL_PUBLIC_KEY_PATH, and only captured — set alone, or to another value, it fails boot",
+		"renamed KEY_STORE_LOCAL_PUBLIC_KEY_PATH, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_JWT_PRIVATE_KEY:
-		"renamed KEY_STORE_LOCAL_PRIVATE_KEY, and only captured — set alone, or to another value, it fails boot",
+		"renamed KEY_STORE_LOCAL_PRIVATE_KEY, and only captured — set at any value, beside its new name or not, it fails boot",
 	OAUTH_JWT_PUBLIC_KEY:
-		"renamed KEY_STORE_LOCAL_PUBLIC_KEY, and only captured — set alone, or to another value, it fails boot",
+		"renamed KEY_STORE_LOCAL_PUBLIC_KEY, and only captured — set at any value, beside its new name or not, it fails boot",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL:
-		"renamed REDIS_CLIENTS_URL, and only captured — set alone, or to another value, it fails boot",
+		"renamed REDIS_CLIENTS_URL, and only captured — set at any value, beside its new name or not, it fails boot",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD:
-		"renamed REDIS_CLIENTS_PASSWORD, and only captured — set alone, or to another value, it fails boot",
+		"renamed REDIS_CLIENTS_PASSWORD, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_PATH:
-		"renamed REPOSITORIES_CLIENT_YAML_PATH, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_CLIENT_YAML_PATH, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_USER_PATH:
-		"renamed REPOSITORIES_USER_YAML_PATH, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_USER_YAML_PATH, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_USER_AUTHENTICATE_URL:
-		"renamed REPOSITORIES_USER_HTTP_AUTHENTICATE_URL, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_USER_HTTP_AUTHENTICATE_URL, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL:
-		"renamed REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_USER_LINK_FEDERATED_IDENTITY_URL:
-		"renamed REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL:
-		"renamed REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_USER_BEARER_TOKEN:
-		"renamed REPOSITORIES_USER_HTTP_BEARER_TOKEN, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_USER_HTTP_BEARER_TOKEN, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_USER_TIMEOUT:
-		"renamed REPOSITORIES_USER_HTTP_TIMEOUT, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_USER_HTTP_TIMEOUT, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_USER_MAX_RESPONSE_BYTES:
-		"renamed REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES, and only captured — set alone, or to another value, it fails boot",
+		"renamed REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_CODE_DEFAULT_EXPIRES_IN:
-		"renamed REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN (the Redis code repository) and STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN (the in-process one), and only captured — set alone, or to another value, it fails boot",
+		"renamed REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN (the Redis code repository) and STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN (the in-process one), and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_CODE_KEY_PREFIX:
-		"renamed REDIS_CODE_REPOSITORY_KEY_PREFIX, and only captured — set alone, or to another value, it fails boot",
+		"renamed REDIS_CODE_REPOSITORY_KEY_PREFIX, and only captured — set at any value, beside its new name or not, it fails boot",
 	CLIENT_CODE_ENDPOINT_URI:
 		"removed: the Redis code repository uses the shared redis-clients connection; only captured — set at all, it fails boot",
 	CLIENT_CODE_PASSWORD:
 		"removed: the Redis code repository uses the shared redis-clients connection; only captured — set at all, it fails boot",
 	ENDPOINTS_MFA_URL:
-		"renamed MFA_PAGE_URL, and only captured — set alone, or to another value, it fails boot where MFA is installed",
+		"renamed MFA_PAGE_URL, and only captured — set at any value, beside its new name or not, it fails boot where MFA is installed",
 	MFA_TOTP_ENABLED:
-		"renamed MFA_TOTP_FACTOR_ENABLED, and only captured — set alone, or to another value, it fails boot where MFA is installed",
+		"renamed MFA_TOTP_FACTOR_ENABLED, and only captured — set at any value, beside its new name or not, it fails boot where MFA is installed",
 	MFA_TOTP_ISSUER:
-		"renamed MFA_TOTP_FACTOR_ISSUER, and only captured — set alone, or to another value, it fails boot where MFA is installed",
+		"renamed MFA_TOTP_FACTOR_ISSUER, and only captured — set at any value, beside its new name or not, it fails boot where MFA is installed",
 };
 
 /**
