@@ -69,6 +69,7 @@ import {
 	type Switches,
 } from "../configPath.mjs";
 import { MFA_SWITCH } from "../mfaSwitch.mjs";
+import { configuredMfaMode } from "./configured-mfa-mode.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -270,7 +271,7 @@ describe("phase one reads federation-grants.enabled as the federation-grants mod
 	it("reads the MFA switch as its own mfaMode, as the environment sets it, and no key of the MFA module's", () => {
 		for (const [name, env] of Object.entries(ENVIRONMENTS)) {
 			const switches = readSwitches(readOwnLayers(ownFiles("production"), { env }));
-			expect(switches.mfaMode, name).toBe(env.MFA_MODE ?? "required");
+			expect(switches.mfaMode, name).toBe(env.MFA_MODE ?? configuredMfaMode("production"));
 			expect(switches, name).not.toHaveProperty("mfa");
 		}
 	});

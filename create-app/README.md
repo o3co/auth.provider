@@ -1,6 +1,6 @@
 # @o3co/create-auth-provider
 
-Last updated: 2026-10-03
+Last updated: 2026-10-06
 
 CLI scaffolder for auth.provider. Generates a new server project from one of the built-in templates.
 
@@ -85,7 +85,10 @@ switch installs and needs is in the template's README.
 it appends `mfaMode = "off"` and then `mfaMode = ${?MFA_MODE}` to
 `config/application.conf`, so the project stays off whatever default a later
 template ships, and `MFA_MODE` still turns MFA on without re-scaffolding. The
-MFA package stays a dependency; nothing else is removed or changed.
+MFA package stays a dependency; nothing else is removed or changed. The
+project's own suite (`pnpm run test`) reads the switch from the project's
+configuration and asserts what it implies, so it passes with or without
+`--no-mfa`.
 
 The generated project is a pnpm project: its `Dockerfile` installs with
 `pnpm install --frozen-lockfile`, and its build allowlist lives in

@@ -15,11 +15,12 @@
  */
 
 /**
- * The development compose run, `docker-compose.yml`, with MFA on as the
- * template ships it, and the Mailpit overlay, `docker-compose.mailpit.yml`: a
- * development run whose mail goes through the SMTP sender to Mailpit. It is an
- * overlay on `docker-compose.yml`, so a plain `docker compose up` starts no
- * Mailpit, and the production file names none. The compose files are read as
+ * The development compose run, `docker-compose.yml`, with MFA as the
+ * configuration's switch says (on as the template ships it), and the Mailpit
+ * overlay, `docker-compose.mailpit.yml`: a development run whose mail goes
+ * through the SMTP sender to Mailpit. It is an overlay on
+ * `docker-compose.yml`, so a plain `docker compose up` starts no Mailpit, and
+ * the production file names none. The compose files are read as
  * the fixed-shape files they are, and the process each run describes is booted
  * from the shipped files, as `app.mts` boots them, under the environment the
  * run sets: `.env.example`'s lines, then each compose file's `environment`, the
@@ -44,6 +45,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "#/configPath.mjs";
 import { createRecordingLogger } from "./all-modules-composition.fixture.mjs";
+import { configuredMfaMode } from "./configured-mfa-mode.fixture.mjs";
 
 vi.mock("redis", () => ({
 	createClient: vi.fn(() => ({
@@ -245,14 +247,15 @@ describe("the process each development run describes", () => {
 		};
 	}
 
-	it("boots docker-compose.yml's run with MFA required: development, the development mail sender, the MFA stores on its Redis", async () => {
+	it("boots docker-compose.yml's run with MFA as the configuration's switch says: development, the development mail sender, the MFA stores on its Redis", async () => {
 		const env = containerEnv(false);
 		// `app.mts`: CONFIG_ENV, then NODE_ENV, then development; the run sets neither.
 		expect(env.CONFIG_ENV ?? env.NODE_ENV).toBeUndefined();
 		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "development");
 		const own = readOwnLayers([envConfPath, applicationConfPath], { env });
 		const switches = readSwitches(own);
-		expect(switches.mfaMode).toBe("required");
+		const mode = configuredMfaMode("development");
+		expect(switches.mfaMode).toBe(mode);
 		// A hot reload restarts the process on every save, and Redis keeps the
 		// factors, and the sessions beside them, across it.
 		expect(switches.adapters).toMatchObject({
@@ -277,7 +280,7 @@ describe("the process each development run describes", () => {
 			"standard-development",
 		);
 		expect((handle.components.config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode).toBe(
-			"required",
+			mode === "off" ? undefined : mode,
 		);
 	});
 
@@ -289,13 +292,14 @@ describe("the process each development run describes", () => {
 		expect(existsSync(resolveConfigPaths(configDir, configEnv as string).envConfPath)).toBe(true);
 	});
 
-	it("boots with MFA on and the SMTP sender in the mailSender slot, relaying to Mailpit", async () => {
+	it("boots with the SMTP sender relaying to Mailpit, in the mailSender slot while MFA is on (the configuration's switch), which nothing reads while it is off", async () => {
 		const env = containerEnv();
 		const configEnv = env.CONFIG_ENV as string;
 		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
 		const own = readOwnLayers([envConfPath, applicationConfPath], { env });
 		const switches = readSwitches(own);
-		expect(switches.mfaMode).toBe("required");
+		const mode = configuredMfaMode(configEnv);
+		expect(switches.mfaMode).toBe(mode);
 
 		const modules = buildModules(switches, {
 			environment: configEnv,
@@ -316,7 +320,12 @@ describe("the process each development run describes", () => {
 			},
 		});
 		handles.push(handle);
-		expect((handle.components.mailSender as MailSender | undefined)?.kind).toBe("standard-smtp");
+		expect((handle.components.mailSender as MailSender | undefined)?.kind).toBe(
+			mode === "off" ? undefined : "standard-smtp",
+		);
+		expect((handle.components.config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode).toBe(
+			mode === "off" ? undefined : mode,
+		);
 		expect(
 			(handle.components.config as Record<string, unknown> | undefined)?.[
 				"standard-smtp-mail-sender"

@@ -32,6 +32,7 @@ import { buildModules } from "../buildModules.mjs";
 import { readOwnLayers, readSwitches, resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { type Adapters, repositoriesSectionSchema } from "../sections.mjs";
+import { configuredMfaMode } from "./configured-mfa-mode.fixture.mjs";
 
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -355,8 +356,8 @@ function dotenvExample(): Record<string, string> {
 	return env;
 }
 
-describe("the production compose leaves MFA on, for the deployment to decide", () => {
-	it("reads the switch as required, so a deployment that sets nothing about MFA is refused naming MFA_MODE=off", () => {
+describe("the production compose leaves MFA to the configuration's switch, for the deployment to decide", () => {
+	it("reads the switch as the configuration's files write it: on, a deployment that sets nothing about MFA is refused naming MFA_MODE=off; off, it installs nothing of MFA", () => {
 		// `environment:` wins over `env_file`, so the compose file's block is
 		// laid over the `.env` copied from `.env.example`.
 		const env = { ...dotenvExample(), ...bootableEnv("/docker-compose.production.yml") };
@@ -365,8 +366,14 @@ describe("the production compose leaves MFA on, for the deployment to decide", (
 		expect(configEnv).toBe("production");
 		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
 		const switches = readSwitches(readOwnLayers([envConfPath, applicationConfPath], { env }));
-		expect(switches.mfaMode).toBe("required");
+		const mode = configuredMfaMode(configEnv);
+		expect(switches.mfaMode).toBe(mode);
 
+		if (mode === "off") {
+			const names = buildModules(switches, { environment: configEnv }).map((m) => m.name);
+			expect(names.filter((name) => /mfa/i.test(name))).toEqual([]);
+			return;
+		}
 		let err: unknown;
 		try {
 			buildModules(switches, { environment: configEnv });
