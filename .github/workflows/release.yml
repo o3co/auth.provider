@@ -74,6 +74,7 @@ jobs:
           .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
 
       - name: Create GitHub Release (draft)
+        id: draft
         uses: softprops/action-gh-release@v2
         with:
           draft: true
@@ -94,9 +95,23 @@ jobs:
           NPM_TAG: ${{ steps.release.outputs.npm_tag }}
         run: pnpm -r publish --access public --no-git-checks --provenance --tag "$NPM_TAG"
 
+      # Publishes the release the draft step resolved for this tag, by id. A
+      # second tag lookup cannot see drafts and would create a second release.
+      # Refuses a release of any other tag; re-publishing is a no-op.
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: false
-          prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.id }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID:?the draft step returned no release id}"
+          release_tag="$(gh api "$endpoint" --jq .tag_name)"
+          if [[ "$release_tag" != "$TAG" ]]; then
+            echo "::error::release ${RELEASE_ID} is for tag ${release_tag}, not ${TAG}"
+            exit 1
+          fi
+          gh api --method PATCH "$endpoint" -F draft=false -F "prerelease=${PRERELEASE}" \
+            --jq '"\(.tag_name): draft=\(.draft) prerelease=\(.prerelease) \(.html_url)"'
