@@ -1094,10 +1094,11 @@ export type ReservedComponentKeyDetails =
 	  };
 
 /**
- * A section path a manifest cannot have written: an `at` that is not a
- * dot-separated path of non-empty keys (or not a string), or one another
- * loaded module's section is read at too, since a section has one owner
- * (`problem` names that module); or a `relocatedFrom` that is neither a list
+ * A section a manifest cannot declare: a manifest still carrying
+ * `configSchema` or `section.at`, since a module's section is at its name and
+ * its configuration is its section, or a module named after a section core
+ * reserves (`core`, `renamed-variables`) — `problem` says which; or a
+ * `relocatedFrom` that is neither a list
  * of such paths nor a map from them to paths inside the section (`""` for the
  * section itself), or whose old path is or holds a loaded module's section
  * (`problem` says what is wrong); or a `renamedVariables` entry boot cannot
@@ -1107,9 +1108,13 @@ export type ModuleSectionPathInvalidDetails =
 	| {
 			readonly reason: "module-section-path-invalid";
 			readonly module: string;
-			/** The `at` the manifest wrote, or the path its section is read at when that is shared. */
+			/**
+			 * The `section.at` the manifest wrote, whatever its value; otherwise
+			 * the path its section is read at, its name, or `undefined` for a
+			 * module without a section.
+			 */
 			readonly at: unknown;
-			/** What is wrong with the path, when it is well formed but shared. */
+			/** What is wrong with the manifest. */
 			readonly problem?: string;
 	  }
 	| {
@@ -1196,10 +1201,9 @@ export interface ConfigValidationFailedDetails {
 	 */
 	readonly issues: readonly z.ZodIssue[];
 	/**
-	 * The composed parse: the modules whose configSchema participated, with
-	 * no `schemaPath`. A section's parse: the modules whose section was
-	 * refused, each with `schemaPath`, the dot-separated path its section is
-	 * read at.
+	 * Core's parse: none. A section's parse: the modules whose section was
+	 * refused, each with `schemaPath`, the path its section is read at — the
+	 * module's name — or none when a module without a section is named.
 	 */
 	readonly modules: readonly { readonly module: string; readonly schemaPath?: string }[];
 }

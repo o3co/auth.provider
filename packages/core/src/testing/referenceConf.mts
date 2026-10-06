@@ -87,8 +87,8 @@ export function referenceConfProblems(check: ReferenceConfCheck): string[] {
 	const problems: string[] = [];
 	const sections = owners.map((module) => {
 		const section = module.section as NonNullable<Module["section"]>;
-		// Unset, `at` is the module's name as one key, not split on dots.
-		const segments = section.at === undefined ? [module.name] : section.at.split(".");
+		// A section is at its module's name, one key, not split on dots.
+		const segments = [module.name];
 		return { module, schema: section.schema, path: segments.join("."), segments };
 	});
 	for (const path of leafPaths(check.tree, "")) {

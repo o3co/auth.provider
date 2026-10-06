@@ -15,7 +15,7 @@
  */
 
 /**
- * `unreadableModuleLeaves`: a module's `configSchema` or section leaf
+ * `unreadableModuleLeaves`: a module's section leaf, at its name,
  * that would refuse the string an environment variable carries — a bare
  * `z.boolean()`, a `z.number()` that does not coerce, a non-string literal —
  * is covered only where core's transitional base reads the path first AND
@@ -29,75 +29,61 @@ import { readsEnvironmentString } from "#/config/schema-path.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
 import { unreadableModuleLeaves } from "#/testing/environmentLeaves.mjs";
 
-const reading = (name: string, configSchema: z.ZodObject) => defineModule({ name, configSchema });
+/** A module whose section, at its name, is `schema`. */
+const reading = (name: string, schema: z.ZodObject) => defineModule({ name, section: { schema } });
 
 describe("unreadableModuleLeaves — what core's base hands a module's leaf", () => {
 	it("covers a module's number where the base reads the string as a number", () => {
 		// `oauth.nonce.maxLength` is a coerced number in core's base.
 		expect(
 			unreadableModuleLeaves([
-				reading(
-					"nonce-reader",
-					z.object({ oauth: z.object({ nonce: z.object({ maxLength: z.number() }) }) }),
-				),
+				reading("oauth", z.object({ nonce: z.object({ maxLength: z.number() }) })),
 			]),
 		).toEqual([]);
 	});
 
 	it("covers a module's boolean where the base reads the string as a boolean", () => {
 		expect(
-			unreadableModuleLeaves([
-				reading(
-					"email-reader",
-					z.object({ oauth: z.object({ requireEmailVerified: z.boolean() }) }),
-				),
-			]),
+			unreadableModuleLeaves([reading("oauth", z.object({ requireEmailVerified: z.boolean() }))]),
 		).toEqual([]);
 	});
 
 	it("does not cover a module's number where the base reads the string and leaves it a string", () => {
 		// `oauth.oidcMode` is an enum of strings: the base reads `"3"` and
 		// refuses it, or hands a string on — never the number the module takes.
-		expect(
-			unreadableModuleLeaves([
-				reading("mode-reader", z.object({ oauth: z.object({ oidcMode: z.number() }) })),
-			]),
-		).toEqual(["mode-reader: oauth.oidcMode"]);
+		expect(unreadableModuleLeaves([reading("oauth", z.object({ oidcMode: z.number() }))])).toEqual([
+			"oauth: oauth.oidcMode",
+		]);
 	});
 
 	it("reports a module's preprocess that hands a string on to a boolean untouched", () => {
 		expect(
 			unreadableModuleLeaves([
-				reading(
-					"identity-reader",
-					z.object({ widget: z.object({ on: z.preprocess((value) => value, z.boolean()) }) }),
-				),
+				reading("widget", z.object({ on: z.preprocess((value) => value, z.boolean()) })),
 			]),
-		).toEqual(["identity-reader: widget.on"]);
+		).toEqual(["widget: widget.on"]);
 	});
 
 	it("reports a module's leaf at a path the base does not declare", () => {
-		expect(
-			unreadableModuleLeaves([
-				reading("widget-reader", z.object({ widget: z.object({ on: z.boolean() }) })),
-			]),
-		).toEqual(["widget-reader: widget.on"]);
+		expect(unreadableModuleLeaves([reading("widget", z.object({ on: z.boolean() }))])).toEqual([
+			"widget: widget.on",
+		]);
 	});
 });
 
-describe("unreadableModuleLeaves — a module's section, at its path", () => {
-	it("reads a section at its `at`, or at the module's name, and a module with neither schema declares none", () => {
-		const atPath = defineModule({
-			name: "at-path",
-			section: { schema: z.object({ on: z.boolean() }), at: "fixture.atPath" },
+describe("unreadableModuleLeaves — a module's section, at its name", () => {
+	it("reads a section at the module's name, not split on its dots, and a module without a section declares none", () => {
+		const dotted = defineModule({
+			name: "fixture.dotted",
+			section: { schema: z.object({ on: z.boolean() }) },
 		});
 		const byName = defineModule({
 			name: "by-name",
 			section: { schema: z.object({ n: z.number() }) },
 		});
-		expect(unreadableModuleLeaves([atPath, byName, defineModule({ name: "plain" })])).toEqual([
-			"at-path: fixture.atPath.on",
+		expect(unreadableModuleLeaves([dotted, byName, defineModule({ name: "plain" })])).toEqual([
 			"by-name: by-name.n",
+			"fixture.dotted: fixture.dotted.on",
 		]);
 	});
 });

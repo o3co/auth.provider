@@ -16,8 +16,8 @@
 
 /**
  * A module's own configuration section, delivered by boot: the
- * manifest's `section.schema` parses the value at `section.at` (the module's
- * name when unset) out of the configuration boot already has, and every
+ * manifest's `section.schema` parses the value at the module's name out of
+ * the configuration boot already has, and every
  * factory of the module — `provides`, name-keyed and list-shaped
  * `contributes`, `overrides` — receives the parsed value as `deps.section`.
  * A value the schema refuses refuses boot, naming the path the operator
@@ -123,11 +123,11 @@ describe("a module's section — delivered as deps.section", () => {
 		await handle.dispose();
 	});
 
-	it("reads the section at `at` when the manifest names a transitional path", async () => {
+	it("reads the section at the module's name, never at another path holding the same shape", async () => {
 		let seen: unknown;
 		const sectioned = defineModule({
 			name: "fixture-section",
-			section: { schema: RetrySection, at: "legacy.fixture" },
+			section: { schema: RetrySection },
 			contributes: {
 				grantMiddleware: [
 					(deps) => {
@@ -141,13 +141,13 @@ describe("a module's section — delivered as deps.section", () => {
 		const handle = await createApp({
 			modules: [sectioned],
 			bootstrapComponents: bootWith({
-				legacy: { fixture: { retries: "5", label: "old home" } },
-				// The module's name is not where this section is read from.
-				"fixture-section": { retries: "not read" },
+				// Not where this section is read from.
+				legacy: { fixture: { retries: "not read" } },
+				"fixture-section": { retries: "5", label: "its name" },
 			}),
 		});
 
-		expect(seen).toEqual({ retries: 5, label: "old home" });
+		expect(seen).toEqual({ retries: 5, label: "its name" });
 		await handle.dispose();
 	});
 
@@ -243,27 +243,6 @@ describe("a module's section — a value its schema refuses refuses boot", () =>
 		expect(ran).toBe(false);
 	});
 
-	it("names the transitional path when the section is read at `at`", async () => {
-		const sectioned = defineModule({
-			name: "fixture-section",
-			section: { schema: RetrySection, at: "legacy.fixture" },
-		});
-
-		const err = await refusal(
-			createApp({
-				modules: [sectioned],
-				bootstrapComponents: bootWith({ legacy: { fixture: { retries: -1 } } }),
-			}),
-		);
-
-		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toContain("legacy.fixture.retries");
-		expect(err.details).toMatchObject({
-			issues: [expect.objectContaining({ path: ["legacy", "fixture", "retries"] })],
-			modules: [{ module: "fixture-section", schemaPath: "legacy.fixture" }],
-		});
-	});
-
 	it("refuses a missing section its schema requires, naming the section", async () => {
 		const sectioned = defineModule({
 			name: "fixture-section",
@@ -341,18 +320,17 @@ describe("a module without a section", () => {
 });
 
 describe("a module's section — read from the parsed configuration", () => {
-	it("sees what core's schema made of the path: coerced, with the keys core does not declare kept", async () => {
+	it("sees what core's schema made of the section: coerced, with the keys core does not declare kept", async () => {
 		// The choice pinned: the section is read out of the composed parse's
-		// output — core's schema laid over what was written. Under a
-		// parent core's schema declares, a value core coerces arrives coerced —
-		// so a section read raw would refuse `maxLength: "128"` — and a key
+		// output — core's schema laid over what was written. At a section
+		// core's schema mirrors, a value core coerces arrives coerced — so a
+		// section read raw would refuse `challengeTtlMs: "120000"` — and a key
 		// core does not declare is still there.
 		let seen: unknown;
 		const sectioned = defineModule({
-			name: "fixture-section",
+			name: "webauthn",
 			section: {
-				schema: z.object({ maxLength: z.number(), extra: z.string().optional() }),
-				at: "oauth.nonce",
+				schema: z.object({ challengeTtlMs: z.number(), extra: z.string().optional() }),
 			},
 			contributes: {
 				grantMiddleware: [
@@ -366,20 +344,18 @@ describe("a module's section — read from the parsed configuration", () => {
 
 		const handle = await createApp({
 			modules: [sectioned],
-			bootstrapComponents: bootWith({
-				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128", extra: "kept" } },
-			}),
+			bootstrapComponents: bootWith({ webauthn: { challengeTtlMs: "120000", extra: "kept" } }),
 		});
 
-		expect(seen).toEqual({ maxLength: 128, extra: "kept" });
+		expect(seen).toEqual({ challengeTtlMs: 120000, extra: "kept" });
 		await handle.dispose();
 	});
 
-	it("reads own keys only: a path segment an object inherits is absent", async () => {
+	it("reads own keys only: a module named after a key the configuration inherits reads its section as absent", async () => {
 		let seen: unknown = "unset";
 		const sectioned = defineModule({
-			name: "fixture-section",
-			section: { schema: z.unknown(), at: "constructor" },
+			name: "constructor",
+			section: { schema: z.unknown() },
 			contributes: {
 				grantMiddleware: [
 					(deps) => {
@@ -638,58 +614,122 @@ describe("a module's section — refused, more", () => {
 });
 
 describe("a module's section — manifest refusals", () => {
-	it.each(["", "a..b", ".a", "a."])("refuses `at: %j`, a path with an empty key", async (at) => {
-		const sectioned = defineModule({
-			name: "fixture-section",
-			section: { schema: RetrySection, at },
-		});
+	// A manifest is plain JavaScript at run time, so one written for an earlier
+	// version may still carry `section.at` or `configSchema`. Ignoring either
+	// would hand the module its configuration somewhere it does not expect it,
+	// unparsed by the schema it declared.
+	const cyclic: Record<string, unknown> = {};
+	cyclic.self = cyclic;
 
-		const err = await refusal(
-			createApp({ modules: [sectioned], bootstrapComponents: bootWith({}) }),
-		);
-
-		expect(err.reason).toBe("module-section-path-invalid");
-		expect(err.stage).toBe("validateManifests");
-		expect(err.details).toEqual({
-			reason: "module-section-path-invalid",
-			module: "fixture-section",
-			at,
-		});
-	});
-
-	it.each<[string, unknown]>([
-		["a bigint", 1n],
-		[
-			"a cyclic object",
-			(() => {
-				const cyclic: Record<string, unknown> = {};
-				cyclic.self = cyclic;
-				return cyclic;
-			})(),
-		],
-		["a number", 7],
+	it.each<[string, unknown, string]>([
+		["a dotted path", "legacy.fixture", '"legacy.fixture"'],
+		["the module's own name", "fixture-section", '"fixture-section"'],
+		["a path with an empty key", "a..b", '"a..b"'],
+		["the empty string", "", '""'],
+		["a bigint", 1n, "a bigint"],
+		["a cyclic object", cyclic, "an object"],
+		["a number", 7, "a number"],
 	])(
-		"refuses `at` that is not a string — %s — naming its type, the value kept in details",
-		async (_label, at) => {
+		"refuses `section.at` — %s — naming the module, the field, and that the section is at the module's name",
+		async (_label, at, shown) => {
+			let ran = false;
 			const sectioned = defineModule({
 				name: "fixture-section",
-				section: { schema: RetrySection, at: at as never },
+				section: { schema: RetrySection, at } as never,
+				contributes: {
+					grantMiddleware: [
+						() => {
+							ran = true;
+							return null;
+						},
+					],
+				},
 			});
 
 			const err = await refusal(
-				createApp({ modules: [sectioned], bootstrapComponents: bootWith({}) }),
+				createApp({
+					modules: [sectioned],
+					bootstrapComponents: bootWith({
+						"fixture-section": { retries: 1 },
+						legacy: { fixture: { retries: 1 } },
+					}),
+				}),
 			);
 
 			expect(err.reason).toBe("module-section-path-invalid");
-			expect(err.message).toContain(`a ${typeof at}`);
+			expect(err.stage).toBe("validateManifests");
+			expect(err.message).toBe(
+				`Module "fixture-section" declares section.at (${shown}), which is removed: a module's section is at its name, "fixture-section".`,
+			);
 			expect(err.details).toEqual({
 				reason: "module-section-path-invalid",
 				module: "fixture-section",
 				at,
+				problem: "section.at is removed: a module's section is at its name",
 			});
 			expect((err.details as { at: unknown }).at).toBe(at);
+			expect(ran).toBe(false);
 		},
 	);
+
+	it.each<[string, Record<string, unknown>, string | undefined]>([
+		["with a section", { section: { schema: RetrySection } }, "fixture-section"],
+		["without a section", {}, undefined],
+	])(
+		"refuses `configSchema` — a module %s — naming the module, the field, and that its section is at its name",
+		async (_label, declared, at) => {
+			const reader = defineModule({
+				name: "fixture-section",
+				...declared,
+				configSchema: z.object({ "fixture-section": RetrySection }),
+			} as never);
+
+			const err = await refusal(
+				createApp({
+					modules: [reader],
+					bootstrapComponents: bootWith({ "fixture-section": { retries: 1 } }),
+				}),
+			);
+
+			expect(err.reason).toBe("module-section-path-invalid");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.message).toBe(
+				`Module "fixture-section" declares configSchema, which is removed: a module reads its configuration as its section, which is at its name, "fixture-section".`,
+			);
+			expect(err.details).toEqual({
+				reason: "module-section-path-invalid",
+				module: "fixture-section",
+				at,
+				problem:
+					"configSchema is removed: a module reads its configuration as its section, at its name",
+			});
+		},
+	);
+
+	it("boots a manifest that writes either removed field as undefined: it carries neither", async () => {
+		let seen: unknown;
+		const sectioned = defineModule({
+			name: "fixture-section",
+			configSchema: undefined,
+			section: { schema: RetrySection, at: undefined },
+			contributes: {
+				grantMiddleware: [
+					(deps: { section: unknown }) => {
+						seen = deps.section;
+						return null;
+					},
+				],
+			},
+		} as never);
+
+		const handle = await createApp({
+			modules: [sectioned],
+			bootstrapComponents: bootWith({ "fixture-section": { retries: "4" } }),
+		});
+
+		expect(seen).toEqual({ retries: 4 });
+		await handle.dispose();
+	});
 
 	const noop = { grantMiddleware: [() => null] };
 

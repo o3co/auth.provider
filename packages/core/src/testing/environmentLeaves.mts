@@ -57,8 +57,8 @@ function coveredByBase(path: string, leaf: z.ZodType): boolean {
 }
 
 /**
- * Every leaf the modules' `configSchema`s and section schemas declare that
- * would refuse an environment variable's string — a bare `z.boolean()`, or a
+ * Every leaf the modules' section schemas declare, each at its module's name,
+ * that would refuse an environment variable's string — a bare `z.boolean()`, or a
  * `z.number()` that does not coerce, with core's base not coercing the path
  * first — as `<module>: <path>`, sorted. A record's value is `*`, a list's
  * element `[]`.
@@ -66,11 +66,8 @@ function coveredByBase(path: string, leaf: z.ZodType): boolean {
 export function unreadableModuleLeaves(modules: readonly Module[]): string[] {
 	return modules
 		.flatMap((module) => {
-			const configSchema = module.configSchema ? unreadableLeaves(module.configSchema) : [];
-			const section = module.section
-				? unreadableLeaves(module.section.schema, module.section.at ?? module.name)
-				: [];
-			return [...configSchema, ...section]
+			const section = module.section ? unreadableLeaves(module.section.schema, module.name) : [];
+			return section
 				.filter(({ path, leaf }) => !coveredByBase(path, leaf))
 				.map(({ path }) => `${module.name}: ${path}`);
 		})

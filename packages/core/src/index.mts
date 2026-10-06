@@ -803,7 +803,6 @@ export type {
 	AuditHookFactory,
 	ComponentKey,
 	ComponentMap,
-	ConfigSchema,
 	Contributed,
 	ContributesMap,
 	ExchangeTokenValidator,

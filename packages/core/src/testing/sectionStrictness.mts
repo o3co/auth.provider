@@ -193,8 +193,8 @@ export function sectionStrictnessProblems(
 	for (const module of modules) {
 		const section = module.section;
 		if (section === undefined) continue;
-		// Unset, `at` is the module's name as one key, not split on dots.
-		const segments = section.at === undefined ? [module.name] : section.at.split(".");
+		// A section is at its module's name, one key, not split on dots.
+		const segments = [module.name];
 		checked.push({ module, segments });
 		const fromTree = valueAt(options.tree, segments);
 		const given = [

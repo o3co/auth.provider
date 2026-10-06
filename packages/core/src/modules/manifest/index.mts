@@ -69,7 +69,6 @@ export type {
 } from "./module-section.mjs";
 export type {
 	ComponentLifecycle,
-	ConfigSchema,
 	Module,
 	ModuleSpec,
 	ReplicaSafetyDeclaration,
