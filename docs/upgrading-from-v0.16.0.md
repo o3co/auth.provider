@@ -793,6 +793,15 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **A module's write to the `config` slot throws.** Every module that
+  requires `config` is handed the configuration boot parsed as plain data
+  frozen all the way down: one object those modules and core share. A
+  factory that changes a value there, to steer what a later module or core
+  reads, now throws a `TypeError` in strict-mode code (every ES module),
+  which refuses boot as the factory's failure (`provides-factory-failed`,
+  `contribute-factory-failed`); in sloppy-mode code the write is silently
+  ignored. Either way the value does not change. Copy what the module needs,
+  or set the value in the configuration (#1492).
 - **BREAKING: `sessionModule` reads the federations from the
   `federationSettings` slot, not `config` (#728).** It requires core's
   `federationSettings`, which core fills from `core.federations` in every
