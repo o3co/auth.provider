@@ -1156,6 +1156,14 @@ modules fills them.
     send that upstream an end-session request again; it is idempotent.
   - The boot warnings `session_family_index_without_session_end` and
     `refresh_token_family_rotation_without_revocation` are no longer logged.
+  - A session lifecycle that rejects with its store's error is answered as
+    the outage it is, where it was a `500`: the code exchange's join answers
+    `503 temporarily_unavailable` ("session linking unavailable"), logged
+    `authorization_grant_store_unavailable` with the error's projection, and
+    `/oauth/logout`'s close answers `503` ("session store unavailable"),
+    logged `logout_store_unavailable` with the projection and audited
+    `logout.cascade_failed`. A federation listing that rejects only leaves
+    the logout without its upstream hint.
 - **BREAKING: `POST /session/logout` closes the session through the
   lifecycle only.** The path that deleted the `UserSession`, the subject-index
   entry and the federation tokens itself, without the lifecycle, is removed,

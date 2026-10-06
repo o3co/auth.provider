@@ -743,26 +743,26 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		sub: string | null,
 		upstream: UpstreamEndRequest,
 	): Promise<LogoutEnd> => {
-		const listed = await lifecycle.federations(sid);
-		const hinted = listed.outcome === "listed" ? listed.federations[0] : undefined;
+		// The hint is best effort: a listing that cannot be read, answered or
+		// rejected, leaves the logout without it, and the close says the outage.
+		const listed = await lifecycle.federations(sid).catch(() => undefined);
+		const hinted = listed?.outcome === "listed" ? listed.federations[0] : undefined;
 		const hint =
 			hinted !== undefined && supportsLogout(opts.getFederationProviders()?.get(hinted))
 				? { federation: hinted, idToken: await readUpstreamIdToken(sid, hinted) }
 				: undefined;
 
-		let closed: Awaited<ReturnType<SessionLifecycle["close"]>>;
-		try {
-			closed = await lifecycle.close(sid, "rp_logout");
-		} catch (error) {
-			// The lifecycle refuses a sid it cannot hold as a key before it
-			// writes: no session of its can carry it.
-			if (error instanceof RangeError) return { outcome: "absent" };
-			throw error;
-		}
-		if (closed.outcome === "unavailable") {
-			// The lifecycle logged the error; this is the route's one line for its 503.
+		// The close did not commit, or whether it did could not be read: the
+		// route's one line for its 503, with the error's projection when the
+		// lifecycle rejected with its store's error (an `unavailable` answer's
+		// error is on the lifecycle's own line).
+		const closeUnavailable = (thrown?: { readonly error: unknown }): LogoutEnd => {
 			(opts.logger ?? console).error(
-				{ store: "session_lifecycle", step: "close" },
+				{
+					store: "session_lifecycle",
+					step: "close",
+					...(thrown === undefined ? {} : { err: loggableError(thrown.error) }),
+				},
 				"logout_store_unavailable",
 			);
 			emitAuditEvent(opts.auditSink, {
@@ -774,7 +774,17 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				details: { sid, store: "session_lifecycle" },
 			});
 			return { outcome: "unavailable", description: "session store unavailable" };
+		};
+		let closed: Awaited<ReturnType<SessionLifecycle["close"]>>;
+		try {
+			closed = await lifecycle.close(sid, "rp_logout");
+		} catch (error) {
+			// The lifecycle refuses a sid it cannot hold as a key before it
+			// writes: no session of its can carry it.
+			if (error instanceof RangeError) return { outcome: "absent" };
+			return closeUnavailable({ error });
 		}
+		if (closed.outcome === "unavailable") return closeUnavailable();
 		// The session has ended — nothing joins it and no liveness read answers
 		// it live — while some of its close work is left to a later close or
 		// the sweep.

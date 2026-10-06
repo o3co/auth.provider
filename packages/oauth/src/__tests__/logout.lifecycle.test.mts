@@ -54,6 +54,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createSessionCloseNotifier } from "#/logout/sessionCloseNotifier.mjs";
 import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import {
+	expectOutageLine,
+	REFUSED_COMMAND_MARKER,
+	serialisedCalls,
+	storeReplyError,
+} from "./_helpers/projectedLog.mjs";
 
 const ISSUER = "https://auth.example.com";
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -332,6 +338,46 @@ describe("/oauth/logout through the session lifecycle: the close's answer", () =
 			"logout_store_unavailable",
 		);
 		expect(browserSession.destroyed).toBe(false);
+	});
+
+	it("a close that rejects with its store's error: 503, audited as logout.cascade_failed, one error line with the error's projection, and the browser session kept", async () => {
+		const google = endingFederation("google");
+		const lifecycle = fakeLifecycle({
+			federations: vi.fn(async () => ({ outcome: "listed" as const, federations: ["google"] })),
+			close: vi.fn(async () => {
+				throw storeReplyError();
+			}),
+		});
+		const { sink, events } = recordingSink();
+		const logger = createMockLogger();
+		const browserSession = { sid: SID, destroyed: false };
+		const app = buildApp({
+			lifecycle,
+			auditSink: sink,
+			logger,
+			browserSession,
+			providers: new Map([["google", google.provider]]),
+		});
+
+		const res = await postLogout(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(typesOf(events)).toEqual(["logout.cascade_failed"]);
+		expect(events[0]).toMatchObject({
+			subject: "u-1",
+			details: { sid: SID, store: "session_lifecycle" },
+		});
+		expectOutageLine(logger, "logout_store_unavailable", {
+			store: "session_lifecycle",
+			step: "close",
+		});
+		expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
+		expect(browserSession.destroyed).toBe(false);
+		expect(google.endSession).not.toHaveBeenCalled();
 	});
 
 	it("a sid the lifecycle cannot hold: the no-op answer, not a 500", async () => {
@@ -819,6 +865,38 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 			expect.objectContaining({ idTokenHint: undefined }),
 		);
 		expect(federationTokenStore.get).not.toHaveBeenCalled();
+	});
+
+	it("federations that reject with their store's error leave the logout without the hint, and say nothing", async () => {
+		const google = endingFederation("google");
+		const federationTokenStore = fedTokenStore({ google: "upstream-id-token" });
+		const logger = createMockLogger();
+		const lifecycle = fakeLifecycle({
+			federations: vi.fn(async () => {
+				throw storeReplyError();
+			}),
+			close: vi.fn(async () => ({ outcome: "done" as const, rps: [], federations: ["google"] })),
+		});
+		const app = buildApp({
+			lifecycle,
+			federationTokenStore,
+			providers: new Map([["google", google.provider]]),
+			logger,
+		});
+
+		const res = await postLogout(app);
+
+		expect(res.status).toBe(303);
+		expect(lifecycle.close).toHaveBeenCalledExactlyOnceWith(SID, "rp_logout");
+		expect(google.endSession).toHaveBeenCalledWith(
+			expect.objectContaining({ idTokenHint: undefined }),
+		);
+		expect(federationTokenStore.get).not.toHaveBeenCalled();
+		expect(logger.error).not.toHaveBeenCalled();
+		// The verifier's own audience note aside, nothing is said.
+		expect(
+			logger.warn.mock.calls.filter(([, event]) => event !== "jwt_verify_aud_skipped"),
+		).toEqual([]);
 	});
 
 	it("a token record that cannot be read leaves the logout without the hint, said once at warn", async () => {

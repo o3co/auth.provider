@@ -40,6 +40,7 @@ import {
 	loggableError,
 	ownedConfirmation,
 	type ProviderDeps,
+	type SessionJoinOutcome,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -158,11 +159,18 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	};
 	/**
 	 * The session lifecycle's outage at the join, said once at error on the
-	 * grant's line; the error is on the lifecycle's own line.
+	 * grant's line: with the error's projection when the lifecycle rejected
+	 * with its store's error; an `unavailable` answer's error is on the
+	 * lifecycle's own line.
 	 */
-	const lifecycleUnavailable = (clientId: string): void => {
+	const lifecycleUnavailable = (clientId: string, err?: { readonly error: unknown }): void => {
 		logger?.error(
-			{ store: "session_lifecycle", step: "join", clientId: auditErrorText(clientId) },
+			{
+				store: "session_lifecycle",
+				step: "join",
+				clientId: auditErrorText(clientId),
+				...(err === undefined ? {} : { err: loggableError(err.error) }),
+			},
 			"authorization_grant_store_unavailable",
 		);
 	};
@@ -807,11 +815,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// the family it was handed, or logged its failure as
 					// `session_join_withdraw_failed`. A sid is only read with a
 					// userSessionStore, which the factory refuses without a lifecycle.
-					// biome-ignore lint/style/noNonNullAssertion: see the factory's refusal
-					const joined = await deps.sessionLifecycle!.join(sid, { rp, familyId });
-					if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
-					if (joined.outcome === "unavailable") {
-						lifecycleUnavailable(authenticatedClientId);
+					// A join that rejects with its store's error is the outage it
+					// is; a RangeError (a sid or participant the lifecycle cannot
+					// hold) is a fault, and leaves through the catch below.
+					const linkingUnavailable = async (err?: { readonly error: unknown }) => {
+						lifecycleUnavailable(authenticatedClientId, err);
 						await revokeRefusedFamily(familyId, at);
 						return {
 							result: {
@@ -819,8 +827,18 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 								error: "temporarily_unavailable",
 								errorDescription: "session linking unavailable",
 							},
-						};
+						} as const;
+					};
+					let joined: SessionJoinOutcome;
+					try {
+						// biome-ignore lint/style/noNonNullAssertion: see the factory's refusal
+						joined = await deps.sessionLifecycle!.join(sid, { rp, familyId });
+					} catch (error) {
+						if (error instanceof RangeError) throw error;
+						return await linkingUnavailable({ error });
 					}
+					if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
+					if (joined.outcome === "unavailable") return await linkingUnavailable();
 				} catch (err) {
 					// The family is registered and its tokens are never served: revoked
 					// before the throw leaves, so none is left live outside the index.

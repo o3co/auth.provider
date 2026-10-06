@@ -65,8 +65,11 @@ const client: PublicClient = {
 
 describe("createAuthorizationGrant — a throw after the family is registered", () => {
 	it("revokes the registered family, and the token endpoint answers 500 without the throw's message", async () => {
+		// A fault, not an outage: a join that rejects with its store's error is
+		// answered 503, while a RangeError (a sid or participant the lifecycle
+		// cannot hold) leaves the grant as the throw it is.
 		const { lifecycle } = joiningLifecycle(async () => {
-			throw new Error(INTERNAL);
+			throw new RangeError(INTERNAL);
 		});
 		const logger = createMockLogger();
 		const userSessionStore = createInMemoryUserSessionStore();
