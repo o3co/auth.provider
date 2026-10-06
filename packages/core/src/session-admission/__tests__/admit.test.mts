@@ -50,6 +50,7 @@ import type {
 } from "#/session-admission/requirement.mjs";
 import { issuedRemediationActions } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
+import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
 import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
@@ -1924,7 +1925,13 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 
 	it("a session record: each declared field is read once, and the admitted session is that copy, with nothing else of the record", async () => {
 		const reads = new Map<string, number>();
-		const base = session();
+		const nonce = newRenewalNonce();
+		const base = session({
+			claims: { email: "user-1@example.test" },
+			enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
+			renewalNonce: nonce,
+		});
+		expect(Object.keys(base).sort()).toEqual([...DECLARED].sort());
 		const record = new Proxy(
 			{ ...base, ormState: "loaded" },
 			{
@@ -1936,7 +1943,7 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 		);
 		const admitted = await admitSession(
 			deps({ userSessionStore: storeOf(async () => record) }),
-			request(),
+			request({ claim: cookie({ renewalNonce: nonce }) }),
 		);
 		const counted = Object.fromEntries(DECLARED.map((field) => [field, reads.get(field)]));
 		expect(admitted).toMatchObject({ outcome: "admitted" });
