@@ -664,7 +664,8 @@ a copy of it, from before a step-up renewed the session — the record is the
 renewed session's, so only this cookie session is destroyed and the answer is
 the same `200`. The renewed session stays live. When the record cannot be
 read, that is logged as `logout_user_session_read_failed` and the logout
-closes the session as above.
+answers `503 temporarily_unavailable`: it closes nothing and keeps the express
+session for a retry.
 
 **The cookie session's destroy.** If destroying the express session fails —
 the cookie store's outage — the user is not logged out, so the response is

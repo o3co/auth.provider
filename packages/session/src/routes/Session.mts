@@ -457,13 +457,15 @@ export const createRouter = (
 
 			// A copy of a cookie session the record was renewed away from (a
 			// step-up moved it to another one) ends only itself: the record is
-			// the renewed session's. A read that fails leaves the logout as it was.
+			// the renewed session's. A read that fails is an outage: nothing is
+			// closed and the cookie session stays for a retry.
 			let renewedAway = false;
 			if (sid && userSessionStore) {
 				try {
 					renewedAway = await cookieRenewedAway(userSessionStore, cookieClaim(req));
 				} catch (err) {
 					logger.error({ err: loggableError(err), sid }, "logout_user_session_read_failed");
+					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				}
 			}
 			// Core's session lifecycle closes the session: it revokes its
