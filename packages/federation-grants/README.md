@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -429,7 +429,10 @@ Each grant has a rotation budget: at most `federation-grants.rotationBudget`
 upstream refresh-token rotations (24 by default) in a window of
 `federation-grants.rotationWindow` seconds (3600 by default). The window
 opens when its first rotation is taken, and a rotation given back (a refresh
-the upstream provably did not act on) leaves it where it opened. With the
+the upstream provably did not act on) leaves it where it opened. A refresh
+answered 503, like 500, 502 or 504, is not given back: a proxy in front of the
+IdP may answer it after forwarding the refresh, so a sustained outage spends
+the budget, one attempt per failure backoff (30 seconds by default). With the
 budget spent, a good stored token is still answered; otherwise the answer is `429 rate_limited/provider` with
 `Retry-After` until the window closes. Each setting is a whole number of at
 least 1, refused at boot otherwise. The [operator

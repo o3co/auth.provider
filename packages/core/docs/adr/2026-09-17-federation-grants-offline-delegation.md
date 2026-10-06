@@ -1221,6 +1221,15 @@ counted against the budget (its writes keep the `rotations` others counted),
 and the bound holds only once every replica runs 0.17. A store that lacks
 either member is refused at boot by `federationGrantsModule`.
 
+**Amended 2026-10-06: a 503 keeps its rotation.** The exception above for a
+503 is withdrawn. A proxy or mesh in front of the IdP can answer 503 after
+forwarding the refresh, so a 503 may follow a rotation, and the budget counts
+rotations that may have happened. A 503 is read like a 500, 502 or 504: its
+rotation stays spent. An outage answered 503 therefore spends the budget, one
+attempt per failure backoff, and once it is spent a grant with no stored token
+that serves the request answers `rate_limited` / `provider` until the window
+closes. A 501 still proves the request was not acted on.
+
 A refresh no longer has to take whatever it is answered with: a fresh token
 that carries less of the asked-for scope than a held token that is still good
 and carries it does not replace that token, as long as the fresh token still
