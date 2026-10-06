@@ -184,7 +184,7 @@ describe("oauthEndpointsModule — manifest shape", () => {
 	});
 
 	it("declares no configSchema: the login page is the session module's, reached through the loginEntry slot", () => {
-		expect(oauthEndpointsModule.configSchema).toBeUndefined();
+		expect(oauthEndpointsModule).not.toHaveProperty("configSchema");
 	});
 
 	it("contributes a single oauth-endpoints route, whatever the issuer (JWKS is core's jwksModule's, discovery core-aggregated)", () => {

@@ -145,7 +145,7 @@ describe("mfaEmailFactorModule, which declares the section", () => {
 
 	it("is named after its section, reads it at its name, declares the package's reference.conf, requires nothing, and reads the mail sender optionally", () => {
 		expect(mfaEmailFactorModule.name).toBe("mfa-email-factor");
-		expect(mfaEmailFactorModule.section?.at).toBeUndefined();
+		expect(mfaEmailFactorModule.section).not.toHaveProperty("at");
 		expect(mfaEmailFactorModule.section?.reference?.href).toBe(REFERENCE.href);
 		expect(mfaEmailFactorModule.requires ?? []).toEqual([]);
 		expect(mfaEmailFactorModule.optional ?? []).toEqual(["mailSender"]);

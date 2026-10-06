@@ -77,7 +77,7 @@ describe("redisSessionStoresModule manifest", () => {
 	});
 
 	it("reads its own section, redis-session-stores, keyPrefix defaulting to ss:", () => {
-		expect(redisSessionStoresModule.configSchema).toBeUndefined();
+		expect(redisSessionStoresModule).not.toHaveProperty("configSchema");
 		expect(redisSessionStoresModule.section?.schema.parse(undefined)).toEqual({ keyPrefix: "ss:" });
 	});
 });

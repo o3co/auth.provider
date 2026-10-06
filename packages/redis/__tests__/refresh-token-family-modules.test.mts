@@ -15,7 +15,7 @@ describe("redisRefreshTokenFamilyStoreModule", () => {
 	});
 
 	it("reads its own section, 'redis-refresh-token-family-store', with its defaults", () => {
-		expect(redisRefreshTokenFamilyStoreModule.configSchema).toBeUndefined();
+		expect(redisRefreshTokenFamilyStoreModule).not.toHaveProperty("configSchema");
 		expect(redisRefreshTokenFamilyStoreModule.section?.schema.parse(undefined)).toEqual({
 			keyPrefix: "rtfam:",
 			casRetryLimit: 3,

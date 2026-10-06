@@ -106,7 +106,11 @@ describe("the package's config/reference.conf", () => {
 			"oauth-session",
 			"oauth-authorization",
 		]);
-		expect(modules.map((module) => module.section?.at)).toEqual([undefined, undefined, undefined]);
+		expect(modules.map((module) => Object.hasOwn(module.section ?? {}, "at"))).toEqual([
+			false,
+			false,
+			false,
+		]);
 		expect(moduleReferences(modules).map((reference) => reference.href)).toContain(REFERENCE.href);
 	});
 

@@ -21,7 +21,7 @@
  * must outlive a session. It is the cookie express-session is given, and no
  * session section yields a policy that breaks core's contract. Through
  * createApp a section the policy refuses is refused at validation: by the
- * store's configSchema with the policy's message for a name or a domain, by
+ * store's section schema with the policy's message for a name or a domain, by
  * core's schema first for `SameSite=None` and the lifetime. While the store's
  * module is loaded the slot has no other source.
  */

@@ -35,8 +35,12 @@ describe("the package's config/reference.conf", () => {
 
 	it("is read at the section named after its module", () => {
 		expect(
-			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
-		).toEqual([["mtls", true, undefined]]);
+			modules.map((module) => [
+				module.name,
+				module.section !== undefined,
+				Object.hasOwn(module.section ?? {}, "at"),
+			]),
+		).toEqual([["mtls", true, false]]);
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {

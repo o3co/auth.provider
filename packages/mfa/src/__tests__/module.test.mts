@@ -156,7 +156,7 @@ describe("mfaModules", () => {
 
 	it("reads its own section, mfa, at its name: the schema holds the whole section, mode to off, optional or required, and refuses a key it does not know", () => {
 		const section = mfaModule().section;
-		expect(section?.at).toBeUndefined();
+		expect(section).not.toHaveProperty("at");
 		expect(section?.reference?.href).toMatch(/\/config\/reference\.conf$/);
 		const schema = section?.schema;
 		if (schema === undefined) throw new Error("mfaModule declares no section");

@@ -45,9 +45,9 @@ describe("the package's config/reference.conf", () => {
 		expect([
 			federationGrantsModule.name,
 			federationGrantsModule.section !== undefined,
-			federationGrantsModule.section?.at,
-			federationGrantsModule.configSchema,
-		]).toEqual(["federation-grants", true, undefined, undefined]);
+			Object.hasOwn(federationGrantsModule.section ?? {}, "at"),
+			Object.hasOwn(federationGrantsModule, "configSchema"),
+		]).toEqual(["federation-grants", true, false, false]);
 	});
 
 	it("is declared by the module and holds only its section, which its schema parses without losing a path", () => {

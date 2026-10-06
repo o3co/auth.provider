@@ -189,7 +189,7 @@ describe("sessionModule (static manifest)", () => {
 		expect(sessionModule.requires).toContain("federationSettings");
 		expect(sessionModule.requires).not.toContain("config");
 		expect(sessionModule.optional ?? []).not.toContain("config");
-		expect(sessionModule.configSchema).toBeUndefined();
+		expect(sessionModule).not.toHaveProperty("configSchema");
 	});
 
 	it("declares its dep set in `requires`, without the oauth package's sessionRPRegistry, sessionFamilyIndex or refreshTokenFamilyRevocation", () => {
