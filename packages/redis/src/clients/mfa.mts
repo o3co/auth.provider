@@ -248,6 +248,19 @@ export type AuthorizeMfaSubjectRecoveryReply =
 	| { readonly authorized: true }
 	| { readonly authorized: false; readonly serverNowMs: number };
 
+/** The keys a consume of the email-proof requirement touches, under the subject's hash tag. */
+export interface MfaEmailProofKeys {
+	/** STRING: the email-proof requirement, with no TTL. */
+	readonly proof: string;
+	/** STRING: the subject's lease, as {@link MfaSubjectKeys.lease}. */
+	readonly lease: string;
+}
+
+/** What a consume answers: nothing removed without the lease; else whether this call removed the requirement. */
+export type ConsumeMfaEmailProofReply =
+	| { readonly held: false }
+	| { readonly held: true; readonly removed: boolean };
+
 export interface RaiseMfaRecoverySetFloorInput {
 	/** A recovery-code set's generation, not the subject's. */
 	readonly setGeneration: number;
@@ -461,8 +474,14 @@ export interface MfaTransactionStoreClient {
 	requireEmailProof(key: string): Promise<void>;
 	/** Whether the requirement is recorded at `key`. */
 	emailProofRequired(key: string): Promise<boolean>;
-	/** Remove the requirement at `key` (`DEL`); resolves whether this call removed it. */
-	consumeEmailProof(key: string): Promise<boolean>;
+	/**
+	 * Atomically, while the lease at `keys.lease` holds `leaseToken`: remove the requirement at
+	 * `keys.proof` and resolve whether this call removed it; otherwise remove nothing.
+	 */
+	consumeEmailProof(
+		keys: MfaEmailProofKeys,
+		leaseToken: string,
+	): Promise<ConsumeMfaEmailProofReply>;
 	/** Write a session's email proof `value` at `key`, replacing any, expiring `ttlMs` from when the server takes it (`SET … PX`). */
 	recordSessionEmailProof(key: string, value: string, ttlMs: number): Promise<void>;
 	/** The session's email proof at `key` (`GET`); `null` when there is none. */

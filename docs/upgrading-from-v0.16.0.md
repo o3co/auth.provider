@@ -1923,7 +1923,13 @@ with what a store of yours records and refuses. Per port:
   or `remove` (#1121, #1179, #1236). An `MfaTransactionStore` answers
   `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
-  and the [test kit](../packages/test-kit/README.md).
+  and the [test kit](../packages/test-kit/README.md). An
+  `MfaTransactionStoreClient` of your own, written against a 0.17 release
+  candidate, implements `consumeEmailProof(keys, leaseToken)` in place of
+  `consumeEmailProof(key)`: it removes the email-proof requirement at
+  `keys.proof` only while the lease at `keys.lease` holds `leaseToken`, in one
+  atomic step, and answers `{ held: false }` or `{ held: true, removed }`.
+  `makeIoredisMfaTransactionStoreClient` provides it.
 - **A second factor of your own (`MfaFactor`)** answers each challenge's and
   enrollment start's `response` as a plain JSON-shaped object — no class
   instance, list or `-0`, every own key an enumerable string, at any depth —
