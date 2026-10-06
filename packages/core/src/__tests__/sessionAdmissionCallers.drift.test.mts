@@ -338,8 +338,8 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 	// in this release.
 	{
 		file: "packages/oauth/src/routes/logout.mts",
-		sites: { get: 2 },
-		why: `${TOKEN_SIDE}: the two logout routes' reads`,
+		sites: { get: 1 },
+		why: `${TOKEN_SIDE}: RP-initiated logout's read of the session it ends`,
 	},
 	{
 		file: "packages/oauth-token-exchange/src/grant.mts",

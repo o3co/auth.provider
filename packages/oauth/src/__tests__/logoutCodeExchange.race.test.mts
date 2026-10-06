@@ -20,7 +20,7 @@
  * exchange opened, or the exchange serves no token and revokes it itself.
  * The exchange joins the session through core's session lifecycle.
  *
- * Driven through `cascadeLogout` or the lifecycle's close, and the real
+ * Driven through the lifecycle's close and the real
  * grant, over core's memory stores. A checkpoint holds one side at a store
  * call while the other runs to its answer.
  */
@@ -53,7 +53,6 @@ import {
 import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
-import { cascadeLogout } from "#/logout/cascadeLogout.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
@@ -261,9 +260,6 @@ async function world(
 		return result;
 	};
 
-	const logout = (stores: typeof logoutStores = logoutStores) =>
-		cascadeLogout({ sid: SID, expiresAt, ...stores });
-
 	/** The family the exchange registered. */
 	const familyId = (): string => {
 		expect(register).toHaveBeenCalledTimes(1);
@@ -275,7 +271,6 @@ async function world(
 		grantStores,
 		logoutStores,
 		exchange,
-		logout,
 		familyId,
 		answers,
 		revocation,
@@ -313,36 +308,6 @@ describe("a code exchange that joins through the session lifecycle", () => {
 		expect((await w.grantStores.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual([
 			CLIENT_ID,
 		]);
-	});
-
-	it("add before end: the logout through the per-session stores lists the family and revokes it", async () => {
-		const w = await world({ lifecycle: true });
-
-		expect((await w.exchange()).status).toBe(200);
-		expect(await w.logout()).toEqual({ outcome: "done" });
-
-		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
-	});
-
-	it("end before add: the old end mark refuses the join, the exchange serves nothing, and the family is revoked", async () => {
-		const w = await world({ lifecycle: true });
-		const held = checkpoint();
-		const logout = w.logout({
-			...w.logoutStores,
-			federationTokenStore: holding(w.logoutStores.federationTokenStore, "removeBySid", held, {
-				when: "before",
-			}),
-		});
-		await held.arrived;
-
-		const result = await w.exchange();
-		held.release();
-
-		expectSessionInvalidated(result);
-		expect(w.answers).toEqual(["ended"]);
-		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
-		expect(await w.lifecycleStore.read(SID)).toBeNull();
-		expect(await logout).toEqual({ outcome: "done" });
 	});
 
 	it("a close through the lifecycle committed first: the join is refused, the exchange serves nothing, and the family is revoked", async () => {

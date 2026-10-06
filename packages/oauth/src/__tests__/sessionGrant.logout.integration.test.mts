@@ -33,9 +33,6 @@ import {
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type RefreshTokenFamilyRevocation,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
-	type SessionRPRegistry,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -163,25 +160,6 @@ async function buildApp(userSessionStore: UserSessionStore) {
 			refreshTokenFamilyRevocation,
 			federationTokenStore,
 		}),
-		sessionRPRegistry: {
-			kind: "memory",
-			registerRP: vi.fn(async () => {}),
-			listRPs: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		} as unknown as SessionRPRegistry,
-		sessionFamilyIndex: {
-			kind: "memory",
-			addFamilyId: vi.fn(async () => {}),
-			listFamilyIds: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		} as unknown as SessionFamilyIndex,
-		sessionFederationIndex: {
-			kind: "memory",
-			addFederation: vi.fn(async () => {}),
-			listFederations: vi.fn(async () => []),
-			removeFederation: vi.fn(async () => {}),
-			removeBySid: vi.fn(async () => {}),
-		} as unknown as SessionFederationIndex,
 		federationTokenStore,
 		refreshTokenFamilyRevocation,
 	});

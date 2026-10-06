@@ -75,7 +75,7 @@ responsibilities:
   [`@o3co/auth-provider-redis`](../redis/README.md)) and who a user is (the
   Store behind `UserRepository`, e.g.
   [`@o3co/auth-provider-foundation`](../foundation/README.md));
-- token issuance, `POST /oauth/logout`'s cascade, upstream logout
+- token issuance, RP-initiated logout (`POST /oauth/logout`), upstream logout
   (`SupportsLogout`) and federation token refresh (`SupportsRefresh`) —
   [`@o3co/auth-provider-oauth`](../oauth/README.md);
 - delegated authorization (`SupportsDelegatedAuthorization`) —

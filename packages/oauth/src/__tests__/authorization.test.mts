@@ -2421,7 +2421,7 @@ describe("createAuthorizationGrant", () => {
 // TOCTOU: re-validate the session before returning tokens
 //
 // Between the first `userSessionStore.get(sid)` and the family's add the
-// handler awaits `clientRepository.findById`; a `cascadeLogout` in that
+// handler awaits `clientRepository.findById`; a logout in that
 // window would orphan the just-issued tokens from logout orchestration. A
 // second `userSessionStore.get(sid)` immediately before the add refuses a
 // session a logout has already deleted. A logout between that read and the

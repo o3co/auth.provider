@@ -26,7 +26,7 @@
 - フェデレーションアダプター契約 — `FederationProvider`、`FederationProfile`、各 capability — と、アダプターが要求を組み立てる純粋関数のヘルパー（`codeChallenge`、`callbackUrlForExchange`、`resolveClientSecret`）は core のもの（[`core/src/federations`](../core/src/federations/README.md)）。
 - アダプター自体: [`federation-google`](../federation-google/README.md)、[`federation-github`](../federation-github/README.md)、[`federation-apple`](../federation-apple/README.md)、[`federation-oidc`](../federation-oidc/README.md)。
 - 書き込むストア（core のポート。memory アダプターは core、Redis アダプターは [`@o3co/auth-provider-redis`](../redis/README.md)）と、ユーザーが誰か（`UserRepository` の背後の Store。例: [`@o3co/auth-provider-foundation`](../foundation/README.ja.md)）。
-- トークン発行、`POST /oauth/logout` のカスケード、上流ログアウト（`SupportsLogout`）、フェデレーショントークンのリフレッシュ（`SupportsRefresh`） — [`@o3co/auth-provider-oauth`](../oauth/README.ja.md)。
+- トークン発行、RP-Initiated Logout（`POST /oauth/logout`）、上流ログアウト（`SupportsLogout`）、フェデレーショントークンのリフレッシュ（`SupportsRefresh`） — [`@o3co/auth-provider-oauth`](../oauth/README.ja.md)。
 - 委任認可（`SupportsDelegatedAuthorization`） — [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)。
 - HTML 一切: ログインページとアカウントページはデプロイ側のもの。
 

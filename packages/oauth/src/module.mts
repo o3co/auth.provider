@@ -111,7 +111,7 @@ const SECTION = {
  *
  * `grantPolicy.evaluate` gates `/oauth/token`, and
  * `refreshTokenFamilyRevocation.isFamilyRevoked` is read by introspect,
- * userinfo, the logout cascade and federation-token.
+ * userinfo and the federation routes.
  */
 export const oauthEndpointsModule: Module = defineModule<
 	| "federationSettings"
@@ -128,9 +128,6 @@ export const oauthEndpointsModule: Module = defineModule<
 	| "subjectRevocation"
 	| "userSessionStore"
 	| "sessionLifecycleStore"
-	| "sessionRPRegistry"
-	| "sessionFamilyIndex"
-	| "sessionFederationIndex"
 	| "federationTokenStore"
 	| "sessionLifecycle"
 	| "consentStore"
@@ -156,13 +153,10 @@ export const oauthEndpointsModule: Module = defineModule<
 		"rateLimiter", // oauth routes degrade gracefully without
 		"auditSink", // no events emitted when absent
 		"grantPolicy", // gates POST /oauth/token; allow-all when absent
-		"refreshTokenFamilyRevocation", // introspect/userinfo/logout cascade family-revocation check
+		"refreshTokenFamilyRevocation", // the introspect, userinfo and federation routes' family-revocation check
 		"accessTokenDenylist", // RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
 		"subjectRevocation", // per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
-		"userSessionStore", // the four session stores: this, sessionRPRegistry, sessionFamilyIndex, sessionFederationIndex
-		"sessionRPRegistry",
-		"sessionFamilyIndex",
-		"sessionFederationIndex",
+		"userSessionStore", // the user session store; with it the router requires sessionLifecycle
 		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step
 		"federationTokenStore", // federation-token routes
 		"sessionLifecycle", // core's session lifecycle, required with a userSessionStore (the router refuses one without it): /oauth/logout closes the session through it, and introspection, userinfo and the federation-token route ask it whether a session is live
@@ -244,9 +238,6 @@ export const oauthEndpointsModule: Module = defineModule<
 					subjectRevocation: deps.subjectRevocation,
 					userSessionStore: deps.userSessionStore,
 					sessionLifecycleStore: deps.sessionLifecycleStore,
-					sessionRPRegistry: deps.sessionRPRegistry,
-					sessionFamilyIndex: deps.sessionFamilyIndex,
-					sessionFederationIndex: deps.sessionFederationIndex,
 					federationTokenStore: deps.federationTokenStore,
 					sessionLifecycle: deps.sessionLifecycle,
 					replaySeenSet: deps.replaySeenSet,
@@ -293,9 +284,7 @@ export const oauthEndpointsModule: Module = defineModule<
 					| "accessTokenDenylist"
 					| "subjectRevocation"
 					| "userSessionStore"
-					| "sessionRPRegistry"
-					| "sessionFamilyIndex"
-					| "sessionFederationIndex"
+					| "sessionLifecycle"
 					| "federationTokenStore"
 					| "federationProviders"
 					| "consentStore"
@@ -304,14 +293,13 @@ export const oauthEndpointsModule: Module = defineModule<
 					typeof oauthSectionSchema
 				>,
 			) => {
-				// Logout discovery fields are advertised only when every session store
-				// backing the logout cascade is wired. Issuer gating lives in core, so
-				// this is purely the store-presence check.
+				// Logout discovery fields are advertised only where the router mounts
+				// logout: the user session store, core's session lifecycle that closes
+				// its sessions, and the stores the routes read. Issuer gating lives in
+				// core, so this is purely the store-presence check.
 				const logoutSupported =
 					!!deps.userSessionStore &&
-					!!deps.sessionRPRegistry &&
-					!!deps.sessionFamilyIndex &&
-					!!deps.sessionFederationIndex &&
+					!!deps.sessionLifecycle &&
 					!!deps.federationTokenStore &&
 					!!deps.refreshTokenFamilyRevocation;
 				// `POST /oauth/revoke` is always mounted, but "mounted" and "can

@@ -31,12 +31,10 @@ import {
 import { describe, expect, it } from "vitest";
 import { oauthEndpointsModule } from "../module.mjs";
 
-/** Truthy stubs for the six session-store deps that gate logout advertisement. */
+/** Truthy stubs for the deps that gate logout advertisement. */
 const allLogoutStores = {
 	userSessionStore: {},
-	sessionRPRegistry: {},
-	sessionFamilyIndex: {},
-	sessionFederationIndex: {},
+	sessionLifecycle: {},
 	federationTokenStore: {},
 	refreshTokenFamilyRevocation: {},
 };

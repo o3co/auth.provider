@@ -23,10 +23,9 @@ import type {
 	KeyStore,
 	Logger,
 	RefreshTokenFamilyRevocation,
-	SessionFamilyIndex,
-	SessionFederationIndex,
+	SessionFederations,
 	SessionLifecycle,
-	SessionRPRegistry,
+	SessionLiveness,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -45,14 +44,11 @@ import {
 import accepts from "accepts";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
-import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
-import { cascadeLogoutFrom } from "../logout/cascadeLogout.mjs";
 import {
 	type UsableFrontchannelRP,
 	usableFrontchannelRP,
 } from "../logout/frontchannelLogoutUri.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
-import { beginLogout, type LogoutLeftState } from "../logout/sessionEnd.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
@@ -72,7 +68,7 @@ interface BrowserSessionLike {
 }
 
 /**
- * Ends the browser session that owns `sid`. The cascade deletes the
+ * Ends the browser session that owns `sid`. The session's close deletes the
  * `UserSession` record, but the express-session cookie is separate and would
  * keep satisfying `/authorize`, minting codes for a dead `sid` that `/token`
  * refuses — a login loop no RP could break.
@@ -84,7 +80,7 @@ interface BrowserSessionLike {
  * refused earlier), and a code minted from it is refused at the token
  * endpoint when a session store is wired.
  *
- * Failures are logged, never propagated: the cascade already succeeded, and
+ * Failures are logged, never propagated: the close already succeeded, and
  * `/authorize` refuses a surviving cookie regardless. Takes `EventLogger`
  * because the route's fallback logger is `console`.
  */
@@ -195,10 +191,8 @@ export interface LogoutRouterOptions {
 	keyStore: KeyStore;
 	/** Issuer URL of this auth provider — used for logout_token `iss` claim and iframe `iss` param. */
 	issuer: string;
+	/** Read to answer a logout of a session already gone as the no-op it is. */
 	userSessionStore: UserSessionStore;
-	sessionRPRegistry: SessionRPRegistry;
-	sessionFamilyIndex: SessionFamilyIndex;
-	sessionFederationIndex: SessionFederationIndex;
 	federationTokenStore: FederationTokenStore;
 	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	clientRepository: ClientRepository;
@@ -210,7 +204,7 @@ export interface LogoutRouterOptions {
 	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
 	/** Override for unit tests. Defaults to the global `fetch`. */
 	fetchImpl?: typeof fetch;
-	/** Structured logger shared with broadcastBackchannelLogout and the cascade. */
+	/** Structured logger for the route's lines. */
 	logger?: Logger;
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSink;
@@ -221,12 +215,12 @@ export interface LogoutRouterOptions {
 	 */
 	legacyTypAccept?: boolean;
 	/**
-	 * Core's session lifecycle. Where installed, `/oauth/logout` ends the
-	 * session with its `close`, and its notifier tells the relying parties
-	 * back-channel; without it, the route runs its own cascade over the
-	 * per-session stores.
+	 * Core's session lifecycle: `/oauth/logout` ends the session with its
+	 * `close`, and its notifier tells the relying parties back-channel; the
+	 * federation logout reads whether the session is live and which
+	 * federations it joined.
 	 */
-	sessionLifecycle?: SessionLifecycle;
+	sessionLifecycle: SessionLifecycle;
 }
 
 /**
@@ -262,18 +256,19 @@ interface UpstreamEndRequest {
  *      hold `post_logout_redirect_uri` to that client's registered list; a
  *      GET with a stale hint gets the confirmation page;
  *   3. load the session (missing → 200 no-op);
- *   4–6. end the session. Where core's session lifecycle is installed:
- *      read the first federation's upstream `id_token` (best effort), then
- *      `close` it (`unavailable` → 503; `pending` → success, audited as
+ *   4–6. end the session through core's session lifecycle: read the first
+ *      federation's upstream `id_token` (best effort), then `close` it
+ *      (`unavailable` → 503; `pending` → success, audited as
  *      `logout.close_pending`); the lifecycle's notifier tells the relying
- *      parties back-channel. Otherwise: broadcast back-channel logout (best
- *      effort), resolve the first federation's IdP end-session URI, and run
- *      the cascade over the per-session stores;
+ *      parties back-channel;
  *   7. respond: front-channel HTML | IdP redirect | post-logout redirect | JSON.
  *
  * Also mounts `POST /oauth/federation/:name/logout`, the bearer-authenticated
  * disconnect of one federation, which holds `post_logout_redirect_uri` to the
- * same rule for the access token's `azp`.
+ * same rule for the access token's `azp`. It removes the federation's tokens
+ * and leaves the federation listed as having joined the session: readers
+ * acting on its tokens skip a federation that has none, and the session's
+ * close may end it upstream again, which is idempotent.
  */
 export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): Router {
 	const router = express.Router();
@@ -285,8 +280,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 	const federationLogoutStoreUnavailable = (
 		logger: EventLogger,
 		federation: string,
-		store: "user_session" | "session_federation_index" | "federation_token",
-		step: "get" | "list" | "delete" | "remove",
+		store: "federation_token",
+		step: "get" | "delete",
 		error: unknown,
 	): void => {
 		logger.error(
@@ -294,22 +289,32 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			"federation_logout_store_unavailable",
 		);
 	};
-	const logoutStoreUnavailable = (
+	/**
+	 * The federation logout's `503` for the session lifecycle that could not
+	 * answer `step`: one error line, carrying the error's projection when the
+	 * lifecycle threw (one a host fills may); an `unavailable` answer the
+	 * lifecycle has logged itself.
+	 */
+	const federationLogoutLifecycleUnavailable = (
+		res: Response,
 		logger: EventLogger,
-		store:
-			| "user_session"
-			| "session_rp_registry"
-			| "session_federation_index"
-			| "session_family_index",
-		step: "get" | "list" | "endSession",
-		error: unknown,
-		/** What the failure left of the session, and a second store that failed in the same read, already projected. */
-		also: {
-			readonly left?: LogoutLeftState;
-			readonly alsoUnavailable?: { readonly store: string; readonly err: unknown };
-		} = {},
-	): void => {
-		logger.error({ store, step, err: loggableError(error), ...also }, "logout_store_unavailable");
+		federation: string,
+		step: "liveness" | "federations",
+		thrown?: { readonly error: unknown },
+	): Response => {
+		logger.error(
+			{
+				federation,
+				store: "session_lifecycle",
+				step,
+				...(thrown === undefined ? {} : { err: loggableError(thrown.error) }),
+			},
+			"federation_logout_store_unavailable",
+		);
+		return res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
 	};
 
 	/**
@@ -491,18 +496,21 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				});
 			}
 
-			// Step 6: Load session. null → 401 (no session = token is effectively invalid).
-			let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
+			// Step 6: the session must be live, read from core's session
+			// lifecycle: a session whose close has committed is not. Not live, or
+			// another subject's → 401 (the token is effectively invalid).
+			let liveness: SessionLiveness;
 			try {
-				session = await opts.userSessionStore.get(sid);
+				liveness = await opts.sessionLifecycle.liveness(sid);
 			} catch (error) {
-				federationLogoutStoreUnavailable(logger, federation, "user_session", "get", error);
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "session store unavailable",
+				return federationLogoutLifecycleUnavailable(res, logger, federation, "liveness", {
+					error,
 				});
 			}
-			if (!session) {
+			if (liveness.outcome === "unavailable") {
+				return federationLogoutLifecycleUnavailable(res, logger, federation, "liveness");
+			}
+			if (liveness.outcome !== "live" || liveness.session.sub !== sub) {
 				res.setHeader(
 					"WWW-Authenticate",
 					'Bearer error="invalid_token", error_description="session not found"',
@@ -513,23 +521,19 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				});
 			}
 
-			// Step 7: the named federation must be linked to this session.
-			let federations: ReadonlyArray<string>;
+			// Step 7: the named federation must have joined this session.
+			let listed: SessionFederations;
 			try {
-				federations = await opts.sessionFederationIndex.listFederations(sid);
+				listed = await opts.sessionLifecycle.federations(sid);
 			} catch (error) {
-				federationLogoutStoreUnavailable(
-					logger,
-					federation,
-					"session_federation_index",
-					"list",
+				return federationLogoutLifecycleUnavailable(res, logger, federation, "federations", {
 					error,
-				);
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "session store unavailable",
 				});
 			}
+			if (listed.outcome === "unavailable") {
+				return federationLogoutLifecycleUnavailable(res, logger, federation, "federations");
+			}
+			const federations = listed.federations;
 
 			if (!federations.includes(name)) {
 				return res.status(404).json({
@@ -574,22 +578,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				});
 			}
 
-			// Step 10: Remove federation link from session.
-			try {
-				await opts.sessionFederationIndex.removeFederation(sid, name);
-			} catch (error) {
-				federationLogoutStoreUnavailable(
-					logger,
-					federation,
-					"session_federation_index",
-					"remove",
-					error,
-				);
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "session store unavailable",
-				});
-			}
+			// The federation stays listed as having joined the session: the
+			// lifecycle keeps who joined until the session closes.
 
 			// Step 11: IdP end-session redirect, best effort. Providers are looked
 			// up per request so module init order does not matter.
@@ -806,122 +796,6 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		};
 	};
 
-	/**
-	 * Ends `sid` through the per-session stores: begins the logout (the
-	 * relying parties to tell, the federations, what the cascade starts
-	 * from), broadcasts back-channel logout, resolves the first federation's
-	 * IdP end-session URI, then runs the cascade.
-	 */
-	const endThroughStores = async (
-		req: Request,
-		sid: string,
-		sub: string | null,
-		expiresAt: Date,
-		upstream: UpstreamEndRequest,
-	): Promise<LogoutEnd> => {
-		// An outage is one log line, saying what it left of the session.
-		const begun = await beginLogout(opts, sid, expiresAt);
-		if (begun.outcome === "unavailable") {
-			const { outage } = begun;
-			logoutStoreUnavailable(opts.logger ?? console, outage.store, outage.step, outage.error, {
-				left: outage.left,
-				...("alsoUnavailable" in outage && outage.alsoUnavailable
-					? {
-							alsoUnavailable: {
-								store: outage.alsoUnavailable.store,
-								err: loggableError(outage.alsoUnavailable.error),
-							},
-						}
-					: {}),
-			});
-			// A begin that left state behind is the logout's first step failing,
-			// audited as the cascade's step 1 has always been.
-			if (outage.left !== "unchanged") {
-				emitAuditEvent(opts.auditSink, {
-					timestamp: new Date(),
-					type: "logout.cascade_failed",
-					subject: sub ?? undefined,
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: { sid, step: 1, store: outage.store, left: outage.left },
-				});
-			}
-			return { outcome: "unavailable", description: "session store unavailable" };
-		}
-		const { rps, federations } = begun;
-
-		// Back-Channel Logout, best effort: never throws.
-		if (sub) {
-			await broadcastBackchannelLogout({
-				rps,
-				issuer: opts.issuer,
-				sub,
-				sid,
-				keyStore: opts.keyStore,
-				fetchImpl: opts.fetchImpl,
-				logger: opts.logger,
-			});
-		}
-
-		// The first federation's IdP end-session URI, resolved before the
-		// cascade removes the federation tokens that carry its hint.
-		const first = federations[0];
-		const endSessionUri =
-			first === undefined
-				? undefined
-				: await upstreamEndSessionUri(first, () => readUpstreamIdToken(sid, first), upstream);
-
-		const cascade = await cascadeLogoutFrom(begun, {
-			sid,
-			refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
-			federationTokenStore: opts.federationTokenStore,
-			userSessionStore: opts.userSessionStore,
-			sessionRPRegistry: opts.sessionRPRegistry,
-			sessionFamilyIndex: opts.sessionFamilyIndex,
-			sessionFederationIndex: opts.sessionFederationIndex,
-			logger: opts.logger,
-		});
-
-		if (cascade.outcome === "failed") {
-			// The outage's one error-level line. Which step stopped the cascade,
-			// and how many operations failed there; the first failure's
-			// projection (each step-2 failure also has its own structured warn
-			// line from the cascade).
-			(opts.logger ?? console).error(
-				{
-					store: "logout_cascade",
-					cascadeStep: cascade.step,
-					failures: cascade.errors.length,
-					err: loggableError(cascade.errors[0]),
-				},
-				"logout_store_unavailable",
-			);
-			emitAuditEvent(opts.auditSink, {
-				timestamp: new Date(),
-				type: "logout.cascade_failed",
-				subject: sub ?? undefined,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { sid, step: cascade.step },
-			});
-			return { outcome: "unavailable", description: "logout cascade failed" };
-		}
-
-		// Only RPs with an http(s) front-channel URI get an iframe; one refused
-		// is logged once here and skipped. Each accepted RP is passed on as
-		// read here, once.
-		return {
-			outcome: "ended",
-			federations,
-			endSessionUri,
-			frontchannelRps: async () =>
-				rps.flatMap((rp) => {
-					const usable = usableFrontchannelRP(rp, "logout", opts.logger ?? console);
-					return usable === undefined ? [] : [usable];
-				}),
-		};
-	};
-
 	const handleLogout = async (req: Request, res: Response) => {
 		// RFC 6749 §5.1 / RFC 9207: cache headers on every response path.
 		res.setHeader("Cache-Control", "no-store");
@@ -988,7 +862,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 		// Held to the initiating client's registered list once, here — before the
 		// confirmation page echoes it, before any RP or upstream hears of the
-		// logout, and before the cascade — and the only value later steps read.
+		// logout, and before the close — and the only value later steps read.
 		// Unregistered or unknowable, it is `undefined` and the logout goes on.
 		const validatedPostLogoutRedirectUri = await registeredPostLogoutRedirectUri(
 			postLogoutRedirectUri,
@@ -1024,7 +898,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		try {
 			session = await opts.userSessionStore.get(sid);
 		} catch (err) {
-			logoutStoreUnavailable(opts.logger ?? console, "user_session", "get", err);
+			(opts.logger ?? console).error(
+				{ store: "user_session", step: "get", err: loggableError(err) },
+				"logout_store_unavailable",
+			);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
@@ -1033,14 +910,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 		if (!session) {
 			// The store entry is already gone (expired, or deleted out of band):
-			// no cascade to run, but the cookie still has to end.
+			// nothing to close, but the cookie still has to end.
 			await endBrowserSession(req, sid, opts.logger ?? console);
 			return res.status(200).json({ logged_out: true });
 		}
 
-		const ended = opts.sessionLifecycle
-			? await endThroughLifecycle(opts.sessionLifecycle, req, sid, sub, upstreamRequest)
-			: await endThroughStores(req, sid, sub, session.expiresAt, upstreamRequest);
+		const ended = await endThroughLifecycle(opts.sessionLifecycle, req, sid, sub, upstreamRequest);
 		if (ended.outcome === "absent") {
 			await endBrowserSession(req, sid, opts.logger ?? console);
 			return res.status(200).json({ logged_out: true });

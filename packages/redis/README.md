@@ -34,8 +34,9 @@ every replica shares, and the manifest that puts it in the port's slot.
   conformance suites hold these adapters to them ([Contract tests](#contract-tests));
 - the flows built on the stores: refresh-token rotation and revocation
   (`RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation`) are core's,
-  over whichever `RefreshTokenFamilyStore` is wired; the logout cascade and
-  subject-wide revocation belong to core and the route packages;
+  over whichever `RefreshTokenFamilyStore` is wired; a session's close (core's
+  session lifecycle) and subject-wide revocation belong to core and the route
+  packages;
 - the connection: the composition root opens the ioredis `Redis` instance,
   chooses its options and attaches its `error` listener;
 - the `express-session` store behind the browser cookie. That is

@@ -3156,7 +3156,7 @@ describe("Federation routes", () => {
 // ---------------------------------------------------------------------------
 // Subject-keyed session index, which `revokeAllForSubject` enumerates after a
 // credential change. A MISSING entry is a live session a password reset will
-// never find; an ORPHAN entry costs one redundant, idempotent `cascadeLogout`.
+// never find; an ORPHAN entry costs one redundant, idempotent session close.
 // So the write stays immediately after `create`, the earliest point a session
 // exists, and every rollback path that deletes the session removes the entry.
 // ---------------------------------------------------------------------------
