@@ -80,24 +80,6 @@ const COPIES: ReadonlyArray<{
 		runners: [["runReplaySeenSetContract", "replay-seen-set.test.mts"]],
 	},
 	{
-		core: "user-sessions/__tests__/sessionFamilyIndex.contract.mts",
-		copy: "sessionFamilyIndex.contract.mts",
-		runners: [
-			["runSessionFamilyIndexContract", "redis.sessionFamilyIndex.test.mts"],
-			["runSessionEndContract", "redis.sessionFamilyIndex.test.mts"],
-		],
-	},
-	{
-		core: "user-sessions/__tests__/sessionFederationIndex.contract.mts",
-		copy: "sessionFederationIndex.contract.mts",
-		runners: [["runSessionFederationIndexContract", "redis.sessionFederationIndex.test.mts"]],
-	},
-	{
-		core: "user-sessions/__tests__/sessionRPRegistry.contract.mts",
-		copy: "sessionRPRegistry.contract.mts",
-		runners: [["runSessionRPRegistryContract", "redis.sessionRPRegistry.test.mts"]],
-	},
-	{
 		core: "user-sessions/__tests__/subjectRevocation.contract.mts",
 		copy: "subjectRevocation.contract.mts",
 		runners: [

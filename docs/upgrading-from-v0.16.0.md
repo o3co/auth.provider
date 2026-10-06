@@ -1407,6 +1407,31 @@ modules fills them.
 - **`cascadeLogout`, `CascadeLogoutOptions` and `CascadeLogoutResult`** are
   removed from `@o3co/auth-provider-oauth` (#1030). A session is ended
   through core's session lifecycle: `sessionLifecycle.close(sid, cause)`.
+- **BREAKING: `@o3co/auth-provider-redis` no longer has adapters for the
+  three per-session stores (#1030).** Core's session lifecycle holds what
+  the RP registry, the refresh-token family index and the federation index
+  held, so the package drops them:
+  - Removed exports: `createRedisSessionRPRegistry`,
+    `RedisSessionRPRegistryOptions`, `redisSessionRPRegistryBuilder`,
+    `createRedisSessionFamilyIndex`, `RedisSessionFamilyIndexOptions`,
+    `redisSessionFamilyIndexBuilder`, `createRedisSessionFederationIndex`,
+    `RedisSessionFederationIndexOptions`, `redisSessionFederationIndexBuilder`,
+    and the client interfaces `SessionRPRegistryClient`,
+    `SessionRPRegistryMultiClient`, `SessionSidSortedSetClient`,
+    `SessionSidSortedSetMultiClient` and `SessionFamilyIndexClient`.
+  - `makeIoredisClients` no longer returns `sessionRPRegistryClient`,
+    `sessionFamilyIndexClient` or `sessionFederationIndexClient`, and the
+    package no longer declares those three `ComponentMap` slots: a
+    composition that fills client slots by hand drops them.
+  - `redisSessionStoresModule` requires `userSessionStoreClient`,
+    `subjectSessionIndexClient`, `subjectRevocationClient` and
+    `sessionLifecycleStoreClient`, and provides `userSessionStore`,
+    `subjectSessionIndex`, `subjectRevocation` and `sessionLifecycleStore`;
+    it no longer provides `sessionRPRegistry`, `sessionFamilyIndex` or
+    `sessionFederationIndex`. The RP registry's warn
+    `session_rp_registry_corrupt_envelope` is gone with it.
+  - The keys those stores wrote are read by nothing; step 2 of
+    [Rolling out](#rolling-out-across-a-mixed-fleet) says what to delete.
 - **Core's public entries no longer export 42 undocumented names** (#1234):
   tuning defaults (most `DEFAULT_MEMORY_*` sweep and size defaults —
   `DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES` stays —
@@ -1914,16 +1939,32 @@ this release's logout does not look: that logout tells no relying party of it
 and leaves its family unrevoked. So:
 
 1. Stop every v0.16.0 replica, draining its traffic.
-2. With none running, delete what v0.16.0 wrote that this release no longer
-   reads. The per-session stores' keys (`ss:rp:*`, `ss:fi:*`, `ss:fi-ended:*`,
-   `ss:fed:*`, under the prefixes your deployment sets;
-   [operator runbook, Key families](operator-runbook.md#key-families)
-   lists the keyspace) are safe to delete. Deleting the refresh-token families
-   (`rtfam:*`) is recommended: every refresh token bound to a v0.16.0 session
-   is refused anyway ([every user signs in again](#passkeys-users-and-sessions)),
-   and with its family gone a refresh token without a `sid` is refused too,
-   unless `oauth-authorization.grants.refreshToken.unknownFamilyPolicy` is
-   `"accept"`.
+2. With none running, you may delete the keys of the three per-session
+   stores v0.16.0 wrote; this release reads none of them, and each expires
+   with its session if left. Delete by prefix (`SCAN MATCH <prefix>*`, then
+   `UNLINK` what it returns), never with `FLUSHDB` or `FLUSHALL`: the same
+   database holds keys this release reads, the MFA factors among them, whose
+   loss cannot be undone. With the shipped prefix
+   (`redis-session-stores.keyPrefix` `ss:`;
+   [operator runbook, Key families](operator-runbook.md#key-families) lists
+   the keyspace):
+
+   | Keys | What they held |
+   | --- | --- |
+   | `ss:rp:*`, `ss:fi:*`, `ss:fi-ended:*`, `ss:fed:*` | v0.16.0's RP registry, refresh-token family index (and its "ended" marks) and federation index, whose adapters `@o3co/auth-provider-redis` no longer has |
+
+   **Never delete the refresh-token family records (`rtfam:*`).** A revoked
+   family's record is what keeps the access tokens issued under it refused:
+   a family with no record reads as not revoked, so deleting one would let
+   an unexpired access token it revoked pass introspection and token
+   exchange again. Leave them to expire on their own. The upgrade needs
+   nothing of them: every refresh token bound to a v0.16.0 session is
+   refused at admission anyway
+   ([every user signs in again](#passkeys-users-and-sessions)), and a
+   refresh token without a `sid` is not affected by the upgrade: no logout
+   ever reached it, and the subject's revocation boundary
+   (`revokeAllForSubject`, which a password reset calls) or its expiry ends
+   it, as before.
 3. Start this release on every replica, every package at the same release.
 
 What carries across the step:
@@ -1948,4 +1989,7 @@ What carries across the step:
 - **Redis.** Records v0.16.0 wrote stay readable: a federation token record
   gets a generation at its first versioned read, and one without `obtainedAt`
   reads it as `undefined`, which is refreshed within the buffer. Scripts
-  whose text changed load by `EVAL` on `NOSCRIPT`.
+  whose text changed load by `EVAL` on `NOSCRIPT`. The per-session keys
+  v0.16.0 wrote beside its sessions are the exception: nothing reads them
+  (step 2 above).
+

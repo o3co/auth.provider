@@ -1670,20 +1670,20 @@ stream — its level is fixed at `info`.
 
 ### Data corruption — a stored record could not be read
 
-`user_session_corrupt_envelope` and `session_rp_registry_corrupt_envelope`
+`user_session_corrupt_envelope`
 (warn, `sid`, `reason` `json_parse` with the parser's projection as `err`, or
-`shape_invalid`; `packages/redis/src/userSessionStore.mts`,
-`sessionRPRegistry.mts`) — the record is treated as absent (fail-closed). A
+`shape_invalid`; `packages/redis/src/userSessionStore.mts`) — the record is
+treated as absent (fail-closed). A
 session envelope whose `authentication` is not a well-formed object — `null`
 included — is `shape_invalid`: it is never read as a session from before the
 key, which would split it again and forget a verified second factor.
 `authorization_code_corrupt_record` (error, `codeHash`, `reason` `json_parse`
 with `err`, or `identity_fields_missing`;
 `packages/redis/src/code-repository.mts`) — the code is refused. They were
-`user_session_corrupt_envelope: JSON.parse failed` (and `: shape invalid`), the
-same for the RP registry, `RedisCodeRepository: corrupted data for code` and
+`user_session_corrupt_envelope: JSON.parse failed` (and `: shape invalid`),
+`RedisCodeRepository: corrupted data for code` and
 `… legacy/corrupted code record missing required identity fields`; the session
-stores' lines now reach the deployment's logger (they were written only by a
+store's lines now reach the deployment's logger (they were written only by a
 store built with one, which the module never did).
 A federation-token envelope that fails to decrypt is **deleted** and the user is
 sent to re-authenticate (`packages/redis/src/federation-tokens.mts` `get`).
@@ -1869,9 +1869,6 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `<tag>:ip:<ip>` — `token`, `authorize`, `introspect`, `revoke`, `device_authorization`, `federation_grants`, `federation_grants_browser`, `webauthn-authentication-options`, `mfa`; and `federation_grants:client:<client_id>`, a first-time lodging's authenticated client | integer counter | the prefix's `windowSeconds`: `redis-rate-limiter.limits.<prefix>` when declared, else `defaultLimit` 60/60 s: no module contributes a budget (the owners claim their prefixes, `webauthn-authentication-options` and `mfa` among them, with none). The expiry is set atomically with the increment and only when missing, so a steady stream cannot hold a window open | `packages/redis/src/ratelimit.mts`, `ioredis/scripts/rate-limiter.mts` (`LUA_INCREMENT_WITH_TTL`), `core/src/ratelimit/budgetLookup.mts` |
 | `attempt:<tag>:<id>` — a verifier's attempt window (what core's attempt guard keys: `login:ip:<ip>`, `device_verification:user:<subject>`) | hash `{count, resetAt}` — the attempts counted in the window and its end, epoch ms on the replica's clock | the window's length plus 5 s (`ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS`), relative (`PEXPIRE`), set when the window opens and moved by nothing; a refused attempt writes nothing. The module refuses any `maxmemory-policy` but `noeviction` at boot. A key holding another type rejects every attempt under it (`WRONGTYPE`, a `503`): `DEL` it | `packages/redis/src/attempt-counter.mts`, `ioredis/scripts/attempt-counter.mts` (`ATTEMPT_COUNTER_CONSUME`) |
 | `ss:us:<sid>` | string, JSON `{sid, sub, authTimeMs, createdAtMs, expiresAtMs, claims, amr?, authentication?, enrollmentFacts?, renewalNonce?}` — `amr` (RFC 8176, #481) is left out when the login path recorded none; `authentication` (`{primary, federation?, upstreamAmr?, mfaAtMs?}`, the MFA ADR's D9) is left out by a release before it, and such a session is read as one to split — a federated one vouches for `fed` alone; `enrollmentFacts` (`{witness, mailAddress}`: the login's MFA enrollment witness and what its address is — none, one the provider reads, or one it cannot (`mailAddress`: `none`, `address`, `unreadable`), never the address; the MFA ADR's D12, D24) is left out by a release before it; such a session recorded nothing, which the MFA ADR's D12 has the `mfa` requirement send to log in before a first binding; `renewalNonce` (22 base64url characters, the MFA ADR's D27) is written by a verified second factor that carries one, binding the session to the one cookie session renewed for it, and left out until then — any other value reads the envelope as corrupt | the session's `expiresAt` (`SET … PX … NX`); a verified second factor rewrites the value with `KEEPTTL` | `packages/redis/src/userSessionStore.mts` |
-| `ss:rp:<sid>` | hash, field = `clientId`, value = RP envelope | `session.expiresAt`, raised but never truncated (`PEXPIREAT NX` + `GT`) | `packages/redis/src/sessionRPRegistry.mts`, `internal/redisSidHash.mts` |
-| `ss:fi:<sid>`, `ss:fed:<sid>` | sorted sets of family ids / federation names | same rule | `packages/redis/src/sessionFamilyIndex.mts`, `sessionFederationIndex.mts`, `internal/redisSidSortedSet.mts` |
-| `ss:fi-ended:<sid>` | string `"1"`, the session's "ended" mark (`endSession`): an `addFamilyIdUnlessEnded` after it answers `"ended"` | the session's `expiresAt` plus the clock-skew allowance, five minutes (`DEFAULT_CLOCK_SKEW_MS`; `SET … PXAT`), so a replica whose clock is behind still sees it; written even by an end after `expiresAt`; `removeBySid` leaves it | `packages/redis/src/sessionFamilyIndex.mts` |
 | `ss:sub:<subject>` | sorted set of sids, **score = each session's expiry** | key TTL raised to the latest member expiry; members pruned on read against the server's `TIME` | `packages/redis/src/subjectSessionIndex.mts` |
 | `ss:rev:<subject>` | string, epoch-ms watermark | the caller's `watermarkTtlMs` — sized to the **longest refresh token**, monotonic on both value and expiry | `packages/redis/src/subjectRevocation.mts`, `core/src/user-sessions/revokeAllForSubject.mts` |
 | `ss:lc:{lc:<shard>}:s:<sid>` (`<sid>` as base64url of its JSON; `<shard>` the 32-bit FNV-1a hash of the sid's UTF-8 bytes modulo 16) | hash — one session's lifecycle record, whole: `sub`, `state` (`active`, `closing`, `closed`), `exp`, `gen`, `until`, `np`, `nw`, and from the close on `cause` and `at`; a `p:<kind>:<id>` field per participant (its value the participant's data as a JSON string) and a `w:<item>` field per pending close work item | one expiry for the whole record (`PEXPIREAT`, the `until` field): the session's `expiresAt` plus five minutes (`DEFAULT_CLOCK_SKEW_MS`), raised by the closing commit to the later of that and the commit plus the caller's retention, kept through `closed`. A key holding another type, or a hash this store did not write, rejects every operation on that session (a `503`): `DEL` it | `packages/redis/src/session-lifecycle-store.mts`, `ioredis/scripts/session-lifecycle.mts` |
@@ -1894,6 +1891,12 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `mfat:proof:{<subject>}` | string `"1"` — an operator reset's `requireEmailProof: true` (D25) | **none**, until the subject's next first binding consumes it; no revocation touches it, and an applied recovery, the reset included, leaves it. As durable as `mfaf:` (D12's step-3 amendment): the transaction store's module runs the same boot check | same |
 | `mfat:session-proof:{<subject>}:<sid>` | string, JSON `{provedAtMs, untilMs}` — the account-email proof (D24) given in one session of a subject: written when the MFA page's step-up proof is verified, `untilMs` `mfa.manage.maxAgeSeconds` later; read by the `mfa` requirement at each first binding in that session that asks the proof | `untilMs` less the store's clock (`SET … PX`), set when it is recorded; a later proof for the session replaces it. Losing one fails closed — the user proves again — so no durability is required of it, and a `volatile-*` policy evicting one costs only a re-proof | same |
 | `mfat:first-binding:{<subject>}` | string, JSON `{atMs, untilMs}` — the subject's first-binding mark (D12): when a first counting factor was last bound for the subject, or its witness marked. A session or a login continuation authenticated no later than it may hold a stale enrollment witness; the mark does not stand in for the witness, and covers only the window in which one can be stale | its `untilMs` on the server's clock (`SET … PXAT`), which alone judges the mark: one script keeps the later time and the later end of the mark held and the one noted, so a note never moves it back or shortens it. A mark the store cannot read back is an outage, never absent — `DEL` the key, as for the lock keys, and the next first binding notes it again. Losing it together with the subject's `mfaf:` records — one Redis flushed inside its lifetime — reopens that window, so it is kept as `mfat:proof:` is, under the same boot check; it always carries a TTL, so a `volatile-*` policy may evict it, and an evicted mark fails open — the module warns (`mfa_transaction_store_lock_evictable`). At `maxmemory`, `volatile-lru` and `volatile-random` were seen to evict nearly every mark, while `volatile-lfu` and `volatile-ttl` spared them in the same probe; run `noeviction` | same (`LUA_MFA_FIRST_BINDING_*`) |
+
+Releases up to v0.16.0 also wrote `ss:rp:<sid>`, `ss:fi:<sid>`,
+`ss:fi-ended:<sid>` and `ss:fed:<sid>`, the per-session stores core's session
+lifecycle replaced. Nothing reads them; each expires with its session, and
+[Upgrading from v0.16.0](upgrading-from-v0.16.0.md#rolling-out-across-a-mixed-fleet)
+says how to delete them sooner.
 
 **When the factor store loses writes.** If your factor store can lose acknowledged writes on failover, a failover may restore a factor that was removed or undo a reset; after such a failover, re-run any operator reset performed in the lost window, and have affected users review their factors.
 Such a failover can also undo an acknowledged update, which brings back a
@@ -2689,10 +2692,11 @@ lists every breaking change since, and which of the steps below each needs.
 ### Rolling out
 
 - **From v0.16.0, upgrade in one coordinated step: no rolling upgrade.** Stop
-  every v0.16.0 replica (drain its traffic), delete what v0.16.0 wrote that
-  the new release no longer reads, then start the new release on every
-  replica (`docs/upgrading-from-v0.16.0.md`, "Rolling out across a mixed
-  fleet", has the keys). v0.16.0 records a session's relying parties and
+  every v0.16.0 replica (drain its traffic), optionally delete the retired
+  per-session store keys, then start the new release on every replica
+  (`docs/upgrading-from-v0.16.0.md`, "Rolling out across a mixed fleet", has
+  the keys). Never delete the refresh-token family records (`rtfam:`): a
+  revoked family's record keeps the access tokens it revoked refused. v0.16.0 records a session's relying parties and
   refresh-token families in the per-session stores, and the new release ends
   a session from its lifecycle record alone: a v0.16.0 replica serving beside
   it hands out tokens whose logout tells no relying party and revokes no

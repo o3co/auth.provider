@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
+import * as entry from "#/index.mjs";
 import {
 	createRedisMfaFactorStore,
 	createRedisMfaTransactionStore,
@@ -135,5 +136,13 @@ describe("the MFA store modules and adapters, from the package's entry", () => {
 	it("exports both adapters' builders", () => {
 		expect(typeof createRedisMfaFactorStore).toBe("function");
 		expect(typeof createRedisMfaTransactionStore).toBe("function");
+	});
+});
+
+describe("the per-session stores core's session lifecycle replaced", () => {
+	it("have no adapter, builder or module export", () => {
+		expect(
+			Object.keys(entry).filter((name) => /RPRegistry|FamilyIndex|FederationIndex/.test(name)),
+		).toEqual([]);
 	});
 });

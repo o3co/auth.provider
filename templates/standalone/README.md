@@ -1068,7 +1068,7 @@ auth.provider instances cannot collide in the same database:
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | Outer prefix for user sessions, RP registry, session-family index, and session-federation index. |
+| `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | Outer prefix for user sessions, the subject session index, the subject-revocation boundaries and the session lifecycle records. |
 | `REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | Prefix for refresh-token family records. |
 | `REDIS_CODE_REPOSITORY_KEY_PREFIX` | `oauth:code:` | Prefix for OAuth authorization codes. |
 | `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX` | `ft:` | Prefix for federation token records, their per-session index and their lock keys. |

@@ -19,8 +19,7 @@
 //
 // `scanCount` is an `SSCAN COUNT` hint rather than a loop step, so it cannot
 // hang — but Redis refuses a non-positive COUNT, and discovering that on the
-// logout path is no better. Same guard, same message as `pageSize` in
-// `createRedisSidSortedSet`.
+// logout path is no better.
 
 import { describe, expect, it, vi } from "vitest";
 import type { RedisSidSetClient } from "#/internal/redisSidSet.mjs";

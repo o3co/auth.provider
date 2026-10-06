@@ -27,10 +27,10 @@
 export interface RefreshTokenFamilyMultiClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): RefreshTokenFamilyMultiClient;
 	/**
-	 * Execute the queued commands. Same contract as
-	 * {@link SessionSidSortedSetMultiClient.exec}: MUST reject when any queued
-	 * command failed; `null` is the WATCH-abort signal, which the CAS loop
-	 * reads as "conflict, retry".
+	 * Execute the queued commands. MUST reject when any queued command failed
+	 * (a driver that reports per-command errors inside the reply, as ioredis
+	 * does, is adapted here); `null` is the WATCH-abort signal, which the CAS
+	 * loop reads as "conflict, retry".
 	 */
 	exec(): Promise<unknown[] | null>;
 }

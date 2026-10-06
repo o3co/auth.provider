@@ -15,8 +15,7 @@
  */
 
 // The sid-keyed SET backing the federation token store's per-session key
-// index, against a real Redis. Sibling of `internalSidHash.test.mts` and
-// `internalSidSortedSet.test.mts`.
+// index, against a real Redis.
 //
 // The expiry semantics (`PEXPIRE … NX` + `PEXPIRE … GT` inside one MULTI) and
 // the `SSCAN` paging live in the ioredis wrapper, so a fake cannot vouch for
