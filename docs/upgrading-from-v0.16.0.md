@@ -877,9 +877,19 @@ modules fills them.
   with their own wording), and the MFA routes did not check it. The slot
   then holds a frozen copy, not the object that filled it, so
   `deps.csrfGuard !== providedGuard`: compare members, not identity. The
-  copy carries the guard's members as read, and `check`, `checkNavigation`
-  and `issue` are bound to the original guard, so a guard written as a class,
-  whose methods use `this`, works as before (#1090).
+  copy carries the guard's data members as read; its functions are core's
+  own and call the guard's on the guard itself, so a guard written as a
+  class, whose methods use `this`, works as before. `middleware` is core's
+  request handler of three parameters in front of the guard's, so
+  `deps.csrfGuard.middleware !== providedGuard.middleware` too, and the
+  guard's `middleware` now runs with the guard as `this`. A
+  `Symbol.asyncDispose` the guard carries still runs on dispose (#1090).
+- **`AppHandle.components` has no prototype.** The component map boot builds
+  is created with `Object.create(null)`, so a component named after an
+  `Object.prototype` member, `__proto__` included, is a key like any other
+  and never the map's prototype. Read a component as a property or with
+  `Object.hasOwn(handle.components, key)`; `handle.components.hasOwnProperty`
+  and the other `Object.prototype` methods are no longer there (#1090).
 - **BREAKING: `sessionModule` reads the federations from the
   `federationSettings` slot, not `config` (#728).** It requires core's
   `federationSettings`, which core fills from `core.federations` in every

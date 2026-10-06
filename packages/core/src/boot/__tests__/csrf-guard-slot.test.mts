@@ -25,7 +25,7 @@
  * checked.
  */
 
-import type { Request, RequestHandler, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 import { describe, expect, it } from "vitest";
 import type { CsrfGuard, CsrfVerdict } from "#/browser-session/types.mjs";
 import { BootError, createApp, defineModule } from "#/index.mjs";
@@ -243,7 +243,10 @@ describe("every reader of the csrfGuard slot receives one snapshot of what was c
 		expect(handed).not.toBe(raw);
 		expect(Object.isFrozen(handed)).toBe(true);
 		const snapshot = handed as CsrfGuard;
-		expect(snapshot.middleware).toBe(base.middleware);
+		// Core's own request handler in front of the guard's: three parameters, frozen.
+		expect(typeof snapshot.middleware).toBe("function");
+		expect(snapshot.middleware.length).toBe(3);
+		expect(Object.isFrozen(snapshot.middleware)).toBe(true);
 		expect(snapshot.cookieName).toBe(base.cookieName);
 		expect(snapshot.headerName).toBe(base.headerName);
 		expect(snapshot.bodyField).toBe(base.bodyField);
@@ -273,7 +276,7 @@ describe("every reader of the csrfGuard slot receives one snapshot of what was c
 		await handle.dispose();
 	});
 
-	it("keeps the guard's methods its own: a guard written as a class answers through the snapshot", async () => {
+	it("keeps the guard's methods its own: a guard written as a class, its methods using this, answers through the snapshot", async () => {
 		const verdicts: CsrfVerdict[] = [];
 		class ClassGuard implements CsrfGuard {
 			readonly cookieName = "csrf";
@@ -288,9 +291,10 @@ describe("every reader of the csrfGuard slot receives one snapshot of what was c
 					? ({ outcome: "accepted" } as const)
 					: ({ outcome: "refused", reason: "origin_absent" } as const);
 			}
-			readonly middleware: RequestHandler = (_req, res) => {
-				res.status(403).end();
-			};
+			readonly #status = 403;
+			middleware(_req: Request, res: Response, _next: NextFunction): void {
+				res.status(this.#status).end();
+			}
 			issue(_res: Response): string {
 				return this.cookieName;
 			}
@@ -305,6 +309,129 @@ describe("every reader of the csrfGuard slot receives one snapshot of what was c
 		expect(verdicts).toHaveLength(1);
 		const { response } = await runMiddleware(snapshot.middleware, req);
 		expect(response.status).toBe(403);
+		await handle.dispose();
+	});
+});
+
+describe("the snapshot cannot be changed under its readers", () => {
+	it("hands on a request handler of three parameters, which a later change to the guard's middleware cannot make an error handler", async () => {
+		const calls: unknown[] = [];
+		function middleware(this: unknown, _req: Request, _res: Response, next: NextFunction) {
+			calls.push(this);
+			next();
+		}
+		const guard = { ...createTestCsrfGuard(), middleware };
+		let lengthSeenLater: number | undefined;
+		const handle = await createApp({
+			modules: [
+				owner(() => guard),
+				defineModule({
+					name: "test:csrf-guard-arity-flipper",
+					requires: ["csrfGuard"],
+					provides: {
+						csrfGuardSlotProbe: (deps) => {
+							// A later provider makes the guard's function look like an error handler.
+							Object.defineProperty(middleware, "length", { value: 4 });
+							lengthSeenLater = deps.csrfGuard.middleware.length;
+							return { probed: true } as const;
+						},
+					},
+					lifecycle: { csrfGuardSlotProbe: { eager: true } },
+				}),
+			],
+			bootstrapComponents: host() as never,
+		});
+		const held = handle.components.csrfGuard as CsrfGuard;
+		expect(lengthSeenLater).toBe(3);
+		expect(held.middleware.length).toBe(3);
+		expect(() => Object.defineProperty(held.middleware, "length", { value: 4 })).toThrow(TypeError);
+		const { next } = await runMiddleware(held.middleware, fakeRequest().req);
+		expect(next).toBe(1);
+		// The guard's own function runs, on the guard it was read from.
+		expect(calls).toEqual([guard]);
+		await handle.dispose();
+	});
+
+	it("calls the guard's methods through core's own binding, never a bind, call or apply the method carries", async () => {
+		const refused: CsrfVerdict = { outcome: "refused", reason: "token_absent" };
+		const acceptAll = () => ({ outcome: "accepted" }) as const;
+		const check = Object.assign(() => refused, {
+			bind: () => acceptAll,
+			call: acceptAll,
+			apply: acceptAll,
+		});
+		const issue = Object.assign(() => "issued", {
+			bind: () => () => "forged",
+			call: () => "forged",
+			apply: () => "forged",
+		});
+		const seen: unknown[] = [];
+		const handle = await bootWithHostGuard({ ...createTestCsrfGuard(), check, issue }, seen);
+		const snapshot = seen[0] as CsrfGuard;
+		expect(snapshot.check(fakeRequest().req)).toEqual(refused);
+		expect(snapshot.issue(fakeResponse().res)).toBe("issued");
+		await handle.dispose();
+	});
+
+	it("disposes a module's guard through the snapshot, on the guard itself", async () => {
+		const disposed: unknown[] = [];
+		const guard = {
+			...createTestCsrfGuard(),
+			async [Symbol.asyncDispose](this: unknown) {
+				disposed.push(this);
+			},
+		};
+		const handle = await createApp({
+			modules: [
+				defineModule({
+					name: "test:csrf-guard-owner",
+					provides: { csrfGuard: () => guard as CsrfGuard },
+					lifecycle: { csrfGuard: { eager: true } },
+				}),
+			],
+			bootstrapComponents: host() as never,
+		});
+		expect(handle.components.csrfGuard).not.toBe(guard);
+		await handle.dispose();
+		expect(disposed).toEqual([guard]);
+	});
+});
+
+describe("a module's component named __proto__ hands no reader an inherited guard", () => {
+	it("leaves the component map's prototype alone, so a reader of the csrfGuard slot finds it empty", async () => {
+		const unchecked = { ...createTestCsrfGuard(), middleware: errorHandler, check: undefined };
+		const seen: unknown[] = [];
+		const contributed: unknown[] = [];
+		const handle = await createApp({
+			modules: [
+				defineModule({
+					name: "test:proto-provider",
+					provides: { ["__proto__"]: () => ({ csrfGuard: unchecked }) } as never,
+					lifecycle: { ["__proto__"]: { eager: true } } as never,
+				}),
+				reader(seen),
+				defineModule({
+					name: "test:proto-contribution-reader",
+					optional: ["csrfGuard"],
+					contributes: {
+						routes: [
+							(deps) => {
+								contributed.push(deps.csrfGuard);
+								return {
+									id: "test-proto-reader",
+									mountPath: "/__test_proto_reader__",
+									handler: (_req: Request, res: Response) => void res.end(),
+								};
+							},
+						],
+					},
+				}),
+			],
+			bootstrapComponents: host() as never,
+		});
+		expect(seen).toEqual([undefined]);
+		expect(contributed).toEqual([undefined]);
+		expect(handle.components.csrfGuard).toBeUndefined();
 		await handle.dispose();
 	});
 });

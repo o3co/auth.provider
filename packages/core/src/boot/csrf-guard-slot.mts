@@ -19,10 +19,12 @@
  * Whatever fills it — a host's bootstrap or override value, or a provider's
  * — enters the component map as a frozen snapshot of the guard, each member
  * read once, with `middleware` held to being a request handler and `check`
- * to being a function. So every reader of the slot mounts or asks the guard
- * that was checked, and none checks it again.
+ * to being a function, and every function of it core's own, calling the
+ * guard's. So every reader of the slot mounts or asks the guard that was
+ * checked, and none checks it again.
  */
 
+import type { NextFunction, Request, Response } from "express";
 import type { CsrfGuard } from "../browser-session/types.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
@@ -52,12 +54,37 @@ const readOnce = (member: string, read: () => unknown): unknown => {
 };
 
 /**
+ * `Reflect.apply` as core loaded: what the snapshot calls the guard's
+ * functions through, so a function's own `bind`, `call` or `apply` — which
+ * the guard's author controls — is never what runs.
+ */
+const reflectApply = Reflect.apply;
+
+/** `fn` called on `guard` with the caller's arguments, through `reflectApply`. */
+const onGuard =
+	(fn: (...args: never[]) => unknown, guard: object) =>
+	(...args: unknown[]): unknown =>
+		reflectApply(fn, guard, args);
+
+/** The disposers a guard may carry, which boot's dispose reaches through the snapshot. */
+const DISPOSERS = [
+	[Symbol.asyncDispose, "[Symbol.asyncDispose]"],
+	[Symbol.dispose, "[Symbol.dispose]"],
+] as const;
+
+/**
  * `value` as the slot holds it: a frozen snapshot of the guard, each member
  * read once. `middleware` must be a function of at most three parameters —
  * Express takes one of four or more for an error handler and skips it — and
- * `check` a function. The other members are carried as read. A method is
- * bound to the guard it was read from, so a guard written as a class
- * answers through the snapshot as it would itself.
+ * `check` a function. The other members are carried as read.
+ *
+ * Every function of the snapshot is core's own, calling the guard's on the
+ * guard it was read from through `reflectApply`: so a guard written as a
+ * class answers as it would itself, nothing the guard carries decides what
+ * is called, and `middleware` stays a request handler of three parameters
+ * whatever later happens to the guard's function. A disposer the guard
+ * carries (`Symbol.asyncDispose`, `Symbol.dispose`) is carried the same way,
+ * so boot's dispose reaches the guard through the snapshot.
  *
  * @throws RangeError naming the member that breaks the contract or whose
  *   read throws (the read's error as its `cause`), or the slot when it holds
@@ -69,24 +96,25 @@ function snapshotOf(value: unknown): CsrfGuard {
 			`csrfGuard must be the guard object its contract describes, and the composition's slot holds ${describeValue(value)}. ${INSTALL}`,
 		);
 	}
-	const guard = value as Record<string, unknown>;
-	const member = (name: string): unknown => readOnce(name, () => guard[name]);
-	const method = (name: string): unknown => {
-		const read = member(name);
-		return typeof read === "function" ? read.bind(guard) : read;
+	const guard = value as Record<PropertyKey, unknown>;
+	const member = (key: PropertyKey, name = String(key)): unknown =>
+		readOnce(name, () => guard[key]);
+	const method = (key: PropertyKey, name = String(key)): unknown => {
+		const read = member(key, name);
+		return typeof read === "function" ? Object.freeze(onGuard(read as never, guard)) : read;
 	};
 
 	const middleware = member("middleware");
 	const arity =
 		typeof middleware === "function" ? readOnce("middleware", () => middleware.length) : undefined;
-	if (typeof arity !== "number" || arity > 3) {
+	if (typeof middleware !== "function" || typeof arity !== "number" || arity > 3) {
 		const held =
 			typeof middleware !== "function"
 				? describeValue(middleware)
 				: typeof arity === "number"
 					? `a function of ${arity} parameters`
 					: `a function whose length is ${describeValue(arity)}`;
-		refuse(
+		return refuse(
 			"middleware",
 			`is not a request handler: the routes it guards mount it in front of themselves, so it must be a function of at most three parameters, and the composition's slot holds ${held}`,
 		);
@@ -99,15 +127,22 @@ function snapshotOf(value: unknown): CsrfGuard {
 		);
 	}
 	const bodyField = member("bodyField");
-	return Object.freeze({
+	const snapshot: Record<PropertyKey, unknown> = {
 		cookieName: member("cookieName"),
 		headerName: member("headerName"),
 		...(bodyField === undefined ? {} : { bodyField }),
 		check,
 		checkNavigation: method("checkNavigation"),
-		middleware,
+		middleware: Object.freeze((req: Request, res: Response, next: NextFunction): unknown =>
+			reflectApply(middleware, guard, [req, res, next]),
+		),
 		issue: method("issue"),
-	}) as CsrfGuard;
+	};
+	for (const [key, name] of DISPOSERS) {
+		const disposer = method(key, name);
+		if (typeof disposer === "function") snapshot[key] = disposer;
+	}
+	return Object.freeze(snapshot) as unknown as CsrfGuard;
 }
 
 /**

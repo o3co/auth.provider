@@ -53,7 +53,7 @@ import { federationStoresRefusal, undeclaredAbsenceRefusal } from "./validate-ma
  * Builds a provider activation's deps object from the working component map.
  * A missing `requires` key means an earlier stage broke an invariant, so it
  * throws a plain Error, not a BootError. Absent `optional` keys are included
- * as `undefined`. `deps.section` is the module's own configuration section,
+ * as `undefined`: a key is read only as the map's own. `deps.section` is the module's own configuration section,
  * parsed at stage 1, and is absent when the module declares none.
  * @internal
  */
@@ -75,7 +75,7 @@ function buildDeps(
 	}
 
 	for (const key of optional) {
-		deps[key as string] = components[key as string];
+		deps[key as string] = Object.hasOwn(components, key) ? components[key as string] : undefined;
 	}
 
 	if (section !== undefined) {
@@ -186,7 +186,10 @@ export async function materializeComponents(
 	overrideComponents: Partial<ComponentMap> | undefined,
 	contributionKinds?: ContributionCollectorMap,
 ): Promise<ComponentWorld> {
-	const components: Record<string, unknown> = {};
+	// No prototype: a component named after one of `Object.prototype`'s members
+	// (`__proto__` among them) is a key like any other, never the map's
+	// prototype, and no read of the map finds a component nothing put there.
+	const components: Record<string, unknown> = Object.create(null);
 
 	// Per-component cleanup records captured during successful materialisations.
 	const cleanups: CleanupRecord[] = [];
