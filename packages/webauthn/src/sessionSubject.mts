@@ -135,10 +135,11 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 					);
 					if (deps.sessionLifecycleStore === undefined) {
 						throw new Error(
-							"webauthn: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
-								"user-session store is wired, core's session lifecycle is required: registering " +
-								"from a browser session admits it through its lifecycle record. Install " +
-								"sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+							"webauthn-session-subject: userSessionStore is wired, but sessionLifecycleStore is " +
+								"not. Where a user-session store is wired, core's session lifecycle is required: " +
+								"registering from a browser session admits it through its lifecycle record. Wire " +
+								"core's session lifecycle: a session-store module that fills sessionLifecycleStore " +
+								"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
 						);
 					}
 					const logger = deps.logger ?? consoleLogger;

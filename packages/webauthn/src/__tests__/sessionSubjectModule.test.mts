@@ -273,7 +273,7 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 
 	it("refuses, when its route is built, a user-session store without core's session lifecycle port, naming both slots", () => {
 		expect(() => setup({ sessionLifecycleStore: null })).toThrow(
-			/^webauthn: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Install sessionLifecycleModule/,
+			/^webauthn-session-subject: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 
