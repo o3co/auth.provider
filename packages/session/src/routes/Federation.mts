@@ -164,7 +164,11 @@ export const createRouter = (
 		 * sessions were revoked can link until it expires.
 		 */
 		subjectRevocation?: SubjectRevocation;
-		/** The session lifecycle port the link routes' admission reads after a live record, when wired. */
+		/**
+		 * The session lifecycle port the link routes' admission reads after a
+		 * live record. Required, as `userSessionStore` is: a router built
+		 * without it is refused.
+		 */
 		sessionLifecycleStore?: SessionLifecycleStore | undefined;
 		/**
 		 * Core's session lifecycle: a federated login opens the session's
@@ -213,6 +217,15 @@ export const createRouter = (
 	if (!sessionLifecycle) {
 		throw new Error(
 			"federation routes: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it, and a federation joins a session through it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
+	}
+	if (!sessionLifecycleStore) {
+		throw new Error(
+			"federation routes: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
+				"user-session store is wired, core's session lifecycle is required: the link routes " +
+				"admit the session through its lifecycle record. Wire core's session lifecycle: a " +
+				"session-store module that fills sessionLifecycleStore (memorySessionStoresModule or " +
+				"redisSessionStoresModule) and sessionLifecycleModule.",
 		);
 	}
 

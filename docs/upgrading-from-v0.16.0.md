@@ -1280,6 +1280,13 @@ modules fills them.
   `sessionLifecycle` too. Where another package's module admits a session,
   it requires `sessionLifecycleStore` beside the store the same way; each
   such refusal is listed with that module's own entry in this section.
+  - `sessionModule`'s federation routes are refused the same way when
+    `userSessionStore` and `sessionLifecycle` are wired without a
+    `sessionLifecycleStore`: `contribute-factory-failed`, the message naming
+    `sessionLifecycleStore`, and the federation router (`createRouter` in
+    `routes/Federation.mts`) throws the same refusal. Such a composition used
+    to build and then answer every account link as a `session_lifecycle`
+    outage.
   - The code exchange joins its session through the lifecycle alone: the
     grant no longer reads `sessionRPRegistry` or `sessionFamilyIndex`, and
     `oauthAuthorizationGrantsModule` no longer declares them, nor

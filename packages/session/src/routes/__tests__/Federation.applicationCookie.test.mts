@@ -37,7 +37,10 @@ import express from "express";
 import session from "express-session";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
+import {
+	fakeSessionLifecycle,
+	openingLifecycleStore,
+} from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
@@ -161,6 +164,7 @@ function buildRealApp({ rolling = false }: { rolling?: boolean } = {}): RealApp 
 			userRepository: makeUserRepository(),
 			userSessionStore: makeUserSessionStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
+			sessionLifecycleStore: openingLifecycleStore(),
 			federationTokenStore: makeFederationTokenStore(),
 		}),
 	);

@@ -400,7 +400,9 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `subjectRevocation` (the boundary the linking routes' admission reads),
   `sessionLifecycleStore` (core's session lifecycle port, which the linking
   routes' admission reads after a live record: a session closing or closed
-  links nothing), `sessionLifecycle` (core's session lifecycle, which
+  links nothing; required beside `userSessionStore`, so the federation
+  routes' factory refuses a composition without it, naming the slot),
+  `sessionLifecycle` (core's session lifecycle, which
   `sessionLifecycleModule` fills: each login opens its session's lifecycle
   record, a federation joins the session through it, and the logout closes
   the session through it; `loginCompletionModule` takes it too). It is
