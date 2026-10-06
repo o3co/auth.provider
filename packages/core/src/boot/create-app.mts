@@ -46,9 +46,11 @@ import { assembleApp } from "./assemble-app.mjs";
 import { freezeWorld } from "./freeze-world.mjs";
 import { materializeComponents } from "./materialize-components.mjs";
 import { planBoot } from "./plan-boot.mjs";
+import { runCleanupsReverse } from "./run-cleanups.mjs";
 import type {
 	AppHandle,
 	BootstrapMap,
+	CleanupRecord,
 	CollectedRouteContribution,
 	ContributionCollectorMap,
 	ContributionKindMap,
@@ -76,6 +78,11 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
  *   4. applyContributions — route contributions to collectors.
  *   5. freezeWorld — Object.freeze component map + call freeze() on registries.
  *   6. assembleApp — mount routes, build AppHandle.
+ *
+ * A refused boot rolls back what stage 3 opened: stages 3 and 4 run the
+ * lifecycle cleanups recorded so far, in reverse, before they throw, and a
+ * failure at stage 5 or 6 runs them here; then the `LifecycleRegistrar`
+ * drains. Each cleanup runs once.
  *
  * `mergeWithBuiltins` seeds the built-in contribution kinds and consumer kinds
  * overlay them, except `sessionRequirements` and `mfaFactors`
@@ -133,6 +140,10 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		readinessRegistrar: readinessReg,
 	} as typeof validatedBootstrap;
 
+	// The stage-3 lifecycle cleanups this function runs when a later stage
+	// fails: set once stage 4 has returned, since stages 3 and 4 run their own
+	// before they throw.
+	let unreleased: readonly CleanupRecord[] = [];
 	try {
 		// Stage 2: planBoot.
 		const plan = planBoot(validated, bootstrapWithLifecycle, overrideComponents);
@@ -147,6 +158,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 
 		// Stage 4: applyContributions.
 		const registry = await applyContributions(material, merged);
+		unreleased = material.cleanups;
 
 		// Stage 5: freezeWorld.
 		const frozen = freezeWorld(registry);
@@ -165,6 +177,10 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		// Stage 6: assembleApp.
 		return assembleApp(frozen, { express: expressMod, lifecycleReg, readinessReg });
 	} catch (err) {
+		// A refusal at stage 5 or 6 carries no `cleanupErrors`, so a cleanup
+		// that throws here is not reported, as at stage 3's refusals of that
+		// kind; the error that failed boot is rethrown.
+		await runCleanupsReverse(unreleased);
 		// Partial-boot failure: a builder may already have registered a
 		// cleanup, so drain best-effort to avoid leaking adapter sub-resources.
 		// There is no AppHandle; a failed cleanup is logged through the logger

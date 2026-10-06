@@ -57,8 +57,8 @@ import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { buildDispatchedFederation } from "./federation-entries.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
+import { runCleanupsReverse } from "./run-cleanups.mjs";
 import type {
-	CleanupRecord,
 	CollectedRouteContribution,
 	ComponentWorld,
 	ContributionCollectorMap,
@@ -110,31 +110,6 @@ function buildDeps(
 		deps.section = section.value;
 	}
 	return deps;
-}
-
-/**
- * Run cleanup records in REVERSE order (best-effort), the partial rollback
- * after a factory failure. Returns the errors for `details.cleanupErrors`.
- * @internal
- */
-async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Promise<
-	readonly {
-		readonly module: string;
-		readonly componentKey: ComponentKey;
-		readonly error: unknown;
-	}[]
-> {
-	const errors: { module: string; componentKey: ComponentKey; error: unknown }[] = [];
-	for (let i = cleanupRecords.length - 1; i >= 0; i--) {
-		// biome-ignore lint/style/noNonNullAssertion: index is bounded
-		const record = cleanupRecords[i]!;
-		try {
-			await record.cleanup(record.value);
-		} catch (err) {
-			errors.push({ module: record.module, componentKey: record.componentKey, error: err });
-		}
-	}
-	return errors;
 }
 
 /**
@@ -1264,8 +1239,11 @@ function warnOnTokenBindingSurfaceOverlap(
  *      `CollectedRouteContribution` with a `declarationIndex`.
  *
  * A throwing factory becomes `BootError` `contribute-factory-failed` (`cause`
- * the thrown value, message via `failureSummary`, never `String(thrown)`),
- * after the stage-3 cleanups in `material.cleanups` run in reverse.
+ * the thrown value, message via `failureSummary`, never `String(thrown)`).
+ * Every refusal this stage raises, the pre-scan's included, runs the stage-3
+ * cleanups in `material.cleanups` once, in reverse, before it is thrown
+ * (`runCleanupsReverse`); a refusal stage 5 or 6 raises leaves them to
+ * `createApp`.
  */
 export async function applyContributions(
 	material: ComponentWorld,
@@ -1323,7 +1301,10 @@ export async function applyContributions(
 		// ------------------------------------------------------------------
 		// Pre-scan phase: validate ALL collector invariants for this module
 		// BEFORE invoking any factory. If any check fails, no factory for this
-		// module runs, so none leaves a side effect behind.
+		// module runs, so none leaves a side effect behind; the stage-3
+		// cleanups run before the refusal, as after a failed factory. Neither
+		// refusal's details carry `cleanupErrors`, so a cleanup that throws
+		// here is not reported, as at stage 3's refusals of the same kind.
 		// ------------------------------------------------------------------
 
 		for (const entry of nameKeyedContributes) {
@@ -1333,6 +1314,7 @@ export async function applyContributions(
 			if (collector === undefined) continue;
 			const name = entry.key as string;
 			if (collector.get(name) !== undefined) {
+				await runCleanupsReverse(material.cleanups);
 				throw new BootError({
 					message: `Pre-scan: duplicate contribution "${name}" for kind "${entry.kind}" in module "${moduleName}".`,
 					reason: "duplicate-contribute",
@@ -1360,6 +1342,7 @@ export async function applyContributions(
 			const switchedOff =
 				target === null ? SWITCHED_OFF_OVERRIDE_TARGETS.get(entry.kind) : undefined;
 			if (target === undefined || switchedOff !== undefined) {
+				await runCleanupsReverse(material.cleanups);
 				throw new BootError({
 					message:
 						`Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".` +
