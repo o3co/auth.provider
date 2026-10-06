@@ -1976,7 +1976,14 @@ with what a store of yours records and refuses. Per port:
   (`checkEmailProofRequirementConsume`). Run
   `runMfaEmailProofRequirementContract` beside the store's suite: copy
   `packages/redis/__tests__/adapters.mfa-email-proof-requirement.contract.mts`,
-  which imports only `@o3co/auth-provider-core`. The contracts and
+  which imports only `@o3co/auth-provider-core`. Such a store's `noteFirstBinding`
+  answers the mark that stood before the note, as `firstBindingAnswer` reads
+  it on the store's clock (its `atMs`, or `null` when none stood), read and
+  replaced in one atomic step, in place of answering nothing; a held value
+  that is not a mark is answered as an outage. Run
+  `runMfaFirstBindingNoteContract` too, from
+  `packages/redis/__tests__/adapters.mfa-first-binding-note.contract.mts`.
+  The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
   and the [test kit](../packages/test-kit/README.md). An
   `MfaTransactionStoreClient` of your own, written against a 0.17 release
