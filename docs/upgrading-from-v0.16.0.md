@@ -1227,6 +1227,14 @@ modules fills them.
     session already gone, reporting a logout that revoked nothing. A sid the
     lifecycle cannot hold is therefore a `503` too; such a sid is never
     issued.
+  - The `token_exchange` grant (`tokenExchangeModule`) is refused the same
+    way, with `contribute-factory-failed`, and `createTokenExchangeGrant`
+    throws the same refusal. The grant reads a presented token's session
+    through the lifecycle's `liveness` alone: the `userSessionStore`
+    fallback is removed, so `token_exchange_session_store_unavailable` no
+    longer carries `store: "user_session"` (`step: "get"`), only
+    `store: "session_lifecycle"` (`step: "liveness"`). Move an alert keyed
+    on the old value.
 - **BREAKING: `POST /session/logout` closes the session through the
   lifecycle only.** The path that deleted the `UserSession`, the subject-index
   entry and the federation tokens itself, without the lifecycle, is removed,
