@@ -981,23 +981,20 @@ describe("a first binding refused by a counting factor its read under the lease 
 });
 
 describe("two transactions of one subject racing the first binding past a lease the store does not hold", () => {
-	/** Two logins of alice, each with a TOTP enrollment begun, whose completions reach their factors' writes together. */
+	/**
+	 * Two logins of alice, each with a TOTP enrollment begun, whose completions
+	 * read the set and the mark, and pass their checks, before either notes the
+	 * mark: the note that lands second answers the first, which distrusts its
+	 * sign-in, before anything of its own is written.
+	 */
 	async function racing() {
 		const memory = createMemoryMfaFactorStore();
 		const removeIf = vi.spyOn(memory, "removeIf");
-		const arrive = barrier(2);
 		const audit = recordingAuditSink();
 		const directory = new WitnessingUserRepository();
 		const booted = await boot({
 			config: configFor("required"),
-			// Both completions read the set, and pass its checks, before either writes.
-			factorStore: {
-				...memory,
-				createIf: async (record, expected) => {
-					if (record.kind === "totp") await arrive();
-					return memory.createIf(record, expected);
-				},
-			},
+			factorStore: memory,
 			auditSink: audit,
 			userRepository: directory,
 		});
@@ -1035,10 +1032,12 @@ describe("two transactions of one subject racing the first binding past a lease 
 		expect(records.filter((record) => record.kind === "totp")).toHaveLength(1);
 		expect(records.filter((record) => record.kind === "recovery_code")).toHaveLength(1);
 		expect(answers.map((res) => res.status).sort()).toEqual([200, 401]);
-		expect(answers.find((res) => res.status === 401)?.body).toEqual({
+		const lost = answers.find((res) => res.status === 401);
+		expect(lost?.body).toEqual({
 			error: "login_required",
 			error_description: "Log in again",
 		});
+		expect(Number(lost?.headers["retry-after"])).toBeGreaterThan(0);
 		expect(directory.marks).toHaveLength(1);
 		expect(audit.of("mfa.factor.enrolled")).toHaveLength(1);
 		expect(audit.of("mfa.recovery_codes.generated")).toHaveLength(1);
@@ -1047,7 +1046,7 @@ describe("two transactions of one subject racing the first binding past a lease 
 		expect(overruns(logger)).toBe(2);
 	});
 
-	it("removes nothing to settle the race, and spends the loser's transaction: a second completion of it is 400", async () => {
+	it("removes nothing to settle the race, and keeps the loser's transaction unspent: a second completion of it is refused again", async () => {
 		const { answers, removeIf, logins, proofs } = await racing();
 
 		expect(removeIf).not.toHaveBeenCalled();
@@ -1055,7 +1054,7 @@ describe("two transactions of one subject racing the first binding past a lease 
 		const loser = logins[lost];
 		if (loser === undefined) throw new Error("no completion lost");
 		const again = await completeEnrollment(loser.agent, loser.transaction, proofs[lost]);
-		expect(again.status, JSON.stringify(again.body)).toBe(400);
+		expect(again.status, JSON.stringify(again.body)).toBe(401);
 	});
 });
 

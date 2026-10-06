@@ -634,19 +634,48 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	};
 
 	/**
-	 * `subject`'s first-binding mark noted, standing its lifetime; the outage
-	 * otherwise. Dated by the clock read just before the note, not the
-	 * request's start: a request that stalled must not date the mark early.
+	 * `subject`'s first-binding mark noted, standing its lifetime, with the
+	 * mark that stood before it as the store answered it in the same step
+	 * (`earlierAtMs`, `null` for none); the outage otherwise, an answer the
+	 * port does not promise among it. Dated by the clock read just before the
+	 * note, not the request's start: a request that stalled must not date the
+	 * mark early.
 	 */
-	const noteFirstBinding = async (subject: string): Promise<MfaStoreOutage | undefined> => {
+	const noteFirstBinding = async (
+		subject: string,
+	): Promise<{ readonly atMs: number; readonly earlierAtMs: number | null } | MfaStoreOutage> => {
 		const atMs = now();
 		try {
-			await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMark.lifetimeMs);
-			return undefined;
+			const earlierAtMs = readFirstBindingMark(
+				await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMark.lifetimeMs),
+				atMs,
+			);
+			return { atMs, earlierAtMs };
 		} catch (cause) {
 			return outage("mfa_transaction", "noteFirstBinding", cause);
 		}
 	};
+
+	/**
+	 * The refusal of an authentication at `authTimeMs` a mark at `markAtMs`
+	 * distrusts, judged at `nowMs`, until a sign-in after `keptAtMs` — the
+	 * mark the store keeps, `markAtMs` unless a later note moved it — is
+	 * trusted; else `undefined`.
+	 */
+	const distrustedBy = (
+		subject: string,
+		authTimeMs: number | undefined,
+		markAtMs: number | null,
+		nowMs: number,
+		keptAtMs: number | null = markAtMs,
+	): MfaFirstBindingDistrusted | undefined =>
+		markAtMs !== null && firstBindingMark.distrusts(authTimeMs, markAtMs)
+			? {
+					outcome: "first_binding_distrusted",
+					subject,
+					retryAfterMs: firstBindingMark.retryAfterMs(keptAtMs ?? markAtMs, nowMs),
+				}
+			: undefined;
 
 	const kit: MfaCeremonyKit = {
 		factors,
@@ -745,15 +774,21 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			} catch (cause) {
 				return outage("mfa_transaction", "firstBindingAt", cause);
 			}
-			return mark !== null && firstBindingMark.distrusts(authTimeMs, mark)
-				? ({
-						outcome: "first_binding_distrusted",
-						subject,
-						retryAfterMs: firstBindingMark.retryAfterMs(mark, nowMs),
-					} satisfies MfaFirstBindingDistrusted)
-				: undefined;
+			return distrustedBy(subject, authTimeMs, mark, nowMs);
 		},
-		noteFirstBinding,
+		noteFirstBinding: async (subject, authTimeMs) => {
+			const noted = await noteFirstBinding(subject);
+			if ("outcome" in noted) return noted;
+			// Judged on the mark that stood before; waited out from the later of it and
+			// this note's, which the store keeps.
+			return distrustedBy(
+				subject,
+				authTimeMs,
+				noted.earlierAtMs,
+				noted.atMs,
+				noted.earlierAtMs === null ? null : Math.max(noted.earlierAtMs, noted.atMs),
+			);
+		},
 		reconcileWitness: async (subject, started) => {
 			// A directory that cannot write the witness leaves no session stale: no mark is due.
 			if (!witness.writable)
@@ -761,13 +796,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					witness: await factorSet.markEnrolled(started, subject),
 					firstBindingUnnoted: undefined,
 				};
-			const unnoted = await noteFirstBinding(subject);
-			return unnoted === undefined
-				? {
+			// The mark that stood before is not judged here: the factor verified is no first binding.
+			const noted = await noteFirstBinding(subject);
+			return "outcome" in noted
+				? { witness: undefined, firstBindingUnnoted: noted }
+				: {
 						witness: await factorSet.markEnrolled(started, subject),
 						firstBindingUnnoted: undefined,
-					}
-				: { witness: undefined, firstBindingUnnoted: unnoted };
+					};
 		},
 		recordsOf,
 		reserve,

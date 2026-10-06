@@ -81,7 +81,9 @@
  *   reads the subject's first-binding mark again — one that distrusts the
  *   authentication refuses it as at the start, one that cannot be read is an
  *   outage, nothing written and the transaction standing — and notes it — a
- *   note that fails refuses it, nothing written — consumes the transaction,
+ *   note that fails refuses it, nothing more written, and so does the mark
+ *   the note answers stood before it when that mark distrusts the
+ *   authentication, as at the start — consumes the transaction,
  *   writes the factor. Every write of the
  *   subject's factor set is fenced on that read (`factorSet.mts`): a factor
  *   whose write finds the set changed since — another write landed, which
@@ -728,8 +730,10 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					if (distrusted !== undefined) return distrusted;
 					// Noted before the factor is written: a first binding the mark misses
 					// would leave a stale session trusted.
+					// Its answer, the mark that stood before it, covers one that landed since
+					// the read above: a note given up on by its writer may land late.
 					const unnoted = await writes.run(
-						() => kit.noteFirstBinding(tx.subject),
+						() => kit.noteFirstBinding(tx.subject, authTimeOf(tx, call)),
 						(cause) => outage("mfa_transaction", "noteFirstBinding", cause),
 					);
 					if (unnoted !== undefined) return unnoted;
