@@ -48,16 +48,6 @@ describe("Federation.mts route rewire — federationRedirectPolicyResolver param
 		};
 		const resolver = new Map([["google", mockPolicy]]);
 
-		const stubSessionFederationIndex = {
-			kind: "memory",
-			async addFederation() {},
-			async listFederations() {
-				return [];
-			},
-			async removeFederation() {},
-			async removeBySid() {},
-		} as never;
-
 		expect(() =>
 			createRouter(stubExpress, {
 				federationSettings: createTestFederationSettings(),
@@ -68,7 +58,6 @@ describe("Federation.mts route rewire — federationRedirectPolicyResolver param
 				userRepository: { authenticateByToken: async () => null } as never,
 				userSessionStore: {} as never,
 				sessionLifecycle: fakeSessionLifecycle(),
-				sessionFederationIndex: stubSessionFederationIndex,
 				federationTokenStore: {} as never,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			}),

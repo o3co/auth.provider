@@ -1369,10 +1369,7 @@ describe("federations", () => {
 			federations: ["github", "oidc"],
 		});
 		const closed = await h.lifecycle.close(SID, "rp_logout");
-		expect(closed.outcome === "unavailable" ? undefined : closed.federations).toEqual([
-			"github",
-			"oidc",
-		]);
+		expect(closed.federations).toEqual(["github", "oidc"]);
 	});
 
 	it("lists the per-session index's alone for a session with no record", async () => {
@@ -1392,8 +1389,7 @@ describe("federations", () => {
 		const listed = await h.lifecycle.federations(SID);
 		const closed = await h.lifecycle.close(SID, "rp_logout");
 		expect(listed.outcome).toBe("listed");
-		expect(closed.outcome).not.toBe("unavailable");
-		expect(closed.outcome === "unavailable" ? undefined : closed.federations).toEqual(
+		expect(closed.federations).toEqual(
 			listed.outcome === "listed" ? listed.federations : undefined,
 		);
 		expect(listed.outcome === "listed" ? listed.federations : []).toEqual(["google"]);

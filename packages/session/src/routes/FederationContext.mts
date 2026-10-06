@@ -26,7 +26,6 @@ import type {
 	FederationTokenStore,
 	Logger,
 	SessionClaim,
-	SessionFederationIndex,
 	SessionLifecycle,
 	UserRepository,
 } from "@o3co/auth-provider-core";
@@ -40,9 +39,12 @@ export interface FederationRouterContext extends FederationTransactionCookie {
 	readonly federationRedirectPolicyResolver: ReadonlyMap<string, FederationRedirectPolicy>;
 	readonly providerCallbackUrls: ReadonlyMap<string, string>;
 	readonly userRepository: UserRepository;
-	readonly sessionFederationIndex: SessionFederationIndex;
 	readonly federationTokenStore: FederationTokenStore;
-	/** Core's session lifecycle: a federation joins a session through it once its tokens are attached. */
+	/**
+	 * Core's session lifecycle: a link reads the federations a session joined
+	 * from it, and a federation joins a session through it once its tokens
+	 * are attached.
+	 */
 	readonly sessionLifecycle: SessionLifecycle;
 	readonly federationTransactionTtlMs: number;
 	readonly auditSink: AuditSink | undefined;
