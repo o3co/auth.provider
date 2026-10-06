@@ -1100,9 +1100,7 @@ modules fills them.
   a federation's token attach or join), the rollback closes the record it
   opened, cause `session_logout`, before it deletes the `UserSession`. A
   federated login whose join the lifecycle refuses (the session was closed
-  during the sign-in) is still `401 login_required`, and is now logged once as
-  `federation_callback_store_unavailable` with `store: "session_lifecycle"`,
-  `step: "join"`.
+  during the sign-in) is still `401 login_required`, and logs nothing.
 - **The session lifecycle sweeps unless told not to.** Installing
   `sessionLifecycleModule` starts a sweep that resumes the closes left
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`

@@ -931,10 +931,9 @@ URL is exactly what the adapter returned.
    (`sessionLifecycle`), after the tokens below are attached: a session
    closed before the join commits is refused, the lifecycle removes the
    tokens handed to it, and the callback answers `401 login_required` with
-   what it wrote rolled back, logged once as
-   `federation_callback_store_unavailable` (store `session_lifecycle`, step
-   `join`, the error reading that the lifecycle answered `refused`); a join
-   the lifecycle cannot answer is `503`, logged the same way. Every rollback
+   what it wrote rolled back, logging nothing (the session's close, not an
+   outage); a join the lifecycle cannot answer is `503` (store
+   `session_lifecycle`, step `join`). Every rollback
    closes the session's lifecycle record before it deletes the `UserSession`.
 6. **Tokens** are attached to `federationTokenStore` under the new `sid` only
    when the profile carries an `accessToken`:

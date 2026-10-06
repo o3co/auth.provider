@@ -452,10 +452,18 @@ export const createRouter = (
 					// callback's own after it.
 					log = log.child({ sid });
 					return {
-						// A refused join, the session closed during the sign-in, is
-						// logged as the store and step it was refused at too.
-						storeUnavailable: (store, step, cause) =>
-							logStoreUnavailable(log, "federation_callback_store_unavailable", store, step, cause),
+						// A refused join is the session's close, not an outage.
+						storeUnavailable: (store, step, cause) => {
+							if (!closed) {
+								logStoreUnavailable(
+									log,
+									"federation_callback_store_unavailable",
+									store,
+									step,
+									cause,
+								);
+							}
+						},
 						cleanupFailed: (store, step, cause) => logCleanupFailed(log, store, step, cause),
 						subjectIndexWriteFailed: (cause) =>
 							log.error(

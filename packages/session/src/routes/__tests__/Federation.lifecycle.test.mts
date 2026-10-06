@@ -316,7 +316,7 @@ describe("a federated login over the session lifecycle", () => {
 		expect(await w.federationTokenStore.get(loginSid(w), "test")).toBeNull();
 	});
 
-	it("logs a refused join once, as the callback's line with the lifecycle's store and step", async () => {
+	it("logs nothing for a refused join: the session's close, not an outage", async () => {
 		const error = vi.fn();
 		const logger: Logger = { ...silentLogger, error, child: () => logger };
 		const w = await world({
@@ -329,16 +329,7 @@ describe("a federated login over the session lifecycle", () => {
 		const res = await login(w);
 
 		expect(res.status).toBe(401);
-		expect(error).toHaveBeenCalledExactlyOnceWith(
-			{
-				store: "session_lifecycle",
-				step: "join",
-				err: expect.objectContaining({
-					detail: "the session lifecycle answered refused to the join",
-				}),
-			},
-			"federation_callback_store_unavailable",
-		);
+		expect(error).not.toHaveBeenCalled();
 	});
 
 	it("closes the record it opened when the cookie session cannot be saved after the join", async () => {
