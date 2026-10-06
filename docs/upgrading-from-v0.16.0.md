@@ -2079,6 +2079,13 @@ Turning it on — or leaving the default on — needs:
 - **`MFA_ENCRYPTION_KEY`**, canonical base64 of 32 bytes
   (`openssl rand -base64 32`). In development, write your own key in
   `config/development.conf` rather than exporting it beside the sample key.
+  The sample key is accepted only in an explicit development or test
+  environment: the name the configuration was selected by and `NODE_ENV`,
+  each where set, must say `development` or `test`, and at least one must be
+  set. A composition that uses the sample key outside an explicit development
+  or test environment — under another name such as `prod` or `local`, or
+  under no name at all — refuses to boot. Some pre-release builds accepted
+  it there.
 - **`MFA_PAGE_URL`** (default `/mfa`): your MFA page, on the issuer's origin.
   The template ships none; what it keeps is
   [The MFA page's contract](../packages/mfa/README.md#the-mfa-pages-contract).
@@ -2117,7 +2124,9 @@ are the template README's
    table. The page is `mfa.page.url` (`MFA_PAGE_URL`): `endpoints.mfa.url` and
    `ENDPOINTS_MFA_URL`, which some pre-release builds read, refuse the boot.
 3. Set `MFA_ENCRYPTION_KEY`, and `STANDARD_SMTP_MAIL_SENDER_*` where mail is
-   sent. There is no `MFA_NOTICES`: notices to the account holder are yours,
+   sent. The development sample key boots only where `mfaModule({ environment })`
+   and `NODE_ENV`, each where set, say `development` or `test`, with at least
+   one set. There is no `MFA_NOTICES`: notices to the account holder are yours,
    built from the audit events
    ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
 4. Make the Redis the factor store uses durable; give the Store `mfaEnrolled`

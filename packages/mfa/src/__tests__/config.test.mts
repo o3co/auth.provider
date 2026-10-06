@@ -373,12 +373,45 @@ describe("the development sample key", () => {
 		);
 	});
 
-	it("is accepted in development: an environment and NODE_ENV that are neither production nor staging, one replica", () => {
+	it("is accepted in development or test: every name set says development or test, one replica", () => {
 		vi.stubEnv("NODE_ENV", "development");
-		for (const environment of [undefined, "development", "test", "local"]) {
+		for (const environment of [undefined, "development", "test", " Test\n"]) {
 			const settings = readSettings(sample(), environment === undefined ? {} : { environment });
 			expect(settings.encryptionKeys[0]?.id, String(environment)).toBe("sample");
 		}
+		vi.stubEnv("NODE_ENV", "");
+		expect(readSettings(sample(), { environment: "test" }).encryptionKeys[0]?.id).toBe("sample");
+	});
+
+	it("is refused where a name set is neither development nor test, an alias of either included", () => {
+		vi.stubEnv("NODE_ENV", "development");
+		for (const environment of ["prod", "local", "qa", "dev", "testing"]) {
+			const message = refusal(() => readSettings(sample(), { environment }));
+			expect(message, environment).toContain("mfa.encryptionKeys[0].key");
+			expect(message, environment).toContain(
+				`the environment "${environment}" is not development or test`,
+			);
+			expect(message, environment).toContain("MFA_ENCRYPTION_KEY");
+		}
+		vi.stubEnv("NODE_ENV", "local");
+		expect(refusal(() => readSettings(sample(), { environment: "development" }))).toContain(
+			'the environment "local" is not development or test',
+		);
+	});
+
+	it("is refused where no environment is named", () => {
+		vi.stubEnv("NODE_ENV", "");
+		for (const options of [{}, { environment: "" }, { environment: "  " }]) {
+			const message = refusal(() => readSettings(sample(), options));
+			expect(message, JSON.stringify(options)).toContain("no environment is named");
+		}
+	});
+
+	it("is refused under an empty NODE_ENV where the environment is named prod", () => {
+		vi.stubEnv("NODE_ENV", "");
+		expect(refusal(() => readSettings(sample(), { environment: "prod" }))).toContain(
+			'the environment "prod" is not development or test',
+		);
 	});
 
 	it("is refused where the configuration was selected as production or staging", () => {
@@ -442,11 +475,6 @@ describe("the development sample key", () => {
 		expect(readSettings(sample()).developmentSampleKeyAccepted).toBe(true);
 		expect(readSettings(sample({}, true)).developmentSampleKeyAccepted).toBe(true);
 		expect(readSettings(valid()).developmentSampleKeyAccepted).toBe(false);
-	});
-
-	it("is accepted where the environment is named prod: an alias does not count as production", () => {
-		vi.stubEnv("NODE_ENV", "development");
-		expect(readSettings(sample(), { environment: "prod" }).encryptionKeys).toHaveLength(1);
 	});
 
 	it('is refused when the deployment mode is "multi", in any environment', () => {
