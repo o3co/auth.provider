@@ -145,7 +145,7 @@ const ALL_ON_REDIS_MODULES = [
 
 describe('every module on, every shared store on Redis, core.deployment.mode = "multi"', () => {
 	it("lists every module, none declaring replica-unsafe state, and boots", async () => {
-		const own = readOwnLayers(ownFiles(), { env: MULTI_ENV });
+		const own = readOwnLayers(ownFiles(MULTI_ENV), { env: MULTI_ENV });
 		const config = resolveConfig(MULTI_ENV, own);
 		const modules = composedModules(config, MULTI);
 		expect(modules.map((m) => m.name)).toEqual(ALL_ON_REDIS_MODULES);

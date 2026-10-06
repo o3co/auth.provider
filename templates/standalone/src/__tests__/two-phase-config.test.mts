@@ -559,8 +559,10 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 				});
 				const parsed = handle.components.config;
 				await handle.dispose();
+				// Unwritten, the switch reads as off, as the shipped files leave it
+				// unless FEDERATION_GRANTS_ENABLED is set.
 				expect(valueAt(switches, "federation-grants.enabled"), `${environment}, ${name}`).toBe(
-					valueAt(parsed, "federation-grants.enabled"),
+					valueAt(parsed, "federation-grants.enabled") ?? false,
 				);
 				expect(valueAt(resolved, "core.sessionRequirements"), `${environment}, ${name}`).toEqual(
 					valueAt(parsed, "core.sessionRequirements"),

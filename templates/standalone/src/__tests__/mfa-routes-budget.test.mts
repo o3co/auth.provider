@@ -17,7 +17,7 @@
 /**
  * The MFA routes' budget the template ships: every `/session/mfa` POST is
  * limited under the prefix `mfa` by the wired limiter alone, and the
- * template's own `application.conf` gives both limiters `limits.mfa`, 60
+ * template's own `reference.conf` gives both limiters `limits.mfa`, 60
  * requests per 300 s. Followed through both configuration phases and
  * `createApp` to the limiter each module builds, in every environment the
  * template ships a file for.
