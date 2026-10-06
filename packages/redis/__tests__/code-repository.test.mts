@@ -463,6 +463,8 @@ describe("RedisCodeRepository", () => {
 				{ primary: "pwd", mfaAtMs: null },
 				{ primary: "pwd", mfaAtMs: -1 },
 				{ primary: "pwd", mfaAtMs: Number.MAX_VALUE },
+				{ primary: "pwd", mfaAtMs: 1.5 },
+				{ primary: "pwd", mfaAtMs: 8_640_000_000_000_001 },
 			];
 			for (const authentication of envelopes) {
 				store.set(`${KEY_PREFIX}old`, JSON.stringify({ ...recorded, authentication }));
@@ -470,6 +472,32 @@ describe("RedisCodeRepository", () => {
 				expect(read, JSON.stringify(authentication)).toMatchObject(recorded);
 				expect(read, JSON.stringify(authentication)).toHaveProperty("authentication", undefined);
 			}
+		});
+
+		it("never reads a second factor the stored form does not name as mfaAtMs", async () => {
+			store.set(
+				`${KEY_PREFIX}old`,
+				JSON.stringify({
+					client_id: "c",
+					redirect_uri: "https://rp.example/cb",
+					authentication: { primary: "pwd", mfaAt: 1_790_000_000_000 },
+				}),
+			);
+			expect((await repo.consumeByCode("old"))?.authentication).toStrictEqual({
+				primary: "pwd",
+				mfaAt: undefined,
+			});
+		});
+
+		it("answers, stores and reads back as none an mfaAt that is not a valid Date", async () => {
+			const created = await repo.createCode({
+				...minimalParams,
+				authentication: { primary: "pwd", mfaAt: new Date(Number.NaN) },
+			});
+			expect(created.authentication).toBeUndefined();
+			const parsed = JSON.parse(store.get(`${KEY_PREFIX}${created.code}`) as string);
+			expect(parsed.authentication).toStrictEqual({ primary: "pwd", mfaAtMs: null });
+			expect((await repo.consumeByCode(created.code))?.authentication).toBeUndefined();
 		});
 
 		it("names every field it has no value for as undefined, rather than leaving it out", async () => {
