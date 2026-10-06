@@ -739,7 +739,8 @@ export interface AppHandle {
 	readonly cleanupAllowanceMs: number | undefined;
 
 	/**
-	 * Read-only typed view of the materialised component map, Object.frozen.
+	 * Read-only typed view of the materialised component map, Object.frozen,
+	 * with no prototype: a key is a component, never an inherited member.
 	 * Typed as Partial because keys are only present when a module produced them
 	 * (or they were provided via bootstrapComponents / overrideComponents).
 	 */

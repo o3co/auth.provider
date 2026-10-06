@@ -29,7 +29,6 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	type LoginEntry,
-	type SessionFederationIndex,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -150,15 +149,6 @@ const stores = [
 		async removeBySid() {},
 		async delete() {},
 	} as unknown as FederationTokenStore),
-	providing("test:session-federation-index", "sessionFederationIndex", {
-		kind: "memory",
-		async addFederation() {},
-		async listFederations() {
-			return [];
-		},
-		async removeFederation() {},
-		async removeBySid() {},
-	} as unknown as SessionFederationIndex),
 	// Where the session store's module is loaded, it provides these.
 	providing("test:csrf-token-signer", "csrfTokenSigner", createTestCsrfTokenSigner()),
 	providing("test:session-cookie-policy", "sessionCookiePolicy", createTestSessionCookiePolicy()),

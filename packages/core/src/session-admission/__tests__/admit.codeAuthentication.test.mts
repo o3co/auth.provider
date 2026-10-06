@@ -46,6 +46,7 @@ import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import { authenticationFreshness } from "#/user-sessions/authentication.mjs";
 import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
+import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
 
 const NOW = new Date("2026-10-06T12:00:00Z");
 const minutesAgo = (minutes: number): Date => new Date(NOW.getTime() - minutes * 60_000);
@@ -126,6 +127,8 @@ const deps = (
 	requirements: SessionRequirement[] = [],
 ): AdmissionDeps => ({
 	userSessionStore: record === undefined ? undefined : holding(record),
+	sessionLifecycleStore:
+		record === undefined ? undefined : openedLifecycleStore([record.sid, record.sub]),
 	subjectRevocation: undefined,
 	requirements: resolverForTests(requirements, { actions: TEST_ACTIONS }),
 	acrTable: readAcrTable({}),

@@ -22,7 +22,6 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	memoryRateLimiterModule,
-	type SessionFederationIndex,
 	type SessionRequirement,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	type SubjectRevocation,
@@ -45,7 +44,11 @@ import { describe, expect, it, vi } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { sessionModule } from "#/module.mjs";
 import { withSessionCaptures } from "./_helpers/sections.mjs";
-import { fakeSessionLifecycle, sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
+import {
+	fakeSessionLifecycle,
+	openingLifecycleStore,
+	sessionLifecycleTestModule,
+} from "./_helpers/sessionLifecycle.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs (typed-slot const Modules)
@@ -94,23 +97,6 @@ const federationTokenStoreModule = defineModule({
 	provides: { federationTokenStore: () => makeFederationTokenStore() },
 });
 
-function makeSessionFederationIndex(): SessionFederationIndex {
-	return {
-		kind: "memory",
-		async addFederation() {},
-		async listFederations() {
-			return [];
-		},
-		async removeFederation() {},
-		async removeBySid() {},
-	} as unknown as SessionFederationIndex;
-}
-
-const sessionFederationIndexModule = defineModule({
-	name: "test:session-federation-index",
-	provides: { sessionFederationIndex: () => makeSessionFederationIndex() },
-});
-
 /** The CSRF token's signer, which the session store's module provides where it is loaded. */
 const csrfTokenSignerModule = defineModule({
 	name: "test:csrf-token-signer",
@@ -124,21 +110,11 @@ const sessionCookiePolicyModule = defineModule({
 });
 
 /**
- * Stubs for three oauth-package slots that no session-package module
- * provides. The boot-time `federation-stores-incomplete` validator requires
- * them whenever any federation is enabled in config, so a test that enables
- * one includes them for the session-level validations under test to fire.
+ * A stub for an oauth-package slot that no session-package module provides.
+ * The boot-time `federation-stores-incomplete` validator requires it whenever
+ * any federation is enabled in config, so a test that enables one includes it
+ * for the session-level validations under test to fire.
  */
-const sessionRPRegistryModule = defineModule({
-	name: "test:session-rp-registry",
-	provides: { sessionRPRegistry: () => ({ kind: "stub" }) } as never,
-});
-
-const sessionFamilyIndexModule = defineModule({
-	name: "test:session-family-index",
-	provides: { sessionFamilyIndex: () => ({ kind: "stub" }) } as never,
-});
-
 const refreshTokenFamilyRevocationModule = defineModule({
 	name: "test:refresh-token-family-revocation",
 	provides: { refreshTokenFamilyRevocation: () => ({ kind: "stub" }) } as never,
@@ -167,12 +143,9 @@ const withoutLifecycle = [
 	userRepositoryModule,
 	userSessionStoreModule,
 	federationTokenStoreModule,
-	sessionFederationIndexModule,
 	csrfTokenSignerModule,
 	sessionCookiePolicyModule,
-	// Oauth-package stubs for the `federation-stores-incomplete` validator (above).
-	sessionRPRegistryModule,
-	sessionFamilyIndexModule,
+	// The oauth-package stub for the `federation-stores-incomplete` validator (above).
 	refreshTokenFamilyRevocationModule,
 ];
 
@@ -457,9 +430,9 @@ describe("sessionModule — the link routes are a consumer of session admission"
 				linkFederatedIdentity: async () => ({ ok: true, user: { id: "user-1" } }),
 			},
 			userSessionStore: { ...makeUserSessionStore(), get: async () => record },
+			sessionLifecycleStore: openingLifecycleStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
-			sessionFederationIndex: makeSessionFederationIndex(),
 			// Boot registers each page on oauth.jwt.issuer — the valid config's.
 			sessionRequirementResolver: resolverForTests(extra.requirements ?? [], {
 				issuer: "https://auth.test",
@@ -546,7 +519,6 @@ describe("sessionModule — the password login is a consumer of session admissio
 			userSessionStore: makeUserSessionStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
-			sessionFederationIndex: makeSessionFederationIndex(),
 			csrfTokenSigner: createTestCsrfTokenSigner(),
 			sessionRequirementResolver: resolverForTests(requirements, {
 				actions: SESSION_ADMISSION_ACTIONS,
@@ -640,7 +612,6 @@ describe("sessionModule — the login's attempt limit reads the deploymentMode s
 			userSessionStore: makeUserSessionStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
-			sessionFederationIndex: makeSessionFederationIndex(),
 			sessionRequirementResolver: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 		});
 	};

@@ -43,6 +43,7 @@ import { createInMemoryUserSessionStore } from "#/user-sessions/memory/userSessi
 import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 import type { UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
+import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
 
 /** A code record as `/authorize` mints it over a password session: its `sid`, and how the session had authenticated. */
 const passwordCode = (sid: string): CodeCarrier => {
@@ -82,6 +83,7 @@ async function holding(renewalNonce?: string) {
 
 const deps = (store: UserSessionStore): AdmissionDeps => ({
 	userSessionStore: store,
+	sessionLifecycleStore: openedLifecycleStore(),
 	subjectRevocation: undefined,
 	requirements: resolverForTests([], { actions: TEST_ACTIONS }),
 	acrTable: readAcrTable({}),

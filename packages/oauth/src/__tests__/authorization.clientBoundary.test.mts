@@ -42,7 +42,7 @@ import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { serialisedCalls } from "./_helpers/projectedLog.mjs";
-import { joiningLifecycle } from "./_helpers/sessionLifecycle.mjs";
+import { joiningLifecycle, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client1";
 const REDIRECT_URI = "https://rp.example/cb";
@@ -120,6 +120,7 @@ const exchangeSetup = async (findById: ClientRepository["findById"]) => {
 		clientRepository: { findById, authenticate: vi.fn().mockResolvedValue(null) },
 		userSessionStore,
 		sessionLifecycle: lifecycle,
+		sessionLifecycleStore: openingLifecycleStore(SUBJECT),
 		refreshTokenFamilyRotation: { ...rotation, register },
 		logger,
 	});

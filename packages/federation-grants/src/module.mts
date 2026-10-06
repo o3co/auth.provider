@@ -348,8 +348,9 @@ const requireUserSessionStore = (deps: FederationGrantsModuleDeps): UserSessionS
  * The `csrfGuard` slot the session module provides — the policy
  * `/session/login` runs. The consent answer is a state change made with the
  * browser's session cookie: it spends the question and sends the user
- * upstream. Without the guard, or with one that has no `check`, it would have
- * no request-origin check at all.
+ * upstream. Without the guard it would have no request-origin check at all.
+ * Core holds the slot to its contract where boot fills it, so a guard handed
+ * here has a `check` to ask.
  */
 const requireCsrfGuard = (
 	deps: FederationGrantsModuleDeps,
@@ -364,13 +365,6 @@ const requireCsrfGuard = (
 				"token — through the csrfGuard slot the session module (sessionModule) provides. " +
 				"Install the session module, fill the csrfGuard slot with a guard of your own that keeps " +
 				"core's CsrfGuard contract, or leave federation grants disabled.",
-		);
-	}
-	if (typeof guard.check !== "function") {
-		throw new Error(
-			"federationGrantsModule: the csrfGuard installed has no check function, which the consent " +
-				"answer asks. Install the session module's guard (sessionModule), or one that keeps core's " +
-				"CsrfGuard contract.",
 		);
 	}
 	return guard;

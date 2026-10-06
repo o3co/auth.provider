@@ -874,6 +874,38 @@ modules fills them.
   `contribute-factory-failed`); in sloppy-mode code the write is silently
   ignored. Either way the value does not change. Copy what the module needs,
   or set the value in the configuration (#1492).
+- **Core checks the `csrfGuard` slot where boot fills it, and every reader
+  receives a frozen copy of the guard.** Whatever fills the slot — a module's
+  `provides`, or a `bootstrapComponents` or `overrideComponents` entry — boot
+  reads each member of the guard once and requires `middleware` to be a
+  function of at most three parameters (Express skips one of four or more as
+  an error handler) and `check` to be a function. A member whose read throws
+  refuses boot too, naming it. A module's guard that fails is refused as
+  `provides-factory-failed` at `materializeComponents`; a host's, before any
+  provider runs, with a `RangeError` naming the member (`csrfGuard.middleware
+  is not a request handler`, `csrfGuard.check is not a function`,
+  `csrfGuard.<member> could not be read`), as a host's `oauthTokenSettings` is.
+  Before, the device grant and federation grants checked the guard in their
+  own contributions (`contribute-factory-failed` at `applyContributions`,
+  with their own wording), and the MFA routes did not check it. The slot
+  then holds a frozen copy, not the object that filled it, so
+  `deps.csrfGuard !== providedGuard`: compare members, not identity. The
+  copy carries the guard's data members as read; its functions are core's
+  own and call the guard's on the guard itself, so a guard written as a
+  class, whose methods use `this`, works as before. `middleware` is core's
+  request handler of three parameters in front of the guard's, so
+  `deps.csrfGuard.middleware !== providedGuard.middleware` too, and the
+  guard's `middleware` now runs with the guard as `this`. A
+  `Symbol.asyncDispose` the guard carries still runs on dispose (#1090).
+- **`AppHandle.components`, and the `deps` a factory is handed, have no
+  prototype.** The component map boot builds is created with
+  `Object.create(null)`, and so is each provider's and contribution's `deps`,
+  every entry an own data property, so a component named after an
+  `Object.prototype` member, `__proto__` included, is a key like any other
+  and never a prototype. Read a component as a property or with
+  `Object.hasOwn(map, key)`; `hasOwnProperty` and the other
+  `Object.prototype` methods are no longer there. Spreading and destructuring
+  work as before (#1090).
 - **BREAKING: `sessionModule` reads the federations from the
   `federationSettings` slot, not `config` (#728).** It requires core's
   `federationSettings`, which core fills from `core.federations` in every
@@ -1407,6 +1439,29 @@ modules fills them.
 - **`cascadeLogout`, `CascadeLogoutOptions` and `CascadeLogoutResult`** are
   removed from `@o3co/auth-provider-oauth` (#1030). A session is ended
   through core's session lifecycle: `sessionLifecycle.close(sid, cause)`.
+- **BREAKING: core no longer has the per-session store ports (#1030).**
+  Core's session lifecycle record holds what they held. Removed from
+  `@o3co/auth-provider-core`: the ports `SessionRPRegistry`,
+  `SessionFamilyIndex` and `SessionFederationIndex`, the session-end
+  capability `SupportsSessionEnd` and its guard `supportsSessionEnd`, the
+  in-process stores `createInMemorySessionRPRegistry`,
+  `createInMemorySessionFamilyIndex` and `createInMemorySessionFederationIndex`,
+  the factory builders `createSessionRPRegistryFactory`,
+  `createSessionFamilyIndexFactory` and `createSessionFederationIndexFactory`
+  with their aliases `SessionRPRegistryFactory`, `SessionFamilyIndexFactory`
+  and `SessionFederationIndexFactory`, and the `ComponentMap` slots
+  `sessionRPRegistry`, `sessionFamilyIndex` and `sessionFederationIndex`
+  (also gone from `GrantDependencies`). `memorySessionStoresModule` no longer
+  provides those slots. `RegisteredRP` stays: a join names one
+  (`SessionJoinRequest.rp`). A module of your own that provides or requires
+  one of the slots drops it.
+- **BREAKING: session admission requires the lifecycle store beside a
+  user-session store (#1030).** `admitSession` handed a `userSessionStore`
+  and no `sessionLifecycleStore` answers a live session
+  `unavailable` (`session_lifecycle`), logged once as
+  `session_admission_unavailable`, instead of reading it as before. Every
+  bundled consumer already refuses to build without it; a caller of your own
+  passes the `sessionLifecycleStore` slot in `AdmissionDeps`.
 - **BREAKING: `@o3co/auth-provider-redis` no longer has adapters for the
   three per-session stores (#1030).** Core's session lifecycle holds what
   the RP registry, the refresh-token family index and the federation index
@@ -1684,8 +1739,9 @@ with what a store of yours records and refuses. Per port:
 - **A `loginCompletion` of your own** implements `renewSession` (#923), the
   renewal of a signed-in session's id a step-up finishes with: the
   [session README](../packages/session/README.md#renewing-a-signed-in-sessions-id).
-- **`SessionRPRegistry`.** A resolved `registerRP` is visible to every later
-  `listRPs` on that sid: no replica or eventually consistent reads (#1155).
+- **`SessionRPRegistry`, `SessionFamilyIndex`, `SessionFederationIndex`.**
+  The ports are removed (#1030, above): an adapter of your own for them has
+  nothing to implement and nothing reads it.
 - **`DeviceCodeStore`.** Record `approvedAtMs`, and what
   `recordableDeviceApproval({ amr, authTime }, nowMs)` answers (#1093).
 - **`FederationTokenStore`.** Implement the conditional members

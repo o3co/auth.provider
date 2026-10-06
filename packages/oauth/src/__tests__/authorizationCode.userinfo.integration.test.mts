@@ -97,8 +97,9 @@ const refreshTokenFamilyRevocation = {
  * before each exchange as a login opens it: the grant joins the code's
  * session through it, and userinfo reads the session's liveness through it.
  */
+const sessionLifecycleStore = createInMemorySessionLifecycleStore();
 const sessionLifecycle = createSessionLifecycle({
-	store: createInMemorySessionLifecycleStore(),
+	store: sessionLifecycleStore,
 	userSessionStore,
 	refreshTokenFamilyRevocation,
 	federationTokenStore: {
@@ -135,6 +136,7 @@ async function exchangeCodeWithoutCookie() {
 		} as unknown as CodeRepository,
 		userSessionStore,
 		sessionLifecycle,
+		sessionLifecycleStore,
 	} as unknown as Parameters<typeof createAuthorizationGrant>[0]);
 
 	// The session object a back-channel /token call sees: the code correlation

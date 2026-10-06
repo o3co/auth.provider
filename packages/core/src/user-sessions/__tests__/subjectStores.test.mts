@@ -85,10 +85,8 @@ describe("createInMemorySubjectSessionIndex", () => {
 	});
 
 	it("expires each session on its own clock, not the subject's last write", async () => {
-		// The reason this index does not reuse `createMemorySidSortedSet`: that
-		// primitive keeps ONE expiry per key, correct for the sid-keyed indexes
-		// where every member shares a session's expiry. A subject's sessions do
-		// not. Adding a longer-lived session must not keep a shorter-lived one
+		// One expiry per member, not per key: a subject's sessions do not share
+		// one. Adding a longer-lived session must not keep a shorter-lived one
 		// listed past its end.
 		vi.useFakeTimers();
 		const index = createInMemorySubjectSessionIndex();

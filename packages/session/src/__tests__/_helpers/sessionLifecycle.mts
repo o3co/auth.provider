@@ -18,10 +18,17 @@
  * Core's session lifecycle for a test that wires a user-session store, which
  * the session package's routes and modules then require beside it: a fake
  * whose every member is a spy answering as an always-available lifecycle
- * does, and a module that fills the slot with one.
+ * does, and a module that fills the slot with one; and the lifecycle store
+ * admission reads beside a user-session store.
  */
 
-import { defineModule, type Module, type SessionLifecycle } from "@o3co/auth-provider-core";
+import {
+	createInMemorySessionLifecycleStore,
+	defineModule,
+	type Module,
+	type SessionLifecycle,
+	type SessionLifecycleStore,
+} from "@o3co/auth-provider-core";
 import { vi } from "vitest";
 
 /**
@@ -56,3 +63,21 @@ export const sessionLifecycleTestModule = (
 		name: "test:session-lifecycle",
 		provides: { sessionLifecycle: () => lifecycle },
 	});
+
+/**
+ * Core's in-memory lifecycle store, holding an active record for every
+ * session of `sub` admission asks about, as the login that established it
+ * opened one (a session with no record reads as closed). A record a close
+ * moved on stays as it is.
+ */
+export function openingLifecycleStore(sub = "user-1"): SessionLifecycleStore {
+	const store = createInMemorySessionLifecycleStore();
+	const end = new Date(Date.now() + 86_400_000);
+	return {
+		...store,
+		read: async (sid) => {
+			await store.open(sid, sub, end);
+			return store.read(sid);
+		},
+	};
+}

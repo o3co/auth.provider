@@ -38,6 +38,7 @@ import { issuedRemediationActions } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
+import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
 
 const NOW = new Date("2026-10-01T12:00:00Z");
 const ISSUER = "https://auth.test";
@@ -108,6 +109,7 @@ const deps = (
 	acrTable: AdmissionDeps["acrTable"] = readAcrTable({}),
 ): AdmissionDeps => ({
 	userSessionStore: store,
+	sessionLifecycleStore: openedLifecycleStore(),
 	subjectRevocation: undefined,
 	requirements: resolverForTests(requirements, {
 		issuer: ISSUER,

@@ -170,21 +170,23 @@ export async function readLiveSession(
 
 	// Step 3c: the session's lifecycle, after the subject and the renewal
 	// nonce. Closing or closed from its closing commit on is not live, and an
-	// absent record reads as closed; no store reads as before. The store is
-	// read off `deps` once, in the same guarded section as its answer, which
-	// core's reader holds to the port's types; a record of another subject is
-	// no answer for this session, refused as malformed.
+	// absent record reads as closed. A user-session store handed without a
+	// lifecycle store fails closed. The store is read off `deps` once, in the
+	// same guarded section as its answer, which core's reader holds to the
+	// port's types; a record of another subject is no answer for this
+	// session, refused as malformed.
 	if (session !== null && presented.sid !== undefined) {
 		try {
 			const lifecycleStore = checked.readSessionLifecycleStore();
-			if (lifecycleStore !== undefined) {
-				const lifecycle = readVersionedSessionLifecycle(await lifecycleStore.read(presented.sid));
-				if (lifecycle !== null && lifecycle.value.sub !== session.sub) {
-					throw new TypeError("the session lifecycle record names another subject");
-				}
-				if (lifecycle === null || lifecycle.value.state !== "active") {
-					return { answer: { outcome: "not_live", reason: "closing" } };
-				}
+			if (lifecycleStore === undefined) {
+				throw new TypeError("a user-session store is handed without a session lifecycle store");
+			}
+			const lifecycle = readVersionedSessionLifecycle(await lifecycleStore.read(presented.sid));
+			if (lifecycle !== null && lifecycle.value.sub !== session.sub) {
+				throw new TypeError("the session lifecycle record names another subject");
+			}
+			if (lifecycle === null || lifecycle.value.state !== "active") {
+				return { answer: { outcome: "not_live", reason: "closing" } };
 			}
 		} catch (err) {
 			return {

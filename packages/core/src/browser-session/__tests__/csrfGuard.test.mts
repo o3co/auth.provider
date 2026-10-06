@@ -215,7 +215,13 @@ describe("the csrfGuard slot", () => {
 			} as never,
 		});
 		try {
-			expect(seen).toBe(guard);
+			// The slot holds boot's snapshot of the guard (`boot/csrf-guard-slot.mts`):
+			// the one value every reader gets, carrying the guard's own members and
+			// core's request handler in front of its middleware.
+			expect(seen).toBe(handle.components.csrfGuard);
+			expect(seen?.middleware.length).toBe(3);
+			expect(seen?.cookieName).toBe(guard.cookieName);
+			expect(seen?.headerName).toBe(guard.headerName);
 		} finally {
 			await handle.dispose();
 		}

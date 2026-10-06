@@ -31,7 +31,10 @@ import { createTestCsrfTokenSigner, resolverForTests } from "@o3co/auth-provider
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
+import {
+	fakeSessionLifecycle,
+	openingLifecycleStore,
+} from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { createCsrfProtection } from "#/csrf.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
@@ -1189,6 +1192,7 @@ describe("Session routes — POST /session/logout from a cookie session the reco
 		admitSession(
 			{
 				userSessionStore: store,
+				sessionLifecycleStore: openingLifecycleStore("u-1"),
 				subjectRevocation: undefined,
 				requirements: resolverForTests([], { actions: { "test.use": { grade: "use" } } }),
 				acrTable: {},
