@@ -129,9 +129,21 @@ function matches(pattern: readonly string[], segments: readonly string[]): boole
 	);
 }
 
-/** Whether the exempt path `pattern` lies at or under the section at `section`. */
-function inside(pattern: string, section: readonly string[]): boolean {
-	const parts = pattern.split(".");
+/**
+ * The keys of the exempt path `pattern` as read against the section of the
+ * module `name`: the module's name, dots and all, is one key when the
+ * pattern starts with it; the rest splits on dots.
+ */
+function patternKeys(pattern: string, name: string): readonly string[] {
+	if (pattern === name) return [name];
+	if (pattern.startsWith(`${name}.`)) return [name, ...pattern.slice(name.length + 1).split(".")];
+	return pattern.split(".");
+}
+
+/** Whether the exempt path `pattern` lies at or under the section of the module `name`. */
+function inside(pattern: string, name: string): boolean {
+	const parts = patternKeys(pattern, name);
+	const section = [name];
 	return (
 		parts.length >= section.length &&
 		section.every((segment, index) => parts[index] === "*" || parts[index] === segment)
@@ -214,35 +226,38 @@ export function sectionStrictnessProblems(
 		}
 		if (valid.length === 0) continue;
 		problems.push(...unreachedLevels(section.schema, valid, segments, module.name));
+		// Keyed by the keys themselves: a module's name may hold a dot.
 		const keeping = new Set<string>();
 		const levels = new Map<string, readonly string[]>();
 		for (const sample of valid) {
 			for (const at of objectLevels(sample)) {
 				const level = [...segments, ...at];
-				levels.set(level.join("."), level);
+				levels.set(JSON.stringify(level), level);
 				const entries = Object.values(valueAt(sample, at) as Record<string, unknown>);
 				const keeps = ["unknown", {}, ...entries].some(
 					(value) => refusal(section.schema, withUnknownKey(sample, at, value)) === undefined,
 				);
-				if (keeps) keeping.add(level.join("."));
+				if (keeps) keeping.add(JSON.stringify(level));
 			}
 		}
-		for (const [path, level] of levels) {
-			const exemptions = exempt.filter(([pattern]) => matches(pattern.split("."), level));
+		for (const [key, level] of levels) {
+			const exemptions = exempt.filter(([pattern]) =>
+				matches(patternKeys(pattern, module.name), level),
+			);
 			if (exemptions.length > 0) {
-				if (keeping.has(path)) for (const [pattern] of exemptions) used.add(pattern);
+				if (keeping.has(key)) for (const [pattern] of exemptions) used.add(pattern);
 				continue;
 			}
-			if (keeping.has(path)) {
+			if (keeping.has(key)) {
 				problems.push(
-					`${path}: module "${module.name}"'s section schema does not refuse an unknown key`,
+					`${level.join(".")}: module "${module.name}"'s section schema does not refuse an unknown key`,
 				);
 			}
 		}
 	}
 	for (const [pattern] of exempt) {
 		if (used.has(pattern)) continue;
-		const owner = checked.find(({ segments }) => inside(pattern, segments));
+		const owner = checked.find(({ module }) => inside(pattern, module.name));
 		if (owner === undefined) continue;
 		problems.push(
 			`${pattern}: exempt, but no level of module "${owner.module.name}"'s section it matches keeps an unknown key`,

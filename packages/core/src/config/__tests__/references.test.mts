@@ -214,6 +214,27 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 			}),
 		).toEqual([]);
 	});
+
+	it("reads a dotted module name as one key: nested keys of the same spelling are no module's", () => {
+		const dotted = defineModule({
+			name: "outer.inner",
+			section: { schema: z.object({ enabled: z.boolean() }).optional(), reference: REF_B },
+		});
+		expect(
+			referenceConfProblems({
+				tree: { outer: { inner: { enabled: true } } },
+				reference: REF_B,
+				modules: [dotted],
+			}),
+		).toEqual(["outer.inner.enabled: no module declaring this reference owns it"]);
+		expect(
+			referenceConfProblems({
+				tree: { "outer.inner": { enabled: true, forgotten: 1 } },
+				reference: REF_B,
+				modules: [dotted],
+			}),
+		).toEqual(['outer.inner.forgotten: lost by module "outer.inner"\'s section schema']);
+	});
 });
 
 describe("packageReferenceProblems — the check each package's test runs over its own reference", () => {

@@ -86,6 +86,12 @@ describe("unreadableModuleLeaves — a module's section, at its name", () => {
 			"fixture.dotted: fixture.dotted.on",
 		]);
 	});
+
+	it("reads a dotted module name as one key: a section at `oauth.nonce` is not core's `oauth { nonce }`", () => {
+		expect(
+			unreadableModuleLeaves([reading("oauth.nonce", z.object({ maxLength: z.number() }))]),
+		).toEqual(["oauth.nonce: oauth.nonce.maxLength"]);
+	});
 });
 
 describe("readsEnvironmentString — a literal reads the string only if it is one", () => {

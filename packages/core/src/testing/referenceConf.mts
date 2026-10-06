@@ -47,16 +47,16 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * Every dotted path in `tree` that carries a value (a list is one value; an
- * empty object is a path of its own; a key whose value is `undefined` is none).
+ * Every path in `tree` that carries a value, as its keys (a list is one
+ * value; an empty object is a path of its own; a key whose value is
+ * `undefined` is none). Keys stay apart, so a key holding a dot — a module's
+ * name — stays one key.
  */
-function leafPaths(tree: unknown, prefix: string): string[] {
-	if (!isPlainObject(tree)) return prefix === "" ? [] : [prefix];
+function leafPaths(tree: unknown, prefix: readonly string[]): string[][] {
+	if (!isPlainObject(tree)) return prefix.length === 0 ? [] : [[...prefix]];
 	const entries = Object.entries(tree).filter(([, value]) => value !== undefined);
-	if (entries.length === 0) return prefix === "" ? [] : [prefix];
-	return entries.flatMap(([key, value]) =>
-		leafPaths(value, prefix === "" ? key : `${prefix}.${key}`),
-	);
+	if (entries.length === 0) return prefix.length === 0 ? [] : [[...prefix]];
+	return entries.flatMap(([key, value]) => leafPaths(value, [...prefix, key]));
 }
 
 /** The value at `segments` in `tree`, or `undefined`. */
@@ -69,9 +69,12 @@ function valueAt(tree: unknown, segments: readonly string[]): unknown {
 	return cursor;
 }
 
-/** Whether `path` is `section` or lies under it. */
-const within = (path: string, section: string): boolean =>
-	path === section || path.startsWith(`${section}.`);
+/** Whether `path` is `prefix` or lies under it, key by key. */
+const within = (path: readonly string[], prefix: readonly string[]): boolean =>
+	prefix.length <= path.length && prefix.every((key, index) => path[index] === key);
+
+/** A path as the operator writes it. */
+const shown = (path: readonly string[]): string => path.join(".");
 
 /**
  * What is wrong with a package's `reference.conf`, one line per problem,
@@ -88,14 +91,13 @@ export function referenceConfProblems(check: ReferenceConfCheck): string[] {
 	const sections = owners.map((module) => {
 		const section = module.section as NonNullable<Module["section"]>;
 		// A section is at its module's name, one key, not split on dots.
-		const segments = [module.name];
-		return { module, schema: section.schema, path: segments.join("."), segments };
+		return { module, schema: section.schema, segments: [module.name] };
 	});
-	for (const path of leafPaths(check.tree, "")) {
+	for (const path of leafPaths(check.tree, [])) {
 		// The captures are held by `renamedVariableProblems`.
-		if (within(path, RENAMED_VARIABLES_SECTION)) continue;
-		if (!sections.some((section) => within(path, section.path))) {
-			problems.push(`${path}: no module declaring this reference owns it`);
+		if (within(path, [RENAMED_VARIABLES_SECTION])) continue;
+		if (!sections.some((section) => within(path, section.segments))) {
+			problems.push(`${shown(path)}: no module declaring this reference owns it`);
 		}
 	}
 	for (const section of sections) {
@@ -110,11 +112,11 @@ export function referenceConfProblems(check: ReferenceConfCheck): string[] {
 			}
 			continue;
 		}
-		const kept = leafPaths(parsed.data, section.path);
-		for (const path of leafPaths(value, section.path)) {
+		const kept = leafPaths(parsed.data, section.segments);
+		for (const path of leafPaths(value, section.segments)) {
 			// An empty object the schema filled in is kept: its output has keys under it.
 			if (!kept.some((output) => within(output, path))) {
-				problems.push(`${path}: lost by module "${section.module.name}"'s section schema`);
+				problems.push(`${shown(path)}: lost by module "${section.module.name}"'s section schema`);
 			}
 		}
 	}

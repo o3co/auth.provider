@@ -234,6 +234,24 @@ describe("sectionStrictnessProblems — levels exempt by the caller", () => {
 		).toEqual([]);
 	});
 
+	it("reads an exemption of a dotted module's name as its section's root, one key", () => {
+		expect(
+			sectionStrictnessProblems([sectioned("fixture.section", Counts)], {
+				tree: { "fixture.section": { login: 5 } },
+				exempt: { "fixture.section": "each key names a prefix the deployment chooses" },
+			}),
+		).toEqual([]);
+		expect(
+			sectionStrictnessProblems([sectioned("fixture.section", Sinks)], {
+				tree: { "fixture.section": { splunk: { token: "t" } } },
+				exempt: {
+					"fixture.section": "each key names a sink the deployment registers",
+					"fixture.section.*": "each sink's builder holds its own options",
+				},
+			}),
+		).toEqual([]);
+	});
+
 	it("matches one segment of an exempt path with `*`", () => {
 		expect(
 			sectionStrictnessProblems([sectioned("sinks", Sinks)], {
