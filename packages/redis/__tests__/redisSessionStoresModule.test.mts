@@ -14,15 +14,10 @@
  * limitations under the License.
  */
 
-import {
-	createApp,
-	defineModule,
-	type Logger,
-	type SessionLifecycleStore,
-} from "@o3co/auth-provider-core";
+import { createApp, defineModule, type SessionLifecycleStore } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { Redis } from "ioredis";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RedisDurability } from "#/clients.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { redisSessionStoresModule } from "#/modules/redisSessionStores.mjs";
@@ -159,19 +154,6 @@ describe("redisSessionStoresModule's session lifecycle store", () => {
 		};
 	};
 
-	const silentLogger = (): Logger & { warn: ReturnType<typeof vi.fn> } => {
-		const logger = {
-			trace: vi.fn(),
-			debug: vi.fn(),
-			info: vi.fn(),
-			warn: vi.fn(),
-			error: vi.fn(),
-			fatal: vi.fn(),
-			child: () => logger,
-		};
-		return logger as never;
-	};
-
 	it("provides a store over real Redis, its keys under the section's keyPrefix and lc:", async () => {
 		const handle = await createApp({
 			modules: [redisSessionStoresModule, reader],
@@ -221,24 +203,29 @@ describe("redisSessionStoresModule's session lifecycle store", () => {
 		});
 	});
 
-	it("boots on a policy it cannot read, warning once on the logger slot", async () => {
-		const logger = silentLogger();
+	it("refuses the boot on a policy it cannot read, and boots when the clients assume noeviction", async () => {
+		const unread = async () => report(undefined, new Error("NOPERM"));
+		await expect(
+			createApp({
+				modules: [redisSessionStoresModule, reader],
+				bootstrapComponents: {
+					config: minBoot({}),
+					pathResolver: (p: string) => p,
+					...clientsReporting(unread),
+				} as never,
+			}),
+		).rejects.toMatchObject({
+			reason: "provides-factory-failed",
+			cause: { reason: "session-lifecycle-store-evictable", maxmemoryPolicy: undefined },
+		});
 		const handle = await createApp({
 			modules: [redisSessionStoresModule, reader],
 			bootstrapComponents: {
 				config: minBoot({}),
 				pathResolver: (p: string) => p,
-				logger,
-				...clientsReporting(async () => report(undefined, new Error("NOPERM"))),
+				...clientsReporting(async () => ({ ...(await unread()), assumeNoEviction: true })),
 			} as never,
 		});
-		try {
-			const unchecked = logger.warn.mock.calls.filter(
-				(call) => call[1] === "session_lifecycle_store_eviction_unchecked",
-			);
-			expect(unchecked).toHaveLength(1);
-		} finally {
-			await handle.dispose();
-		}
+		await handle.dispose();
 	});
 });

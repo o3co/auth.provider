@@ -412,6 +412,8 @@
 . MfaChallengeContext type
 . MfaDigestMatch type
 . MfaDigests type
+. MfaEmailProofRequirementConsume type
+. MfaEmailProofRequirementConsumeAnswer type
 . MfaEnrolledFactor type
 . MfaEnrollmentCompletion type
 . MfaEnrollmentCompletionContext type
@@ -757,6 +759,7 @@
 . checkCanonicalIssuer value
 . checkConfiguredMfaLockoutPolicy value
 . checkDeploymentMode value
+. checkEmailProofRequirementConsume value
 . checkFederationGrantPolicy value
 . checkFirstBindingNote value
 . checkFirstBindingQuestion value
@@ -933,6 +936,7 @@
 . isClientRecordRefused value
 . isCompoundConfirmation value
 . isConsumedMfaTransaction value
+. isDevelopmentEnvironment value
 . isEmailVerified value
 . isEstablishment value
 . isFederationUpstreamOutage value
@@ -1042,6 +1046,7 @@
 . readHostEntry value
 . readIssuedScope value
 . readMfaAttemptReservation value
+. readMfaEmailProofRequirementConsumeAnswer value
 . readMfaEnrollmentWitness value
 . readMfaFactorSet value
 . readMfaRecoverySetFloorAnswer value

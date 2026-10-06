@@ -112,12 +112,12 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   reads as "never enrolled", and whoever holds the password can then bind
   their own; the email proof an operator reset requires is lost the same way.
   Give them `noeviction` and AOF (`appendfsync everysec`), preferably on a
-  database or instance of their own. A `volatile-*` policy never picks the
-  factors or the requirement, which carry no TTL, but it may pick an emptied
-  factor set's tombstone, which then reads as never written before its 24
-  hours are up, and a subject's lock state once that carries one, ending a
-  hold on guessable proofs early. Both modules check at boot (see
-  [MFA stores](#mfa-stores)). The factor store also assumes acknowledged
+  database or instance of their own. Their fences carry a TTL (an emptied
+  factor set's tombstone, a write's replay key, a subject's lock, lease and
+  first-binding mark), so a `volatile-*` policy is refused as an `allkeys-*`
+  one is: both stores pass the [eviction gate](#the-eviction-gate), and their
+  modules warn on missing persistence (see [MFA stores](#mfa-stores)). The
+  factor store also assumes acknowledged
   writes are not rolled back on failover, and that the app's and Redis's
   clocks agree within 1 second (see [MFA stores](#mfa-stores), "The factor
   set's generation").
@@ -129,8 +129,49 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   overwrites a newer record, or restores a removed one (a logged-out
   session's upstream refresh token included). A copy of a `replaceIf` or
   `removeIf` writes nothing, but answers `conflict` or `missing` for a write
-  that landed. The module refuses an eviction policy at boot; give the store
-  a server of its own if the rest of your Redis may not run `noeviction`.
+  that landed. The store passes the [eviction gate](#the-eviction-gate); give
+  it a server of its own if the rest of your Redis may not run `noeviction`.
+- **For the attempt counter and the session lifecycle store, `noeviction`**,
+  through the same [eviction gate](#the-eviction-gate).
+
+### The eviction gate
+
+Every store whose keys must stay until they expire — the attempt counter,
+the session lifecycle store, the federation token store and the two MFA
+stores — is built only on a server whose `maxmemory-policy` reads as
+`noeviction`. Its factory (`createRedisAttemptCounter`,
+`createRedisSessionLifecycleStore`, `createRedisFederationTokenStore`,
+`createRedisMfaFactorStore`, `createRedisMfaTransactionStore`) asks the server
+once, through its client's `durability()`, and resolves only then; its module
+and the federation token store's builder build through it, so every path
+holds the store to the same gate
+([`src/internal/eviction-policy.mts`](src/internal/eviction-policy.mts)):
+
+- The policy is read from `INFO memory`, and from `CONFIG GET
+  maxmemory-policy` only where INFO does not say, so a managed server that
+  blocks `CONFIG` still reports it. `CONFIG GET` is read in either reply
+  shape, a flat array (RESP2) or a map (RESP3). A reply about the policy that
+  is neither a policy nor a refusal — another shape, or `INFO memory` naming
+  the policy on two lines with different values — fails the build, whatever
+  the client assumes.
+- `noeviction` passes. Any other policy it reads — `allkeys-*`, `volatile-*`
+  or one it does not know — refuses with a `RedisStoreEvictableError`
+  (`reason` `<store>-evictable`, `maxmemoryPolicy`), which boot carries as the
+  `cause` of a `provides-factory-failed` BootError naming the module.
+- A policy it cannot read — `INFO` and `CONFIG` refused, renamed or disabled
+  for the connection's user, or answered without the value — refuses the
+  same way, `maxmemoryPolicy` `undefined`, with the refusing reply as its
+  `cause`. For a server you know runs `noeviction` but that will not say,
+  build the clients with `assumeNoEviction: true`
+  (`makeIoredisClients(io, { assumeNoEviction: true })`, or the same option
+  on `makeIoredisMfaFactorStoreClient` and `makeIoredisMfaTransactionStoreClient`).
+  The assertion is read only while the policy is unread: a policy the server
+  does report always decides. A client of your own reports it as
+  `RedisDurability.assumeNoEviction`.
+- A server that cannot answer at all fails the build, as any store outage at
+  boot does.
+
+The gate writes no log line: it builds or it refuses.
 
 ## Adapters
 
@@ -238,13 +279,11 @@ Each one implements a port core declares; the slot name is in parentheses.
   the guard takes within five seconds and answers `503` beyond, never with a
   fresh window. A forward step of the server's wall clock can still expire
   windows early, as for every key with a TTL. A refused attempt writes nothing, and a reply that is no count
-  rejects, which the guard answers `503`. `redisAttemptCounterModule` refuses
-  the boot (`attempt-counter-evictable`) on a server whose `maxmemory-policy`
-  is not `noeviction`: every window's key carries a TTL, so any evicting policy
-  may drop a running window and give its key a fresh one. A policy it cannot
-  read is one warning, `attempt_counter_durability_unchecked`, and the boot
-  goes on. Give the counter a server, or a database on one, that does not
-  evict. Windows do not survive a restart of a server without persistence: each
+  rejects, which the guard answers `503`. The counter passes the
+  [eviction gate](#the-eviction-gate) (`attempt-counter-evictable`): every
+  window's key carries a TTL, so any evicting policy may drop a running
+  window and give its key a fresh one. Give the counter a server, or a
+  database on one, that does not evict. Windows do not survive a restart of a server without persistence: each
   key starts a fresh window after one.
 - `CodeRepository` (`codeRepository`) — authorization codes.
 - `DeviceCodeStore` (`deviceCodeStore`) — pending RFC 8628 device
@@ -357,7 +396,10 @@ can give the grants a connection of their own; they may equally be the same
 `io`. The MFA stores' clients are in `makeIoredisClients` too, and can also be
 built on their own — `makeIoredisMfaFactorStoreClient(io)`,
 `makeIoredisMfaTransactionStoreClient(io)` — for the database or instance of
-their own that D12 prefers.
+their own that D12 prefers. `assumeNoEviction: true` on `makeIoredisClients`,
+or on those two, is the operator's assertion the
+[eviction gate](#the-eviction-gate) reads where the server will not report its
+policy.
 
 A `DeviceCodeStoreClient` of your own writes an approval's `amr` and
 `authTimeMs` in `decide`'s same atomic write as the approval itself; one that
@@ -472,9 +514,8 @@ Each adapter ships in up to two forms:
 Each store module but `redisCodeRepositoryModule` reads its own section, named after the module: strict, its defaults and its variables in the package's [`config/reference.conf`](config/reference.conf), which each module declares (`section.reference`) and a composition root layers when it loads any of them. The path a section moved from (`redisConsentStore`, `redisRateLimiter`, `rateLimit.failMode`, the grant store's `federationGrants` keys, …) refuses boot naming the new one, and so does a renamed variable's old name (`RATE_LIMIT_FAIL_MODE`, `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` and `_CAS_RETRY_LIMIT`, `FEDERATION_GRANTS_ENCRYPTION_MODE`) unless the new one carries the same value. `redisCodeRepositoryModule` still requires `config` and reads `redisCodeRepository`; the two sealing-store modules require `deploymentMode`. Every module whose stores log also reads
 the optional `logger` slot: the two sealing-store modules, for the plaintext
 guard's line; `redisSessionStoresModule` and `redisCodeRepositoryModule`, for a
-stored record they cannot read (and `redisSessionStoresModule` for the session
-lifecycle store's eviction check's warning); the two MFA store modules, for
-their boot durability check's warning. The `*Client` column is the slot
+stored record they cannot read; the two MFA store modules, for their
+persistence warnings at boot. The `*Client` column is the slot
 `makeIoredisClients` fills, except the two federation-grant clients (see
 above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at
@@ -729,17 +770,9 @@ conditional-write convention for a record
   `allkeys-*` policy may evict it first, and a copy the driver resends within
   W then writes again: an `attach` puts an older record back over a later
   write, or a logged-out session's tokens back (`replaceIf` and `removeIf`
-  still meet their generation check). The module reads the policy once at
-  boot (`INFO memory`, then `CONFIG GET maxmemory-policy`). A `volatile-*`
-  or `allkeys-*` policy refuses the boot with a `RedisStoreEvictableError`
-  (`reason` `federation-token-store-evictable`, `maxmemoryPolicy`), the
-  `cause` of a `provides-factory-failed` BootError. A policy it could not
-  read (a managed server that blocks both questions, or no answer at boot)
-  or does not know is one info line,
-  `federation_token_store_eviction_unchecked` (`store`, `adapter`;
-  `maxmemoryPolicy` for one it does not know; `err` when the server refused
-  the question or could not answer), and the boot goes on. A store built
-  with `createRedisFederationTokenStore` or the builder is not checked.
+  still meet their generation check). The store passes the
+  [eviction gate](#the-eviction-gate) (`federation-token-store-evictable`)
+  whichever way it is built.
 
 A `FederationTokenStoreClient` of your own implements the five primitives
 `attach` and the conditional members use: `attachRecord`, `readVersioned`,
@@ -747,7 +780,7 @@ A `FederationTokenStoreClient` of your own implements the five primitives
 at or after the deadline they are handed, `readVersioned` only its mint, and
 keeping their answer, or `readVersioned` its mint, under the replay key they
 are handed until the clock skew they are handed past it) and `pExpireGT`; and `durability`, the
-server's report the module's boot check reads. The builder refuses a client
+server's report the [eviction gate](#the-eviction-gate) reads. The builder refuses a client
 without them. [`federation-tokens.conditional.test.mts`](__tests__/federation-tokens.conditional.test.mts)
 runs `federationTokenStoreConditionalContract` (`@o3co/auth-provider-test-kit`)
 over the store on two connections.
@@ -1029,9 +1062,9 @@ of core's conditional-write convention
   later, starting that retention again at each such write; a write that
   leaves a factor in it takes the expiry off, so a set holding a factor never
   expires. An emptied set reads as one never written only once 24 hours have
-  passed since its last membership write. A `volatile-*` eviction policy may
-  evict a tombstone sooner: the module warns
-  (`mfa_factor_store_tombstone_evictable`). Run `noeviction`.
+  passed since its last membership write. An evicting policy could drop a
+  tombstone sooner, so the store passes the
+  [eviction gate](#the-eviction-gate).
 - **A hash with factors and no `~g`** was written by a development build from
   before the set had a generation (the store was never released, so nothing
   needs migrating). Every conditional write against it answers `conflict` and
@@ -1057,9 +1090,9 @@ of core's conditional-write convention
   write that landed, even when another server, whose clock may lag by the
   skew, judges the copy after a failover or a slot migration; one that
   reaches it later is `late`, though another copy may have committed, or may
-  still commit within W on a server whose clock lags by the skew. A
-  `volatile-*` policy may evict a replay key
-  early; the module's warning names it.
+  still commit within W on a server whose clock lags by the skew. An
+  evicting policy could drop a replay key early, which is why the store
+  passes the [eviction gate](#the-eviction-gate).
 - **A full server.** Under `noeviction`, Redis refuses a script that does
   not declare `allow-oom` once `maxmemory` is reached. The removal
   (`removeIf`), the reset (`removeAllForSubject`) and
@@ -1175,7 +1208,8 @@ do not read (`t:<digest>` among them) is ignored and goes with the keys, and
 a transaction hash's `sends` and `lastSentAtMs`, where present, are not read:
 neither loosens a limit the store keeps. The email-proof requirement is a key of
 its own with no TTL: an applied recovery leaves it, and consuming it is one
-`DEL`.
+script that checks the subject's lease and removes it, so a consume that
+reaches the server after its lease ended removes nothing.
 
 **Recovery, the generation, the lease and the floor.** `authorizeSubjectRecovery`
 and `applySubjectRecovery` are one script each. An authorization is a field of
@@ -1217,9 +1251,7 @@ floor or authorization the store cannot read is an outage, with nothing
 written, never none, and so is a lease key with no deadline. The lease is logical: a write that outlives
 it is told so at its release (`false`), never stopped. Evicting a lease lets a
 second writer at the subject's factor set, so the MFA stores require
-`noeviction`; the recovery hash, with no TTL once it holds a generation or a
-floor, is never picked by a `volatile-*` policy, and `allkeys-*` is refused at
-boot.
+`noeviction`, which the [eviction gate](#the-eviction-gate) holds them to.
 
 **A session's account-email proof.** One string per session of a subject,
 written with one `SET … PX`, whose lifetime is `untilMs` less the store's own
@@ -1249,37 +1281,27 @@ never absent, since an absent mark trusts the session it is there to distrust.
 Where a sound mark's time sits on the caller's clock is the caller's reading
 to judge (`readFirstBindingAt`). The mark's guarantee rests on the login
 replicas' clocks agreeing within `DEFAULT_CLOCK_SKEW_MS`: they date the
-sessions it is compared with, and the note's time. The module's durability
-check covers it as it covers the email-proof requirement; a `volatile-*`
-policy may evict it, which fails open.
+sessions it is compared with, and the note's time. It always carries a TTL,
+so the store passes the [eviction gate](#the-eviction-gate), as it does for
+the email-proof requirement.
 
-**Durability at boot (D12).** Before providing its store each module asks the
-server, through its client's `durability()`, each part on its own: the policy
-from `INFO memory` — `CONFIG GET maxmemory-policy` only where INFO does not
-say, so a managed server that blocks `CONFIG` is still held to the refusal —
-AOF from `INFO persistence`, and `CONFIG GET save` only when AOF is off, to
-tell RDB snapshots from none. The policy is judged by an allow-list:
-`allkeys-lru`, `-lfu` and `-random` refuse the boot
-(`mfa-factor-store-evictable`, `mfa-transaction-store-evictable`) whatever
-else could not be read; `noeviction` passes; the four `volatile-*` policies
-are one warning from each store, with `evictableFamilies`: from the factor
-store (`mfa_factor_store_tombstone_evictable`), whose emptied sets'
-tombstones carry a TTL, and an evicted one reads as a set never written
-before its 24 hours are up, and whose writes' replay keys carry one until
-the write's deadline, and an evicted one lets a resent copy apply again; from the transaction store
-(`mfa_transaction_store_lock_evictable`), whose lock and week keys carry a
-TTL once no run is counted, and an evicted one lifts a D21 hold early; a first-binding mark
-always carries one, and an evicted mark fails open; a lease always carries
-one, and an evicted lease lets a second writer in. RDB snapshots without AOF (`mfa_factor_store_lossy`,
-`mfa_transaction_store_lossy`) and no persistence (`…_volatile`) are each one
-warning. A part that could not be read — a question the server refused
-(`NOPERM`, an unknown or renamed command, a disabled one), or answered without
-the value — and a policy the allow-list does not know are named in one
-warning that the check could not run (`…_durability_unchecked`: `unread`,
-`maxmemoryPolicy`), and the boot goes on; any other reply error, and a server
-that cannot be reached, fails it. The transaction store runs the check
-because of the email-proof requirement (D12's step-3 amendment). `noeviction`
-is what both stores' key families are meant to run on.
+**Durability at boot (D12).** Both stores pass the
+[eviction gate](#the-eviction-gate) (`mfa-factor-store-evictable`,
+`mfa-transaction-store-evictable`): their fences carry a TTL — the factor
+store's emptied sets' tombstones and writes' replay keys, the transaction
+store's lock and week keys once no run is counted, its first-binding marks
+and its leases — so every evicting policy, `volatile-*` included, refuses the
+boot. Then each module asks the server about persistence, through its
+client's `durability()`: AOF from `INFO persistence`, and `CONFIG GET save`
+only when AOF is off, to tell RDB snapshots from none. RDB snapshots without
+AOF (`mfa_factor_store_lossy`, `mfa_transaction_store_lossy`) and no
+persistence (`…_volatile`) are each one warning. A part that could not be
+read — a question the server refused (`NOPERM`, an unknown or renamed
+command, a disabled one), or answered without the value — is named in one
+warning that the check could not run (`…_durability_unchecked`: `unread`),
+and the boot goes on; any other reply error, and a server that cannot be
+reached, fails it. The transaction store is held to this because of the
+email-proof requirement (D12's step-3 amendment).
 
 ## Session lifecycle: one key per session, in fixed shards
 
@@ -1334,12 +1356,9 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
   runs `maxmemory-policy` `noeviction`. An evicted active or closing record
   drops a live session's fence or loses its pending work; an evicted replay
   key lets a resent
-  write apply again; an evicted index hides a closing record. The boot check,
-  `checkSessionLifecycleEviction` in
-  [`src/internal/session-lifecycle-eviction.mts`](src/internal/session-lifecycle-eviction.mts),
-  refuses every `volatile-*` and `allkeys-*` policy with a
-  `RedisStoreEvictableError` (`session-lifecycle-store-evictable`);
-  `redisSessionStoresModule` runs it once it builds the store.
+  write apply again; an evicted index hides a closing record. The store
+  passes the [eviction gate](#the-eviction-gate)
+  (`session-lifecycle-store-evictable`).
 - **What it refuses.** A key of another type, a record holding a field or a
   value this store did not write, and a pending count that disagrees with
   the pending items reject every member that touches them, never answering an
@@ -1424,5 +1443,6 @@ its port. Two directories hold what several of them share:
   which lives in core's `sealing/` leaf), the plaintext guard both sealing
   stores share (one escape hatch, `FEDERATION_TOKENS_ALLOW_INSECURE=1`, for
   both), the federation-grant codecs and lock, the MFA stores' key spelling and
-  their boot durability check, and the sid-keyed SET the federation token
+  their persistence notices, the eviction gate the durable stores share, and
+  the sid-keyed SET the federation token
   store's index is built from.

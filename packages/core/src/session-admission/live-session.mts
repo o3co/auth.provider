@@ -17,7 +17,8 @@
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
  * read, the subject, the renewal nonce, the session's lifecycle and the
- * revocation boundary, then the
+ * revocation boundary, the record's expiry again on a clock reading taken
+ * after those reads, then the
  * store's step-up capability over the live record. The session store, the
  * lifecycle store, the boundary and the audit sink are read here and nowhere
  * else in admission,
@@ -143,21 +144,25 @@ export async function readLiveSession(
 		return { answer: unavailable("user_session" satisfies AdmissionInfrastructureStore, err) };
 	}
 	let session: UserSession | null = null;
+	// The record's expiry, read once: judged here and again after the reads below.
+	let expiresAt: Date | undefined;
 	if (userSessionStore !== undefined && presented.sid === undefined) {
 		if (presented.carrier !== "token") return { answer: { outcome: "not_live", reason: "no_sid" } };
 	} else if (userSessionStore !== undefined) {
 		// `== null`: the port answers `null`, and a store of the deployment's own
 		// that answers `undefined` for a missing session is still no session.
+		const expiry: unknown = record == null ? undefined : record.expiresAt;
 		if (
 			record == null ||
 			nonEmptyString(record.sub) === undefined ||
 			!isValidDate(record.authTime) ||
-			!isValidDate(record.expiresAt) ||
-			!(record.expiresAt.getTime() > now.getTime())
+			!isValidDate(expiry) ||
+			!(expiry.getTime() > now.getTime())
 		) {
 			return { answer: { outcome: "not_live", reason: "gone" } };
 		}
 		session = record;
+		expiresAt = expiry;
 	}
 
 	// Step 3: the subject.
@@ -254,6 +259,13 @@ export async function readLiveSession(
 				answer: unavailable("revocation_boundary" satisfies AdmissionInfrastructureStore, err),
 			};
 		}
+	}
+
+	// Step 4b: the expiry again, on a clock reading taken after the lifecycle
+	// and the revocation boundary were read: the record answers as live only
+	// while it is unexpired once every read it stands on has answered.
+	if (expiresAt !== undefined && !(expiresAt.getTime() > checked.clock().getTime())) {
+		return { answer: { outcome: "not_live", reason: "gone" } };
 	}
 
 	// The store's step-up capability, read once over the live record: a

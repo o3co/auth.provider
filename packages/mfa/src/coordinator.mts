@@ -785,14 +785,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				? flagged
 				: outage("mfa_transaction", "emailProofRequiredAtNextBinding", OUTSIDE_CONTRACT);
 		},
-		consumeEmailProofRequirement: async (subject) => {
-			try {
-				await transactions.consumeEmailProofRequirement(subject);
-				return undefined;
-			} catch (failed) {
-				return { failed };
-			}
-		},
 		declaredAmr: (factor, data) => {
 			try {
 				return declaredAmrOf(factor, factor.amrFor(data));

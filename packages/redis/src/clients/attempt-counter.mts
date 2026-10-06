@@ -71,6 +71,6 @@ export interface AttemptCounterClient {
 	 */
 	consume(key: string, input: AttemptCounterConsumeInput): Promise<AttemptCounterConsumeReply>;
 
-	/** What the server says about evicting and keeping keys, read once at boot by the module. */
+	/** What the server says about evicting and keeping keys, read once by the factory for its eviction gate. */
 	durability(): Promise<RedisDurability>;
 }

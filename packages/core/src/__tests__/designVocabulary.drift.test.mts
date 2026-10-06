@@ -726,9 +726,10 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept:
-			"an environment name as a development-only guard reads it — trimmed, lower case, production or staging whichever name says so",
+			"an environment name as a development-only guard reads it — trimmed, lower case, production or staging whichever name says so, development or test only when every name set says so",
 		home: "packages/core/src/deployment/environment.mts",
-		definition: /(?:function|const)\s+(?:readEnvironmentName|productionEnvironmentIn)\b/,
+		definition:
+			/(?:function|const)\s+(?:readEnvironmentName|productionEnvironmentIn|isDevelopmentEnvironment)\b/,
 	},
 	{
 		// A private copy of the guard under another name still lists the two

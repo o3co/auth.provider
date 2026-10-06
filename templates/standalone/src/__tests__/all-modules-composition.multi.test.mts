@@ -78,6 +78,10 @@ vi.mock("ioredis", () => {
 		quit: async () => "OK",
 		disconnect: () => undefined,
 		ping: async () => "PONG",
+		// The Redis stores' eviction gate reads the policy from INFO memory: a
+		// default server's.
+		info: async (section: string) =>
+			section === "memory" ? "# Memory\r\nmaxmemory_policy:noeviction\r\n" : null,
 	};
 	const makeMockRedis = (): object =>
 		new Proxy(

@@ -57,13 +57,25 @@ describe("sessionLifecycleStoreContract over the Redis store, on two connections
 		build: async () => {
 			harnesses += 1;
 			const keyPrefix = `lcc:${harnesses}:`;
-			return {
-				store: storeOn(one, keyPrefix),
-				second: storeOn(two, keyPrefix),
-				unreachable: () => {
-					const offline = one.duplicate({ lazyConnect: true, enableOfflineQueue: false });
-					return storeOn(offline, keyPrefix);
+			// Built over a client that reports noeviction, so the gate passes on
+			// a connection that never opens.
+			const offline = one.duplicate({ lazyConnect: true, enableOfflineQueue: false });
+			const unreachable = await createRedisSessionLifecycleStore({
+				client: {
+					...makeIoredisClients(offline).sessionLifecycleStoreClient,
+					durability: async () => ({
+						maxmemoryPolicy: "noeviction",
+						appendOnly: undefined,
+						snapshots: undefined,
+						refusal: undefined,
+					}),
 				},
+				keyPrefix,
+			});
+			return {
+				store: await storeOn(one, keyPrefix),
+				second: await storeOn(two, keyPrefix),
+				unreachable: () => unreachable,
 			};
 		},
 		supports: { unreachable: true },

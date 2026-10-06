@@ -105,7 +105,11 @@
  * and a subject state a script cannot read is refused, never read as empty.
  *
  * The requirement must last as enrolled factors do: it has no TTL, and the
- * module runs the factor store's durability check.
+ * factory holds the server to `noeviction` (`internal/eviction-policy.mts`),
+ * as the factor store's does: the lock, lease and first-binding mark carry a
+ * TTL. It is consumed only under the subject's lease, one script checking the
+ * lease and removing it, so a consume that reaches the server after its lease
+ * ended removes nothing.
  *
  * A session's proof is JSON `{provedAtMs, untilMs}` written with `PX` on
  * this side's clock (`untilMs` less `now`, rounded up), and answered absent
@@ -127,6 +131,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import {
+	checkEmailProofRequirementConsume,
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
@@ -167,7 +172,8 @@ import type {
 	MfaSubjectKeys,
 	MfaTransactionStoreClient,
 } from "./clients.mjs";
-import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
+import { requireNoEviction } from "./internal/eviction-policy.mjs";
+import { checkRedisMfaStorePersistence, MFA_STORE_EVICTABLE } from "./internal/mfa-durability.mjs";
 import { checkMfaKeyPrefix, mfaKeyPart } from "./internal/mfa-keys.mjs";
 import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
@@ -447,7 +453,24 @@ function checkInstant(nowMs: number, operation: string): void {
 	}
 }
 
-export function createRedisMfaTransactionStore(
+/**
+ * The Redis {@link MfaTransactionStore}. It resolves once the server's
+ * eviction policy passes the gate (`internal/eviction-policy.mts`); an option
+ * it cannot use rejects before the server is asked.
+ */
+export async function createRedisMfaTransactionStore(
+	options: RedisMfaTransactionStoreOptions,
+): Promise<MfaTransactionStore> {
+	const store = buildRedisMfaTransactionStore(options);
+	await requireNoEviction(
+		"mfaTransactionStore",
+		() => options.client.durability(),
+		MFA_STORE_EVICTABLE.mfaTransactionStore,
+	);
+	return store;
+}
+
+function buildRedisMfaTransactionStore(
 	options: RedisMfaTransactionStoreOptions,
 ): MfaTransactionStore {
 	const { client } = options;
@@ -634,8 +657,14 @@ export function createRedisMfaTransactionStore(
 			return client.emailProofRequired(proofKey(subject));
 		},
 
-		async consumeEmailProofRequirement(subject) {
-			return client.consumeEmailProof(proofKey(subject));
+		async consumeEmailProofRequirement(subject, consume) {
+			const { leaseToken } = checkEmailProofRequirementConsume(subject, consume);
+			const reply = await client.consumeEmailProof(
+				{ proof: proofKey(subject), lease: subjectKeys(subject).lease },
+				leaseToken,
+			);
+			if (!reply.held) return { outcome: "refused", reason: "lease_not_held" };
+			return { outcome: reply.removed ? "consumed" : "absent" };
 		},
 
 		async recordSessionEmailProof(subject, sid, provedAtMs, untilMs) {
@@ -758,19 +787,13 @@ export function createRedisMfaTransactionStore(
  * Declares no `replicaSafety`:
  * transactions, attempt limits and the lock are shared by every replica.
  *
- * The email-proof requirement must last as enrolled factors do, so before
- * providing the store it runs the factor store's durability check: an
- * `allkeys-*` eviction policy refuses the boot (`mfa-transaction-store-evictable`);
+ * The email-proof requirement must last as enrolled factors do. The store is
+ * built by {@link createRedisMfaTransactionStore}, so a server that fails the
+ * eviction gate refuses the boot (`mfa-transaction-store-evictable`); then
  * RDB without AOF (`mfa_transaction_store_lossy`), no persistence
- * (`mfa_transaction_store_volatile`) and a server refusing `CONFIG`
- * (`mfa_transaction_store_durability_unchecked`) each warn on the `logger` slot
- * (or `consoleLogger`). So does a `volatile-*` policy
- * (`mfa_transaction_store_lock_evictable`, naming `evictableFamilies`): the
- * lock state carries a TTL once no run is counted, and evicting it lifts a
- * lockout hold early; a first-binding mark carries one always, and evicting
- * it fails open — a stale session's first binding is no longer refused; a
- * subject's lease carries one always, and evicting it lets a second writer
- * at the subject's factor set.
+ * (`mfa_transaction_store_volatile`) and a server refusing the persistence
+ * questions (`mfa_transaction_store_durability_unchecked`) each warn on the
+ * `logger` slot (or `consoleLogger`).
  */
 export const redisMfaTransactionStoreModule = defineModule({
 	name: "redis-mfa-transaction-store",
@@ -786,13 +809,12 @@ export const redisMfaTransactionStoreModule = defineModule({
 	optional: ["logger"] as const,
 	provides: {
 		mfaTransactionStore: async (deps) => {
-			// Built first, so a prefix it refuses is refused before the server is asked.
-			const store = createRedisMfaTransactionStore({
+			const store = await createRedisMfaTransactionStore({
 				client: deps.mfaTransactionStoreClient,
 				keyPrefix: deps.section.keyPrefix,
 				logger: deps.logger ?? consoleLogger,
 			});
-			await checkRedisMfaStoreDurability(
+			await checkRedisMfaStorePersistence(
 				"mfaTransactionStore",
 				() => deps.mfaTransactionStoreClient.durability(),
 				deps.logger ?? consoleLogger,

@@ -293,9 +293,9 @@ const percentDecoded = (text: string): string =>
 function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>>, what: string) {
 	const { email } = user;
 	if (typeof email !== "string" || email === "") return;
-	const addresses = [email.toLowerCase(), normaliseMailAddress(email)].filter(
-		(address): address is string => address !== undefined && address.trim() !== "",
-	);
+	const addresses = [email, normaliseMailAddress(email)]
+		.filter((address): address is string => address !== undefined && address.trim() !== "")
+		.map((address) => address.toLowerCase());
 	assert.ok(
 		!decodedStrings(value).some((text) =>
 			[text, percentDecoded(text)].some((read) =>

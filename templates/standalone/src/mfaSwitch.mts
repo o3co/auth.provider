@@ -38,6 +38,7 @@
  */
 
 import {
+	isDevelopmentEnvironment,
 	type Module,
 	memoryMfaFactorStoreModule,
 	memoryMfaTransactionStoreModule,
@@ -96,13 +97,11 @@ export function readMfaSwitch(
 	return result.data;
 }
 
-/** The names the memory MFA stores are let in under. */
-const DEVELOPMENT_NAMES: ReadonlySet<string> = new Set(["development", "test"]);
-
 /**
  * Why the MFA stores may not be kept in memory under `environment` and
- * `CONFIG_ENV` and `NODE_ENV` wherever they are set: each name that is not
- * development or test, or that nothing is named. None lifts another's.
+ * `CONFIG_ENV` and `NODE_ENV` wherever they are set, as core's
+ * `isDevelopmentEnvironment` reads them: each name that is not development
+ * or test, or that nothing is named. None lifts another's.
  */
 function memoryRefusals(environment: string | undefined): string[] {
 	const named: [string, string][] =
@@ -113,10 +112,10 @@ function memoryRefusals(environment: string | undefined): string[] {
 	}
 	if (named.length === 0) return ["no environment is named"];
 	return named.flatMap(([label, value]) => {
+		if (isDevelopmentEnvironment([value])) return [];
 		const production = productionEnvironmentIn([value]);
 		if (production !== undefined) return [`${label} is "${production}"`];
-		const name = readEnvironmentName(value) ?? "";
-		return DEVELOPMENT_NAMES.has(name) ? [] : [`${label} "${name}" is not development or test`];
+		return [`${label} "${readEnvironmentName(value)}" is not development or test`];
 	});
 }
 

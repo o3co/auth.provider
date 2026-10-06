@@ -954,10 +954,19 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				true,
 			],
 			[
-				"an outage",
-				Object.assign(new Error("x"), { status: 503 }),
+				"an outage that refused the connection",
+				new TypeError("fetch failed", {
+					cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+				}),
 				{ code: "temporarily_unavailable", reason: "upstream" },
 				true,
+			],
+			// A 503 may come from a proxy that forwarded the request: the IdP may have rotated.
+			[
+				"an outage answered 503",
+				Object.assign(new Error("x"), { status: 503 }),
+				{ code: "temporarily_unavailable", reason: "upstream" },
+				false,
 			],
 			// A gateway that timed out forwarded the request: the IdP may have rotated.
 			[

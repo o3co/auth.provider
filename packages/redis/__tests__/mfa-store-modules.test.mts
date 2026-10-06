@@ -15,19 +15,15 @@
  */
 
 /**
- * The two MFA store modules (the MFA ADR's D7, D8, D10, D12, D19) and the one
- * durability check both run at boot. Why the records must survive: the MFA
- * ADR's D12, as amended.
+ * The two MFA store modules (the MFA ADR's D7, D8, D10, D12, D19), the
+ * eviction gate their factories pass and the persistence notices both write
+ * at boot. Why the records must survive: the MFA ADR's D12, as amended.
  *
- * Before providing its store, each module reads the server's
- * `maxmemory-policy` and persistence: an `allkeys-*` policy refuses the boot;
+ * Each store is built only on a server whose `maxmemory-policy` reads as
+ * `noeviction`; any other policy, and one it cannot read, refuses the boot,
+ * unless the client assumes `noeviction` for a policy it cannot read. Then
  * RDB snapshots without AOF, and no persistence at all, are each one warning;
- * a server that refuses `CONFIG` is one warning that the check could not run.
- * Each store also warns on a `volatile-*` policy, naming the key families
- * that carry a TTL and fail open when evicted: the factor store's emptied
- * sets' tombstones, which an eviction ends before the write lifetime has
- * passed, and its writes' replay keys; the transaction store's lock and week keys, which carry one once
- * no run is counted, and an evicted one lifts a hold early.
+ * persistence it cannot read is one warning that the check could not run.
  *
  * The policy is read from `INFO memory`, and from `CONFIG GET
  * maxmemory-policy` only where INFO does not say, so a server that blocks
@@ -38,8 +34,8 @@
  * disabled command) is read so; any other reply error, and any failure to
  * reach the server, fails the boot.
  *
- * Every real-server case that reads or sets the eviction policy is in this
- * file alone, so no other file sees the policy this one sets for a moment.
+ * The cases that set the eviction policy run on a server of their own: the
+ * policy is the whole server's, and the shared one never changes it.
  */
 
 import {
@@ -56,6 +52,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { Redis } from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { RedisDurability } from "#/clients.mjs";
 import {
@@ -114,12 +111,11 @@ interface Case {
 	readonly lossy: string;
 	readonly volatile: string;
 	readonly unchecked: string;
-	/** The notice a `volatile-*` policy is given: some of the store's keys carry a TTL. */
-	readonly volatileEvictable: string;
-	/** The key families that notice names: each one's loss fails open. */
-	readonly evictableFamilies: readonly string[];
 	readonly memoryModule: Module;
-	readonly client: (io: Redis) => { durability(): Promise<RedisDurability> };
+	readonly client: (
+		io: Redis,
+		options?: { readonly assumeNoEviction?: boolean },
+	) => { durability(): Promise<RedisDurability> };
 }
 
 const CASES: readonly Case[] = [
@@ -133,8 +129,6 @@ const CASES: readonly Case[] = [
 		lossy: "mfa_factor_store_lossy",
 		volatile: "mfa_factor_store_volatile",
 		unchecked: "mfa_factor_store_durability_unchecked",
-		volatileEvictable: "mfa_factor_store_tombstone_evictable",
-		evictableFamilies: ["tombstone", "replay"],
 		memoryModule: memoryMfaFactorStoreModule,
 		client: makeIoredisMfaFactorStoreClient,
 	},
@@ -148,8 +142,6 @@ const CASES: readonly Case[] = [
 		lossy: "mfa_transaction_store_lossy",
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
-		volatileEvictable: "mfa_transaction_store_lock_evictable",
-		evictableFamilies: ["lock", "week", "first-binding", "lease"],
 		memoryModule: memoryMfaTransactionStoreModule,
 		client: makeIoredisMfaTransactionStoreClient,
 	},
@@ -218,8 +210,22 @@ describe.each(CASES)("$module.name", (c) => {
 		expect(durability).not.toHaveBeenCalled();
 	});
 
-	it.each(["allkeys-lru", "allkeys-lfu", "allkeys-random"])(
-		"refuses %s at boot: a policy that may evict any key, naming the policy",
+	it.each([
+		"allkeys-lru",
+		"allkeys-lfu",
+		"allkeys-random",
+		"volatile-lru",
+		"volatile-lfu",
+		"volatile-random",
+		"volatile-ttl",
+		"",
+		"lru",
+		"noeviction-strict",
+		"allkeys-coldest",
+		"volatile-oldest",
+		"NOEVICTION",
+	])(
+		"refuses %j at boot, writing nothing: any policy but noeviction, naming the policy",
 		async (policy) => {
 			const { logger, calls } = recordingLogger();
 			const refused = boot({ ...DURABLE, maxmemoryPolicy: policy }, logger);
@@ -236,41 +242,6 @@ describe.each(CASES)("$module.name", (c) => {
 		const { logger, calls } = recordingLogger();
 		expect((await boot(DURABLE, logger)).kind).toBe("redis");
 		expect(calls).toEqual([]);
-	});
-
-	it.each(["volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl"])(
-		"boots on %s with AOF, and warns once, naming the key families an eviction fails open on",
-		async (policy) => {
-			// The factor store's tombstones carry a TTL: evicted, an emptied set
-			// reads as never written before the write lifetime has passed. The
-			// transaction store's lock and week keys carry one once no run is
-			// counted: evicted, a weekly hold ends early.
-			const { logger, calls } = recordingLogger();
-			expect((await boot({ ...DURABLE, maxmemoryPolicy: policy }, logger)).kind).toBe("redis");
-			expect(calls).toEqual([
-				{
-					level: "warn",
-					args: [
-						{
-							store: c.slot,
-							adapter: "redis",
-							maxmemoryPolicy: policy,
-							evictableFamilies: c.evictableFamilies,
-						},
-						c.volatileEvictable,
-					],
-				},
-			]);
-		},
-	);
-
-	it("says each thing once when a volatile-* policy and RDB-only persistence come together", async () => {
-		const { logger, calls } = recordingLogger();
-		await boot(
-			{ ...DURABLE, maxmemoryPolicy: "volatile-lru", appendOnly: false, snapshots: true },
-			logger,
-		);
-		expect(calls.map((call) => call.args[1])).toEqual([c.volatileEvictable, c.lossy]);
 	});
 
 	it("warns once when RDB snapshots are the only persistence: the last interval is lost on a crash", async () => {
@@ -293,7 +264,7 @@ describe.each(CASES)("$module.name", (c) => {
 		]);
 	});
 
-	it("warns once that the check could not run when nothing could be read, naming the parts, and boots", async () => {
+	it("refuses the boot when nothing could be read, naming the refusal as its cause", async () => {
 		const refusal = replyError("ERR unknown command 'CONFIG'");
 		const { logger, calls } = recordingLogger();
 		const unread: RedisDurability = {
@@ -302,7 +273,26 @@ describe.each(CASES)("$module.name", (c) => {
 			snapshots: undefined,
 			refusal,
 		};
-		expect((await boot(unread, logger)).kind).toBe("redis");
+		await expect(boot(unread, logger)).rejects.toMatchObject({
+			name: "RedisStoreEvictableError",
+			reason: c.evictable,
+			maxmemoryPolicy: undefined,
+			cause: refusal,
+		});
+		expect(calls).toEqual([]);
+	});
+
+	it("boots when nothing could be read and the client assumes noeviction, warning once that persistence could not be checked", async () => {
+		const refusal = replyError("ERR unknown command 'CONFIG'");
+		const { logger, calls } = recordingLogger();
+		const asserted: RedisDurability = {
+			maxmemoryPolicy: undefined,
+			appendOnly: undefined,
+			snapshots: undefined,
+			refusal,
+			assumeNoEviction: true,
+		};
+		expect((await boot(asserted, logger)).kind).toBe("redis");
 		expect(calls).toEqual([
 			{
 				level: "warn",
@@ -310,7 +300,7 @@ describe.each(CASES)("$module.name", (c) => {
 					{
 						store: c.slot,
 						adapter: "redis",
-						unread: ["maxmemory-policy", "appendonly"],
+						unread: ["appendonly"],
 						err: loggableError(refusal),
 					},
 					c.unchecked,
@@ -319,7 +309,7 @@ describe.each(CASES)("$module.name", (c) => {
 		]);
 	});
 
-	it("refuses an allkeys-* policy it could read, whatever else it could not", async () => {
+	it("refuses an allkeys-* policy it could read, whatever else it could not or the client assumes", async () => {
 		const { logger, calls } = recordingLogger();
 		const refused = boot(
 			{
@@ -327,28 +317,13 @@ describe.each(CASES)("$module.name", (c) => {
 				appendOnly: undefined,
 				snapshots: undefined,
 				refusal: replyError("NOPERM this user has no permissions to run the 'config|get' command"),
+				assumeNoEviction: true,
 			},
 			logger,
 		);
 		await expect(refused).rejects.toMatchObject({ reason: c.evictable });
 		expect(calls).toEqual([]);
 	});
-
-	it.each(["", "lru", "noeviction-strict", "allkeys-coldest", "volatile-oldest", "NOEVICTION"])(
-		"warns that it could not check a policy it does not know (%j), naming it — neither refused nor passed",
-		async (policy) => {
-			// An allow-list: a future server's policy, or a value no server sends,
-			// is judged by no prefix.
-			const { logger, calls } = recordingLogger();
-			expect((await boot({ ...DURABLE, maxmemoryPolicy: policy }, logger)).kind).toBe("redis");
-			expect(calls).toEqual([
-				{
-					level: "warn",
-					args: [{ store: c.slot, adapter: "redis", maxmemoryPolicy: policy }, c.unchecked],
-				},
-			]);
-		},
-	);
 
 	it("judges the policy on its own when a server answers CONFIG GET save with nothing", async () => {
 		// AOF off and no answer for save: persistence alone falls back to the
@@ -498,7 +473,7 @@ describe.each(CASES)("$clientSlot's durability() against a real server", (c) => 
 	});
 
 	it("reads the policy and AOF from INFO for a user the server refuses CONFIG, and names the refusal", async () => {
-		await asUser(["-config"], async (restricted) => {
+		await asUser(shared(), ["-config"], async (restricted) => {
 			const report = await c.client(restricted).durability();
 			expect(report).toMatchObject({
 				maxmemoryPolicy: "noeviction",
@@ -510,7 +485,7 @@ describe.each(CASES)("$clientSlot's durability() against a real server", (c) => 
 	});
 
 	it("falls back to CONFIG GET maxmemory-policy for a user the server refuses INFO", async () => {
-		await asUser(["-info"], async (restricted) => {
+		await asUser(shared(), ["-info"], async (restricted) => {
 			const report = await c.client(restricted).durability();
 			expect(report).toMatchObject({
 				maxmemoryPolicy: "noeviction",
@@ -624,30 +599,73 @@ describe.each(CASES)("$clientSlot's durability() against fakes", (c) => {
 	);
 });
 
-/** Runs `use` over a connection as a fresh ACL user with every command but `denied`, and removes the user. */
-async function asUser(denied: readonly string[], use: (io: Redis) => Promise<void>): Promise<void> {
+/** Where a connection reaches a server, and the connection that administers it. */
+interface Server {
+	readonly admin: Redis;
+	readonly at: { readonly host: string; readonly port: number };
+}
+
+/** The shared test server. */
+const shared = (): Server => ({ admin: raw, at });
+
+/** Runs `use` over a connection to `server` as a fresh ACL user with every command but `denied`, and removes the user. */
+async function asUser(
+	server: Server,
+	denied: readonly string[],
+	use: (io: Redis) => Promise<void>,
+): Promise<void> {
 	const user = `mfa-durability-${denied.join("").replace(/\W/g, "")}-${Date.now()}-${Math.random()}`;
-	await raw.call("ACL", "SETUSER", user, "on", ">secret", "~*", "+@all", ...denied);
-	const restricted = new Redis({ ...at, username: user, password: "secret" });
+	await server.admin.call("ACL", "SETUSER", user, "on", ">secret", "~*", "+@all", ...denied);
+	const restricted = new Redis({ ...server.at, username: user, password: "secret" });
 	try {
 		await use(restricted);
 	} finally {
 		restricted.disconnect();
-		await raw.call("ACL", "DELUSER", user);
+		await server.admin.call("ACL", "DELUSER", user);
 	}
 }
 
-describe("allkeys-lru set on the real server", () => {
-	/** Runs `use` with the server's policy at allkeys-lru, and puts the policy back. */
+/**
+ * A server's eviction policy is the whole server's, whatever database a test
+ * uses: these cases set it on a container of their own, so no other file's
+ * stores see it.
+ */
+describe("allkeys-lru set on a server of its own", () => {
+	let container: StartedTestContainer | undefined;
+	let own: Server | undefined;
+
+	beforeAll(async () => {
+		container = await new GenericContainer("redis:7.2-alpine")
+			.withExposedPorts(6379)
+			.withStartupTimeout(60_000)
+			.start();
+		const ownAt = { host: container.getHost(), port: container.getMappedPort(6379) };
+		const admin = new Redis(ownAt);
+		admin.on("error", () => {});
+		own = { admin, at: ownAt };
+	}, 120_000);
+
+	afterAll(async () => {
+		own?.admin.disconnect();
+		await container?.stop();
+	});
+
+	const server = (): Server => {
+		if (own === undefined) throw new Error("the container did not start");
+		return own;
+	};
+
+	/** Runs `use` with the own server's policy at allkeys-lru, and puts the policy back. */
 	async function underAllkeysLru(use: () => Promise<void>): Promise<void> {
-		const [, original] = (await raw.config("GET", "maxmemory-policy")) as [string, string];
-		await raw.config("SET", "maxmemory-policy", "allkeys-lru");
+		const { admin } = server();
+		const [, original] = (await admin.config("GET", "maxmemory-policy")) as [string, string];
+		await admin.config("SET", "maxmemory-policy", "allkeys-lru");
 		try {
 			await use();
 		} finally {
-			await raw.config("SET", "maxmemory-policy", original);
+			await admin.config("SET", "maxmemory-policy", original);
 		}
-		expect(await raw.config("GET", "maxmemory-policy")).toEqual(["maxmemory-policy", original]);
+		expect(await admin.config("GET", "maxmemory-policy")).toEqual(["maxmemory-policy", original]);
 	}
 
 	const refusesBoth = async (io: Redis): Promise<void> => {
@@ -660,35 +678,70 @@ describe("allkeys-lru set on the real server", () => {
 	};
 
 	it("refuses both modules at boot, and the policy is put back", async () => {
-		await underAllkeysLru(() => refusesBoth(raw));
+		await underAllkeysLru(() => refusesBoth(server().admin));
 	});
 
 	it("refuses both modules for a user the server refuses CONFIG: INFO memory says the policy", async () => {
-		await underAllkeysLru(() => asUser(["-config"], refusesBoth));
+		await underAllkeysLru(() => asUser(server(), ["-config"], refusesBoth));
 	});
 
 	it("refuses both modules for a user the server refuses INFO: CONFIG GET says the policy", async () => {
-		await underAllkeysLru(() => asUser(["-info"], refusesBoth));
+		await underAllkeysLru(() => asUser(server(), ["-info"], refusesBoth));
 	});
 
-	it("boots both modules with the warning that the check could not run for a user refused INFO and CONFIG", async () => {
+	it("refuses both modules for a user refused INFO and CONFIG: the policy cannot be read", async () => {
 		await underAllkeysLru(() =>
-			asUser(["-info", "-config"], async (restricted) => {
+			asUser(server(), ["-info", "-config"], async (restricted) => {
 				for (const c of CASES) {
-					const { logger, calls } = recordingLogger();
-					const store = await providerOf(c)(
-						withSection(c.module, { [c.clientSlot]: c.client(restricted), config: {}, logger }),
-					);
-					expect(store.kind, c.module.name).toBe("redis");
-					expect(
-						calls.map((call) => call.args[1]),
+					await expect(
+						providerOf(c)(
+							withSection(c.module, { [c.clientSlot]: c.client(restricted), config: {} }),
+						),
 						c.module.name,
-					).toEqual([c.unchecked]);
-					expect(calls[0]?.args[0], c.module.name).toMatchObject({
-						unread: ["maxmemory-policy", "appendonly"],
-					});
+					).rejects.toMatchObject({ reason: c.evictable, maxmemoryPolicy: undefined });
 				}
 			}),
 		);
+	});
+
+	it("refuses both modules for a client that assumes noeviction where INFO memory says the policy", async () => {
+		await underAllkeysLru(() =>
+			asUser(server(), ["-config"], async (restricted) => {
+				for (const c of CASES) {
+					await expect(
+						providerOf(c)(
+							withSection(c.module, {
+								[c.clientSlot]: c.client(restricted, { assumeNoEviction: true }),
+								config: {},
+							}),
+						),
+						c.module.name,
+					).rejects.toMatchObject({ reason: c.evictable, maxmemoryPolicy: "allkeys-lru" });
+				}
+			}),
+		);
+	});
+});
+
+describe("a user the real server refuses INFO and CONFIG", () => {
+	it("boots both modules when the client assumes noeviction, with the warning that persistence could not be checked", async () => {
+		await asUser(shared(), ["-info", "-config"], async (restricted) => {
+			for (const c of CASES) {
+				const { logger, calls } = recordingLogger();
+				const store = await providerOf(c)(
+					withSection(c.module, {
+						[c.clientSlot]: c.client(restricted, { assumeNoEviction: true }),
+						config: {},
+						logger,
+					}),
+				);
+				expect(store.kind, c.module.name).toBe("redis");
+				expect(
+					calls.map((call) => call.args[1]),
+					c.module.name,
+				).toEqual([c.unchecked]);
+				expect(calls[0]?.args[0], c.module.name).toMatchObject({ unread: ["appendonly"] });
+			}
+		});
 	});
 });

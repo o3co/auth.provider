@@ -1015,6 +1015,63 @@ export function readMfaRecoverySetFloorAnswer(
 	}
 }
 
+/** Under which lease `consumeEmailProofRequirement` consumes the email-proof requirement. */
+export interface MfaEmailProofRequirementConsume {
+	/** The subject's lease the caller holds. */
+	readonly leaseToken: string;
+}
+
+/**
+ * What `consumeEmailProofRequirement` answers under a lease: `consumed` for
+ * the one caller that cleared the requirement, `absent` when none stood, or
+ * the refusal without the lease, nothing cleared.
+ */
+export type MfaEmailProofRequirementConsumeAnswer =
+	| { readonly outcome: "consumed" }
+	| { readonly outcome: "absent" }
+	| { readonly outcome: "refused"; readonly reason: "lease_not_held" };
+
+/**
+ * The consume `consumeEmailProofRequirement` makes under a lease, its field
+ * read once, or a `RangeError`: `subject` and `leaseToken` non-empty strings.
+ * Every adapter calls it first.
+ */
+export function checkEmailProofRequirementConsume(
+	subject: unknown,
+	consume: unknown,
+): MfaEmailProofRequirementConsume {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.consumeEmailProofRequirement: ${what}`);
+	};
+	checkSubjectQuestion("consumeEmailProofRequirement", subject);
+	if (!isRecord(consume)) return refuse("the consume must be an object");
+	const { leaseToken } = consume;
+	if (!isSubject(leaseToken)) refuse("leaseToken must be a non-empty string");
+	return { leaseToken: leaseToken as string };
+}
+
+/**
+ * `answer`, what `consumeEmailProofRequirement` answered under a lease, as
+ * the port promises it. `undefined` for anything else, which the caller
+ * answers as the store's outage.
+ */
+export function readMfaEmailProofRequirementConsumeAnswer(
+	answer: unknown,
+): MfaEmailProofRequirementConsumeAnswer | undefined {
+	try {
+		if (!isRecord(answer)) return undefined;
+		const { outcome } = answer;
+		if (outcome === "consumed" || outcome === "absent") return { outcome };
+		if (outcome === "refused") {
+			const { reason } = answer;
+			return reason === "lease_not_held" ? { outcome, reason } : undefined;
+		}
+		return undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** The two authorized recoveries: `recover`, the subject's own after an exempt proof; `reset`, the operator's. */
 export type MfaSubjectRecoveryOperation = "recover" | "reset";
 
@@ -1427,14 +1484,23 @@ export interface MfaTransactionStore {
 	/** Whether the requirement is recorded for `subject`. */
 	emailProofRequiredAtNextBinding(subject: string): Promise<boolean>;
 	/**
-	 * Atomic read-and-clear at the first binding: `true` for the one caller that
-	 * cleared it, `false` when none was recorded or another cleared it first.
-	 * Call it only after the email proof was verified and the first counting
-	 * factor written, so a failed binding leaves the requirement standing. Keep
-	 * it as durably as the factor store: a lost requirement lets a password
-	 * holder bind without the proof.
+	 * Atomic read-and-clear at the first binding, under the subject's lease
+	 * held by `consume.leaseToken`: the lease checked and the requirement
+	 * cleared in one atomic step, so a consume that lands after the lease
+	 * ended — after a later reset set the requirement again — clears nothing.
+	 * Answers `consumed` for the one caller that cleared it, `absent` when
+	 * none was recorded or another cleared it first, and refuses
+	 * `lease_not_held` without the lease. A `RangeError`, nothing cleared, for
+	 * what {@link checkEmailProofRequirementConsume} refuses. Call it only
+	 * after the email proof was verified and the first counting factor
+	 * written, so a failed binding leaves the requirement standing. Keep it as
+	 * durably as the factor store: a lost requirement lets a password holder
+	 * bind without the proof.
 	 */
-	consumeEmailProofRequirement(subject: string): Promise<boolean>;
+	consumeEmailProofRequirement(
+		subject: string,
+		consume: MfaEmailProofRequirementConsume,
+	): Promise<MfaEmailProofRequirementConsumeAnswer>;
 
 	// A session's account-email proof: verification state whose loss fails
 	// closed — the user proves again.

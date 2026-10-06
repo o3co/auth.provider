@@ -248,19 +248,18 @@ const NOT_SENT: ReadonlySet<string> = new Set([
 /**
  * What an HTTP status proves about the request it answered. A 4xx is the
  * upstream refusing it, but a 408 or a 499 (the request or the client gave
- * up), and a 501 or a 503 is a server that did not take it on; a 500, a 502,
- * a 504 and any other 5xx may come back over a request that was forwarded
- * and acted on. A status that is not an integer from 400 to 599 proves
- * nothing and is doubted. (A mesh such as Envoy or Istio can answer 503 after
- * forwarding: that undercounts one rotation per such answer, which the
- * failure backoff bounds.)
+ * up), and a 501 is a server that does not implement it; a 500, a 502, a
+ * 503, a 504 and any other 5xx may come back over a request that was
+ * forwarded and acted on — a proxy or mesh in front of the upstream (Envoy,
+ * Istio) can answer 503 after forwarding. A status that is not an integer
+ * from 400 to 599 proves nothing and is doubted.
  */
 const statusDelivery = (status: unknown): "unprocessed" | "unknown" => {
 	if (typeof status !== "number" || !Number.isInteger(status) || status < 400 || status > 599) {
 		return "unknown";
 	}
 	if (status === 408 || status === 499) return "unknown";
-	if (status < 500 || status === 501 || status === 503) return "unprocessed";
+	if (status < 500 || status === 501) return "unprocessed";
 	return "unknown";
 };
 

@@ -95,6 +95,7 @@ async function withMail(
 		readonly requireEmailProof?: "when-mail" | "always" | "never";
 		readonly withoutAddress?: boolean;
 		readonly transactionStore?: MfaTransactionStore;
+		readonly storeTimeoutMs?: number;
 	} = {},
 ) {
 	const sender = options.sender === undefined ? createRecordingMailSender() : options.sender;
@@ -103,6 +104,7 @@ async function withMail(
 	const booted = await boot({
 		config: configFor("required", {
 			enrollment: { requireEmailProof: options.requireEmailProof ?? "when-mail" },
+			...(options.storeTimeoutMs === undefined ? {} : { storeTimeoutMs: options.storeTimeoutMs }),
 		}),
 		factorStore,
 		auditSink: audit,
@@ -462,6 +464,74 @@ describe("D25's flag", () => {
 		expect(done.status).toBe(200);
 		expect(await store.emailProofRequiredAtNextBinding(ALICE.id)).toBe(false);
 	});
+
+	it("stands when the binding's consume lands after a later reset set it under a lease of its own", async () => {
+		const store = createMemoryMfaTransactionStore();
+		await store.requireEmailProofAtNextBinding(ALICE.id);
+		const consume = store.consumeEmailProofRequirement.bind(store);
+		const landing: (() => Promise<unknown>)[] = [];
+		// The binding's consume is not answered in time, and lands later.
+		vi.spyOn(store, "consumeEmailProofRequirement").mockImplementation((...args) => {
+			landing.push(() => consume(...args));
+			return new Promise(() => {});
+		});
+		const { app, sender } = await withMail({ transactionStore: store, storeTimeoutMs: 1_000 });
+		const { agent, transaction } = await beginFirstBinding(app);
+		await challengeProof(agent, transaction);
+		await verify(agent, transaction, ACCOUNT_EMAIL, lastCode(sender));
+		const begun = await beginEnrollment(agent, transaction, "totp");
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+		expect(done.status).toBe(200);
+		expect(landing).toHaveLength(1);
+
+		// A reset sets the requirement again under a lease of its own.
+		const lease = await store.acquireSubjectLease(ALICE.id, {
+			ttlMs: 60_000,
+			generation: await store.subjectGeneration(ALICE.id),
+		});
+		if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
+		await store.requireEmailProofAtNextBinding(ALICE.id);
+		expect(await store.releaseSubjectLease(ALICE.id, lease.token)).toBe(true);
+		await Promise.all(landing.map((land) => land()));
+
+		expect(await store.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
+	});
+
+	it.each<[string, () => Promise<unknown>]>([
+		[
+			"refused without the lease",
+			() => Promise.resolve({ outcome: "refused", reason: "lease_not_held" }),
+		],
+		["answered outside its port", () => Promise.resolve(true)],
+		["rejected", () => Promise.reject(new Error("store down"))],
+	])(
+		"stands when the binding's consume is %s: the factor stands, said at warn, not tried again",
+		async (_label, answer) => {
+			const store = createMemoryMfaTransactionStore();
+			await store.requireEmailProofAtNextBinding(ALICE.id);
+			const consume = vi
+				.spyOn(store, "consumeEmailProofRequirement")
+				.mockImplementation(answer as never);
+			const { app, sender, factorStore, logger } = await withMail({ transactionStore: store });
+			const { agent, transaction } = await beginFirstBinding(app);
+			await challengeProof(agent, transaction);
+			await verify(agent, transaction, ACCOUNT_EMAIL, lastCode(sender));
+			const begun = await beginEnrollment(agent, transaction, "totp");
+
+			const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+			expect(done.status).toBe(200);
+			expect((await factorStore.list(ALICE.id)).find((r) => r.kind === "totp")?.binding).toBe(
+				"email_proof",
+			);
+			expect(await store.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
+			expect(consume).toHaveBeenCalledTimes(1);
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.objectContaining({ sub: ALICE.id }),
+				"mfa_email_proof_flag_uncleared",
+			);
+		},
+	);
 
 	it("stands when the binding fails before the factor is written", async () => {
 		const store = createMemoryMfaTransactionStore();

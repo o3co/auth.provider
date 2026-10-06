@@ -58,6 +58,8 @@ my-app:
 
 ロードバランサ配下で standalone サーバーを複数インスタンス動かすときは、`REDIS_CLIENTS_URL` を**共有**の Redis 7.2+ インスタンスに向けること。共有の Redis URL が無いと、各レプリカは refresh token family を自分の接続（と、ローカル専用の Redis）に保持するため、トークンを発行していないレプリカに届いた refresh リクエストは `invalid_grant` を返し、ラウンドロビンの LB では 1 回おきにそうなる。
 
+**その Redis は `maxmemory-policy noeviction`（Redis のデフォルト）で動かすこと。** 期限まで残らなければならないキーを持つ Redis のストア — attempt counter、ユーザーセッションストアのライフサイクルストア、フェデレーショントークンストア、MFA のストア — は起動時にポリシーを読む（`INFO memory`、次に `CONFIG GET maxmemory-policy`）。ほかのポリシーでは起動を拒否し、サーバーがポリシーを答えないときも拒否する。接続のユーザーが `INFO` や `CONFIG` を実行できない（ACL で制限されたユーザー、それらを改名するマネージドサービス）が、サーバーが `noeviction` で動いていると分かっているなら、`REDIS_CLIENTS_ASSUME_NO_EVICTION=true`（`redis-clients.assumeNoEviction`、デフォルト `false`）を設定すること。これはポリシーを読めないときにだけ読まれる: サーバーが答えたポリシーが常に優先するので、`allkeys-*` や `volatile-*` のサーバーを通すことはない。
+
 **ロードバランサ配下では `HTTP_TRUST_PROXY` をプロキシのアドレスに設定すること。** デフォルトは `false` で、この場合 `req.ip` はクライアントではなく*ロードバランサの*アドレスになる。すると IP をキーとするすべての rate limit — OAuth エンドポイントの limiter と `POST /session/login` の総当たり対策ガード — が**全ユーザーで 1 つのバケットを共有する**: 誰からであれ最初の 20 回のログイン試行でウィンドウを使い切り、以降のユーザーは全員 `429` を受け取る。この障害は設定ミスではなく攻撃のように見えるため、深夜 3 時の診断が高くつく。このサービスの前段で何かが TLS を終端したりプロキシしたりしているなら必ず設定し、`X-Forwarded-For` を設定しているのがそのホップであることを確認すること。`ip` のない監査イベントは、リクエストのアドレスがアドレスでなかった — `req.ip` がアドレス以外を入れた `X-Forwarded-For` から来た — ことを意味するので、`HTTP_TRUST_PROXY` がそのヘッダーを設定するホップだけを信頼しているか確認すること。
 
 取りうる形は 4 つで、いずれも Express 自身のものである:
@@ -77,7 +79,7 @@ allowlist はネットワーク上の制御であって、暗号学的な制御�
 
 **MFA ルートの予算はリミッターのものである。** MFA パッケージは自身のルートの予算を持たない: `/session/mfa` への POST はすべて、配線されたリミッターだけによって、クライアントアドレスごとにプレフィックス `mfa` の下で制限される。`config/reference.conf` は両方のリミッターに `limits.mfa { limit = 60, windowSeconds = 300 }`（`core-rate-limiter-memory.limits.mfa`、`redis-rate-limiter.limits.mfa`）を与えるので、`adapters.rateLimiter` を切り替えてもこの予算は保たれる。そこでは既定値なので、構成が配線しないリミッターがこれを持っていても、boot はそのセクションの名前を出さない。変えるなら、配線したリミッターについて `config/application.conf` か自分のレイヤーで変えること。エントリがなければリミッターの `defaultLimit`（60 秒あたり 60）が適用される。MFA のロック — トランザクションごとの試行回数、バックオフ、週ごとの失敗回数 — は MFA パッケージ自身のもので、リミッターの設定はこれを変えない。
 
-**`adapters.attemptCounter` を Redis に向けること。** デフォルトは `"memory"` でカウンターを配線しない: ログイン（device grant を加えたときはデバイス検証も）は試行をプロセスごとに数えるので、N レプリカでは `session.rateLimit.login`（と `device-grant.rateLimit`）が上限の N 倍を許し、デプロイのたびにリセットされる。`CORE_DEPLOYMENT_MODE=multi` は起動を拒否する。`"redis"`（`ADAPTERS_ATTEMPT_COUNTER=redis`）は共有の Redis ソケットの上に `redisAttemptCounterModule` を入れる。その Redis は `maxmemory-policy noeviction`（Redis のデフォルト）で動かすこと: 追い出された窓は数え直しになるからである。モジュールは読み取れたほかのポリシーでは起動を拒否するが、サーバーが答えない（`INFO` と `CONFIG` が拒否・改名されている）ときは `attempt_counter_durability_unchecked` を警告して起動するので、ポリシーはサーバーの設定側で確かめること。どちらも閉じる側に倒れる: カウンターが答えられない間、`/session/login` と `POST /oauth/device/verification` は `redis-rate-limiter.failMode` が何であっても `503` を返す。
+**`adapters.attemptCounter` を Redis に向けること。** デフォルトは `"memory"` でカウンターを配線しない: ログイン（device grant を加えたときはデバイス検証も）は試行をプロセスごとに数えるので、N レプリカでは `session.rateLimit.login`（と `device-grant.rateLimit`）が上限の N 倍を許し、デプロイのたびにリセットされる。`CORE_DEPLOYMENT_MODE=multi` は起動を拒否する。`"redis"`（`ADAPTERS_ATTEMPT_COUNTER=redis`）は共有の Redis ソケットの上に `redisAttemptCounterModule` を入れる。その Redis は `maxmemory-policy noeviction`（Redis のデフォルト）で動かすこと: 追い出された窓は数え直しになるからである。モジュールはほかのポリシーでは起動を拒否する。サーバーがポリシーを答えないときも、`REDIS_CLIENTS_ASSUME_NO_EVICTION=true`（上記）でない限り拒否する。どちらも閉じる側に倒れる: カウンターが答えられない間、`/session/login` と `POST /oauth/device/verification` は `redis-rate-limiter.failMode` が何であっても `503` を返す。
 
 **BFF の背後では、必要になる前に `limits.token` を上げておくこと。** OAuth エンドポイントの rate limit は `req.ip` をキーにする（`packages/core/src/ratelimit/guard.mts` はバケットキーを `<endpoint>:ip:<req.ip>` として組み立てる）。クライアントがブラウザやネイティブアプリで、このプロバイダーと直接通信しているなら、これは正しい identity である。しかし backend-for-frontend 構成 — サーバー側アプリがセッションを保持し、ユーザーに代わってコード交換と refresh を行う構成 — では誤った identity になる: すべての `/oauth/token` と `/oauth/introspect` の呼び出しが BFF の単一アドレスから届き、デプロイ全体で 1 つのバケットを共有する。デフォルトの 60 秒あたり 60 リクエストでは、**全ユーザー合計で毎分およそ 60 回の session グラント交換**が上限になる — しかもそれは rate limit として表に出てこない。BFF は想定していない `429` を受け取り、それを自分の呼び出し元への `502` に変え、ユーザーが報告する症状は「サインインがときどき壊れる」になる。それは起き始めるトラフィック量に達した時点で現れ、それより前には現れない。
 
@@ -510,7 +512,7 @@ core.federations {
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `MFA_MODE` | `required` | `mfaMode`: `required`、`optional` または `off` |
-| `MFA_ENCRYPTION_KEY` | — | MFA の鍵リングの最初の鍵で、すべての要素のデータを封じる: 32 バイトの canonical な base64（`openssl rand -base64 32`）。MFA が有効なら必須。`CONFIG_ENV=development` では `config/development.conf` が代わりに MFA パッケージの公開サンプル鍵を置く: 自分の鍵はそこに書く。そのリングの横でこの変数を設定すると boot は拒否される。サンプル鍵は `CONFIG_ENV` か `NODE_ENV` が `production` か `staging` のとき、また `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
+| `MFA_ENCRYPTION_KEY` | — | MFA の鍵リングの最初の鍵で、すべての要素のデータを封じる: 32 バイトの canonical な base64（`openssl rand -base64 32`）。MFA が有効なら必須。`CONFIG_ENV=development` では `config/development.conf` が代わりに MFA パッケージの公開サンプル鍵を置く: 自分の鍵はそこに書く。そのリングの横でこの変数を設定すると boot は拒否される。サンプル鍵が受け入れられるのは、`CONFIG_ENV` と `NODE_ENV` のうち設定されているものがすべて `development` か `test` を示すときだけで、`CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `MFA_PAGE_URL` | `/mfa` | デプロイの MFA ページ。ログインの第二要素とステップアップはここから始まる。テンプレートはページを同梱しない: ページの契約は [MFA パッケージのもの](../../packages/mfa/README.md#the-routes) |
 | `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`、Store の呼び出し 1 回の時間: 各ストアの呼び出しごとのタイムアウト以上でなければならない。Store を呼ぶ構成（`ADAPTERS_USER_REPOSITORY=http`、または要素を Store に置く）で `REPOSITORIES_USER_HTTP_TIMEOUT` を下回ると boot を拒否するので、二つは一緒に上げる。37500 ms を超えても拒否する |
 | `STANDARD_SMTP_MAIL_SENDER_HOST` | — | development 以外での SMTP リレー。MFA はここにアカウントのメールの証明とメール要素のコードを送る。MFA が有効なら、boot にはこれと `STANDARD_SMTP_MAIL_SENDER_FROM` が要る |
@@ -718,11 +720,13 @@ docker run -e HTTP_PORT=8080 -p 8080:8080 my-auth-provider
 docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
 ```
 
+最初に実行する前に、自分の鍵を `.env` に `MFA_ENCRYPTION_KEY` として書く（`openssl rand -base64 32`）。この実行は development のサンプル鍵を使わず、鍵が無ければ boot は拒否される。
+
 メールは <http://localhost:8025> で読む。Mailpit はメールを保持し、先へは何も配送しない。素の `docker compose up`（`make dev`）は Mailpit を起動せず、本番用のファイルにも Mailpit は無い。開発専用である: デプロイでは `STANDARD_SMTP_MAIL_SENDER_*` の変数で実際のリレーを指定する（[多要素認証](#多要素認証)）。
 
 オーバーレイが app サービスに設定するもの:
 
-- `CONFIG_ENV=mailpit`。`development` ではテンプレートは各コードをログに出す送信者を入れる（[モジュール合成順序](#モジュール合成順序) のルール 7）。[`config/mailpit.conf`](config/mailpit.conf) は `development.conf` を include するので、それ以外は MFA のサンプル鍵も含めて development の実行と同じである。
+- `CONFIG_ENV=mailpit`。`development` ではテンプレートは各コードをログに出す送信者を入れる（[モジュール合成順序](#モジュール合成順序) のルール 7）。[`config/mailpit.conf`](config/mailpit.conf) は `development.conf` を include しない。`development.conf` の唯一の設定は MFA のサンプル鍵で、MFA パッケージがそれを受け入れるのは、設定されている環境名がすべて `development` か `test` を示すときだけだからである。鍵リングの最初の鍵は、MFA パッケージの `reference.conf` が束ねるとおり `MFA_ENCRYPTION_KEY` である。
 - `MFA_MODE` は設定しない: MFA はテンプレートの出荷どおり、または `.env` が設定するとおりに有効である。MFA が off ならメールを送るものが無い。
 - `ADAPTERS_MFA_FACTOR_STORE=redis` と `ADAPTERS_MFA_TRANSACTION_STORE=redis`（compose の Redis 上、`docker-compose.yml` と同じ）: `development` と `test` 以外の名前では、MFA のストアをメモリに置けない。
 - `STANDARD_SMTP_MAIL_SENDER_HOST=localhost`、`STANDARD_SMTP_MAIL_SENDER_PORT=1025`、`STANDARD_SMTP_MAIL_SENDER_SECURE=none`、`STANDARD_SMTP_MAIL_SENDER_FROM=auth@example.com`。SMTP 送信者が平文で送るのはループバックのホストにだけなので、Mailpit は app コンテナのネットワーク名前空間で動き（`network_mode: service:app`）、その `localhost` で待ち受ける。そのため Mailpit の Web UI のポートは、Mailpit ではなく app サービスがループバックに公開する。

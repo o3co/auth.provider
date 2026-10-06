@@ -58,14 +58,14 @@
  * writes); a deployment that accepts acknowledged-write loss on failover also
  * accepts that a conditional write may see a restored, older generation. It
  * also assumes `noeviction`: an evicted replay key lets a resent `attach`
- * write again, so the module's boot check refuses an eviction policy.
+ * write again, so the factory holds the server to it
+ * (`internal/eviction-policy.mts`).
  */
 
 import {
 	type AdapterBuilder,
 	checkDeploymentMode,
 	coerceBooleanFromEnv,
-	consoleLogger,
 	type DeploymentMode,
 	decodeSealingKey,
 	defineModule,
@@ -88,8 +88,7 @@ import {
 	type EncryptionGuardContext,
 	validateEncryptionMode,
 } from "./internal/encryption-mode.mjs";
-
-import { checkFederationTokenEviction } from "./internal/federation-token-eviction.mjs";
+import { requireNoEviction } from "./internal/eviction-policy.mjs";
 import { createRedisLock } from "./internal/lock.mjs";
 import { createRedisSidSet } from "./internal/redisSidSet.mjs";
 import { replayKeyOf } from "./internal/replay-key.mjs";
@@ -265,7 +264,25 @@ const obtainedAtMsOf = (obtainedAt: Date | undefined): number | undefined => {
 	return isInstant(ms) ? ms : undefined;
 };
 
-export function createRedisFederationTokenStore(
+/**
+ * The Redis {@link FederationTokenStore}. It resolves once the server's
+ * eviction policy passes the gate (`internal/eviction-policy.mts`); an option
+ * it cannot use, the plaintext guard's refusal included, rejects before the
+ * server is asked.
+ */
+export async function createRedisFederationTokenStore(
+	opts: RedisFederationTokenStoreOptions,
+): Promise<FederationTokenStore & SupportsLock> {
+	const store = buildRedisFederationTokenStore(opts);
+	await requireNoEviction("federationTokenStore", () => opts.client.durability(), {
+		reason: "federation-token-store-evictable",
+		holds:
+			"writes' replay keys, and losing one lets a resent attach write again, putting an older record back over a later write, or a logged-out session's upstream tokens back",
+	});
+	return store;
+}
+
+function buildRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
 ): FederationTokenStore & SupportsLock {
 	const deploymentMode = checkDeploymentMode(
@@ -638,8 +655,11 @@ export function createRedisFederationTokenStore(
  * `@o3co/auth-provider-core`. Anything but `"single"`, `"multi"` or `"unset"`,
  * absence included, is a TypeError before anything is built, the client
  * checked or the key read.
+ *
+ * It builds through {@link createRedisFederationTokenStore}, so it resolves
+ * only on a server that passes the eviction gate.
  */
-export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStore> = (
+export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStore> = async (
 	config,
 	ctx,
 ) => {
@@ -783,11 +803,9 @@ export interface RedisFederationTokenStoreModuleOptions {
  * composition root knows how it chose its config file. Its notice goes to the
  * optional `logger` slot (`consoleLogger` when empty).
  *
- * Once the store is built, the module reads the server's eviction policy
- * once: an eviction policy (`volatile-*`, `allkeys-*`), under which a resent
- * write's replay key may be evicted, refuses the boot with a
- * `RedisStoreEvictableError`; a policy it could not read or does not know is
- * an info line there, and the boot goes on.
+ * The store is built by the builder above, so a server that fails the
+ * eviction gate (`internal/eviction-policy.mts`) refuses the boot with a
+ * `RedisStoreEvictableError`.
  */
 export function redisFederationTokenStoreModuleFor(
 	options: RedisFederationTokenStoreModuleOptions = {},
@@ -809,7 +827,7 @@ export function redisFederationTokenStoreModuleFor(
 		provides: {
 			federationTokenStore: (deps) => {
 				const cfg = deps.section;
-				const built = redisFederationTokenStoreBuilder(
+				return redisFederationTokenStoreBuilder(
 					{
 						client: deps.federationTokenStoreClient,
 						encryption: { mode: cfg.encryptionMode, key: cfg.encryptionKey },
@@ -824,15 +842,6 @@ export function redisFederationTokenStoreModuleFor(
 					},
 					deps.logger !== undefined ? { logger: deps.logger } : {},
 				);
-				// Built first, so a setting it refuses throws before the server is asked.
-				return (async () => {
-					const store = await built;
-					await checkFederationTokenEviction(
-						() => deps.federationTokenStoreClient.durability(),
-						deps.logger ?? consoleLogger,
-					);
-					return store;
-				})();
 			},
 		},
 	});

@@ -59,6 +59,11 @@ const UNTOUCHED: AuditSlot = { beforeProviders: () => {}, provided: (_key, value
  * `Symbol.asyncDispose`, so boot's dispose reaches it as it would unwrapped.
  * The hooks are contributions and are not disposed.
  *
+ * The fan-out is core's own and frozen, its disposable copy included, so a
+ * write to the slot's value throws in strict-mode code. The sink it wraps is
+ * the host's or the provider's and is not frozen, and without an
+ * `auditHooks` contribution the slot holds that sink as it was given.
+ *
  * A contributed hook with no `auditHooks` collector to read is a broken
  * invariant (the planner always merges it), refused rather than left a
  * fan-out to nothing.
@@ -86,12 +91,12 @@ export function auditSlotFor(
 		});
 		const dispose = (own as { [Symbol.asyncDispose]?: unknown } | undefined)?.[Symbol.asyncDispose];
 		if (typeof dispose !== "function") return composite;
-		const disposable: AuditSink & AsyncDisposable = {
+		const disposable: AuditSink & AsyncDisposable = Object.freeze({
 			...composite,
 			[Symbol.asyncDispose]: async () => {
 				await dispose.call(own);
 			},
-		};
+		});
 		return disposable;
 	};
 	const provider = plan.providerActivations.some(

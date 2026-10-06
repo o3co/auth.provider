@@ -488,7 +488,6 @@ describe("isDefiniteFederationRefreshFailure — a refresh the upstream provably
 			upstream({ error: "invalid_grant", status: 400 }),
 			upstream({ error: "interaction_required", status: 400 }),
 			upstream({ status: 429 }),
-			upstream({ status: 503 }),
 			upstream({ status: 501 }),
 			// A known refusal code on the thrown value, with no status beside it.
 			{ error: "invalid_client" },
@@ -501,7 +500,7 @@ describe("isDefiniteFederationRefreshFailure — a refresh the upstream provably
 	});
 
 	it("is not a status a forwarded request may have come back with", () => {
-		for (const status of [408, 499, 500, 502, 504, 522]) {
+		for (const status of [408, 499, 500, 502, 503, 504, 522]) {
 			expect(isDefiniteFederationRefreshFailure(upstream({ status })), String(status)).toBe(false);
 		}
 	});

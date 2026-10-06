@@ -41,12 +41,20 @@
  * write past it is never applied after the adapter stopped waiting. A Store
  * that reads it as passed answers `408`, which is `unexpected_status`. A conditional write that is sent and then fails,
  * its deadline included, is unknown: it may have committed.
+ *
+ * Its write lifetime W is the timeout plus `DEFAULT_CLOCK_SKEW_MS`, and the
+ * factor-set writer issues a conditional write up to `MFA_SUBJECT_LEASE_MAX_MS`
+ * after its read; a `timeout` that would take the two past
+ * `BUNDLED_STORE_WRITE_LIFETIME_MS` is a `RangeError` at construction.
  */
 
 import {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	type ConditionalCreateAnswer,
 	type ConditionalSetRemoveAnswer,
+	DEFAULT_CLOCK_SKEW_MS,
 	fromMfaStoreFactor,
+	MFA_SUBJECT_LEASE_MAX_MS,
 	type MfaFactorRecord,
 	type MfaFactorRecordUpdate,
 	type MfaFactorStore,
@@ -87,6 +95,28 @@ import {
 /** What this adapter's messages lead with. */
 const OWNER = "HttpMfaFactorStore";
 
+/**
+ * The largest `timeout`: a conditional write's lifetime (the timeout plus
+ * `DEFAULT_CLOCK_SKEW_MS`), issued up to `MFA_SUBJECT_LEASE_MAX_MS` after its
+ * read, ends within `BUNDLED_STORE_WRITE_LIFETIME_MS` of that read.
+ */
+const MAX_TIMEOUT_MS =
+	BUNDLED_STORE_WRITE_LIFETIME_MS - MFA_SUBJECT_LEASE_MAX_MS - DEFAULT_CLOCK_SKEW_MS;
+
+/** `timeout` as the transport takes it, and no greater than {@link MAX_TIMEOUT_MS}. */
+function checkTimeout(timeout: unknown): number {
+	const checked = checkStoreTimeout(timeout, OWNER);
+	if (checked > MAX_TIMEOUT_MS) {
+		throw new RangeError(
+			`${OWNER}: "timeout" must be no greater than ${MAX_TIMEOUT_MS} milliseconds: ` +
+				`the timeout plus MFA_SUBJECT_LEASE_MAX_MS (${MFA_SUBJECT_LEASE_MAX_MS}) and ` +
+				`DEFAULT_CLOCK_SKEW_MS (${DEFAULT_CLOCK_SKEW_MS}) must be within ` +
+				`BUNDLED_STORE_WRITE_LIFETIME_MS (${BUNDLED_STORE_WRITE_LIFETIME_MS}), the factor store's write lifetime`,
+		);
+	}
+	return checked;
+}
+
 /** The statuses a conditional create is answered with, each with its outcome body. */
 const CREATE_IF_STATUSES: ReadonlySet<number> = new Set([200, 409]);
 
@@ -101,7 +131,7 @@ export interface HttpMfaFactorStoreOptions {
 	readonly deleteUrl: string;
 	/** The user repository's credential: sent as `Authorization: Bearer <token>`. */
 	readonly bearerToken?: string;
-	/** The whole exchange's deadline, in milliseconds. */
+	/** The whole exchange's deadline, in milliseconds: at most 85 500 000 (see the file header). */
 	readonly timeout: number;
 	/** The most bytes of an answer read. Default `DEFAULT_MAX_RESPONSE_BYTES`. */
 	readonly maxResponseBytes?: number;
@@ -149,7 +179,7 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		});
 		this.#settings = Object.freeze({
 			authorization: bearerAuthorization(bearerToken, OWNER),
-			timeout: checkStoreTimeout(timeout, OWNER),
+			timeout: checkTimeout(timeout),
 			maxResponseBytes: checkStoreResponseCap(maxResponseBytes, OWNER),
 		});
 	}

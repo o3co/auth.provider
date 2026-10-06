@@ -43,7 +43,11 @@
  * Every member runs as a script, on the primary.
  *
  * The store assumes acknowledged writes are not rolled back and
- * `noeviction` (the boot check in `internal/session-lifecycle-eviction.mts`).
+ * `noeviction`, which the factory holds the server to
+ * (`internal/eviction-policy.mts`): an evicted active or closing record drops
+ * a live session's fence or loses its pending work, an evicted replay key lets
+ * a resent write apply again, and the closing index carries no TTL, so an
+ * evicted index hides a closing record from the listing.
  */
 
 import {
@@ -64,6 +68,7 @@ import {
 	type Versioned,
 } from "@o3co/auth-provider-core";
 import type { SessionLifecycleKeys, SessionLifecycleStoreClient } from "./clients.mjs";
+import { requireNoEviction } from "./internal/eviction-policy.mjs";
 import { replayKeyOf } from "./internal/replay-key.mjs";
 import {
 	checkCloseItem,
@@ -216,7 +221,24 @@ const recordOf = (fields: Readonly<Record<string, string>>): Versioned<SessionLi
 	return { value, generation: fields.gen as Versioned<SessionLifecycleRecord>["generation"] };
 };
 
-export function createRedisSessionLifecycleStore(
+/**
+ * The Redis {@link SessionLifecycleStore}. It resolves once the server's
+ * eviction policy passes the gate (`internal/eviction-policy.mts`); an option
+ * it cannot use rejects before the server is asked.
+ */
+export async function createRedisSessionLifecycleStore(
+	options: RedisSessionLifecycleStoreOptions,
+): Promise<SessionLifecycleStore> {
+	const store = buildRedisSessionLifecycleStore(options);
+	await requireNoEviction("sessionLifecycleStore", () => options.client.durability(), {
+		reason: "session-lifecycle-store-evictable",
+		holds:
+			"sessions' records, writes' replay keys and the closing index, and losing one lets a closed session be opened and joined again, a resent write apply again, or a closing session drop out of the listing that resumes its work",
+	});
+	return store;
+}
+
+function buildRedisSessionLifecycleStore(
 	options: RedisSessionLifecycleStoreOptions,
 ): SessionLifecycleStore {
 	const { client } = options;

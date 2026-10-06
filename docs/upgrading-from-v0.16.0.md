@@ -562,10 +562,36 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   a composition of your own installs `redisAttemptCounterModule` from
   `@o3co/auth-provider-redis`, whose client the template's `redis-clients`
   module provides as `attemptCounterClient`. Its Redis must run
-  `maxmemory-policy noeviction` (the default). The module refuses the boot on
-  any other policy it reads; a server that will not say boots with the
-  warning `attempt_counter_durability_unchecked`, and the policy is then
-  yours to confirm.
+  `maxmemory-policy noeviction` (the default), which the module holds it to
+  as the next entry says.
+- **BREAKING: the Redis stores that keep durable keys refuse to boot unless
+  the server's `maxmemory-policy` is `noeviction` (#1541).** The attempt counter,
+  the session lifecycle store, the federation token store and the two MFA
+  stores are built only once the server reports `noeviction` (`INFO memory`,
+  then `CONFIG GET maxmemory-policy`). Any other policy refuses the boot —
+  `volatile-*` included, which the MFA stores used to accept with a warning,
+  and a policy the check does not know, which the session lifecycle,
+  federation token and MFA stores used to accept with a log line. So does a
+  policy the server will not report (`INFO` and `CONFIG` refused or renamed
+  for the connection's user), which every one of them used to accept with a
+  log line, and a server that cannot answer at boot, which the session
+  lifecycle and federation token stores used to accept. The refusal is a
+  `provides-factory-failed` whose `cause` is a `RedisStoreEvictableError`
+  (`reason` `<store>-evictable`, `maxmemoryPolicy`, `undefined` when unread).
+  Set `maxmemory-policy noeviction`, or give these stores a Redis of their
+  own. Where the server runs `noeviction` but will not say, assert it:
+  `makeIoredisClients(io, { assumeNoEviction: true })` (or the same option
+  on `makeIoredisMfaFactorStoreClient` / `makeIoredisMfaTransactionStoreClient`;
+  in the standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
+  `redis-clients.assumeNoEviction`). A policy the
+  server does report always overrides the assertion. The log lines
+  `attempt_counter_durability_unchecked`,
+  `session_lifecycle_store_eviction_unchecked`,
+  `federation_token_store_eviction_unchecked`,
+  `mfa_factor_store_tombstone_evictable` and
+  `mfa_transaction_store_lock_evictable` are gone; the MFA stores'
+  `…_durability_unchecked` now names only the persistence it could not read
+  (`appendonly`, `save`).
 - **BREAKING: the Redis federation stores read the environment's name
   trimmed and in lower case (#826).** The plaintext guard of
   `redis-federation-token-store` and `redis-federation-grant-store` matched
@@ -889,6 +915,13 @@ modules fills them.
   `contribute-factory-failed`); in sloppy-mode code the write is silently
   ignored. Either way the value does not change. Copy what the module needs,
   or set the value in the configuration (#1492).
+- **A write to the audit fan-out throws.** When a module contributes
+  `auditHooks`, the `auditSink` slot holds core's fan-out, and it is now
+  frozen: assigning to it (`deps.auditSink.record = ...`) throws a
+  `TypeError` in strict-mode code, which refuses boot when a factory does it.
+  The sink the fan-out wraps — the host's or a provider's — is not frozen,
+  and without a hook the slot holds that sink as it was given. Wrap the sink
+  in a module of your own, or contribute a hook, instead (#1532).
 - **Core checks the `csrfGuard` slot where boot fills it, and every reader
   receives a frozen copy of the guard.** Whatever fills the slot — a module's
   `provides`, or a `bootstrapComponents` or `overrideComponents` entry — boot
@@ -1814,6 +1847,17 @@ modules fills them.
   `RedirectUriRejection` `query-name-invalid` and `reserved-parameter` (#1044);
   `FederationGrantReauthorizationResult` loses `connection_not_configured`
   (#963). An exhaustive `switch` over one needs the change.
+- **BREAKING: the Redis factories of the stores that keep durable keys are
+  async (#1541).** `createRedisAttemptCounter`, `createRedisSessionLifecycleStore`,
+  `createRedisFederationTokenStore`, `createRedisMfaFactorStore` and
+  `createRedisMfaTransactionStore` return a `Promise` of the store, and so
+  does `redisFederationTokenStoreBuilder`: each resolves once the server
+  passes the eviction gate (the entry under
+  [Values read more strictly](#values-read-more-strictly)), and an option it
+  refuses rejects rather than throws. `await` them. A client of your own
+  that implements `durability()` may report the operator's assertion as
+  `RedisDurability.assumeNoEviction`. `redisAttemptCounterModule` no longer
+  reads the `logger` slot.
 
 ## Stores and records you implement
 
@@ -1921,9 +1965,27 @@ with what a store of yours records and refuses. Per port:
   writes are `createIf`, `removeIf` and the reset `removeAllForSubject`, at
   the generation `listVersioned` answered; it has no unconditional `create`
   or `remove` (#1121, #1179, #1236). An `MfaTransactionStore` answers
-  `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
+  `rebindAfterMs` on every subject-recovery answer (#1238). One written
+  against a 0.17 release candidate implements
+  `consumeEmailProofRequirement(subject, { leaseToken })` in place of
+  `consumeEmailProofRequirement(subject)`: consuming the email-proof
+  requirement is checked against the subject's lease, atomically, the lease
+  checked and the requirement cleared in one step. It answers
+  `{ outcome: "consumed" }`, `{ outcome: "absent" }` or
+  `{ outcome: "refused", reason: "lease_not_held" }`, and refuses a call
+  without a lease token with a `RangeError`
+  (`checkEmailProofRequirementConsume`). Run
+  `runMfaEmailProofRequirementContract` beside the store's suite: copy
+  `packages/redis/__tests__/adapters.mfa-email-proof-requirement.contract.mts`,
+  which imports only `@o3co/auth-provider-core`. The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
-  and the [test kit](../packages/test-kit/README.md).
+  and the [test kit](../packages/test-kit/README.md). An
+  `MfaTransactionStoreClient` of your own, written against a 0.17 release
+  candidate, implements `consumeEmailProof(keys, leaseToken)` in place of
+  `consumeEmailProof(key)`: it removes the email-proof requirement at
+  `keys.proof` only while the lease at `keys.lease` holds `leaseToken`, in one
+  atomic step, and answers `{ held: false }` or `{ held: true, removed }`.
+  `makeIoredisMfaTransactionStoreClient` provides it.
 - **A second factor of your own (`MfaFactor`)** answers each challenge's and
   enrollment start's `response` as a plain JSON-shaped object — no class
   instance, list or `-0`, every own key an enumerable string, at any depth —
@@ -2042,6 +2104,22 @@ if you run a Store, then go `optional` — users enroll at their own pace — an
 of a user with no counting factor is asked to log in again, and that login
 binds their first factor.
 
+**Email factors enrolled on a 0.17.0 pre-release, for an address whose local
+part has upper-case letters, are enrolled again.** The provider now keeps an
+address's local part in the case the user record holds it, and lower-cases
+only the domain (`normaliseMailAddress`): a code goes to the local part as it
+is written, and the digest an email factor records is of that spelling. A
+factor such a pre-release enrolled for `Alice@example.com` recorded the
+digest of `alice@example.com`, so it now reads as `address_changed`: no
+login code is sent for it. The user enrolls a replacement factor first — the
+address again, or another factor — and then removes the stale one; under
+`mfa.mode = "required"` removing it while it is the only counting factor is
+`409 mfa_last_factor`, since neither it nor a recovery set stands in for a
+usable counting factor. A user with no other usable factor gives the recent
+MFA the enrollment needs with a recovery code, or an operator resets the
+subject ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
+Factors for addresses whose local part is all lower case are not affected.
+
 ### The standalone template
 
 `MFA_MODE` binds the template's own key, `mfaMode` (#1245), default
@@ -2057,6 +2135,13 @@ Turning it on — or leaving the default on — needs:
 - **`MFA_ENCRYPTION_KEY`**, canonical base64 of 32 bytes
   (`openssl rand -base64 32`). In development, write your own key in
   `config/development.conf` rather than exporting it beside the sample key.
+  The sample key is accepted only in an explicit development or test
+  environment: the name the configuration was selected by and `NODE_ENV`,
+  each where set, must say `development` or `test`, and at least one must be
+  set. A composition that uses the sample key outside an explicit development
+  or test environment — under another name such as `prod` or `local`, or
+  under no name at all — refuses to boot. Some pre-release builds accepted
+  it there.
 - **`MFA_PAGE_URL`** (default `/mfa`): your MFA page, on the issuer's origin.
   The template ships none; what it keeps is
   [The MFA page's contract](../packages/mfa/README.md#the-mfa-pages-contract).
@@ -2095,11 +2180,18 @@ are the template README's
    table. The page is `mfa.page.url` (`MFA_PAGE_URL`): `endpoints.mfa.url` and
    `ENDPOINTS_MFA_URL`, which some pre-release builds read, refuse the boot.
 3. Set `MFA_ENCRYPTION_KEY`, and `STANDARD_SMTP_MAIL_SENDER_*` where mail is
-   sent. There is no `MFA_NOTICES`: notices to the account holder are yours,
+   sent. The development sample key boots only where `mfaModule({ environment })`
+   and `NODE_ENV`, each where set, say `development` or `test`, with at least
+   one set. There is no `MFA_NOTICES`: notices to the account holder are yours,
    built from the audit events
    ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
 4. Make the Redis the factor store uses durable; give the Store `mfaEnrolled`
    and `markMfaEnrolledUrl` ([the checklist](#store-implementer-checklist-before-switching-to-required)).
+   With the factors in the Store, keep the Store transport's `timeout`
+   (`repositories.user.http.timeout`, which the user repository shares) at
+   most 85 500 000 ms: `HttpMfaFactorStore` refuses a larger one at
+   construction with a `RangeError`, and `foundationMfaFactorStoreModule`
+   refuses the boot ([foundation's README](../packages/foundation/README.md#constructor-validation)).
 5. Teach the login page `403 mfa_required` / `mfa_enrollment_required`; build
    the MFA page and the account page.
 6. Teach BFFs using the `session` grant its `step_up` member, and the

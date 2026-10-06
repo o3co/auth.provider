@@ -54,6 +54,7 @@ import {
 	makeIoredisSubjectSessionIndexClient,
 	makeIoredisUserSessionStoreClient,
 } from "./ioredis/clients/user-sessions.mjs";
+import type { IoredisDurabilityOptions } from "./ioredis/durability.mjs";
 
 export {
 	type FederationGrantRedisCommands,
@@ -64,11 +65,15 @@ export {
 	type FederationGrantIntentRedisCommands,
 	makeIoredisFederationGrantIntentStoreClient,
 } from "./ioredis/clients/federation-grant-intent.mjs";
-
+export type { IoredisDurabilityOptions } from "./ioredis/durability.mjs";
 export { makeIoredisMfaFactorStoreClient, makeIoredisMfaTransactionStoreClient };
 
-/** Options for {@link makeIoredisClients}. */
-export interface IoredisClientsOptions {
+/**
+ * Options for {@link makeIoredisClients}. `assumeNoEviction` reaches the durability report of
+ * each client whose store runs the eviction gate: the attempt counter's, the session lifecycle
+ * store's, the federation token store's and the two MFA stores'.
+ */
+export interface IoredisClientsOptions extends IoredisDurabilityOptions {
 	/**
 	 * Where errors from connections the wrapper opens itself (the refresh-token family's
 	 * `duplicate()`) are reported; defaults to `consoleLogger`. An `EventLogger` rather than a
@@ -111,6 +116,8 @@ export function makeIoredisClients(
 	mfaTransactionStoreClient: MfaTransactionStoreClient;
 } {
 	const logger = options.logger ?? consoleLogger;
+	const durability: IoredisDurabilityOptions =
+		options.assumeNoEviction === undefined ? {} : { assumeNoEviction: options.assumeNoEviction };
 
 	const challengeStoreClient = makeIoredisChallengeStoreClient(io);
 	const accessTokenDenylistClient = makeIoredisAccessTokenDenylistClient(io);
@@ -119,7 +126,7 @@ export function makeIoredisClients(
 	const userSessionStoreClient = makeIoredisUserSessionStoreClient(io);
 	const subjectSessionIndexClient = makeIoredisSubjectSessionIndexClient(io);
 	const subjectRevocationClient = makeIoredisSubjectRevocationClient(io);
-	const federationTokenStoreClient = makeIoredisFederationTokenStoreClient(io);
+	const federationTokenStoreClient = makeIoredisFederationTokenStoreClient(io, durability);
 	const rateLimiterClient = makeIoredisRateLimiterClient(io);
 	const codeRepositoryClient = makeIoredisCodeRepositoryClient(io);
 	const deviceCodeStoreClient = makeIoredisDeviceCodeStoreClient(io);
@@ -135,14 +142,14 @@ export function makeIoredisClients(
 		subjectSessionIndexClient,
 		subjectRevocationClient,
 		federationTokenStoreClient,
-		sessionLifecycleStoreClient: makeIoredisSessionLifecycleStoreClient(io),
+		sessionLifecycleStoreClient: makeIoredisSessionLifecycleStoreClient(io, durability),
 		rateLimiterClient,
-		attemptCounterClient: makeIoredisAttemptCounterClient(io),
+		attemptCounterClient: makeIoredisAttemptCounterClient(io, durability),
 		codeRepositoryClient,
 		deviceCodeStoreClient,
 		consentStoreClient,
 		pendingConsentStoreClient,
-		mfaFactorStoreClient: makeIoredisMfaFactorStoreClient(io),
-		mfaTransactionStoreClient: makeIoredisMfaTransactionStoreClient(io),
+		mfaFactorStoreClient: makeIoredisMfaFactorStoreClient(io, durability),
+		mfaTransactionStoreClient: makeIoredisMfaTransactionStoreClient(io, durability),
 	};
 }
