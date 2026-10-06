@@ -281,24 +281,28 @@ describe("session grant — the minting instant", () => {
 			get: async (sid: string) => (sid === tracked.sid ? tracked : null),
 			delete: async () => {},
 		} as unknown as UserSessionStore;
+		// Its record, opened by its login: admitted before the policy runs.
+		const sessionLifecycleStore = createInMemorySessionLifecycleStore();
+		expect(
+			(await sessionLifecycleStore.open(tracked.sid, tracked.sub, tracked.expiresAt)).outcome,
+		).toBe("opened");
+		const evaluate = vi.fn(async () => {
+			vi.setSystemTime(answered);
+			return { outcome: "allow" as const };
+		});
 		const { result } = await createSessionGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore: createSymmetricKeyStore("session-policy-test-secret-32-bytes"),
 			userSessionStore,
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
-			grantPolicy: {
-				kind: "slow",
-				evaluate: async () => {
-					vi.setSystemTime(answered);
-					return { outcome: "allow" };
-				},
-			},
+			sessionLifecycleStore,
+			grantPolicy: { kind: "slow", evaluate },
 		}).handle(
 			ctx(undefined, {
 				session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } },
 			}),
 		);
+		expect(evaluate).toHaveBeenCalledOnce();
 		expect(result).toEqual({
 			status: 400,
 			error: "invalid_grant",
