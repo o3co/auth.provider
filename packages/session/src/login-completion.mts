@@ -60,7 +60,7 @@ export function createLoginCompletion(deps: LoginCompletionDeps): LoginCompletio
 	const { userSessionStore, subjectSessionIndex, sessionLifecycle, sessionTtlMs, csrf } = deps;
 	if (userSessionStore !== undefined && sessionLifecycle === undefined) {
 		throw new Error(
-			"login completion: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores",
+			"login completion: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
 		);
 	}
 	return Object.freeze({

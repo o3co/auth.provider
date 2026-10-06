@@ -17,9 +17,8 @@
 /**
  * A federation grant outlives the session it was agreed through, at both HTTP
  * logout endpoints (ADR 2026-09-17-federation-grants-offline-delegation).
- * `/oauth/logout` runs `cascadeLogout()`; `/session/logout` has its own record
- * hygiene (`invalidateSessionRecords`) and reaches the grant store on no path,
- * by construction. A proof of the helper is not a proof of the endpoints, so
+ * Both close the session through core's session lifecycle, whose close work
+ * reaches the grant store on no path, by construction. A proof of the helper is not a proof of the endpoints, so
  * this drives both, on the standalone, as a deployment composes them: a grant
  * seeded beside a live browser session, the session's records gone afterwards,
  * the grant and its credential exactly as they were, and `/token` still

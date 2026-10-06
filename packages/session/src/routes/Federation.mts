@@ -216,7 +216,7 @@ export const createRouter = (
 	}
 	if (!sessionLifecycle) {
 		throw new Error(
-			"federation routes: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it, and a federation joins a session through it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores",
+			"federation routes: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it, and a federation joins a session through it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
 		);
 	}
 

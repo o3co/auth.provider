@@ -33,8 +33,8 @@
  * Sequence:
  * 1. the record: its lifecycle record opened first, then
  *    `UserSessionStore.create`. Either failing or throwing, or the open
- *    refused, is the record's outage at `create`, with nothing to undo:
- *    an open record with no user session is not live and nothing joins it;
+ *    refused, is the record's outage at `create`; a lifecycle record the
+ *    open wrote is closed again, best effort;
  * 2. `SubjectSessionIndex.addSid`, best effort, at the earliest point the
  *    session exists: a missing entry is a live session a credential change
  *    never finds, while an orphan costs only a redundant cascade;
@@ -319,8 +319,10 @@ export async function establishSession<S extends string = never, T extends strin
 	};
 
 	if (record !== undefined && userSessionStore !== undefined && sessionLifecycle !== undefined) {
+		let opened = false;
 		try {
 			await openLifecycle(sessionLifecycle, record);
+			opened = true;
 			await userSessionStore.create({
 				sid: record.sid,
 				sub,
@@ -334,6 +336,9 @@ export async function establishSession<S extends string = never, T extends strin
 			// Fail-closed: the store's outage, answered as one — never a
 			// session-less login.
 			reporter.storeUnavailable("user_session", "create", err);
+			if (opened) {
+				await cleanUp("user_session", "delete", () => closeLifecycle(sessionLifecycle, record));
+			}
 			return { outcome: "unavailable", store: "user_session", step: "create" };
 		}
 

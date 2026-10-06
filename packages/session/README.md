@@ -557,7 +557,8 @@ written. It runs, in order: the
 `authTime`), its lifecycle record opened first in core's session lifecycle,
 required beside a `UserSessionStore` (one handed without it is a `TypeError`
 before anything is written; an `open` that fails, throws or is refused is the
-record's outage at `create`, its error naming the session lifecycle); the `subjectSessionIndex` entry when that is wired (best-effort:
+record's outage at `create`, its error naming the session lifecycle, and a
+`create` that fails after the open closes the opened record again); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the
 regeneration; the express session's regeneration (session fixation); the
 caller's steps after it; `isAuthenticated`, `user`, `sid` and the primary's

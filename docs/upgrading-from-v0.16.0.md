@@ -1078,7 +1078,11 @@ modules fills them.
   `installGracefulShutdown` takes `cleanupAllowanceMs` (#797).
 - **BREAKING: where a user-session store is wired, core's session lifecycle
   is required.** A composition that wires `userSessionStore` installs
-  `sessionLifecycleModule` beside it (the standalone template does). Without
+  `sessionLifecycleModule` beside it (the standalone template does; see
+  [Your scaffold](#your-scaffold)), with what that module requires:
+  `sessionLifecycleStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
+  `sessionFederationIndex`, `refreshTokenFamilyRevocation` and
+  `federationTokenStore`. Without
   it the boot is refused: `sessionModule`'s route factories with
   `contribute-factory-failed`, `loginCompletionModule`'s provider with
   `provides-factory-failed`, each message naming `userSessionStore` and

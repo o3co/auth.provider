@@ -178,7 +178,7 @@ export const createRouter = (
 	}
 	if (userSessionStore !== undefined && sessionLifecycle === undefined) {
 		throw new Error(
-			"session routes: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it, and the logout closes the session through it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores",
+			"session routes: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it, and the logout closes the session through it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
 		);
 	}
 	const replicas = checkDeploymentMode(deploymentMode, "session routes: deploymentMode");

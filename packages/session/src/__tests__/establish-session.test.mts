@@ -692,8 +692,20 @@ describe("establishSession", () => {
 			},
 		);
 
-		it("closes nothing when the record's create failed: nothing was established on the sid", async () => {
-			const h = harness({ create: new Error("session store down") });
+		it("closes the record it opened when the record's create failed, after the outage is reported", async () => {
+			const h = harness({ create: new Error("session store down") }, { traceReporter: true });
+
+			await h.run();
+
+			expect(h.sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith(
+				createdSid(h),
+				"session_logout",
+			);
+			expect(h.trace).toEqual(["reporter", "open", "create", "outage", "close"]);
+		});
+
+		it("closes nothing when the open itself failed: no record was opened", async () => {
+			const h = harness({}, { lifecycle: "unavailable" });
 
 			await h.run();
 
@@ -718,7 +730,7 @@ describe("establishSession", () => {
 			const result = await h.run();
 
 			expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
-			expect(h.trace).toEqual(["reporter", "open", "create"]);
+			expect(h.trace).toEqual(["reporter", "open", "create", "close"]);
 			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
 				"user_session",
 				"create",
