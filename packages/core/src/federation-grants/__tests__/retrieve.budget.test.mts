@@ -43,6 +43,12 @@ const failureOf = (
 ): FederationGrantRetrievalFailure | undefined =>
 	result.ok || result.code !== "temporarily_unavailable" ? undefined : result.failure;
 
+/** A refresh that never left: the connection to the upstream was refused. */
+const neverSent = () =>
+	new TypeError("fetch failed", {
+		cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+	});
+
 /**
  * The rotation budget bounds how many upstream refresh-token rotations a grant
  * takes in a window, whatever the upstream answers and whatever a client asks.
@@ -491,9 +497,9 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		const rotationsOf = async () =>
 			((await h.store.find("g-1", now())) as { rotations?: unknown } | null)?.rotations;
 
-		it("gives its rotation back: a sustained outage over a whole window, under the defaults, leaves the budget whole, and the first request after it refreshes", async () => {
+		it("gives its rotation back: a sustained outage that refuses the connection over a whole window, under the defaults, leaves the budget whole, and the first request after it refreshes", async () => {
 			await seedEndingAt(10 * MIN);
-			h.refresh.mockRejectedValue(Object.assign(new Error("service unavailable"), { status: 503 }));
+			h.refresh.mockRejectedValue(neverSent());
 			const start = 20 * MIN;
 			for (let elapsed = start; elapsed < start + HOUR; elapsed += 10_000) {
 				setNow(at(elapsed));
@@ -540,6 +546,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		it.each([
 			["a gateway that timed out", { status: 504 }],
 			["a bad gateway", { status: 502 }],
+			["a service unavailable answer, which a proxy may give after forwarding", { status: 503 }],
 			["an outage the IdP names in its body", { status: 400, error: "temporarily_unavailable" }],
 		])(
 			"keeps the rotation spent for %s: the request may have reached the IdP",
@@ -552,6 +559,45 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			},
 		);
 
+		it("counts a refresh answered 503 against the budget: with one rotation a window, the next request in the window answers the spent budget", async () => {
+			budgetOf(1);
+			await seedEndingAt(10 * MIN);
+			setNow(at(20 * MIN));
+			// The upstream rotated the refresh token, and a proxy in front of it answered 503.
+			h.refresh.mockRejectedValueOnce(
+				Object.assign(new Error("service unavailable"), { status: 503 }),
+			);
+			expect((await retrieve()).ok).toBe(false);
+
+			// Past the failure backoff, within the window the first attempt opened.
+			h.refresh.mockImplementation(async () => refreshed("next", now()));
+			setNow(at(21 * MIN));
+			expect(await retrieve()).toMatchObject({
+				ok: false,
+				code: "rate_limited",
+				reason: "provider",
+				retryAfterSeconds: 59 * 60,
+			});
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+		});
+
+		it("spends the budget over a sustained 503 outage: under the defaults the upstream is asked the budget in the window, and the first request after the window refreshes", async () => {
+			await seedEndingAt(10 * MIN);
+			h.refresh.mockRejectedValue(Object.assign(new Error("service unavailable"), { status: 503 }));
+			const start = 20 * MIN;
+			for (let elapsed = start; elapsed < start + HOUR; elapsed += 10_000) {
+				setNow(at(elapsed));
+				expect((await retrieve()).ok).toBe(false);
+			}
+			expect(h.refresh).toHaveBeenCalledTimes(24);
+			expect(await rotationsOf()).toMatchObject({ count: 24 });
+
+			h.refresh.mockReset();
+			h.refresh.mockImplementation(async () => refreshed("back", now()));
+			setNow(at(start + HOUR + MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-back", refreshed: true });
+		});
+
 		it("asks nothing back when the stamp lost on the version: the race is the grant's news, not the budget's", async () => {
 			await seedEndingAt(10 * MIN);
 			const refund = vi.fn(async () => ({ ok: true as const, grant: {} as never }));
@@ -563,7 +609,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			const reported: string[] = [];
 			h.deps.report = (failure) => reported.push(failure.during);
 			setNow(at(20 * MIN));
-			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			h.refresh.mockRejectedValueOnce(neverSent());
 			expect(await retrieve()).toMatchObject({ ok: false, code: "temporarily_unavailable" });
 			expect(refund).not.toHaveBeenCalled();
 			expect(reported).not.toContain("rotation");
@@ -576,7 +622,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			const reported: string[] = [];
 			h.deps.report = (failure) => reported.push(failure.during);
 			setNow(at(20 * MIN));
-			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			h.refresh.mockRejectedValueOnce(neverSent());
 			const answer = retrieve();
 			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs);
 			expect(await answer).toMatchObject({ ok: false, code: "temporarily_unavailable" });
@@ -614,7 +660,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 				const reported: string[] = [];
 				h.deps.report = (failure) => reported.push(failure.during);
 				setNow(at(20 * MIN));
-				h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+				h.refresh.mockRejectedValueOnce(neverSent());
 				expect(await retrieve()).toStrictEqual({
 					ok: false,
 					code: "temporarily_unavailable",
@@ -666,7 +712,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		it("guards the failure stamp and the give-back by it", async () => {
 			const grant = await seedEndingAt(10 * MIN);
 			const named = guardedWrites();
-			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			h.refresh.mockRejectedValueOnce(neverSent());
 			setNow(at(20 * MIN));
 			expect(await retrieve()).toMatchObject({ ok: false, code: "temporarily_unavailable" });
 			expect(named).toEqual([
@@ -807,7 +853,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			};
 
 			setNow(at(20 * MIN));
-			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			h.refresh.mockRejectedValueOnce(neverSent());
 			const first = retrieve();
 			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs);
 			expect(await first).toMatchObject({ ok: false, code: "temporarily_unavailable" });
