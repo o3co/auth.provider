@@ -1176,6 +1176,12 @@ modules fills them.
   is core's `session_close_item_failed`. A federated login and a link join
   their federation through the lifecycle only; the federated login no longer
   writes the `sessionFederationIndex` entry itself.
+- **BREAKING: every failed close at `POST /session/logout` is an outage.** A
+  logout whose `sid` the session lifecycle cannot hold now answers
+  `503 temporarily_unavailable` and keeps the cookie, as any close the
+  lifecycle rejects does, instead of `200`. The warn
+  `session_logout_sid_not_closable` is removed. A login never writes such a
+  sid, so this is not expected in practice.
 - **A login's rollback closes the session's lifecycle record.** When a login
   fails after its record was created (a cookie-session regeneration or save,
   a federation's token attach or join), the rollback closes the record it

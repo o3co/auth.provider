@@ -608,24 +608,30 @@ describe("establishSession", () => {
 			},
 		);
 
-		it("an open that throws is the record's outage at create, named as the lifecycle's, its error the cause", async () => {
-			const thrown = new RangeError("session lifecycle: sub must be 1 to 512 characters");
-			const h = harness({}, { lifecycle: thrown });
+		it.each([
+			["the lifecycle store's error", new Error("lifecycle store down")],
+			[
+				"the lifecycle's refusal",
+				new RangeError("session lifecycle: sub must be 1 to 512 characters"),
+			],
+		])(
+			"an open that rejects with %s is the record's outage at create, reported with that error itself",
+			async (_label, thrown) => {
+				const h = harness({}, { lifecycle: thrown });
 
-			const result = await h.run();
+				const result = await h.run();
 
-			expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
-			expect(h.trace).toEqual(["reporter", "open"]);
-			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
-				"user_session",
-				"create",
-				expect.objectContaining({
-					message: "the session lifecycle could not open the session",
-					cause: thrown,
-				}),
-			);
-			expect(h.req.session).toMatchObject({ id: "stale" });
-		});
+				expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
+				expect(h.trace).toEqual(["reporter", "open"]);
+				expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+					"user_session",
+					"create",
+					thrown,
+				);
+				expect(h.reporter.cleanupFailed).not.toHaveBeenCalled();
+				expect(h.req.session).toMatchObject({ id: "stale" });
+			},
+		);
 
 		it("refuses a UserSessionStore without a session lifecycle, naming both, before anything is written", async () => {
 			const h = harness({}, { lifecycle: false });
@@ -670,7 +676,7 @@ describe("establishSession", () => {
 			["rejects", new Error("lifecycle store down")],
 			["answers unavailable", "unavailable" as const],
 		])(
-			"a close that %s is the record's failed rollback step, named as the lifecycle's; the rest still run",
+			"a close that %s is the record's failed rollback step, reported with the lifecycle's rejection itself or named as the lifecycle's answer; the rest still run",
 			async (_label, close) => {
 				const h = harness({ save: new Error("cookie store down"), close });
 
@@ -681,10 +687,7 @@ describe("establishSession", () => {
 					"user_session",
 					"delete",
 					close instanceof Error
-						? expect.objectContaining({
-								message: "the session lifecycle could not close the session",
-								cause: close,
-							})
+						? close
 						: expect.objectContaining({
 								message: "the session lifecycle answered unavailable to the close",
 							}),
@@ -702,6 +705,19 @@ describe("establishSession", () => {
 				"session_logout",
 			);
 			expect(h.trace).toEqual(["reporter", "open", "create", "outage", "close"]);
+		});
+
+		it("a close that rejects after the record's create failed is reported with the lifecycle's rejection itself", async () => {
+			const close = new Error("lifecycle store down");
+			const h = harness({ create: new Error("session store down"), close });
+
+			await h.run();
+
+			expect(h.reporter.cleanupFailed).toHaveBeenCalledExactlyOnceWith(
+				"user_session",
+				"delete",
+				close,
+			);
 		});
 
 		it("closes nothing when the open itself failed: no record was opened", async () => {
