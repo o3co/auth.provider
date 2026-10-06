@@ -295,6 +295,98 @@ describe("a first binding in a session after the subject's first binding elsewhe
 		expect(await transactionStore.firstBindingAt(ALICE.id, Date.now())).toBe(earlierAtMs);
 	});
 
+	it("is refused when another completion's note, not answered within its Store timeout, lands after this completion read no mark under the lease: nothing written, the transaction kept", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, users } = await composed(
+			"optional",
+			undefined,
+			{ storeTimeoutMs: 1_000 },
+		);
+		const first = await signIn(app, userSessionStore);
+		const second = await signIn(app, userSessionStore);
+		const firstBegun = await enrollFromAccount(first.agent, "totp");
+		const secondBegun = await enrollFromAccount(second.agent, "totp");
+		expect(firstBegun.status, JSON.stringify(firstBegun.body)).toBe(200);
+		expect(secondBegun.status, JSON.stringify(secondBegun.body)).toBe(200);
+		freezeClock(T0 + 30_000);
+		const note = transactionStore.noteFirstBinding.bind(transactionStore);
+		let land: () => Promise<unknown> = async () => undefined;
+		const read = transactionStore.firstBindingAt.bind(transactionStore);
+		const reads: (number | null)[] = [];
+		vi.spyOn(transactionStore, "firstBindingAt").mockImplementation(async (...args) => {
+			const answer = await read(...args);
+			reads.push(answer);
+			return answer;
+		});
+		vi.spyOn(transactionStore, "noteFirstBinding")
+			// The first completion's note is not answered within its Store timeout; it lands later.
+			.mockImplementationOnce((...args) => {
+				land = () => note(...args);
+				return new Promise(() => {});
+			})
+			.mockImplementationOnce(async (subject, atMs, untilMs) => {
+				await land();
+				return note(subject, atMs, untilMs);
+			});
+
+		const given = await completeEnrollment(
+			first.agent,
+			firstBegun.body.transaction as string,
+			totpProofOf(firstBegun.body.secret),
+		);
+		expect(given.status, JSON.stringify(given.body)).toBe(503);
+		reads.length = 0;
+		const res = await completeEnrollment(
+			second.agent,
+			secondBegun.body.transaction as string,
+			totpProofOf(secondBegun.body.secret),
+		);
+
+		// Every read this completion made, before and under its lease, found no mark.
+		expect(reads.length).toBeGreaterThanOrEqual(2);
+		expect(reads.every((read) => read === null)).toBe(true);
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(users.marks).toEqual([]);
+		expect(await transactionStore.get(secondBegun.body.transaction as string)).toMatchObject({
+			pendingEnrollment: { kind: "totp" },
+			attempts: 1,
+		});
+		expect(await transactionStore.firstBindingAt(ALICE.id, Date.now())).toBe(T0 + 30_000);
+	});
+
+	it("answers Retry-After until the mark the store keeps lets a sign-in through, when its note answers an earlier mark: a fresh sign-in after it binds", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed("optional");
+		const stale = await signIn(app, userSessionStore);
+		const pending = await enrollFromAccount(stale.agent, "totp");
+		expect(pending.status, JSON.stringify(pending.body)).toBe(200);
+		const earlierAtMs = T0 + 30_000;
+		freezeClock(T0 + 90_000);
+		const note = transactionStore.noteFirstBinding.bind(transactionStore);
+		vi.spyOn(transactionStore, "noteFirstBinding").mockImplementationOnce(
+			async (subject, atMs, untilMs) => {
+				await note(subject, earlierAtMs, earlierAtMs + LIFETIME_MS);
+				return note(subject, atMs, untilMs);
+			},
+		);
+
+		const res = await completeEnrollment(
+			stale.agent,
+			pending.body.transaction as string,
+			totpProofOf(pending.body.secret),
+		);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		// The store keeps the later of the two marks, this completion's own: the wait runs from it.
+		expect(await transactionStore.firstBindingAt(ALICE.id, Date.now())).toBe(T0 + 90_000);
+		const waitSeconds = Number(res.headers["retry-after"]);
+		expect(waitSeconds).toBe(Math.ceil((DEFAULT_CLOCK_SKEW_MS + LEASE_MS + 1) / 1000));
+		freezeClock(T0 + 90_000 + waitSeconds * 1000);
+		const fresh = await signIn(app, userSessionStore);
+		expect((await bindFromAccount(fresh.agent)).status).toBe(200);
+		expect((await factorStore.list(ALICE.id)).filter((r) => r.kind === "totp")).toHaveLength(1);
+	});
+
 	it("is refused when a verification's note, not answered in time, lands after the read under the lease: the earlier mark protects as a note answered in time does", async () => {
 		const { app, factorStore, transactionStore, userSessionStore, logger } =
 			await composed("optional");
@@ -866,6 +958,76 @@ describe("noting the mark", () => {
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(note).not.toHaveBeenCalled();
+	});
+
+	it("refuses a first binding 503 when the note answers outside the port, writing no factor, no codes and no witness, the transaction kept", async () => {
+		for (const answer of ["soon", -1, 1.5, Number.NaN, { atMs: 1 }, true]) {
+			const { app, factorStore, transactionStore, userSessionStore, users, logger } =
+				await composed("optional");
+			const note = transactionStore.noteFirstBinding.bind(transactionStore);
+			vi.spyOn(transactionStore, "noteFirstBinding").mockImplementation(
+				async (subject, atMs, untilMs) => {
+					await note(subject, atMs, untilMs);
+					return answer as never;
+				},
+			);
+			const { agent } = await signIn(app, userSessionStore);
+			const begun = await enrollFromAccount(agent, "totp");
+			const transaction = begun.body.transaction as string;
+
+			const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+			const label = JSON.stringify(answer) ?? String(answer);
+			expect(res.status, label).toBe(503);
+			expect(res.body, label).toEqual(MFA_UNAVAILABLE);
+			expect(await factorStore.list(ALICE.id), label).toEqual([]);
+			expect(users.marks, label).toEqual([]);
+			expect(await transactionStore.get(transaction), label).toMatchObject({
+				pendingEnrollment: { kind: "totp" },
+				attempts: 1,
+			});
+			expect(logger.error.mock.calls, label).toContainEqual([
+				expect.objectContaining({ store: "mfa_transaction", step: "noteFirstBinding" }),
+				"mfa_store_unavailable",
+			]);
+			await disposeAll();
+		}
+	});
+
+	it("leaves the witness unmarked, and says so once at warn, when a verification's note answers outside the port: the login completes", async () => {
+		const { app, factorStore, transactionStore, users, logger } = await composed("required");
+		const seeded = await seedTotp(factorStore);
+		const note = transactionStore.noteFirstBinding.bind(transactionStore);
+		vi.spyOn(transactionStore, "noteFirstBinding").mockImplementation(
+			async (subject, atMs, untilMs) => {
+				await note(subject, atMs, untilMs);
+				return "soon" as never;
+			},
+		);
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, seeded.record.id, totpCode(seeded.secret));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(users.marks).toEqual([]);
+		expect(
+			events(logger, "warn").filter((event) => event === "mfa_first_binding_unnoted"),
+		).toHaveLength(1);
+	});
+
+	it("marks the witness when a verification's note answers an earlier mark that distrusts the login's sign-in: it is no first binding, and judges nothing", async () => {
+		const { app, factorStore, transactionStore, users } = await composed("required");
+		const seeded = await seedTotp(factorStore);
+		await transactionStore.noteFirstBinding(ALICE.id, T0, T0 + LIFETIME_MS);
+		const note = vi.spyOn(transactionStore, "noteFirstBinding");
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, seeded.record.id, totpCode(seeded.secret));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(note).toHaveBeenCalledTimes(1);
+		expect(await note.mock.results[0]?.value).toBe(T0);
+		expect(users.marks).toEqual([{ subject: ALICE.id, enrolled: true }]);
 	});
 
 	it("leaves the witness unmarked, and says so once at warn, when a verification cannot note the mark: the login completes", async () => {

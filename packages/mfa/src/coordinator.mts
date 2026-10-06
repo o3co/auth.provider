@@ -656,18 +656,24 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		}
 	};
 
-	/** The refusal of an authentication at `authTimeMs` a mark at `markAtMs` distrusts, judged at `nowMs`; else `undefined`. */
+	/**
+	 * The refusal of an authentication at `authTimeMs` a mark at `markAtMs`
+	 * distrusts, judged at `nowMs`, until a sign-in after `keptAtMs` — the
+	 * mark the store keeps, `markAtMs` unless a later note moved it — is
+	 * trusted; else `undefined`.
+	 */
 	const distrustedBy = (
 		subject: string,
 		authTimeMs: number | undefined,
 		markAtMs: number | null,
 		nowMs: number,
+		keptAtMs: number | null = markAtMs,
 	): MfaFirstBindingDistrusted | undefined =>
 		markAtMs !== null && firstBindingMark.distrusts(authTimeMs, markAtMs)
 			? {
 					outcome: "first_binding_distrusted",
 					subject,
-					retryAfterMs: firstBindingMark.retryAfterMs(markAtMs, nowMs),
+					retryAfterMs: firstBindingMark.retryAfterMs(keptAtMs ?? markAtMs, nowMs),
 				}
 			: undefined;
 
@@ -773,7 +779,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		noteFirstBinding: async (subject, authTimeMs) => {
 			const noted = await noteFirstBinding(subject);
 			if ("outcome" in noted) return noted;
-			return distrustedBy(subject, authTimeMs, noted.earlierAtMs, noted.atMs);
+			// Judged on the mark that stood before; waited out from the later of it and
+			// this note's, which the store keeps.
+			return distrustedBy(
+				subject,
+				authTimeMs,
+				noted.earlierAtMs,
+				noted.atMs,
+				noted.earlierAtMs === null ? null : Math.max(noted.earlierAtMs, noted.atMs),
+			);
 		},
 		reconcileWitness: async (subject, started) => {
 			// A directory that cannot write the witness leaves no session stale: no mark is due.
