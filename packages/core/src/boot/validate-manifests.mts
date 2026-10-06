@@ -3253,9 +3253,9 @@ function checkRelocatedConfigPaths(rawModules: readonly Module[], bootstrap: Boo
  * A variable a loaded module — or core — declares renamed refuses boot
  * (`environment-variable-renamed`) by what the resolution captured of it in
  * the configuration's reserved section (`findRenamedVariables`): the old name
- * set while the new one is unset or set to a different string; a removed
+ * set, whether or not the new one is set and whatever either holds; a removed
  * key's variable set; or a name not captured, which cannot be told from one
- * set. The two set to the same string boot. Names every such variable in
+ * set. Only the new name set boots. Names every such variable in
  * module and declaration order, with its new name and the path that name is
  * bound to, and no value.
  * @internal
@@ -3495,7 +3495,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	},
 	{
 		id: "renamed-environment-variables",
-		spec: "issue #728 (a variable renamed with a move refuses boot unless its new name carries the same value)",
+		spec: "issue #728 (a variable renamed with a move refuses boot while its old name is set)",
 		run: (ctx) => checkRenamedEnvironmentVariables(ctx.relocating, ctx.bootstrapComponents),
 	},
 ]);

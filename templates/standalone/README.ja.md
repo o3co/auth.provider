@@ -58,6 +58,8 @@ my-app:
 
 ロードバランサ配下で standalone サーバーを複数インスタンス動かすときは、`REDIS_CLIENTS_URL` を**共有**の Redis 7.2+ インスタンスに向けること。共有の Redis URL が無いと、各レプリカは refresh token family を自分の接続（と、ローカル専用の Redis）に保持するため、トークンを発行していないレプリカに届いた refresh リクエストは `invalid_grant` を返し、ラウンドロビンの LB では 1 回おきにそうなる。
 
+**その Redis は `maxmemory-policy noeviction`（Redis のデフォルト）で動かすこと。** 期限まで残らなければならないキーを持つ Redis のストア — attempt counter、ユーザーセッションストアのライフサイクルストア、フェデレーショントークンストア、MFA のストア — は起動時にポリシーを読む（`INFO memory`、次に `CONFIG GET maxmemory-policy`）。ほかのポリシーでは起動を拒否し、サーバーがポリシーを答えないときも拒否する。接続のユーザーが `INFO` や `CONFIG` を実行できない（ACL で制限されたユーザー、それらを改名するマネージドサービス）が、サーバーが `noeviction` で動いていると分かっているなら、`REDIS_CLIENTS_ASSUME_NO_EVICTION=true`（`redis-clients.assumeNoEviction`、デフォルト `false`）を設定すること。これはポリシーを読めないときにだけ読まれる: サーバーが答えたポリシーが常に優先するので、`allkeys-*` や `volatile-*` のサーバーを通すことはない。
+
 **ロードバランサ配下では `HTTP_TRUST_PROXY` をプロキシのアドレスに設定すること。** デフォルトは `false` で、この場合 `req.ip` はクライアントではなく*ロードバランサの*アドレスになる。すると IP をキーとするすべての rate limit — OAuth エンドポイントの limiter と `POST /session/login` の総当たり対策ガード — が**全ユーザーで 1 つのバケットを共有する**: 誰からであれ最初の 20 回のログイン試行でウィンドウを使い切り、以降のユーザーは全員 `429` を受け取る。この障害は設定ミスではなく攻撃のように見えるため、深夜 3 時の診断が高くつく。このサービスの前段で何かが TLS を終端したりプロキシしたりしているなら必ず設定し、`X-Forwarded-For` を設定しているのがそのホップであることを確認すること。`ip` のない監査イベントは、リクエストのアドレスがアドレスでなかった — `req.ip` がアドレス以外を入れた `X-Forwarded-For` から来た — ことを意味するので、`HTTP_TRUST_PROXY` がそのヘッダーを設定するホップだけを信頼しているか確認すること。
 
 取りうる形は 4 つで、いずれも Express 自身のものである:
@@ -77,7 +79,7 @@ allowlist はネットワーク上の制御であって、暗号学的な制御�
 
 **MFA ルートの予算はリミッターのものである。** MFA パッケージは自身のルートの予算を持たない: `/session/mfa` への POST はすべて、配線されたリミッターだけによって、クライアントアドレスごとにプレフィックス `mfa` の下で制限される。`config/reference.conf` は両方のリミッターに `limits.mfa { limit = 60, windowSeconds = 300 }`（`core-rate-limiter-memory.limits.mfa`、`redis-rate-limiter.limits.mfa`）を与えるので、`adapters.rateLimiter` を切り替えてもこの予算は保たれる。そこでは既定値なので、構成が配線しないリミッターがこれを持っていても、boot はそのセクションの名前を出さない。変えるなら、配線したリミッターについて `config/application.conf` か自分のレイヤーで変えること。エントリがなければリミッターの `defaultLimit`（60 秒あたり 60）が適用される。MFA のロック — トランザクションごとの試行回数、バックオフ、週ごとの失敗回数 — は MFA パッケージ自身のもので、リミッターの設定はこれを変えない。
 
-**`adapters.attemptCounter` を Redis に向けること。** デフォルトは `"memory"` でカウンターを配線しない: ログイン（device grant を加えたときはデバイス検証も）は試行をプロセスごとに数えるので、N レプリカでは `session.rateLimit.login`（と `device-grant.rateLimit`）が上限の N 倍を許し、デプロイのたびにリセットされる。`CORE_DEPLOYMENT_MODE=multi` は起動を拒否する。`"redis"`（`ADAPTERS_ATTEMPT_COUNTER=redis`）は共有の Redis ソケットの上に `redisAttemptCounterModule` を入れる。その Redis は `maxmemory-policy noeviction`（Redis のデフォルト）で動かすこと: 追い出された窓は数え直しになるからである。モジュールはほかのポリシーでは起動を拒否し、サーバーがポリシーを答えない（接続のユーザーに対して `INFO` と `CONFIG` が拒否・改名されている）ときも拒否する。どちらも閉じる側に倒れる: カウンターが答えられない間、`/session/login` と `POST /oauth/device/verification` は `redis-rate-limiter.failMode` が何であっても `503` を返す。
+**`adapters.attemptCounter` を Redis に向けること。** デフォルトは `"memory"` でカウンターを配線しない: ログイン（device grant を加えたときはデバイス検証も）は試行をプロセスごとに数えるので、N レプリカでは `session.rateLimit.login`（と `device-grant.rateLimit`）が上限の N 倍を許し、デプロイのたびにリセットされる。`CORE_DEPLOYMENT_MODE=multi` は起動を拒否する。`"redis"`（`ADAPTERS_ATTEMPT_COUNTER=redis`）は共有の Redis ソケットの上に `redisAttemptCounterModule` を入れる。その Redis は `maxmemory-policy noeviction`（Redis のデフォルト）で動かすこと: 追い出された窓は数え直しになるからである。モジュールはほかのポリシーでは起動を拒否する。サーバーがポリシーを答えないときも、`REDIS_CLIENTS_ASSUME_NO_EVICTION=true`（上記）でない限り拒否する。どちらも閉じる側に倒れる: カウンターが答えられない間、`/session/login` と `POST /oauth/device/verification` は `redis-rate-limiter.failMode` が何であっても `503` を返す。
 
 **BFF の背後では、必要になる前に `limits.token` を上げておくこと。** OAuth エンドポイントの rate limit は `req.ip` をキーにする（`packages/core/src/ratelimit/guard.mts` はバケットキーを `<endpoint>:ip:<req.ip>` として組み立てる）。クライアントがブラウザやネイティブアプリで、このプロバイダーと直接通信しているなら、これは正しい identity である。しかし backend-for-frontend 構成 — サーバー側アプリがセッションを保持し、ユーザーに代わってコード交換と refresh を行う構成 — では誤った identity になる: すべての `/oauth/token` と `/oauth/introspect` の呼び出しが BFF の単一アドレスから届き、デプロイ全体で 1 つのバケットを共有する。デフォルトの 60 秒あたり 60 リクエストでは、**全ユーザー合計で毎分およそ 60 回の session グラント交換**が上限になる — しかもそれは rate limit として表に出てこない。BFF は想定していない `429` を受け取り、それを自分の呼び出し元への `502` に変え、ユーザーが報告する症状は「サインインがときどき壊れる」になる。それは起き始めるトラフィック量に達した時点で現れ、それより前には現れない。
 
@@ -100,7 +102,7 @@ redis-rate-limiter {
 
 **2 つ以上のレプリカを動かすようになったら `CORE_DEPLOYMENT_MODE=multi` を設定すること。** すると、共有が必要な in-memory ストアがまだ配線されていれば起動が*失敗*し、該当するものすべてと、それぞれの代償が名指しされる — ユーザーセッションの分岐（back-channel logout が 1 つのレプリカにしか届かず、ログアウトしたセッションが他のレプリカでは有効なまま）、rate limit カウンターの倍増、アクセストークン失効の未伝播、一度きりのクライアントアサーションや WebAuthn チャレンジがレプリカごとに 1 回ずつ再利用できてしまうこと。このチェックはライブラリのモジュール名のリストではなく、インストールされた各モジュールが自身の manifest に持つ宣言を読むため、このテンプレート独自の in-memory モジュール — ユーザーセッションストア（`ADAPTERS_USER_SESSION_STORES=memory`）、認可コードリポジトリ（`ADAPTERS_CODE_REPOSITORY=memory`）、フェデレーショントークンストア（`ADAPTERS_FEDERATION_TOKEN_STORE=memory`、デフォルト） — も名指しで拒否される。`SESSION_STORE_STORAGE_TYPE=memory` のときの express-session 自身のストア（#474）と、デフォルトの memory の rate limiter（`core-rate-limiter-memory`、`ADAPTERS_RATE_LIMITER=memory`）も同様である。モードが未設定なら何も拒否されない: これらはすべて、起動時の 1 件の `replica_unsafe_adapters` 警告に列挙される。（WebAuthn-options のルートは個別に警告するプロセス単位のフォールバック limiter を持つが、それが働くのは `rateLimiter` をまったく配線しない構成だけで、このテンプレートは常に配線する。ログインは `ADAPTERS_ATTEMPT_COUNTER=memory` のときプロセスごとに数える: `multi` ではログインを名指しして起動が拒否され、モード未設定なら `attempt_counter_not_shared` を警告する。オペレーター runbook を参照。）`CORE_DEPLOYMENT_MODE=single` ではチェックは何も言わない。レプリカは 1 つだと宣言したからである。このテンプレートは DPoP をインストールしない。DPoP を加えた構成では、受け入れた DPoP proof はすべて `private_key_jwt` と同じ replay seen-set（`ADAPTERS_REPLAY_SEEN_SET`）に記録されるため、同じ扱いを受ける — `memory` は `CORE_DEPLOYMENT_MODE=multi` のもとで拒否され、モード未設定なら警告に列挙される。同梱の `redis` なら DPoP の記録もレプリカ間で共有される。dpop パッケージの [operator requirements](../../packages/dpop/README.md#operator-requirements) を参照。
 
-この変数は `core.deployment.mode` を設定する。旧名の `DEPLOYMENT_MODE` は、単独で、または `CORE_DEPLOYMENT_MODE` と異なる値で設定されているとブートを拒否し、同じ値で並べて設定されていればブートする。
+この変数は `core.deployment.mode` を設定する。旧名の `DEPLOYMENT_MODE` は、設定されていれば、単独でも `CORE_DEPLOYMENT_MODE` と並べても、値が何であれブートを拒否する。外すこと。
 
 このチェックに*できない*ことも把握しておくこと: `CORE_DEPLOYMENT_MODE` を一度も設定しないまま N レプリカにスケールしても、何も失敗しない。すべての状態を自分のメモリに持つプロセスには、他のピアに気づくための共有媒体が無い — その状態は、まさにそれが真であるときに内側からは検出できない。この変数はスケールの一環として設定し、何かが壊れてからにしないこと。
 
@@ -236,7 +238,7 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `ADAPTERS_USER_REPOSITORY` | `http` | `adapters.userRepository`: `http`、`yaml` または `static`（core の `yaml` の別名）。[ユーザーリポジトリ](#ユーザーリポジトリ) を参照 |
 | `ADAPTERS_AUDIT_SINK` | `logger` | `adapters.auditSink`: セキュリティイベントの送り先、`logger`（stdout への pino エンベロープ付き NDJSON）または `console`（イベントの JSON そのまま）。`none` は存在しない。[監査ログ](#監査ログ) を参照 |
 
-移動する前の場所 — `rateLimiter.adapter`、`oauth.code.adapter`、`audit.sink.type`、`repositories.user.type` など — にまだ書かれた選択や、それとともに改名された変数（`RATE_LIMITER_ADAPTER`、`CLIENT_TYPE` など）が単独で、または別の値で設定されていると、新しいパスと変数を名指しして boot の前に失敗する。古い変数が新しい変数と同じ値で並んでいるなら受け入れる。
+移動する前の場所 — `rateLimiter.adapter`、`oauth.code.adapter`、`audit.sink.type`、`repositories.user.type` など — にまだ書かれた選択や、それとともに改名された変数（`RATE_LIMITER_ADAPTER`、`CLIENT_TYPE` など）が設定されていれば、単独でも新しい変数と並べても、値が何であれ、新しいパスと変数を名指しして boot の前に失敗する。古い変数は外すこと。
 
 ### HTTP
 
@@ -301,7 +303,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 
 `expires_in` リクエストパラメータを読むのは token exchange（RFC 8693）だけで、他のグラントはそれを無視してデフォルトを発行する。
 
-デフォルトの旧名 `OAUTH_ACCESS_TOKEN_EXPIRES_IN`（config キーでは `oauth.accessToken.expiresIn`）は、単独で、または `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` と異なる値で設定されているとブートを拒否し、同じ値で並べて設定されていればブートする。旧キーは値が何であれブートを拒否する。値は消さずに新しい名前へ移すこと: 消すとデフォルトは `3600` になる。
+デフォルトの旧名 `OAUTH_ACCESS_TOKEN_EXPIRES_IN`（config キーでは `oauth.accessToken.expiresIn`）は、設定されていれば、単独でも `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` と並べても、値が何であれブートを拒否する。旧キーは値が何であれブートを拒否する。値は消さずに新しい名前へ移すこと: 消すとデフォルトは `3600` になる。
 
 ### グラントタイプ
 
@@ -313,7 +315,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED` | `false` | client credentials グラントタイプを有効化 |
 | `OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED` | `false` | jwt-bearer グラントタイプ（RFC 7523）を有効化 |
 
-スイッチはそれぞれモジュールのキー — `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — である。どちらのモジュールも常に読み込まれ、自分のスイッチを boot がパースする設定から boot で読む。テンプレートはそのどれも boot の前には読まない。旧名の `OAUTH_GRANTS_<GRANT>_ENABLED` は、単独で、または新名と違う値で設定されていると boot を拒否し、同じ値なら boot する。
+スイッチはそれぞれモジュールのキー — `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — である。どちらのモジュールも常に読み込まれ、自分のスイッチを boot がパースする設定から boot で読む。テンプレートはそのどれも boot の前には読まない。旧名の `OAUTH_GRANTS_<GRANT>_ENABLED` は、設定されていれば、単独でも新名と並べても、値が何であれ boot を拒否する。
 
 ### Session
 
@@ -330,7 +332,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `SESSION_STORE_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
 | `SESSION_STORE_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
 
-cookie とそのストアはセッションストアのセクション `session-store` のもので、CSRF トークンの寿命、ログインページ、ログインの予算は session モジュールのセクション `session` のもの。`SESSION_STORE_*` の旧名 `SESSION_<KEY>` は、単独で、または新名と違う値で設定されていると boot を拒否し、同じ値なら boot する。
+cookie とそのストアはセッションストアのセクション `session-store` のもので、CSRF トークンの寿命、ログインページ、ログインの予算は session モジュールのセクション `session` のもの。`SESSION_STORE_*` の旧名 `SESSION_<KEY>` は、設定されていれば、単独でも新名と並べても、値が何であれ boot を拒否する。
 
 ローカルの HTTP 開発のために `SESSION_STORE_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_STORE_DOMAIN` を設定する場合は、`SESSION_STORE_NAME` も `auth.sid` のような `__Host-` でない値にすること — `SESSION_STORE_SECURE=false` なら接頭辞の無い値にする: `__Secure-` の名前も `SESSION_STORE_SECURE=true` を要する。`__Host-` や `__Secure-`（大文字小文字は問わない）の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、`SESSION_STORE_NAME` が Cookie の名前（RFC 6265 のトークン: 空白、`;` などの区切り文字を含まない）でないと、また `SESSION_STORE_DOMAIN` がホスト名でない（スキーム、ポート、パスを含む）と、サーバーは fail-fast する。
 
@@ -379,7 +381,7 @@ http.cors {
 
 ### Google フェデレーション
 
-フェデレーションは core のものである: `core.federations`、各フェデレーションに到達する名前（`/session/oauth/federation/<name>`）をキーとする 1 つのマップ。各キーは、そのパスから名付けた変数 `CORE_FEDERATIONS_<NAME>_<KEY>` に束縛される。トップレベルに書いたマップ（`federations { ... }`）は、各キーの `core.federations` の下のパスを名指しして起動を拒否する。`FEDERATIONS_GOOGLE_*` や `FEDERATIONS_OIDC_*` の変数が単独で、または新しい名前と異なる値で設定されていると、どのモジュールを選ぶよりも前に拒否される。
+フェデレーションは core のものである: `core.federations`、各フェデレーションに到達する名前（`/session/oauth/federation/<name>`）をキーとする 1 つのマップ。各キーは、そのパスから名付けた変数 `CORE_FEDERATIONS_<NAME>_<KEY>` に束縛される。トップレベルに書いたマップ（`federations { ... }`）は、各キーの `core.federations` の下のパスを名指しして起動を拒否する。`FEDERATIONS_GOOGLE_*` や `FEDERATIONS_OIDC_*` の変数が設定されていれば、単独でも新しい名前と並べても、値が何であれ、どのモジュールを選ぶよりも前に拒否される。
 
 すべてのエントリは自分の `type` を書き、boot は有効化された各エントリを、その type を扱うモジュールにエントリの名前で渡す。テンプレートは同梱する 2 つの type — `google`（`@o3co/auth-provider-federation-google`）と `oidc`（`@o3co/auth-provider-federation-oidc`）— を、マップの内容にかかわらず常に読み込み、エントリを自分では読まない: エントリが持つキーは core と type のスキーマが読み、不正なものはそのパス（`core.federations.<name>.<key>`）を名指しして拒否される。`type` の無いエントリは、有効かどうかにかかわらず `core.federations.<name>.type` で拒否される（`config-validation-failed`）。読み込んだどのモジュールも扱わない type の有効なエントリは、そのエントリを名指しして起動を拒否する（`federation-type-unhandled`）。GitHub と Apple は同梱しない: 使いたいデプロイは、そのパッケージとモジュールを `buildModules` に加える — GitHub は type モジュール `githubFederationTypeModule()` と `type = "github"` のエントリで、Apple はその [README](../../packages/federation-apple/README.md) に従う。
 
@@ -479,7 +481,7 @@ core.federations {
 | `REDIS_CODE_REPOSITORY_KEY_PREFIX` | `oauth:code:` | `redis-code-repository.keyPrefix`: Redis のリポジトリのキー名前空間（[Redis の名前空間](#redis-の名前空間) を参照） |
 | `STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN` | `600` | `standalone-in-memory-code-repository.defaultExpiresIn`: in-process のリポジトリのもの。正の整数（秒） |
 
-`CLIENT_CODE_DEFAULT_EXPIRES_IN` と `CLIENT_CODE_KEY_PREFIX` はこれらとともに改名され、`CLIENT_CODE_ENDPOINT_URI` と `CLIENT_CODE_PASSWORD` は削除された。改名されたものが単独で、または新しい名前と異なる値で設定されていると、そして削除されたものが設定されていると、代わりに設定すべきものを名指しして起動に失敗する。
+`CLIENT_CODE_DEFAULT_EXPIRES_IN` と `CLIENT_CODE_KEY_PREFIX` はこれらとともに改名され、`CLIENT_CODE_ENDPOINT_URI` と `CLIENT_CODE_PASSWORD` は削除された。改名されたものが、単独でも新しい名前と並べても、値が何であれ設定されていると、そして削除されたものが設定されていると、代わりに設定すべきものを名指しして起動に失敗する。
 
 ### フェデレーショントークンストア
 

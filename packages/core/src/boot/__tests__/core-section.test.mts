@@ -21,8 +21,8 @@
  * `core.tokenBinding`, read from core's own `reference.conf` resolved under
  * an environment, as a composition root layers it. The paths they moved from
  * refuse boot naming the new one, and a variable renamed with them
- * (`DEPLOYMENT_MODE`, `OAUTH_TOKEN_BINDING_*`) refuses boot unless the new
- * name carries the same value.
+ * (`DEPLOYMENT_MODE`, `OAUTH_TOKEN_BINDING_*`) refuses boot while its old
+ * name is set, whatever the new name holds.
  */
 
 import { fileURLToPath } from "node:url";
@@ -531,8 +531,12 @@ describe("DEPLOYMENT_MODE, renamed CORE_DEPLOYMENT_MODE", () => {
 		expect(err.message).not.toContain("new-mode-c81a");
 	});
 
-	it("set beside CORE_DEPLOYMENT_MODE at the same value: boots with that mode", async () => {
-		expect(await modeOf({ DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: "multi" })).toBe("multi");
+	it("set beside CORE_DEPLOYMENT_MODE at the same value: refused all the same", async () => {
+		const err = await refusal(boot({ DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: "multi" }));
+
+		expect(err.details).toMatchObject({
+			renamed: [{ from: "DEPLOYMENT_MODE", to: "CORE_DEPLOYMENT_MODE", state: "different" }],
+		});
 	});
 });
 
@@ -663,11 +667,27 @@ describe("the token-binding variables, renamed after their paths under core", ()
 		expect(err.message).not.toContain("new-policy-c81a");
 	});
 
-	it("set beside the new name at the same value: boots with that value", async () => {
+	it("set beside the new name at the same value: refused all the same", async () => {
+		const err = await refusal(
+			boot({
+				OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "strict-mutual-exclusion",
+				CORE_TOKEN_BINDING_DISPATCH_POLICY: "strict-mutual-exclusion",
+				OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
+				CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
+			}),
+		);
+
+		expect(err.details).toMatchObject({
+			renamed: [
+				{ from: "OAUTH_TOKEN_BINDING_DISPATCH_POLICY", state: "different" },
+				{ from: "OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS", state: "different" },
+			],
+		});
+	});
+
+	it("the new names alone: boot with their values", async () => {
 		const handle = await boot({
-			OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "strict-mutual-exclusion",
 			CORE_TOKEN_BINDING_DISPATCH_POLICY: "strict-mutual-exclusion",
-			OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
 			CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
 		});
 		const settings = resolveTokenBindingSettings(handle.components.config);

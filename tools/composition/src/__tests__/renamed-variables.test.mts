@@ -23,8 +23,8 @@
  * (`section.renamedVariables`); its `reference.conf` binds only the new
  * names, at the new paths, and captures the old and new ones. For each
  * rename: the old name alone refuses boot, naming the new path and the new
- * variable; old and new at different values refuse; at the same value, the
- * composition boots and reads it; the new name alone boots as usual.
+ * variable; old and new set together refuse, at different values or the
+ * same one; the new name alone boots as usual.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -159,10 +159,13 @@ describe.each(RENAMES)(
 			expect(err.message).not.toContain("new-value-c81a");
 		});
 
-		it("set beside the new name at the same value: boots, and the module reads it at the new path", async () => {
-			const composition = await boot({ [old]: value, [renamed]: value });
+		it("set beside the new name at the same value: refused all the same", async () => {
+			const err = await refused({ [old]: value, [renamed]: value });
 
-			expect(sectionOf(composition)).toMatchObject({ [key]: read });
+			expect(err.details).toEqual({
+				reason: "environment-variable-renamed",
+				renamed: [{ module: "fixture-renaming", from: old, to: renamed, path, state: "different" }],
+			});
 		});
 
 		it("unset, with the new name set: boots, and the module reads it", async () => {
@@ -191,8 +194,16 @@ describe("a renamed variable, through the template's reading — more", () => {
 		});
 	});
 
-	it("both names set to the empty string boot, and the module reads the empty string", async () => {
-		const composition = await boot({ LEGACY_LABEL: "", FIXTURE_RENAMING_LABEL: "" });
+	it("both names set to the empty string are refused", async () => {
+		const err = await refused({ LEGACY_LABEL: "", FIXTURE_RENAMING_LABEL: "" });
+
+		expect(err.details).toMatchObject({
+			renamed: [{ from: "LEGACY_LABEL", state: "different" }],
+		});
+	});
+
+	it("the new name set to the empty string alone boots, and the module reads the empty string", async () => {
+		const composition = await boot({ FIXTURE_RENAMING_LABEL: "" });
 
 		expect(sectionOf(composition)).toMatchObject({ label: "" });
 	});

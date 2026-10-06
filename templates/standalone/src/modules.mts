@@ -409,7 +409,8 @@ export function auditSinkModuleFor(sink: string): Module {
  * `redis-clients`, which moved from `refreshTokenFamilyStore.redis` with its
  * variables (`REDIS_CLIENTS_*`). Per-store Redis instances belong in a
  * custom composition root. An empty URL throws rather than falling back to
- * localhost. `io.quit()` is registered once with `lifecycleRegistrar`, so
+ * localhost. `assumeNoEviction` is handed to every client, for the Redis
+ * stores' eviction gate. `io.quit()` is registered once with `lifecycleRegistrar`, so
  * `handle.dispose()` closes the connection.
  *
  * `buildModules` adds this module only when some composed module needs a
@@ -640,7 +641,11 @@ type StandaloneRedisClients = ReturnType<typeof makeIoredisClients> & {
 // registrar (tests that seed none), each call creates a fresh client.
 const clientsCache = new WeakMap<LifecycleRegistrar, StandaloneRedisClients>();
 function getOrCreateClients(
-	section: { readonly url: string; readonly password?: string | undefined },
+	section: {
+		readonly url: string;
+		readonly password?: string | undefined;
+		readonly assumeNoEviction: boolean;
+	},
 	lifecycleRegistrar: LifecycleRegistrar | undefined,
 	readinessRegistrar?: ReadinessRegistrar,
 	injectedLogger?: Logger,
@@ -685,7 +690,7 @@ function getOrCreateClients(
 	// (`refreshTokenFamilyClient.duplicate()`), which inherit no listeners from
 	// `io`; passing the logger lets those report through the same channel.
 	const clients: StandaloneRedisClients = {
-		...makeIoredisClients(io, { logger }),
+		...makeIoredisClients(io, { logger, assumeNoEviction: section.assumeNoEviction }),
 		federationGrantStoreClient: makeIoredisFederationGrantStoreClient(io),
 		federationGrantIntentStoreClient: makeIoredisFederationGrantIntentStoreClient(io),
 	};

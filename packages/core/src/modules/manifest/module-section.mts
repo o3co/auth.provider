@@ -128,10 +128,9 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * binds each new name at its path, and captures every declared old and new
 	 * name in the top-level `renamed-variables` section, each `null` and then
 	 * `${?NAME}`, so boot judges what the resolution saw: the old name set
-	 * refuses boot (`environment-variable-renamed`) unless the new one is set
-	 * to the same string — a default at the new path does not count — and a
-	 * removed key's variable set refuses it outright, as does a name the
-	 * configuration does not capture. For a composition root's own module the
+	 * refuses boot (`environment-variable-renamed`), whether or not the new
+	 * one is set and whatever either holds, as does a removed key's variable
+	 * set, or a name the configuration does not capture. For a composition root's own module the
 	 * reference is the root's `config/reference.conf`, layered through
 	 * `moduleReferences`, never its `application.conf`. No other layer writes
 	 * `renamed-variables`: a capture written by hand overrides what the

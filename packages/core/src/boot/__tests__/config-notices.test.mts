@@ -454,13 +454,10 @@ describe("environment_variables_not_applied — a captured variable no loaded mo
 		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("marker-value-91c2");
 	});
 
-	it("does not name a variable a loaded module declares renamed, by its old name or its new one", async () => {
+	it("does not name a variable a loaded module declares renamed, by its new name (its old one set refuses boot)", async () => {
 		const logger = await boot(
 			[memoryRateLimiterModule],
-			withCaptures({
-				MEMORY_RATE_LIMITER_MAX_BUCKETS: "500",
-				CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "500",
-			}),
+			withCaptures({ CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "500" }),
 		);
 		expect(noticesOf(logger, "environment_variables_not_applied")).toEqual([]);
 	});

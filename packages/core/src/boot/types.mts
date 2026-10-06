@@ -1159,10 +1159,10 @@ export interface ConfigPathRelocatedDetails {
  * its own section — declares renamed (`section.renamedVariables`) refuses
  * boot. Each entry: the declaring module (`"core"` for core), the old name,
  * the new name and the dot path it is bound to (both `null` for a removed
- * key), and why (`state`): the new name `unset` or set to a `different`
- * string while the old one is set, a `removed` key's variable set, or a name
- * the configuration does not capture (`uncaptured`). No value is carried: a
- * variable may hold a secret. A bridge for the 0.x line, removed at the first
+ * key), and why (`state`): the new name `unset`, or set as well
+ * (`different` names, whatever either holds), while the old one is set; a
+ * `removed` key's variable set; or a name the configuration does not capture
+ * (`uncaptured`). No value is carried: a variable may hold a secret. A bridge for the 0.x line, removed at the first
  * major release with `config-path-relocated`.
  */
 export interface EnvironmentVariableRenamedDetails {

@@ -232,8 +232,8 @@ paths these keys moved from — each key of the cookie and its store under
 (`config-path-relocated`), naming the new path and its variable. The variables
 renamed with them — `SESSION_<KEY>` to `SESSION_STORE_<KEY>`, and
 `ENDPOINTS_LOGIN_URL` to `SESSION_LOGIN_PAGE_URL` — refuse boot
-(`environment-variable-renamed`) when the old name is set alone, or to another
-value than the new one; set to the same value, both boot.
+(`environment-variable-renamed`) while the old name is set, alone or beside the
+new one at any value: set the new name and unset the old one.
 
 ## Browser session store
 

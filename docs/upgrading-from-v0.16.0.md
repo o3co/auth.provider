@@ -26,7 +26,8 @@ describes.
 
 1. Fix the configuration. Every moved or removed key, and every value now
    read strictly, refuses to start and names itself, so a start against a
-   staging copy lists what is left.
+   staging copy lists what is left. A refusal of a moved, removed or renamed
+   key or variable points at this guide.
 2. Check the data the provider reads from you: client records, redirect URIs,
    the users your Store answers.
 3. Update code that implements a port or calls an API that changed, and run
@@ -221,11 +222,10 @@ rather than `workspace:*`, and refresh the lockfile. Then:
 Every setting now lives under the name of the module that owns it (#728).
 An old path refuses the boot, naming the new one and the variable bound to
 it, while the module that owns it is loaded. A renamed variable refuses the
-boot when it is set alone or beside its new name at a different value; set
-to the same value as its new name, it boots, so an environment can carry
-both while it moves. Sections are strict: a key a module's section
-does not declare refuses the boot, naming its path, where it used to be
-dropped — [Values read more strictly](#values-read-more-strictly) lists the
+boot while its old name is set, alone or beside its new name, even at the
+same value: set the new name and unset the old one. Sections are strict: a
+key a module's section does not declare refuses the boot, naming its path,
+where it used to be dropped — [Values read more strictly](#values-read-more-strictly) lists the
 sections that still accept one.
 
 | What moved | Where it is listed |
@@ -325,7 +325,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
 - `oauth.refreshToken.legacyTokenCompat` and
   `oauth.authorize.allowUnmarkedClients` still refuse the boot, now wherever
   `oauthEndpointsModule` is installed, as `config-path-relocated`
-  (`<key> was removed; see CHANGELOG. Remove this field …`) instead of
+  (`<key> was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md).
+  Remove this field …`) instead of
   `config-validation-failed` naming the release that removed the key. An
   exported `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` — any value, the empty
   string included — refuses it as `environment-variable-renamed`
@@ -581,8 +582,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   Set `maxmemory-policy noeviction`, or give these stores a Redis of their
   own. Where the server runs `noeviction` but will not say, assert it:
   `makeIoredisClients(io, { assumeNoEviction: true })` (or the same option
-  on `makeIoredisMfaFactorStoreClient` / `makeIoredisMfaTransactionStoreClient`).
-  A policy the
+  on `makeIoredisMfaFactorStoreClient` / `makeIoredisMfaTransactionStoreClient`;
+  in the standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
+  `redis-clients.assumeNoEviction`). A policy the
   server does report always overrides the assertion. The log lines
   `attempt_counter_durability_unchecked`,
   `session_lifecycle_store_eviction_unchecked`,
@@ -697,6 +699,24 @@ The boot refusals you can meet, with their messages, are in
   `403` (#859). `token.issued.failure`'s `details.reason` is the refusal's
   description, or its error code: a dashboard keyed on `denied by policy` or
   `grant policy evaluation failed` stops matching (#889).
+- **BREAKING: token exchange requires the caller to be an audience of the
+  subject token by default.** A `subject_token` is accepted only when its
+  `azp` is the calling client's id or its `aud` (a string or an array)
+  contains it; otherwise the exchange is `400 invalid_request` /
+  `subject_token azp and aud do not name this client`, logged at warn as
+  `token_exchange_subject_not_for_client`. A resource server exchanging a
+  token it received, and the client the token was issued to, keep working.
+  **What to do:** grep for `token_exchange_subject_not_for_client` against a
+  staging copy, and for each client that exchanges tokens issued to other
+  clients — a gateway, an on-behalf-of service — add
+  `allowExchangeOfTokensIssuedToOthers: true` to its client registration.
+  Only a strict `true` counts. `may_act`, the scope and audience ceilings and
+  the grant allowlist still apply to it. A subject-token validator you
+  contribute (`tokenExchangeValidators`) must return the token's `aud` (as
+  `ValidatedToken.aud`) and/or its `azp` (in `claims`) as the token carries
+  them; an answer with neither is refused the same way. See the
+  [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
+  note 18.
 - **Federation grants.** `/reauthorize` answers a removed connection, or a
   client that may no longer use it, `403 access_denied/connection_not_permitted`
   (#883), and a revoked or pending grant whose boundary cannot be read `410` /
@@ -2261,7 +2281,7 @@ What carries across the step:
   first, so on v0.16.0: write the value at the new key, export the new
   variable at the value the old one carries, then delete the old key and
   unset the old variable. This release refuses the old key at any value, and
-  the old variable unless the new one carries the same value. Move the value
+  the old variable while it is set, beside the new one or not. Move the value
   rather than deleting it: without it, the default is `3600`.
 - **The federation-grant rotation budget counts from the upgrade** (#1032).
   v0.16.0 took no rotation, so the refreshes it made are not counted against

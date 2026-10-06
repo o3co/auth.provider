@@ -71,6 +71,7 @@ const FULLY_POPULATED_CLIENT = {
 	senderConstrained: { required: true, methods: ["dpop"] },
 	firstParty: true,
 	allowPlainPkce: false,
+	allowExchangeOfTokensIssuedToOthers: true,
 	// `Required<...>`, not a bare `Omit<...>`: an omitted optional field is
 	// assignable to the latter, so a new field on `Client` would silently stop
 	// being covered here. This turns that into a compile error.

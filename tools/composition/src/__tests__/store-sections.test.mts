@@ -21,7 +21,8 @@
  * layers over every loaded package's `reference.conf` handed to boot. Each
  * section is read at its module's name and refuses a key it does not declare;
  * a path it moved from refuses boot naming the new one; a variable renamed
- * with the move refuses boot unless its new name carries the same value.
+ * with the move refuses boot while its old name is set, whatever its new name
+ * holds.
  */
 
 import { BootError, type RateLimiter } from "@o3co/auth-provider-core";
@@ -781,9 +782,18 @@ describe("a store variable renamed with the move, through the template's reading
 	);
 
 	it.each(ROWS)(
-		"$from set beside $to at the same value: boots, the value at $path",
-		async ({ from, to, path, value, options }) => {
-			const composition = await boot(withEnv(options(), { [from]: value, [to]: value }));
+		"$from set beside $to at the same value: refused all the same",
+		async ({ from, to, value, options }) => {
+			const err = await refused(withEnv(options(), { [from]: value, [to]: value }));
+
+			expect(err.details).toMatchObject({ renamed: [{ from, to, state: "different" }] });
+		},
+	);
+
+	it.each(ROWS)(
+		"$to set alone: boots, the value at $path",
+		async ({ to, path, value, options }) => {
+			const composition = await boot(withEnv(options(), { [to]: value }));
 
 			const [section, key] = path.split(".") as [string, string];
 			expect(String((sectionOf(composition, section) as Record<string, unknown>)[key])).toBe(value);

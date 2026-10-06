@@ -18,9 +18,10 @@
  * `webauthnSessionSubjectModule`: sets `req.webauthnSubject`, which both
  * registration routes require, from the browser's cookie session, admitted as
  * `webauthn.register` (graded `credential_change`: a passkey is a new way
- * into the account). What it needs, where it runs and what each admission
- * outcome answers are in the README, "Registering from a browser session";
- * see also ADR 2026-09-28-session-admission.
+ * into the account), once the request body has arrived. What it needs,
+ * where it runs and what each admission outcome answers are in the README,
+ * "Registering from a browser session"; see also ADR
+ * 2026-09-28-session-admission.
  */
 
 import {
@@ -39,6 +40,7 @@ import {
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import express, { type RequestHandler, type Response } from "express";
+import { wholeBody } from "./internal/jsonBody.mjs";
 import type { WebAuthnSubject } from "./request.mjs";
 
 /** The id of the module's one route. */
@@ -219,11 +221,23 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 						req.webauthnSubject = subject;
 						next();
 					};
-					// The two registration POSTs, on this router's own paths: core
-					// mounts it by prefix, and nothing else beneath the path reads a
-					// session through it.
+					// The two registration POSTs, matched as the routes match them:
+					// each route is a router core mounts on its path that answers
+					// `post("/")`, so admission is a router on the same path answering
+					// the same `post("/")`. Every request a registration route handles
+					// is admitted first, and nothing else beneath the path reads a
+					// session or a body through it. The session is admitted once the
+					// body has arrived, with the routes' own parser and limit: a
+					// session that closes while the body is still arriving registers
+					// nothing, and the routes' parser leaves the parsed body as it is.
+					// Any other body is read to its end too, within the same limit,
+					// and refused before admission when it has bytes.
 					const router = express.Router();
-					router.post(["/options", "/verify"], admitRegistration);
+					for (const path of ["/options", "/verify"]) {
+						const route = express.Router();
+						route.post("/", ...wholeBody(), admitRegistration);
+						router.use(path, route);
+					}
 					return {
 						id: WEBAUTHN_SESSION_SUBJECT_ROUTE_ID,
 						mountPath: "/oauth/webauthn/registration",

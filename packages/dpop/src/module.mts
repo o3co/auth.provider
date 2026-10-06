@@ -25,7 +25,7 @@
  * which reads an absent section or key as off: off, the module registers
  * nothing and requires nothing. A key still written at `oauth.dpop`, the
  * section's old path, refuses boot naming the new one, and so does a nonce
- * variable's old name unless its new name carries the same value.
+ * variable's old name set, whether or not its new name is set.
  *
  * DI requires `oauthTokenSettings`: the deployment's issuer, whose origin is
  * the authority half of every proof's expected `htu`. The oauth module

@@ -39,6 +39,11 @@ export const tokenSettings = createTestOAuthTokenSettings({
 	accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
 });
 
+/**
+ * An access token this provider could have issued to `client-a`, the client
+ * the tests exchange as: its `azp` names that client, so a test that sets
+ * another `aud` still presents a subject token the caller may exchange.
+ */
 export async function signSelfIssuedAccessToken(
 	claims: Record<string, unknown>,
 	options: { expiresIn?: string; typ?: string } = {},
@@ -49,6 +54,7 @@ export async function signSelfIssuedAccessToken(
 		scope: "read",
 		iss: ISSUER,
 		aud: "client-a",
+		azp: "client-a",
 		...claims,
 	})
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ })
