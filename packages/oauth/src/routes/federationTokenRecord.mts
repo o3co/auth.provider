@@ -37,6 +37,7 @@ import type { FederationTokenCaller, FederationTokenContext } from "./federation
 import { isUsableToken } from "./federationTokenCredential.mjs";
 import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
+import { checkSessionLive } from "./federationTokenSession.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
 import { answerUnlinkedRecord } from "./federationTokenUnlinked.mjs";
 
@@ -173,8 +174,9 @@ export const removeRecord = async (
  * longer the one it was made from. `missing`: the user removed the link, so
  * nothing of it is handed on (`404`). `conflict`: the record was rewritten
  * (a relink, or another refresh), so the current record is answered as
- * stored if it is not due, and `503` if it is: the refresh is never repeated
- * within one request, and the client's retry refreshes it.
+ * stored if it is not due and the session is still live, and `503` if it is
+ * due: the refresh is never repeated within one request, and the client's
+ * retry refreshes it.
  */
 export const answerDiscardedRefresh = async (
 	ctx: FederationTokenContext,
@@ -193,7 +195,11 @@ export const answerDiscardedRefresh = async (
 	if (outcome === "missing") return answerUnlinkedRecord(ctx);
 	const current = await readRecord(ctx, caller, "get_after_conflict");
 	if (current === null) return res;
-	if (!refreshIsDue(ctx, current.value)) return serveStored(ctx, caller, current);
+	if (!refreshIsDue(ctx, current.value)) {
+		// After the upstream call: served only while the session is still live.
+		if (!(await checkSessionLive(ctx, caller))) return res;
+		return serveStored(ctx, caller, current);
+	}
 	return res.status(503).json({
 		error: "temporarily_unavailable",
 		error_description: "the federation token was replaced concurrently; retry",

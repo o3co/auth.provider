@@ -23,8 +23,9 @@
  * answer's lifetime is refused, as it did before it was due. Every write lands only on the record the
  * refresh was made from, and a stored token is answered only from it; a
  * refresh whose record was removed or rewritten meanwhile is dropped, never
- * written over what replaced it. A refreshed token is answered only while the
- * caller's session is still live once it is written.
+ * written over what replaced it. No token is answered after the upstream call
+ * unless the caller's session is still live when it is answered: a close that
+ * committed meanwhile removes the stored tokens itself.
  */
 
 import { canonicalScope, emitAuditEvent, loggableError } from "@o3co/auth-provider-core";
@@ -138,6 +139,7 @@ export const recordRefresh = async (
 			if (!isDisclosable(currentTokens)) {
 				return refuseUndisclosableTokenType(ctx, caller, currentTokens.tokenType);
 			}
+			if (!(await checkSessionLive(ctx, caller))) return res;
 			return answerToken(ctx, caller, currentTokens, false);
 		}
 		stampRefreshFailed(ctx, caller, current);
@@ -198,8 +200,6 @@ export const recordRefresh = async (
 	// connection that is gone, and are neither stored nor handed on.
 	if (outcome !== "updated") return answerDiscardedRefresh(ctx, caller, outcome);
 
-	// A close that committed during the refresh: its tokens are the close's to
-	// remove, and are not handed on.
 	if (!(await checkSessionLive(ctx, caller))) return res;
 
 	// 11h: `updatedTokens`, not the adapter's object: the answer was read

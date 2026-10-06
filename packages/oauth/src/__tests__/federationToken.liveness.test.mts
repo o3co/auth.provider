@@ -61,7 +61,7 @@ const mintAccessToken = (): Promise<string> =>
 		.sign(createSecretKey(Buffer.from(SECRET)));
 
 /** The stored connection: due unless `expiresAt` says otherwise. */
-const link = (expiresAt = new Date(Date.now() - 1000)): FederationTokens => ({
+const link = (expiresAt: Date | null = new Date(Date.now() - 1000)): FederationTokens => ({
 	accessToken: "old-at",
 	refreshToken: "old-rt",
 	idToken: "old-id",
@@ -112,11 +112,16 @@ interface Route {
  * for `SUB` and joined by the federation, its record seeded with `seed`. The
  * close's removal of the federation tokens waits for `releaseRemoval`, so a
  * close can commit while its work is still outstanding. The provider's
- * refresh runs `refresh` with the lifecycle.
+ * refresh runs `refresh` with the lifecycle and the store, and answers what it
+ * returns, or a token with an hour's life when it returns nothing.
  */
 const route = async (opts: {
 	seed: FederationTokens;
-	refresh?: (lifecycle: SessionLifecycle, removalBegun: Promise<void>) => Promise<void>;
+	refresh?: (
+		lifecycle: SessionLifecycle,
+		removalBegun: Promise<void>,
+		store: Store,
+	) => Promise<unknown>;
 }): Promise<Route> => {
 	const store = memoryStore();
 	await store.attach(SID, NAME, opts.seed);
@@ -177,8 +182,8 @@ const route = async (opts: {
 	const logger = createMockLogger();
 	const auditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
 	const refreshToken = vi.fn(async () => {
-		await opts.refresh?.(lifecycle, begun.wait);
-		return { accessToken: "new-at", expiresIn: 3600, refreshToken: "new-rt" };
+		const answer = await opts.refresh?.(lifecycle, begun.wait, store);
+		return answer ?? { accessToken: "new-at", expiresIn: 3600, refreshToken: "new-rt" };
 	});
 	const provider = {
 		name: NAME,
@@ -223,6 +228,25 @@ const route = async (opts: {
 	};
 };
 
+/** A relink of the federation in the session: a new connection, not due. */
+const relink = (): FederationTokens => ({
+	accessToken: "relinked-at",
+	refreshToken: "relinked-rt",
+	idToken: "relinked-id",
+	expiresAt: new Date(Date.now() + 3_600_000),
+	tokenType: "Bearer",
+	scope: "openid",
+	grantedScope: "openid",
+	obtainedAt: undefined,
+});
+
+const invalidGrant = (): Error =>
+	Object.assign(new Error("server responded with an error in the response body"), {
+		name: "ResponseBodyError",
+		error: "invalid_grant",
+		status: 400,
+	});
+
 const audited = (r: Route, type: string): unknown[] =>
 	r.auditSink.record.mock.calls.filter(([event]) => (event as { type: string }).type === type);
 
@@ -232,7 +256,7 @@ const expectSessionNotLive = (res: request.Response): void => {
 	expect(res.headers["www-authenticate"]).toBe(
 		'Bearer error="invalid_token", error_description="session not found"',
 	);
-	expect(JSON.stringify(res.body)).not.toContain("new-at");
+	expect(res.body.access_token).toBeUndefined();
 };
 
 describe("federation token route — a refreshed token is handed on only to a session still live", () => {
@@ -336,5 +360,129 @@ describe("federation token route — a refreshed token is handed on only to a se
 		expect(res.body.access_token).toBe("old-at");
 		expect(r.refreshToken).not.toHaveBeenCalled();
 		expect(r.liveness).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("federation token route — a stored token is handed on after an upstream refresh only to a session still live", () => {
+	it.each([
+		["no refresh token", {}],
+		["a rotated refresh token", { refreshToken: "new-rt" }],
+	])(
+		"answers a close that commits during a refresh answering a refused lifetime and %s as a session that is not live",
+		async (_label, rotation) => {
+			let closed: Promise<unknown> | undefined;
+			const r = await route({
+				seed: link(null),
+				refresh: async (lifecycle, removalBegun) => {
+					closed = lifecycle.close(SID, "rp_logout");
+					await removalBegun;
+					return { accessToken: "new-at", expiresIn: Number.NaN, ...rotation };
+				},
+			});
+
+			const res = await r.post();
+
+			expectSessionNotLive(res);
+			expect(r.refreshToken).toHaveBeenCalledTimes(1);
+			expect(audited(r, "federation.token.success")).toEqual([]);
+			expect(r.liveness).toHaveBeenCalledTimes(2);
+
+			r.releaseRemoval();
+			await closed;
+			expect(await r.store.get(SID, NAME)).toBeNull();
+		},
+	);
+
+	it("answers a live session's refresh answering a refused lifetime with the stored token, reading liveness once more", async () => {
+		const r = await route({
+			seed: link(null),
+			refresh: async () => ({ accessToken: "new-at", expiresIn: Number.NaN }),
+		});
+		r.releaseRemoval();
+
+		const res = await r.post();
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("old-at");
+		expect(r.liveness).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([
+		["answers a token", async () => undefined],
+		[
+			"refuses the refresh token",
+			async () => {
+				throw invalidGrant();
+			},
+		],
+	])(
+		"answers a relink and a close that both land while the upstream %s as a session that is not live",
+		async (_label, answer) => {
+			let closed: Promise<unknown> | undefined;
+			const r = await route({
+				seed: link(),
+				refresh: async (lifecycle, removalBegun, store) => {
+					await store.attach(SID, NAME, relink());
+					closed = lifecycle.close(SID, "rp_logout");
+					await removalBegun;
+					return answer();
+				},
+			});
+
+			const res = await r.post();
+
+			expectSessionNotLive(res);
+			expect(r.refreshToken).toHaveBeenCalledTimes(1);
+			expect(audited(r, "federation.token.success")).toEqual([]);
+			expect(r.liveness).toHaveBeenCalledTimes(2);
+
+			r.releaseRemoval();
+			await closed;
+			expect(await r.store.get(SID, NAME)).toBeNull();
+		},
+	);
+
+	it("answers a relink that lands during a live session's refresh with the relink's token, reading liveness once more", async () => {
+		const r = await route({
+			seed: link(),
+			refresh: async (_lifecycle, _removalBegun, store) => {
+				await store.attach(SID, NAME, relink());
+				return undefined;
+			},
+		});
+		r.releaseRemoval();
+
+		const res = await r.post();
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("relinked-at");
+		expect(r.liveness).toHaveBeenCalledTimes(2);
+	});
+
+	it("answers 503 when the liveness read before serving the relink rejects", async () => {
+		const r = await route({
+			seed: link(),
+			refresh: async (_lifecycle, _removalBegun, store) => {
+				await store.attach(SID, NAME, relink());
+				return undefined;
+			},
+		});
+		r.releaseRemoval();
+		r.liveness
+			.mockImplementationOnce((sid) => r.real.liveness(sid))
+			.mockImplementationOnce(async () => Promise.reject(storeReplyError()));
+
+		const res = await r.post();
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(audited(r, "federation.token.success")).toEqual([]);
+		expect(r.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ federation: NAME, store: "session_lifecycle", step: "liveness" }),
+			"federation_token_store_unavailable",
+		);
 	});
 });
