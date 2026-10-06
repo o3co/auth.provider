@@ -539,3 +539,83 @@ describe("federation token route — a liveness reply outside the lifecycle's co
 		expect(r.refreshToken).not.toHaveBeenCalled();
 	});
 });
+
+describe("federation token route — a token another request refreshed during the lock wait is handed on only to a session still live", () => {
+	/** A sibling's refresh lands while this request waits for the lock: the record is fresh. */
+	const siblingRefreshed = (): FederationTokens => ({
+		...link(new Date(Date.now() + 3_600_000)),
+		accessToken: "sibling-at",
+		refreshToken: "sibling-rt",
+	});
+
+	/** Runs `during` with the store before this request's lock is acquired. */
+	const waitForLock = (r: Route, during: () => Promise<void>): void => {
+		const acquire = r.store.acquireLock.bind(r.store);
+		r.store.acquireLock = async (...args) => {
+			await during();
+			return acquire(...args);
+		};
+	};
+
+	it("answers a close that commits during the lock wait as a session that is not live", async () => {
+		const r = await route({ seed: link() });
+		let closed: Promise<unknown> | undefined;
+		waitForLock(r, async () => {
+			await r.store.attach(SID, NAME, siblingRefreshed());
+			closed = r.lifecycle.close(SID, "rp_logout");
+			await r.removalBegun;
+		});
+
+		const res = await r.post();
+
+		expectSessionNotLive(res);
+		expect(r.refreshToken).not.toHaveBeenCalled();
+		expect(audited(r, "federation.token.success")).toEqual([]);
+		expect(r.liveness).toHaveBeenCalledTimes(2);
+
+		r.releaseRemoval();
+		await closed;
+		expect(await r.store.get(SID, NAME)).toBeNull();
+	});
+
+	it("answers a live session with the token refreshed during the lock wait, reading liveness once more", async () => {
+		const r = await route({ seed: link() });
+		r.releaseRemoval();
+		waitForLock(r, async () => {
+			await r.store.attach(SID, NAME, siblingRefreshed());
+		});
+
+		const res = await r.post();
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("sibling-at");
+		expect(r.refreshToken).not.toHaveBeenCalled();
+		expect(r.liveness).toHaveBeenCalledTimes(2);
+	});
+
+	it("answers 503 when the liveness read after the lock wait rejects", async () => {
+		const r = await route({ seed: link() });
+		r.releaseRemoval();
+		waitForLock(r, async () => {
+			await r.store.attach(SID, NAME, siblingRefreshed());
+		});
+		r.liveness
+			.mockImplementationOnce((sid) => r.real.liveness(sid))
+			.mockImplementationOnce(async () => Promise.reject(storeReplyError()));
+
+		const res = await r.post();
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(r.refreshToken).not.toHaveBeenCalled();
+		expect(audited(r, "federation.token.success")).toEqual([]);
+		expectOutageLine(r.logger, "federation_token_store_unavailable", {
+			federation: NAME,
+			store: "session_lifecycle",
+			step: "liveness",
+		});
+	});
+});
