@@ -54,7 +54,11 @@ import { sessionModule } from "#/module.mjs";
 import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { createRouter as createSessionRouter } from "#/routes/Session.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
-import { fakeSessionLifecycle, sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
+import {
+	fakeSessionLifecycle,
+	openingLifecycleStore,
+	sessionLifecycleTestModule,
+} from "./_helpers/sessionLifecycle.mjs";
 
 /**
  * A token's payload (`<expiry-seconds>.<nonce>`) and its signature under
@@ -497,6 +501,7 @@ describe("the session module reads no session-store.secret", () => {
 			},
 			userSessionStore: fakeUserSessionStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
+			sessionLifecycleStore: openingLifecycleStore(),
 			federationTokenStore: fakeFederationTokenStore(),
 			federationProviders: new Map([["stub", stub]]),
 			federationRedirectPolicyResolver: new Map([

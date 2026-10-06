@@ -35,7 +35,10 @@ import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provi
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
+import {
+	fakeSessionLifecycle,
+	openingLifecycleStore,
+} from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import {
 	deriveFederationTransactionCookieName,
@@ -216,6 +219,7 @@ function buildApp(knobs: Knobs = {}) {
 			userRepository: makeUserRepository(),
 			userSessionStore: makeUserSessionStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
+			sessionLifecycleStore: openingLifecycleStore(),
 			federationTokenStore: makeFederationTokenStore(),
 			federationTransactionCookieName: knobs.cookieName ?? DEFAULT_COOKIE_NAME,
 			...(knobs.logger === undefined ? {} : { logger: knobs.logger }),

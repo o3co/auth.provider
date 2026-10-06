@@ -232,13 +232,14 @@ export const sessionModule = defineModule<
 	// `attemptCounter` the login's attempts are counted per process where the
 	// deployment mode allows it; without `auditSink` no events are emitted; without
 	// `subjectSessionIndex`, `revokeAllForSubject` reports the capability as
-	// unavailable; `subjectRevocation` is the boundary, and
-	// `sessionLifecycleStore` the lifecycle port, the link routes' admission
-	// reads when wired. `sessionLifecycle`, core's session lifecycle, opens
-	// each login's session record, joins its federations and is what
-	// `POST /session/logout` closes the session through: required beside
-	// `userSessionStore`, the route factories refuse a composition without it,
-	// naming both.
+	// unavailable; `subjectRevocation` is the boundary the link routes'
+	// admission reads when wired. `sessionLifecycle`, core's session
+	// lifecycle, opens each login's session record, joins its federations and
+	// is what `POST /session/logout` closes the session through, and
+	// `sessionLifecycleStore` is the lifecycle port the link routes' admission
+	// reads: both are required beside `userSessionStore`. The route factories
+	// refuse a composition without `sessionLifecycle`, and the federation
+	// routes' factory one without `sessionLifecycleStore`, naming both slots.
 	optional: [
 		"logger",
 		"attemptCounter",

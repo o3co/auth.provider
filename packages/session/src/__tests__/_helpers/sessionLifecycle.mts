@@ -55,13 +55,18 @@ export function fakeSessionLifecycle(over: Partial<SessionLifecycle> = {}) {
 	} satisfies SessionLifecycle;
 }
 
-/** Fills the `sessionLifecycle` slot with `lifecycle`, a fresh fake by default. */
+/**
+ * Fills the `sessionLifecycle` slot with `lifecycle`, a fresh fake by default,
+ * and the `sessionLifecycleStore` slot with `store`, one holding an active
+ * record for every session admission asks about by default.
+ */
 export const sessionLifecycleTestModule = (
 	lifecycle: SessionLifecycle = fakeSessionLifecycle(),
+	store: SessionLifecycleStore = openingLifecycleStore(),
 ): Module =>
 	defineModule({
 		name: "test:session-lifecycle",
-		provides: { sessionLifecycle: () => lifecycle },
+		provides: { sessionLifecycle: () => lifecycle, sessionLifecycleStore: () => store },
 	});
 
 /**

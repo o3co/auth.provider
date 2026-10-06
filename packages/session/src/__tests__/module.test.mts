@@ -352,6 +352,38 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		expect(message).toMatch(/sessionLifecycleModule/);
 	});
 
+	it("refuses to boot with userSessionStore and sessionLifecycle wired and no sessionLifecycleStore, naming both slots", async () => {
+		const lifecycleOnly = defineModule({
+			name: "test:session-lifecycle-only",
+			provides: { sessionLifecycle: () => fakeSessionLifecycle() },
+		});
+		const refusal = await createTestApp({
+			modules: [...withoutLifecycle, lifecycleOnly],
+			bootstrapComponents: {
+				config: withSessionCaptures(makeValidAppConfig()),
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(refusal, "boot must be refused").toBeInstanceOf(BootError);
+		expect(refusal).toMatchObject({
+			reason: "contribute-factory-failed",
+			details: { module: "session", kind: "routes" },
+		});
+		const message = String(
+			(refusal as BootError).cause instanceof Error
+				? ((refusal as BootError).cause as Error).message
+				: "",
+		);
+		expect(message).toMatch(/userSessionStore is wired, but sessionLifecycleStore is not/);
+		expect(message).toMatch(/memorySessionStoresModule or redisSessionStoresModule/);
+	});
+
 	it("boots with userSessionStore and sessionLifecycle both wired", async () => {
 		const handle = await createTestApp({
 			modules: baseTestModules,

@@ -103,7 +103,7 @@ import {
 import { createRouter as createFederationRouter } from "#/routes/Federation.mjs";
 import { createRouter as createSessionRouter } from "#/routes/Session.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
-import { fakeSessionLifecycle } from "./_helpers/sessionLifecycle.mjs";
+import { fakeSessionLifecycle, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 /** A logger whose every level is a spy; `child` answers the same logger. */
 function spyLogger() {
@@ -272,6 +272,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 						userRepository: makeUserRepository(),
 						userSessionStore: makeUserSessionStore(),
 						sessionLifecycle: fakeSessionLifecycle(),
+						sessionLifecycleStore: openingLifecycleStore(),
 						federationTokenStore: makeFederationTokenStore(),
 						logger: logger as unknown as Logger,
 					}),

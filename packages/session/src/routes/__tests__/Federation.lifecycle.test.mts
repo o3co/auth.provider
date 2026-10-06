@@ -419,6 +419,29 @@ describe("the federation routes require core's session lifecycle beside the user
 			}),
 		).toThrow(/userSessionStore is wired, but sessionLifecycle is not/);
 	});
+
+	it("refuses to build the router with a sessionLifecycle and no sessionLifecycleStore, naming the slot", () => {
+		expect(() =>
+			createRouter(express, {
+				federationSettings: createTestFederationSettings(),
+				federationProviders: new Map([["test", provider]]),
+				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]) as never,
+				providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
+				userRepository: { authenticate: vi.fn(), authenticateByToken: vi.fn() } as never,
+				userSessionStore: createInMemoryUserSessionStore(),
+				sessionLifecycle: {} as SessionLifecycle,
+				federationTokenStore: {} as FederationTokenStore,
+				federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+				requirements: resolverForTests([], {
+					issuer: HARNESS_ISSUER,
+					actions: SESSION_ADMISSION_ACTIONS,
+				}),
+				logger: silentLogger,
+			}),
+		).toThrow(
+			/^federation routes: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*sessionLifecycleModule\.$/,
+		);
+	});
 });
 
 describe("a link callback over the session lifecycle", () => {
