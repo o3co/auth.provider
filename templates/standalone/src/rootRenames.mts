@@ -18,46 +18,62 @@
  * The variables renamed with a path of the composition root's own layers,
  * which no module declares: the adapter selections and the federations the
  * template ships. Phase one refuses an old name set alone, or beside its new
- * name at a different value, before any module is chosen; the two at one
- * value are accepted.
+ * name at a different value, before any module is chosen, as boot refuses a
+ * variable a module declares renamed (`environment-variable-renamed`); the
+ * two at one value are accepted. Boot's own check cannot hold these: an
+ * adapter selection decides which modules are chosen before boot, and a
+ * federation's key sits in core's section, whose renames core alone declares.
  */
 
-/** A variable renamed with a path of the composition root's own: its old name, its new one, and the path the new one binds. */
+import { variablesRenamed } from "./bootRefusal.mjs";
+
+/**
+ * A variable renamed with a path of the composition root's own: its old name,
+ * its new one, the path the new one binds, and the module that path's section
+ * is named after in a refusal's details (`bootRefusal.mts`).
+ */
 export interface RootRename {
+	readonly module: string;
 	readonly from: string;
 	readonly to: string;
 	readonly path: string;
 }
 
 /**
- * Refuses, with a `RangeError`, an old name in `env` set alone, or beside its
- * new name at a different value; the two at one value are accepted. Every
- * such rename is named at once; no value is quoted.
+ * Refuses, with an `environment-variable-renamed` `BootError`, an old name in
+ * `env` set alone (`unset`), or beside its new name at a different value
+ * (`different`); the two at one value are accepted. Every such rename is
+ * named at once; no value is quoted or carried.
  */
 export function refuseRenamedVariables(
 	env: Readonly<Record<string, string>>,
 	renames: readonly RootRename[],
 ): void {
-	const refused = renames.flatMap(({ from, to, path }) => {
+	const refused = renames.flatMap((rename) => {
+		const { from, to } = rename;
 		const old = env[from];
 		if (old === undefined || env[to] === old) return [];
-		const renamed = `${from} was renamed ${to}, the variable ${path} is bound to; see CHANGELOG.`;
-		return env[to] === undefined
-			? [`${renamed} Set ${to} instead and unset ${from}.`]
-			: [
-					`${renamed} ${to} is set to a different value: keep the one you mean in ${to} and unset ${from}.`,
-				];
+		return [
+			{ ...rename, state: env[to] === undefined ? ("unset" as const) : ("different" as const) },
+		];
 	});
-	if (refused.length > 0) {
-		throw new RangeError(
-			`The environment sets ${refused.length} variable(s) that were renamed: ${refused.join(" ")}`,
-		);
-	}
+	if (refused.length === 0) return;
+	const named = refused.map(({ from, to, path, state }) => {
+		const renamed = `${from} was renamed ${to}, the variable ${path} is bound to; see CHANGELOG.`;
+		return state === "unset"
+			? `${renamed} Set ${to} instead and unset ${from}.`
+			: `${renamed} ${to} is set to a different value: keep the one you mean in ${to} and unset ${from}.`;
+	});
+	throw variablesRenamed(
+		`The environment sets ${refused.length} variable(s) that were renamed: ${named.join(" ")}`,
+		refused.map(({ module, from, to, path, state }) => ({ module, from, to, path, state })),
+	);
 }
 
 /**
  * The variables `config/application.conf` binds for the two federations the
- * template ships, each renamed after its path under `core.federations`.
+ * template ships, each renamed after its path under `core.federations`: in
+ * core's section, so named under module "core" in a refusal's details.
  */
 export const SHIPPED_FEDERATION_RENAMES: readonly RootRename[] = (
 	[
@@ -73,6 +89,7 @@ export const SHIPPED_FEDERATION_RENAMES: readonly RootRename[] = (
 		["OIDC", "oidc", ["CALLBACK_URL", "callbackURL"]],
 	] as const
 ).map(([federation, name, [key, path]]) => ({
+	module: "core",
 	from: `FEDERATIONS_${federation}_${key}`,
 	to: `CORE_FEDERATIONS_${federation}_${key}`,
 	path: `core.federations.${name}.${path}`,

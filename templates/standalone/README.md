@@ -338,7 +338,13 @@ layered yet. A module you add to `buildModules` reads its own section at
 boot (`deps.section`), never when it is built. The log level is read before boot too, as
 the `logging` module's section, with that module's schema, over the template's
 `reference.conf` (`readLogging`): the logger exists before boot, since the
-template logs while it reads its configuration and chooses its modules. Then it hands `createApp` the configuration as resolved over every
+template logs while it reads its configuration and chooses its modules.
+Every refusal the template raises before boot — in phase one, and as it
+builds what it hands boot below — is a `BootError` under the reason boot
+raises for the same case (`config-path-relocated`,
+`environment-variable-renamed`, `config-validation-failed`,
+`module-section-path-invalid`; [`src/bootRefusal.mts`](src/bootRefusal.mts)),
+so an alert on a boot error's reason sees it too. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed, with
 `core.sessionRequirements` as the MFA switch expects it written in — the
 configuration's list with `mfa` added when the switch installs MFA; a value

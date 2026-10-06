@@ -416,18 +416,29 @@ describe("phase two refuses the Redis grant store's key prefix moved while the i
 	};
 
 	/** What phase two refused with. */
-	const refusal = (...args: Parameters<typeof resolve>): RangeError => {
+	const refusal = (...args: Parameters<typeof resolve>): BootError => {
 		try {
 			resolve(...args);
 		} catch (err) {
-			if (err instanceof RangeError) return err;
+			if (err instanceof BootError) return err;
 			throw err;
 		}
 		throw new Error("phase two resolved");
 	};
 
 	it("the grant store's set and the intent store's left alone: refused, naming both keys and both variables and quoting no value", () => {
-		const { message } = refusal({ [GRANT]: "t1:fg:" });
+		const { message, reason, details } = refusal({ [GRANT]: "t1:fg:" });
+		expect(reason).toBe("config-validation-failed");
+		expect(details).toMatchObject({
+			issues: [{ code: "custom", path: ["redis-federation-grant-intent-store", "keyPrefix"] }],
+			modules: [
+				{
+					module: "redis-federation-grant-intent-store",
+					schemaPath: "redis-federation-grant-intent-store",
+				},
+			],
+		});
+		expect(JSON.stringify(details)).not.toContain("fg:");
 		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");
@@ -465,11 +476,23 @@ describe("phase two refuses the Redis grant store's key prefix moved while the i
 
 	it("grants kept in memory and intents on Redis: the grant store's key at its old path, which no loaded module relocates, refused naming the intent store's", () => {
 		const operator = operatorLayer('redisFederationGrantStore.keyPrefix = "t1:fg:"\n');
-		const { message } = refusal(
+		const { message, reason, details } = refusal(
 			{ [INTENT]: "t1:fgi:" },
 			[redisFederationGrantIntentStoreModule],
 			[operator, ...ownFiles("development")],
 		);
+		expect(reason).toBe("config-path-relocated");
+		expect(details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "redis-federation-grant-intent-store",
+					from: "redisFederationGrantStore.keyPrefix",
+					to: "redis-federation-grant-intent-store.keyPrefix",
+					environmentVariable: INTENT,
+				},
+			],
+		});
 		expect(message).toContain("redisFederationGrantStore.keyPrefix");
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");

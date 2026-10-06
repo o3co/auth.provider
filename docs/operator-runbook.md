@@ -231,8 +231,12 @@ those addresses are special-use, so an IPv4-only host is refused there.
 ### Boot refusals you will meet
 
 Every boot-time failure is a `BootError` with a `reason` and a `stage`
-(`packages/core/src/boot/types.mts`). The ones an operator meets, and the key
-each names:
+(`packages/core/src/boot/types.mts`). So is every refusal the standalone
+template raises before boot, while it reads its own `adapters`, `mfaMode` and
+`logging` and before it hands boot the configuration: each carries the
+reason boot raises for the same case, at stage `validateManifests`
+(`templates/standalone/src/bootRefusal.mts`), so one alert on the reason
+covers both. The ones an operator meets, and the key each names:
 
 | `reason` | Trigger | What to change |
 | --- | --- | --- |
@@ -296,15 +300,18 @@ Module-level messages that arrive wrapped in a factory failure:
   (REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX) is set off its default key prefix,
   and redis-federation-grant-intent-store.keyPrefix
   (REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX) is left at its default. …`,
-  a `RangeError` before boot whenever the Redis intent store is installed,
-  the grants on Redis or in memory (`templates/standalone/src/configPath.mts`).
+  refused before boot as `config-validation-failed` at
+  `redis-federation-grant-intent-store.keyPrefix` whenever the Redis intent
+  store is installed, the grants on Redis or in memory
+  (`templates/standalone/src/configPath.mts`).
   The intent store's prefix is its own key: set it too — to the grant store's
   prefix to keep acquisition's records beside the grants, or to one of its
   own. The check compares values, so an intent store prefix written as the
   default reads as left there. With the grants in memory,
   `redisFederationGrantStore.keyPrefix is set, and no installed module reads
-  it: …` refuses that old key written at all, naming the intent store's key
-  and variable: move the value there and delete the old line.
+  it: …` refuses that old key written at all (`config-path-relocated`),
+  naming the intent store's key and variable: move the value there and
+  delete the old line.
 - Federation grants (#593): the same guard, the same environment variable, and
   the message names `[federation-grants]` rather than `[federation-tokens]`
   (`packages/redis/src/internal/encryption-mode.mts`). One more refusal of its
@@ -465,7 +472,7 @@ Module-level messages that arrive wrapped in a factory failure:
 - mTLS: `source = "header"` with empty `trustedProxies`; `mode = "pki"`/`"full-pki"` with empty `trustedCas`; `mode = "pki"` with `source = "tls-layer"`; `full-pki` without `fullPki.revocation.mode` + `onUnavailable`; `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` with empty `allowedHosts` (`packages/mtls/README.md` "Boot-time fail-loud invariants", `packages/mtls/src/module.mts`).
 - Remote signing: `the signer's output does not verify against publicKeyPem for kid "…"` — the boot self-check in `createRemoteSigningKeyStore` (`packages/core/src/keys/remoteSigning.mts`).
 - A library's refusal at boot — OIDC discovery (`discovery of <issuer> failed …`), a private key (`privateKey could not be parsed`, `privateKey cannot sign <alg>`), an mTLS trust anchor (`trustedCas[<i>] is not a parseable X.509 certificate`, `… failed to read file at <path>`) — says what failed in fixed words; the library's own error (openid-client's, OpenSSL's, jose's, the file read's `ENOENT`) is the error's `cause`, which Node prints below it (`packages/federation-oidc/src/oidc.mts`, `client-auth.mts`, `packages/mtls/src/extractor.mts`).
-- The standalone's MFA switch (`templates/standalone/src/mfaSwitch.mts`), each refused before boot as a `RangeError`, not a `BootError`, quoting no configured mode, timeout, key or other secret (the memory-store refusal names the environment names it read): an `MFA_MODE` that is none of `off`, `optional` and `required`, or that a file's `mfaMode` contradicts; an `mfa.mode` the configuration writes that the switch does not say; with MFA on, a written `core.sessionRequirements.secondFactorAuthority` other than `mfa`; with MFA on — the template's default, `required` — an MFA store in memory unless every environment name says development or test (`ADAPTERS_MFA_FACTOR_STORE`, `ADAPTERS_MFA_TRANSACTION_STORE`: select redis, or store for the factors), the first refusal a deployment that has decided nothing about MFA meets, so it also names `MFA_ENCRYPTION_KEY`, the SMTP relay, `MFA_PAGE_URL` and `MFA_MODE=off`; `MFA_ENCRYPTION_KEY` set beside `config/development.conf`'s sample-key ring; and `mfa.storeTimeoutMs` below `repositories.user.http.timeout` where the Store is called. Set `MFA_MODE`, and remove `mfa.mode`. With MFA on, a second requirement named `mfa`, or a second one declaring the second-factor authority (`duplicate-second-factor-authority`), refuses the boot in core.
+- The standalone's MFA switch (`templates/standalone/src/mfaSwitch.mts`), each refused before boot as a `config-validation-failed` `BootError` whose issue is at the key's path (`mfaMode`, `adapters.<store>`, `mfa.<key>`, `core.sessionRequirements.secondFactorAuthority`), quoting no configured mode, timeout, key or other secret (the memory-store refusal names the environment names it read): an `MFA_MODE` that is none of `off`, `optional` and `required`, or that a file's `mfaMode` contradicts; an `mfa.mode` the configuration writes that the switch does not say; with MFA on, a written `core.sessionRequirements.secondFactorAuthority` other than `mfa`; with MFA on — the template's default, `required` — an MFA store in memory unless every environment name says development or test (`ADAPTERS_MFA_FACTOR_STORE`, `ADAPTERS_MFA_TRANSACTION_STORE`: select redis, or store for the factors), the first refusal a deployment that has decided nothing about MFA meets, so it also names `MFA_ENCRYPTION_KEY`, the SMTP relay, `MFA_PAGE_URL` and `MFA_MODE=off`; `MFA_ENCRYPTION_KEY` set beside `config/development.conf`'s sample-key ring; and `mfa.storeTimeoutMs` below `repositories.user.http.timeout` where the Store is called. Set `MFA_MODE`, and remove `mfa.mode`. With MFA on, a second requirement named `mfa`, or a second one declaring the second-factor authority (`duplicate-second-factor-authority`), refuses the boot in core.
 - A federation's provider, built by the factory of the type its `core.federations` entry names: `the type "…"'s factory must answer a provider named after its entry, "…" (it answered one named "…"): …`, or `… must answer a provider, an object` — `contribute-factory-failed`, naming the module, kind `federations` and the entry's name (`packages/core/src/boot/federation-entries.mts`). The session finds a federation's redirect policy and callback URL by its provider's name, so a provider named otherwise would be served at the entry with another federation's. It is a defect of the federation package, not of the configuration: report it to the package's authors, or remove the module.
 - The standalone's listener: a port it cannot bind (`EADDRINUSE`, `EACCES`) fails boot with that error; the process no longer announces a server it never started. A bound listener logs `server_listening` (info, `port`) once, and each later server error — an `accept` failing with `EMFILE`, say — as `server_error` (error, the error's projection), where it was lost and a second one crashed the process (`templates/standalone/src/listen.mts`).
 
@@ -2579,11 +2586,14 @@ lists every breaking change since, and which of the steps below each needs.
    - **The adapter selections are refused before boot, not by it.** The
      template's phase one reads `adapters` before it chooses its modules, so
      an old selection path or variable, or a value the template does not know
-     (`ADAPTERS_RATE_LIMITER=memcached`), fails the start with a
-     `RangeError` naming `adapters.<slot>`, where it used to be a
-     `config-validation-failed` or `config-path-relocated` BootError. So do
-     the template's own `FEDERATIONS_*` variables. An alert that matches the
-     boot error's reason sees neither.
+     (`ADAPTERS_RATE_LIMITER=memcached`), fails the start before any module
+     is chosen, naming `adapters.<slot>`. It is still a `BootError` under the
+     reason boot raises for the same case: `config-path-relocated` for an old
+     path, `environment-variable-renamed` for an old variable — the
+     template's own `FEDERATIONS_*` variables too — and
+     `config-validation-failed` for a value, the details naming the module
+     `adapters` (`core` for a federation's variable). An alert that matches
+     the boot error's reason sees them as it sees boot's own.
    - **`repositories.code.type` (`CLIENT_CODE_TYPE`) is refused.** It used to
      be read with a `config_key_deprecated` warning while `oauth.code.adapter`
      was unset; move the value to `ADAPTERS_CODE_REPOSITORY`.

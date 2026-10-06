@@ -342,12 +342,15 @@ describe("a variable the template's own modules renamed, through the template's 
 	);
 });
 
-/** What phase one refused the full set with, before any module was chosen. */
-async function phaseOneRefused(options: FullSetOptions): Promise<RangeError> {
+/**
+ * What phase one refused the full set with, before any module was chosen: a
+ * `BootError` under the reason boot raises for the same case.
+ */
+async function phaseOneRefused(options: FullSetOptions): Promise<BootError> {
 	try {
 		current = await composeFullSet(options);
 	} catch (err) {
-		if (err instanceof RangeError) return err;
+		if (err instanceof BootError) return err;
 		throw err;
 	}
 	throw new Error("the full set booted");
@@ -388,6 +391,11 @@ describe("the composition root's adapters, read by phase one alone", () => {
 		async (hocon, from, to, variable) => {
 			const err = await phaseOneRefused({ operatorHocon: `${hocon}\n` });
 
+			expect(err.reason).toBe("config-path-relocated");
+			expect(err.details).toEqual({
+				reason: "config-path-relocated",
+				relocated: [{ module: "adapters", from, to, environmentVariable: variable }],
+			});
 			expect(err.message).toContain(`${from} has moved to ${to}`);
 			expect(err.message).toContain(variable);
 		},
@@ -401,6 +409,10 @@ describe("the composition root's adapters, read by phase one alone", () => {
 	])("%s set alone: refused before boot, naming %s", async (from, to) => {
 		const err = await phaseOneRefused({ env: { ...without(to), [from]: "memory" } });
 
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toMatchObject({
+			renamed: [{ module: "adapters", from, to, state: "unset" }],
+		});
 		expect(err.message).toContain(`${from} was renamed ${to}`);
 	});
 });
@@ -489,8 +501,19 @@ describe("the federations, under core.federations", () => {
 	it("refuses, before any module is chosen, the variables under their old names alone", async () => {
 		const err = await phaseOneRefused({ env: withOldNames(SINGLE_ENV) });
 
+		expect(err.reason).toBe("environment-variable-renamed");
 		for (const name of ["GOOGLE_ENABLED", "OIDC_ISSUER", "OIDC_CLIENT_ID"]) {
 			expect(err.message).toContain(`FEDERATIONS_${name} was renamed CORE_FEDERATIONS_${name}`);
+			expect(err.details).toMatchObject({
+				renamed: expect.arrayContaining([
+					expect.objectContaining({
+						module: "core",
+						from: `FEDERATIONS_${name}`,
+						to: `CORE_FEDERATIONS_${name}`,
+						state: "unset",
+					}),
+				]),
+			});
 		}
 	});
 

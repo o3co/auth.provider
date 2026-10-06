@@ -219,11 +219,19 @@ describe("what the template hands boot of the mfa section", () => {
 			} catch (caught) {
 				err = caught;
 			}
-			expect(err).toBeInstanceOf(RangeError);
-			const message = (err as RangeError).message;
+			expect(err).toBeInstanceOf(BootError);
+			expect(err).toMatchObject({
+				reason: "config-validation-failed",
+				details: {
+					issues: [{ code: "custom", path: ["mfa", "mode"] }],
+					modules: [{ module: "mfa", schemaPath: "mfa" }],
+				},
+			});
+			const message = (err as BootError).message;
 			expect(message).toContain("mfa.mode");
 			expect(message).toContain("mfaMode");
 			expect(message).not.toMatch(/"(?:off|optional|required)"/);
+			expect(JSON.stringify((err as BootError).details)).not.toMatch(/"(?:off|optional|required)"/);
 		},
 	);
 
@@ -240,8 +248,12 @@ describe("what the template hands boot of the mfa section", () => {
 			} catch (caught) {
 				err = caught;
 			}
-			expect(err).toBeInstanceOf(RangeError);
-			const message = (err as RangeError).message;
+			expect(err).toBeInstanceOf(BootError);
+			expect(err).toMatchObject({
+				reason: "config-validation-failed",
+				details: { issues: [{ code: "custom", path: ["mfa"] }] },
+			});
+			const message = (err as BootError).message;
 			expect(message).toMatch(/^mfa is written as a value/);
 			expect(message).not.toContain("remove mfa.mode");
 			expect(message).toContain("mfaMode");
@@ -259,11 +271,14 @@ describe("what the template hands boot of the mfa section", () => {
 		}
 	});
 
-	it("is refused through the composition as through phase two: before boot, under the switch off", async () => {
+	it("is refused through the composition as through phase two, under the switch off", async () => {
 		const err = await refusal(compose({ operatorHocon: 'mfa.mode = "required"\n' }));
-		expect(err).toBeInstanceOf(RangeError);
-		expect(err).not.toBeInstanceOf(BootError);
-		expect((err as RangeError).message).toContain("mfaMode");
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "config-validation-failed",
+			details: { issues: [{ path: ["mfa", "mode"] }] },
+		});
+		expect((err as BootError).message).toContain("mfaMode");
 	});
 });
 
@@ -312,8 +327,18 @@ describe("expectedSessionRequirements", () => {
 		} catch (caught) {
 			err = caught;
 		}
-		expect(err).toBeInstanceOf(RangeError);
-		const message = (err as RangeError).message;
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "config-validation-failed",
+			details: {
+				issues: [
+					{ code: "custom", path: ["core", "sessionRequirements", "secondFactorAuthority"] },
+				],
+				modules: [{ module: "core", schemaPath: "core" }],
+			},
+		});
+		expect(JSON.stringify((err as BootError).details)).not.toContain("sentinel-requirement");
+		const message = (err as BootError).message;
 		expect(message).toContain("core.sessionRequirements.secondFactorAuthority");
 		expect(message).toContain("mfaMode");
 		expect(message).toContain("MFA_MODE");

@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
+	BootError,
 	createApp,
 	type Module,
 	moduleReferences,
@@ -1192,7 +1193,7 @@ describe("the shipped config boots with every documented override supplied as a 
 
 		it("refuses MFA_MODE that is none of the three before boot, naming mfaMode", async () => {
 			const env = { ...DOCUMENTED_ENV, MFA_MODE: "on" };
-			expect(() => readShippedSwitches(env)).toThrow(RangeError);
+			expect(() => readShippedSwitches(env)).toThrow(BootError);
 			await expect(bootParsed(env)).rejects.toThrow(/mfaMode/);
 		});
 

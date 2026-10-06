@@ -447,8 +447,8 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 		CORE_DEPLOYMENT_MODE: "single",
 	};
 
-	/** What the template's reading refused the full set with, before boot. */
-	async function refusedBeforeBoot(options: FullSetOptions): Promise<RangeError> {
+	/** What the template's reading refused the full set with, before boot: a `BootError`. */
+	async function refusedBeforeBoot(options: FullSetOptions): Promise<BootError> {
 		const err = await composeFullSet(options).then(
 			async (composition) => {
 				await composition.handle.dispose();
@@ -456,12 +456,13 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 			},
 			(error: unknown) => error,
 		);
-		expect(err).toBeInstanceOf(RangeError);
-		return err as RangeError;
+		expect(err).toBeInstanceOf(BootError);
+		return err as BootError;
 	}
 
 	it("refuses boot, naming both keys and both variables and quoting no value", async () => {
-		const { message } = await refusedBeforeBoot(onRedis({ env: { [GRANT]: "t1:fg:" } }));
+		const { message, reason } = await refusedBeforeBoot(onRedis({ env: { [GRANT]: "t1:fg:" } }));
+		expect(reason).toBe("config-validation-failed");
 		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");
@@ -477,12 +478,13 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 	});
 
 	it("grants kept in memory and intents on Redis: the grant store's key at its old path refused, naming the intent store's", async () => {
-		const { message } = await refusedBeforeBoot(
+		const { message, reason } = await refusedBeforeBoot(
 			onRedis({
 				env: GRANTS_IN_MEMORY,
 				operatorHocon: 'redisFederationGrantStore.keyPrefix = "t1:fg:"\n',
 			}),
 		);
+		expect(reason).toBe("config-path-relocated");
 		expect(message).toContain("redisFederationGrantStore.keyPrefix");
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");

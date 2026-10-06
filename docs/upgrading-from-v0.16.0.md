@@ -131,7 +131,22 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`, `OAUTH_ACCESS_TOKEN_EXPIRES_IN`),
     which the template no longer reads before boot either. With MFA on, a
     written `core.sessionRequirements.secondFactorAuthority` other than `mfa`
-    is still a `RangeError` before boot.
+    is still refused before boot.
+  - What the template refuses before boot is a `BootError` under the reason
+    boot raises for the same case, where it was a `RangeError` with no
+    reason; the messages are unchanged. An adapter selection at its old path
+    (`rateLimiter.adapter`, …), and `redisFederationGrantStore.keyPrefix`
+    where no loaded module reads it, are `config-path-relocated`; an old
+    adapter variable (`RATE_LIMITER_ADAPTER`, …) or `FEDERATIONS_*` variable
+    is `environment-variable-renamed`; a value the `adapters`, `mfaMode` or
+    `logging` schema refuses, and the template's checks across keys — the
+    MFA stores in memory outside development, `MFA_MODE` against a file's
+    `mfaMode`, `mfa.mode`, the sample-key ring, `mfa.storeTimeoutMs`,
+    `core.sessionRequirements.secondFactorAuthority`, the Redis intent
+    store's key prefix — are `config-validation-failed`, each issue at its
+    key's path; a module of your own named `adapters` or `mfaMode` is
+    `module-section-path-invalid`. An alert keyed on a boot error's reason
+    now sees every refusal to start.
   - `buildModules`' `overrides.logger` is removed: it carried only that
     warning. Drop it from your call; `app.mts` passes `{ environment }`.
   - For code of a fork's own: `SWITCHES`, `readSwitches`' second argument
