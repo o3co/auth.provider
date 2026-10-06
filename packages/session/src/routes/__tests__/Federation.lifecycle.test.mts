@@ -153,7 +153,16 @@ async function world(options: WorldOptions = {}) {
 			logger: silentLogger,
 		}),
 	);
-	return { app, store, userSessionStore, federationTokenStore, lifecycleStore, service, join };
+	return {
+		app,
+		store,
+		userSessionStore,
+		federationTokenStore,
+		sessionFederationIndex,
+		lifecycleStore,
+		service,
+		join,
+	};
 }
 
 type World = Awaited<ReturnType<typeof world>>;
@@ -169,8 +178,27 @@ async function login(w: World) {
 		.set("Cookie", "sid=browser");
 }
 
-/** A link callback for the live session `LINKED_SID`, opened in the lifecycle. */
-async function link(w: World) {
+/** Tokens the session held for `test` before the link callback. */
+const EARLIER_TOKENS = {
+	accessToken: "earlier-at",
+	refreshToken: undefined,
+	idToken: undefined,
+	expiresAt: new Date(Date.now() + 3_600_000),
+	tokenType: undefined,
+	scope: "openid",
+	grantedScope: "openid",
+	obtainedAt: undefined,
+};
+
+interface LinkOptions {
+	/** Whether the session's lifecycle record is opened; one established before the lifecycle was installed has none. */
+	readonly open?: boolean;
+	/** The session already carries `test`: in the per-session index, with tokens. */
+	readonly carrying?: boolean;
+}
+
+/** A link callback for the live session `LINKED_SID`. */
+async function link(w: World, { open = true, carrying = false }: LinkOptions = {}) {
 	const expiresAt = new Date(Date.now() + 3_600_000);
 	await w.userSessionStore.create({
 		sid: LINKED_SID,
@@ -181,9 +209,21 @@ async function link(w: World) {
 		amr: ["pwd"],
 		authentication: undefined,
 	});
-	expect(await w.service.open(LINKED_SID, { sub: SUBJECT, expiresAt })).toEqual({
-		outcome: "opened",
-	});
+	if (open) {
+		expect(await w.service.open(LINKED_SID, { sub: SUBJECT, expiresAt })).toEqual({
+			outcome: "opened",
+		});
+	}
+	if (carrying) {
+		if (open) {
+			expect(await w.service.join(LINKED_SID, { federation: "test" })).toEqual({
+				outcome: "joined",
+			});
+		} else {
+			await w.sessionFederationIndex.addFederation(LINKED_SID, "test", expiresAt);
+		}
+		await w.federationTokenStore.attach(LINKED_SID, "test", EARLIER_TOKENS);
+	}
 	w.store.set("browser", {
 		data: {
 			sid: LINKED_SID,
@@ -293,6 +333,27 @@ describe("a link callback over the session lifecycle", () => {
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("login_required");
 		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
+	});
+
+	it("re-links a federation the session already carries: joined again, its tokens replaced", async () => {
+		const w = await world();
+
+		const res = await link(w, { carrying: true });
+
+		expect(res.status).toBe(302);
+		expect(await participantsOf(w, LINKED_SID)).toEqual(["federation:test"]);
+		expect((await w.federationTokenStore.get(LINKED_SID, "test"))?.accessToken).toBe("upstream-at");
+	});
+
+	it("refuses a session with no lifecycle record: a federation alone cannot adopt it, and a re-link removes that federation's tokens", async () => {
+		const w = await world();
+
+		const res = await link(w, { open: false, carrying: true });
+
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
+		expect(readVersionedSessionLifecycle(await w.lifecycleStore.read(LINKED_SID))).toBeNull();
 	});
 
 	it("leaves no federation tokens when the session closed before they were attached", async () => {

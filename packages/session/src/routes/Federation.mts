@@ -348,14 +348,16 @@ export const createRouter = (
 			mappedClaims: supportsClaimMapping(provider) ? provider.mapClaims(profile) : undefined,
 		});
 
-		// `establishSession` writes the login's tail. This callback adds two
+		// `establishSession` writes the login's tail. This callback adds its
 		// steps — the federation's index entry before the regeneration and the
-		// upstream tokens after it, each undone in reverse when a later write
-		// fails — and logs in this router's vocabulary. The index entry is not
-		// atomic with the record: a failed `addFederation` rolls the record back
-		// and the user logs in again (an atomic compound call would re-couple
-		// the stores). Regeneration comes after the record and index exist and
-		// before tokens or session fields are written.
+		// upstream tokens after it, or, where core's session lifecycle is
+		// installed, the tokens and then the lifecycle's join, which writes the
+		// index entry — each undone in reverse when a later write fails, and
+		// logs in this router's vocabulary. The index entry is not atomic with
+		// the record: a failed write rolls the record back and the user logs in
+		// again (an atomic compound call would re-couple the stores).
+		// Regeneration comes after the record exists and before tokens or
+		// session fields are written.
 		const accessToken = profile.accessToken;
 		const attachTokens: ReadonlyArray<EstablishSessionStep<FederationStore, FederationStoreStep>> =
 			accessToken
