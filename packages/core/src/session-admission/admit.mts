@@ -331,8 +331,8 @@ const copyView = (view: SessionView): SessionView =>
  *    `stepUpVerdict` for `step_up`). A token carrier is judged on the
  *    token's own `amr`, record or not; a code carrier, over a record, on
  *    how its session had authenticated at `/authorize` as the code carries
- *    it (`codeReadingOver`), and on the record when it carries nothing
- *    readable. A code whose primary is not the record's is
+ *    it (`codeReadingOver`). A code that carries no readable
+ *    `authentication`, or whose primary is not the record's, is
  *    `unauthenticated`, nothing asked.
  * 6. `acr_values`: `selectAcr` over the `amr` step 5 judged on, with reach the union
  *    of every requirement's when the session is live.
@@ -347,7 +347,9 @@ const copyView = (view: SessionView): SessionView =>
  *    steps 1 to 4 again, on a fresh clock reading and with the claim's
  *    subject held to the first reading's, whatever step 7 answered. An
  *    answer they give is the admission's; else step 7's stands, carrying the
- *    first reading's session, view and renewal nonce. A requirement that
+ *    first reading's session, view and renewal nonce. A code whose primary
+ *    the record read last does not hold, or whose record can no longer be
+ *    read, is `unauthenticated`, as on the first reading. A requirement that
  *    throws has already answered `unavailable`.
  */
 export async function admitSession(
@@ -389,10 +391,12 @@ export async function admitSession(
 	let reading: AuthenticationReading | null;
 	if (presented.carrier === "token") reading = tokenReading(presented.tokenAmr);
 	else if (session === null) reading = null;
-	else if (presented.carrier === "code" && checked.codeReading !== undefined) {
-		const over = codeReadingOver(checked.codeReading, session);
-		// The record's primary is not the code's: its other facts are not the
-		// code's session's, and nothing is asked of them.
+	else if (presented.carrier === "code") {
+		// A code that does not say how its session had authenticated, or whose
+		// primary is not the record's, says nothing of this session: nothing
+		// is asked of it.
+		const over =
+			checked.codeReading === undefined ? undefined : codeReadingOver(checked.codeReading, session);
 		if (over === undefined) return { outcome: "unauthenticated" };
 		reading = over;
 	} else reading = sessionReading(session);
@@ -487,6 +491,15 @@ export async function admitSession(
 			unavailable,
 		);
 		if ("answer" in last) return last.answer;
+		// The code's primary is held to the record read last, as to the first.
+		if (
+			presented.carrier === "code" &&
+			(checked.codeReading === undefined ||
+				last.session === null ||
+				codeReadingOver(checked.codeReading, last.session) === undefined)
+		) {
+			return { outcome: "unauthenticated" };
+		}
 	}
 	return answer;
 }

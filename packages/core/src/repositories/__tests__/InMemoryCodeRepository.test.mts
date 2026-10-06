@@ -31,6 +31,7 @@ describe("InMemoryCodeRepository", () => {
 		sid: undefined,
 		acr: undefined,
 		amr: undefined,
+		authentication: undefined,
 		grantedScope: undefined,
 		grantedAudience: undefined,
 	};
@@ -449,6 +450,12 @@ describe("InMemoryCodeRepository", () => {
 			for (const authentication of [
 				null,
 				"pwd",
+				{},
+				{ primary: "pwd" },
+				{ mfaAt: undefined },
+				new Date(),
+				Object.create({ primary: undefined, mfaAt: undefined }),
+				Object.assign(new Date(), { primary: undefined, mfaAt: undefined }),
 				{ primary: "" },
 				{ primary: "pwd", mfaAt: new Date(Number.NaN) },
 			]) {

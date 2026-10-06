@@ -28,6 +28,7 @@ import { readAcrTable } from "#/session-admission/acr.mjs";
 import type { AdmissionAction } from "#/session-admission/actions.mjs";
 import {
 	admitSession,
+	type CodeCarrier,
 	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
@@ -52,6 +53,15 @@ import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
 import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
+
+/** A code record as `/authorize` mints it over a password session: its `sid`, and how the session had authenticated. */
+const passwordCode = (sid: string): CodeCarrier => {
+	const code: { readonly sid: string; readonly authentication: unknown } = {
+		sid,
+		authentication: { primary: "pwd", mfaAt: undefined },
+	};
+	return code;
+};
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 /** The issuer each resolver here registers its pages on. */
@@ -586,7 +596,7 @@ describe("step 1 — the claim", () => {
 
 	it("does not ask a subject of a code claim's first read, which has none", async () => {
 		expect(
-			await admitSession(deps(), request({ claim: codeClaimFirstRead({ sid: "sid-1" }) })),
+			await admitSession(deps(), request({ claim: codeClaimFirstRead(passwordCode("sid-1")) })),
 		).toMatchObject({ outcome: "admitted" });
 	});
 });
@@ -669,7 +679,7 @@ describe("step 2 — the live read", () => {
 			expect(
 				await admitSession(
 					deps({ userSessionStore: holding(session({ sub: sub as never })) }),
-					request({ claim: codeClaimFirstRead({ sid: "sid-1" }) }),
+					request({ claim: codeClaimFirstRead(passwordCode("sid-1")) }),
 				),
 				String(sub),
 			).toEqual({ outcome: "not_live", reason: "gone" });
@@ -817,13 +827,13 @@ describe("step 3 — the subject", () => {
 		expect(
 			await admitSession(
 				deps(),
-				request({ claim: codeClaimRevalidation({ sid: "sid-1" }, "user-2") }),
+				request({ claim: codeClaimRevalidation(passwordCode("sid-1"), "user-2") }),
 			),
 		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
 		expect(
 			await admitSession(
 				deps(),
-				request({ claim: codeClaimRevalidation({ sid: "sid-1" }, "user-1") }),
+				request({ claim: codeClaimRevalidation(passwordCode("sid-1"), "user-1") }),
 			),
 		).toMatchObject({ outcome: "admitted" });
 	});
@@ -891,8 +901,8 @@ describe("step 4 — the revocation boundary", () => {
 	it("reads the boundary for a code claim — either read — and a link claim as for a cookie: only a token carrier's is verifyJwt's", async () => {
 		const record = session({ authTime: minutesAgo(5) });
 		for (const [label, claim] of [
-			["a code's first read", codeClaimFirstRead({ sid: "sid-1" })],
-			["a code's revalidation", codeClaimRevalidation({ sid: "sid-1" }, "user-1")],
+			["a code's first read", codeClaimFirstRead(passwordCode("sid-1"))],
+			["a code's revalidation", codeClaimRevalidation(passwordCode("sid-1"), "user-1")],
 			["a link", linkClaim({ sid: "sid-1", subject: "user-1" })],
 		] as const) {
 			expect(
@@ -1707,17 +1717,17 @@ describe("step 5 — what a requirement answers is validated at the boundary", (
 			[
 				"a code's first read with a record",
 				deps({ userSessionStore: holding(record) }),
-				codeClaimFirstRead({ sid: "sid-1" }),
+				codeClaimFirstRead(passwordCode("sid-1")),
 			],
 			[
 				"a code's first read without a store",
 				deps({ userSessionStore: undefined }),
-				codeClaimFirstRead({ sid: "sid-1" }),
+				codeClaimFirstRead(passwordCode("sid-1")),
 			],
 			[
 				"a code's revalidation without a store",
 				deps({ userSessionStore: undefined }),
-				codeClaimRevalidation({ sid: "sid-1" }, "user-1"),
+				codeClaimRevalidation(passwordCode("sid-1"), "user-1"),
 			],
 			[
 				"a token without a sid, the store not read",

@@ -27,6 +27,7 @@ import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
 	admitSession,
+	type CodeCarrier,
 	codeClaimFirstRead,
 	cookieClaim,
 	tokenClaim,
@@ -46,6 +47,15 @@ import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
 import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
+
+/** A code record as `/authorize` mints it over a password session: its `sid`, and how the session had authenticated. */
+const passwordCode = (sid: string): CodeCarrier => {
+	const code: { readonly sid: string; readonly authentication: unknown } = {
+		sid,
+		authentication: { primary: "pwd", mfaAt: undefined },
+	};
+	return code;
+};
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 const ISSUER = "https://auth.test";
@@ -278,7 +288,7 @@ describe("admission reads the record and the boundary again after its requiremen
 
 	for (const [carrier, claim] of [
 		["a cookie", cookie()],
-		["a code's first read, which names no subject", codeClaimFirstRead({ sid: "sid-1" })],
+		["a code's first read, which names no subject", codeClaimFirstRead(passwordCode("sid-1"))],
 	] as const) {
 		it(`answers not_live (subject_mismatch) for ${carrier} when the record under the sid names another subject by then, logged and audited once`, async () => {
 			const w = world();

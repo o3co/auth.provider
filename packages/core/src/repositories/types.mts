@@ -300,10 +300,11 @@ export interface CodeData {
 	 * `amr`, what the exchange judges the code on, since a step-up recorded
 	 * on the session later moves the session and not the code. `undefined`
 	 * when `/authorize` admitted no session record (no user-session store).
-	 * Optional in this release step only: a code that carries none is judged
-	 * on the live record.
+	 * A code whose session the exchange reads, and which carries none — one
+	 * an earlier release issued, or one a repository dropped it from — is
+	 * refused.
 	 */
-	readonly authentication?: CodeAuthentication | undefined;
+	readonly authentication: CodeAuthentication | undefined;
 }
 
 /**

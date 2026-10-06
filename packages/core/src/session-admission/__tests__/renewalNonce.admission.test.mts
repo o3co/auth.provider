@@ -26,6 +26,7 @@ import { describe, expect, it } from "vitest";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
 	admitSession,
+	type CodeCarrier,
 	codeClaimRevalidation,
 	cookieClaim,
 	cookieRenewedAway,
@@ -43,6 +44,15 @@ import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 import type { UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
 import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
+
+/** A code record as `/authorize` mints it over a password session: its `sid`, and how the session had authenticated. */
+const passwordCode = (sid: string): CodeCarrier => {
+	const code: { readonly sid: string; readonly authentication: unknown } = {
+		sid,
+		authentication: { primary: "pwd", mfaAt: undefined },
+	};
+	return code;
+};
 
 const SID = "sid-1";
 const SUB = "user-1";
@@ -190,7 +200,7 @@ describe("admission over a session bound to a renewed cookie session", () => {
 		expect(await admit(store, tokenClaim({ sid: SID, sub: SUB }))).toMatchObject({
 			outcome: "admitted",
 		});
-		expect(await admit(store, codeClaimRevalidation({ sid: SID }, SUB))).toMatchObject({
+		expect(await admit(store, codeClaimRevalidation(passwordCode(SID), SUB))).toMatchObject({
 			outcome: "admitted",
 		});
 	});
@@ -332,7 +342,7 @@ describe("the admitted outcome carries the record's renewal nonce", () => {
 		const nonce = newRenewalNonce();
 		const store = await holding(nonce);
 		for (const claim of [
-			codeClaimRevalidation({ sid: SID }, SUB),
+			codeClaimRevalidation(passwordCode(SID), SUB),
 			linkClaim({ sid: SID, subject: SUB }),
 		]) {
 			expect(await admit(store, claim), claim.carrier).toMatchObject({
@@ -353,7 +363,7 @@ describe("the admitted outcome carries the record's renewal nonce", () => {
 		};
 		for (const claim of [
 			tokenClaim({ sid: SID, sub: SUB }),
-			codeClaimRevalidation({ sid: SID }, SUB),
+			codeClaimRevalidation(passwordCode(SID), SUB),
 			linkClaim({ sid: SID, subject: SUB }),
 		]) {
 			const admission = await admit(odd, claim);

@@ -23,7 +23,8 @@
  * the bundled repositories copy the record field by field, so a field a copy
  * forgets is dropped silently: `nonce` gone mints an id_token the RP cannot
  * bind to its request, `acr` gone one that no longer attests the step-up the
- * user performed, `amr` gone tokens that carry no `amr`, `sid` gone makes
+ * user performed, `amr` gone tokens that carry no `amr`, `authentication`
+ * gone a code the exchange refuses, `sid` gone makes
  * `/token` refuse the code where a session store is wired and otherwise
  * leaves the RP nothing to match a logout against, `grantedAudience` gone
  * falls back to the client as the audience.
@@ -48,8 +49,8 @@ type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, 
 type OptionalKeys<T> = { [K in keyof T]-?: IsRequiredKey<T, K> extends true ? never : K }[keyof T];
 
 describe("Code — what a repository answers with", () => {
-	it("has no optional key but authentication, optional until every writer names it", () => {
-		expectTypeOf<OptionalKeys<Code>>().toEqualTypeOf<"authentication">();
+	it("has no optional key", () => {
+		expectTypeOf<OptionalKeys<Code>>().toEqualTypeOf<never>();
 	});
 
 	it("names each field, so a failure says which one regressed", () => {
@@ -59,6 +60,7 @@ describe("Code — what a repository answers with", () => {
 		expectTypeOf<IsRequiredKey<Code, "sid">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "acr">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "amr">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<Code, "authentication">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "expiresIn">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "grantedScope">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "grantedAudience">>().toEqualTypeOf<true>();
@@ -77,8 +79,8 @@ describe("CreateCodeInput — what /authorize writes", () => {
 		expectTypeOf<Parameters<CodeRepository["createCode"]>[0]>().toEqualTypeOf<CreateCodeInput>();
 	});
 
-	it("leaves only expiresIn optional — absent means the repository's default — and authentication, until every writer names it", () => {
-		expectTypeOf<OptionalKeys<CreateCodeInput>>().toEqualTypeOf<"expiresIn" | "authentication">();
+	it("leaves only expiresIn optional — absent means the repository's default", () => {
+		expectTypeOf<OptionalKeys<CreateCodeInput>>().toEqualTypeOf<"expiresIn">();
 	});
 
 	it("names exactly the record's fields but the code itself", () => {
