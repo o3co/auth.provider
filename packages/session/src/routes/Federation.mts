@@ -261,6 +261,7 @@ export const createRouter = (
 		userRepository,
 		sessionFederationIndex,
 		federationTokenStore,
+		sessionLifecycle,
 		federationTransactionTtlMs,
 		auditSink,
 		logger,
@@ -347,14 +348,16 @@ export const createRouter = (
 			mappedClaims: supportsClaimMapping(provider) ? provider.mapClaims(profile) : undefined,
 		});
 
-		// `establishSession` writes the login's tail. This callback adds two
+		// `establishSession` writes the login's tail. This callback adds its
 		// steps — the federation's index entry before the regeneration and the
-		// upstream tokens after it, each undone in reverse when a later write
-		// fails — and logs in this router's vocabulary. The index entry is not
-		// atomic with the record: a failed `addFederation` rolls the record back
-		// and the user logs in again (an atomic compound call would re-couple
-		// the stores). Regeneration comes after the record and index exist and
-		// before tokens or session fields are written.
+		// upstream tokens after it, or, where core's session lifecycle is
+		// installed, the tokens and then the lifecycle's join, which writes the
+		// index entry — each undone in reverse when a later write fails, and
+		// logs in this router's vocabulary. The index entry is not atomic with
+		// the record: a failed write rolls the record back and the user logs in
+		// again (an atomic compound call would re-couple the stores).
+		// Regeneration comes after the record exists and before tokens or
+		// session fields are written.
 		const accessToken = profile.accessToken;
 		const attachTokens: ReadonlyArray<EstablishSessionStep<FederationStore, FederationStoreStep>> =
 			accessToken
@@ -413,6 +416,22 @@ export const createRouter = (
 			},
 			{ logger: log },
 		);
+		// Where core's session lifecycle is installed, the federation joins the
+		// session through it after its tokens are attached, in place of the index
+		// entry: a session closed before the join is refused, and the lifecycle
+		// removes the tokens handed to it.
+		let closed = false;
+		const joined: EstablishSessionStep<FederationStore, FederationStoreStep> | undefined =
+			sessionLifecycle && {
+				store: "session_lifecycle",
+				step: "join",
+				run: async ({ sid }) => {
+					const answer = await sessionLifecycle.join(sid, { federation: provider.name });
+					if (answer.outcome === "joined") return;
+					closed = answer.outcome === "refused";
+					throw new Error(`the session lifecycle answered ${answer.outcome} to the join`);
+				},
+			};
 		const established = await establishSession<FederationStore, FederationStoreStep>(
 			establishment,
 			{
@@ -421,27 +440,39 @@ export const createRouter = (
 				...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
 				...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 				sessionTtlMs,
-				beforeRegenerate: [
-					{
-						store: "session_federation_index",
-						step: "add",
-						run: ({ sid, expiresAt }) =>
-							sessionFederationIndex.addFederation(sid, provider.name, expiresAt),
-						undo: {
-							step: "remove_by_sid",
-							run: ({ sid }) => sessionFederationIndex.removeBySid(sid),
-						},
-					},
-				],
-				afterRegenerate: attachTokens,
+				beforeRegenerate: joined
+					? []
+					: [
+							{
+								store: "session_federation_index",
+								step: "add",
+								run: ({ sid, expiresAt }) =>
+									sessionFederationIndex.addFederation(sid, provider.name, expiresAt),
+								undo: {
+									step: "remove_by_sid",
+									run: ({ sid }) => sessionFederationIndex.removeBySid(sid),
+								},
+							},
+						],
+				afterRegenerate: joined ? [...attachTokens, joined] : attachTokens,
 				reporter: ({ sid }) => {
 					// Rebind: from this point onward, every log call carries
 					// `provider` AND `sid` — the lines the tail emits, and this
 					// callback's own after it.
 					log = log.child({ sid });
 					return {
-						storeUnavailable: (store, step, cause) =>
-							logStoreUnavailable(log, "federation_callback_store_unavailable", store, step, cause),
+						// A refused join is the session's close, not an outage.
+						storeUnavailable: (store, step, cause) => {
+							if (!closed) {
+								logStoreUnavailable(
+									log,
+									"federation_callback_store_unavailable",
+									store,
+									step,
+									cause,
+								);
+							}
+						},
 						cleanupFailed: (store, step, cause) => logCleanupFailed(log, store, step, cause),
 						subjectIndexWriteFailed: (cause) =>
 							log.error(
@@ -453,6 +484,12 @@ export const createRouter = (
 			},
 		);
 		if (established.outcome === "unavailable") {
+			if (closed) {
+				return res.status(401).json({
+					error: "login_required",
+					error_description: "The session ended before the sign-in completed",
+				});
+			}
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 

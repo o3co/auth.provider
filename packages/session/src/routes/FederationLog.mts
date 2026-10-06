@@ -26,7 +26,8 @@ import { type Logger, loggableError } from "@o3co/auth-provider-core";
  * The stores the federation routes read or write, as their log lines name
  * them. `cookie_session` is the express-session store behind `req.session`;
  * `federation_transaction` is a `form_post` federation's transaction record,
- * kept in that same store under a key of its own.
+ * kept in that same store under a key of its own; `session_lifecycle` is
+ * core's session lifecycle, which a federation joins a session through.
  */
 export type FederationStore =
 	| "user_repository"
@@ -35,7 +36,8 @@ export type FederationStore =
 	| "federation_token"
 	| "subject_session_index"
 	| "federation_transaction"
-	| "cookie_session";
+	| "cookie_session"
+	| "session_lifecycle";
 
 /** The operation on a {@link FederationStore} that failed, as a log line names it. */
 export type FederationStoreStep =
@@ -53,7 +55,8 @@ export type FederationStoreStep =
 	| "attach"
 	| "remove"
 	| "remove_by_sid"
-	| "remove_sid";
+	| "remove_sid"
+	| "join";
 
 /** Which leg of a federation a store outage stopped. */
 type FederationOutageEvent =

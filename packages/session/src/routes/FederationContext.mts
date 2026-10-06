@@ -27,6 +27,7 @@ import type {
 	Logger,
 	SessionClaim,
 	SessionFederationIndex,
+	SessionLifecycle,
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import type { SessionAdmissionAction } from "../admissionActions.mjs";
@@ -41,6 +42,12 @@ export interface FederationRouterContext extends FederationTransactionCookie {
 	readonly userRepository: UserRepository;
 	readonly sessionFederationIndex: SessionFederationIndex;
 	readonly federationTokenStore: FederationTokenStore;
+	/**
+	 * Core's session lifecycle, where installed: a federation joins a session
+	 * through it once its tokens are attached. Absent: through
+	 * `sessionFederationIndex`.
+	 */
+	readonly sessionLifecycle: SessionLifecycle | undefined;
 	readonly federationTransactionTtlMs: number;
 	readonly auditSink: AuditSink | undefined;
 	readonly logger: Logger;
