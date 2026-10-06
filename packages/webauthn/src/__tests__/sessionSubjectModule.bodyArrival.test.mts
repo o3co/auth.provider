@@ -43,6 +43,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express, { type RequestHandler } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { webauthnModule } from "#/module.mjs";
+import type { WebAuthnSubject } from "#/request.mjs";
 import {
 	SESSION_SUBJECT_ADMISSION_ACTIONS,
 	webauthnSessionSubjectModule,
@@ -76,9 +77,12 @@ function deferred() {
 
 /**
  * A signed-in browser's session in front of the session-subject route and
- * the verify route, a challenge issued for the subject; the server listening.
+ * both registration routes, each mounted as core mounts it — on its path, on
+ * one router — a challenge issued for the subject (and for `preset`'s, so a
+ * registration under that subject would verify too); the server listening.
+ * `preset` is a subject an earlier middleware set.
  */
-async function setup() {
+async function setup(options: { readonly preset?: WebAuthnSubject } = {}) {
 	const now = Date.now();
 	const record: UserSession = {
 		sid: SID,
@@ -127,7 +131,7 @@ async function setup() {
 			logger,
 		}),
 	);
-	const verify = routeFactories(webauthnModule)
+	const registrationRoutes = routeFactories(webauthnModule)
 		.map((factory) =>
 			factory({
 				section: config,
@@ -140,8 +144,10 @@ async function setup() {
 				logger,
 			}),
 		)
-		.find((contribution) => contribution.id === "webauthn-registration-verify");
-	if (sessionSubject === undefined || verify === undefined) throw new Error("routes not built");
+		.filter((contribution) => contribution.id.startsWith("webauthn-registration-"));
+	if (sessionSubject === undefined || registrationRoutes.length !== 2) {
+		throw new Error("routes not built");
+	}
 
 	// Settled when the request's headers have reached the server.
 	const headersArrived = deferred();
@@ -152,11 +158,15 @@ async function setup() {
 			isAuthenticated: true,
 			user: { id: SUBJECT },
 		};
+		if (options.preset !== undefined) req.webauthnSubject = options.preset;
 		headersArrived.resolve();
 		next();
 	});
-	app.use(sessionSubject.mountPath, sessionSubject.handler);
-	app.use(verify.mountPath, verify.handler);
+	const core = express.Router();
+	for (const contribution of [sessionSubject, ...registrationRoutes]) {
+		core.use(contribution.mountPath, contribution.handler);
+	}
+	app.use(core);
 
 	const server = app.listen(0, "127.0.0.1");
 	await once(server, "listening");
@@ -164,6 +174,13 @@ async function setup() {
 
 	const challenge = randomBytes(32).toString("base64url");
 	await challengeStore.issue(`webauthn:registration:${SUBJECT}`, challenge, now + 120_000);
+	if (options.preset !== undefined) {
+		await challengeStore.issue(
+			`webauthn:registration:${options.preset.userId}`,
+			challenge,
+			now + 120_000,
+		);
+	}
 	const body = JSON.stringify({
 		response: softwareAuthenticator({
 			rpId: config.rpId,
@@ -173,15 +190,15 @@ async function setup() {
 
 	/**
 	 * Posts the registration in two halves, running `between` once the first
-	 * half is sent and the headers have reached the server; answers the
-	 * response's status and body.
+	 * half is sent and the headers have reached the server, to `path`; answers
+	 * the response's status and body.
 	 */
-	const post = async (between: () => Promise<void>) => {
+	const post = async (between: () => Promise<void>, path: string = VERIFY) => {
 		const req = http.request({
 			host: "127.0.0.1",
 			port,
 			method: "POST",
-			path: VERIFY,
+			path,
 			headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
 		});
 		const response = once(req, "response") as Promise<[http.IncomingMessage]>;
@@ -199,7 +216,22 @@ async function setup() {
 		return { status: res.statusCode, body: JSON.parse(text) as unknown };
 	};
 
-	return { post, lifecycle, registerCredential, close: () => server.close() };
+	const closeSession = () =>
+		lifecycle.beginClose(SID, {
+			cause: "rp_logout",
+			steps: ["tokens"],
+			perParticipant: [],
+			retainMs: 0,
+		});
+
+	return {
+		post,
+		lifecycle,
+		closeSession,
+		credentialStore,
+		registerCredential,
+		close: () => server.close(),
+	};
 }
 
 describe("webauthnSessionSubjectModule — admission once the request body has arrived", () => {
@@ -234,4 +266,57 @@ describe("webauthnSessionSubjectModule — admission once the request body has a
 			close();
 		}
 	});
+});
+
+describe("webauthnSessionSubjectModule — on every path the registration routes answer", () => {
+	const REGISTRATION = "/oauth/webauthn/registration";
+	const PATHS = ["/verify", "/verify/", "/verify//", "/VERIFY", "/Verify/"] as const;
+	const PRESET: WebAuthnSubject = { userId: "earlier" };
+
+	it.each(PATHS)(
+		"answers 401 and registers nothing at %s for a closed session, over a subject an earlier middleware set",
+		async (path) => {
+			const { post, closeSession, registerCredential, close } = await setup({ preset: PRESET });
+			try {
+				await closeSession();
+				const res = await post(async () => {}, `${REGISTRATION}${path}`);
+
+				expect(res.status).toBe(401);
+				expect(registerCredential).not.toHaveBeenCalled();
+			} finally {
+				close();
+			}
+		},
+	);
+
+	it.each(PATHS)(
+		"registers at %s under the admitted session's subject, not one an earlier middleware set",
+		async (path) => {
+			const { post, credentialStore, close } = await setup({ preset: PRESET });
+			try {
+				const res = await post(async () => {}, `${REGISTRATION}${path}`);
+
+				expect(res.status, JSON.stringify(res.body)).toBe(200);
+				expect(await credentialStore.listByUserId(SUBJECT)).toHaveLength(1);
+				expect(await credentialStore.listByUserId(PRESET.userId)).toEqual([]);
+			} finally {
+				close();
+			}
+		},
+	);
+
+	it.each(["/options", "/options/", "/options//", "/OPTIONS"])(
+		"answers 401 at %s for a closed session, over a subject an earlier middleware set",
+		async (path) => {
+			const { post, closeSession, close } = await setup({ preset: PRESET });
+			try {
+				await closeSession();
+				const res = await post(async () => {}, `${REGISTRATION}${path}`);
+
+				expect(res.status).toBe(401);
+			} finally {
+				close();
+			}
+		},
+	);
 });

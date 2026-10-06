@@ -40,7 +40,7 @@ import {
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import express, { type RequestHandler, type Response } from "express";
-import { jsonBody } from "./internal/jsonBody.mjs";
+import { jsonBody, refuseBodyNotJson } from "./internal/jsonBody.mjs";
 import type { WebAuthnSubject } from "./request.mjs";
 
 /** The id of the module's one route. */
@@ -221,14 +221,22 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 						req.webauthnSubject = subject;
 						next();
 					};
-					// The two registration POSTs, on this router's own paths: core
-					// mounts it by prefix, and nothing else beneath the path reads a
+					// The two registration POSTs, matched as the routes match them:
+					// each route is a router core mounts on its path that answers
+					// `post("/")`, so admission is a router on the same path answering
+					// the same `post("/")`. Every request a registration route handles
+					// is admitted first, and nothing else beneath the path reads a
 					// session or a body through it. The session is admitted once the
 					// body has arrived, with the routes' own parser and limit: a
 					// session that closes while the body is still arriving registers
 					// nothing, and the routes' parser leaves the parsed body as it is.
+					// A body the parser would not read is refused before admission.
 					const router = express.Router();
-					router.post(["/options", "/verify"], jsonBody(), admitRegistration);
+					for (const path of ["/options", "/verify"]) {
+						const route = express.Router();
+						route.post("/", refuseBodyNotJson, jsonBody(), admitRegistration);
+						router.use(path, route);
+					}
 					return {
 						id: WEBAUTHN_SESSION_SUBJECT_ROUTE_ID,
 						mountPath: "/oauth/webauthn/registration",

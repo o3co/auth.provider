@@ -543,6 +543,33 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 			expect(get).not.toHaveBeenCalled();
 		},
 	);
+
+	it.each([
+		["options", "text/plain", "text/plain"],
+		["verify", "a form", "application/x-www-form-urlencoded"],
+		["verify", "no content type", undefined],
+	] as const)(
+		"refuses a %s body sent as %s with 400 invalid_request, with no session read",
+		async (route, _what, contentType) => {
+			const { app, get } = setup();
+			const request = supertest(app).post(`/oauth/webauthn/registration/${route}`);
+			if (contentType !== undefined) request.set("Content-Type", contentType);
+			else request.unset("Content-Type");
+			const res = await request.send(Buffer.from('{"a":1}'));
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({ error: "invalid_request" });
+			expect(get).not.toHaveBeenCalled();
+		},
+	);
+
+	it("admits a POST with an empty body and no content type", async () => {
+		const { app } = setup();
+		const res = await supertest(app)
+			.post("/oauth/webauthn/registration/options")
+			.set("Content-Length", "0");
+		expect(res.status).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+	});
 });
 
 // ---------------------------------------------------------------------------
