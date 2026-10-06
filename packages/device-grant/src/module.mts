@@ -347,7 +347,8 @@ const unexpectedErrors =
  * The middleware of the `csrfGuard` slot the session module provides — the
  * guard `/session/login` runs. Required when the grant is on: the
  * verification endpoint authorises on the session cookie and would otherwise
- * have no CSRF defence. Read once, so the route runs the function checked.
+ * have no CSRF defence. Core holds the slot to its contract where boot fills
+ * it, so the middleware is a request handler already.
  */
 const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 	const guard = deps.csrfGuard;
@@ -362,32 +363,7 @@ const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 				"or leave the grant disabled.",
 		);
 	}
-	const install =
-		"Install the session module's guard (sessionModule), or one that keeps core's " +
-		"CsrfGuard contract.";
-	let middleware: unknown;
-	let usable: boolean;
-	try {
-		middleware = (guard as { readonly middleware?: unknown } | null)?.middleware;
-		// A function of at most three parameters; Express skips one of four or
-		// more as an error handler.
-		usable = typeof middleware === "function" && middleware.length <= 3;
-	} catch (cause) {
-		throw new Error(
-			`deviceAuthorizationGrantModule: csrfGuard.middleware could not be read. ${install}`,
-			{
-				cause,
-			},
-		);
-	}
-	if (!usable) {
-		throw new Error(
-			"deviceAuthorizationGrantModule: csrfGuard.middleware is not a request handler. " +
-				"POST /oauth/device/verification mounts it in front of the whole route. " +
-				install,
-		);
-	}
-	return middleware as RequestHandler;
+	return guard.middleware;
 };
 
 /**

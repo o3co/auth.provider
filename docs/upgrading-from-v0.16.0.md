@@ -874,6 +874,38 @@ modules fills them.
   `contribute-factory-failed`); in sloppy-mode code the write is silently
   ignored. Either way the value does not change. Copy what the module needs,
   or set the value in the configuration (#1492).
+- **Core checks the `csrfGuard` slot where boot fills it, and every reader
+  receives a frozen copy of the guard.** Whatever fills the slot — a module's
+  `provides`, or a `bootstrapComponents` or `overrideComponents` entry — boot
+  reads each member of the guard once and requires `middleware` to be a
+  function of at most three parameters (Express skips one of four or more as
+  an error handler) and `check` to be a function. A member whose read throws
+  refuses boot too, naming it. A module's guard that fails is refused as
+  `provides-factory-failed` at `materializeComponents`; a host's, before any
+  provider runs, with a `RangeError` naming the member (`csrfGuard.middleware
+  is not a request handler`, `csrfGuard.check is not a function`,
+  `csrfGuard.<member> could not be read`), as a host's `oauthTokenSettings` is.
+  Before, the device grant and federation grants checked the guard in their
+  own contributions (`contribute-factory-failed` at `applyContributions`,
+  with their own wording), and the MFA routes did not check it. The slot
+  then holds a frozen copy, not the object that filled it, so
+  `deps.csrfGuard !== providedGuard`: compare members, not identity. The
+  copy carries the guard's data members as read; its functions are core's
+  own and call the guard's on the guard itself, so a guard written as a
+  class, whose methods use `this`, works as before. `middleware` is core's
+  request handler of three parameters in front of the guard's, so
+  `deps.csrfGuard.middleware !== providedGuard.middleware` too, and the
+  guard's `middleware` now runs with the guard as `this`. A
+  `Symbol.asyncDispose` the guard carries still runs on dispose (#1090).
+- **`AppHandle.components`, and the `deps` a factory is handed, have no
+  prototype.** The component map boot builds is created with
+  `Object.create(null)`, and so is each provider's and contribution's `deps`,
+  every entry an own data property, so a component named after an
+  `Object.prototype` member, `__proto__` included, is a key like any other
+  and never a prototype. Read a component as a property or with
+  `Object.hasOwn(map, key)`; `hasOwnProperty` and the other
+  `Object.prototype` methods are no longer there. Spreading and destructuring
+  work as before (#1090).
 - **BREAKING: `sessionModule` reads the federations from the
   `federationSettings` slot, not `config` (#728).** It requires core's
   `federationSettings`, which core fills from `core.federations` in every

@@ -30,6 +30,7 @@ import { outboundPolicyOf } from "../net/outbound-fetch.mjs";
 import { freezeSyntheticSlots, prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { auditSlotFor } from "./audit-fan-out.mjs";
 import { clientRecordSlotFor } from "./client-record-slot.mjs";
+import { csrfGuardSlotFor } from "./csrf-guard-slot.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { federationSettingsOf } from "./federation-settings.mjs";
 import { runCleanupsReverse } from "./run-cleanups.mjs";
@@ -48,11 +49,20 @@ import { federationStoresRefusal, undeclaredAbsenceRefusal } from "./validate-ma
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/** `Object.defineProperty` as core loaded it. */
+const defineProperty = Object.defineProperty;
+
+/** Sets `key` on `deps` as an own data property, never through a setter or as the prototype. */
+const setOwn = (deps: Record<string, unknown>, key: string, value: unknown): void => {
+	defineProperty(deps, key, { value, enumerable: true, writable: true, configurable: true });
+};
+
 /**
  * Builds a provider activation's deps object from the working component map.
  * A missing `requires` key means an earlier stage broke an invariant, so it
  * throws a plain Error, not a BootError. Absent `optional` keys are included
- * as `undefined`. `deps.section` is the module's own configuration section,
+ * as `undefined`: a key is read only as the map's own. The deps object has
+ * no prototype and holds each entry as its own data property. `deps.section` is the module's own configuration section,
  * parsed at stage 1, and is absent when the module declares none.
  * @internal
  */
@@ -62,7 +72,10 @@ function buildDeps(
 	optional: readonly ComponentKey[],
 	section: { readonly value: unknown } | undefined,
 ): Record<string, unknown> {
-	const deps: Record<string, unknown> = {};
+	// No prototype, and every entry its own data property: a component named
+	// `__proto__` is an entry like any other, and no entry's value decides
+	// what another entry reads.
+	const deps: Record<string, unknown> = Object.create(null);
 
 	for (const key of requires) {
 		if (!Object.hasOwn(components, key)) {
@@ -70,15 +83,19 @@ function buildDeps(
 				`invariant violated: missing required dep "${String(key)}" — stage 1/2 should have caught this`,
 			);
 		}
-		deps[key as string] = components[key as string];
+		setOwn(deps, key as string, components[key as string]);
 	}
 
 	for (const key of optional) {
-		deps[key as string] = components[key as string];
+		setOwn(
+			deps,
+			key as string,
+			Object.hasOwn(components, key) ? components[key as string] : undefined,
+		);
 	}
 
 	if (section !== undefined) {
-		deps.section = section.value;
+		setOwn(deps, "section", section.value);
 	}
 
 	return deps;
@@ -158,15 +175,17 @@ function unfilledSlotRefusal(
  * core's client-record boundary over whatever fills it), and the
  * `oauthTokenSettings` slot `token-settings-slot.mts`'s
  * (`tokenSettingsSlotFor`, the checked, frozen snapshot of whatever fills
- * it); a cleanup is still handed the provider's own value.
+ * it), and the `csrfGuard` slot `csrf-guard-slot.mts`'s (`csrfGuardSlotFor`,
+ * likewise); a cleanup is still handed the provider's own value.
  *
  * A factory failure becomes `BootError reason="provides-factory-failed"`, its
  * message naming the thrown value by `failureSummary` (never
  * `String(thrown)`). The cleanups of the components already materialised run
  * first, in reverse, and their errors go to `details.cleanupErrors`. A
- * provided `oauthTokenSettings` the slot refuses is reported the same way,
- * after the provider's own cleanup too, unless the refusal is already a
- * BootError (a lifetime beyond the configuration's), which is thrown as it is.
+ * provided `oauthTokenSettings` or `csrfGuard` its slot refuses is reported
+ * the same way, after the provider's own cleanup too, unless the refusal is
+ * already a BootError (a lifetime beyond the configuration's), which is
+ * thrown as it is.
  *
  * A slot holding `undefined` (a bootstrap or override entry given as
  * `undefined`, or a factory resolving to it) is unfilled, after the cleanups
@@ -183,7 +202,10 @@ export async function materializeComponents(
 	overrideComponents: Partial<ComponentMap> | undefined,
 	contributionKinds?: ContributionCollectorMap,
 ): Promise<ComponentWorld> {
-	const components: Record<string, unknown> = {};
+	// No prototype: a component named after one of `Object.prototype`'s members
+	// (`__proto__` among them) is a key like any other, never the map's
+	// prototype, and no read of the map finds a component nothing put there.
+	const components: Record<string, unknown> = Object.create(null);
 
 	// Per-component cleanup records captured during successful materialisations.
 	const cleanups: CleanupRecord[] = [];
@@ -244,6 +266,9 @@ export async function materializeComponents(
 	tokenSettingsSlot.beforeProviders(
 		overrideComponents !== undefined && Object.hasOwn(overrideComponents, "oauthTokenSettings"),
 	);
+	// The `csrfGuard` slot's handling, `csrf-guard-slot.mts`'s alone.
+	const csrfGuardSlot = csrfGuardSlotFor(components);
+	csrfGuardSlot.beforeProviders();
 
 	for (const activation of plan.providerActivations) {
 		const { module: moduleName, componentKey } = activation;
@@ -320,7 +345,10 @@ export async function materializeComponents(
 
 		let held: unknown;
 		try {
-			held = tokenSettingsSlot.provided(componentKey, value, moduleName);
+			held = csrfGuardSlot.provided(
+				componentKey,
+				tokenSettingsSlot.provided(componentKey, value, moduleName),
+			);
 		} catch (refusal) {
 			// The provider's own value is rolled back with the rest.
 			if (!(refusal instanceof BootError)) await providerFailed(refusal);
