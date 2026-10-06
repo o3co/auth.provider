@@ -923,6 +923,30 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 		).toEqual([]);
 	});
 
+	it("a federation listing that throws before it answers leaves the logout without the hint, and says nothing", async () => {
+		const google = endingFederation("google");
+		const logger = createMockLogger();
+		const lifecycle = fakeLifecycle({
+			federations: vi.fn(() => {
+				throw storeReplyError();
+			}) as unknown as SessionLifecycle["federations"],
+			close: vi.fn(async () => ({ outcome: "done" as const, rps: [], federations: ["google"] })),
+		});
+		const app = buildApp({
+			lifecycle,
+			providers: new Map([["google", google.provider]]),
+			logger,
+		});
+
+		const res = await postLogout(app);
+
+		expect(res.status).toBe(303);
+		expect(google.endSession).toHaveBeenCalledWith(
+			expect.objectContaining({ idTokenHint: undefined }),
+		);
+		expect(logger.error).not.toHaveBeenCalled();
+	});
+
 	it("a token record that cannot be read leaves the logout without the hint, said once at warn", async () => {
 		const google = endingFederation("google");
 		const logger = createMockLogger();

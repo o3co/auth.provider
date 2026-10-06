@@ -732,7 +732,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 	): Promise<LogoutEnd> => {
 		// The hint is best effort: a listing that cannot be read, answered or
 		// rejected, leaves the logout without it, and the close says the outage.
-		const listed = await lifecycle.federations(sid).catch(() => undefined);
+		let listed: SessionFederations | undefined;
+		try {
+			listed = await lifecycle.federations(sid);
+		} catch {
+			listed = undefined;
+		}
 		const hinted = listed?.outcome === "listed" ? listed.federations[0] : undefined;
 		const hint =
 			hinted !== undefined && supportsLogout(opts.getFederationProviders()?.get(hinted))
