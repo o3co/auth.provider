@@ -20,6 +20,8 @@ import {
 	type GrantResult,
 	type KeyStore,
 	type RefreshTokenFamilyRevocation,
+	type SessionLifecycle,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
@@ -72,3 +74,27 @@ export const tokensOf = (result: GrantResult) =>
 	"tokens" in result
 		? result.tokens
 		: expect.fail(`expected tokens, got ${JSON.stringify(result)}`);
+
+/**
+ * A session lifecycle whose `liveness` answers from `store`, read at each
+ * call, as core's does for an active record: `live` with the user session,
+ * `not_live` when there is none. A read that throws rejects with that error,
+ * as core's lifecycle does on an outage. Its other members are not expected
+ * to be called.
+ */
+export function livenessOver(store: Pick<UserSessionStore, "get">): SessionLifecycle {
+	const unexpected = async (): Promise<never> => {
+		throw new Error("this test's session lifecycle only answers liveness");
+	};
+	return {
+		open: unexpected,
+		join: unexpected,
+		close: unexpected,
+		async liveness(sid) {
+			const session = await store.get(sid);
+			return session ? { outcome: "live", session } : { outcome: "not_live" };
+		},
+		federations: unexpected,
+		resumePending: unexpected,
+	};
+}

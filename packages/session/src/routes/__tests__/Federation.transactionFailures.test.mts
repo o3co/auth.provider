@@ -46,7 +46,6 @@ import {
 	makeFederationTokenStore,
 	makePermissivePolicy,
 	makeRecordStore,
-	makeSessionFederationIndex,
 	makeUserRepository,
 	makeUserSessionStore,
 } from "./federation-harness.mjs";
@@ -217,7 +216,6 @@ function buildApp(knobs: Knobs = {}) {
 			userRepository: makeUserRepository(),
 			userSessionStore: makeUserSessionStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
-			sessionFederationIndex: makeSessionFederationIndex(),
 			federationTokenStore: makeFederationTokenStore(),
 			federationTransactionCookieName: knobs.cookieName ?? DEFAULT_COOKIE_NAME,
 			...(knobs.logger === undefined ? {} : { logger: knobs.logger }),
