@@ -179,8 +179,8 @@ describe("one composed parse over core's base", () => {
 	);
 
 	it("refuses a configuration a read of which throws, rather than letting the error escape", async () => {
-		// A hand-built configuration with a getter that throws: core's own parse
-		// reads it.
+		// A hand-built configuration with a getter that throws: stage 1's copy of
+		// the configuration reads it, before any parse.
 		const deployment = {
 			get mode(): string {
 				throw new Error("the mode getter broke");
@@ -191,8 +191,8 @@ describe("one composed parse over core's base", () => {
 			resolved({ core: { ...makeValidCoreConfig().core, deployment } }),
 		);
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/core's configuration schema threw instead of answering/);
-		expect(err.message).toMatch(/the mode getter broke/);
+		expect(err.message).toContain("the configuration at .core.deployment.mode is not plain data");
+		expect(err.message).not.toMatch(/the mode getter broke/);
 	});
 
 	it("names the configuration itself when it is not an object, when core declares no renamed variable", () => {
@@ -499,11 +499,9 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 		).toEqual([[{ sections: ["listSection", "valueSection"] }, "config_sections_ignored"]]);
 	});
 
-	it("names the sections of a configuration handed as an object that is not plain data, by its own keys", async () => {
-		// Boot's parse takes an instance as the configuration; its own keys are
-		// the sections, and a key its prototype carries is not one.
-		// Validated without core's own renamed variables, whose captures an
-		// instance would carry as a section of its own.
+	it("refuses a configuration handed as an object that is not plain data, before any section is named", () => {
+		// Stage 1 copies the configuration as plain data before anything reads
+		// it: an instance, whose prototype could carry a section, is not.
 		const logger = recordingLogger();
 		const { "renamed-variables": _captures, ...plain } = resolved({
 			typoSection: { enabled: true },
@@ -512,18 +510,18 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 			Object.create({ inheritedSection: { enabled: true } }),
 			plain,
 		) as Record<string, unknown>;
-		validateManifests({
-			modules: [],
-			bootstrapComponents: {
-				config: instance,
-				pathResolver: (s: string) => s,
-				logger,
-			} as unknown as BootstrapMap,
-			core: {},
-		});
-		expect(
-			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
-		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);
+		expect(() =>
+			validateManifests({
+				modules: [],
+				bootstrapComponents: {
+					config: instance,
+					pathResolver: (s: string) => s,
+					logger,
+				} as unknown as BootstrapMap,
+				core: {},
+			}),
+		).toThrow(/the configuration is not plain data/);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("logs nothing when every section is owned", async () => {

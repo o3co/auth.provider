@@ -51,6 +51,7 @@ import {
 import { describeValue } from "../errors/describe-value.mjs";
 import { enabledFederationsOf } from "../federations/configured.mjs";
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
+import { copyPlainJson } from "../json/plainJson.mjs";
 import {
 	type AbsencePolicy,
 	describeAbsenceDeclaration,
@@ -2164,47 +2165,14 @@ const startsWith = (path: readonly string[], prefix: readonly string[]): boolean
 const isPathCoreReads = (path: readonly string[]): boolean =>
 	OAUTH_PATHS_CORE_READS.some((read) => read.length === path.length && startsWith(path, read));
 
-/** A copy of a configuration value as plain data, every property read once, and the paths whose read threw. */
-interface OAuthSnapshot {
-	readonly value: unknown;
-	readonly unreadable: readonly (readonly string[])[];
-}
-
-/**
- * `value` copied with each own enumerable property of every plain object and
- * list read exactly once, so what is checked is what later stages hold; a
- * getter that would answer differently on a second read is never read again.
- * A property whose read throws, or that refers back to an object it lies
- * under, is left out and its path listed. Anything else is kept as it is.
- */
-function snapshotOf(value: unknown, path: readonly string[]): OAuthSnapshot {
-	const unreadable: (readonly string[])[] = [];
-	const ancestors = new Set<object>();
-	const copy = (node: unknown, at: readonly string[]): unknown => {
-		const list = Array.isArray(node);
-		if (!list && !isPlainConfigObject(node)) return node;
-		if (ancestors.has(node as object)) {
-			unreadable.push(at);
-			return undefined;
-		}
-		ancestors.add(node as object);
-		const out: Record<string, unknown> | unknown[] = list
-			? []
-			: Object.create(Object.getPrototypeOf(node) as object | null);
-		for (const key of Object.keys(node as object)) {
-			let read: unknown;
-			try {
-				read = (node as Record<string, unknown>)[key];
-			} catch {
-				unreadable.push([...at, key]);
-				continue;
-			}
-			defineConfigKey(out as Record<string, unknown>, key, copy(read, [...at, key]));
-		}
-		ancestors.delete(node as object);
-		return out;
-	};
-	return { value: copy(value, path), unreadable };
+/** The value at `path` of `node`, read as own properties; `undefined` where there is none. */
+function ownValueAt(node: unknown, path: readonly string[]): unknown {
+	let value: unknown = node;
+	for (const key of path) {
+		if (value === null || typeof value !== "object" || !Object.hasOwn(value, key)) return undefined;
+		value = (value as Record<string, unknown>)[key];
+	}
+	return value;
 }
 
 /** A custom issue at `path` with `message`. */
@@ -2216,69 +2184,32 @@ const UNREAD_OAUTH_KEY =
 
 /**
  * Where no loaded module's section is `oauth` — the oauth endpoints module is
- * not loaded — core's reading of `oauth {}`: the section copied once
- * (`snapshotOf`), which is what the rest of boot holds, and its issues. A
- * section that is not an object, a key whose read throws (named, never what
- * it threw), every key set that core does not read (`OAUTH_PATHS_CORE_READS`,
- * segment for segment, by the reading of what a configuration sets the
- * relocation refusal uses: `pathsSetBy`, a key whose value is `undefined`
- * setting nothing), and an issuer present (not `undefined`) that is not a
- * canonical issuer, whatever its shape. A key named after an `Object.prototype`
- * member, or `prototype`, is left to `reservedKeyIssues`. Nothing else would
- * read such a key, so it would be accepted unread: a retired key, a misspelt
- * one, one only the module reads. Where the module is loaded, its own strict
- * section refuses instead, and the configuration is handed on as written.
+ * not loaded — the issues of core's reading of `oauth {}` in `config`, the
+ * frozen plain-data copy stage 1 took of what was handed over
+ * (`withConfigCopied`): a section that is not an object, every key set that
+ * core does not read (`OAUTH_PATHS_CORE_READS`, segment for segment, by the
+ * reading of what a configuration sets the relocation refusal uses:
+ * `pathsSetBy`), and an issuer present that is not a canonical issuer,
+ * whatever its shape. A key named after an `Object.prototype` member, or
+ * `prototype`, is left to `reservedKeyIssues`. Nothing else would read such a
+ * key, so it would be accepted unread: a retired key, a misspelt one, one only
+ * the module reads. Where the module is loaded, its own strict section
+ * refuses instead.
  */
-function readOAuthWithoutItsModule(
-	raw: unknown,
+function oauthIssuesWithoutItsModule(
+	config: unknown,
 	modules: readonly Module[],
-): { readonly config: unknown; readonly issues: z.core.$ZodIssue[] } {
+): z.core.$ZodIssue[] {
 	const [name] = SECTIONS_CORE_READS;
-	if (
-		modules.some((m) => m.section !== undefined && m.name === name) ||
-		raw === null ||
-		typeof raw !== "object" ||
-		!Object.hasOwn(raw, name)
-	) {
-		return { config: raw, issues: [] };
+	if (modules.some((m) => m.section !== undefined && m.name === name)) return [];
+	const section = ownValueAt(config, [name]);
+	if (section === undefined) return [];
+	if (!isPlainConfigObject(section)) {
+		return [issueAt([name], `must be a section: ${UNREAD_OAUTH_KEY}`)];
 	}
 	const issues: z.core.$ZodIssue[] = [];
-	let written: unknown;
-	try {
-		written = (raw as Record<string, unknown>)[name];
-	} catch {
-		return { config: raw, issues: [issueAt([name], "could not be read: reading it threw")] };
-	}
-	const snapshot = snapshotOf(written, [name]);
-	// The configuration with the section replaced by its copy, every other key
-	// carried over as it was defined, so nothing else is read here.
-	const config = Object.create(Object.getPrototypeOf(raw) as object | null) as Record<
-		string,
-		unknown
-	>;
-	for (const key of Object.keys(raw)) {
-		if (key === name) defineConfigKey(config, key, snapshot.value);
-		else {
-			const descriptor = Object.getOwnPropertyDescriptor(raw, key);
-			if (descriptor !== undefined) Object.defineProperty(config, key, descriptor);
-		}
-	}
-	const section = snapshot.value;
-	if (section === undefined) return { config, issues };
-	for (const path of snapshot.unreadable) {
-		issues.push(issueAt(path, "could not be read: reading it threw, or it contains itself"));
-	}
-	if (!isPlainConfigObject(section)) {
-		issues.push(issueAt([name], `must be a section: ${UNREAD_OAUTH_KEY}`));
-		return { config, issues };
-	}
-	const isReserved = (path: readonly string[]): boolean =>
-		path.some((segment) => reservedKeyReason(segment) !== undefined);
-	const unreadable = (path: readonly string[]): boolean =>
-		snapshot.unreadable.some((at) => startsWith(path, at) || startsWith(at, path));
-	const jwt = section.jwt;
-	const issuer = isPlainConfigObject(jwt) && Object.hasOwn(jwt, "issuer") ? jwt.issuer : undefined;
-	if (issuer !== undefined && !unreadable(OAUTH_ISSUER_PATH)) {
+	const issuer = ownValueAt(section, OAUTH_ISSUER_PATH.slice(1));
+	if (issuer !== undefined) {
 		const rejection = checkCanonicalIssuer(issuer);
 		if (rejection !== null) {
 			issues.push(
@@ -2290,19 +2221,12 @@ function readOAuthWithoutItsModule(
 		}
 	}
 	for (const path of pathsSetBy(section, [name])) {
-		// A key whose value is `undefined` sets nothing.
-		if (
-			path
-				.slice(1)
-				.reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], section) ===
-			undefined
-		)
-			continue;
 		if (startsWith(path, OAUTH_ISSUER_PATH) && issuer !== undefined) continue;
-		if (isReserved(path) || isPathCoreReads(path)) continue;
+		if (path.some((segment) => reservedKeyReason(segment) !== undefined)) continue;
+		if (isPathCoreReads(path)) continue;
 		issues.push(issueAt(path, UNREAD_OAUTH_KEY));
 	}
-	return { config, issues };
+	return issues;
 }
 
 /**
@@ -2320,8 +2244,7 @@ function readOAuthWithoutItsModule(
  * `config-validation-failed` naming each operator path: every reserved key
  * (`reservedKeyIssues`: an `Object.prototype` member's name, or
  * `prototype`), every key of `oauth {}` nothing reads where its module is not
- * loaded (`readOAuthWithoutItsModule`, whose copy of the section is what the
- * composed configuration carries), a `cors` section that sets anything while
+ * loaded (`oauthIssuesWithoutItsModule`), a `cors` section that sets anything while
  * no loaded module's section is `cors` (`unreadCorsSection`: core reads its CORS
  * origins from the `httpSettings` slot alone), then the base's issues. No
  * module is named: a module's own configuration is its section, parsed after
@@ -2333,8 +2256,7 @@ function validateAndComposeConfig(bootstrap: BootstrapMap, modules: readonly Mod
 	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
 	issues.push(...reservedKeyIssues(raw));
-	const oauth = readOAuthWithoutItsModule(raw, modules);
-	issues.push(...oauth.issues);
+	issues.push(...oauthIssuesWithoutItsModule(raw, modules));
 	// The sections a loaded module owns, at its name: an absence policy keyed
 	// in `cors` does not make the section read.
 	const unreadCors = unreadCorsSection(
@@ -2358,8 +2280,7 @@ function validateAndComposeConfig(bootstrap: BootstrapMap, modules: readonly Mod
 			details: { reason: "config-validation-failed", issues: issues as z.ZodIssue[], modules: [] },
 		});
 	}
-	// Over the configuration with `oauth {}` as core read it, once.
-	return overlayConfig(oauth.config, (base as { readonly data: unknown }).data);
+	return overlayConfig(raw, (base as { readonly data: unknown }).data);
 }
 
 /**
@@ -3390,6 +3311,48 @@ function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
  * an object of sections, a getter, a throw as it is read — refuses boot
  * (`config-defaults-invalid`), before any check, naming the path and no value.
  */
+/**
+ * The bootstrap map with `config` replaced by its frozen plain-data copy
+ * (`copyPlainJson`): every field read once — a getter runs once — and every
+ * object and list copied, so no getter, Proxy trap or prototype of a
+ * configuration built in code survives into what stage 1 checks and every
+ * later stage reads. Taken first, before anything reads the configuration;
+ * `copyPlainJson` is the one reader of what the composition root handed over,
+ * which is neither frozen nor changed. A configuration resolved from HOCON is
+ * plain data and is copied as it is. One that is not — a read that throws,
+ * a value JSON would not give back as it is (a `Date`, a class instance, a
+ * symbol's field, a cycle) — refuses boot (`config-validation-failed`),
+ * naming where and never what a read threw. A configuration that is no
+ * object (a string) is handed on as it is, for the composed parse to refuse.
+ * @internal
+ */
+function withConfigCopied(bootstrap: BootstrapMap): BootstrapMap {
+	if (!Object.hasOwn(bootstrap, "config")) return bootstrap;
+	const handed: unknown = (bootstrap as Record<string, unknown>).config;
+	if (handed === null || typeof handed !== "object") return bootstrap;
+	const taken = copyPlainJson(handed);
+	if (!taken.ok) {
+		const where = taken.at === "" ? "the configuration" : `the configuration at ${taken.at}`;
+		const issues = [
+			issueAt(
+				[],
+				`${where} is not plain data: a read threw there, or it holds a value configuration cannot (a getter or Proxy that throws, a class instance, a symbol's field, a cycle)`,
+			),
+		];
+		throw new BootError({
+			message: `Config validation failed — ${issues.length} issue(s) found: ${namedIssues(issues)}.`,
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+			details: {
+				reason: "config-validation-failed",
+				issues: issues as z.ZodIssue[],
+				modules: [],
+			},
+		});
+	}
+	return { ...bootstrap, config: taken.copy } as BootstrapMap;
+}
+
 function takeConfigDefaults(bootstrap: BootstrapMap): {
 	readonly bootstrapComponents: BootstrapMap;
 	readonly configDefaults: ConfigDefaults | undefined;
@@ -3483,11 +3446,16 @@ function checkHostTokenSettingsLifetimes(
 		try {
 			found = lifetimeBeyondConfiguration(value, parsedConfig);
 		} catch (err) {
-			// The resolvers' refusal of the configuration: a RangeError naming
-			// the key. Anything else is not a refusal, and goes on as itself.
-			if (!(err instanceof RangeError)) throw err;
+			// The resolvers' refusal of the configuration, the only throw here:
+			// the slot's members are read without throwing, and the configuration
+			// is stage 1's plain-data copy. A RangeError naming the key.
 			const issues = [
-				{ code: "custom", path: [], message: err.message, input: undefined } as z.core.$ZodIssue,
+				{
+					code: "custom",
+					path: [],
+					message: (err as RangeError).message,
+					input: undefined,
+				} as z.core.$ZodIssue,
 			];
 			throw new BootError({
 				message: `Config validation failed — 1 issue(s) found: ${namedIssues(issues)}. The oauthTokenSettings in ${source} is bounded by the token lifetimes the configuration resolves.`,
@@ -3773,7 +3741,11 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	const { modules, contributionKinds, overrideComponents } = input;
 	// `configDefaults` is read here and is no component: no check and no later
 	// stage sees it.
-	const { bootstrapComponents, configDefaults } = takeConfigDefaults(input.bootstrapComponents);
+	const taken = takeConfigDefaults(input.bootstrapComponents);
+	const { configDefaults } = taken;
+	// The configuration as frozen plain data, read once, before anything reads
+	// it: what every check below and every later stage reads.
+	const bootstrapComponents = withConfigCopied(taken.bootstrapComponents);
 
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);

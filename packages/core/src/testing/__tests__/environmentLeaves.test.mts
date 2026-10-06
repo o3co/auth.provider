@@ -41,6 +41,12 @@ describe("unreadableModuleLeaves — a module's own leaf reads the string, or is
 		expect(unreadableModuleLeaves([reading("oauth", z.object(shape))])).toEqual([found]);
 	});
 
+	it("names a section that is itself a leaf by the module's name", () => {
+		expect(
+			unreadableModuleLeaves([defineModule({ name: "switch", section: { schema: z.boolean() } })]),
+		).toEqual(["switch: switch"]);
+	});
+
 	it("reports nothing for a leaf that reads the string itself", () => {
 		expect(
 			unreadableModuleLeaves([

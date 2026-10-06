@@ -1490,6 +1490,14 @@ modules fills them.
   typed as written. `unreadableModuleLeaves` is stricter: a module's leaf that
   core's schema used to read first — any key of `oauth {}` — is no longer
   counted as covered, so the leaf must read the environment's string itself.
+- **BREAKING: a configuration handed to `createApp` must be plain data
+  (#1500).** Stage 1 takes one frozen copy of `bootstrapComponents.config`
+  with `copyPlainJson` before anything reads it, and reads only the copy: a
+  getter runs once. A configuration built in code that holds what JSON would
+  not give back as it is — a `Date`, a class instance, a symbol's field, a
+  cycle, a getter or Proxy trap that throws — is refused as
+  `config-validation-failed`, naming where and never what a read threw. A
+  configuration resolved from HOCON is plain data and boots as before.
 - **BREAKING: `GrantDependencies` no longer carries `config` (#1500).** Its
   required slot is `keyStore`. A grant of your own that read `deps.config`
   reads the oauth module's settings from `oauthTokenSettings`, core's

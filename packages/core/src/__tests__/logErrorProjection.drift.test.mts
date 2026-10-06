@@ -455,6 +455,11 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 		why: "a legacy classifier reads the text for an outage (`temporarily_unavailable` / `5xx`), never for a verdict; it is never logged",
 	},
 	{
+		file: "packages/core/src/boot/validate-manifests.mts",
+		sites: 1,
+		why: "the lifetime resolvers' RangeError, the only throw where stage 1 bounds a host's token settings by the configuration: its text names the configuration key it refuses and no value of a store or a library, and becomes that key's issue in config-validation-failed, the error kept as cause; it is never logged",
+	},
+	{
 		file: "packages/core/src/jwt/verify.mts",
 		sites: 1,
 		why: "jose's own text about the token, as the verdict's message, through lineSafeText — it quotes an unrecognised crit name the caller wrote; jose's claims ride on the error, not in its message",

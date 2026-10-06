@@ -26,7 +26,7 @@
  * configuration's, since core runs in compositions without the oauth module.
  * Without the oauth module no section schema parses `oauth {}`, so boot's
  * stage-1 read of it refuses a configured issuer that is not canonical
- * (`validate-manifests.mts`, `readOAuthWithoutItsModule`): every reader sees a
+ * (`validate-manifests.mts`, `oauthIssuesWithoutItsModule`): every reader sees a
  * canonical issuer, or none. The stage-1 checks read the configuration alone
  * because no provider has run by then (`validate-manifests.mts`, the
  * `grantPolicy` issuer check).
