@@ -75,6 +75,14 @@ import { BootError } from "./types.mjs";
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/** `Object.defineProperty` as core loaded it. */
+const defineProperty = Object.defineProperty;
+
+/** Sets `key` on `deps` as an own data property, never through a setter or as the prototype. */
+const setOwn = (deps: Record<string, unknown>, key: string, value: unknown): void => {
+	defineProperty(deps, key, { value, enumerable: true, writable: true, configurable: true });
+};
+
 /**
  * Build a typed deps object for a module from the working component map,
  * using the module's DepsBlueprint from the plan.
@@ -84,7 +92,8 @@ import { BootError } from "./types.mjs";
  * materializeComponents) broke an invariant, so it throws a plain Error, not
  * a BootError; this mirrors materialize-components.buildDeps as
  * defence in depth. `optional` keys may be absent and are included as
- * `undefined`; a key is read only as the map's own. `deps.section`, the module's own configuration section parsed
+ * `undefined`; a key is read only as the map's own. The deps object has no
+ * prototype and holds each entry as its own data property. `deps.section`, the module's own configuration section parsed
  * at stage 1, is set only when the module declares one.
  * @internal
  */
@@ -94,20 +103,27 @@ function buildDeps(
 	optional: readonly ComponentKey[],
 	section: { readonly value: unknown } | undefined,
 ): Record<string, unknown> {
-	const deps: Record<string, unknown> = {};
+	// No prototype, and every entry its own data property: a component named
+	// `__proto__` is an entry like any other, and no entry's value decides
+	// what another entry reads.
+	const deps: Record<string, unknown> = Object.create(null);
 	for (const key of requires) {
 		if (!Object.hasOwn(components, key) || components[key as string] === undefined) {
 			throw new Error(
 				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/3 should have caught this`,
 			);
 		}
-		deps[key as string] = components[key as string];
+		setOwn(deps, key as string, components[key as string]);
 	}
 	for (const key of optional) {
-		deps[key as string] = Object.hasOwn(components, key) ? components[key as string] : undefined;
+		setOwn(
+			deps,
+			key as string,
+			Object.hasOwn(components, key) ? components[key as string] : undefined,
+		);
 	}
 	if (section !== undefined) {
-		deps.section = section.value;
+		setOwn(deps, "section", section.value);
 	}
 	return deps;
 }

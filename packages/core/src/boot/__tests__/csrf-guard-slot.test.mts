@@ -435,3 +435,106 @@ describe("a module's component named __proto__ hands no reader an inherited guar
 		await handle.dispose();
 	});
 });
+
+describe("a reader's deps hold each component as its own key, whatever another is named", () => {
+	/**
+	 * A component named `__proto__` whose value intercepts `csrfGuard` with a
+	 * getter and setter: on a deps object built by assignment it would become
+	 * the prototype, and the later `deps.csrfGuard = …` would land in its
+	 * setter and read back the unchecked guard.
+	 */
+	const intercepting = () => {
+		const unchecked = { ...createTestCsrfGuard(), middleware: errorHandler, check: undefined };
+		return {
+			get csrfGuard() {
+				return unchecked;
+			},
+			set csrfGuard(_value: unknown) {},
+		};
+	};
+	const protoProvider = (value: () => unknown) =>
+		defineModule({
+			name: "test:proto-provider",
+			provides: { ["__proto__"]: value } as never,
+		});
+	it("on a provider's deps", async () => {
+		const seen: Array<Readonly<Record<string, unknown>>> = [];
+		const handle = await createApp({
+			modules: [
+				protoProvider(intercepting),
+				defineModule({
+					name: "test:proto-provider-reader",
+					requires: ["__proto__"] as never,
+					optional: ["csrfGuard"],
+					provides: {
+						csrfGuardSlotProbe: (deps) => {
+							seen.push(deps as never);
+							return { probed: true } as const;
+						},
+					},
+					lifecycle: { csrfGuardSlotProbe: { eager: true } },
+				}),
+			],
+			bootstrapComponents: host() as never,
+		});
+		const [deps] = seen;
+		expect(deps?.csrfGuard).toBeUndefined();
+		expect(Object.hasOwn(deps ?? {}, "csrfGuard")).toBe(true);
+		expect(Object.hasOwn(deps ?? {}, "__proto__")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("on a contribution's deps", async () => {
+		const seen: Array<Readonly<Record<string, unknown>>> = [];
+		const handle = await createApp({
+			modules: [
+				protoProvider(intercepting),
+				defineModule({
+					name: "test:proto-contribution-reader",
+					requires: ["__proto__"] as never,
+					optional: ["csrfGuard"],
+					contributes: {
+						routes: [
+							(deps) => {
+								seen.push(deps as never);
+								return {
+									id: "test-proto-reader",
+									mountPath: "/__test_proto_reader__",
+									handler: (_req: Request, res: Response) => void res.end(),
+								};
+							},
+						],
+					},
+				}),
+			],
+			bootstrapComponents: host() as never,
+		});
+		const [deps] = seen;
+		expect(deps?.csrfGuard).toBeUndefined();
+		expect(Object.hasOwn(deps ?? {}, "__proto__")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("hands a primitive component named __proto__ over as its value", async () => {
+		const seen: Array<Readonly<Record<string, unknown>>> = [];
+		const handle = await createApp({
+			modules: [
+				protoProvider(() => 42),
+				defineModule({
+					name: "test:proto-primitive-reader",
+					requires: ["__proto__"] as never,
+					provides: {
+						csrfGuardSlotProbe: (deps) => {
+							seen.push(deps as never);
+							return { probed: true } as const;
+						},
+					},
+					lifecycle: { csrfGuardSlotProbe: { eager: true } },
+				}),
+			],
+			bootstrapComponents: host() as never,
+		});
+		expect(Object.getOwnPropertyDescriptor(seen[0] ?? {}, "__proto__")?.value).toBe(42);
+		await handle.dispose();
+	});
+});

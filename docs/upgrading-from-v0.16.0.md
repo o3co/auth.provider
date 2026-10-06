@@ -884,12 +884,15 @@ modules fills them.
   `deps.csrfGuard.middleware !== providedGuard.middleware` too, and the
   guard's `middleware` now runs with the guard as `this`. A
   `Symbol.asyncDispose` the guard carries still runs on dispose (#1090).
-- **`AppHandle.components` has no prototype.** The component map boot builds
-  is created with `Object.create(null)`, so a component named after an
+- **`AppHandle.components`, and the `deps` a factory is handed, have no
+  prototype.** The component map boot builds is created with
+  `Object.create(null)`, and so is each provider's and contribution's `deps`,
+  every entry an own data property, so a component named after an
   `Object.prototype` member, `__proto__` included, is a key like any other
-  and never the map's prototype. Read a component as a property or with
-  `Object.hasOwn(handle.components, key)`; `handle.components.hasOwnProperty`
-  and the other `Object.prototype` methods are no longer there (#1090).
+  and never a prototype. Read a component as a property or with
+  `Object.hasOwn(map, key)`; `hasOwnProperty` and the other
+  `Object.prototype` methods are no longer there. Spreading and destructuring
+  work as before (#1090).
 - **BREAKING: `sessionModule` reads the federations from the
   `federationSettings` slot, not `config` (#728).** It requires core's
   `federationSettings`, which core fills from `core.federations` in every
