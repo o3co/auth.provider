@@ -144,16 +144,17 @@ const LEASE_WAITS_MS = [25, 50, 100, 200, 400] as const;
  * the lease is sized from, and `factorSetBudget.test.mts` holds every writer
  * to. A first binding by the account-email proof in a session over two
  * standing recovery-code sets (a binding by password keeps the one that
- * stood) makes twelve: the set read, the first-binding note, the consume, the
- * factor, D25's flag, the recovery-set floor read, the new set, the floor
- * raised, each old set's removal, the set marked shown, the witness. A
- * login's makes eleven, its set marked shown by its answer, past the lease; a
- * regeneration of recovery codes six and one per standing set (the set read,
+ * stood) makes thirteen: the set read, the first-binding mark read, the
+ * first-binding note, the consume, the factor, D25's flag, the recovery-set
+ * floor read, the new set, the floor raised, each old set's removal, the set
+ * marked shown, the witness. A login's makes twelve, its set marked shown by
+ * its answer, past the lease; a regeneration of recovery codes six and one
+ * per standing set (the set read,
  * the first-binding mark read, the floor read, the new set, the floor raised,
  * the removals, the set marked shown); the operator reset eight (the read,
  * D25's flag, its authorization, the lock state's reset, the removal, the
  * read again, the witness, D25's flag again); a removal five; a mark four; a
- * release two. More standing sets — past four at a binding, past eight at a
+ * release two. More standing sets — past three at a binding, past eight at a
  * regeneration — each add a removal, which the lease's time cuts off when it
  * runs short: every set that stood is already retired by the raised floor,
  * the new set is left unshown, and the writer answers an outage, to be run
