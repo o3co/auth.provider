@@ -2049,9 +2049,13 @@ only the domain (`normaliseMailAddress`): a code goes to the local part as it
 is written, and the digest an email factor records is of that spelling. A
 factor such a pre-release enrolled for `Alice@example.com` recorded the
 digest of `alice@example.com`, so it now reads as `address_changed`: no
-login code is sent for it, and the user removes it and enrolls the address
-again ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
-A user with no other factor needs a recovery code or an operator reset.
+login code is sent for it. The user enrolls a replacement factor first — the
+address again, or another factor — and then removes the stale one; under
+`mfa.mode = "required"` removing it while it is the only counting factor is
+`409 mfa_last_factor`, since neither it nor a recovery set stands in for a
+usable counting factor. A user with no other usable factor gives the recent
+MFA the enrollment needs with a recovery code, or an operator resets the
+subject ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
 Factors for addresses whose local part is all lower case are not affected.
 
 ### The standalone template
