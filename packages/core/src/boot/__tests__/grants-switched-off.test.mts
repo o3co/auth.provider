@@ -316,7 +316,7 @@ describe("grants — the factory types", () => {
 	it("types the root GrantFactory as the contribution factory over GrantDependencies, null included", () => {
 		expectTypeOf<RootGrantFactory>().toEqualTypeOf<GrantFactory<GrantDependencies>>();
 		const settingsGated: RootGrantFactory = (deps) =>
-			deps.config === undefined ? null : fakeGrantHandler("gated");
+			deps.oauthTokenSettings === undefined ? null : fakeGrantHandler("gated");
 		const alwaysOn: RootGrantFactory = () => fakeGrantHandler("always");
 		expect(settingsGated).toBeTypeOf("function");
 		expect(alwaysOn).toBeTypeOf("function");

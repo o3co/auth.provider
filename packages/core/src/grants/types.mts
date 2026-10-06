@@ -197,8 +197,8 @@ export interface GrantHandler {
 }
 
 /**
- * The slots a grant may depend on, as `ComponentMap` slots: `config` and
- * `keyStore` required, the rest optional. A grant factory takes
+ * The slots a grant may depend on, as `ComponentMap` slots: `keyStore`
+ * required, the rest optional. A grant factory takes
  * `Pick<GrantDependencies, …>` of the slots it reads (plus `ProviderDeps<…>`
  * for a slot no other grant shares), and its module's `ProviderDeps<R, O>`
  * must satisfy that pick at the wiring, so an undeclared slot is a compile
@@ -230,10 +230,11 @@ export interface GrantHandler {
  *   `config`. Optional because a factory is handed only the slots its module
  *   lists; a grant whose module requires the slot always gets it.
  *
- * `config` stays required while grants still read it.
+ * No grant reads `config`: a grant reads its settings from the slots above,
+ * and its module's own from that module's section.
  */
 export type GrantDependencies = ProviderDeps<
-	"config" | "keyStore",
+	"keyStore",
 	| "refreshTokenFamilyRotation"
 	| "refreshTokenFamilyRevocation"
 	| "grantPolicy"

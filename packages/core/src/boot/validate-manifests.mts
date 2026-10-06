@@ -44,6 +44,7 @@ import {
 } from "../config/removed-keys.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
 import { enabledFederationsOf } from "../federations/configured.mjs";
+import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import {
 	type AbsencePolicy,
 	describeAbsenceDeclaration,
@@ -1531,10 +1532,13 @@ function checkRouteCollisions(
 //
 // When `grantPolicy` is wired through any of the three component sources
 // (module `provides`, `bootstrapComponents`, `overrideComponents`), the
-// configured issuer must be a non-empty string: the policy hook signs
-// decisions against it, and an empty value silently disables fail-closed
-// enforcement at the JWT layer. Runs after step 13 (validateAndComposeConfig)
-// so the parsed config is available.
+// configured issuer must be a canonical issuer (`checkCanonicalIssuer`): the
+// policy hook signs decisions against it, and an empty value silently disables
+// fail-closed enforcement at the JWT layer. Core's schema does not declare
+// `oauth {}`, so the check holds the value to the rule itself: where the oauth
+// module is loaded its section schema has refused a bad issuer already, and
+// where it is not, nothing else has. Runs after step 13
+// (validateAndComposeConfig) so the parsed config is available.
 // ---------------------------------------------------------------------------
 
 function checkGrantPolicyIssuerInvariant(
@@ -1566,10 +1570,11 @@ function checkGrantPolicyIssuerInvariant(
 
 	const issuer = (parsedConfig as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth
 		?.jwt?.issuer;
-	if (typeof issuer === "string" && issuer.length > 0) return;
+	const rejection = checkCanonicalIssuer(issuer);
+	if (rejection === null) return;
 
 	throw new BootError({
-		message: `CP-20 invariant: config.oauth.jwt.issuer must be a non-empty string when grantPolicy is wired (provided by "${providedBy}"). Empty issuer turns CP-18 fail-closed enforcement into silent allow-all at the JWT layer.`,
+		message: `CP-20 invariant: config.oauth.jwt.issuer must be a canonical issuer when grantPolicy is wired (provided by "${providedBy}"), and it ${describeIssuerRejection(rejection)}. Empty issuer turns CP-18 fail-closed enforcement into silent allow-all at the JWT layer.`,
 		reason: "grant-policy-without-issuer",
 		stage: "validateManifests",
 		details: {
@@ -2159,15 +2164,25 @@ function validateAndComposeConfig(bootstrap: BootstrapMap): unknown {
 }
 
 /**
- * The top-level sections something loaded owns: every section core's base
- * declares and every loaded module's section, at its name. What the
+ * The top-level sections something loaded reads: every section core's base
+ * declares, every loaded module's section, at its name, and the section each
+ * absence policy a loaded module attaches is keyed in. The declared-absence
+ * guard reads that key as written whether or not the module owning its
+ * section is loaded (`oauth.revocation.subject`, read by modules outside the
+ * oauth package), so the section is not one nothing reads. What the
  * configuration sets outside them is what stage 1's notices name
  * (`logConfigNotices`).
  * @internal
  */
 function ownedSections(modules: readonly Module[]): ReadonlySet<string> {
 	const owned = new Set<string>(Object.keys(CoreConfigSchema.shape));
-	for (const m of modules) if (m.section !== undefined) owned.add(m.name);
+	for (const m of modules) {
+		if (m.section !== undefined) owned.add(m.name);
+		for (const policy of Object.values(m.absencePolicies ?? {})) {
+			const section = policy?.configKey[0];
+			if (section !== undefined) owned.add(section);
+		}
+	}
 	return owned;
 }
 
@@ -3245,7 +3260,11 @@ interface StageOneContext {
  * member and both values; a module-provided value is refused the same way
  * as stage 3 materialises it (`token-settings-slot.mts`), which also holds a
  * host's value to the contract and stores the frozen snapshot every reader
- * reads. A member that is not a number is left to that check.
+ * reads. A member that is not a number is left to that check. A
+ * configuration that resolves no lifetime to bound the slot by — no
+ * `oauth {}`, which only the oauth module's reference sets, or a value no
+ * section schema read — is refused as the configuration it is
+ * (`config-validation-failed`), naming the key.
  * @internal
  */
 function checkHostTokenSettingsLifetimes(
@@ -3262,7 +3281,28 @@ function checkHostTokenSettingsLifetimes(
 	] as const;
 	for (const [source, value] of sources) {
 		if (typeof value !== "object" || value === null) continue;
-		const found = lifetimeBeyondConfiguration(value, parsedConfig);
+		let found: ReturnType<typeof lifetimeBeyondConfiguration>;
+		try {
+			found = lifetimeBeyondConfiguration(value, parsedConfig);
+		} catch (err) {
+			// The resolvers' refusal of the configuration: a RangeError naming
+			// the key. Anything else is not a refusal, and goes on as itself.
+			if (!(err instanceof RangeError)) throw err;
+			const issues = [
+				{ code: "custom", path: [], message: err.message, input: undefined } as z.core.$ZodIssue,
+			];
+			throw new BootError({
+				message: `Config validation failed — 1 issue(s) found: ${namedIssues(issues)}. The oauthTokenSettings in ${source} is bounded by the token lifetimes the configuration resolves.`,
+				reason: "config-validation-failed",
+				stage: "validateManifests",
+				details: {
+					reason: "config-validation-failed",
+					issues: issues as z.ZodIssue[],
+					modules: [],
+				},
+				cause: err,
+			});
+		}
 		if (found === undefined) continue;
 		throw new BootError({
 			stage: "validateManifests",

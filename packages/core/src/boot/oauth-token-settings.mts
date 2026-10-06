@@ -23,11 +23,15 @@
  *
  * The issuer is the `oauthTokenSettings` slot's when the composition holds it
  * — the key is present, whatever a provider answered — otherwise the
- * configuration's, since core runs in compositions without the oauth module. The stage-1
- * checks read the configuration alone because no provider has run by then
+ * configuration's, since core runs in compositions without the oauth module.
+ * No schema of core's declares `oauth {}`, and without the oauth module none
+ * parses it, so the configuration's issuer is read only when it is a
+ * canonical issuer, and is none otherwise. The stage-1 checks read the
+ * configuration alone because no provider has run by then
  * (`validate-manifests.mts`, the `grantPolicy` issuer check).
  */
 
+import { isCanonicalIssuer } from "../issuer/canonical.mjs";
 import { checkOAuthTokenSettings } from "../token-settings/check.mjs";
 
 /** The component map as boot holds it. */
@@ -39,13 +43,16 @@ type Components = Readonly<Record<string, unknown>>;
  * contract and the configured lifetimes, read whole through
  * `checkOAuthTokenSettings`, so a slot without a canonical issuer refuses
  * rather than the configuration's being read beside it — else
- * `oauth.jwt.issuer` as the configuration carries it, unvalidated, for each
- * reader to hold to its own rule.
+ * `oauth.jwt.issuer` as the configuration carries it when it is a canonical
+ * issuer (`isCanonicalIssuer`), and `undefined` otherwise: no discovery
+ * document, no discovery path in the CORS table, and no issuer to register a
+ * requirement's page on.
  */
-export function compositionIssuer(components: Components): unknown {
+export function compositionIssuer(components: Components): string | undefined {
 	if (Object.hasOwn(components, "oauthTokenSettings")) {
 		return checkOAuthTokenSettings(components.oauthTokenSettings).issuer;
 	}
-	return (components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt
-		?.issuer;
+	const configured = (components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)
+		?.oauth?.jwt?.issuer;
+	return isCanonicalIssuer(configured) ? configured : undefined;
 }

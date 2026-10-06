@@ -18,16 +18,16 @@ import { CoreConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * Every env-overridable boolean rides ONE coercion path, pinned at the field.
+ * Every env-overridable boolean of core's own section rides ONE coercion path,
+ * pinned at the field.
  *
  * HOCON substitutes `${?VAR}` as a **string**, always. `@o3co/ts.hocon`'s zod
  * bridge coerces only a bare boolean leaf **it can reach**: it walks
  * `ZodObject` shapes and unwraps optional/nullable/default/catch/readonly, and
- * a `z.preprocess(...)` wrapper (a `ZodPipe`) is opaque to it. `oauth.jwt` is
- * wrapped to catch legacy flat fields, so a bare `z.boolean()` there would get
- * `OAUTH_JWT_LEGACY_TYP_ACCEPT` as a string and **fail boot**. Coercing at the
- * field, not at the bridge, means wrapping a section cannot silently take an
- * operator's documented override away.
+ * a `z.preprocess(...)` wrapper (a `ZodPipe`) or a `z.record` is opaque to it.
+ * Coercing at the field, not at the bridge, means wrapping a section cannot
+ * silently take an operator's documented override away. The oauth module's
+ * booleans are pinned by its own section's tests.
  */
 
 /** The `google` federation `parsed` holds under `core.federations`. */
@@ -35,37 +35,8 @@ const federationOf = (parsed: Record<string, unknown>): Record<string, unknown> 
 	((parsed.core as { federations: Record<string, Record<string, unknown>> }).federations
 		.google as Record<string, unknown>) ?? {};
 
-/** Every boolean in `CoreConfigSchema` that a `${?VAR}` can reach. */
+/** Every boolean in `CoreConfigSchema` that a `${?VAR}` can reach, or one written beside them. */
 const ENV_OVERRIDABLE_BOOLEANS = [
-	{
-		key: "oauth.jwt.legacyTypAccept",
-		envVar: "OAUTH_JWT_LEGACY_TYP_ACCEPT",
-		set: (config: Record<string, unknown>, value: unknown) => {
-			((config.oauth as Record<string, unknown>).jwt as Record<string, unknown>).legacyTypAccept =
-				value;
-		},
-		read: (parsed: Record<string, unknown>) =>
-			((parsed.oauth as Record<string, unknown>).jwt as Record<string, unknown>).legacyTypAccept,
-	},
-	{
-		key: "oauth.requireEmailVerified",
-		envVar: "OAUTH_REQUIRE_EMAIL_VERIFIED",
-		set: (config: Record<string, unknown>, value: unknown) => {
-			(config.oauth as Record<string, unknown>).requireEmailVerified = value;
-		},
-		read: (parsed: Record<string, unknown>) =>
-			(parsed.oauth as Record<string, unknown>).requireEmailVerified,
-	},
-	{
-		key: "oauth.resourceIndicator.enabled",
-		envVar: "OAUTH_RESOURCE_INDICATOR_ENABLED",
-		set: (config: Record<string, unknown>, value: unknown) => {
-			(config.oauth as Record<string, unknown>).resourceIndicator = { enabled: value };
-		},
-		read: (parsed: Record<string, unknown>) =>
-			((parsed.oauth as Record<string, unknown>).resourceIndicator as Record<string, unknown>)
-				?.enabled,
-	},
 	{
 		key: "core.federations.<name>.enabled",
 		envVar: "CORE_FEDERATIONS_GOOGLE_ENABLED",
@@ -180,8 +151,10 @@ describe("every env-overridable boolean uses one coercion path", () => {
 	it("leaves an omitted optional boolean undefined rather than defaulting it", () => {
 		// The defaults live in reference.conf (ADR 2026-04-30), so the schema
 		// must not invent one when the key is absent.
-		const parsed = CoreConfigSchema.parse(makeValidCoreConfig());
-		expect(parsed.oauth.jwt.legacyTypAccept).toBeUndefined();
-		expect(parsed.oauth.requireEmailVerified).toBeUndefined();
+		const parsed = CoreConfigSchema.parse({
+			core: { federations: { google: { enabled: true, type: "google" } } },
+		}) as unknown as Record<string, unknown>;
+		expect(federationOf(parsed).trustUpstreamAmr).toBeUndefined();
+		expect(federationOf(parsed).callbackMeetsFreshness).toBeUndefined();
 	});
 });

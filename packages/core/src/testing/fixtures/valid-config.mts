@@ -40,9 +40,10 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  * modules declare renamed, `null` (`renamed-variables`), which boot requires
  * of any configuration.
  *
- * `satisfies CoreConfig` type-checks core's sections while keeping literal
- * types; the other packages' sections are typed as written, since their
- * schemas are their own packages'. Each call returns a fresh, mutable object.
+ * Core's own section is type-checked against `CoreConfig` while keeping
+ * literal types (`coreConfigForTests`); the other packages' sections are
+ * typed as written, since their schemas are their own packages'. Each call
+ * returns a fresh, mutable object.
  */
 
 /** What {@link coreConfigForTests} states in core's own section. */
@@ -115,7 +116,7 @@ function grantSwitchesForTests() {
 }
 
 export function makeValidCoreConfig() {
-	const core = {
+	return {
 		...{
 			[RENAMED_VARIABLES_SECTION]: renamedVariableCaptures({
 				modules: [memoryRateLimiterModule],
@@ -123,6 +124,8 @@ export function makeValidCoreConfig() {
 				env: {},
 			}),
 		},
+		// The oauth module's section, typed as written: its schema is the oauth
+		// package's.
 		oauth: {
 			jwt: {
 				issuer: "https://auth.test",
@@ -143,8 +146,8 @@ export function makeValidCoreConfig() {
 		// a createApp test that installs a consumer of admission must state its
 		// posture. A test of the declaration itself removes the key.
 		...coreConfigForTests(),
-	} satisfies CoreConfig;
-	return { ...core, ...grantSwitchesForTests() };
+		...grantSwitchesForTests(),
+	};
 }
 
 export function makeValidFullSections() {

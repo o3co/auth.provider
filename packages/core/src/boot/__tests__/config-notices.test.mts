@@ -52,12 +52,13 @@ function recordingLogger(): Logger & { readonly warn: ReturnType<typeof vi.fn> }
 }
 
 /**
- * The fixture's configuration less the oauth package's grant switches
- * (`oauth-session`, `oauth-authorization`): no module here reads them, so
+ * The fixture's configuration less the oauth package's sections (`oauth`,
+ * `oauth-session`, `oauth-authorization`): no module here reads them, so
  * boot would name them as ignored.
  */
-function withoutGrantSwitches(): Record<string, unknown> {
+function withoutOAuthSections(): Record<string, unknown> {
 	const {
+		oauth: _oauth,
 		"oauth-session": _session,
 		"oauth-authorization": _authorization,
 		...config
@@ -67,7 +68,7 @@ function withoutGrantSwitches(): Record<string, unknown> {
 
 /** A resolved configuration: core's sections, plus whatever `extra` adds at the top. */
 const resolved = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
-	...withoutGrantSwitches(),
+	...withoutOAuthSections(),
 	...extra,
 });
 

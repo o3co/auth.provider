@@ -100,8 +100,8 @@ export function planDiscoveryDocument(input: {
 }): DiscoveryDocumentPlanning {
 	const { issuer, readSigningAlgs, readMetadata } = input;
 
-	// The schema requires `oauth.jwt.issuer`; this guards a hand-built
-	// `AppConfig` passed through `bootstrapComponents`, which is not validated.
+	// No issuer: the composition configured none, or boot read none it could
+	// serve on (`compositionIssuer`), or a caller handed none.
 	if (typeof issuer !== "string" || issuer.length === 0) return { outcome: "not-served" };
 
 	// Host-supplied inputs are read in the order the planner needs them: the

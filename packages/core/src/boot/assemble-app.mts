@@ -568,7 +568,7 @@ export function assembleApp(
 		// The oauth module's `oauthTokenSettings` when the composition holds it,
 		// otherwise the configuration's issuer. The planner validates what it
 		// is handed.
-		issuer: compositionIssuer(frozen.components as Record<string, unknown>) as string | undefined,
+		issuer: compositionIssuer(frozen.components as Record<string, unknown>),
 		// `KeyStore.algorithm` is typed, but a host may put an object of its own
 		// in the slot through `bootstrapComponents` / `overrideComponents`,
 		// unchecked at that boundary, so the read is guarded. A reader, so the

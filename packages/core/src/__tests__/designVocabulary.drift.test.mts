@@ -122,7 +122,7 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	{
 		concept: "retired config key (#366)",
 		home: "packages/core/src/config/removed-keys.mts",
-		definition: /(?:function|const)\s+withRemovedKeys\b/,
+		definition: /(?:function|const)\s+findRelocatedKeys\b/,
 	},
 	{
 		concept: "serialized origin (#500)",

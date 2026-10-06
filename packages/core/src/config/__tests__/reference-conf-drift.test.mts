@@ -115,7 +115,7 @@ describe("core's reference.conf holds only what core's schema declares", () => {
 	it("resolves to a non-trivial tree, so the diff below is over something", () => {
 		const paths = collectPaths(resolved);
 		expect(paths.length).toBeGreaterThan(30);
-		expect(paths).toContain("oauth.jwt.legacyTypAccept");
+		expect(paths).toContain("core.tokenBinding.dispatchPolicy");
 		expect(paths).toContain("core-rate-limiter-memory.maxBuckets");
 	});
 
@@ -234,11 +234,12 @@ describe("core's reference.conf binds core's own section and its modules', and n
 		});
 	});
 
-	it("sets nothing at the paths core's section, the JWKS module's and the stores' moved from", () => {
+	it("sets nothing at oauth {}, the oauth module's, nor at the paths core's section, the JWKS module's and the stores' moved from", () => {
 		const tree = parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject();
 		for (const path of [
 			"deployment",
 			"sessionRequirements",
+			"oauth",
 			"oauth.jwt.jwksPath",
 			"oauth.jwt.jwksCacheMaxAge",
 			"memoryRateLimiter",
@@ -256,20 +257,6 @@ describe("core's reference.conf binds core's own section and its modules', and n
 		]) {
 			expect(hasPath(tree, path), path).toBe(false);
 		}
-	});
-});
-
-describe("core's reference.conf declares the operator keys a composition layering on it alone needs", () => {
-	// The drift diff above proves the schema keeps every path the file has; it
-	// cannot notice a path the file should have and does not.
-
-	it("declares oauth.authorize.acrValues, empty, so an unset table resolves to no acr values", () => {
-		const parsed = parsedByBase(
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
-		) as {
-			oauth?: { authorize?: { acrValues?: unknown } };
-		};
-		expect(parsed.oauth?.authorize?.acrValues).toEqual({});
 	});
 });
 

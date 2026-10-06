@@ -14,20 +14,20 @@
  * limitations under the License.
  */
 /**
- * Zod schemas for the application config. They are a pure type contract: the
- * shape required at the boundary, not defaults. Defaults live only in a
- * `reference.conf` — core's own sections' in `packages/core/config/reference.conf`,
- * a module's in the one its manifest declares — so parsing `{}` fails. Tests load through
- * `parseFile` or start from `makeValidCoreConfig`
- * (`@o3co/auth-provider-core/testing`). See ADR 2026-04-30.
+ * Zod schemas for core's own configuration, `core`, and the readers core keeps
+ * for keys of the oauth module's section it reads by path (the token
+ * lifetimes, the access-token revocation mode). The schemas are a pure type
+ * contract: the shape required at the boundary, not defaults. Defaults live
+ * only in a `reference.conf` — core's own sections' in
+ * `packages/core/config/reference.conf`, a module's in the one its manifest
+ * declares. Tests load through `parseFile` or start from
+ * `makeValidCoreConfig` (`@o3co/auth-provider-core/testing`). See ADR
+ * 2026-04-30.
  */
 import { z } from "zod";
 
-import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { OutboundSectionSchema } from "../net/outbound-policy.mjs";
-import { checkAcrValueName } from "./acr-values.mjs";
 import { MAX_DURATION_SECONDS } from "./durations.mjs";
-import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
 
 /**
@@ -60,59 +60,6 @@ export const coerceBooleanFromEnv = environmentCoercer(
 		}),
 	),
 );
-
-const LEGACY_JWT_FIELDS = [
-	"algorithm",
-	"kid",
-	"secret",
-	"privateKey",
-	"privateKeyPath",
-	"publicKey",
-	"publicKeyPath",
-	"previousKeys",
-	"previousSecrets",
-] as const;
-
-/**
- * Fields removed from `oauth.refreshToken`, detected on the raw input so an
- * upgrading operator gets a targeted error instead of Zod silently stripping
- * the key. `removedIn` is the release tag plus the phase or PR, so the error
- * names the release and its CHANGELOG entry. An entry added between cuts reads
- * `"this release (#NNN)"` until the cut stamps it (docs/release-policy.md R5,
- * R6), which `removedIn.drift.test.mts` enforces.
- */
-const REMOVED_REFRESH_TOKEN_FIELDS: readonly RemovedKey[] = [
-	{
-		name: "legacyTokenCompat",
-		removedIn: "v0.6.0 (Phase G / M4)",
-		note:
-			"v0.4.x refresh-token shape compat (payload.type, claims.user.id fallback) is no " +
-			"longer accepted. Ensure all in-flight refresh tokens were minted by v0.5.x or newer " +
-			"(header.typ = 'rt+jwt' and top-level sub) before upgrading.",
-	},
-];
-
-/**
- * Fields removed from `oauth.authorize`; same mechanism as above.
- * `reference.conf` keeps the `${?OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS}`
- * substitution as a tombstone so a still-exported env var reaches this check.
- * Where the oauth module is installed, its relocation refuses these fields,
- * and the one in `REMOVED_REFRESH_TOKEN_FIELDS`, first, before this schema
- * parses (`config-path-relocated`).
- */
-const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
-	{
-		name: "allowUnmarkedClients",
-		removedIn: "v0.10.0 (#330)",
-		note:
-			"The one-time migration flag for the /authorize first-party invariant is " +
-			"gone: a client whose registration does not carry `firstParty: true` is now always " +
-			"refused, whatever this key is set to. Mark every client you operate with " +
-			"`firstParty: true` (only ones you would trust to receive a user's identity without " +
-			"the user being asked), then delete this key and the " +
-			"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS environment variable.",
-	},
-];
 
 /**
  * A whole number read strictly: a number, or a string of decimal digits (a
@@ -147,57 +94,8 @@ export const wholeNumberInRangeFromEnv = (min: number, max?: number) => {
 	return wholeNumberFromEnv(max === undefined ? bounds : bounds.max(max, { error }));
 };
 
-const jwtSchemaBase = z.object({
-	// Required: the issuer belongs to the deployment, never to a request. An
-	// `iss` derived from the Host header is caller-controlled behind a trusted
-	// proxy. See `core/src/issuer/canonical.mts`.
-	issuer: z.string().superRefine((value, ctx) => {
-		const rejection = checkCanonicalIssuer(value);
-		if (rejection) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: `oauth.jwt.issuer ${describeIssuerRejection(rejection)}`,
-			});
-		}
-	}),
-	// Presence-only: the path the key-store module's section moved from (see
-	// `CoreConfigSchema` on presence-only keys).
-	signingKey: z.unknown().optional(),
-	// When true, the JWT verifier accepts tokens with no `typ` header and warns.
-	// No schema default: `reference.conf` ships `false` (a typ-less token is a
-	// misconfiguration or downgrade signal); `OAUTH_JWT_LEGACY_TYP_ACCEPT=true`
-	// is a migration override. `coerceBooleanFromEnv` because this section sits
-	// behind `z.preprocess`, which the hocon bridge does not coerce through.
-	legacyTypAccept: coerceBooleanFromEnv.optional(),
-	// Presence-only: the JWKS module's old paths (see `CoreConfigSchema`).
-	jwksPath: z.unknown().optional(),
-	jwksCacheMaxAge: z.unknown().optional(),
-});
-
 /**
- * Detects legacy flat `oauth.jwt.*` fields on the raw input: Zod strips unknown
- * keys before `superRefine` runs, so only `z.preprocess` can see them.
- */
-const jwtSchema = z.preprocess((raw, ctx) => {
-	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-		const rawObj = raw as Record<string, unknown>;
-		const legacyPresent = LEGACY_JWT_FIELDS.filter((field) => field in rawObj);
-		if (legacyPresent.length > 0) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message:
-					`oauth.jwt has legacy flat fields (${legacyPresent.join(", ")}). ` +
-					`Migrate to the key store's section: key-store.local.<field>. ` +
-					`See packages/core/README.md for migration guide.`,
-				path: [legacyPresent[0]],
-			});
-		}
-	}
-	return raw;
-}, jwtSchemaBase);
-
-/**
- * `oauth.accessToken` once the schema has parsed it.
+ * `oauth.accessToken` once the oauth module's section schema has parsed it.
  *
  * Read the lifetime through {@link resolveAccessTokenLifetime}, not through
  * these fields: `defaultExpiresIn` and `maxExpiresIn` are present only when
@@ -236,7 +134,7 @@ export interface AccessTokenLifetime {
 
 /**
  * Anything carrying an `oauth.accessToken` section: a loaded `AppConfig`, or
- * a configuration built by hand that never met the schema. Values are
+ * a configuration built by hand that never met the oauth module's schema. Values are
  * `unknown` because the resolver validates them rather than trusting a type.
  */
 export interface AccessTokenLifetimeSource {
@@ -250,8 +148,6 @@ export interface AccessTokenLifetimeSource {
 }
 
 const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const;
-
-type AccessTokenLifetimeKey = (typeof ACCESS_TOKEN_LIFETIME_KEYS)[number];
 
 /**
  * Whether a value is a token lifetime this provider accepts: whole seconds from
@@ -267,11 +163,12 @@ export const isLifetimeSeconds = (value: unknown): value is number =>
 
 type AccessTokenLifetimeCheck =
 	| { readonly ok: true; readonly lifetime: AccessTokenLifetime }
-	| { readonly ok: false; readonly key: AccessTokenLifetimeKey; readonly message: string };
+	| { readonly ok: false; readonly message: string };
 
 /**
- * The lifetime rules, shared by the schema refinement and the resolver.
- * `defaultExpiresIn` wins over the deprecated `expiresIn` whenever set, and a
+ * The lifetime rules {@link resolveAccessTokenLifetime} holds a configuration
+ * to; the oauth module's section schema holds `oauth.accessToken` to the same
+ * rules, in the same words. `defaultExpiresIn` wins over the deprecated `expiresIn` whenever set, and a
  * disagreement cannot fail boot: `reference.conf` keeps the shipped literal on
  * `expiresIn`, so a configuration using the new key always carries both.
  */
@@ -283,7 +180,6 @@ function checkAccessTokenLifetime(
 		if (value !== undefined && !isLifetimeSeconds(value)) {
 			return {
 				ok: false,
-				key,
 				message: `oauth.accessToken.${key} must be a whole number of seconds from 1 to ${MAX_DURATION_SECONDS} (got ${typeof value === "string" ? JSON.stringify(value) : String(value)})`,
 			};
 		}
@@ -294,7 +190,6 @@ function checkAccessTokenLifetime(
 	if (defaultExpiresIn === undefined) {
 		return {
 			ok: false,
-			key: "defaultExpiresIn",
 			message:
 				"oauth.accessToken.defaultExpiresIn is required (OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN); the deprecated oauth.accessToken.expiresIn is still read in its place",
 		};
@@ -307,7 +202,6 @@ function checkAccessTokenLifetime(
 				: "";
 		return {
 			ok: false,
-			key: "maxExpiresIn",
 			message: `oauth.accessToken.defaultExpiresIn (${defaultExpiresIn}${source}) must not exceed oauth.accessToken.maxExpiresIn (${maxExpiresIn}): lower the default or raise the max`,
 		};
 	}
@@ -323,9 +217,11 @@ function checkAccessTokenLifetime(
  * - `maxExpiresIn` when set, otherwise the default, so nothing is extended past
  *   the default unless the operator opts in.
  *
- * The schema enforces the same rules at boot; they are repeated for
- * configurations built by hand, so a bad value fails when the grant is built
- * rather than after a request's single-use credential is spent. The alias is
+ * The oauth module's section schema enforces the same rules at boot; they are
+ * repeated for a configuration no such schema parsed — one built by hand, or
+ * one whose `oauth {}` no loaded module owns — so a bad or missing value fails
+ * when the grant is built rather than after a request's single-use credential
+ * is spent. The alias is
  * resolved here, not in HOCON, because `parseFile` resolves substitutions per
  * file before the layers merge. {@link resolveRefreshTokenLifetime} is the
  * refresh token's counterpart.
@@ -341,7 +237,7 @@ export function resolveAccessTokenLifetime(config: AccessTokenLifetimeSource): A
 
 /**
  * Anything carrying an `oauth.refreshToken` section: a loaded `AppConfig`, or
- * a configuration built by hand that never met the schema. The value is
+ * a configuration built by hand that never met the oauth module's schema. The value is
  * `unknown` because the resolver validates it rather than trusting a type.
  */
 export interface RefreshTokenLifetimeSource {
@@ -352,9 +248,11 @@ export interface RefreshTokenLifetimeSource {
  * The refresh-token lifetime a deployment configured, in seconds
  * (`oauth.refreshToken.expiresIn`), and the one reader of that key: every grant
  * minting a refresh token reads it when built, as does the subject-revocation
- * horizon. The schema refuses bad values at boot; the check is repeated for
- * hand-built configurations so a grant fails when built, not after spending a
- * code or challenge or signing a refresh token with no `exp`.
+ * horizon. The oauth module's section schema refuses bad values at boot; the
+ * check is repeated for a configuration no such schema parsed — one built by
+ * hand, or one whose `oauth {}` no loaded module owns — so a grant fails when
+ * built, not after spending a code or challenge or signing a refresh token
+ * with no `exp`.
  *
  * @throws RangeError naming the key, for anything but whole seconds from 1 to
  * the one-year ceiling (`isLifetimeSeconds`), absence included.
@@ -368,126 +266,6 @@ export function resolveRefreshTokenLifetime(config: RefreshTokenLifetimeSource):
 	}
 	return value;
 }
-
-/** A lifetime in whole seconds, positive and bounded. */
-const lifetimeSecondsSchema = wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS);
-
-/**
- * `oauth.accessToken`. Every key is optional so either spelling of the default
- * can stand alone; the refinement requires one and refuses a default above the
- * max. The output mirrors the resolved default onto `expiresIn` for readers of
- * that key. The mirror must stay idempotent: `createApp` parses the loaded
- * configuration a second time.
- */
-const accessTokenSchema = z
-	.object({
-		defaultExpiresIn: lifetimeSecondsSchema.optional(),
-		maxExpiresIn: lifetimeSecondsSchema.optional(),
-		/**
-		 * @deprecated An alias of `defaultExpiresIn`, still read when that key is
-		 * unset. See CHANGELOG.
-		 */
-		expiresIn: lifetimeSecondsSchema.optional(),
-	})
-	.superRefine((value, ctx) => {
-		// A value that failed its own leaf check is already reported by name;
-		// a cross-field complaint built on it would only be noise.
-		if (
-			ACCESS_TOKEN_LIFETIME_KEYS.some(
-				(key) => value[key] !== undefined && !isLifetimeSeconds(value[key]),
-			)
-		) {
-			return;
-		}
-		const check = checkAccessTokenLifetime(value);
-		if (!check.ok) {
-			ctx.addIssue({ code: z.ZodIssueCode.custom, message: check.message, path: [check.key] });
-		}
-	})
-	.transform(
-		({ defaultExpiresIn, maxExpiresIn, expiresIn }): AccessTokenConfig => ({
-			...(defaultExpiresIn !== undefined ? { defaultExpiresIn } : {}),
-			...(maxExpiresIn !== undefined ? { maxExpiresIn } : {}),
-			// The refinement above guarantees one of the two; the transform does
-			// not run on a value that failed it.
-			expiresIn: (defaultExpiresIn ?? expiresIn) as number,
-		}),
-	);
-
-const refreshTokenSchemaBase = z.object({
-	// Positive and bounded (`MAX_DURATION_SECONDS`): the rule
-	// `resolveRefreshTokenLifetime` holds a hand-built configuration to.
-	expiresIn: lifetimeSecondsSchema,
-	// Policy for refresh tokens whose `family_id` matches no family record.
-	// Shape only, with no default: the oauth package owns the key and its
-	// default. The enum keeps any other string from reaching the refresh grant.
-	unknownFamilyPolicy: z.enum(["accept", "reject"]).optional(),
-	// Refresh tokens lacking `jti` or `family_id` while family rotation is wired
-	// are rejected. Shape only, with no default: the oauth package owns the key
-	// and its default. `"reject"` is the only value, so a stale
-	// `accept-with-warning` fails boot on this field.
-	legacyRtPolicy: z.enum(["reject"]).optional(),
-});
-
-/**
- * Fields removed from `oauth.refreshToken` fail boot via `withRemovedKeys`; see
- * `./removed-keys.mts` for why detection runs on the raw input.
- */
-const refreshTokenSchema = withRemovedKeys(
-	"oauth.refreshToken",
-	REMOVED_REFRESH_TOKEN_FIELDS,
-	refreshTokenSchemaBase,
-);
-
-/**
- * One `oauth.authorize.acrValues` entry: `amr` values a session must all carry,
- * or a list of such lists, any one of which suffices —
- * `"urn:o3co:acr:phr" = [["hwk"], ["swk"]]`. An empty list or alternative is
- * refused: every session would satisfy it.
- */
-const acrAlternativeSchema = z.array(z.string().min(1)).min(1);
-const acrRequirementSchema = z.union([acrAlternativeSchema, z.array(acrAlternativeSchema).min(1)]);
-
-/**
- * `oauth.authorize.acrValues`: each key an acr value a request can name
- * (`checkAcrValueName`), refused under the key otherwise, so no deployment
- * advertises one `/authorize` can never be asked for. The keys are judged
- * whenever the table is a record, beside any entry refused for its value, so
- * one boot names every key to fix.
- */
-const acrValuesSchema = z.record(z.string().min(1), acrRequirementSchema).superRefine(
-	(table, ctx) => {
-		for (const name of Object.keys(table)) {
-			const refusal = checkAcrValueName(name);
-			if (refusal !== null) ctx.addIssue({ code: "custom", message: refusal, path: [name] });
-		}
-	},
-	{
-		when: ({ value }) => typeof value === "object" && value !== null && !Array.isArray(value),
-	},
-);
-
-/**
- * `oauth.authorize`: one live key, `acrValues`, plus the retired
- * `allowUnmarkedClients`. Optional: `reference.conf` declares `acrValues {}`,
- * and the tombstone env substitution resolves to nothing unless a stale
- * variable is still exported.
- */
-const authorizeSchema = withRemovedKeys(
-	"oauth.authorize",
-	REMOVED_AUTHORIZE_FIELDS,
-	z
-		.object({
-			// The Authentication Context Class References this deployment can
-			// vouch for, each mapped to the RFC 8176 `amr` values that satisfy it.
-			// `/authorize` answers `acr_values` from this table alone (an acr not
-			// here is refused), and discovery advertises the keys as
-			// `acr_values_supported`, less entries nothing installed can satisfy
-			// (dropped at boot with a log line).
-			acrValues: acrValuesSchema.optional(),
-		})
-		.optional(),
-);
 
 /**
  * Ceiling for a `trust proxy` hop count: a typo guard, not a policy. A large
@@ -530,105 +308,12 @@ const federationEntrySchema = z
 	.passthrough();
 
 /**
- * Minimal always-required config for the auth provider core.
- * Token-only deployments (no session, no federation) only need these sections.
- *
- * The presence-only keys under `oauth` are paths a module's section, core's
- * own, or a composition root's setting moved from. No reader in core uses
- * them, and this schema does not refuse them: whoever declares the move does,
- * from the configuration as written — a module's `section.relocatedFrom`,
- * `CORE_RELOCATIONS` for `oauth.tokenBinding`, the standalone template's
- * adapter selections for `oauth.code` — and boot keeps every key as written
- * whatever this schema declares. They are declared only so a direct parse with
- * this schema keeps them as written and `CoreConfig` names them; they go with
- * core's copy of `oauth {}`.
+ * Core's own configuration: the one section core declares, `core`. Every
+ * other top-level section is a module's, parsed by that module's schema when
+ * it is loaded (`oauth {}` is the oauth module's), and declared by nothing
+ * here: core reads none of them through this schema.
  */
 export const CoreConfigSchema = z.object({
-	oauth: z.object({
-		jwt: jwtSchema,
-		// The access-token lifetime: `defaultExpiresIn`, `maxExpiresIn`, and the
-		// deprecated `expiresIn` alias. See `accessTokenSchema` and
-		// `resolveAccessTokenLifetime`.
-		accessToken: accessTokenSchema,
-		refreshToken: refreshTokenSchema,
-		// Presence-only: the path the grant switches moved from (each grant's
-		// under its module's section, `oauth-session` and
-		// `oauth-authorization`).
-		grants: z.unknown().optional(),
-		// As an OIDC OP, `/authorize` rejects requests without `openid` unless the
-		// operator chooses dual OAuth/OIDC mode. Default in HOCON.
-		oidcMode: z.enum(["oidc-required", "dual"]),
-		// Require a Store-published verified email before issuing tokens for an
-		// end-user subject. Off by default: many Stores do not model
-		// `emailVerified`, and turning it on would refuse all their users. The
-		// verification flow stays with the Store; this only gates issuance.
-		requireEmailVerified: coerceBooleanFromEnv.optional(),
-		// Deployment-wide deny-by-absence for `allowedGrantTypes`. Per client, an
-		// absent allowlist means every grant, so registrations without the field
-		// keep working; the secure posture is otherwise opt-in per registration.
-		// Off by default: turning it on says the operator audited their
-		// registrations. Composes with the per-grant
-		// `requiresExplicitGrantAllowlist` to the stricter of the two.
-		requireGrantTypeAllowlist: coerceBooleanFromEnv.optional(),
-		// `/authorize` refuses a client not marked `firstParty: true` (a missing
-		// field and an explicit `false` alike). The section carries `acrValues`
-		// and the tombstone for the removed `allowUnmarkedClients` (see
-		// `REMOVED_AUTHORIZE_FIELDS`).
-		authorize: authorizeSchema,
-		// Presence-only: the path the code repository's selection moved from (the
-		// composition root's `adapters.codeRepository`).
-		code: z.unknown().optional(),
-		// Presence-only: the paths the device-grant, oauth-token-exchange, mTLS
-		// and DPoP modules' sections moved from.
-		deviceAuthorization: z.unknown().optional(),
-		tokenExchange: z.unknown().optional(),
-		mtls: z.unknown().optional(),
-		dpop: z.unknown().optional(),
-		// Bounds the OIDC `nonce` at /authorize so a malicious RP cannot exhaust
-		// per-request memory or bloat the id_token. Default in HOCON.
-		nonce: z
-			.object({
-				maxLength: wholeNumberInRangeFromEnv(1),
-			})
-			.optional(),
-		// Opt-in RFC 8707 Resource Indicator enforcement; off in reference.conf
-		// (`OAUTH_RESOURCE_INDICATOR_ENABLED=true` turns it on).
-		resourceIndicator: z
-			.object({
-				enabled: coerceBooleanFromEnv,
-			})
-			.optional(),
-		// Presence-only: the keys of `oauth {}` the oauth module's own schema
-		// declares — the consent page, and the Client ID Metadata Documents.
-		// The module parses them.
-		consentPage: z.unknown().optional(),
-		clientIdMetadataDocuments: z.unknown().optional(),
-		// What `POST /oauth/revoke` promises for access tokens:
-		//   "denylist"    — the `jti` goes into the `accessTokenDenylist`
-		//                   component that verification consults. Boot refuses an
-		//                   unwired slot: RFC 7009's mandatory 200 would otherwise
-		//                   leave the JWT valid until expiry.
-		//   "unsupported" — `token_type_hint = access_token` gets RFC 7009
-		//                   §2.2.1 `unsupported_token_type`; no denylist needed.
-		// Refresh-token revocation is unaffected (`refreshTokenFamilyRevocation`).
-		// Optional with no default in schema or code (see
-		// `readAccessTokenRevocationMode`); `reference.conf` carries `"denylist"`
-		// so the key is discoverable.
-		revocation: z
-			.object({
-				accessToken: z.enum(["denylist", "unsupported"]),
-				// The declared-absence spelling for both subject-level revocation
-				// slots (`subjectRevocation`, `subjectSessionIndex`). One key because
-				// they are one capability: the index enumerates what a credential
-				// change cascades over, the watermark refuses what it missed. Read
-				// only when a slot is unfilled.
-				subject: z.enum(["watermark", "unsupported"]).optional(),
-			})
-			.optional(),
-		// Presence-only: the path core's token-binding settings moved from
-		// (`core.tokenBinding`).
-		tokenBinding: z.unknown().optional(),
-	}),
 	// Core's own section, strict at every level: an unknown key is refused,
 	// named and never its value.
 	core: z

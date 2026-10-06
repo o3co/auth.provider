@@ -18,13 +18,13 @@
  * `unreadableModuleLeaves`: a module's section leaf, at its name,
  * that would refuse the string an environment variable carries — a bare
  * `z.boolean()`, a `z.number()` that does not coerce, a non-string literal —
- * is covered only where core's transitional base reads the path first AND
- * hands the module the type the module's leaf takes. A base that reads the
- * string and leaves it a string does not cover a module's number.
+ * is reported wherever it is: core's base declares core's own section alone,
+ * so it reads no module's leaf first.
  */
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { coerceBooleanFromEnv, wholeNumberInRangeFromEnv } from "#/config/application.schema.mjs";
 import { readsEnvironmentString } from "#/config/schema-path.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
 import { unreadableModuleLeaves } from "#/testing/environmentLeaves.mjs";
@@ -32,28 +32,27 @@ import { unreadableModuleLeaves } from "#/testing/environmentLeaves.mjs";
 /** A module whose section, at its name, is `schema`. */
 const reading = (name: string, schema: z.ZodObject) => defineModule({ name, section: { schema } });
 
-describe("unreadableModuleLeaves — what core's base hands a module's leaf", () => {
-	it("covers a module's number where the base reads the string as a number", () => {
-		// `oauth.nonce.maxLength` is a coerced number in core's base.
+describe("unreadableModuleLeaves — a module's own leaf reads the string, or is reported", () => {
+	it.each([
+		["a number", { nonce: z.object({ maxLength: z.number() }) }, "oauth: oauth.nonce.maxLength"],
+		["a boolean", { requireEmailVerified: z.boolean() }, "oauth: oauth.requireEmailVerified"],
+		["a number under a string key", { oidcMode: z.number() }, "oauth: oauth.oidcMode"],
+	])("reports %s at a path no core schema declares, oauth {} included", (_, shape, found) => {
+		expect(unreadableModuleLeaves([reading("oauth", z.object(shape))])).toEqual([found]);
+	});
+
+	it("reports nothing for a leaf that reads the string itself", () => {
 		expect(
 			unreadableModuleLeaves([
-				reading("oauth", z.object({ nonce: z.object({ maxLength: z.number() }) })),
+				reading(
+					"oauth",
+					z.object({
+						requireEmailVerified: coerceBooleanFromEnv.optional(),
+						nonce: z.object({ maxLength: wholeNumberInRangeFromEnv(1) }),
+					}),
+				),
 			]),
 		).toEqual([]);
-	});
-
-	it("covers a module's boolean where the base reads the string as a boolean", () => {
-		expect(
-			unreadableModuleLeaves([reading("oauth", z.object({ requireEmailVerified: z.boolean() }))]),
-		).toEqual([]);
-	});
-
-	it("does not cover a module's number where the base reads the string and leaves it a string", () => {
-		// `oauth.oidcMode` is an enum of strings: the base reads `"3"` and
-		// refuses it, or hands a string on — never the number the module takes.
-		expect(unreadableModuleLeaves([reading("oauth", z.object({ oidcMode: z.number() }))])).toEqual([
-			"oauth: oauth.oidcMode",
-		]);
 	});
 
 	it("reports a module's preprocess that hands a string on to a boolean untouched", () => {
@@ -87,7 +86,7 @@ describe("unreadableModuleLeaves — a module's section, at its name", () => {
 		]);
 	});
 
-	it("reads a dotted module name as one key: a section at `oauth.nonce` is not core's `oauth { nonce }`", () => {
+	it("reads a dotted module name as one key: a section at `oauth.nonce` is not `oauth { nonce }`", () => {
 		expect(
 			unreadableModuleLeaves([reading("oauth.nonce", z.object({ maxLength: z.number() }))]),
 		).toEqual(["oauth.nonce: oauth.nonce.maxLength"]);

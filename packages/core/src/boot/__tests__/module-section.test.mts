@@ -320,37 +320,38 @@ describe("a module without a section", () => {
 });
 
 describe("a module's section — read from the parsed configuration", () => {
-	it("sees what core's schema made of the section: coerced, with the keys core does not declare kept", async () => {
+	it("sees what was written at its name: core's schema declares no module's section, so nothing coerces it first", async () => {
 		// The choice pinned: the section is read out of the composed parse's
-		// output — core's schema laid over what was written. At a section
-		// core's schema declares, a value core coerces arrives coerced — so a
-		// section read raw would refuse `nonce.maxLength: "128"` — and a key
-		// core does not declare is still there.
+		// output — core's schema laid over what was written — and core's schema
+		// declares `core` alone, so a module's section arrives as written: its
+		// own schema reads an environment string, and a bare `z.number()`
+		// refuses `"128"`.
 		let seen: unknown;
-		const sectioned = defineModule({
-			name: "oauth",
-			section: {
-				schema: z.object({
-					nonce: z.object({ maxLength: z.number(), extra: z.string().optional() }),
-				}),
-			},
-			contributes: {
-				grantMiddleware: [
-					(deps) => {
-						seen = deps.section;
-						return null;
-					},
-				],
-			},
-		});
+		const reading = (maxLength: z.ZodType) =>
+			defineModule({
+				name: "oauth",
+				section: {
+					schema: z.object({ nonce: z.object({ maxLength, extra: z.string().optional() }) }),
+				},
+				contributes: {
+					grantMiddleware: [
+						(deps) => {
+							seen = deps.section;
+							return null;
+						},
+					],
+				},
+			});
+		const written = { oauth: { nonce: { maxLength: "128", extra: "kept" } } };
+
+		await expect(
+			createApp({ modules: [reading(z.number())], bootstrapComponents: bootWith(written) }),
+		).rejects.toMatchObject({ reason: "config-validation-failed" });
 
 		const handle = await createApp({
-			modules: [sectioned],
-			bootstrapComponents: bootWith({
-				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128", extra: "kept" } },
-			}),
+			modules: [reading(z.coerce.number())],
+			bootstrapComponents: bootWith(written),
 		});
-
 		expect(seen).toEqual({ nonce: { maxLength: 128, extra: "kept" } });
 		await handle.dispose();
 	});

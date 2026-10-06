@@ -41,12 +41,13 @@ import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 const READ = ["core", "jwks", "renamed-variables"] as const;
 
 /**
- * The fixture's configuration less the oauth package's grant switches
- * (`oauth-session`, `oauth-authorization`): no module here reads them, so
+ * The fixture's configuration less the oauth package's sections (`oauth`,
+ * `oauth-session`, `oauth-authorization`): no module here reads them, so
  * boot would name them as ignored.
  */
-function withoutGrantSwitches(): Record<string, unknown> {
+function withoutOAuthSections(): Record<string, unknown> {
 	const {
+		oauth: _oauth,
 		"oauth-session": _session,
 		"oauth-authorization": _authorization,
 		...config
@@ -70,7 +71,7 @@ function resolved(env: Record<string, string>, operator = ""): Record<string, un
 		.toObject() as Record<string, unknown>;
 	const sections = [...READ, ...Object.keys(own.toObject() as Record<string, unknown>)];
 	return {
-		...withoutGrantSwitches(),
+		...withoutOAuthSections(),
 		...Object.fromEntries(sections.map((section) => [section, layered[section]])),
 	};
 }

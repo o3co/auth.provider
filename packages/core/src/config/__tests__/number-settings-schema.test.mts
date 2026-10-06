@@ -18,51 +18,14 @@
  * Every number setting core's own schemas declare is read as a whole number
  * in decimal digits: a typo such as `"1e9"` or `"0x10"`, or an
  * exported-but-empty variable, fails boot naming the key instead of being
- * read as some other number.
+ * read as some other number. `core {}` itself declares no number setting the
+ * schema reads (`core.sessionLifecycle.sweepIntervalSeconds` is read by its
+ * reader); the oauth module's numbers are pinned by its section's tests.
  */
 
 import { describe, expect, it } from "vitest";
-import { CoreConfigSchema } from "#/config/application.schema.mjs";
 import { memoryRateLimiterSectionSchema } from "#/ratelimit/module.mjs";
 import { createRepositoryFactories } from "#/repositories/RepositoryFactory.mjs";
-import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-
-type CoreConfigInput = ReturnType<typeof makeValidCoreConfig>;
-
-/** Each key core's schema reads a number at, with the config that sets it. */
-const CORE_CONFIG_KEYS: ReadonlyArray<
-	readonly [path: string, set: (base: CoreConfigInput, value: unknown) => unknown]
-> = [
-	[
-		"oauth.accessToken.defaultExpiresIn",
-		(base, value) => ({
-			...base,
-			oauth: { ...base.oauth, accessToken: { defaultExpiresIn: value } },
-		}),
-	],
-	[
-		"oauth.accessToken.maxExpiresIn",
-		(base, value) => ({
-			...base,
-			oauth: { ...base.oauth, accessToken: { expiresIn: 60, maxExpiresIn: value } },
-		}),
-	],
-	[
-		"oauth.accessToken.expiresIn",
-		(base, value) => ({ ...base, oauth: { ...base.oauth, accessToken: { expiresIn: value } } }),
-	],
-	[
-		"oauth.refreshToken.expiresIn",
-		(base, value) => ({
-			...base,
-			oauth: { ...base.oauth, refreshToken: { ...base.oauth.refreshToken, expiresIn: value } },
-		}),
-	],
-	[
-		"oauth.nonce.maxLength",
-		(base, value) => ({ ...base, oauth: { ...base.oauth, nonce: { maxLength: value } } }),
-	],
-];
 
 /** Each key the memory rate limiter's section reads a number at, with the section that sets it. */
 const RATE_LIMITER_KEYS: ReadonlyArray<readonly [path: string, set: (value: unknown) => unknown]> =
@@ -105,23 +68,6 @@ const issuesAt = (
 	(result.error?.issues ?? [])
 		.filter((issue) => issue.path.map(String).join(".") === path)
 		.map((issue) => issue.message);
-
-describe("core's schema reads each number setting in decimal digits", () => {
-	describe.each(CORE_CONFIG_KEYS)("%s", (path, set) => {
-		it.each(REFUSED.map((value) => [value]))("refuses %j, naming the key", (value) => {
-			const result = CoreConfigSchema.safeParse(set(makeValidCoreConfig(), value));
-			expect(result.success).toBe(false);
-			expect(issuesAt(result, path)).toEqual([
-				expect.stringMatching(/^must be a whole number .*, in decimal digits$/),
-			]);
-		});
-
-		it.each([[60], ["60"], [" 60 "]])("reads %j as 60", (value) => {
-			const result = CoreConfigSchema.safeParse(set(makeValidCoreConfig(), value));
-			expect(result.error?.issues ?? []).toEqual([]);
-		});
-	});
-});
 
 describe("the memory rate limiter's section reads each number setting in decimal digits", () => {
 	describe.each(RATE_LIMITER_KEYS)("%s", (path, set) => {
