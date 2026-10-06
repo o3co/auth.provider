@@ -85,18 +85,15 @@ Operator-facing strings (Zod issues, error messages, structured log fields) must
 
 ```typescript
 // ❌ — refers to a label that was never released
-removedIn: "1.0 GA (Phase G / M4)"
+message: "the key was removed in 1.0 GA"
 
 // ❌ — pre-stamps a version that hasn't been cut yet
-removedIn: "vX.Y.Z (Phase G / M4)"   // when vX.Y.Z is still pending
+message: "the key was removed in vX.Y.Z"   // when vX.Y.Z is still pending
 
-// ✅ — neutral wording, no forward reference
-removedIn: "this release (Phase G / M4)"
-// or omit the version entirely:
-removedIn: "(Phase G / M4)"
-
-// ✅ — released tag, post-cut (R6 audit at cut time fills this in)
-removedIn: "vA.B.C (Phase G / M4)"   // where vA.B.C is the tag that landed this removal
+// ✅ — no version: a retired key is a `relocatedFrom` entry to `null` in the
+// module that owns its path, and its refusal points at the CHANGELOG
+relocatedFrom: { "oauth.authorize.allowUnmarkedClients": null }
+// → "oauth.authorize.allowUnmarkedClients was removed; see CHANGELOG. …"
 ```
 
 If a removal is announced in advance (deprecated now, will be removed later), the error path during the deprecated window emits a *deprecation warning* (not yet an error). The removed-in version is filled in **at the release-cut PR that actually performs the removal** (per R6, step 5), not at the sweep/refactor PR before it. Operators running the release that contains the removal naturally know their own version; the "in version X" context inside the error message is optional and can be omitted to avoid pre-stamping pressure.
@@ -109,7 +106,7 @@ Before tagging a release `vX.Y.Z` (in `auth.provider`, the tag is cut from `main
 2. Write `## [X.Y.Z] - YYYY-MM-DD` in CHANGELOG from `git log <lastTag>..HEAD` (where `X.Y.Z` is the tag being cut), and list that range in the cut PR's description so completeness can be reviewed (R2)
 3. In the new CHANGELOG section: replace any forward-version reference (e.g., "removed in 1.0 GA", "this release", "next release") with the actual release name `X.Y.Z`
 4. JSDoc / code comments / config comments: replace forward-version references with `X.Y.Z` or remove the version mention entirely
-5. Schema metadata strings (Zod `removedIn`, etc.): replace neutral / forward-version values with `X.Y.Z` so operator error messages name the release that actually removed the field
+5. Operator-facing strings that name a release (a Zod message, a log field): replace neutral / forward-version values with `X.Y.Z`. A retired key's refusal (`relocatedFrom: null`) names no release — it points at the CHANGELOG, whose section names it — so it needs no stamp
 6. PR title for the release-cut PR uses "release: vX.Y.Z" (no Phase / GA / "next-release" labels)
 7. Release notes (`gh release create` body) include a brief retirement note if any pre-existing label was retired in this cut
 

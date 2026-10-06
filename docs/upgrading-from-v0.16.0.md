@@ -328,14 +328,17 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   key and unset the variable. For `allowUnmarkedClients`, first mark
   `firstParty: true` every client you operate that you would trust to
   receive a user's identity without the user being asked: `/authorize`
-  refuses every other client. Without `oauthEndpointsModule` nothing reads
-  `oauth {}`: the keys are named among the sections nothing loaded reads.
+  refuses every other client. Without `oauthEndpointsModule` core refuses every key written under
+  `oauth {}` but the few it reads (`oauth.jwt.issuer`, the access- and
+  refresh-token lifetimes, `oauth.revocation.*`), these included, as
+  `config-validation-failed` naming each path and the module.
 - `oauth.jwt`'s flat key fields (`algorithm`, `kid`, `secret`, `privateKey`,
   `privateKeyPath`, `publicKey`, `publicKeyPath`, `previousKeys`,
   `previousSecrets`) are refused by the oauth module's strict section as
   `config-validation-failed`, `oauth.jwt: Unrecognized key: "<field>"`,
-  instead of core's message pointing at `key-store.local` (#1500). Move each
-  field to the key store's section, `key-store.local`, as before.
+  instead of core's message pointing at `key-store.local` (#1500), and
+  without `oauthEndpointsModule` by core, naming the module. Move each field to
+  the key store's section, `key-store.local`, as before.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
 - `device-grant.store` (and `oauth.deviceAuthorization.store`), at any value,
@@ -1348,6 +1351,20 @@ modules fills them.
   `oauth.jwt.issuer` unless something wires `grantPolicy`, and binds no
   `OAUTH_*` variable. What changes for one that reads `oauth.*` through core
   without the oauth module:
+  - Core reads `oauth.jwt.issuer`, the access-token lifetime keys
+    (`defaultExpiresIn`, `maxExpiresIn`, `expiresIn`),
+    `oauth.refreshToken.expiresIn` and `oauth.revocation.accessToken` /
+    `subject`, and refuses every other key written under `oauth {}` while no
+    loaded module's section is `oauth` (`oauthEndpointsModule` not loaded):
+    `config-validation-failed`, one issue per path, naming the module, never
+    the value — a retired key, a misspelt one, or one only that module reads
+    (`oidcMode`, `nonce`, `consentPage`, …). The oauth package's
+    `reference.conf` sets such keys, so a composition that loads
+    `oauthAuthorizationGrantsModule` or `oauthSessionGrantModule` loads
+    `oauthEndpointsModule` too. A configured `oauth.jwt.issuer` that is not a
+    canonical issuer is refused the same way, at the key, so a discovery
+    document, the CORS table and a session requirement's page are built on a
+    canonical issuer or on none.
   - `OAUTH_REVOCATION_SUBJECT` and `OAUTH_REVOCATION_ACCESS_TOKEN` no longer
     declare an absence: a module that attaches
     `SUBJECT_REVOCATION_ABSENCE_POLICY` or
@@ -1361,25 +1378,36 @@ modules fills them.
   - A `grantPolicy` from any source needs a canonical `oauth.jwt.issuer`
     (`checkCanonicalIssuer`: an absolute https URL, http only for loopback, no
     query, fragment, credentials or trailing slash), else
-    `grant-policy-without-issuer`; it used to be held only to non-empty
-    there. With no `oauthTokenSettings` slot, an issuer that is not canonical
-    is read as none: no discovery document and no discovery path in the CORS
-    table.
+    `grant-policy-without-issuer` for a missing one, `config-validation-failed`
+    at the key for one that is not canonical; it used to be held only to
+    non-empty there. With no issuer, no discovery document is served, the CORS
+    table guards no discovery path — `browserFacingCorsRoutes` lists none
+    without an issuer, where it used to list the root forms — and a
+    requirement's page is held to no issuer's origin.
   - The token lifetimes core sizes its revoking records by
     (`oauth.accessToken.*`, `oauth.refreshToken.expiresIn`) are read as
     written: an environment string no section schema coerced is refused, not
     read as a number. A host's `oauthTokenSettings` over a configuration that
     resolves no lifetime refuses the boot as `config-validation-failed`
     naming the key, and the default refresh-token family modules as
-    `provides-factory-failed`. A composition that loads
-    `oauthAuthorizationGrantsModule` or `oauthSessionGrantModule` without
-    `oauthEndpointsModule` therefore needs `OAUTH_ACCESS_TOKEN_*` and
-    `OAUTH_REFRESH_TOKEN_EXPIRES_IN` unset, or the lifetimes written as
-    numbers in its own files.
+    `provides-factory-failed`, and so is the default refresh-token family
+    revocation module a session lifecycle requires. The refusal names
+    `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`, which only the oauth package's
+    reference binds. Without the oauth module, do one of: write the lifetimes
+    as numbers in your own files (`oauth.accessToken.defaultExpiresIn`,
+    `oauth.refreshToken.expiresIn`); load `oauthEndpointsModule`, whose
+    reference sets and binds them; or provide a refresh-token family
+    revocation of your own that reads no configuration.
   In code, `CoreConfig` loses `oauth` (`AppConfig["oauth"]` is `unknown`:
   read the oauth module's section from `deps.section`, or its settings from
-  the `oauthTokenSettings` slot); `makeValidCoreConfig` keeps carrying
-  `oauth {}`, typed as written.
+  the `oauthTokenSettings` slot). On core's `./testing`, `makeValidCoreConfig`
+  and `makeValidAppConfig` carry only the keys of `oauth {}` core reads (the
+  issuer, the lifetimes, the revocation modes; `oauth.oidcMode` is gone), so
+  they boot a composition without the oauth module; a test that loads it adds
+  `oidcMode`, as the oauth package's `oauthConfigForTests` now does. Both are
+  typed as written. `unreadableModuleLeaves` is stricter: a module's leaf that
+  core's schema used to read first — any key of `oauth {}` — is no longer
+  counted as covered, so the leaf must read the environment's string itself.
 - **BREAKING: `GrantDependencies` no longer carries `config` (#1500).** Its
   required slot is `keyStore`. A grant of your own that read `deps.config`
   reads the oauth module's settings from `oauthTokenSettings`, core's

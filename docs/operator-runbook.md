@@ -2400,8 +2400,11 @@ lists every breaking change since, and which of the steps below each needs.
    `section.relocatedFrom`; `packages/core/src/config/removed-keys.mts`), and a
    variable that set it fails boot exported at all
    (`environment-variable-renamed`). Without that module nothing reads the
-   section, and boot names it among the sections nothing loaded reads. The
-   decision rule is [release-policy.md §Retiring a config key](release-policy.md#retiring-a-config-key-366)).
+   section, and boot names it among the sections nothing loaded reads —
+   except `oauth {}`: core reads the issuer, the token lifetimes and
+   `oauth.revocation.*` there, and refuses every other key written under it
+   (`config-validation-failed`, naming each path and `oauthEndpointsModule`).
+   The decision rule is [release-policy.md §Retiring a config key](release-policy.md#retiring-a-config-key-366)).
    The keys retired so far:
 
    | Key | Mechanism | What you see |
