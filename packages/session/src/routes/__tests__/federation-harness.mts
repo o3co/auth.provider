@@ -178,8 +178,9 @@ export function makeSessionApp(
 
 		const originalEnd = res.end.bind(res);
 		res.end = ((...args: Parameters<typeof originalEnd>) => {
-			if (!res.headersSent) {
-				const current = (req as unknown as { session: Record<string, unknown> }).session;
+			const current = (req as unknown as { session?: Record<string, unknown> }).session;
+			// A route that dropped the cookie session names none.
+			if (!res.headersSent && current !== undefined) {
 				const attributes = current.cookie as SessionCookieAttributes;
 				res.cookie("sid", id, {
 					httpOnly: attributes.httpOnly,

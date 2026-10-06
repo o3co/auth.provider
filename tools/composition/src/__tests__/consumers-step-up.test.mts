@@ -36,6 +36,7 @@
 
 import { randomBytes } from "node:crypto";
 import {
+	type AppConfig,
 	type ApproveDeviceAuthorizationInput,
 	createMemoryDeviceCodeStore,
 	type UserSessionStore,
@@ -57,7 +58,6 @@ import {
 	SINGLE_ENV,
 	WORKER,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import type { Switches } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import type { Express } from "express";
 import request from "supertest";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -112,7 +112,7 @@ const RECENT_MFA_SECONDS = 300;
 /** The MFA package's configuration under `mode`, the TOTP factor on, with `extra` laid over it. */
 const adjust =
 	(mode: "optional" | "required", extra: Record<string, unknown> = {}) =>
-	(config: Switches): Switches =>
+	(config: AppConfig): AppConfig =>
 		({
 			...config,
 			...mfaConfigForTests({
@@ -122,7 +122,7 @@ const adjust =
 				...extra,
 			}),
 			...mfaTotpFactorConfigForTests(),
-		}) as unknown as Switches;
+		}) as AppConfig;
 
 /** Boots the full set for `users` under `required`, with `options` laid over it. */
 async function boot(users: readonly User[], options: FullSetOptions = {}): Promise<FullSet> {

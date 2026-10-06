@@ -73,10 +73,16 @@ function refusal(env: Record<string, string>): Error {
 	throw new Error("phase one read the switches");
 }
 
-/** The federations phase one reads, by name. */
-const federationsOf = (env: Record<string, string> = {}) =>
-	(switchesFrom(env).core as { federations?: Record<string, Record<string, unknown>> } | undefined)
-		?.federations ?? {};
+/** The federations the composition hands boot under `env`, by name: phase one, then phase two. */
+function federationsOf(env: Record<string, string> = {}) {
+	const own = readOwnLayers(ownFiles(), { env: { ...MFA_OFF, ...env } });
+	const switches = readSwitches(own);
+	const modules = buildModules(switches, { environment: "production" });
+	const resolved = resolveForBoot(own, modules, switches) as unknown as {
+		readonly core?: { readonly federations?: Record<string, Record<string, unknown>> };
+	};
+	return resolved.core?.federations ?? {};
+}
 
 /** The modules phase one chooses under `env`, by name. */
 const moduleNames = (env: Record<string, string>) =>

@@ -35,10 +35,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
-	coreReference,
+	type CoreSection,
+	coerceBooleanFromEnv,
 	type Module,
 	moduleReferences,
-	readTransitionalConfig,
 } from "@o3co/auth-provider-core";
 import {
 	redisFederationGrantIntentStoreModule,
@@ -137,77 +137,76 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
 	return layered.toObject() as Record<string, unknown>;
 }
 
-/**
- * What the template reads before it knows its modules, through core's
- * reader: the switches `buildModules` and its module factories choose by, and
- * the configuration's `core.sessionRequirements`, which
- * `expectedSessionRequirements` reads (the log level is `readLogging`'s).
- * No federation entry is among them: the template loads the federation types
- * it bundles whatever `core.federations` says, and boot dispatches each
- * enabled entry to its type. A module a deployment adds that reads its
- * configuration when it is built adds those paths here, or passes them to
- * `readSwitches` as `reads`.
- * `two-phase-config.test.mts` holds this list to what the template reads.
- *
- * Every path here and in `reads` must be one core's transitional base
- * declares (a section core's schema has, or mirrors for a package), or
- * `readSwitches` refuses it. A deployment module reading, when it is built, a
- * key of its own that core does not mirror gets it as written: raw, an
- * environment variable's string and all, without what only a package's
- * `reference.conf` sets. Parse it in the module, or read it after boot.
- */
-export const SWITCHES: readonly string[] = [
-	"core.sessionRequirements",
-	"federation-grants.enabled",
-	"oauth.accessToken",
-];
-
 /** `core.sessionRequirements`, as the composition declares it to boot. */
-export type SessionRequirements = NonNullable<AppConfig["core"]>["sessionRequirements"];
-
-export interface SwitchesOptions {
-	/** Paths read beside `SWITCHES`: what a module a deployment adds reads when it is built. */
-	readonly reads?: readonly string[];
-}
+export type SessionRequirements = NonNullable<CoreSection["sessionRequirements"]>;
 
 /**
- * What phase one answers: the switches core's reader parsed; the composition
- * root's own `adapters` and `mfaMode`, parsed with the template's schema;
- * and the Store transport settings — the user repository's HTTP settings,
- * `repositories.user.http`, as the template's own layers hold them, unparsed
- * — which the Store-backed MFA factor store is built over.
+ * What phase one answers, from the composition's own layers over the
+ * template's `config/reference.conf` alone: the composition root's own
+ * `adapters` and `mfaMode`, parsed with the template's schema; the Store
+ * transport settings — the user repository's HTTP settings,
+ * `repositories.user.http`, unparsed — which the Store-backed MFA factor
+ * store is built over; and whether the federation-grants modules are
+ * installed (`federationGrantsInstalled`). Nothing else of the configuration
+ * is read before boot: a module reads its own section, `deps.section`, at
+ * boot.
  */
-export type Switches = AppConfig & {
+export type Switches = {
 	readonly adapters: Adapters;
 	readonly mfaMode: MfaSwitch;
 	readonly storeTransport: unknown;
+	readonly "federation-grants"?: { readonly enabled?: boolean };
 };
 
 /**
- * Phase one: the switches (`SWITCHES`, and `reads`) from the composition's
- * own layers over core's `reference.conf` alone, read with core's
- * `readTransitionalConfig`: each parsed with the schema core declares at its
- * path, everything else as written; and, from its own layers over the
- * template's `config/reference.conf`, the composition root's own `adapters`
+ * Phase one: from the composition's own layers over the template's
+ * `config/reference.conf`, the composition root's own `adapters`
  * (`readAdapters`), which refuses a selection at the path it moved from and a
  * variable renamed with one, its own MFA switch `mfaMode` (`readMfaSwitch`),
- * and the Store transport settings. A variable the template bound for a
+ * the Store transport settings, and whether federation grants are installed
+ * (`federationGrantsInstalled`). A variable the template bound for a
  * federation it ships, renamed after the entry's path under
  * `core.federations` (`SHIPPED_FEDERATION_RENAMES`), is refused here too.
- * Use it for those choices only. A switch whose
- * default only a package ships reads as unset here; set it in the template's
- * own files.
+ * Use it for those choices only. A default only a package's reference ships
+ * reads as unset here; the template's own files set what it reads.
  */
-export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): Switches {
+export function readSwitches(own: OwnLayers): Switches {
 	const template = resolveLayers(own, [templateReference()]);
 	const adapters = readAdapters(template, own.env);
 	const mfaMode = readMfaSwitch(template, own.env);
 	refuseRenamedVariables(own.env, SHIPPED_FEDERATION_RENAMES);
-	const switches = readTransitionalConfig(resolveLayers(own, [coreReference()]), [
-		...SWITCHES,
-		...(options.reads ?? []),
-	]);
-	return { ...switches, adapters, mfaMode, storeTransport: storeTransportOf(template) };
+	return {
+		adapters,
+		mfaMode,
+		storeTransport: storeTransportOf(template),
+		"federation-grants": { enabled: federationGrantsInstalled(template) },
+	};
+}
+
+/**
+ * Whether `resolved` installs the federation-grants modules: unless
+ * `federation-grants.enabled` reads as `false` with core's
+ * `coerceBooleanFromEnv`, or is not written at all. A value that does not
+ * parse installs them, so that boot refuses it at `federation-grants.enabled`
+ * rather than the feature reading as off; so does a section written as
+ * something other than a section, and any setting written at the section's
+ * old path, `federationGrants`, which boot refuses naming the new path.
+ */
+function federationGrantsInstalled(resolved: Readonly<Record<string, unknown>>): boolean {
+	if (setsAnything(resolved.federationGrants)) return true;
+	const section = resolved["federation-grants"];
+	if (section === undefined) return false;
+	if (!isPlainSection(section)) return true;
+	if (section.enabled === undefined) return false;
+	const enabled = coerceBooleanFromEnv.safeParse(section.enabled);
+	return !(enabled.success && enabled.data === false);
+}
+
+/** Whether `value` sets anything: a value, or a section with one somewhere under it. */
+function setsAnything(value: unknown): boolean {
+	if (value === undefined) return false;
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return true;
+	return Object.values(value).some(setsAnything);
 }
 
 /** `repositories.user.http` in `resolved`, as written; `undefined` when absent. */
@@ -238,50 +237,62 @@ export function readLogging(own: OwnLayers): LoggingSettings {
 }
 
 /**
- * What this composition expects of session admission, from phase one: the
- * configuration's `core.sessionRequirements` as written, with `mfa` appended
- * to `expected` when the template's MFA switch, `mfaMode`, is not `off` and
- * the list does not name it, and `secondFactorAuthority` written as `mfa`
- * beside it — the switch installs the MFA module, whose requirement registers
- * `mfa` as the second-factor authority, and boot refuses a declared name
- * nothing registers (`session-requirement-missing`) and a declared authority
- * the requirement of that name does not declare. With the switch on, a
+ * What this composition expects of session admission: what to write over
+ * the configuration's `core.sessionRequirements` — `written`, as resolved —
+ * when the template's MFA switch, `mfaMode`, is not `off`: the configuration's
+ * `expected` with `mfa` appended when the list does not name it, and
+ * `secondFactorAuthority` written as `mfa` beside it — the switch installs the
+ * MFA module, whose requirement registers `mfa` as the second-factor
+ * authority, and boot refuses a declared name nothing registers
+ * (`session-requirement-missing`) and a declared authority the requirement of
+ * that name does not declare. Every other key written there is kept, for
+ * boot to refuse. With nothing written, `mfa` alone. With the switch on, a
  * written `secondFactorAuthority` other than `mfa` is a `RangeError` naming
- * the key, `mfaMode` and `MFA_MODE`, quoting nothing. With the switch `off`
- * the section is as written, and with nothing written nothing is declared:
- * boot's rule for an unwritten key applies. Computed here because HOCON has
- * no conditional.
+ * the key, `mfaMode` and `MFA_MODE`, quoting nothing.
+ *
+ * `undefined` hands the section on as written: with the switch `off`, and
+ * where `written` is not a section or its `expected` is not a list of names,
+ * which boot refuses at its path. Computed here because HOCON has no
+ * conditional.
  */
 export function expectedSessionRequirements(
-	switches: Pick<Switches, "core" | "mfaMode">,
-): SessionRequirements {
-	const written = switches.core?.sessionRequirements;
-	if (switches.mfaMode === "off") {
-		return written === undefined ? undefined : { ...written, expected: [...written.expected] };
-	}
-	const authority = written?.secondFactorAuthority;
+	written: unknown,
+	mfaMode: MfaSwitch,
+): SessionRequirements | undefined {
+	if (mfaMode === "off") return undefined;
+	if (written === undefined) return { expected: ["mfa"], secondFactorAuthority: "mfa" };
+	if (!isPlainSection(written)) return undefined;
+	const authority = written.secondFactorAuthority;
 	if (authority !== undefined && authority !== "mfa") {
 		throw new RangeError(
 			`core.sessionRequirements.secondFactorAuthority is written and names a requirement other than the one ${MFA_SWITCH} (MFA_MODE) installs as the second-factor authority: remove it, or write mfa`,
 		);
 	}
-	const declared = [...(written?.expected ?? [])];
+	const declared = written.expected;
+	if (!isListOfNames(declared)) return undefined;
 	return {
-		expected: declared.includes("mfa") ? declared : [...declared, "mfa"],
+		...written,
+		expected: declared.includes("mfa") ? [...declared] : [...declared, "mfa"],
 		secondFactorAuthority: "mfa",
 	};
 }
 
+/** Whether `value` is a list of strings. */
+function isListOfNames(value: unknown): value is readonly string[] {
+	return Array.isArray(value) && value.every((name) => typeof name === "string");
+}
+
 /**
  * Whether a module in `modules` owns the top-level section `name`: its
- * section sits there or under it, or it moved from there or under it.
+ * section sits there, at the module's name, or it moved from there or under
+ * it.
  */
 function ownsSection(modules: readonly Module[], name: string): boolean {
 	const topOf = (path: string): string | undefined => path.split(".")[0];
 	return modules.some((module) => {
 		const section = module.section;
 		if (section === undefined) return false;
-		if ((section.at === undefined ? module.name : topOf(section.at)) === name) return true;
+		if (module.name === name) return true;
 		const from = section.relocatedFrom;
 		const old = from === undefined ? [] : Array.isArray(from) ? from : Object.keys(from);
 		return old.some((path) => topOf(path) === name);
@@ -359,21 +370,17 @@ function refuseIntentPrefixLeftAtDefault(
 const ROOT_SECTIONS: readonly string[] = [ADAPTERS_SECTION, MFA_SWITCH];
 
 /**
- * Refuses, with a `RangeError` naming it, a module whose section is at or
- * under one of the composition root's own sections, which phase one consumes
- * and boot is never handed: the module would read nothing its operator wrote.
+ * Refuses, with a `RangeError` naming it, a module whose section — at the
+ * module's name — is one of the composition root's own sections, which phase
+ * one consumes and boot is never handed: the module would read nothing its
+ * operator wrote.
  */
 function refuseModuleAtRootSections(modules: readonly Module[]): void {
 	for (const module of modules) {
-		const section = module.section;
-		if (section === undefined) continue;
-		const path = section.at ?? module.name;
-		const top = path.split(".")[0] ?? path;
-		if (ROOT_SECTIONS.includes(top)) {
-			throw new RangeError(
-				`Module "${module.name}" has its section at ${path}, under ${top}: the composition root's own section, which boot is not handed. Give the module a section of another name.`,
-			);
-		}
+		if (module.section === undefined || !ROOT_SECTIONS.includes(module.name)) continue;
+		throw new RangeError(
+			`Module "${module.name}" has its section at ${module.name}: the composition root's own section, which boot is not handed. Give the module a section of another name.`,
+		);
 	}
 }
 
@@ -381,20 +388,21 @@ function refuseModuleAtRootSections(modules: readonly Module[]): void {
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
  * `reference.conf` of every package `modules` come from, core's last,
- * resolved and unparsed, with `core.sessionRequirements` — what phase one
- * says the composition expects (`expectedSessionRequirements`) — written over
- * the resolved section when there is one to write, and the `mfa` section and
- * the `oauth` acr table as the template's MFA switch decides them
- * (`mfaSectionForBoot`, `oauthForBoot`). Left out:
- * `adapters` and `mfaMode`, the composition root's own keys, which phase one
- * consumed. A section a loaded package's `reference.conf` sets for a module
- * the composition does not load is handed on as resolved: boot tells it
- * apart by the configuration's defaults (`configDefaultsFor`).
+ * resolved and unparsed, with `core.sessionRequirements` — what the
+ * composition expects under the MFA switch (`expectedSessionRequirements`) —
+ * written over the resolved section when there is one to write, and the
+ * `mfa` section and the `oauth` acr table as the template's MFA switch
+ * decides them (`mfaSectionForBoot`, `oauthForBoot`). Left out: `adapters`
+ * and `mfaMode`, the composition root's own keys, which phase one consumed.
+ * A section a loaded package's `reference.conf` sets for a module the
+ * composition does not load is handed on as resolved: boot tells it apart by
+ * the configuration's defaults (`configDefaultsFor`).
  *
- * Refuses, with a `RangeError`, a module whose section is under a section of
- * the composition root's (`refuseModuleAtRootSections`), what
- * `mfaSectionForBoot` refuses of the `mfa` section, and the Redis intent store left
- * on its default key prefix where the grant store's was moved
+ * Refuses, with a `RangeError`, a module whose section is a section of the
+ * composition root's (`refuseModuleAtRootSections`), what
+ * `expectedSessionRequirements` refuses of `core.sessionRequirements`, what
+ * `mfaSectionForBoot` refuses of the `mfa` section, and the Redis intent
+ * store left on its default key prefix where the grant store's was moved
  * (`refuseIntentPrefixLeftAtDefault`).
  *
  * Typed `AppConfig` because that is the `config` slot's type; read the parsed
@@ -403,7 +411,7 @@ function refuseModuleAtRootSections(modules: readonly Module[]): void {
 export function resolveForBoot(
 	own: OwnLayers,
 	modules: readonly Module[],
-	switches: Pick<Switches, "core" | "mfaMode" | "adapters">,
+	switches: Pick<Switches, "mfaMode" | "adapters">,
 ): AppConfig {
 	refuseModuleAtRootSections(modules);
 	const all = resolveLayers(own, moduleReferences(modules));
@@ -421,18 +429,20 @@ export function resolveForBoot(
 			switches.adapters.userRepository === "http" || switches.adapters.mfaFactorStore === "store",
 		env: own.env,
 	});
-	const sessionRequirements = expectedSessionRequirements(switches);
+	// `core` written as something other than a section is handed on as
+	// written, for boot to refuse.
+	const core = isPlainSection(resolved.core) ? resolved.core : undefined;
+	const sessionRequirements =
+		resolved.core === undefined || core !== undefined
+			? expectedSessionRequirements(core?.sessionRequirements, switches.mfaMode)
+			: undefined;
 	return {
 		...resolved,
 		...(mfa === undefined ? {} : { mfa }),
 		...(resolved.oauth === undefined
 			? {}
 			: { oauth: oauthForBoot(switches.mfaMode, resolved.oauth) }),
-		...(sessionRequirements === undefined
-			? {}
-			: {
-					core: { ...(resolved.core as Record<string, unknown> | undefined), sessionRequirements },
-				}),
+		...(sessionRequirements === undefined ? {} : { core: { ...core, sessionRequirements } }),
 	} as unknown as AppConfig;
 }
 

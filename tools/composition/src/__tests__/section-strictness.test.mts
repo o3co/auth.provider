@@ -100,9 +100,8 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 const isModule = (value: unknown): value is Module =>
 	isPlainObject(value) && typeof value.name === "string";
 
-/** Where `module`'s section sits. */
-const sectionPath = (module: Module): string[] =>
-	module.section?.at === undefined ? [module.name] : module.section.at.split(".");
+/** Where `module`'s section sits: at the module's name. */
+const sectionPath = (module: Module): string[] => [module.name];
 
 function valueAt(tree: unknown, path: readonly string[]): unknown {
 	let cursor: unknown = tree;

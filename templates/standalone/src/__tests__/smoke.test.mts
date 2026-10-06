@@ -313,14 +313,11 @@ describe("standalone smoke test", () => {
 			},
 		};
 		const handle = await createApp({
-			modules: buildModules(
-				{ ...switches, oauth: issuerConfig.oauth },
-				{
-					keyStoreModule: testKeyStoreModule,
-					repositoriesModule: testRepositoriesModule,
-					refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
-				},
-			),
+			modules: buildModules(switches, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			}),
 			bootstrapComponents: { config: issuerConfig, pathResolver: (s) => s },
 		});
 		handleRef = handle;

@@ -14,11 +14,9 @@
  * limitations under the License.
  */
 import {
-	consoleLogger,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
 	jwksModule,
-	type Logger,
 	type Module,
 	memoryAccessTokenDenylistModule,
 	memoryConsentStoreModule,
@@ -70,7 +68,7 @@ import {
 } from "./modules.mjs";
 
 /**
- * Overrides for the composition. All but `environment`, `logger` and
+ * Overrides for the composition. All but `environment` and
  * `mailSenderModules` are test-only: they let the smoke test substitute
  * in-memory implementations of the file-system-backed modules, and production
  * callers should not pass them — the defaults match the standalone scaffold.
@@ -88,12 +86,6 @@ export interface BuildModulesOverrides {
 	 * MFA module reads it too, for the development sample key's refusal.
 	 */
 	readonly environment?: string;
-	/**
-	 * Where the composition's own notices go — a deprecated config key, one
-	 * `config_key_deprecated` line (warn) each. `app.mts` passes the logger it
-	 * hands every module; omitted, `consoleLogger`.
-	 */
-	readonly logger?: Logger;
 	readonly keyStoreModule?: Module;
 	readonly repositoriesModule?: Module;
 	/**
@@ -122,32 +114,15 @@ export interface BuildModulesOverrides {
 }
 
 /**
- * The access-token lifetime core's `reference.conf` ships on the deprecated
- * `oauth.accessToken.expiresIn`. Not a default — nothing mints with it — only
- * what an unmodified deployment carries there, so the deprecation line can tell
- * an operator's override from the shipped value. Pinned against the real file
- * by `access-token-lifetime-alias.test.mts`.
- */
-const SHIPPED_ACCESS_TOKEN_EXPIRES_IN = 3600;
-
-/** Whether `value` sets anything: a value, or a section with one somewhere under it. */
-function setsAnything(value: unknown): boolean {
-	if (value === undefined) return false;
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return true;
-	return Object.values(value).some(setsAnything);
-}
-
-/**
  * Compose the standalone module list from phase one's `config`: the
  * composition root's `adapters`, which choose the adapter behind each slot,
- * and the switches core's reader parsed. Kept out of `app.mts` so a smoke
- * test can check the manifest (that disabling federation grants removes their
- * modules, say) without an HTTP server. The rules for editing the list
- * (order, one module per store slot, the federation types it bundles) are in
- * the template README, "Module Composition Order".
+ * its MFA switch, and whether federation grants are installed. Kept out of
+ * `app.mts` so a smoke test can check the manifest (that disabling federation
+ * grants removes their modules, say) without an HTTP server. The rules for
+ * editing the list (order, one module per store slot, the federation types it
+ * bundles) are in the template README, "Module Composition Order".
  */
 export function buildModules(config: Switches, overrides: BuildModulesOverrides = {}): Module[] {
-	const logger = overrides.logger ?? consoleLogger;
 	const adapters = config.adapters;
 
 	// Federation grants: a user's standing consent that a client may obtain
@@ -160,11 +135,10 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 	// subject holds" include the grants. Enabling it also states the deployment
 	// has a consent page, a callback per connection and a user repository
 	// covering each connection's registration; the routes module refuses at
-	// boot what is missing, naming it. A setting still written at the section's
-	// old path, `federationGrants`, installs the feature too, so that boot
-	// refuses it naming the new path rather than reading the feature as off.
-	const federationGrantsEnabled =
-		config["federation-grants"]?.enabled === true || setsAnything(config.federationGrants);
+	// boot what is missing, naming it. Phase one decides it (`readSwitches`): a
+	// value boot would refuse installs the feature, so that boot refuses it
+	// rather than reading the feature as off.
+	const federationGrantsEnabled = config["federation-grants"]?.enabled === true;
 
 	// MFA: the template's own switch, `mfaMode` (MFA_MODE). `off` installs
 	// nothing of MFA; `optional` and `required` install what `mfaModulesFor`
@@ -172,28 +146,6 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 	// (`expectedSessionRequirements`) and `mfa.mode` is written from the
 	// switch (`resolveForBoot`).
 	const mfaInstalled = config.mfaMode !== "off";
-
-	// The deprecated alias `oauth.accessToken.expiresIn`
-	// (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is still read as the default while
-	// `defaultExpiresIn` is unset; `resolveAccessTokenLifetime` does that, and
-	// this only warns. Core's `reference.conf` ships the lifetime on the
-	// deprecated key, so only an override of it has something to move. See
-	// CHANGELOG for the removal version.
-	const accessToken = config.oauth.accessToken;
-	if (
-		accessToken.defaultExpiresIn === undefined &&
-		accessToken.expiresIn !== SHIPPED_ACCESS_TOKEN_EXPIRES_IN
-	) {
-		logger.warn(
-			{
-				key: "oauth.accessToken.expiresIn",
-				env: "OAUTH_ACCESS_TOKEN_EXPIRES_IN",
-				replacement: "oauth.accessToken.defaultExpiresIn",
-				replacementEnv: "OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
-			},
-			"config_key_deprecated",
-		);
-	}
 
 	const refreshTokenFamilyModules: readonly Module[] = overrides.refreshTokenFamilyModules ?? [
 		redisRefreshTokenFamilyStoreModule,

@@ -111,6 +111,40 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     and `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`'s two values included.
   - A second Google client is now configuration alone: another entry with
     `type = "google"` ([template README](../templates/standalone/README.md#google-federation)).
+- **BREAKING: the template reads only its own keys before it chooses its
+  modules** (#728). `readSwitches` reads, from the scaffold's files over the
+  template's `config/reference.conf`, the composition root's `adapters` and
+  `mfaMode`, the user repository's HTTP settings, and whether federation
+  grants are installed — nothing of core's section or of a package's.
+  - The `config_key_deprecated` (warn) line for `oauth.accessToken.expiresIn`
+    (`OAUTH_ACCESS_TOKEN_EXPIRES_IN`) is no longer logged. The key is still
+    read as the access-token default while `oauth.accessToken.defaultExpiresIn`
+    is unset: move the value to `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`. An
+    alert on that line sees nothing now.
+  - A `federation-grants.enabled` (`FEDERATION_GRANTS_ENABLED`) that does not
+    read as a boolean installs the federation-grants modules and is refused at
+    boot, `config-validation-failed` naming `federation-grants.enabled`, where
+    it was a `RangeError` before boot. A `core.sessionRequirements` boot's
+    schema refuses — `expected` not a list of names, or a key core does not
+    declare — is refused the same way at its path, and so is a bad
+    access-token lifetime (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`,
+    `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`, `OAUTH_ACCESS_TOKEN_EXPIRES_IN`),
+    which the template no longer reads before boot either. With MFA on, a
+    written `core.sessionRequirements.secondFactorAuthority` other than `mfa`
+    is still a `RangeError` before boot.
+  - `buildModules`' `overrides.logger` is removed: it carried only that
+    warning. Drop it from your call; `app.mts` passes `{ environment }`.
+  - For code of a fork's own: `SWITCHES`, `readSwitches`' second argument
+    (`reads`, of type `SwitchesOptions`) and the configuration `Switches`
+    carried are gone. `Switches` is `adapters`, `mfaMode`, `storeTransport`
+    and `federation-grants.enabled`. A module you add reads its own section
+    at boot (`deps.section`); code that read another key from what
+    `readSwitches` answers reads it at boot, from the parsed configuration.
+    `expectedSessionRequirements` takes the resolved
+    `core.sessionRequirements` and the MFA switch, and answers
+    `SessionRequirements | undefined` — `undefined` where `resolveForBoot`
+    hands the section on as written — and the exported `SessionRequirements`
+    type no longer includes `undefined`.
 - Install MFA only through `MFA_MODE`
   ([Turning MFA on](#turning-mfa-on)).
 - **MFA is on by default** in the new `config/reference.conf`
@@ -979,8 +1013,7 @@ modules fills them.
   config })` is removed: list `oauthAuthorizationGrantsModule` in its place.
   The refusal of a module built from a configuration that disagrees with the
   booted one about a grant's switch is gone, and the standalone template no longer reads
-  `oauth-authorization.grants` before boot (its `SWITCHES` no longer lists
-  it). A grant switched off registers nothing, but while the module is on it
+  `oauth-authorization.grants` before boot. A grant switched off registers nothing, but while the module is on it
   still claims its grant type: a composition that pairs the module with its
   own `client_credentials`, `refresh_token` or jwt-bearer grant, this
   module's switch for it off, is refused (`duplicate-contribute`) where it

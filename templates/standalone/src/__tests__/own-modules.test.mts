@@ -61,7 +61,6 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
-	SWITCHES,
 } from "../configPath.mjs";
 import { createAppLogger } from "../logger.mjs";
 import { MFA_SWITCH } from "../mfaSwitch.mjs";
@@ -265,8 +264,9 @@ describe("logging", () => {
 		});
 	});
 
-	it("is not among SWITCHES", () => {
-		expect(SWITCHES).not.toContain("logging");
+	it("is not among what phase one reads", () => {
+		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
+		expect(Object.keys(readSwitches(own))).not.toContain("logging");
 	});
 
 	it.each([

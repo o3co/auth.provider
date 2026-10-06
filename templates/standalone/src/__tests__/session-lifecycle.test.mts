@@ -21,6 +21,7 @@
  */
 
 import {
+	type FederationTokenStore,
 	readVersionedSessionLifecycle,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
@@ -33,6 +34,7 @@ import {
 	ALICE,
 	basic,
 	compose,
+	cookiesOf,
 	federatedCallback,
 	ISSUER,
 	login,
@@ -138,11 +140,12 @@ describe("the template, which composes the session lifecycle module", () => {
 		}
 	});
 
-	it("opens a federated login's session in the lifecycle, through the session module's federation routes", async () => {
+	it("joins a federated login's federation to the session's lifecycle record, beside its tokens, through the session module's federation routes", async () => {
 		const { app, handle, upstreams } = await compose();
 		try {
 			const callback = await (await federatedCallback(app, "oidc", upstreams.oidc))();
 			expect(callback.status).toBe(302);
+			expect(cookiesOf(callback)).not.toEqual([]);
 			const components = handle.components as Record<string, unknown>;
 			const [sid] = await (components.subjectSessionIndex as SubjectSessionIndex).listSids(
 				ALICE.sub,
@@ -150,6 +153,11 @@ describe("the template, which composes the session lifecycle module", () => {
 			const store = components.sessionLifecycleStore as SessionLifecycleStore;
 			const record = readVersionedSessionLifecycle(await store.read(String(sid)));
 			expect(record?.value).toMatchObject({ sub: ALICE.sub, state: "active" });
+			expect(record?.value.participants.map((p) => `${p.kind}:${p.id}`)).toEqual([
+				"federation:oidc",
+			]);
+			const tokens = components.federationTokenStore as FederationTokenStore;
+			expect(await tokens.get(String(sid), "oidc")).not.toBeNull();
 		} finally {
 			await handle.dispose();
 		}

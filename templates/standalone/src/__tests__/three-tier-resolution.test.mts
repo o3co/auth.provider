@@ -15,21 +15,27 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { type AppConfig, AppConfigSchema, coreReference } from "@o3co/auth-provider-core";
+import type { AppConfig } from "@o3co/auth-provider-core";
+import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { readAdapters } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths, type Switches } from "../configPath.mjs";
-import { readMfaSwitch } from "../mfaSwitch.mjs";
+import {
+	readOwnLayers,
+	readSwitches,
+	resolveConfigPaths,
+	resolveForBoot,
+	type Switches,
+} from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
+import { type BothPhases, withSwitches } from "./library-references.fixture.mjs";
 
 // config/ is two levels above this test file:
 //   src/__tests__/ → src/ → standalone/ → config/
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
-// Provide required secrets so AppConfigSchema parse succeeds. These are
+// Provide the secrets the template's files require. These are
 // test-only values — no real keys are embedded here. SESSION_STORE_SECRET
 // carries a 256-bit entropy floor, so these clear it (the '.' characters keep
 // them outside the base64 alphabet, so the UTF-8 length is what counts).
@@ -40,30 +46,32 @@ const testEnv = {
 };
 
 /**
- * The three tiers under `env`, parsed with core's schema, beside the
- * composition root's `adapters` and `mfaMode` phase one reads from the
- * template's own layers.
+ * The three tiers under `env`, as `app.mts` reads them: what phase one reads
+ * of the template's own layers, laid over what phase two hands boot — the
+ * own layers over the reference of every package the chosen modules come
+ * from, resolved and unparsed.
  */
-function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): Switches {
+function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): BothPhases {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, env);
-	const libraryReferencePath = fileURLToPath(coreReference());
-	const resolvedEnv = { ...testEnv, ...extraEnv };
-	const own = parseFile(envConfPath, { env: resolvedEnv })
-		.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
-		.withFallback(parseFile(fileURLToPath(templateReference()), { env: resolvedEnv }));
-	return {
-		...validate(
-			own.withFallback(parseFile(libraryReferencePath, { env: resolvedEnv })),
-			AppConfigSchema,
-		),
-		adapters: readAdapters(own.toObject() as Record<string, unknown>, resolvedEnv),
-		mfaMode: readMfaSwitch(own.toObject() as Record<string, unknown>, resolvedEnv),
-		storeTransport: undefined,
-	};
+	const own = readOwnLayers([envConfPath, applicationConfPath], {
+		env: { ...testEnv, ...extraEnv },
+	});
+	const switches = readSwitches(own);
+	return withSwitches(
+		resolveForBoot(own, buildModules(switches), switches) as unknown as Record<string, unknown>,
+		switches,
+	);
 }
 
-// The oauth-authorization module's section, which core mirrors for the one
-// key read before the modules are chosen (`grants`), kept as written: the
+/** `oauth.resourceIndicator` as the section's owner, the oauth module, parses it at boot. */
+function parsedResourceIndicator(config: AppConfig): { readonly enabled?: unknown } | undefined {
+	const schema = oauthEndpointsModule.section?.schema;
+	if (schema === undefined) throw new Error("the oauth module declares no section");
+	return (schema.parse(config.oauth) as { resourceIndicator?: { enabled?: unknown } })
+		.resourceIndicator;
+}
+
+// The oauth-authorization module's section as resolved, unparsed: the
 // runtime shape is a string from env substitution, a boolean from a literal.
 type GrantEntry = { enabled?: unknown };
 const grants = (config: AppConfig) =>
@@ -89,9 +97,9 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 	it("env var at template layer can disable a template-enabled grant (precedence: env-override line must be repeated)", () => {
 		// The env-override line is repeated at the template layer alongside
 		// `enabled = true`; without it, the package reference's substitution is
-		// shadowed by the template's literal `true`. The value stays a string:
-		// core mirrors the section as written, and the module reads the switch
-		// with its own schema, `"false"` as off.
+		// shadowed by the template's literal `true`. The value stays a string
+		// until boot: the module reads the switch with its own schema, `"false"`
+		// as off.
 		const config = buildResolvedConfig("development", {
 			OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "false",
 		});
@@ -133,6 +141,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		// Without the HOCON block the field resolves to undefined.
 		const config = buildResolvedConfig("development");
 		expect(config.oauth.resourceIndicator?.enabled).toBe(false);
+		expect(parsedResourceIndicator(config)?.enabled).toBe(false);
 	});
 
 	it("env var OAUTH_RESOURCE_INDICATOR_ENABLED=true reaches resolved config and coerces to boolean true", () => {
@@ -143,7 +152,8 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		const config = buildResolvedConfig("development", {
 			OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 		});
-		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
+		expect(config.oauth.resourceIndicator?.enabled).toBe("true");
+		expect(parsedResourceIndicator(config)?.enabled).toBe(true);
 	});
 
 	// The selection is the composition root's own, `adapters.auditSink`,
