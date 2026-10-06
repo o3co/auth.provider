@@ -342,8 +342,29 @@ const noStore: RequestHandler = (_req, res, next) => {
 	next();
 };
 
+/**
+ * Where a user-session store is wired, core's session lifecycle is required:
+ * admission reads the session's lifecycle record through the port, so a
+ * session closing or closed is admitted to nothing. Throws when the store is
+ * wired without the port.
+ */
+export function requireSessionLifecycleStore(
+	admission: Pick<AdmissionDeps, "userSessionStore" | "sessionLifecycleStore">,
+): void {
+	if (admission.userSessionStore !== undefined && admission.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"mfa: userSessionStore is wired, but sessionLifecycleStore is not. Where a user-session " +
+				"store is wired, core's session lifecycle is required: the MFA routes' admission reads " +
+				"the session's lifecycle record through it. Wire core's session lifecycle: a " +
+				"session-store module that fills sessionLifecycleStore (memorySessionStoresModule or " +
+				"redisSessionStoresModule) and sessionLifecycleModule.",
+		);
+	}
+}
+
 /** The MFA routes' router (see this file's header). */
 export function createMfaRouter(options: MfaRoutesOptions): Router {
+	requireSessionLifecycleStore(options.admission);
 	const {
 		coordinator,
 		admission,
