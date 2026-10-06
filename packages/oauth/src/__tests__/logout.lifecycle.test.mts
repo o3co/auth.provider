@@ -380,23 +380,47 @@ describe("/oauth/logout through the session lifecycle: the close's answer", () =
 		expect(google.endSession).not.toHaveBeenCalled();
 	});
 
-	it("a sid the lifecycle cannot hold: the no-op answer, not a 500", async () => {
-		const lifecycle = fakeLifecycle({
-			close: async () => {
-				throw new RangeError("session lifecycle: sid must be 1 to 512 characters");
-			},
+	for (const [label, rejection] of [
+		[
+			"a store-style RangeError",
+			() =>
+				Object.assign(new RangeError("Invalid array length"), {
+					command: { name: "hset", args: [REFUSED_COMMAND_MARKER] },
+				}),
+		],
+		["a generic rejection", () => new Error("connection reset")],
+	] as const) {
+		it(`a close that rejects with ${label}: 503, never a false logout, one error line, audited, the browser session kept`, async () => {
+			const lifecycle = fakeLifecycle({
+				close: async () => {
+					throw rejection();
+				},
+			});
+			const { sink, events } = recordingSink();
+			const logger = createMockLogger();
+			const browserSession = { sid: SID, destroyed: false };
+			const app = buildApp({ lifecycle, auditSink: sink, logger, browserSession });
+
+			const res = await postLogout(app);
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			expect(typesOf(events)).toEqual(["logout.cascade_failed"]);
+			expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+				expect.objectContaining({
+					store: "session_lifecycle",
+					step: "close",
+					err: expect.objectContaining({ name: rejection().name }),
+				}),
+				"logout_store_unavailable",
+			);
+			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
+			expect(browserSession.destroyed).toBe(false);
 		});
-		const { sink, events } = recordingSink();
-		const browserSession = { sid: SID, destroyed: false };
-		const app = buildApp({ lifecycle, auditSink: sink, browserSession });
-
-		const res = await postLogout(app);
-
-		expect(res.status).toBe(200);
-		expect(res.body).toEqual({ logged_out: true });
-		expect(events).toEqual([]);
-		expect(browserSession.destroyed).toBe(true);
-	});
+	}
 
 	it("a session already gone: the no-op answer, and nothing is closed", async () => {
 		const lifecycle = fakeLifecycle();

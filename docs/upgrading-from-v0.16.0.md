@@ -1164,6 +1164,11 @@ modules fills them.
     logged `logout_store_unavailable` with the projection and audited
     `logout.cascade_failed`. A federation listing that rejects only leaves
     the logout without its upstream hint.
+  - A `/oauth/logout` whose close rejects with a `RangeError` is that same
+    `503`, where it answered `200 {"logged_out": true}` as a session
+    already gone: a store's own error can be a `RangeError`, and the old
+    answer reported a logout that revoked nothing. A sid the lifecycle
+    cannot hold is therefore a `503` too; such a sid is never issued.
 - **BREAKING: `POST /session/logout` closes the session through the
   lifecycle only.** The path that deleted the `UserSession`, the subject-index
   entry and the federation tokens itself, without the lifecycle, is removed,
