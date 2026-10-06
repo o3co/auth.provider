@@ -2202,7 +2202,7 @@ function oauthKeysNothingReads(raw: unknown, modules: readonly Module[]): z.core
 			code: "custom",
 			path: [...path],
 			message:
-				"is read only by the oauth endpoints module (oauthEndpointsModule), which owns oauth {} and is not loaded: load it to use this key, or remove the key",
+				"is read only by oauthEndpointsModule, which owns oauth {} and is not loaded: load oauthEndpointsModule to use this key (the oauth grant modules need it too), or remove the key",
 			input: undefined,
 		} as z.core.$ZodIssue);
 	}
