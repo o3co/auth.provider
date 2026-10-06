@@ -883,4 +883,38 @@ describe("InMemoryClientRepository", () => {
 			expect(client && "allowPlainPkce" in client).toBe(false);
 		});
 	});
+
+	describe("allowExchangeOfTokensIssuedToOthers projection", () => {
+		const entry = {
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "secret",
+			allowedRedirectUris: [],
+			allowedScopes: [],
+			allowExchangeOfTokensIssuedToOthers: true,
+			// biome-ignore lint/suspicious/noExplicitAny: fixture shorthand, parsed by the schema at construction
+		} as any;
+
+		it("findById surfaces allowExchangeOfTokensIssuedToOthers, which token exchange reads", async () => {
+			const repo = new InMemoryClientRepository(new Map([["gateway", entry]]));
+			expect((await repo.findById("gateway"))?.allowExchangeOfTokensIssuedToOthers).toBe(true);
+		});
+
+		it("authenticate surfaces allowExchangeOfTokensIssuedToOthers too", async () => {
+			const repo = new InMemoryClientRepository(new Map([["gateway", entry]]));
+			expect(
+				(await repo.authenticate("gateway", "secret"))?.allowExchangeOfTokensIssuedToOthers,
+			).toBe(true);
+		});
+
+		it("omits the field entirely when the registration does not set it", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					// biome-ignore lint/suspicious/noExplicitAny: fixture shorthand
+					["service", { ...entry, allowExchangeOfTokensIssuedToOthers: undefined } as any],
+				]),
+			);
+			const client = await repo.findById("service");
+			expect(client && "allowExchangeOfTokensIssuedToOthers" in client).toBe(false);
+		});
+	});
 });

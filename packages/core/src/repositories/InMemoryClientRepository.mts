@@ -255,6 +255,9 @@ const registrationFields = z.object({
 	// absent must stay distinguishable from an explicit `false` in the surfaced
 	// record; both mean "S256 only" at the policy site.
 	allowPlainPkce: z.boolean().optional(),
+	// Read by token exchange alone. No default, as for `allowPlainPkce`: absent
+	// and `false` both keep the exchange to subject tokens naming the client.
+	allowExchangeOfTokensIssuedToOthers: z.boolean().optional(),
 	// Per-client sender-constraint requirement. `methods` entries are
 	// non-empty so a typo cannot match a future mechanism with `kind: ""`; the
 	// superRefine below refuses `required: true` with no methods.
@@ -494,6 +497,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			...(entry.allowPlainPkce !== undefined && {
 				allowPlainPkce: entry.allowPlainPkce,
 			}),
+			...(entry.allowExchangeOfTokensIssuedToOthers !== undefined && {
+				allowExchangeOfTokensIssuedToOthers: entry.allowExchangeOfTokensIssuedToOthers,
+			}),
 		};
 	}
 
@@ -563,6 +569,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			...(entry.clientUri !== undefined && { clientUri: entry.clientUri }),
 			...(entry.allowPlainPkce !== undefined && {
 				allowPlainPkce: entry.allowPlainPkce,
+			}),
+			...(entry.allowExchangeOfTokensIssuedToOthers !== undefined && {
+				allowExchangeOfTokensIssuedToOthers: entry.allowExchangeOfTokensIssuedToOthers,
 			}),
 		};
 	}

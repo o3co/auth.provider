@@ -101,6 +101,7 @@ const CLIENT_RECORD_FIELDS = [
 	"clientName",
 	"clientUri",
 	"allowPlainPkce",
+	"allowExchangeOfTokensIssuedToOthers",
 ] as const satisfies readonly (keyof PublicClient)[];
 
 type UnreadClientField = Exclude<keyof PublicClient, (typeof CLIENT_RECORD_FIELDS)[number]>;

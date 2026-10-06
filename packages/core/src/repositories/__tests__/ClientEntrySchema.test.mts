@@ -208,6 +208,36 @@ describe("ClientEntrySchema — senderConstrained field", () => {
 		});
 		expect(result.success).toBe(false);
 	});
+
+	it("accepts allowExchangeOfTokensIssuedToOthers: true and keeps it", () => {
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			allowExchangeOfTokensIssuedToOthers: true,
+		});
+		expect(result.success).toBe(true);
+		expect(result.success && result.data.allowExchangeOfTokensIssuedToOthers).toBe(true);
+	});
+
+	it("allowExchangeOfTokensIssuedToOthers stays optional — absent, it parses as undefined", () => {
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+		});
+		expect(result.success).toBe(true);
+		expect(result.success && result.data.allowExchangeOfTokensIssuedToOthers).toBeUndefined();
+	});
+
+	it("rejects a non-boolean allowExchangeOfTokensIssuedToOthers", () => {
+		// A YAML `"true"` must fail at boot rather than reach the grant, where
+		// the strict `=== true` would leave the operator's setting without effect.
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			allowExchangeOfTokensIssuedToOthers: "true",
+		});
+		expect(result.success).toBe(false);
+	});
 });
 
 describe("ClientEntrySchema — allowedRedirectUris shape", () => {
