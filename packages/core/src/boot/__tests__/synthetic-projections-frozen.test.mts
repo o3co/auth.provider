@@ -27,6 +27,7 @@
 import { describe, expect, it } from "vitest";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../../modules/manifest/synthetic-keys.mjs";
+import { runReadinessProbes } from "../../readiness/run.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { unfrozenPath } from "../../testing/slots/shared.mjs";
 import { applyContributions, freezeSyntheticSlots } from "../apply-contributions.mjs";
@@ -40,6 +41,7 @@ declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly "test.projectionMutator": object;
 		readonly "test.projectionReader": object;
+		readonly "test.registrarUser": object;
 	}
 }
 
@@ -204,6 +206,53 @@ describe("synthetic projections are frozen where boot injects them", () => {
 			expect(handle.components.outboundPolicy?.allowedHosts).toHaveLength(1);
 		} finally {
 			await handle.dispose();
+		}
+	});
+
+	it("leaves the registrars working: a provider registers through each, dispose drains the cleanup and the probe is probed", async () => {
+		const events: string[] = [];
+		const frozenWhenUsed: boolean[] = [];
+		const registrarUser: Module = defineModule({
+			name: "test:registrar-user",
+			requires: ["lifecycleRegistrar", "readinessRegistrar"] as never,
+			provides: {
+				"test.registrarUser": (deps: Record<string, unknown>) => {
+					const lifecycle = deps.lifecycleRegistrar as {
+						register(cleanup: () => Promise<void>): void;
+					};
+					const readiness = deps.readinessRegistrar as {
+						register(probe: { name: string; check(): Promise<unknown> }): void;
+					};
+					frozenWhenUsed.push(Object.isFrozen(lifecycle), Object.isFrozen(readiness));
+					lifecycle.register(async () => {
+						events.push("cleaned up");
+					});
+					readiness.register({
+						name: "test-store",
+						check: async () => {
+							events.push("probed");
+							return "ok";
+						},
+					});
+					return {};
+				},
+			} as never,
+			lifecycle: { "test.registrarUser": { eager: true } } as never,
+		});
+
+		const handle = await createApp({ modules: [registrarUser], bootstrapComponents: bootstrap() });
+		let disposed = false;
+		try {
+			expect(frozenWhenUsed).toEqual([true, true]);
+			expect(handle.readinessProbes.map((probe) => probe.name)).toEqual(["test-store"]);
+			const report = await runReadinessProbes(handle.readinessProbes, { timeoutMs: 1_000 });
+			expect(report.ready).toBe(true);
+			expect(events).toEqual(["probed"]);
+			await handle.dispose();
+			disposed = true;
+			expect(events).toEqual(["probed", "cleaned up"]);
+		} finally {
+			if (!disposed) await handle.dispose();
 		}
 	});
 
