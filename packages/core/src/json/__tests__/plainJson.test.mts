@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { copyPlainJson } from "../plainJson.mjs";
+import { copyPlainJson, copyPlainJsonNegativeZeroAsZero } from "../plainJson.mjs";
 
 /** A value nested `depth` objects deep. */
 const nested = (depth: number): unknown => {
@@ -220,5 +220,23 @@ describe("copyPlainJson", () => {
 			},
 		);
 		expect(copyPlainJson({ a: { b: throwing } })).toEqual({ ok: false, at: ".a.b" });
+	});
+});
+
+describe("copyPlainJsonNegativeZeroAsZero — internal: -0 read as 0, as JSON writes it", () => {
+	it("reads -0 as 0 at any depth, where copyPlainJson refuses it", () => {
+		const taken = copyPlainJsonNegativeZeroAsZero({ a: -0, b: [-0], c: { d: -0 } });
+		expect(taken.ok).toBe(true);
+		if (!taken.ok) return;
+		const copy = taken.copy as { a: number; b: number[]; c: { d: number } };
+		expect(Object.is(copy.a, 0)).toBe(true);
+		expect(Object.is(copy.b[0], 0)).toBe(true);
+		expect(Object.is(copy.c.d, 0)).toBe(true);
+		expect(copyPlainJson({ a: -0 })).toEqual({ ok: false, at: ".a" });
+	});
+
+	it("refuses everything else copyPlainJson refuses", () => {
+		expect(copyPlainJsonNegativeZeroAsZero({ a: Number.NaN })).toEqual({ ok: false, at: ".a" });
+		expect(copyPlainJsonNegativeZeroAsZero({ a: new Date(0) })).toEqual({ ok: false, at: ".a" });
 	});
 });

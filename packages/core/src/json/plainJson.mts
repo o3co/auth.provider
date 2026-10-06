@@ -86,8 +86,22 @@ const COPYING: unique symbol = Symbol("being copied");
  * refusal there, and nothing of the thrown value is run to tell.
  */
 export function copyPlainJson(value: unknown): PlainJsonCopy {
+	return takePlainJson(value, false);
+}
+
+/**
+ * {@link copyPlainJson}, but `-0` read as `0`, as `JSON.stringify` writes it,
+ * rather than refused. Internal to core: stage 1 copies a configuration with
+ * it, where HOCON resolves `-0` from what an operator wrote and boot always
+ * read it as `0`.
+ */
+export function copyPlainJsonNegativeZeroAsZero(value: unknown): PlainJsonCopy {
+	return takePlainJson(value, true);
+}
+
+function takePlainJson(value: unknown, zero: boolean): PlainJsonCopy {
 	try {
-		const copy = copyAt(value, "", new Map());
+		const copy = copyAt(value, "", new Map(), zero);
 		// Written once here, so a copy JSON cannot write — nesting a shared object
 		// keeps shallow for the copy, deep for JSON — is refused where it is taken.
 		JSON.stringify(copy);
@@ -98,17 +112,23 @@ export function copyPlainJson(value: unknown): PlainJsonCopy {
 }
 
 /** `value`'s copy at `at`; a read that throws there is a refusal there. */
-function copyAt(value: unknown, at: string, copies: Map<object, unknown>): unknown {
+function copyAt(value: unknown, at: string, copies: Map<object, unknown>, zero: boolean): unknown {
 	try {
-		return copyPlain(value, at, copies);
+		return copyPlain(value, at, copies, zero);
 	} catch (thrown) {
 		throw isRefusal(thrown) ? thrown : refused(at);
 	}
 }
 
-function copyPlain(value: unknown, at: string, copies: Map<object, unknown>): unknown {
+function copyPlain(
+	value: unknown,
+	at: string,
+	copies: Map<object, unknown>,
+	zero: boolean,
+): unknown {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
 	if (typeof value === "number") {
+		if (Object.is(value, -0) && zero) return 0;
 		if (Number.isFinite(value) && !Object.is(value, -0)) return value;
 		throw refused(at);
 	}
@@ -123,8 +143,8 @@ function copyPlain(value: unknown, at: string, copies: Map<object, unknown>): un
 		throw refused(at);
 	}
 	const copy = list
-		? copyList(value as readonly unknown[], at, copies)
-		: copyFields(value, at, copies);
+		? copyList(value as readonly unknown[], at, copies, zero)
+		: copyFields(value, at, copies, zero);
 	copies.set(value, copy);
 	return copy;
 }
@@ -151,6 +171,7 @@ function copyList(
 	list: readonly unknown[],
 	at: string,
 	copies: Map<object, unknown>,
+	zero: boolean,
 ): readonly unknown[] {
 	const length = list.length;
 	const keys = fieldsOf(list, true, at);
@@ -167,7 +188,7 @@ function copyList(
 			throw refused(entryAt);
 		}
 		if (entry === undefined) throw refused(entryAt);
-		copy.push(copyAt(entry, entryAt, copies));
+		copy.push(copyAt(entry, entryAt, copies, zero));
 	}
 	return Object.freeze(copy);
 }
@@ -176,6 +197,7 @@ function copyFields(
 	value: object,
 	at: string,
 	copies: Map<object, unknown>,
+	zero: boolean,
 ): Readonly<Record<string, unknown>> {
 	const source = value as Readonly<Record<string, unknown>>;
 	const copy: Record<string, unknown> = {};
@@ -190,7 +212,7 @@ function copyFields(
 		if (field === undefined) continue;
 		// Defined, not assigned: an own `__proto__` stays the field it is.
 		Object.defineProperty(copy, key, {
-			value: copyAt(field, fieldAt, copies),
+			value: copyAt(field, fieldAt, copies, zero),
 			enumerable: true,
 			writable: true,
 			configurable: true,

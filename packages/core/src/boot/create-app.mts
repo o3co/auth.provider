@@ -23,6 +23,7 @@
  */
 
 import type { RequestHandler, Router } from "express";
+import type { z } from "zod";
 import { createLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
@@ -62,6 +63,7 @@ import type {
 	RegisteredFederationType,
 	RouteCollector,
 } from "./types.mjs";
+import { BootError } from "./types.mjs";
 import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.mjs";
 
 // ---------------------------------------------------------------------------
@@ -199,6 +201,32 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 // ---------------------------------------------------------------------------
 
 /**
+ * A host map's `config`, read once; a read that throws refuses boot as a
+ * configuration that cannot be read (`config-validation-failed`), never with
+ * what it threw.
+ */
+function readConfigSlot(source: Record<string, unknown>): unknown {
+	try {
+		return source.config;
+	} catch {
+		const issues = [
+			{
+				code: "custom",
+				path: [],
+				message: "the configuration could not be read: reading it threw",
+			} as z.ZodIssue,
+		];
+		throw new BootError({
+			message:
+				"Config validation failed — 1 issue(s) found: (the configuration): the configuration could not be read: reading it threw.",
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+			details: { reason: "config-validation-failed", issues, modules: [] },
+		});
+	}
+}
+
+/**
  * A plain copy of a host map's own enumerable keys and their values, each
  * read once. Every key is defined, not assigned, so an own `__proto__` stays a
  * key (stage 1 refuses it, naming the map) rather than becoming the copy's
@@ -212,8 +240,11 @@ function snapshotHostMap<T>(map: T): T {
 	for (const key of Object.keys(source)) {
 		Object.defineProperty(copy, key, {
 			// Stage 1 refuses an own `__proto__` whatever it holds, so its value
-			// is never read: an accessor there does not run.
-			value: key === "__proto__" ? undefined : source[key],
+			// is never read: an accessor there does not run. The configuration
+			// is read through `readConfigSlot`, whose throw refuses as a
+			// configuration that cannot be read.
+			value:
+				key === "__proto__" ? undefined : key === "config" ? readConfigSlot(source) : source[key],
 			enumerable: true,
 			writable: true,
 			configurable: true,

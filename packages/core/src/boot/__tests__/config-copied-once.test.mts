@@ -30,6 +30,7 @@ import { parseString } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
 import { BootError } from "#/boot/types.mjs";
+import { validateManifests } from "#/boot/validate-manifests.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /** Core's valid configuration, none of the oauth package's grant switches. */
@@ -243,6 +244,108 @@ describe("the configuration stage 1 is handed is copied once, and only the copy 
 			const { "renamed-variables": _captures, ...expected } = resolved;
 			expect(handle.components.config).toEqual(expected);
 			expect(Object.isFrozen(handle.components.config)).toBe(true);
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
+describe("the config slot of the bootstrap map is read once, as an own property", () => {
+	it("reads an own config getter once, through createApp and through validateManifests", async () => {
+		let reads = 0;
+		const written = base();
+		const bootstrapComponents = {
+			pathResolver: (p: string) => p,
+			get config(): unknown {
+				reads += 1;
+				return written;
+			},
+		};
+		const handle = await createApp({
+			modules: [],
+			bootstrapComponents: bootstrapComponents as never,
+		});
+		await handle.dispose();
+		expect(reads).toBe(1);
+
+		reads = 0;
+		const validated = validateManifests({
+			modules: [],
+			bootstrapComponents: bootstrapComponents as never,
+		});
+		expect(reads).toBe(1);
+		expect((validated.bootstrapComponents.config as { core?: unknown }).core).toEqual(written.core);
+	});
+
+	it.each([
+		["createApp", (map: object) => createApp({ modules: [], bootstrapComponents: map as never })],
+		[
+			"validateManifests",
+			async (map: object) => validateManifests({ modules: [], bootstrapComponents: map as never }),
+		],
+	])(
+		"refuses a config slot whose read throws, through %s, never with what it threw",
+		async (_, run) => {
+			const map = {
+				pathResolver: (p: string) => p,
+				get config(): never {
+					throw new Error("SECRET https://secret.example");
+				},
+			};
+			const caught = await Promise.resolve()
+				.then((): Promise<unknown> => run(map))
+				.then(
+					() => undefined,
+					(e: unknown) => e,
+				);
+			expect(caught).toBeInstanceOf(BootError);
+			expect((caught as BootError).reason).toBe("config-validation-failed");
+			expect((caught as BootError).message).not.toContain("SECRET");
+		},
+	);
+
+	it("reads no config the bootstrap map inherits: it is absent, and refused as none, unread", () => {
+		let reads = 0;
+		const inherited = {
+			get config(): unknown {
+				reads += 1;
+				return base();
+			},
+		};
+		const map = Object.assign(Object.create(inherited) as object, {
+			pathResolver: (p: string) => p,
+		});
+		// Refused as a map handed no configuration, the inherited getter unread.
+		expect(() => validateManifests({ modules: [], bootstrapComponents: map as never })).toThrow(
+			/handed no configuration/,
+		);
+		expect(reads).toBe(0);
+	});
+});
+
+describe("negative zero, which HOCON can resolve, reads as zero, as JSON writes it", () => {
+	it("boots core.sessionLifecycle.sweepIntervalSeconds = -0 as 0", async () => {
+		const written = base();
+		const resolved = {
+			...written,
+			core: {
+				...(written.core as object),
+				...(parseString("sessionLifecycle.sweepIntervalSeconds = -0").toObject() as object),
+			},
+		};
+		expect(
+			Object.is(
+				(resolved.core as { sessionLifecycle: { sweepIntervalSeconds: unknown } }).sessionLifecycle
+					.sweepIntervalSeconds,
+				-0,
+			),
+		).toBe(true);
+		const handle = await boot(resolved);
+		try {
+			const slot = handle.components.config as unknown as {
+				core: { sessionLifecycle: { sweepIntervalSeconds: unknown } };
+			};
+			expect(Object.is(slot.core.sessionLifecycle.sweepIntervalSeconds, 0)).toBe(true);
 		} finally {
 			await handle.dispose();
 		}

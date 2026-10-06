@@ -51,7 +51,7 @@ import {
 import { describeValue } from "../errors/describe-value.mjs";
 import { enabledFederationsOf } from "../federations/configured.mjs";
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
-import { copyPlainJson } from "../json/plainJson.mjs";
+import { copyPlainJsonNegativeZeroAsZero } from "../json/plainJson.mjs";
 import {
 	type AbsencePolicy,
 	describeAbsenceDeclaration,
@@ -3304,16 +3304,10 @@ function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
 }
 
 /**
- * The bootstrap map without `configDefaults`, and that input read once into a
- * copy of its plain data (`readConfigDefaults`): boot reads it at stage 1 for
- * the notices and seeds no component from it. The map itself, and no
- * defaults, when it holds no such key. A value that is not plain data — not
- * an object of sections, a getter, a throw as it is read — refuses boot
- * (`config-defaults-invalid`), before any check, naming the path and no value.
- */
-/**
- * The bootstrap map with `config` replaced by its frozen plain-data copy
- * (`copyPlainJson`): every field read once — a getter runs once — and every
+ * The bootstrap map's own entries, `config` read once as an own property (one
+ * the map inherits is none) and replaced by its frozen plain-data copy
+ * (`copyPlainJson`, `-0` read as `0` as JSON writes it, since HOCON resolves
+ * it from what an operator wrote): every field read once — a getter runs once — and every
  * object and list copied, so no getter, Proxy trap or prototype of a
  * configuration built in code survives into what stage 1 checks and every
  * later stage reads. Taken first, before anything reads the configuration;
@@ -3321,38 +3315,71 @@ function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
  * which is neither frozen nor changed. A configuration resolved from HOCON is
  * plain data and is copied as it is. One that is not — a read that throws,
  * a value JSON would not give back as it is (a `Date`, a class instance, a
- * symbol's field, a cycle) — refuses boot (`config-validation-failed`),
- * naming where and never what a read threw. A configuration that is no
- * object (a string) is handed on as it is, for the composed parse to refuse.
+ * symbol's field, a cycle), or a `config` whose own read throws — refuses
+ * boot (`config-validation-failed`), naming where and never what a read
+ * threw. A configuration that is no object (a string) is handed on as it is,
+ * for the composed parse to refuse. Every other entry is carried over as it
+ * was defined, and `config` is not read again.
  * @internal
  */
 function withConfigCopied(bootstrap: BootstrapMap): BootstrapMap {
-	if (!Object.hasOwn(bootstrap, "config")) return bootstrap;
-	const handed: unknown = (bootstrap as Record<string, unknown>).config;
-	if (handed === null || typeof handed !== "object") return bootstrap;
-	const taken = copyPlainJson(handed);
+	// The map's own entries, each carried over as it was defined, `config`
+	// read once as an own property: one the map inherits is none, as the host
+	// maps createApp copies keep their own keys alone.
+	const copied: Record<string, unknown> = {};
+	let handed: unknown;
+	for (const key of Object.keys(bootstrap)) {
+		// An own key `Object.keys` listed has a descriptor.
+		const descriptor = Object.getOwnPropertyDescriptor(bootstrap, key) as PropertyDescriptor;
+		if (key !== "config") {
+			Object.defineProperty(copied, key, descriptor);
+			continue;
+		}
+		try {
+			handed = "value" in descriptor ? descriptor.value : descriptor.get?.call(bootstrap);
+		} catch {
+			throw configNotPlainData("the configuration could not be read: reading it threw");
+		}
+	}
+	if (!Object.hasOwn(bootstrap, "config")) return copied as BootstrapMap;
+	if (handed === null || typeof handed !== "object") {
+		defineConfigKey(copied, "config", handed);
+		return copied as BootstrapMap;
+	}
+	const taken = copyPlainJsonNegativeZeroAsZero(handed);
 	if (!taken.ok) {
 		const where = taken.at === "" ? "the configuration" : `the configuration at ${taken.at}`;
-		const issues = [
-			issueAt(
-				[],
-				`${where} is not plain data: a read threw there, or it holds a value configuration cannot (a getter or Proxy that throws, a class instance, a symbol's field, a cycle)`,
-			),
-		];
-		throw new BootError({
-			message: `Config validation failed — ${issues.length} issue(s) found: ${namedIssues(issues)}.`,
-			reason: "config-validation-failed",
-			stage: "validateManifests",
-			details: {
-				reason: "config-validation-failed",
-				issues: issues as z.ZodIssue[],
-				modules: [],
-			},
-		});
+		throw configNotPlainData(
+			`${where} is not plain data: a read threw there, or it holds a value configuration cannot (a getter or Proxy that throws, a class instance, a symbol's field, a cycle)`,
+		);
 	}
-	return { ...bootstrap, config: taken.copy } as BootstrapMap;
+	defineConfigKey(copied, "config", taken.copy);
+	return copied as BootstrapMap;
 }
 
+/** The refusal of a configuration that cannot be copied as plain data: one issue at its root. */
+function configNotPlainData(message: string): BootError {
+	const issues = [issueAt([], message)];
+	return new BootError({
+		message: `Config validation failed — ${issues.length} issue(s) found: ${namedIssues(issues)}.`,
+		reason: "config-validation-failed",
+		stage: "validateManifests",
+		details: {
+			reason: "config-validation-failed",
+			issues: issues as z.ZodIssue[],
+			modules: [],
+		},
+	});
+}
+
+/**
+ * The bootstrap map without `configDefaults`, and that input read once into a
+ * copy of its plain data (`readConfigDefaults`): boot reads it at stage 1 for
+ * the notices and seeds no component from it. The map itself, and no
+ * defaults, when it holds no such key. A value that is not plain data — not
+ * an object of sections, a getter, a throw as it is read — refuses boot
+ * (`config-defaults-invalid`), before any check, naming the path and no value.
+ */
 function takeConfigDefaults(bootstrap: BootstrapMap): {
 	readonly bootstrapComponents: BootstrapMap;
 	readonly configDefaults: ConfigDefaults | undefined;
