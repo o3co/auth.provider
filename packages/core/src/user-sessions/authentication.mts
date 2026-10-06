@@ -658,7 +658,8 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
  * configuration meets the refusal.
  *
  * The federation callback (which writes the split) and the `acr` drop both
- * read this one function, so they cannot disagree.
+ * read this function's answer, which boot carries in the
+ * `federationSettings` slot (`trustsUpstreamAmr`), so they cannot disagree.
  */
 export function federationTrustsUpstreamAmr(config: unknown, name: string): boolean {
 	return enabledFederationSwitch(config, name, "trustUpstreamAmr", false);
