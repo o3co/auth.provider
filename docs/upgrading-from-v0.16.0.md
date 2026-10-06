@@ -861,6 +861,25 @@ modules fills them.
   `contribute-factory-failed`); in sloppy-mode code the write is silently
   ignored. Either way the value does not change. Copy what the module needs,
   or set the value in the configuration (#1492).
+- **Core checks the `csrfGuard` slot where boot fills it, and every reader
+  receives a frozen copy of the guard.** Whatever fills the slot — a module's
+  `provides`, or a `bootstrapComponents` or `overrideComponents` entry — boot
+  reads each member of the guard once and requires `middleware` to be a
+  function of at most three parameters (Express skips one of four or more as
+  an error handler) and `check` to be a function. A member whose read throws
+  refuses boot too, naming it. A module's guard that fails is refused as
+  `provides-factory-failed` at `materializeComponents`; a host's, before any
+  provider runs, with a `RangeError` naming the member (`csrfGuard.middleware
+  is not a request handler`, `csrfGuard.check is not a function`,
+  `csrfGuard.<member> could not be read`), as a host's `oauthTokenSettings` is.
+  Before, the device grant and federation grants checked the guard in their
+  own contributions (`contribute-factory-failed` at `applyContributions`,
+  with their own wording), and the MFA routes did not check it. The slot
+  then holds a frozen copy, not the object that filled it, so
+  `deps.csrfGuard !== providedGuard`: compare members, not identity. The
+  copy carries the guard's members as read, and `check`, `checkNavigation`
+  and `issue` are bound to the original guard, so a guard written as a class,
+  whose methods use `this`, works as before (#1090).
 - **BREAKING: `sessionModule` reads the federations from the
   `federationSettings` slot, not `config` (#728).** It requires core's
   `federationSettings`, which core fills from `core.federations` in every
