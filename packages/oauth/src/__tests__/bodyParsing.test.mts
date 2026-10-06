@@ -33,6 +33,7 @@ import type {
 	RefreshTokenFamilyRevocation,
 	SessionFamilyIndex,
 	SessionFederationIndex,
+	SessionLifecycle,
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -95,6 +96,7 @@ const routerWith = async (surfaces: "all" | "none"): Promise<Router> => {
 		...(surfaces === "all"
 			? {
 					userSessionStore: unused as UserSessionStore,
+					sessionLifecycle: unused as SessionLifecycle,
 					sessionRPRegistry: unused as SessionRPRegistry,
 					sessionFamilyIndex: unused as SessionFamilyIndex,
 					sessionFederationIndex: unused as SessionFederationIndex,

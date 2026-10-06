@@ -46,6 +46,7 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
@@ -198,6 +199,8 @@ function makeClientRepo(override?: Partial<ClientRepository>): ClientRepository 
 interface BuildAppOpts {
 	sessionStore?: UserSessionStore;
 	sessionFederationIndex?: SessionFederationIndex;
+	/** `"reject"`: the lifecycle's reads reject when the stores behind them throw, as one the host fills may. */
+	lifecycleOutage?: "answer" | "reject";
 	refreshFamilyRevocation?: RefreshTokenFamilyRevocation;
 	fedTokenStore?: FederationTokenStore;
 	clientRepo?: ClientRepository;
@@ -212,8 +215,11 @@ function buildApp(opts: BuildAppOpts = {}) {
 	const app = express();
 	const router = createRouter(express, {
 		keyStore,
-		userSessionStore: opts.sessionStore ?? makeSessionStore(),
-		sessionFederationIndex: opts.sessionFederationIndex ?? makeSessionFederationIndex(),
+		sessionLifecycle: livenessOver(
+			opts.sessionStore ?? makeSessionStore(),
+			(sid) => (opts.sessionFederationIndex ?? makeSessionFederationIndex()).listFederations(sid),
+			{ onOutage: opts.lifecycleOutage ?? "answer" },
+		),
 		refreshTokenFamilyRevocation: opts.refreshFamilyRevocation ?? makeFamilyRevocation(),
 		federationTokenStore: opts.fedTokenStore ?? makeFedTokenStore(),
 		clientRepository: opts.clientRepo ?? makeClientRepo(),
@@ -621,8 +627,8 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 	});
 
-	describe("federationTokenStore.get returns null (dangling link)", () => {
-		it("returns 404 and leaves the session's index alone", async () => {
+	describe("a federation the session joined, with no tokens stored (a federation logout removed them)", () => {
+		it("is skipped: 404, and the session's listing is left alone", async () => {
 			const removeFederationSpy = vi.fn(async () => {});
 			const sessionFederationIndex = makeSessionFederationIndex({
 				listFederations: vi.fn(async () => ["google"]),
@@ -3462,11 +3468,11 @@ describe("POST /oauth/federation/:name/token", () => {
 			});
 		});
 
-		it("the session store", async () => {
+		it("the session lifecycle's liveness", async () => {
 			const logger = createMockLogger();
 			const sessionStore = makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) });
 			const res = await postFedToken(
-				buildApp({ sessionStore, logger }),
+				buildApp({ sessionStore, logger, lifecycleOutage: "reject" }),
 				"google",
 				await mintAccessToken(),
 			);
@@ -3474,18 +3480,18 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error_description).toBe("session store unavailable");
 			expectOutageLine(logger, "federation_token_store_unavailable", {
 				federation: "google",
-				store: "user_session",
-				step: "get",
+				store: "session_lifecycle",
+				step: "liveness",
 			});
 		});
 
-		it("the session's federation index", async () => {
+		it("the session lifecycle's federation listing", async () => {
 			const logger = createMockLogger();
 			const sessionFederationIndex = makeSessionFederationIndex({
 				listFederations: vi.fn().mockRejectedValue(storeReplyError()),
 			});
 			const res = await postFedToken(
-				buildApp({ sessionFederationIndex, logger }),
+				buildApp({ sessionFederationIndex, logger, lifecycleOutage: "reject" }),
 				"google",
 				await mintAccessToken(),
 			);
@@ -3493,8 +3499,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error_description).toBe("session store unavailable");
 			expectOutageLine(logger, "federation_token_store_unavailable", {
 				federation: "google",
-				store: "session_federation_index",
-				step: "list",
+				store: "session_lifecycle",
+				step: "federations",
 			});
 		});
 

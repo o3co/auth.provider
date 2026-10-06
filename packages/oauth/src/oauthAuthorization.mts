@@ -44,11 +44,9 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	type CodeRepository,
 	coerceBooleanFromEnv,
-	consoleLogger,
 	defineModule,
 	type ProviderDeps,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
-	supportsSessionEnd,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import {
@@ -204,11 +202,9 @@ const OPTIONAL = [
 	"userRepository",
 	"grantPolicy",
 	"userSessionStore",
-	"sessionRPRegistry",
-	"sessionFamilyIndex",
-	"sessionFederationIndex",
-	// Core's session lifecycle: where installed, the authorization_code grant
-	// joins the session through it instead of the per-session stores.
+	// Core's session lifecycle, which the authorization_code grant joins the
+	// code's session through: required with a userSessionStore, and the grant
+	// refuses a composition without it.
 	"sessionLifecycle",
 	// The session lifecycle's record, which admission reads for the
 	// authorization_code and refresh_token grants: a closing session is not live.
@@ -282,43 +278,6 @@ function requireSessionStoreWithSubjectRevocation(deps: OAuthAuthorizationModule
 }
 
 /**
- * Say once, at boot, that the authorization_code grant links families to
- * sessions through an index without the session-end capability: a logout
- * racing a code exchange can then miss the family the exchange opens.
- */
-function warnWithoutSessionEnd(deps: OAuthAuthorizationModuleDeps): void {
-	const index = deps.sessionFamilyIndex;
-	if (deps.userSessionStore === undefined || index === undefined || supportsSessionEnd(index)) {
-		return;
-	}
-	(deps.logger ?? consoleLogger).warn(
-		{ slot: "sessionFamilyIndex", kind: index.kind },
-		"session_family_index_without_session_end",
-	);
-}
-
-/**
- * Say once, at boot, that a code exchange the authorization_code grant
- * refuses because a logout ended its session leaves its family record
- * active: the rotation registers it, and no revocation is wired to revoke
- * it. No token of that family was served.
- */
-function warnRotationWithoutRevocation(deps: OAuthAuthorizationModuleDeps): void {
-	if (
-		deps.userSessionStore === undefined ||
-		!supportsSessionEnd(deps.sessionFamilyIndex) ||
-		deps.refreshTokenFamilyRotation === undefined ||
-		deps.refreshTokenFamilyRevocation !== undefined
-	) {
-		return;
-	}
-	(deps.logger ?? consoleLogger).warn(
-		{ slot: "refreshTokenFamilyRevocation", grant: "authorization_code" },
-		"refresh_token_family_rotation_without_revocation",
-	);
-}
-
-/**
  * The deps every contribution of {@link oauthAuthorizationGrantsModule}
  * receives, besides its section: exactly its `requires` / `optional`, typed.
  * Each grant factory declares the subset it reads, so the wiring below is
@@ -375,8 +334,6 @@ export const oauthAuthorizationGrantsModule = defineModule<
 					...deps,
 					codeRepository: requireCodeRepository(deps),
 				});
-				warnWithoutSessionEnd(deps);
-				warnRotationWithoutRevocation(deps);
 				return grant;
 			},
 			refresh_token: (deps) => {

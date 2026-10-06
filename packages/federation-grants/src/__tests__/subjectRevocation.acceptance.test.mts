@@ -42,10 +42,16 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
+	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
+	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
+	createInMemoryUserSessionStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
+	createSessionLifecycle,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 	resolveSubjectRevocationHorizonMs,
@@ -123,6 +129,22 @@ const CASCADE_STORES = {
 	refreshTokenFamilyRevocation: { revokeFamily: async () => undefined },
 };
 
+/**
+ * Core's session lifecycle, which the service closes each of the subject's
+ * sessions through, over in-memory stores and the cascade's revocation.
+ */
+const sessionLifecycle = () =>
+	createSessionLifecycle({
+		store: createInMemorySessionLifecycleStore(),
+		userSessionStore: createInMemoryUserSessionStore(),
+		refreshTokenFamilyRevocation: CASCADE_STORES.refreshTokenFamilyRevocation as never,
+		federationTokenStore: CASCADE_STORES.federationTokenStore as never,
+		sessionRPRegistry: createInMemorySessionRPRegistry(),
+		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+		sessionFederationIndex: createInMemorySessionFederationIndex(),
+		retainMs: 3_600_000,
+	});
+
 interface BootOptions {
 	/** Stores and boundaries to compose over, for a second deployment on the first one's state. */
 	readonly components?: ReturnType<typeof shared>;
@@ -186,6 +208,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 				defaultLimit: { limit: 100, windowSeconds: 60 },
 			}),
 			...CASCADE_STORES,
+			sessionLifecycle: sessionLifecycle(),
 			// The service sizes the boundary from the lifetimes it has to
 			// outlive: the session's is the session store's slot.
 			sessionCookiePolicy,

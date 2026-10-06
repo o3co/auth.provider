@@ -169,7 +169,6 @@ const createIntrospectHandler = ({
 	accessTokenDenylist,
 	subjectRevocation,
 	refreshTokenFamilyRevocation,
-	userSessionStore,
 	sessionLifecycle,
 	auditSink,
 	logger,
@@ -180,8 +179,7 @@ const createIntrospectHandler = ({
 	readonly accessTokenDenylist: AccessTokenDenylist | undefined;
 	readonly subjectRevocation: SubjectRevocation | undefined;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation | undefined;
-	readonly userSessionStore: UserSessionStore | undefined;
-	/** Where installed, what answers whether the token's session is live, in place of `userSessionStore`. */
+	/** What answers whether the token's session is live; absent in a composition that keeps no sessions. */
 	readonly sessionLifecycle: SessionLifecycle | undefined;
 	readonly auditSink: AuditSink | undefined;
 	readonly logger: Logger;
@@ -272,9 +270,9 @@ const createIntrospectHandler = ({
 			// token ends with the session it came from, as its subject token
 			// does.
 			//
-			// Where core's session lifecycle is installed, it answers: a session
-			// whose close has committed is not live, while its user session is
-			// still there.
+			// Core's session lifecycle answers, wherever sessions are kept: a
+			// session whose close has committed is not live, while its user
+			// session is still there.
 			const sid = livenessSidOf(payload as Record<string, unknown>);
 			if (sid !== null && sessionLifecycle) {
 				let liveness: SessionLiveness;
@@ -296,27 +294,6 @@ const createIntrospectHandler = ({
 				}
 				// A live session of another subject is not this token's session.
 				if (liveness.outcome === "not_live" || liveness.session.sub !== payload.sub) {
-					emitAuditEvent(auditSink, {
-						timestamp: new Date(),
-						type: "introspect.session_invalid",
-						ip: req.ip,
-						userAgent: req.get("user-agent"),
-						details: { sid },
-					});
-					return res.status(200).json({ active: false });
-				}
-			} else if (sid !== null && userSessionStore) {
-				let userSession: Awaited<ReturnType<UserSessionStore["get"]>>;
-				try {
-					userSession = await userSessionStore.get(sid);
-				} catch (cause) {
-					return answerStoreUnavailable(req, res, {
-						store: "user_session",
-						details: { sid },
-						cause,
-					});
-				}
-				if (!userSession) {
 					emitAuditEvent(auditSink, {
 						timestamp: new Date(),
 						type: "introspect.session_invalid",
@@ -492,10 +469,11 @@ export const createOAuthRouter = async (
 		sessionFederationIndex?: SessionFederationIndex;
 		federationTokenStore?: FederationTokenStore;
 		/**
-		 * Core's session lifecycle. Where installed, `/oauth/logout` ends the
-		 * session through its `close` instead of its own cascade, and
-		 * introspection, userinfo and the federation-token route ask it
-		 * whether a token's session is live.
+		 * Core's session lifecycle, required with a `userSessionStore`:
+		 * `/oauth/logout` ends the session through its `close`, and
+		 * introspection, userinfo and the federation-token route ask it whether
+		 * a token's session is live. A router built with the store and without
+		 * it is refused.
 		 */
 		sessionLifecycle?: SessionLifecycle;
 		/**
@@ -576,6 +554,16 @@ export const createOAuthRouter = async (
 	if (authorizationEndpoint && codeRepository === undefined) {
 		throw new Error(
 			"createOAuthRouter: the authorization_code grant is registered but no codeRepository is wired — /authorize issues its codes into it; wire one, or leave the grant out",
+		);
+	}
+	// Where a user-session store is wired, core's session lifecycle answers for
+	// every session this router reads, and joins and closes them.
+	if (userSessionStore !== undefined && sessionLifecycle === undefined) {
+		throw new Error(
+			"createOAuthRouter: userSessionStore is wired, but sessionLifecycle is not. Where a " +
+				"user-session store is wired, core's session lifecycle is required: introspection, " +
+				"userinfo, the federation-token route and logout read and end sessions through it. " +
+				"Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
 		);
 	}
 	const router = express.Router();
@@ -681,13 +669,11 @@ export const createOAuthRouter = async (
 		!!refreshTokenFamilyRevocation;
 
 	// Federation-token endpoint forwards upstream; does NOT need our issuer.
-	// Gated like logoutSupported, though it consumes only some of these
-	// stores: createApp enforces that when ANY is wired, ALL are wired.
+	// Mounted with the session stores, whose sessions the lifecycle (required
+	// beside them) answers for.
 	const federationTokenSupported =
 		!!userSessionStore &&
-		!!sessionRPRegistry &&
-		!!sessionFamilyIndex &&
-		!!sessionFederationIndex &&
+		!!sessionLifecycle &&
 		!!federationTokenStore &&
 		!!refreshTokenFamilyRevocation;
 
@@ -750,7 +736,6 @@ export const createOAuthRouter = async (
 				accessTokenDenylist,
 				subjectRevocation,
 				refreshTokenFamilyRevocation,
-				userSessionStore,
 				sessionLifecycle,
 				auditSink,
 				logger,
@@ -775,7 +760,6 @@ export const createOAuthRouter = async (
 	router.use(
 		userinfo.createRouter(express, {
 			keyStore,
-			userSessionStore,
 			...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
@@ -824,9 +808,7 @@ export const createOAuthRouter = async (
 				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
 				refreshTokenFamilyRevocation: refreshTokenFamilyRevocation!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
-				userSessionStore: userSessionStore!,
-				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
-				sessionFederationIndex: sessionFederationIndex!,
+				sessionLifecycle: sessionLifecycle!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
 				federationTokenStore: federationTokenStore!,
 				clientRepository,
@@ -837,7 +819,6 @@ export const createOAuthRouter = async (
 				logger,
 				issuer: canonicalIssuer,
 				legacyTypAccept: legacyTypAcceptOpt,
-				...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 			}),
 		);
 	}

@@ -49,7 +49,6 @@ import {
 import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { behindClientBoundary } from "../clients/clientBoundary.mjs";
-import { joinSession } from "../logout/sessionEnd.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient, resolvePkceOptions } from "./pkce.mjs";
 import { bindConfidentialClientRefreshTokensFrom } from "./tokenBindingRule.mjs";
 
@@ -70,11 +69,10 @@ export type AuthorizationGrantDeps = Pick<
 	| "subjectRevocation"
 	| "refreshTokenFamilyRotation"
 	| "refreshTokenFamilyRevocation"
-	| "sessionFamilyIndex"
-	| "sessionRPRegistry"
 > &
-	// `sessionLifecycle`, where core's session lifecycle module is installed, is
-	// what the family and the client join the session through.
+	// `sessionLifecycle` is what the family and the client join the code's
+	// session through; with a `userSessionStore` wired it is required, and the
+	// factory refuses a composition without it.
 	// `sessionRequirementResolver` (the synthetic key, by its slot's name, so
 	// the module hands its deps over whole) is what the two reads of the
 	// code's session go through (ADR 2026-09-28-session-admission). Required:
@@ -121,6 +119,14 @@ const requirementOrOutageRefusal = (
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
 	const { codeRepository, keyStore, logger } = deps;
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycle === undefined) {
+		throw new Error(
+			"The authorization_code grant: userSessionStore is wired, but sessionLifecycle is not. " +
+				"Where a user-session store is wired, core's session lifecycle is required: the grant " +
+				"joins the code's session through it. Install sessionLifecycleModule from " +
+				"@o3co/auth-provider-core beside the session stores.",
+		);
+	}
 	// The client's logout metadata is snapshotted into the session RP
 	// registry, so the record is read through core's client-record boundary:
 	// a record it refuses rejects the lookup, answered as the store's outage.
@@ -140,12 +146,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	// can carry what the store was sent. The session store is read through
 	// admission, which logs its own outage.
 	const storeUnavailable = (
-		store:
-			| "authorization_code"
-			| "refresh_token_family"
-			| "session_family_index"
-			| "session_rp_registry",
-		step: "consume" | "register" | "add",
+		store: "authorization_code" | "refresh_token_family",
+		step: "consume" | "register",
 		clientId: string,
 		err: unknown,
 	): void => {
@@ -800,53 +802,24 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
 						registeredAt: new Date(),
 					};
-					if (deps.sessionLifecycle) {
-						// Core's session lifecycle joins the session: it refuses one
-						// closing, closed or gone, and on a refusal has already revoked
-						// the family it was handed, or logged its failure as
-						// `session_join_withdraw_failed`.
-						const joined = await deps.sessionLifecycle.join(sid, { rp, familyId });
-						if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
-						if (joined.outcome === "unavailable") {
-							lifecycleUnavailable(authenticatedClientId);
-							await revokeRefusedFamily(familyId, at);
-							return {
-								result: {
-									status: 503,
-									error: "temporarily_unavailable",
-									errorDescription: "session linking unavailable",
-								},
-							};
-						}
-					} else {
-						// Composition-root invariant: the session-stores module wires its
-						// sibling stores together, so with userSessionStore present these
-						// two are too. `?.` would silently no-op on a misconfigured root.
-						const joined = await joinSession(
-							{
-								// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
-								sessionRPRegistry: deps.sessionRPRegistry!,
-								// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
-								sessionFamilyIndex: deps.sessionFamilyIndex!,
+					// Core's session lifecycle joins the session: it refuses one
+					// closing, closed or gone, and on a refusal has already revoked
+					// the family it was handed, or logged its failure as
+					// `session_join_withdraw_failed`. A sid is only read with a
+					// userSessionStore, which the factory refuses without a lifecycle.
+					// biome-ignore lint/style/noNonNullAssertion: see the factory's refusal
+					const joined = await deps.sessionLifecycle!.join(sid, { rp, familyId });
+					if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
+					if (joined.outcome === "unavailable") {
+						lifecycleUnavailable(authenticatedClientId);
+						await revokeRefusedFamily(familyId, at);
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "session linking unavailable",
 							},
-							{ sid, rp, familyId, expiresAt: userSession.expiresAt },
-						);
-						if (joined.outcome === "ended") {
-							const refusal = sessionInvalidated(at);
-							await revokeRefusedFamily(familyId, at);
-							return { result: refusal };
-						}
-						if (joined.outcome === "unavailable") {
-							storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
-							await revokeRefusedFamily(familyId, at);
-							return {
-								result: {
-									status: 503,
-									error: "temporarily_unavailable",
-									errorDescription: "session linking unavailable",
-								},
-							};
-						}
+						};
 					}
 				} catch (err) {
 					// The family is registered and its tokens are never served: revoked

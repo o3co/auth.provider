@@ -15,9 +15,9 @@
  */
 
 // The code exchange reads the client's logout metadata through core's
-// client-record boundary: a record the registration schema refuses puts no
-// logout URI in the session RP registry, and is answered as the store's
-// outage is, with the refusal named as the cause.
+// client-record boundary: a record the registration schema refuses joins no
+// relying party to the session (and so no logout URI), and is answered as the
+// store's outage is, with the refusal named as the cause.
 
 import crypto from "node:crypto";
 import {
@@ -25,8 +25,6 @@ import {
 	type ClientRepository,
 	type Code,
 	type CodeRepository,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRotation,
@@ -44,6 +42,7 @@ import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { serialisedCalls } from "./_helpers/projectedLog.mjs";
+import { joiningLifecycle } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client1";
 const REDIRECT_URI = "https://rp.example/cb";
@@ -71,7 +70,8 @@ const validRecord: PublicClient = {
 /**
  * A code exchange handler whose client lookup is `findById`, over a
  * single-use code store holding one code, with a refresh-token family
- * rotation whose `register` is a spy.
+ * rotation whose `register` is a spy and a session lifecycle whose `join`
+ * records what joined.
  */
 const exchangeSetup = async (findById: ClientRepository["findById"]) => {
 	const logger = createMockLogger();
@@ -84,7 +84,7 @@ const exchangeSetup = async (findById: ClientRepository["findById"]) => {
 		claims: {},
 		...passwordSessionAuthentication(),
 	});
-	const sessionRPRegistry = createInMemorySessionRPRegistry();
+	const { lifecycle, join } = joiningLifecycle();
 	let stored: Code | null = codeRecord({
 		code: "abc",
 		sid: SID,
@@ -119,8 +119,7 @@ const exchangeSetup = async (findById: ClientRepository["findById"]) => {
 		codeRepository,
 		clientRepository: { findById, authenticate: vi.fn().mockResolvedValue(null) },
 		userSessionStore,
-		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-		sessionRPRegistry,
+		sessionLifecycle: lifecycle,
 		refreshTokenFamilyRotation: { ...rotation, register },
 		logger,
 	});
@@ -139,17 +138,21 @@ const exchangeSetup = async (findById: ClientRepository["findById"]) => {
 		});
 		return result;
 	};
-	return { exchange, consumeByCode, register, signed, sessionRPRegistry, logger };
+	return { exchange, consumeByCode, register, signed, join, logger };
 };
 
 /**
- * One code exchange whose `findById` is `findById`; what the session RP
- * registry holds for the session afterwards, the result and the logger.
+ * One code exchange whose `findById` is `findById`; the relying parties it
+ * joined to the session, the result and the logger.
  */
 const exchangeWith = async (findById: ClientRepository["findById"]) => {
-	const { exchange, sessionRPRegistry, logger } = await exchangeSetup(findById);
+	const { exchange, join, logger } = await exchangeSetup(findById);
 	const result = await exchange();
-	const rps = await sessionRPRegistry.listRPs(SID);
+	const rps = join.mock.calls.map(([sid, joined]) => {
+		expect(sid).toBe(SID);
+		if (joined.rp === undefined) throw new Error("expected the exchange to join a relying party");
+		return joined.rp;
+	});
 	return { result, rps, logger };
 };
 
@@ -157,7 +160,7 @@ const exchangeWith = async (findById: ClientRepository["findById"]) => {
 const withoutRegisteredAt = ({ registeredAt: _at, ...rp }: RegisteredRP) => rp;
 
 describe("createAuthorizationGrant — the client's logout metadata is read through core's boundary", () => {
-	it("registers the logout URIs of a record the registration schema accepts", async () => {
+	it("joins the session with the logout URIs of a record the registration schema accepts", async () => {
 		const { result, rps, logger } = await exchangeWith(async () => validRecord);
 
 		expect(result.status).toBe(200);
@@ -182,7 +185,7 @@ describe("createAuthorizationGrant — the client's logout metadata is read thro
 		["a clientId that is not the id looked up", { clientId: "another-client" }],
 		["no token endpoint auth method", { tokenEndpointAuthMethod: undefined }],
 	])(
-		"answers 503 temporarily_unavailable and registers no RP, warning client_record_refused, for a record with %s",
+		"answers 503 temporarily_unavailable and joins no RP, warning client_record_refused, for a record with %s",
 		async (_label, change) => {
 			const refused = await exchangeWith(
 				async () => ({ ...validRecord, ...change }) as PublicClient,
@@ -220,7 +223,7 @@ describe("createAuthorizationGrant — the client's logout metadata is read thro
 		},
 	);
 
-	it("registers an absent client's RP with no logout metadata, and issues tokens", async () => {
+	it("joins an absent client's RP with no logout metadata, and issues tokens", async () => {
 		const { result, rps, logger } = await exchangeWith(async () => null);
 
 		expect(result.status).toBe(200);
@@ -228,7 +231,7 @@ describe("createAuthorizationGrant — the client's logout metadata is read thro
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("answers a repository that throws 503 temporarily_unavailable and registers no RP", async () => {
+	it("answers a repository that throws 503 temporarily_unavailable and joins no RP", async () => {
 		const { result, rps, logger } = await exchangeWith(async () => {
 			throw new Error("db down");
 		});

@@ -17,7 +17,8 @@
 /**
  * `subjectRevocationServiceModule`: the wiring, and what it refuses to wire.
  * The service itself is core's and is tested there. Here is what only this
- * module can get wrong: the cascade closure over `cascadeLogout`, the horizon
+ * module can get wrong: each session closed through `SessionLifecycle.close`
+ * for `subject_revocation`, the horizon
  * and the allowance read off the `oauthTokenSettings`, `sessionCookiePolicy`
  * and `federationGrantPolicy` slots, and the compositions that would let a
  * subject-wide revocation report success over grants it could not reach.
@@ -69,17 +70,11 @@ const oauthTokenSettings = createTestOAuthTokenSettings({
 /** The session store's slot: a session lives a day. */
 const sessionCookiePolicy = createTestSessionCookiePolicy({ maxAgeMs: 24 * HOUR });
 
-/** Every store `cascadeLogout` fans out to, each one a spy that succeeds. */
-const cascadeStores = () => ({
-	userSessionStore: { delete: vi.fn(async () => undefined) },
-	sessionRPRegistry: { removeBySid: vi.fn(async () => undefined) },
-	sessionFamilyIndex: {
-		listFamilyIds: vi.fn(async () => ["fam-1"]),
-		removeBySid: vi.fn(async () => undefined),
-	},
-	sessionFederationIndex: { removeBySid: vi.fn(async () => undefined) },
-	refreshTokenFamilyRevocation: { revokeFamily: vi.fn(async () => undefined) },
-	federationTokenStore: { removeBySid: vi.fn(async () => undefined) },
+/** A session lifecycle whose every close answers `done`, for a test about something else. */
+const closingStores = () => ({
+	sessionLifecycle: {
+		close: vi.fn(async () => ({ outcome: "done", rps: [], federations: [] }) as const),
+	} as unknown as SessionLifecycle,
 });
 
 const build = (over: Record<string, unknown> = {}): SubjectRevocationService => {
@@ -89,7 +84,7 @@ const build = (over: Record<string, unknown> = {}): SubjectRevocationService => 
 	return provides.subjectRevocationService({
 		oauthTokenSettings,
 		sessionCookiePolicy,
-		...cascadeStores(),
+		...closingStores(),
 		subjectSessionIndex: createInMemorySubjectSessionIndex(),
 		subjectRevocation: createInMemorySubjectRevocation(),
 		...over,
@@ -126,17 +121,17 @@ const grantsOn = (allowKeepOnSubjectRevocation = false) => ({
 });
 
 describe("subjectRevocationServiceModule", () => {
-	it("declares the whole cascade, because it cannot run without it", () => {
-		expect(subjectRevocationServiceModule.requires).toEqual(
-			expect.arrayContaining([
-				"userSessionStore",
-				"sessionRPRegistry",
-				"sessionFamilyIndex",
-				"sessionFederationIndex",
-				"refreshTokenFamilyRevocation",
-				"federationTokenStore",
-			]),
-		);
+	it("requires the session lifecycle, which closes each session, and none of the per-session stores", () => {
+		expect(subjectRevocationServiceModule.requires).toContain("sessionLifecycle");
+		for (const slot of [
+			"userSessionStore",
+			"sessionRPRegistry",
+			"sessionFamilyIndex",
+			"sessionFederationIndex",
+		]) {
+			expect(subjectRevocationServiceModule.requires).not.toContain(slot);
+			expect(subjectRevocationServiceModule.optional).not.toContain(slot);
+		}
 	});
 
 	it("does not require subjectSessionIndex or subjectRevocation, the two slots a deployment may declare absent", () => {
@@ -161,7 +156,7 @@ describe("subjectRevocationServiceModule", () => {
 		const { subjectRevocation: _absent, ...withoutBoundary } = {
 			oauthTokenSettings,
 			sessionCookiePolicy,
-			...cascadeStores(),
+			...closingStores(),
 			subjectSessionIndex: createInMemorySubjectSessionIndex(),
 			subjectRevocation: createInMemorySubjectRevocation(),
 		};
@@ -182,7 +177,7 @@ describe("subjectRevocationServiceModule", () => {
 			oauthTokenSettings,
 			...grantsOn(),
 			sessionCookiePolicy,
-			...cascadeStores(),
+			...closingStores(),
 			subjectSessionIndex: createInMemorySubjectSessionIndex(),
 			subjectRevocation: createInMemorySubjectRevocation(),
 			federationGrantStore: createMemoryFederationGrantStore(),
@@ -209,40 +204,7 @@ describe("subjectRevocationServiceModule", () => {
 		).toBe(true);
 	});
 
-	describe("the cascade closure", () => {
-		it("tears a session down through cascadeLogout and counts it revoked", async () => {
-			const index = createInMemorySubjectSessionIndex();
-			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
-			const stores = cascadeStores();
-			const service = build({ ...stores, subjectSessionIndex: index });
-
-			const result = await service.revokeAllForSubject({ subject: "u-1" });
-
-			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
-			expect(stores.userSessionStore.delete).toHaveBeenCalledWith("sid-1");
-			expect(result.sessionsRevoked).toEqual(["sid-1"]);
-			expect(result.complete).toBe(true);
-		});
-
-		it("reads a cascade that did not finish as a session still live", async () => {
-			// `cascadeLogout` answers with an outcome and a step, not with `ok`.
-			// Anything that is not `done` left something behind, and the entry
-			// stays in the index for the retry to find.
-			const index = createInMemorySubjectSessionIndex();
-			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
-			const stores = cascadeStores();
-			stores.sessionFamilyIndex.listFamilyIds.mockRejectedValue(new Error("store is down"));
-			const service = build({ ...stores, subjectSessionIndex: index });
-
-			const result = await service.revokeAllForSubject({ subject: "u-1" });
-
-			expect(result.sessionsFailed).toEqual(["sid-1"]);
-			expect(result.complete).toBe(false);
-			expect(await index.listSids("u-1")).toEqual(["sid-1"]);
-		});
-	});
-
-	describe("with the session lifecycle installed", () => {
+	describe("the close of each session", () => {
 		/** A lifecycle whose close answers `outcome`, recording each call and what it was called after. */
 		const lifecycleAnswering = (
 			outcome: "done" | "pending" | "unavailable",
@@ -257,13 +219,12 @@ describe("subjectRevocationServiceModule", () => {
 			return { close, lifecycle: { close } as unknown as SessionLifecycle };
 		};
 
-		it("closes each of the subject's sessions for subject_revocation, not through cascadeLogout", async () => {
+		it("closes each of the subject's sessions for subject_revocation", async () => {
 			const index = createInMemorySubjectSessionIndex();
 			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
 			await index.addSid("u-1", "sid-2", new Date(Date.now() + HOUR));
-			const stores = cascadeStores();
 			const { close, lifecycle } = lifecycleAnswering("done");
-			const service = build({ ...stores, subjectSessionIndex: index, sessionLifecycle: lifecycle });
+			const service = build({ subjectSessionIndex: index, sessionLifecycle: lifecycle });
 
 			const result = await service.revokeAllForSubject({ subject: "u-1" });
 
@@ -271,8 +232,6 @@ describe("subjectRevocationServiceModule", () => {
 				"sid-1:subject_revocation",
 				"sid-2:subject_revocation",
 			]);
-			expect(stores.sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
-			expect(stores.userSessionStore.delete).not.toHaveBeenCalled();
 			expect([...result.sessionsRevoked].sort()).toEqual(["sid-1", "sid-2"]);
 			expect(result.complete).toBe(true);
 			expect(await index.listSids("u-1")).toEqual([]);
@@ -438,34 +397,6 @@ describe("subjectRevocationServiceModule", () => {
 		});
 	});
 
-	describe("the session's end", () => {
-		it("runs the cascade without expiresAt: the families are listed, not marked, and no session is read", async () => {
-			const index = createInMemorySubjectSessionIndex();
-			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
-			const stores = cascadeStores();
-			const userSessionStore = { ...stores.userSessionStore, get: vi.fn() };
-			const sessionFamilyIndex = {
-				...stores.sessionFamilyIndex,
-				endSession: vi.fn(async () => ["fam-1"]),
-				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
-			};
-			const service = build({
-				...stores,
-				userSessionStore,
-				sessionFamilyIndex,
-				subjectSessionIndex: index,
-			});
-
-			const result = await service.revokeAllForSubject({ subject: "u-1" });
-
-			expect(userSessionStore.get).not.toHaveBeenCalled();
-			expect(sessionFamilyIndex.endSession).not.toHaveBeenCalled();
-			expect(sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-1");
-			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
-			expect(result.sessionsRevoked).toEqual(["sid-1"]);
-		});
-	});
-
 	describe("what it refuses when grants are on", () => {
 		it("refuses a deployment with nowhere to read the grants from", () => {
 			expect(() => build(grantsOn())).toThrow(
@@ -588,7 +519,7 @@ describe("subjectRevocationServiceModule", () => {
 				modules: [subjectRevocationServiceModule],
 				bootstrapComponents: {
 					...bootConfig(),
-					...cascadeStores(),
+					...closingStores(),
 					oauthTokenSettings,
 					sessionCookiePolicy,
 					subjectRevocation: createInMemorySubjectRevocation(),
@@ -696,7 +627,7 @@ describe("subjectRevocationServiceModule", () => {
 				modules: [subjectRevocationServiceModule],
 				bootstrapComponents: {
 					...bootConfig(),
-					...cascadeStores(),
+					...closingStores(),
 					sessionCookiePolicy,
 				} as never,
 			}).then(
@@ -724,7 +655,7 @@ describe("subjectRevocationServiceModule", () => {
 				modules: [subjectRevocationServiceModule],
 				bootstrapComponents: {
 					...bootConfig(),
-					...cascadeStores(),
+					...closingStores(),
 					oauthTokenSettings,
 				} as never,
 			}).then(

@@ -64,6 +64,7 @@ import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
+import { livenessOver, sessionLifecycleModules } from "./_helpers/sessionLifecycle.mjs";
 
 /**
  * A federation that satisfies the `FederationProvider` contract, with whatever
@@ -360,14 +361,15 @@ describe("oauthEndpointsModule — the acr table in the served discovery documen
 
 	/**
 	 * What an enabled federation needs beside it (boot refuses one without
-	 * them): the session stores, the federation-token store and family
-	 * revocation.
+	 * them): the session stores and core's session lifecycle, the
+	 * federation-token store and family revocation.
 	 */
 	const federationStores = [
 		memorySessionStoresModule,
 		memoryFederationTokenStoreModule,
 		memoryRefreshTokenFamilyStoreModule,
 		defaultRefreshTokenFamilyRevocationModule,
+		...sessionLifecycleModules({ notifier: false, federationTokenStore: false }),
 	];
 
 	it("advertises only what a login this composition performs can meet, and says once at boot what it dropped", async () => {
@@ -889,6 +891,13 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			name: "test:refresh-token-family-revocation",
 			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
+		const sessionLifecycleOverStoreModule = defineModule({
+			name: "test:session-lifecycle",
+			provides: {
+				sessionLifecycle: () =>
+					livenessOver(sessionStore, (sid) => sessionFederationIndex.listFederations(sid)),
+			},
+		});
 		// federationProviders is SYNTHETIC: boot builds it from the enabled
 		// `core.federations` entries a registered federation type handles and
 		// injects it as deps.federationProviders. The type `google` answers
@@ -938,6 +947,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 				sessionFederationIndexModule,
 				federationTokenStoreModule,
 				refreshTokenFamilyRevocationModule,
+				sessionLifecycleOverStoreModule,
 				federationModule,
 			],
 			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
@@ -1032,6 +1042,13 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			name: "test:refresh-token-family-revocation-noissuer",
 			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
+		const sessionLifecycleOverStoreModule = defineModule({
+			name: "test:session-lifecycle-noissuer",
+			provides: {
+				sessionLifecycle: () =>
+					livenessOver(sessionStore, (sid) => sessionFederationIndex.listFederations(sid)),
+			},
+		});
 
 		const config = makeValidAppConfig();
 
@@ -1051,6 +1068,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 				sessionFederationIndexModule,
 				federationTokenStoreModule,
 				refreshTokenFamilyRevocationModule,
+				sessionLifecycleOverStoreModule,
 			],
 			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
@@ -1430,6 +1448,54 @@ describe("oauthEndpointsModule — a composition with no authorization_code gran
 		const { body } = await request(app).get("/.well-known/openid-configuration");
 		expect(body.authorization_endpoint).toBe("https://auth.example.com/oauth/authorize");
 		expect(body.response_types_supported).toEqual(["code"]);
+		await handle.dispose();
+	});
+});
+
+describe("oauthEndpointsModule — a user-session store needs core's session lifecycle", () => {
+	const config = () => {
+		const base = makeValidAppConfig();
+		return withGrants(
+			{
+				...base,
+				oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" } },
+			},
+			{ authorizationCode: false, refreshToken: false, clientCredentials: true },
+		) as ReturnType<typeof makeValidAppConfig>;
+	};
+	const boot = (extra: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthEndpointsModule,
+				oauthAuthorizationGrantsModule,
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				keyStoreModule,
+				...extra,
+			],
+			bootstrapComponents: { config: withOauthCaptures(config()), pathResolver: (s) => s },
+		});
+
+	it("refuses to boot with userSessionStore wired and no sessionLifecycle, naming both slots", async () => {
+		const refusal = await boot([memorySessionStoresModule]).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught as BootError,
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth" },
+		});
+		expect(refusal?.message).toMatch(/userSessionStore is wired, but sessionLifecycle is not/);
+	});
+
+	it("boots sessionless, with neither wired", async () => {
+		const handle = await boot([]);
+		expect(handle.inspect.routes.length).toBeGreaterThan(0);
 		await handle.dispose();
 	});
 });

@@ -1113,18 +1113,40 @@ modules fills them.
 - **Shutdown.** A cleanup registers the allowance it needs; the template's
   `installGracefulShutdown` takes `cleanupAllowanceMs` (#797).
 - **BREAKING: where a user-session store is wired, core's session lifecycle
-  is required.** A composition that wires `userSessionStore` installs
-  `sessionLifecycleModule` beside it (the standalone template does; see
-  [Your scaffold](#your-scaffold)), with what that module requires:
+  is required** (#1030). A composition that wires `userSessionStore`
+  installs `sessionLifecycleModule` beside it (the standalone template does;
+  see [Your scaffold](#your-scaffold)), with what that module requires:
   `sessionLifecycleStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
   `sessionFederationIndex`, `refreshTokenFamilyRevocation` and
-  `federationTokenStore`. Without
-  it the boot is refused: `sessionModule`'s route factories with
-  `contribute-factory-failed`, `loginCompletionModule`'s provider with
-  `provides-factory-failed`, each message naming `userSessionStore` and
-  `sessionLifecycle`. A sessionless composition (client credentials,
-  jwt-bearer) wires neither and is unaffected. A test or composition of your
-  own that fills the slots by hand provides a `sessionLifecycle` too.
+  `federationTokenStore`. Without it the boot is refused, each message
+  naming `userSessionStore` and `sessionLifecycle`: in the session package,
+  `sessionModule`'s route factories with `contribute-factory-failed` and
+  `loginCompletionModule`'s provider with `provides-factory-failed`; in the
+  oauth package, the `authorization_code` grant
+  (`oauthAuthorizationGrantsModule`) and `oauthEndpointsModule` with
+  `contribute-factory-failed`, and `createOAuthRouter` throws the same
+  refusal. `subjectRevocationServiceModule` requires `sessionLifecycle` in
+  place of the six session-cascade slots. A sessionless composition (client
+  credentials, jwt-bearer) wires neither and is unaffected. A test or
+  composition of your own that fills the slots by hand provides a
+  `sessionLifecycle` too.
+  - The code exchange joins its session through the lifecycle alone: the
+    grant no longer reads `sessionRPRegistry` or `sessionFamilyIndex`, and
+    `oauthAuthorizationGrantsModule` no longer declares them, nor
+    `sessionFederationIndex`.
+  - Introspection, `/oauth/userinfo` and `POST /oauth/federation/:name/token`
+    read a session through the lifecycle alone. Their outage lines no longer
+    carry `store: "user_session"`, nor (the federation-token route)
+    `store: "session_federation_index"`; they carry
+    `store: "session_lifecycle"` (`step: "liveness"` or `"federations"` on
+    the federation-token route). Move an alert keyed on the old values.
+  - The federation-token route lists the session's federations from the
+    lifecycle. A federation logout removes that federation's tokens and
+    leaves it listed, so the route answers it `404 federation_not_linked`,
+    as a federation with no token record. A later close of the session may
+    send that upstream an end-session request again; it is idempotent.
+  - The boot warnings `session_family_index_without_session_end` and
+    `refresh_token_family_rotation_without_revocation` are no longer logged.
 - **BREAKING: `POST /session/logout` closes the session through the
   lifecycle only.** The path that deleted the `UserSession`, the subject-index
   entry and the federation tokens itself, without the lifecycle, is removed,
