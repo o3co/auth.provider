@@ -700,6 +700,7 @@ export {
 } from "./mfa/storeWire.mjs";
 export {
 	checkConfiguredMfaLockoutPolicy,
+	checkEmailProofRequirementConsume,
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
@@ -728,6 +729,8 @@ export {
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
 	MFA_WEEKLY_WINDOW_MS,
+	type MfaEmailProofRequirementConsume,
+	type MfaEmailProofRequirementConsumeAnswer,
 	type MfaLockoutPolicy,
 	type MfaRecoverySetFloorAnswer,
 	type MfaRecoverySetFloorRaise,
@@ -751,6 +754,7 @@ export {
 	newMfaTransactionRecord,
 	readFirstBindingAt,
 	readMfaAttemptReservation,
+	readMfaEmailProofRequirementConsumeAnswer,
 	readMfaRecoverySetFloorAnswer,
 	readMfaSubjectAttemptReservation,
 	readMfaSubjectCount,

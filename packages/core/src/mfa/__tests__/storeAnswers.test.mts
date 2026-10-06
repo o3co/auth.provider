@@ -31,6 +31,7 @@ import {
 	type MfaTransaction,
 	readFirstBindingAt,
 	readMfaAttemptReservation,
+	readMfaEmailProofRequirementConsumeAnswer,
 	readMfaRecoverySetFloorAnswer,
 	readMfaSubjectAttemptReservation,
 	readMfaSubjectCount,
@@ -723,6 +724,31 @@ describe("readMfaRecoverySetFloorAnswer", () => {
 		["null", null],
 	])("reads %s as no answer", (_label, answer) => {
 		expect(readMfaRecoverySetFloorAnswer(answer)).toBeUndefined();
+	});
+});
+
+describe("readMfaEmailProofRequirementConsumeAnswer", () => {
+	it("reads a consume, a requirement that was not standing, and the refusal without the lease", () => {
+		expect(readMfaEmailProofRequirementConsumeAnswer({ outcome: "consumed" })).toEqual({
+			outcome: "consumed",
+		});
+		expect(readMfaEmailProofRequirementConsumeAnswer({ outcome: "absent" })).toEqual({
+			outcome: "absent",
+		});
+		expect(
+			readMfaEmailProofRequirementConsumeAnswer({ outcome: "refused", reason: "lease_not_held" }),
+		).toEqual({ outcome: "refused", reason: "lease_not_held" });
+	});
+
+	it.each<[string, unknown]>([
+		["a boolean", true],
+		["a refusal it does not know", { outcome: "refused", reason: "stale" }],
+		["a refusal with no reason", { outcome: "refused" }],
+		["an outcome it does not know", { outcome: "cleared" }],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaEmailProofRequirementConsumeAnswer(answer)).toBeUndefined();
 	});
 });
 
