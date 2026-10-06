@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-10-05
+最終更新: 2026-10-06
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -340,7 +340,7 @@ oauth.authorize.acrValues {
 | `authorization_code` グラント | `oauth.code_exchange`、コード、2 度 | `session_invalid`、次に `session_invalidated` | `400 invalid_grant` | `step_up` 付きの `400 invalid_grant` | `503` |
 | `refresh_token` グラント | `oauth.refresh`、検証済みのトークン | `session_invalid` | `400 invalid_grant` | `step_up` 付きの `400 invalid_grant` | `503` |
 
-`/authorize` はまず Cookie のフラグを、クライアントを引く前に、ストアを読まずに確かめるので、認証されていないブラウザーはこれまでどおりログインページへ行く。セッションを読むのは 1 度だけ、クライアントの参照と `redirect_uri` の確認、リクエストオブジェクトの拒否、`prompt`・単一値パラメーター・`claims`・`max_age`・`acr_values` の解析のあとで、`response_type`・グラントタイプ・ファーストパーティ・メール確認・PKCE・nonce・スコープの確認の前である — したがって、未知のクライアントとともに送られた死んだセッションは、そのクライアントの `400` になる — 判定を実行する前に、判定が運ぶセッションで鮮度（`max_age`、`prompt=login`）を判断するので、`max_age` が古い `prompt=none` は要件が何と言おうと `login_required` である。死んだ・失効したセッションをログインへ送る前には Cookie セッションを再生成するので、サインイン済みのユーザーを転送するログインページが、拒否されたセッションに残ったフラグでループすることは無い。再生成に失敗すれば `temporarily_unavailable` で、`authorize_cookie_session_unavailable` としてログに出す。
+`/authorize` はまず Cookie のフラグを、クライアントを引く前に、ストアを読まずに確かめるので、認証されていないブラウザーはこれまでどおりログインページへ行く。セッションを読むのは 1 度だけ、クライアントの参照と `redirect_uri` の確認、リクエストオブジェクトの拒否、`prompt`・単一値パラメーター・`claims`・`max_age`・`acr_values` の解析のあとで、`response_type`・グラントタイプ・ファーストパーティ・メール確認・PKCE・nonce・スコープの確認の前である — したがって、未知のクライアントとともに送られた死んだセッションは、そのクライアントの `400` になる — 判定を実行する前に、判定が運ぶセッションで鮮度（`max_age`、`prompt=login`）を判断するので、`max_age` が古い `prompt=none` は要件が何と言おうと `login_required` である。受け入れたセッションの `authTime` を時計に対して読めない（core の `authTimeAt`: 時計より `DEFAULT_CLOCK_SKEW_MS` を超えて先にある）とき、リクエストが `max_age` や `prompt=login` を送るかどうかにかかわらず、コードを発行しない。そのコードの交換はどれも拒否されるからである: `auth_time_ahead_of_clock` として warn に出し、`reauthenticate` の判定と同じく、要求を記録して生きたセッションを保ったまま 1 度だけログインへ送る。`prompt=none` の下では `login_required` であり、そのログインから戻ってもなお読めないときも `login_required` である。死んだ・失効したセッションをログインへ送る前には Cookie セッションを再生成するので、サインイン済みのユーザーを転送するログインページが、拒否されたセッションに残ったフラグでループすることは無い。再生成に失敗すれば `temporarily_unavailable` で、`authorize_cookie_session_unavailable` としてログに出す。
 
 **新しいログインの求め**（`reauthenticate`）— 要件によるもの、あるいは、このセッションには第 2 要素の権限によるステップアップを記録できない（`recordSecondFactor` を持たないセッションストア、または一次認証を見分けられないセッション）ときの `acr_values` で、新しいログインなら要素を運べるのでアドミッションが `reauthenticate`（`acr`）と答えるもの — は **1 度のログインの往復**である: [要求](#ステップアップと再認証-481) を記録して（すでに求めたステップアップの往復はそこに引き継ぐ）ログインページへ送り、生きているセッションは `prompt=login` の往復と同じく残す — クロスサイトのページが送れるリクエストでユーザーをサインアウトさせない。その往復から戻ったセッションがなお `reauthenticate` なら、要求のあとにログインしたのでも、ログインページがそのまま転送して戻したのでも、もう 1 度送るのではなく拒否する: `acr` なら `unmet_authentication_requirements`（ログインが要素を運ばなかった: 要素を持たないサブジェクト、フェデレーションのセッション）、要件なら `login_required`。`prompt=none` なら要求を書かず、セッションを残したまま `login_required`。要求を記録するセッションストアが無い構成は `invalid_request` を返す。`/oauth/token` は、グラントの `step_up` メンバーをエラー本文の `error` と `error_description` の横に載せる。
 
