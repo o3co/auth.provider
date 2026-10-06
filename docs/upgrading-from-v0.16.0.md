@@ -1203,6 +1203,15 @@ modules fills them.
   opened, cause `session_logout`, before it deletes the `UserSession`. A
   federated login whose join the lifecycle refuses (the session was closed
   during the sign-in) is still `401 login_required`, and logs nothing.
+- **Core's session lifecycle rejects an outage with the store's own error,
+  and logs nothing for it** (#1030). `open`, `join`, `close`, `federations`
+  and `liveness` reject where they answered `{ outcome: "unavailable" }`,
+  and the warn `session_lifecycle_unavailable` is no longer logged for them;
+  each consumer logs its own event once, at error, with the error's
+  projection. A caller of your own catches the rejection as an outage. The
+  close work's and the sweep's own lines (`session_close_item_failed`,
+  `session_lifecycle_unavailable` for a close-work read or a resumed
+  session, `session_lifecycle_sweep_*`) are unchanged.
 - **The session lifecycle sweeps unless told not to.** Installing
   `sessionLifecycleModule` starts a sweep that resumes the closes left
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`

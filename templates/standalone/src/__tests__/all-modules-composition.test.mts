@@ -833,11 +833,8 @@ const csrfTokenOf = (cookies: readonly string[]): string => {
 	return decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1).split(";")[0] ?? "");
 };
 
-const LIFECYCLE_LOGS =
-	"core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) logs the store's failure at warn (`session_lifecycle_unavailable`, with the error's projection) and answers `unavailable`; the consumer's error line names the step but carries no projection: two lines for one outage, the cause on the warn. Fixed before 0.17.0 by the PR that removes the lifecycle's bridge (#1030, 14a), which restores one error line, the consumer's, with the projection";
-
 const ROLLBACK_CLOSE_LOGS =
-	"a login that fails after its record's open closes that record (`packages/session/src/establish-session.mts`), and the close's own work meets the same outage: core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) warns `session_close_item_failed` for the item and keeps the close pending for its sweep, a second line for one outage. Fixed before 0.17.0 by the PR that settles the lifecycle's logging (#1030, 14a)";
+	"a login that fails after its record's open closes that record (`packages/session/src/establish-session.mts`), and the close's own work meets the same outage: core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) warns `session_close_item_failed` for the item and keeps the close pending for its sweep, a second line for one outage. Fixed before 0.17.0 by the PR that settles the lifecycle's logging (#1030, 14a) At the OIDC federation callback with the session federation index down, the rollback's lifecycle close cannot commit and rejects, and the login's cleanup logs `federation_cleanup_failed` (warn) for it: that one line. Removed with the lifecycle's bridge (#1030, 14a), after which the rollback close no longer meets the per-session stores' outage";
 
 const OUTAGES: readonly OutageCase[] = [
 	{
@@ -855,7 +852,6 @@ const OUTAGES: readonly OutageCase[] = [
 		run: codeExchange,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "authorization_grant_store_unavailable",
-		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth-authorization",
@@ -864,7 +860,6 @@ const OUTAGES: readonly OutageCase[] = [
 		run: codeExchange,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "authorization_grant_store_unavailable",
-		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth",
@@ -942,7 +937,6 @@ const OUTAGES: readonly OutageCase[] = [
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "userinfo_store_unavailable",
 		unrelatedWarns: ["jwt_verify_aud_skipped"],
-		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth",
@@ -956,7 +950,6 @@ const OUTAGES: readonly OutageCase[] = [
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "userinfo_store_unavailable",
 		unrelatedWarns: ["jwt_verify_aud_skipped"],
-		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth",
@@ -969,7 +962,7 @@ const OUTAGES: readonly OutageCase[] = [
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "logout_store_unavailable",
-		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
+		unrelatedWarns: ["jwt_verify_aud_skipped"],
 	},
 	{
 		module: "session",
@@ -985,7 +978,6 @@ const OUTAGES: readonly OutageCase[] = [
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "session_logout_store_unavailable",
-		defects: { projection: LIFECYCLE_LOGS, "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "oauth-session",
@@ -1113,7 +1105,8 @@ const OUTAGES: readonly OutageCase[] = [
 		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "federation_callback_store_unavailable",
-		defects: { "no-warn": LIFECYCLE_LOGS },
+		defects: { "no-warn": ROLLBACK_CLOSE_LOGS },
+		defectWarns: ["federation_cleanup_failed"],
 	},
 	{
 		module: "core (rate-limit guard)",
