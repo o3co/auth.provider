@@ -37,9 +37,6 @@ import {
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type RefreshTokenFamilyRevocation,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
-	type SessionRPRegistry,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -162,25 +159,6 @@ async function buildApp(stores: Stores = {}): Promise<Harness> {
 		// A lifecycle the host fills, whose reads reject when the session store
 		// cannot answer.
 		sessionLifecycle: livenessOver(userSessionStore, [FEDERATION], { onOutage: "reject" }),
-		sessionRPRegistry: {
-			kind: "memory",
-			registerRP: async () => {},
-			listRPs: async () => [],
-			removeBySid: async () => {},
-		} as unknown as SessionRPRegistry,
-		sessionFamilyIndex: {
-			kind: "memory",
-			addFamilyId: async () => {},
-			listFamilyIds: async () => [],
-			removeBySid: async () => {},
-		} as unknown as SessionFamilyIndex,
-		sessionFederationIndex: {
-			kind: "memory",
-			addFederation: async () => {},
-			listFederations: async () => [FEDERATION],
-			removeFederation: async () => {},
-			removeBySid: async () => {},
-		} as unknown as SessionFederationIndex,
 		federationTokenStore: {
 			kind: "memory",
 			attach: async () => {},

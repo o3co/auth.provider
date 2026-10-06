@@ -30,18 +30,13 @@ export {
 	type BroadcastRP,
 	broadcastBackchannelLogout,
 } from "./logout/broadcastBackchannel.mjs";
-export type {
-	CascadeLogoutOptions,
-	CascadeLogoutResult,
-} from "./logout/cascadeLogout.mjs";
-export { cascadeLogout } from "./logout/cascadeLogout.mjs";
 export {
 	type FrontchannelRP,
 	type RenderFrontchannelLogoutHtmlOptions,
 	renderFrontchannelLogoutHtml,
 } from "./logout/renderFrontchannel.mjs";
-// The subject revocation service, installed explicitly — it needs the whole
-// session cascade, which `oauthEndpointsModule` does not (ADR
+// The subject revocation service, installed explicitly — it needs core's
+// session lifecycle, which `oauthEndpointsModule` does not (ADR
 // 2026-09-17-federation-grants-offline-delegation, D13).
 export { subjectRevocationServiceModule } from "./logout/subjectRevocationService.mjs";
 // private_key_jwt client authentication (RFC 7523 §2.2).

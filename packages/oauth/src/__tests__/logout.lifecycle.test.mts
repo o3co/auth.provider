@@ -50,9 +50,9 @@ import {
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createSessionCloseNotifier } from "#/logout/sessionCloseNotifier.mjs";
-import { createRouter } from "#/routes/logout.mjs";
+import { createRouter, type LogoutRouterOptions } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	expectOutageLine,
@@ -984,5 +984,152 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 
 		expect((await postLogout(app)).status).toBe(503);
 		expect(google.endSession).not.toHaveBeenCalled();
+	});
+});
+
+describe("POST /oauth/federation/:name/logout through the session lifecycle", () => {
+	async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<string> {
+		return new SignJWT({ sub: "u-1", sid: SID, azp: "client-1", ...extra })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+			.setExpirationTime("1h")
+			.setIssuedAt()
+			.setIssuer(ISSUER)
+			.sign(secretKey);
+	}
+
+	const federationLogout = async (app: express.Express, token?: string) =>
+		request(app)
+			.post("/oauth/federation/google/logout")
+			.set("Authorization", `Bearer ${token ?? (await mintAccessToken())}`)
+			.send();
+
+	const liveLifecycle = (federations: readonly string[] = ["google"]) =>
+		fakeLifecycle({
+			liveness: vi.fn(async () => ({ outcome: "live" as const, session: baseSession })),
+			federations: vi.fn(async () => ({ outcome: "listed" as const, federations })),
+		});
+
+	it("reads the session's liveness and its federations from the lifecycle, never the per-session stores", async () => {
+		const lifecycle = liveLifecycle();
+		const stores = untouchedStores();
+		const sessionStore = {
+			kind: "memory",
+			create: vi.fn(),
+			get: vi.fn(async () => baseSession),
+			delete: vi.fn(),
+		} as unknown as UserSessionStore;
+		const app = buildApp({ lifecycle, stores, sessionStore });
+
+		const res = await federationLogout(app);
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ disconnected: true });
+		expect(lifecycle.liveness).toHaveBeenCalledExactlyOnceWith(SID);
+		expect(lifecycle.federations).toHaveBeenCalledExactlyOnceWith(SID);
+		expect(sessionStore.get).not.toHaveBeenCalled();
+		expect(stores.sessionFederationIndex.listFederations).not.toHaveBeenCalled();
+		expect(stores.sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
+	});
+
+	it("removes the federation's tokens and leaves it listed as having joined the session", async () => {
+		const federationTokenStore = fedTokenStore({ google: "upstream-id-token" });
+		const lifecycle = liveLifecycle();
+		const app = buildApp({ lifecycle, federationTokenStore });
+
+		const res = await federationLogout(app);
+
+		expect(res.status).toBe(200);
+		expect(federationTokenStore.delete).toHaveBeenCalledExactlyOnceWith(SID, "google");
+		expect(lifecycle.close).not.toHaveBeenCalled();
+		expect(lifecycle.join).not.toHaveBeenCalled();
+	});
+
+	it("a session the lifecycle answers not live: 401 session not found", async () => {
+		const app = buildApp({ lifecycle: fakeLifecycle() });
+
+		const res = await federationLogout(app);
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "session not found" });
+	});
+
+	it("a live session of another subject: 401 session not found", async () => {
+		const lifecycle = fakeLifecycle({
+			liveness: vi.fn(async () => ({
+				outcome: "live" as const,
+				session: { ...baseSession, sub: "someone-else" },
+			})),
+		});
+
+		const res = await federationLogout(buildApp({ lifecycle }));
+
+		expect(res.status).toBe(401);
+	});
+
+	it("a federation the session did not join: 404 federation_not_linked", async () => {
+		const res = await federationLogout(buildApp({ lifecycle: liveLifecycle(["github"]) }));
+
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("federation_not_linked");
+	});
+
+	it("a lifecycle that cannot answer: 503, one error line naming its step", async () => {
+		for (const [step, lifecycle] of [
+			[
+				"liveness",
+				fakeLifecycle({ liveness: vi.fn(async () => ({ outcome: "unavailable" as const })) }),
+			],
+			[
+				"federations",
+				fakeLifecycle({
+					liveness: vi.fn(async () => ({ outcome: "live" as const, session: baseSession })),
+					federations: vi.fn(async () => ({ outcome: "unavailable" as const })),
+				}),
+			],
+		] as const) {
+			const logger = createMockLogger();
+			const res = await federationLogout(buildApp({ lifecycle, logger }));
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+				{ federation: "google", store: "session_lifecycle", step },
+				"federation_logout_store_unavailable",
+			);
+		}
+	});
+
+	it("a lifecycle that throws: 503, logged with the error's projection", async () => {
+		const logger = createMockLogger();
+		const lifecycle = fakeLifecycle({
+			liveness: vi.fn(async () => {
+				throw new Error("lifecycle down");
+			}),
+		});
+
+		const res = await federationLogout(buildApp({ lifecycle, logger }));
+
+		expect(res.status).toBe(503);
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				federation: "google",
+				store: "session_lifecycle",
+				step: "liveness",
+				err: expect.objectContaining({ name: "Error" }),
+			}),
+			"federation_logout_store_unavailable",
+		);
+	});
+});
+
+describe("the logout router's options", () => {
+	it("take no per-session store: the session lifecycle ends and reads sessions", () => {
+		expectTypeOf<LogoutRouterOptions>().not.toHaveProperty("sessionRPRegistry");
+		expectTypeOf<LogoutRouterOptions>().not.toHaveProperty("sessionFamilyIndex");
+		expectTypeOf<LogoutRouterOptions>().not.toHaveProperty("sessionFederationIndex");
+		expectTypeOf<LogoutRouterOptions["sessionLifecycle"]>().toEqualTypeOf<SessionLifecycle>();
 	});
 });

@@ -35,6 +35,7 @@ import {
 	type FederationProvider,
 	type FederationTokenStore,
 	type Logger,
+	loggableError,
 	readVersionedSessionLifecycle,
 	registerBuiltinFederationTokenStores,
 	type SessionLifecycle,
@@ -272,6 +273,14 @@ const participantsOf = async (w: World, sid: string) =>
 /** The sid of the one user session a login created. */
 const loginSid = (w: World): string => String(w.join.mock.calls[0]?.[0]);
 
+/** A logger whose `error` and `warn` are spies; `child` answers the same logger. */
+function spiedLogger() {
+	const error = vi.fn();
+	const warn = vi.fn();
+	const logger: Logger = { ...silentLogger, error, warn, child: () => logger };
+	return { logger, error, warn };
+}
+
 describe("a federated login over the session lifecycle", () => {
 	it("attaches the federation's tokens, then joins the federation to the session", async () => {
 		const w = await world();
@@ -344,6 +353,32 @@ describe("a federated login over the session lifecycle", () => {
 			"closed",
 		);
 		expect(await w.service.join(sid, { federation: "test" })).toEqual({ outcome: "refused" });
+		expect(await w.federationTokenStore.get(sid, "test")).toBeNull();
+		expect(await w.userSessionStore.get(sid)).toBeNull();
+		expect(w.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
+	});
+
+	it("answers 503 when the lifecycle rejects the join, logged once at error with the rejection's projection, undoing the tokens it attached", async () => {
+		const thrown = new Error("lifecycle store down");
+		const { logger, error, warn } = spiedLogger();
+		const w = await world({ logger });
+		w.join.mockImplementationOnce(async () => {
+			throw thrown;
+		});
+
+		const res = await login(w);
+
+		expect(res.status).toBe(503);
+		expect(error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				store: "session_lifecycle",
+				step: "join",
+				err: loggableError(thrown),
+			}),
+			"federation_callback_store_unavailable",
+		);
+		expect(warn).not.toHaveBeenCalled();
+		const sid = loginSid(w);
 		expect(await w.federationTokenStore.get(sid, "test")).toBeNull();
 		expect(await w.userSessionStore.get(sid)).toBeNull();
 		expect(w.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
@@ -444,6 +479,30 @@ describe("a link callback over the session lifecycle", () => {
 
 		expect(res.status).toBe(401);
 		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
+	});
+
+	it("answers 503 when the lifecycle rejects the join, logged once at error with the rejection's projection, undoing the tokens it attached", async () => {
+		const thrown = new Error("lifecycle store down");
+		const { logger, error, warn } = spiedLogger();
+		const w = await world({ logger });
+		w.join.mockImplementationOnce(async () => {
+			throw thrown;
+		});
+
+		const res = await link(w);
+
+		expect(res.status).toBe(503);
+		expect(error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				store: "session_lifecycle",
+				step: "join",
+				err: loggableError(thrown),
+			}),
+			"federation_link_store_unavailable",
+		);
+		expect(warn).not.toHaveBeenCalled();
+		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
+		expect(await participantsOf(w, LINKED_SID)).toEqual([]);
 	});
 
 	it("answers 503 when the lifecycle cannot answer the join, undoing the tokens it attached", async () => {

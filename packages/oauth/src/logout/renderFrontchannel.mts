@@ -166,7 +166,7 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 			const rp = usableFrontchannelRP(entry, "logout", logger);
 			if (rp === undefined) return [];
 			// A failure building the iframe URL skips that RP's iframe: throwing
-			// after cascadeLogout has cleared session state would answer a 500
+			// after the session has closed would answer a 500
 			// with an empty body.
 			try {
 				const includeSid = rp.frontchannelLogoutSessionRequired !== false;

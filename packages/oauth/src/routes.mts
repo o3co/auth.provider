@@ -48,13 +48,10 @@ import {
 	type RefreshTokenFamilyRevocation,
 	type ReplaySeenSet,
 	readAccessTokenRevocationMode,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
 	type SessionLiveness,
 	type SessionRequirementResolver,
-	type SessionRPRegistry,
 	type SubjectRevocation,
 	tokenTypeForConfirmation,
 	type UserSessionStore,
@@ -396,9 +393,6 @@ export const createOAuthRouter = async (
 		subjectRevocation,
 		userSessionStore,
 		sessionLifecycleStore,
-		sessionRPRegistry,
-		sessionFamilyIndex,
-		sessionFederationIndex,
 		federationTokenStore,
 		sessionLifecycle,
 		replaySeenSet,
@@ -464,9 +458,6 @@ export const createOAuthRouter = async (
 		userSessionStore?: UserSessionStore;
 		/** The session lifecycle's record, which admission reads after a live session. */
 		sessionLifecycleStore?: SessionLifecycleStore;
-		sessionRPRegistry?: SessionRPRegistry;
-		sessionFamilyIndex?: SessionFamilyIndex;
-		sessionFederationIndex?: SessionFederationIndex;
 		federationTokenStore?: FederationTokenStore;
 		/**
 		 * Core's session lifecycle, required with a `userSessionStore`:
@@ -659,12 +650,11 @@ export const createOAuthRouter = async (
 	// POST /oauth/federation/:name/token.
 	// logout_token signing needs the issuer; it is the router-scope canonical one.
 
-	// Logout (back-channel logout_token signing requires issuer).
+	// Logout: mounted with the session stores, whose sessions the lifecycle
+	// (required beside them) closes.
 	const logoutSupported =
 		!!userSessionStore &&
-		!!sessionRPRegistry &&
-		!!sessionFamilyIndex &&
-		!!sessionFederationIndex &&
+		!!sessionLifecycle &&
 		!!federationTokenStore &&
 		!!refreshTokenFamilyRevocation;
 
@@ -782,11 +772,7 @@ export const createOAuthRouter = async (
 				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				userSessionStore: userSessionStore!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
-				sessionRPRegistry: sessionRPRegistry!,
-				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
-				sessionFamilyIndex: sessionFamilyIndex!,
-				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
-				sessionFederationIndex: sessionFederationIndex!,
+				sessionLifecycle: sessionLifecycle!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				federationTokenStore: federationTokenStore!,
 				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
@@ -796,7 +782,6 @@ export const createOAuthRouter = async (
 				auditSink,
 				logger,
 				legacyTypAccept: legacyTypAcceptOpt,
-				...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
 			}),
 		);
 	}

@@ -168,8 +168,6 @@ const world = async (
 		codeRepository,
 		keyStore,
 		userSessionStore,
-		sessionFamilyIndex,
-		sessionRPRegistry,
 		sessionLifecycle,
 		accessTokenDenylist: createMemoryAccessTokenDenylist(),
 		requirements,

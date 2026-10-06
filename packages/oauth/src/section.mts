@@ -28,10 +28,12 @@
  * `oauth.refreshToken.unknownFamilyPolicy`, which moved to the
  * oauth-authorization module's section, and `oauth.refreshToken.legacyRtPolicy`,
  * which this module refuses as removed. Boot parses the section with core's
- * first. Core alone holds what it retired from the section: the keys it
- * refuses naming what became of them (`oauth.jwt`'s flat key fields,
- * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`),
- * and the paths other modules' sections moved from (`oauth.grants`,
+ * first. The module refuses its removed keys (`legacyRtPolicy`,
+ * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`)
+ * before either schema parses, from its manifest's `relocatedFrom`. Core alone
+ * holds the rest of what it retired from the section: `oauth.jwt`'s flat key
+ * fields, which it refuses naming what became of them, and the paths other
+ * modules' sections moved from (`oauth.grants`,
  * `oauth.dpop`, `oauth.jwt.signingKey`, …). A key set under one of those
  * paths refuses boot naming its new path, before any section is parsed, while
  * a loaded module declares that it moved there; otherwise this section refuses

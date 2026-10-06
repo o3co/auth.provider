@@ -31,10 +31,7 @@ import type {
 	FederationTokenStore,
 	PendingConsentStore,
 	RefreshTokenFamilyRevocation,
-	SessionFamilyIndex,
-	SessionFederationIndex,
 	SessionLifecycle,
-	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createSymmetricKeyStore } from "@o3co/auth-provider-core";
@@ -97,9 +94,6 @@ const routerWith = async (surfaces: "all" | "none"): Promise<Router> => {
 			? {
 					userSessionStore: unused as UserSessionStore,
 					sessionLifecycle: unused as SessionLifecycle,
-					sessionRPRegistry: unused as SessionRPRegistry,
-					sessionFamilyIndex: unused as SessionFamilyIndex,
-					sessionFederationIndex: unused as SessionFederationIndex,
 					federationTokenStore: unused as FederationTokenStore,
 					refreshTokenFamilyRevocation: unused as RefreshTokenFamilyRevocation,
 					consentStore: unused as ConsentStore,

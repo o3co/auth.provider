@@ -19,9 +19,12 @@
  * it before this module's schema, so an operator meets core's refusal first.
  * The two must agree on every key both declare: what each accepts, what it
  * makes of it, and each refusal's path and message, so nothing changes for an
- * operator when core stops declaring the section. What core retired from the
- * section stays core's: a retired key core refuses naming what became of it,
- * the module as a key it does not declare; a path another section moved from
+ * operator when core stops declaring the section. Of what core retired from
+ * the section, `oauth.jwt`'s flat key fields stay core's: core refuses them
+ * naming what became of them, the module as keys it does not declare. The keys
+ * the module removed (`oauth.refreshToken.legacyTokenCompat`,
+ * `oauth.authorize.allowUnmarkedClients`) its manifest declares removed, and
+ * boot refuses them before either schema runs; a path another section moved from
  * core carries unread, the module only as an empty object or null. Boot refuses a key
  * set under a moved path naming its new one before either schema runs, while
  * the module it moved to is loaded; the refresh-token family policy keys core
@@ -164,13 +167,20 @@ describe("both refuse an acr value name /authorize can never be asked for, in on
 	);
 });
 
-describe("what core retired from the section stays core's", () => {
+describe("what core retired from the section", () => {
+	it("refreshToken.legacyTokenCompat and authorize.allowUnmarkedClients: the module's manifest declares them removed, so boot refuses them before either schema runs", () => {
+		expect(oauthEndpointsModule.section?.relocatedFrom).toMatchObject({
+			"oauth.refreshToken.legacyTokenCompat": null,
+			"oauth.authorize.allowUnmarkedClients": null,
+		});
+	});
+
 	it.each([
 		["jwt", { issuer: "https://auth.test", algorithm: "HS256" }, "jwt", "algorithm"],
 		["refreshToken.legacyTokenCompat", false, "refreshToken", "legacyTokenCompat"],
 		["authorize.allowUnmarkedClients", false, "authorize", "allowUnmarkedClients"],
 	])(
-		"%s = %j: core names what became of it, the module refuses a key it does not declare",
+		"%s = %j: core's schema names what became of it, the module's refuses a key it does not declare",
 		(path, value, level, key) => {
 			const input = withValue(path, value);
 			const core = outcome(coreOauth, input) as { issues?: string[] };

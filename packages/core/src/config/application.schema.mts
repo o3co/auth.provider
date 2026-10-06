@@ -96,6 +96,9 @@ const REMOVED_REFRESH_TOKEN_FIELDS: readonly RemovedKey[] = [
  * Fields removed from `oauth.authorize`; same mechanism as above.
  * `reference.conf` keeps the `${?OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS}`
  * substitution as a tombstone so a still-exported env var reaches this check.
+ * Where the oauth module is installed, its relocation refuses these fields,
+ * and the one in `REMOVED_REFRESH_TOKEN_FIELDS`, first, before this schema
+ * parses (`config-path-relocated`).
  */
 const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 	{

@@ -30,9 +30,11 @@ import {
 	type AdmissionDeps,
 	admitPrimary,
 	type Logger,
+	loggableError,
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
 	passwordPrimary,
+	type SessionLifecycle,
 	type SessionRequirement,
 	type UserRepository,
 	type UserSessionStore,
@@ -164,6 +166,8 @@ interface Setup {
 	readonly logger?: SpyLogger;
 	/** The user the Store verifies alice as; `ALICE` by default. */
 	readonly user?: Record<string, unknown>;
+	/** Core's session lifecycle; one that always answers by default. */
+	readonly sessionLifecycle?: SessionLifecycle;
 }
 
 /**
@@ -249,7 +253,7 @@ function setup(options: Setup = {}) {
 			sessionCookie,
 			deploymentMode: "unset",
 			userSessionStore,
-			sessionLifecycle: fakeSessionLifecycle(),
+			sessionLifecycle: options.sessionLifecycle ?? fakeSessionLifecycle(),
 			subjectSessionIndex: subjectSessionIndex as never,
 			logger: logger as unknown as Logger,
 			requirements: resolverForTests(options.requirements ?? []),
@@ -541,6 +545,34 @@ describe("POST /session/login — admission answers unavailable", () => {
 // ---------------------------------------------------------------------------
 // interrupt
 // ---------------------------------------------------------------------------
+
+describe("POST /session/login — the session lifecycle rejects the open", () => {
+	it("answers 503, logs login_store_unavailable once at error with the rejection's projection, and writes no record", async () => {
+		const thrown = new Error("lifecycle store down");
+		const { app, userSessionStore, logger } = setup({
+			sessionLifecycle: fakeSessionLifecycle({
+				open: async () => {
+					throw thrown;
+				},
+			}),
+		});
+		// The router's own warn at construction is not the login's.
+		logger.warn.mockClear();
+
+		const res = await login(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expect(userSessionStore.create).not.toHaveBeenCalled();
+		expect(errorEvents(logger)).toEqual(["login_store_unavailable"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+			store: "user_session",
+			step: "create",
+			err: loggableError(thrown),
+		});
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+});
 
 describe("POST /session/login — a requirement interrupts", () => {
 	it("regenerates the express session, opens the ceremony with the regenerated session's id, saves it, and answers the requirement's 403 — in that order", async () => {
