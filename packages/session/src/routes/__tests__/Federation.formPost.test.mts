@@ -939,11 +939,7 @@ describe("POST callback — account linking through a form_post federation", () 
 			"user-1",
 			expect.objectContaining({ provider: "apple", sub: "000123.abcdef.0456" }),
 		);
-		expect(harness.sessionFederationIndex.addFederation).toHaveBeenCalledWith(
-			"s-1",
-			"apple",
-			expect.any(Date),
-		);
+		expect(harness.sessionLifecycle.join).toHaveBeenCalledWith("s-1", { federation: "apple" });
 		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
 	});
 });

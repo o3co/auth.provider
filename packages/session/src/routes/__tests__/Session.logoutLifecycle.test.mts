@@ -47,7 +47,6 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createCsrfProtection } from "#/csrf.mjs";
-import { sessionModule } from "#/module.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
 const SID = "sid-1";
@@ -130,7 +129,8 @@ interface Bag extends Record<string, unknown> {
 }
 
 function buildApp(opts: {
-	readonly sessionLifecycle: SessionLifecycle;
+	/** Absent: none is handed to the router. */
+	readonly sessionLifecycle?: SessionLifecycle;
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
 	readonly federationTokenStore?: FederationTokenStore;
@@ -176,7 +176,7 @@ function buildApp(opts: {
 			...(opts.federationTokenStore ? { federationTokenStore: opts.federationTokenStore } : {}),
 			...(opts.subjectSessionIndex ? { subjectSessionIndex: opts.subjectSessionIndex } : {}),
 			...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
-			sessionLifecycle: opts.sessionLifecycle,
+			...(opts.sessionLifecycle ? { sessionLifecycle: opts.sessionLifecycle } : {}),
 			logger: opts.logger ?? mockLogger(),
 			csrfTokenSigner: SIGNER,
 			requirements: resolverForTests([]),
@@ -435,9 +435,20 @@ describe("POST /session/logout through the session lifecycle: what the close run
 	});
 });
 
-describe("sessionModule", () => {
-	it("takes the session lifecycle as optional", () => {
-		expect(sessionModule.optional).toContain("sessionLifecycle");
-		expect(sessionModule.requires).not.toContain("sessionLifecycle");
+describe("where a user-session store is wired, core's session lifecycle is required", () => {
+	it("refuses to build the router with a userSessionStore and no sessionLifecycle, naming both", async () => {
+		const userSessionStore = await liveSessionStore();
+		expect(() => buildApp({ userSessionStore })).toThrow(
+			/userSessionStore is wired, but sessionLifecycle is not/,
+		);
+	});
+
+	it("builds a sessionless router, with neither: its logout ends the cookie session alone", async () => {
+		const { app, bag } = buildApp({});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(200);
+		expect(bag.destroyed).toBe(true);
 	});
 });

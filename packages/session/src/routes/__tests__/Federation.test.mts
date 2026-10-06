@@ -22,6 +22,7 @@ import type {
 	FederationTokenStore,
 	Logger,
 	SessionFederationIndex,
+	SessionLifecycle,
 	SubjectSessionIndex,
 	UserRepository,
 	UserSessionStore,
@@ -35,6 +36,7 @@ import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provi
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createFederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
@@ -300,6 +302,7 @@ function buildStatelessApp({
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			sessionFederationIndex: sessionFederationIndex ?? makeSessionFederationIndex(),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
 		}),
@@ -336,6 +339,7 @@ function buildCallbackApp({
 	federationSettings,
 	linkTrustedOrigins,
 	logger,
+	sessionLifecycle,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls?: ReadonlyMap<string, string>;
@@ -356,6 +360,8 @@ function buildCallbackApp({
 	/** `session.csrf.trustedOrigins`; absent trusts no other origin. */
 	linkTrustedOrigins?: readonly string[];
 	logger?: Logger;
+	/** Core's session lifecycle; a fresh fake by default. */
+	sessionLifecycle?: SessionLifecycle;
 }): { app: express.Express; store: SessionStore } {
 	const store: SessionStore = new Map();
 	const app = makeSessionApp(store);
@@ -380,6 +386,7 @@ function buildCallbackApp({
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
+			sessionLifecycle: sessionLifecycle ?? fakeSessionLifecycle(),
 			sessionFederationIndex: sessionFederationIndex ?? makeSessionFederationIndex(),
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
@@ -998,6 +1005,7 @@ describe("account linking across federations", () => {
 			const sfi = makeSessionFederationIndex();
 			const fts = makeFederationTokenStore();
 			const audit = recorder();
+			const lifecycle = fakeSessionLifecycle();
 			const { app } = buildCallbackApp({
 				providers,
 				federation: linkEnvelope,
@@ -1007,6 +1015,7 @@ describe("account linking across federations", () => {
 				sessionFederationIndex: sfi,
 				federationTokenStore: fts,
 				auditSink: audit.sink,
+				sessionLifecycle: lifecycle,
 			});
 			const agent = await plantAndGetAgent(app);
 			const res = await callback(agent);
@@ -1019,7 +1028,8 @@ describe("account linking across federations", () => {
 				token: "test:external-42",
 				claims: expect.any(Object),
 			});
-			expect(sfi.addFederation).toHaveBeenCalledWith("s-1", "test", LIVE.expiresAt);
+			expect(lifecycle.join).toHaveBeenCalledWith("s-1", { federation: "test" });
+			expect(sfi.addFederation).not.toHaveBeenCalled();
 			expect(fts.attach).toHaveBeenCalledWith(
 				"s-1",
 				"test",
@@ -1339,20 +1349,20 @@ describe("account linking across federations", () => {
 
 		it("is idempotent for an identity the account already holds", async () => {
 			const repo = linkableRepo({ current: alice });
-			const sfi = makeSessionFederationIndex();
+			const lifecycle = fakeSessionLifecycle();
 			const { app } = buildCallbackApp({
 				providers,
 				federation: linkEnvelope,
 				sessionSeed: seed,
 				userRepository: repo,
 				userSessionStore: liveStore(),
-				sessionFederationIndex: sfi,
+				sessionLifecycle: lifecycle,
 			});
 			const agent = await plantAndGetAgent(app);
 			const res = await callback(agent);
 			expect(res.status).toBe(302);
 			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
-			expect(sfi.addFederation).toHaveBeenCalledWith("s-1", "test", LIVE.expiresAt);
+			expect(lifecycle.join).toHaveBeenCalledWith("s-1", { federation: "test" });
 		});
 
 		it("relays the Store's refusal as 403 and its conflict as 409", async () => {
@@ -1776,9 +1786,8 @@ describe("account linking across federations", () => {
 			expect(fts.delete).not.toHaveBeenCalled();
 		});
 
-		it("the index write: 503 and one error line", async () => {
+		it("the join: 503 and one error line", async () => {
 			const repo = linkableRepo({ current: null });
-			const sfi = makeSessionFederationIndex({ addFederation: down("federation index") });
 			const logger = spyLogger();
 			const { app } = buildCallbackApp({
 				providers,
@@ -1786,14 +1795,14 @@ describe("account linking across federations", () => {
 				sessionSeed: seed,
 				userRepository: repo,
 				userSessionStore: liveStore(),
-				sessionFederationIndex: sfi,
+				sessionLifecycle: fakeSessionLifecycle({ join: async () => ({ outcome: "unavailable" }) }),
 				logger,
 			});
 			const res = await callback(await plantAndGetAgent(app));
 			expect(res.status).toBe(503);
 			expectOutageLogged(logger, "federation_link_store_unavailable", {
-				store: "session_federation_index",
-				step: "add",
+				store: "session_lifecycle",
+				step: "join",
 				sid: "s-1",
 			});
 		});
@@ -1863,6 +1872,7 @@ describe("Federation routes", () => {
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionFederationIndex: undefined as never,
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
@@ -1880,6 +1890,7 @@ describe("Federation routes", () => {
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: undefined as never,
 					providerCallbackUrls: new Map(),
@@ -1897,6 +1908,7 @@ describe("Federation routes", () => {
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: undefined as never,
 					userSessionStore: makeUserSessionStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
@@ -1914,6 +1926,7 @@ describe("Federation routes", () => {
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
@@ -1932,6 +1945,7 @@ describe("Federation routes", () => {
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
@@ -1953,6 +1967,7 @@ describe("Federation routes", () => {
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
@@ -1970,6 +1985,7 @@ describe("Federation routes", () => {
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: undefined as never,
@@ -1993,6 +2009,7 @@ describe("Federation routes", () => {
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionLifecycle: fakeSessionLifecycle(),
 					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
@@ -2229,13 +2246,14 @@ describe("Federation routes", () => {
 			expectMisconfigurationLogged(logger, { reason: "no_callback_url" });
 		});
 
-		it("happy path: creates UserSession, addFederation, attaches token, sets req.session.sid, redirects to redirectTo", async () => {
+		it("happy path: creates UserSession, attaches token, joins the federation, sets req.session.sid, redirects to redirectTo", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 			const repo = makeUserRepository({ id: "user-1", username: "alice" });
 			const uss = makeUserSessionStore();
 			const sfi = makeSessionFederationIndex();
 			const fts = makeFederationTokenStore();
+			const lifecycle = fakeSessionLifecycle();
 
 			const { app } = buildCallbackApp({
 				providers,
@@ -2244,6 +2262,7 @@ describe("Federation routes", () => {
 				userSessionStore: uss,
 				sessionFederationIndex: sfi,
 				federationTokenStore: fts,
+				sessionLifecycle: lifecycle,
 			});
 			const agent = await plantAndGetAgent(app);
 
@@ -2262,13 +2281,9 @@ describe("Federation routes", () => {
 			expect(createArg.federations).toBeUndefined();
 			expect(typeof createArg.sid).toBe("string");
 
-			// sessionFederationIndex.addFederation called with (sid, "test", expiresAt)
-			expect(sfi.addFederation).toHaveBeenCalledOnce();
-			const [addSid, addName, addExpiresAt] = (sfi.addFederation as ReturnType<typeof vi.fn>).mock
-				.calls[0] as [string, string, Date];
-			expect(addSid).toBe(createArg.sid);
-			expect(addName).toBe("test");
-			expect(addExpiresAt).toBeInstanceOf(Date);
+			// The federation joins the session through the lifecycle, not the index
+			expect(lifecycle.join).toHaveBeenCalledExactlyOnceWith(createArg.sid, { federation: "test" });
+			expect(sfi.addFederation).not.toHaveBeenCalled();
 
 			// FederationTokenStore.attach called with correct tokens
 			expect(fts.attach).toHaveBeenCalledOnce();
@@ -2845,55 +2860,42 @@ describe("Federation routes", () => {
 		// -----------------------------------------------------------------------
 
 		describe("federation login: sibling-store invariants", () => {
-			it("create succeeds + addFederation succeeds → both stores called, no federations in create input", async () => {
-				const provider = makeFakeProvider();
-				const providers = new Map([["test", provider]]);
+			it("create succeeds + the join succeeds → the lifecycle joins the created sid, no federations in create input", async () => {
 				const uss = makeUserSessionStore();
-				const sfi = makeSessionFederationIndex();
+				const lifecycle = fakeSessionLifecycle();
 
 				const { app } = buildCallbackApp({
-					providers,
+					providers: new Map([["test", makeFakeProvider()]]),
 					federation: { name: "test", state: "s1", codeVerifier: "v1" },
 					userSessionStore: uss,
-					sessionFederationIndex: sfi,
+					sessionLifecycle: lifecycle,
 				});
 				const agent = await plantAndGetAgent(app);
 
 				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
 				expect(res.status).toBe(302);
 
-				// userSessionStore.create called once with no federations field
 				expect(uss.create).toHaveBeenCalledOnce();
 				const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
 					string,
 					unknown
 				>;
 				expect(createArg.federations).toBeUndefined();
-
-				// sessionFederationIndex.addFederation called with (sid, "test", expiresAt)
-				expect(sfi.addFederation).toHaveBeenCalledOnce();
-				const [addSid, addName, addExpiresAt] = (sfi.addFederation as ReturnType<typeof vi.fn>).mock
-					.calls[0] as [string, string, Date];
-				expect(addSid).toBe(createArg.sid);
-				expect(addName).toBe("test");
-				expect(addExpiresAt).toBeInstanceOf(Date);
+				expect(lifecycle.open).toHaveBeenCalledOnce();
+				expect(lifecycle.join).toHaveBeenCalledExactlyOnceWith(createArg.sid, {
+					federation: "test",
+				});
 			});
 
-			it("addFederation failure after create → orphan session rolled back, 503 returned", async () => {
-				const provider = makeFakeProvider();
-				const providers = new Map([["test", provider]]);
+			it("a join the lifecycle cannot answer after create → its record closed, the session rolled back, 503 returned", async () => {
 				const uss = makeUserSessionStore();
-				const sfi = makeSessionFederationIndex({
-					addFederation: vi.fn(async () => {
-						throw new Error("redis blip");
-					}),
-				});
+				const lifecycle = fakeSessionLifecycle({ join: async () => ({ outcome: "unavailable" }) });
 
 				const { app } = buildCallbackApp({
-					providers,
+					providers: new Map([["test", makeFakeProvider()]]),
 					federation: { name: "test", state: "s1", codeVerifier: "v1" },
 					userSessionStore: uss,
-					sessionFederationIndex: sfi,
+					sessionLifecycle: lifecycle,
 				});
 				const agent = await plantAndGetAgent(app);
 
@@ -2901,25 +2903,16 @@ describe("Federation routes", () => {
 				expect(res.status).toBe(503);
 				expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
 
-				// userSessionStore.create was called
-				expect(uss.create).toHaveBeenCalledOnce();
-				// Orphan UserSession rolled back
-				expect(uss.delete).toHaveBeenCalledOnce();
-				const deleteSid = (uss.delete as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
 				const createSid = (
 					(uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>
 				).sid as string;
-				expect(deleteSid).toBe(createSid);
-				// No federation token attached
-				expect(sfi.addFederation).toHaveBeenCalledOnce();
+				expect(lifecycle.close).toHaveBeenCalledExactlyOnceWith(createSid, "session_logout");
+				expect(uss.delete).toHaveBeenCalledExactlyOnceWith(createSid);
 			});
 
-			it("regenerate failure after addFederation rolls back BOTH stores in reverse order (fed first)", async () => {
-				const provider = makeFakeProvider();
-				const providers = new Map([["test", provider]]);
+			it("a regenerate failure closes the record before it deletes the session", async () => {
 				const uss = makeUserSessionStore();
-				const sfi = makeSessionFederationIndex();
-
+				const lifecycle = fakeSessionLifecycle();
 				const regenerateFailInterceptor: express.RequestHandler = (req, _res, next) => {
 					req.session.regenerate = (cb?: (err: unknown) => void) => {
 						cb?.(new Error("regenerate failed"));
@@ -2929,28 +2922,20 @@ describe("Federation routes", () => {
 				};
 
 				const { app } = buildCallbackApp({
-					providers,
+					providers: new Map([["test", makeFakeProvider()]]),
 					federation: { name: "test", state: "s1", codeVerifier: "v1" },
 					userSessionStore: uss,
-					sessionFederationIndex: sfi,
+					sessionLifecycle: lifecycle,
 					saveInterceptor: regenerateFailInterceptor,
 				});
 				const agent = await plantAndGetAgent(app);
 
 				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
 				expect(res.status).toBe(503);
-				expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
-
-				// Both stores were rolled back
-				expect(sfi.removeBySid).toHaveBeenCalledOnce();
-				expect(uss.delete).toHaveBeenCalledOnce();
-
-				// Verify reverse order: removeBySid (fed index, created last) before delete (session, created first)
-				const removeFedOrder = (sfi.removeBySid as ReturnType<typeof vi.fn>).mock
-					.invocationCallOrder[0];
-				const deleteSessionOrder = (uss.delete as ReturnType<typeof vi.fn>).mock
-					.invocationCallOrder[0];
-				expect(removeFedOrder).toBeLessThan(deleteSessionOrder);
+				expect(lifecycle.join).not.toHaveBeenCalled();
+				expect(lifecycle.close.mock.invocationCallOrder[0]).toBeLessThan(
+					(uss.delete as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+				);
 			});
 
 			it("logs a failed token attach after the session was created without the store's command", async () => {
@@ -2973,11 +2958,11 @@ describe("Federation routes", () => {
 				expectNoTokenIn(lines);
 			});
 
-			it("post-regenerate rollback also unwinds federation index before session (REVERSE order)", async () => {
+			it("post-regenerate rollback undoes the token, closes the record, then deletes the session (REVERSE order)", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
 				const uss = makeUserSessionStore();
-				const sfi = makeSessionFederationIndex();
+				const lifecycle = fakeSessionLifecycle();
 				const fts = makeFederationTokenStore();
 				// Make session.save fail on the post-regenerate save (save 2) to trigger the catch block
 				const saveFailInterceptor: express.RequestHandler = (req, _res, next) => {
@@ -3012,7 +2997,7 @@ describe("Federation routes", () => {
 					providers,
 					federation: { name: "test", state: "s1", codeVerifier: "v1" },
 					userSessionStore: uss,
-					sessionFederationIndex: sfi,
+					sessionLifecycle: lifecycle,
 					federationTokenStore: fts,
 					saveInterceptor: saveFailInterceptor,
 				});
@@ -3023,15 +3008,14 @@ describe("Federation routes", () => {
 
 				// federationTokenStore.delete called (token was attached before save failed)
 				expect(fts.delete).toHaveBeenCalledOnce();
-				// sessionFederationIndex.removeBySid called
-				expect(sfi.removeBySid).toHaveBeenCalledOnce();
+				// the lifecycle record closed
+				expect(lifecycle.close).toHaveBeenCalledOnce();
 				// userSessionStore.delete called
 				expect(uss.delete).toHaveBeenCalledOnce();
 
-				// Verify reverse order: fts.delete → sfi.removeBySid → uss.delete
+				// Verify reverse order: fts.delete → lifecycle.close → uss.delete
 				const deleteFtsOrder = (fts.delete as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
-				const removeFedOrder = (sfi.removeBySid as ReturnType<typeof vi.fn>).mock
-					.invocationCallOrder[0];
+				const removeFedOrder = lifecycle.close.mock.invocationCallOrder[0];
 				const deleteSessionOrder = (uss.delete as ReturnType<typeof vi.fn>).mock
 					.invocationCallOrder[0];
 				expect(deleteFtsOrder).toBeLessThan(removeFedOrder);
@@ -3227,21 +3211,16 @@ describe("federation login: subject session index", () => {
 		expect(res.status).toBe(302);
 	});
 
-	it("removes the entry when addFederation fails and the session is rolled back", async () => {
+	it("removes the entry when the join fails and the session is rolled back", async () => {
 		const providers = new Map([["test", makeFakeProvider()]]);
 		const uss = makeUserSessionStore();
 		const ssi = makeSubjectSessionIndex();
-		const sfi = makeSessionFederationIndex({
-			addFederation: vi.fn(async () => {
-				throw new Error("redis blip");
-			}),
-		});
 
 		const { app } = buildCallbackApp({
 			providers,
 			federation: { name: "test", state: "s1", codeVerifier: "v1" },
 			userSessionStore: uss,
-			sessionFederationIndex: sfi,
+			sessionLifecycle: fakeSessionLifecycle({ join: async () => ({ outcome: "unavailable" }) }),
 			subjectSessionIndex: ssi,
 		});
 		const agent = await plantAndGetAgent(app);
@@ -3340,16 +3319,10 @@ describe("federation login: subject session index", () => {
 				throw new Error("index store down");
 			}),
 		});
-		const sfi = makeSessionFederationIndex({
-			addFederation: vi.fn(async () => {
-				throw new Error("redis blip");
-			}),
-		});
-
 		const { app } = buildCallbackApp({
 			providers,
 			federation: { name: "test", state: "s1", codeVerifier: "v1" },
-			sessionFederationIndex: sfi,
+			sessionLifecycle: fakeSessionLifecycle({ join: async () => ({ outcome: "unavailable" }) }),
 			subjectSessionIndex: ssi,
 		});
 		const agent = await plantAndGetAgent(app);
@@ -3705,7 +3678,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		});
 	});
 
-	it("the federation index: 503, one error line, and a warn for the rollback that fails", async () => {
+	it("the join: 503, one error line, and a warn for the rollback that fails", async () => {
 		const logger = spyLogger();
 		const uss = makeUserSessionStore();
 		uss.delete.mockRejectedValueOnce(new Error("session store down"));
@@ -3713,9 +3686,7 @@ describe("the federation login callback answers a store that cannot answer as an
 			providers: new Map([["test", makeFakeProvider()]]),
 			federation,
 			userSessionStore: uss,
-			sessionFederationIndex: makeSessionFederationIndex({
-				addFederation: down("federation index"),
-			}),
+			sessionLifecycle: fakeSessionLifecycle({ join: down("session lifecycle") }),
 			subjectSessionIndex: makeSubjectSessionIndex({ removeSid: down("subject index") }),
 			logger,
 		});
@@ -3725,7 +3696,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		expectOutageLogged(
 			logger,
 			"federation_callback_store_unavailable",
-			{ store: "session_federation_index", step: "add" },
+			{ store: "session_lifecycle", step: "join" },
 			[
 				{ store: "user_session", step: "delete" },
 				{ store: "subject_session_index", step: "remove_sid" },
@@ -3829,6 +3800,7 @@ describe("the federation login callback answers a store that cannot answer as an
 				providerCallbackUrls: new Map([["test", TEST_CALLBACK_URL]]),
 				userRepository: makeUserRepository(),
 				userSessionStore: makeUserSessionStore(),
+				sessionLifecycle: fakeSessionLifecycle(),
 				sessionFederationIndex: makeSessionFederationIndex(),
 				federationTokenStore: makeFederationTokenStore(),
 				logger: logger as unknown as Logger,
@@ -3862,6 +3834,7 @@ describe("a federation route's composition fault is a 500, logged once at error"
 				providerCallbackUrls: options.callbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 				userRepository: makeUserRepository(),
 				userSessionStore: makeUserSessionStore(),
+				sessionLifecycle: fakeSessionLifecycle(),
 				sessionFederationIndex: makeSessionFederationIndex(),
 				federationTokenStore: makeFederationTokenStore(),
 				logger: logger as unknown as Logger,
@@ -4013,6 +3986,7 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 				providerCallbackUrls: new Map([["test", TEST_CALLBACK_URL]]),
 				userRepository: makeUserRepository(),
 				userSessionStore: makeUserSessionStore(),
+				sessionLifecycle: fakeSessionLifecycle(),
 				sessionFederationIndex: makeSessionFederationIndex(),
 				federationTokenStore: makeFederationTokenStore(),
 				logger: logger as unknown as Logger,

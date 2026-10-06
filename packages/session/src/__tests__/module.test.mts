@@ -45,6 +45,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { sessionModule } from "#/module.mjs";
 import { withSessionCaptures } from "./_helpers/sections.mjs";
+import { fakeSessionLifecycle, sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs (typed-slot const Modules)
@@ -160,7 +161,8 @@ const stubFederationModule = federationTypeForTests("stub", {
 	provider: () => stubFederationProvider,
 });
 
-const baseTestModules = [
+/** The session module and the stores it requires, without core's session lifecycle. */
+const withoutLifecycle = [
 	sessionModule,
 	userRepositoryModule,
 	userSessionStoreModule,
@@ -173,6 +175,8 @@ const baseTestModules = [
 	sessionFamilyIndexModule,
 	refreshTokenFamilyRevocationModule,
 ];
+
+const baseTestModules = [...withoutLifecycle, sessionLifecycleTestModule()];
 
 // ---------------------------------------------------------------------------
 // Static manifest assertions: declarative shape only; the HTTP and boot
@@ -346,9 +350,43 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		});
 	});
 
-	it("takes sessionLifecycle as an optional slot: core's session lifecycle, which opens each login's session record", () => {
-		expect(sessionModule.optional).toContain("sessionLifecycle");
-		expect(sessionModule.requires).not.toContain("sessionLifecycle");
+	it("refuses to boot with userSessionStore wired and no sessionLifecycle, naming both slots", async () => {
+		const refusal = await createTestApp({
+			modules: withoutLifecycle,
+			bootstrapComponents: {
+				config: withSessionCaptures(makeValidAppConfig()),
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(refusal, "boot must be refused").toBeInstanceOf(BootError);
+		expect(refusal).toMatchObject({
+			reason: "contribute-factory-failed",
+			details: { module: "session", kind: "routes" },
+		});
+		const message = String(
+			(refusal as BootError).cause instanceof Error
+				? ((refusal as BootError).cause as Error).message
+				: "",
+		);
+		expect(message).toMatch(/userSessionStore is wired, but sessionLifecycle is not/);
+		expect(message).toMatch(/sessionLifecycleModule/);
+	});
+
+	it("boots with userSessionStore and sessionLifecycle both wired", async () => {
+		const handle = await createTestApp({
+			modules: baseTestModules,
+			bootstrapComponents: {
+				config: withSessionCaptures(makeValidAppConfig()),
+				pathResolver: (s: string) => s,
+			} as never,
+		});
+		await handle.dispose();
 	});
 
 	it("takes sessionLifecycleStore as an optional slot: the lifecycle port the link routes' admission reads", () => {
@@ -418,6 +456,7 @@ describe("sessionModule — the link routes are a consumer of session admission"
 				linkFederatedIdentity: async () => ({ ok: true, user: { id: "user-1" } }),
 			},
 			userSessionStore: { ...makeUserSessionStore(), get: async () => record },
+			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			// Boot registers each page on oauth.jwt.issuer — the valid config's.
@@ -504,6 +543,7 @@ describe("sessionModule — the password login is a consumer of session admissio
 				authenticateByToken: async () => null,
 			},
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			csrfTokenSigner: createTestCsrfTokenSigner(),
@@ -597,6 +637,7 @@ describe("sessionModule — the login's attempt limit reads the deploymentMode s
 			logger,
 			userRepository: fakeUserRepository,
 			userSessionStore: makeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			sessionRequirementResolver: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
