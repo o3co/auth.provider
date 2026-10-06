@@ -31,7 +31,7 @@ import { consoleLogger, type Logger, productionEnvironmentIn } from "@o3co/auth-
  * (error) where only the escape hatch let it through — on the logger the
  * composition handed the store, or `consoleLogger` when it handed none.
  *
- * Whether the environment is production is core's reading
+ * Whether the environment is production or staging is core's reading
  * (`productionEnvironmentIn`): each name trimmed and in lower case, so
  * "Production" or "production\n" names production as surely.
  */
