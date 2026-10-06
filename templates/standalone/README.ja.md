@@ -724,7 +724,7 @@ docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
 
 オーバーレイが app サービスに設定するもの:
 
-- `CONFIG_ENV=mailpit`。`development` ではテンプレートは各コードをログに出す送信者を入れる（[モジュール合成順序](#モジュール合成順序) のルール 7）。[`config/mailpit.conf`](config/mailpit.conf) は `development.conf` を include するので、MFA の鍵リングを除いて development の実行と同じである。鍵リングは最初の鍵をサンプル鍵の代わりに `MFA_ENCRYPTION_KEY` から読む。MFA パッケージがサンプル鍵を受け入れるのは、設定されている環境名がすべて `development` か `test` を示すときだけだからである。
+- `CONFIG_ENV=mailpit`。`development` ではテンプレートは各コードをログに出す送信者を入れる（[モジュール合成順序](#モジュール合成順序) のルール 7）。[`config/mailpit.conf`](config/mailpit.conf) は `development.conf` を include しない。`development.conf` の唯一の設定は MFA のサンプル鍵で、MFA パッケージがそれを受け入れるのは、設定されている環境名がすべて `development` か `test` を示すときだけだからである。鍵リングの最初の鍵は、MFA パッケージの `reference.conf` が束ねるとおり `MFA_ENCRYPTION_KEY` である。
 - `MFA_MODE` は設定しない: MFA はテンプレートの出荷どおり、または `.env` が設定するとおりに有効である。MFA が off ならメールを送るものが無い。
 - `ADAPTERS_MFA_FACTOR_STORE=redis` と `ADAPTERS_MFA_TRANSACTION_STORE=redis`（compose の Redis 上、`docker-compose.yml` と同じ）: `development` と `test` 以外の名前では、MFA のストアをメモリに置けない。
 - `STANDARD_SMTP_MAIL_SENDER_HOST=localhost`、`STANDARD_SMTP_MAIL_SENDER_PORT=1025`、`STANDARD_SMTP_MAIL_SENDER_SECURE=none`、`STANDARD_SMTP_MAIL_SENDER_FROM=auth@example.com`。SMTP 送信者が平文で送るのはループバックのホストにだけなので、Mailpit は app コンテナのネットワーク名前空間で動き（`network_mode: service:app`）、その `localhost` で待ち受ける。そのため Mailpit の Web UI のポートは、Mailpit ではなく app サービスがループバックに公開する。

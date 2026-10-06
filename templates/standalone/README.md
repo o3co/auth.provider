@@ -1228,11 +1228,11 @@ What the overlay sets on the app service:
 
 - `CONFIG_ENV=mailpit`. Under `development` the template installs the sender
   that logs each code ([Module Composition Order](#module-composition-order),
-  rule 7). [`config/mailpit.conf`](config/mailpit.conf) includes
-  `development.conf`, so the run is otherwise the development one, except the
-  MFA key ring: it reads its first key from `MFA_ENCRYPTION_KEY` in place of
-  the sample key, which the MFA package accepts only where every environment
-  name set says `development` or `test`.
+  rule 7). [`config/mailpit.conf`](config/mailpit.conf) does not include
+  `development.conf`, whose one setting is the MFA sample key: the MFA
+  package accepts that key only where every environment name set says
+  `development` or `test`. The key ring's first key is `MFA_ENCRYPTION_KEY`,
+  as the MFA package's `reference.conf` binds it.
 - Nothing of `MFA_MODE`: MFA is on as the template ships it, or as your
   `.env` sets it. With MFA off nothing sends mail.
 - `ADAPTERS_MFA_FACTOR_STORE=redis` and `ADAPTERS_MFA_TRANSACTION_STORE=redis`,
