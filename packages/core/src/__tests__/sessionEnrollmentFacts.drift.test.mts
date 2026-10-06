@@ -73,6 +73,11 @@ const ALLOWED_RAW_READS: readonly AllowedRawRead[] = [
 		why: "admission copies the record's facts into the view through readEnrollmentFacts",
 	},
 	{
+		file: "packages/core/src/session-admission/live-session.mts",
+		within: "copyRecord",
+		why: "admission copies the store's answer once by its declared fields, inside the guarded live read; viewOf reads the facts off that copy",
+	},
+	{
 		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
 		why: "the memory store records what recordableEnrollmentFacts answers, and copies it out",
 	},
@@ -264,7 +269,7 @@ const allowed = (file: string, read: FactsRead): boolean =>
 	);
 
 describe("a session's stored enrollment facts have one reading", () => {
-	it("are read raw by no product file, the template's included, but admission's viewOf, the two session stores and establishSession", () => {
+	it("are read raw by no product file, the template's included, but admission's record copy and viewOf, the two session stores and establishSession", () => {
 		const offenders = [...productReads()].flatMap(([file, reads]) =>
 			reads
 				.filter((read) => !read.copy && !allowed(file, read))
