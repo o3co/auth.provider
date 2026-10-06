@@ -163,13 +163,13 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	 * with its store's error; an `unavailable` answer's error is on the
 	 * lifecycle's own line.
 	 */
-	const lifecycleUnavailable = (clientId: string, err?: { readonly error: unknown }): void => {
+	const lifecycleUnavailable = (clientId: string, thrown?: { readonly error: unknown }): void => {
 		logger?.error(
 			{
 				store: "session_lifecycle",
 				step: "join",
 				clientId: auditErrorText(clientId),
-				...(err === undefined ? {} : { err: loggableError(err.error) }),
+				...(thrown === undefined ? {} : { err: loggableError(thrown.error) }),
 			},
 			"authorization_grant_store_unavailable",
 		);
@@ -818,8 +818,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// A join that rejects with its store's error is the outage it
 					// is; a RangeError (a sid or participant the lifecycle cannot
 					// hold) is a fault, and leaves through the catch below.
-					const linkingUnavailable = async (err?: { readonly error: unknown }) => {
-						lifecycleUnavailable(authenticatedClientId, err);
+					const linkingUnavailable = async (thrown?: { readonly error: unknown }) => {
+						lifecycleUnavailable(authenticatedClientId, thrown);
 						await revokeRefusedFamily(familyId, at);
 						return {
 							result: {
