@@ -91,6 +91,10 @@ interface WorldOptions {
 	readonly beforeJoin?: (lifecycle: SessionLifecycle, sid: string) => Promise<void>;
 	/** Runs inside the token store's `attach`, before it. */
 	readonly beforeAttach?: (lifecycle: SessionLifecycle, sid: string) => Promise<void>;
+	/** The cookie session's save fails, once it has been regenerated. */
+	readonly saveFails?: boolean;
+	/** The router's logger: silent by default. */
+	readonly logger?: Logger;
 }
 
 async function world(options: WorldOptions = {}) {
@@ -128,6 +132,23 @@ async function world(options: WorldOptions = {}) {
 
 	const store: HarnessSessionStore = new Map();
 	const app = makeSessionApp(store);
+	if (options.saveFails) {
+		// The regenerated session's save fails, as a cookie store gone down
+		// between the regeneration and the save does.
+		app.use((req, _res, next) => {
+			const held = req.session as unknown as {
+				regenerate(cb: (err: unknown) => void): unknown;
+			};
+			const regenerate = held.regenerate.bind(held);
+			held.regenerate = (cb) =>
+				regenerate((err) => {
+					const fresh = req.session as unknown as { save(cb: (err: unknown) => void): unknown };
+					fresh.save = (done) => done(new Error("cookie store down"));
+					cb(err);
+				});
+			next();
+		});
+	}
 	const userRepository = {
 		authenticate: vi.fn(async () => null),
 		authenticateByToken: vi.fn(async () => ({ id: SUBJECT, username: "alice" })),
@@ -150,7 +171,7 @@ async function world(options: WorldOptions = {}) {
 				issuer: HARNESS_ISSUER,
 				actions: SESSION_ADMISSION_ACTIONS,
 			}),
-			logger: silentLogger,
+			logger: options.logger ?? silentLogger,
 		}),
 	);
 	return {
@@ -295,6 +316,39 @@ describe("a federated login over the session lifecycle", () => {
 		expect(await w.federationTokenStore.get(loginSid(w), "test")).toBeNull();
 	});
 
+	it("logs nothing for a refused join: the session's close, not an outage", async () => {
+		const error = vi.fn();
+		const logger: Logger = { ...silentLogger, error, child: () => logger };
+		const w = await world({
+			logger,
+			beforeJoin: async (lifecycle, sid) => {
+				expect((await lifecycle.close(sid, "subject_revocation")).outcome).toBe("done");
+			},
+		});
+
+		const res = await login(w);
+
+		expect(res.status).toBe(401);
+		expect(error).not.toHaveBeenCalled();
+	});
+
+	it("closes the record it opened when the cookie session cannot be saved after the join", async () => {
+		const w = await world({ saveFails: true });
+
+		const res = await login(w);
+
+		expect(res.status).toBe(503);
+		const sid = loginSid(w);
+		expect(w.join).toHaveBeenCalledOnce();
+		expect(readVersionedSessionLifecycle(await w.lifecycleStore.read(sid))?.value.state).toBe(
+			"closed",
+		);
+		expect(await w.service.join(sid, { federation: "test" })).toEqual({ outcome: "refused" });
+		expect(await w.federationTokenStore.get(sid, "test")).toBeNull();
+		expect(await w.userSessionStore.get(sid)).toBeNull();
+		expect(w.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
+	});
+
 	it("answers 503 when the lifecycle cannot answer the join, undoing the tokens it attached", async () => {
 		const w = await world();
 		w.join.mockImplementationOnce(async () => ({ outcome: "unavailable" }));
@@ -306,6 +360,29 @@ describe("a federated login over the session lifecycle", () => {
 		expect(await w.federationTokenStore.get(sid, "test")).toBeNull();
 		expect(await w.userSessionStore.get(sid)).toBeNull();
 		expect(w.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
+	});
+});
+
+describe("the federation routes require core's session lifecycle beside the user-session store", () => {
+	it("refuses to build the router without a sessionLifecycle, naming both slots", () => {
+		expect(() =>
+			createRouter(express, {
+				federationSettings: createTestFederationSettings(),
+				federationProviders: new Map([["test", provider]]),
+				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]) as never,
+				providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
+				userRepository: { authenticate: vi.fn(), authenticateByToken: vi.fn() } as never,
+				userSessionStore: createInMemoryUserSessionStore(),
+				sessionFederationIndex: createInMemorySessionFederationIndex(),
+				federationTokenStore: {} as FederationTokenStore,
+				federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+				requirements: resolverForTests([], {
+					issuer: HARNESS_ISSUER,
+					actions: SESSION_ADMISSION_ACTIONS,
+				}),
+				logger: silentLogger,
+			}),
+		).toThrow(/userSessionStore is wired, but sessionLifecycle is not/);
 	});
 });
 

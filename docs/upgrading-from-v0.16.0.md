@@ -1093,6 +1093,35 @@ modules fills them.
   `@o3co/auth-provider-core/testing` (#786, #796).
 - **Shutdown.** A cleanup registers the allowance it needs; the template's
   `installGracefulShutdown` takes `cleanupAllowanceMs` (#797).
+- **BREAKING: where a user-session store is wired, core's session lifecycle
+  is required.** A composition that wires `userSessionStore` installs
+  `sessionLifecycleModule` beside it (the standalone template does; see
+  [Your scaffold](#your-scaffold)), with what that module requires:
+  `sessionLifecycleStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
+  `sessionFederationIndex`, `refreshTokenFamilyRevocation` and
+  `federationTokenStore`. Without
+  it the boot is refused: `sessionModule`'s route factories with
+  `contribute-factory-failed`, `loginCompletionModule`'s provider with
+  `provides-factory-failed`, each message naming `userSessionStore` and
+  `sessionLifecycle`. A sessionless composition (client credentials,
+  jwt-bearer) wires neither and is unaffected. A test or composition of your
+  own that fills the slots by hand provides a `sessionLifecycle` too.
+- **BREAKING: `POST /session/logout` closes the session through the
+  lifecycle only.** The path that deleted the `UserSession`, the subject-index
+  entry and the federation tokens itself, without the lifecycle, is removed,
+  and with it the log events `logout_user_session_delete_failed`,
+  `logout_subject_session_index_remove_failed`,
+  `logout_federation_token_remove_failed` and
+  `logout_session_federation_index_remove_failed`: a failed step of the close
+  is core's `session_close_item_failed`. A federated login and a link join
+  their federation through the lifecycle only; the federated login no longer
+  writes the `sessionFederationIndex` entry itself.
+- **A login's rollback closes the session's lifecycle record.** When a login
+  fails after its record was created (a cookie-session regeneration or save,
+  a federation's token attach or join), the rollback closes the record it
+  opened, cause `session_logout`, before it deletes the `UserSession`. A
+  federated login whose join the lifecycle refuses (the session was closed
+  during the sign-in) is still `401 login_required`, and logs nothing.
 - **The session lifecycle sweeps unless told not to.** Installing
   `sessionLifecycleModule` starts a sweep that resumes the closes left
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
@@ -1110,6 +1139,11 @@ modules fills them.
   among others; the pull request lists all 42. Stop importing them; for a
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
+- **`establishSession`** (`@o3co/auth-provider-session`) refuses a
+  `userSessionStore` handed without a `sessionLifecycle`, with a `TypeError`
+  before anything is written, and `EstablishSessionDeps.sessionLifecycle` is
+  now `Pick<SessionLifecycle, "open" | "close">`: a rollback closes the
+  record it opened. Hand it the `sessionLifecycle` slot's value.
 - **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
 - **`DEVICE_CODE_STORE_ABSENCE_POLICY`** is removed from core (#728). An
   enabled device grant requires a `deviceCodeStore`, and nothing declares its

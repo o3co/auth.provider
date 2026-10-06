@@ -45,6 +45,7 @@ import type { FederationRedirectPolicy } from "#/federations/redirect-policy.mjs
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
+import { sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 /** Every character a contributed text might carry that RFC 6749 does not allow. */
 const HOSTILE = 'say "hi" \\ see §3 — café\r\nX-Injected: 1 \u{1F600}';
@@ -59,6 +60,7 @@ const stores = [
 		authenticate: async () => null,
 		authenticateByToken: async () => null,
 	} as unknown as UserRepository),
+	sessionLifecycleTestModule(),
 	providing("test:user-session-store", "userSessionStore", {
 		kind: "memory",
 		async create() {},

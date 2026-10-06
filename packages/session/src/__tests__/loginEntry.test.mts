@@ -45,6 +45,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createLoginEntry, loginEntryFromConfig } from "#/login-entry.mjs";
 import { sessionModule } from "#/module.mjs";
 import { withSession, withSessionCaptures } from "./_helpers/sections.mjs";
+import { sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 describe("createLoginEntry keeps core's loginEntry contract", () => {
 	it.each(loginEntryContract({ build: (url) => createLoginEntry(url) }))(
@@ -131,6 +132,7 @@ const stores = [
 		authenticate: async () => null,
 		authenticateByToken: async () => null,
 	} as unknown as UserRepository),
+	sessionLifecycleTestModule(),
 	providing("test:user-session-store", "userSessionStore", {
 		kind: "memory",
 		async create() {},

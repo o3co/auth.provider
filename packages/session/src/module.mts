@@ -236,9 +236,11 @@ export const sessionModule = defineModule<
 	// `subjectSessionIndex`, `revokeAllForSubject` reports the capability as
 	// unavailable; `subjectRevocation` is the boundary, and
 	// `sessionLifecycleStore` the lifecycle port, the link routes' admission
-	// reads when wired; `sessionLifecycle`, core's session lifecycle, where its
-	// module is installed, opens each login's session record and is what
-	// `POST /session/logout` closes the session through.
+	// reads when wired. `sessionLifecycle`, core's session lifecycle, opens
+	// each login's session record, joins its federations and is what
+	// `POST /session/logout` closes the session through: required beside
+	// `userSessionStore`, the route factories refuse a composition without it,
+	// naming both.
 	optional: [
 		"logger",
 		"attemptCounter",
@@ -301,13 +303,6 @@ export const sessionModule = defineModule<
 						sessionCookie: deps.sessionCookiePolicy,
 						deploymentMode: deps.deploymentMode,
 						userSessionStore: deps.userSessionStore,
-						// `POST /session/logout` invalidates the records the session
-						// owns, not just the cookie, without core's session lifecycle;
-						// with it, the lifecycle's close does. Both stores are already in
-						// this module's `requires` for the federation routes, so handing
-						// them to the session routes adds no manifest surface.
-						federationTokenStore: deps.federationTokenStore,
-						sessionFederationIndex: deps.sessionFederationIndex,
 						// The CSRF token's signer, the one `csrfGuard` signs with.
 						csrfTokenSigner: deps.csrfTokenSigner,
 						...(deps.attemptCounter ? { attemptCounter: deps.attemptCounter } : {}),

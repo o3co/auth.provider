@@ -836,6 +836,9 @@ const csrfTokenOf = (cookies: readonly string[]): string => {
 const LIFECYCLE_LOGS =
 	"core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) logs the store's failure at warn (`session_lifecycle_unavailable`, with the error's projection) and answers `unavailable`; the consumer's error line names the step but carries no projection: two lines for one outage, the cause on the warn. Fixed before 0.17.0 by the PR that removes the lifecycle's bridge (#1030, 14a), which restores one error line, the consumer's, with the projection";
 
+const ROLLBACK_CLOSE_LOGS =
+	"a login that fails after its record's open closes that record (`packages/session/src/establish-session.mts`), and the close's own work meets the same outage: core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) warns `session_close_item_failed` for the item and keeps the close pending for its sweep, a second line for one outage. Fixed before 0.17.0 by the PR that settles the lifecycle's logging (#1030, 14a)";
+
 const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "oauth-authorization",
@@ -1040,6 +1043,7 @@ const OUTAGES: readonly OutageCase[] = [
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "login_store_unavailable",
+		defects: { "no-warn": ROLLBACK_CLOSE_LOGS },
 	},
 	{
 		module: "session",
@@ -1100,6 +1104,7 @@ const OUTAGES: readonly OutageCase[] = [
 		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "federation_callback_store_unavailable",
+		defects: { "no-warn": ROLLBACK_CLOSE_LOGS },
 	},
 	{
 		module: "session",

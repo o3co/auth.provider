@@ -55,6 +55,7 @@ import {
 	memoryRateLimiterModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
+	sessionLifecycleModule,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { oauthEndpointsModule, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
@@ -164,6 +165,12 @@ const bootWith = async (
 		swap.deviceCodeStore ?? memoryDeviceCodeStoreModule,
 		memoryRateLimiterModule,
 		memorySessionStoresModule,
+		// Core's session lifecycle, which the session module requires beside
+		// the user-session store, and the family revocation it requires.
+		sessionLifecycleModule,
+		...(ordered.includes(defaultRefreshTokenFamilyRevocationModule)
+			? []
+			: [memoryRefreshTokenFamilyStoreModule, defaultRefreshTokenFamilyRevocationModule]),
 		memoryFederationTokenStoreModule,
 		memoryAccessTokenDenylistModule,
 		deploymentProviders,

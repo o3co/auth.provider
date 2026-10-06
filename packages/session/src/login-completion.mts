@@ -44,7 +44,10 @@ export interface LoginCompletionDeps {
 	/** Absent: no record is created, and the express session alone is signed in. */
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
-	/** Core's session lifecycle, where installed: a login opens the session's lifecycle record in it. */
+	/**
+	 * Core's session lifecycle: a login opens the session's lifecycle record
+	 * in it. Required with a `userSessionStore`.
+	 */
 	readonly sessionLifecycle?: SessionLifecycle;
 	/** The session's lifetime: a record expires this long after its `authTime`. */
 	readonly sessionTtlMs: number;
@@ -55,6 +58,11 @@ export interface LoginCompletionDeps {
 /** The session package's two login tails and its session renewal over `deps`, as core's `LoginCompletion`. Frozen. */
 export function createLoginCompletion(deps: LoginCompletionDeps): LoginCompletion {
 	const { userSessionStore, subjectSessionIndex, sessionLifecycle, sessionTtlMs, csrf } = deps;
+	if (userSessionStore !== undefined && sessionLifecycle === undefined) {
+		throw new Error(
+			"login completion: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: a login opens its session's record in it. Install sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+		);
+	}
 	return Object.freeze({
 		// No steps of the caller's beside the record: the store and step names
 		// are the contract's own.

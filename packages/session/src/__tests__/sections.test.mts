@@ -43,6 +43,7 @@ import { describe, expect, it } from "vitest";
 import { sessionModule, sessionSectionSchema } from "#/module.mjs";
 import { sessionStoreConfigSchema, sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSession, withSessionCaptures, withStore } from "./_helpers/sections.mjs";
+import { sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 /** The package's defaults, as a composition root finds them. */
 const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
@@ -430,6 +431,7 @@ const STORES = [
 		authenticate: async () => null,
 		authenticateByToken: async () => null,
 	} as unknown as UserRepository),
+	sessionLifecycleTestModule(),
 	providing("test:user-session-store", "userSessionStore", {
 		kind: "memory",
 		async create() {},

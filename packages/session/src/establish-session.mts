@@ -26,12 +26,15 @@
  * (e.g. MFA) finishes a login the same way; callers supply their extra writes
  * (steps) and their log vocabulary (reporter).
  *
+ * Where a `UserSessionStore` is wired, core's session lifecycle is required
+ * beside it: the record's lifecycle is opened in it, and a rollback closes it
+ * there.
+ *
  * Sequence:
- * 1. the record: where the session lifecycle is wired, its lifecycle record
- *    opened first, then `UserSessionStore.create`. Either failing or
- *    throwing, or the open refused, is the record's outage at `create`, with
- *    nothing to undo:
- *    an open record with no user session is not live and nothing joins it;
+ * 1. the record: its lifecycle record opened first, then
+ *    `UserSessionStore.create`. Either failing or throwing, or the open
+ *    refused, is the record's outage at `create`; a lifecycle record the
+ *    open wrote is closed again, best effort;
  * 2. `SubjectSessionIndex.addSid`, best effort, at the earliest point the
  *    session exists: a missing entry is a live session a credential change
  *    never finds, while an orphan costs only a redundant cascade;
@@ -44,7 +47,9 @@
  *    find.
  *
  * Rollback is best effort and ordered: completed caller steps in reverse,
- * then the record, then its index entry. From step 4 on, a failure also
+ * then the record — its lifecycle record closed, then the user session
+ * deleted — then its index entry. A close that fails is reported as the
+ * record's `delete`, its error naming the session lifecycle. From step 4 on, a failure also
  * drops the request's cookie session, which must be neither saved against
  * the failed store nor named by a cookie. Without a `UserSessionStore` only
  * steps 4, 6 and 7 run. The CSRF token and the response stay with the routes.
@@ -149,8 +154,11 @@ export interface EstablishSessionDeps<S extends string = never, T extends string
 	/** Absent: no record is created, and the express session alone is authenticated. */
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
-	/** Where installed, the session lifecycle the record's lifecycle is opened in. */
-	readonly sessionLifecycle?: Pick<SessionLifecycle, "open">;
+	/**
+	 * Core's session lifecycle: the record's lifecycle is opened in it, and
+	 * closed in it by a rollback. Required with a `userSessionStore`.
+	 */
+	readonly sessionLifecycle?: Pick<SessionLifecycle, "open" | "close">;
 	/** The session's lifetime: the record expires this long after `authTime`. */
 	readonly sessionTtlMs: number;
 	/** Writes beside the record before the express session is regenerated. */
@@ -196,13 +204,33 @@ const openLifecycle = async (
 };
 
 /**
+ * Closes `record`'s lifecycle in `lifecycle`, for a rollback. A close that
+ * throws or answers `unavailable` throws, named as the lifecycle's.
+ */
+const closeLifecycle = async (
+	lifecycle: Pick<SessionLifecycle, "close">,
+	record: EstablishedRecord,
+): Promise<void> => {
+	let closed: Awaited<ReturnType<SessionLifecycle["close"]>>;
+	try {
+		closed = await lifecycle.close(record.sid, "session_logout");
+	} catch (cause) {
+		throw new Error("the session lifecycle could not close the session", { cause });
+	}
+	if (closed.outcome === "unavailable") {
+		throw new Error("the session lifecycle answered unavailable to the close");
+	}
+};
+
+/**
  * Establish the session admission established (sequence and rollback in this
  * file's header). Answers `established` with the record's `sid` (`undefined`
  * without a store), or `unavailable` naming the store and step that failed,
  * after rolling back; the reporter has already been told what to log.
  *
  * @throws RangeError, before anything is written, when `establishment` was not
- * built by core.
+ * built by core; TypeError when a `userSessionStore` is handed without a
+ * `sessionLifecycle`.
  */
 export async function establishSession<S extends string = never, T extends string = never>(
 	establishment: Establishment,
@@ -214,6 +242,11 @@ export async function establishSession<S extends string = never, T extends strin
 		);
 	}
 	const { req, userSessionStore, subjectSessionIndex, sessionLifecycle, sessionTtlMs } = deps;
+	if (userSessionStore !== undefined && sessionLifecycle === undefined) {
+		throw new TypeError(
+			"establishSession: userSessionStore is wired, but sessionLifecycle is not. Where a user-session store is wired, core's session lifecycle is required: the session's record is opened in it",
+		);
+	}
 	const {
 		subject: sub,
 		user,
@@ -252,10 +285,13 @@ export async function establishSession<S extends string = never, T extends strin
 	}> = [];
 
 	const rollBack = async (): Promise<void> => {
-		if (record === undefined || userSessionStore === undefined) return;
+		if (record === undefined || userSessionStore === undefined || sessionLifecycle === undefined) {
+			return;
+		}
 		for (const { store, undo } of completed) {
 			await cleanUp(store, undo.step, () => undo.run(record));
 		}
+		await cleanUp("user_session", "delete", () => closeLifecycle(sessionLifecycle, record));
 		await cleanUp("user_session", "delete", () => userSessionStore.delete(record.sid));
 		if (subjectSessionIndex) {
 			await cleanUp("subject_session_index", "remove_sid", () =>
@@ -282,9 +318,11 @@ export async function establishSession<S extends string = never, T extends strin
 		return undefined;
 	};
 
-	if (record !== undefined && userSessionStore !== undefined) {
+	if (record !== undefined && userSessionStore !== undefined && sessionLifecycle !== undefined) {
+		let opened = false;
 		try {
-			if (sessionLifecycle !== undefined) await openLifecycle(sessionLifecycle, record);
+			await openLifecycle(sessionLifecycle, record);
+			opened = true;
 			await userSessionStore.create({
 				sid: record.sid,
 				sub,
@@ -298,6 +336,9 @@ export async function establishSession<S extends string = never, T extends strin
 			// Fail-closed: the store's outage, answered as one — never a
 			// session-less login.
 			reporter.storeUnavailable("user_session", "create", err);
+			if (opened) {
+				await cleanUp("user_session", "delete", () => closeLifecycle(sessionLifecycle, record));
+			}
 			return { outcome: "unavailable", store: "user_session", step: "create" };
 		}
 
