@@ -331,8 +331,8 @@ const copyView = (view: SessionView): SessionView =>
  *    `stepUpVerdict` for `step_up`). A token carrier is judged on the
  *    token's own `amr`, record or not; a code carrier, over a record, on
  *    how its session had authenticated at `/authorize` as the code carries
- *    it (`codeReadingOver`), and on the record when it carries nothing
- *    readable. A code whose primary is not the record's is
+ *    it (`codeReadingOver`). A code that carries no readable
+ *    `authentication`, or whose primary is not the record's, is
  *    `unauthenticated`, nothing asked.
  * 6. `acr_values`: `selectAcr` over the `amr` step 5 judged on, with reach the union
  *    of every requirement's when the session is live.
@@ -389,10 +389,12 @@ export async function admitSession(
 	let reading: AuthenticationReading | null;
 	if (presented.carrier === "token") reading = tokenReading(presented.tokenAmr);
 	else if (session === null) reading = null;
-	else if (presented.carrier === "code" && checked.codeReading !== undefined) {
-		const over = codeReadingOver(checked.codeReading, session);
-		// The record's primary is not the code's: its other facts are not the
-		// code's session's, and nothing is asked of them.
+	else if (presented.carrier === "code") {
+		// A code that does not say how its session had authenticated, or whose
+		// primary is not the record's, says nothing of this session: nothing
+		// is asked of it.
+		const over =
+			checked.codeReading === undefined ? undefined : codeReadingOver(checked.codeReading, session);
 		if (over === undefined) return { outcome: "unauthenticated" };
 		reading = over;
 	} else reading = sessionReading(session);

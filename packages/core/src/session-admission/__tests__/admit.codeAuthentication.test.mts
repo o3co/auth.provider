@@ -19,10 +19,10 @@
  * admitted it — the code's `authentication` (`primary`, `mfaAt`) and its
  * `amr` — not on the live record, which a step-up may have moved since. What
  * a step-up never changes (`federation`, `upstreamAmr`, `upstreamAuthTime`)
- * is read from the live record, only while its primary is the code's. A code
- * that carries no readable `authentication` is judged on the live record in
- * this release step. And the admitted answer's `codeFields`: what a code
- * minted on that admission records.
+ * is read from the live record, while its primary is the code's. A code whose
+ * session is read and which carries no readable `authentication`, or whose
+ * primary is not the record's, is refused. And the admitted answer's
+ * `codeFields`: what a code minted on that admission records.
  */
 
 import { describe, expect, it } from "vitest";
@@ -386,38 +386,47 @@ describe("a code is judged on how its session had authenticated at /authorize", 
 	});
 });
 
-describe("a code that carries no readable authentication is judged on the live record in this release step", () => {
-	it("as before: the record's authentication and what it vouches for", async () => {
-		const live = {
-			authentication: {
-				primary: "pwd",
-				federation: undefined,
-				upstreamAmr: undefined,
-				mfaAt: MFA_AT,
-			},
-			amr: ["pwd", "otp", "mfa"],
-		};
-		const unreadable: unknown[] = [
-			undefined,
-			null,
-			"pwd",
-			[],
-			{ primary: "" },
-			{ primary: 7 },
-			{ primary: "pwd", mfaAt: "2026-10-06T11:59:00Z" },
-			{ primary: "pwd", mfaAt: new Date(Number.NaN) },
-			{ primary: "pwd", mfaAt: new Date(-1) },
+describe("a code that carries no readable authentication is refused once its session is read", () => {
+	const unreadable: unknown[] = [
+		undefined,
+		null,
+		"pwd",
+		[],
+		{ primary: "" },
+		{ primary: 7 },
+		{ primary: "pwd", mfaAt: "2026-10-06T11:59:00Z" },
+		{ primary: "pwd", mfaAt: new Date(Number.NaN) },
+		{ primary: "pwd", mfaAt: new Date(-1) },
+	];
+
+	it("as unauthenticated, on both reads, before any requirement is asked — one an earlier release issued included", async () => {
+		const codes = [
+			...unreadable.map((authentication) => record({ sid: "sid-1", amr: ["pwd"], authentication })),
+			record({ sid: "sid-1", amr: ["pwd"] }),
+			record({ sid: "sid-1" }),
 		];
-		for (const authentication of unreadable) {
-			expect(
-				await judgedOn(
-					steppedUp(),
-					codeClaimFirstRead(record({ sid: "sid-1", amr: ["pwd"], authentication })),
-				),
-				JSON.stringify(authentication),
-			).toEqual(live);
+		for (const code of codes) {
+			const { requirement, seen } = watching();
+			for (const claim of [codeClaimFirstRead(code), codeClaimRevalidation(code, "user-1")]) {
+				expect(
+					await admitSession(deps(steppedUp(), [requirement]), { claim, action: "test.use" }),
+					JSON.stringify(code),
+				).toEqual({ outcome: "unauthenticated" });
+			}
+			expect(seen, JSON.stringify(code)).toEqual([]);
 		}
-		expect(await judgedOn(steppedUp(), codeClaimFirstRead(record({ sid: "sid-1" })))).toEqual(live);
+	});
+
+	it("is read as before without a session store: there is no session to judge it against, and the requirements decide", async () => {
+		const { requirement, seen } = watching();
+		expect(
+			await admitSession(deps(undefined, [requirement]), {
+				claim: codeClaimFirstRead(record({})),
+				action: "test.use",
+			}),
+		).toMatchObject({ outcome: "admitted", session: null });
+		expect(seen).toHaveLength(1);
+		expect(seen[0]?.authentication).toBeNull();
 	});
 });
 

@@ -88,7 +88,7 @@ const isStringList = (value: unknown): value is readonly string[] =>
  */
 export interface CheckedRequest {
 	readonly claim: SessionClaim;
-	/** A code claim's: what its builder read of the code; `undefined` when the code carries no readable authentication, and for every other carrier. */
+	/** A code claim's: what its builder read of the code; `undefined` when the code carries no readable authentication — refused once its session is read — and for every other carrier. */
 	readonly codeReading: CodeReading | undefined;
 	readonly action: AdmissionAction;
 	readonly asks: AdmissionAsks | undefined;

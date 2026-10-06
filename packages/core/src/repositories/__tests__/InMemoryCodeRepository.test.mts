@@ -31,6 +31,7 @@ describe("InMemoryCodeRepository", () => {
 		sid: undefined,
 		acr: undefined,
 		amr: undefined,
+		authentication: undefined,
 		grantedScope: undefined,
 		grantedAudience: undefined,
 	};

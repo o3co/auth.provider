@@ -1653,7 +1653,12 @@ with what a store of yours records and refuses. Per port:
   `createCode` pass it, `undefined` without a user-session store. A repository
   that drops it yields tokens without `amr`, and their refresh family carries
   none forward; under `MFA_MODE` (template) / `mfa.mode` `required` such a
-  family is refused at its first refresh.
+  family is refused at its first refresh. Round-trip `authentication` as well
+  (#935): the primary and `mfaAt` `/authorize` read of the session, which the
+  exchange judges the code on with its `amr`, so a step-up recorded between
+  `/authorize` and `/token` does not reach the exchange. Where a user-session
+  store is wired, a code that carries none is refused at the exchange
+  (`400 invalid_grant` `session_invalid`).
 - **`UserSessionStore`.**
   - `authentication`, how the session was established
     (`UserSession.authentication`): round-trip it and
@@ -1975,8 +1980,8 @@ What carries across the step:
   v0.16.0 took no rotation, so the refreshes it made are not counted against
   a grant's budget.
 - **Codes do not cross the step.** A code v0.16.0 issued and nobody redeemed
-  names a session with no lifecycle record, so its exchange is refused, and
-  the relying party authorizes again.
+  names a session with no lifecycle record and carries no `authentication`,
+  so its exchange is refused, and the relying party authorizes again.
 - **Keep `MFA_MODE` (template) / `mfa.mode` off for the first start**, as
   [Your scaffold](#your-scaffold) says, and turn it on as
   [Turning MFA on](#turning-mfa-on) says.
