@@ -17,10 +17,10 @@
 /**
  * The template's MFA switch under the name production, where the MFA stores
  * must be shared: both on Redis, as a production deployment selects them.
- * ioredis is a stand-in, as in `all-modules-composition.multi.test.mts`:
- * nothing here issues a command, and the stores' durability check names what
- * it could not read and goes on. `packages/redis` runs the stores against a
- * real server.
+ * ioredis is a stand-in, as in `all-modules-composition.multi.test.mts`: it
+ * answers `INFO memory` as a default server does, so the stores' eviction gate
+ * passes, and their persistence check names what it could not read and goes
+ * on. `packages/redis` runs the stores against a real server.
  */
 
 import { BootError } from "@o3co/auth-provider-core";
@@ -36,6 +36,10 @@ vi.mock("ioredis", () => {
 		quit: async () => "OK",
 		disconnect: () => undefined,
 		ping: async () => "PONG",
+		// The Redis stores' eviction gate reads the policy from INFO memory: a
+		// default server's.
+		info: async (section: string) =>
+			section === "memory" ? "# Memory\r\nmaxmemory_policy:noeviction\r\n" : null,
 	};
 	const makeMockRedis = (): object =>
 		new Proxy(

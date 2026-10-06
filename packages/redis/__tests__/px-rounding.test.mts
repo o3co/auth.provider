@@ -364,7 +364,7 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 		const lifetimes = [1.2344, 1.2345, 0.0002, 59.999999];
 		for (const ttl of lifetimes) {
 			const recording = federationTokenRecorder();
-			const store = createRedisFederationTokenStore({
+			const store = await createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: recording.client,
 				encryption: { mode: "required", key: Buffer.alloc(32, 7) },
@@ -622,14 +622,14 @@ describe("an expiry or lifetime past the Date range is refused before Redis is a
 			await expect(repo.createCode(codeInput(expiresIn)), String(expiresIn)).rejects.toThrow(
 				RangeError,
 			);
-			expect(() =>
+			await expect(
 				createRedisFederationTokenStore({
 					deploymentMode: "unset",
 					client: federationTokenRecorder().client,
 					encryption: { mode: "required", key: Buffer.alloc(32, 7) },
 					ttl: expiresIn,
 				}),
-			).toThrow(RangeError);
+			).rejects.toThrow(RangeError);
 		}
 		expect(client.px).toEqual([]);
 	});

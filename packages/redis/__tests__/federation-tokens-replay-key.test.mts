@@ -128,7 +128,7 @@ describe("the Redis store hands each attach, versioned read and conditional writ
 				refusal: undefined,
 			}),
 		} as unknown as FederationTokenStoreClient;
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client,
 			encryption: { mode: "allow-plaintext" },
@@ -169,6 +169,15 @@ describe("the Redis store hands each attach, versioned read and conditional writ
 				{
 					get: (_target, method: string) => {
 						if (method === "then") return undefined;
+						// Asked once, by the factory's eviction gate, before the store exists.
+						if (method === "durability") {
+							return async () => ({
+								maxmemoryPolicy: "noeviction",
+								appendOnly: true,
+								snapshots: undefined,
+								refusal: undefined,
+							});
+						}
 						return (..._args: unknown[]) => {
 							calls.push(method);
 							throw new Error(`${method} must not run`);
@@ -176,7 +185,7 @@ describe("the Redis store hands each attach, versioned read and conditional writ
 					},
 				},
 			) as FederationTokenStoreClient;
-			const store = createRedisFederationTokenStore({
+			const store = await createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client,
 				encryption: { mode: "allow-plaintext" },

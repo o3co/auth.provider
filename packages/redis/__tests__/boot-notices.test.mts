@@ -115,9 +115,9 @@ describe("the plaintext guard's notices", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("warns once, object-first, where plaintext is allowed", () => {
+	it("warns once, object-first, where plaintext is allowed", async () => {
 		const { logger, calls } = recordingLogger();
-		createRedisFederationTokenStore({
+		await createRedisFederationTokenStore({
 			client: tokenClient,
 			encryption: PLAINTEXT,
 			environment: "development",
@@ -127,10 +127,10 @@ describe("the plaintext guard's notices", () => {
 		expect(calls).toEqual([plaintextWarning("federation-tokens")]);
 	});
 
-	it("logs once at error, naming what refused it, when the override lets plaintext through", () => {
+	it("logs once at error, naming what refused it, when the override lets plaintext through", async () => {
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
 		const { logger, calls } = recordingLogger();
-		createRedisFederationTokenStore({
+		await createRedisFederationTokenStore({
 			client: tokenClient,
 			encryption: PLAINTEXT,
 			environment: "production",
@@ -186,20 +186,20 @@ describe("the plaintext guard's notices", () => {
 		]);
 	});
 
-	it("the token store's builder writes its context's logger, once", () => {
+	it("the token store's builder writes its context's logger, once", async () => {
 		const { logger, calls } = recordingLogger();
-		redisFederationTokenStoreBuilder(
+		await redisFederationTokenStoreBuilder(
 			{ deploymentMode: "unset", client: tokenClient, encryption: PLAINTEXT },
 			{ logger },
 		);
 		expect(calls).toEqual([plaintextWarning("federation-tokens")]);
 	});
 
-	it("each module writes the composition's logger slot, once", () => {
+	it("each module writes the composition's logger slot, once", async () => {
 		const tokens = recordingLogger();
 		const tokenModule = redisFederationTokenStoreModuleFor();
 		const provideTokens = tokenModule.provides?.federationTokenStore as (deps: unknown) => unknown;
-		provideTokens(
+		await provideTokens(
 			withSection(tokenModule, {
 				federationTokenStoreClient: tokenClient,
 				config: TOKEN_STORE_CONFIG,
@@ -223,10 +223,10 @@ describe("the plaintext guard's notices", () => {
 		expect(grants.calls).toEqual([plaintextWarning("federation-grants")]);
 	});
 
-	it("with no logger handed over, consoleLogger writes the same one line", () => {
+	it("with no logger handed over, consoleLogger writes the same one line", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
-		createRedisFederationTokenStore({
+		await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: tokenClient,
 			encryption: PLAINTEXT,
@@ -238,7 +238,7 @@ describe("the plaintext guard's notices", () => {
 	});
 });
 
-describe("the token store module's eviction-policy notice", () => {
+describe("the token store module's eviction gate, which writes no notice", () => {
 	const SEALED_CONFIG = {
 		"redis-federation-token-store": {
 			encryptionKey: Buffer.alloc(32, 7).toString("base64"),
@@ -299,41 +299,45 @@ describe("the token store module's eviction-policy notice", () => {
 		},
 	);
 
-	it("says once, at info, that it cannot judge a policy it does not know, and boots", async () => {
-		const { store, calls } = await provideOver(report("some-future-policy"));
-		expect(store.kind).toBe("redis");
-		expect(calls).toEqual([
-			{
-				level: "info",
-				args: [
-					{ store: "federation-tokens", adapter: "redis", maxmemoryPolicy: "some-future-policy" },
-					"federation_token_store_eviction_unchecked",
-				],
-			},
-		]);
-	});
-
-	it("says once, at info, that it could not read the policy where the server refuses the question, and boots", async () => {
+	it("refuses, writing no line, a policy it does not know, one it cannot read and a server that cannot answer", async () => {
 		const refusal = Object.assign(new Error("ERR unknown command 'CONFIG'"), {
 			name: "ReplyError",
 		});
-		const { store, calls } = await provideOver(report(undefined, refusal));
-		expect(store.kind).toBe("redis");
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.level).toBe("info");
-		expect(calls[0]?.args[0]).toMatchObject({ store: "federation-tokens", adapter: "redis" });
-		expect(calls[0]?.args[0]).toHaveProperty("err");
-		expect(calls[0]?.args[1]).toBe("federation_token_store_eviction_unchecked");
+		const outage = new Error("connect ECONNREFUSED");
+		for (const [durability, rejection] of [
+			[report("some-future-policy"), { reason: "federation-token-store-evictable" }],
+			[report(undefined, refusal), { reason: "federation-token-store-evictable" }],
+			[
+				async () => {
+					throw outage;
+				},
+				outage,
+			],
+		] as const) {
+			const { logger, calls } = recordingLogger();
+			const module = redisFederationTokenStoreModuleFor();
+			const provide = module.provides?.federationTokenStore as (deps: unknown) => unknown;
+			await expect(
+				provide(
+					withSection(module, {
+						federationTokenStoreClient: { ...tokenClient, durability },
+						config: SEALED_CONFIG,
+						deploymentMode: "multi",
+						logger,
+					}),
+				),
+			).rejects.toMatchObject(rejection);
+			expect(calls).toEqual([]);
+		}
 	});
 
-	it("says the same where the server cannot answer at boot, and boots", async () => {
-		const { store, calls } = await provideOver(async () => {
-			throw new Error("connect ECONNREFUSED");
-		});
+	it("boots, writing no line, on a policy it cannot read when the client assumes noeviction", async () => {
+		const { store, calls } = await provideOver(async () => ({
+			...(await report(undefined)()),
+			assumeNoEviction: true,
+		}));
 		expect(store.kind).toBe("redis");
-		expect(calls.map((call) => [call.level, call.args[1]])).toEqual([
-			["info", "federation_token_store_eviction_unchecked"],
-		]);
+		expect(calls).toEqual([]);
 	});
 });
 

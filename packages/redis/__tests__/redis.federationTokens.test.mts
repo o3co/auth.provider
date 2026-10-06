@@ -54,7 +54,7 @@ const tokens: FederationTokens = {
 };
 
 let suiteCounter = 0;
-const makeStore = (
+const makeStore = async (
 	scanFallback: boolean,
 	encryption: EncryptionConfig = { mode: "allow-plaintext" },
 ) => {
@@ -63,7 +63,7 @@ const makeStore = (
 	const { federationTokenStoreClient } = makeIoredisClients(raw);
 	return {
 		keyPrefix,
-		store: createRedisFederationTokenStore({
+		store: await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: federationTokenStoreClient,
 			encryption,
@@ -75,7 +75,7 @@ const makeStore = (
 
 describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 	it("removes the session's federations without a keyspace scan", async () => {
-		const { keyPrefix, store } = makeStore(false);
+		const { keyPrefix, store } = await makeStore(false);
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);
 		await store.attach("sid-2", "google", tokens);
@@ -91,7 +91,7 @@ describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 	});
 
 	it("handles a session linked to more federations than fit in one batch", async () => {
-		const { keyPrefix, store } = makeStore(false);
+		const { keyPrefix, store } = await makeStore(false);
 		const names = Array.from({ length: 250 }, (_, i) => `idp-${String(i).padStart(3, "0")}`);
 		for (const name of names) await store.attach("sid-many", name, tokens);
 
@@ -102,7 +102,7 @@ describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 	});
 
 	it("the index key never collides with the envelope keyspace", async () => {
-		const { keyPrefix, store } = makeStore(false);
+		const { keyPrefix, store } = await makeStore(false);
 		await store.attach("sid-1", "google", tokens);
 		// The migration fallback matches `${keyPrefix}${sid}:*`; the index must
 		// sit outside it, or one session's sweep would reach another's index.
@@ -111,7 +111,7 @@ describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 	});
 
 	it("delete(sid, name) leaves the remaining federation removable", async () => {
-		const { store } = makeStore(false);
+		const { store } = await makeStore(false);
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);
 		await store.delete("sid-1", "google");
@@ -120,7 +120,7 @@ describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 	});
 
 	it("scanFallback reaches envelopes written before the index existed", async () => {
-		const { keyPrefix, store } = makeStore(true);
+		const { keyPrefix, store } = await makeStore(true);
 		// An envelope with no index member, as written before the index existed.
 		await raw.set(
 			`${keyPrefix}legacy:google`,
@@ -135,7 +135,7 @@ describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 	});
 
 	it("with the fallback off, a pre-index envelope survives — the flag is the migration", async () => {
-		const { keyPrefix, store } = makeStore(false);
+		const { keyPrefix, store } = await makeStore(false);
 		await raw.set(
 			`${keyPrefix}legacy:google`,
 			JSON.stringify({ accessToken: "at", expiresAtMs: null }),
@@ -170,7 +170,7 @@ describe("mode=required over a real Redis", () => {
 	const makeEncrypted = () => makeStore(false, { mode: "required", key: encryptionKey });
 
 	it("stores one ciphertext — no token, no field name in clear", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		await store.attach("sid-1", "google", fullTokens);
 
 		const value = (await raw.get(`${keyPrefix}sid-1:google`)) as string;
@@ -183,7 +183,7 @@ describe("mode=required over a real Redis", () => {
 	});
 
 	it("round-trips every field, a null expiry included", async () => {
-		const { store } = makeEncrypted();
+		const { store } = await makeEncrypted();
 		await store.attach("sid-1", "google", fullTokens);
 		await store.attach("sid-1", "github", { ...fullTokens, expiresAt: null });
 		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
@@ -191,7 +191,7 @@ describe("mode=required over a real Redis", () => {
 	});
 
 	it("drops a legacy per-field record on read — key gone, index member kept, null returned", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		// A legacy per-field record, under the same key this store holds.
 		await raw.set(
 			`${keyPrefix}sid-1:google`,
@@ -214,7 +214,7 @@ describe("mode=required over a real Redis", () => {
 	});
 
 	it("a ciphertext copied to another session's key is refused and removed (AAD)", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		await store.attach("sid-1", "google", fullTokens);
 		const bytes = (await raw.get(`${keyPrefix}sid-1:google`)) as string;
 		await raw.set(`${keyPrefix}sid-2:google`, bytes, "PX", 3600_000);
@@ -251,7 +251,7 @@ describe("obtainedAt over a real Redis", () => {
 
 			/** Replaces the live record of `(sid, google)` at its current generation. */
 			const replace = async (
-				store: ReturnType<typeof makeStore>["store"],
+				store: Awaited<ReturnType<typeof makeStore>>["store"],
 				sid: string,
 				next: FederationTokens,
 			): Promise<void> => {
@@ -263,7 +263,7 @@ describe("obtainedAt over a real Redis", () => {
 			};
 
 			it("round-trips obtainedAt through attach, replaceIf and get", async () => {
-				const { store } = makeStore(false, encryption);
+				const { store } = await makeStore(false, encryption);
 				await store.attach("sid-1", "google", { ...tokens, obtainedAt });
 				expect(await store.get("sid-1", "google")).toStrictEqual({ ...tokens, obtainedAt });
 
@@ -273,7 +273,7 @@ describe("obtainedAt over a real Redis", () => {
 			});
 
 			it("a record without obtainedAt reads back with the key named, as undefined, never null", async () => {
-				const { store } = makeStore(false, encryption);
+				const { store } = await makeStore(false, encryption);
 				await store.attach("sid-1", "google", tokens);
 				const read = await store.get("sid-1", "google");
 				expect(read).toStrictEqual(tokens);
@@ -287,7 +287,7 @@ describe("obtainedAt over a real Redis", () => {
 			});
 
 			it("hands out a copy: mutating either Date leaves the stored value", async () => {
-				const { store } = makeStore(false, encryption);
+				const { store } = await makeStore(false, encryption);
 				const callers = new Date(obtainedAt.getTime());
 				await store.attach("sid-1", "google", { ...tokens, obtainedAt: callers });
 				callers.setTime(0);
@@ -296,7 +296,7 @@ describe("obtainedAt over a real Redis", () => {
 			});
 
 			it("keeps the v2 wrapper", async () => {
-				const { keyPrefix, store } = makeStore(false, encryption);
+				const { keyPrefix, store } = await makeStore(false, encryption);
 				await store.attach("sid-1", "google", { ...tokens, obtainedAt });
 				const record = JSON.parse((await raw.get(`${keyPrefix}sid-1:google`)) as string) as Record<
 					string,
@@ -309,7 +309,7 @@ describe("obtainedAt over a real Redis", () => {
 			});
 
 			it("writes an Invalid Date obtainedAt as absent: the tokens stay readable", async () => {
-				const { store } = makeStore(false, encryption);
+				const { store } = await makeStore(false, encryption);
 				await store.attach("sid-1", "google", { ...tokens, obtainedAt: new Date(Number.NaN) });
 				const read = await store.get("sid-1", "google");
 				expect(read).toStrictEqual(tokens);
@@ -325,7 +325,7 @@ describe("obtainedAt over a real Redis", () => {
 			])(
 				"a corrupt obtainedAtMs (%s) self-heals: key gone, index member kept, null returned",
 				async (_label, value) => {
-					const { keyPrefix, store } = makeStore(false, encryption);
+					const { keyPrefix, store } = await makeStore(false, encryption);
 					await store.attach("sid-1", "github", tokens);
 					const key = `${keyPrefix}sid-1:google`;
 					await raw.set(
@@ -365,7 +365,7 @@ describe("conditional writes over a real Redis", () => {
 	};
 
 	const live = async (
-		store: ReturnType<typeof makeEncrypted>["store"],
+		store: Awaited<ReturnType<typeof makeEncrypted>>["store"],
 		sid: string,
 		name: string,
 	) => {
@@ -375,7 +375,7 @@ describe("conditional writes over a real Redis", () => {
 	};
 
 	it("keeps the generation in the wrapper, outside the ciphertext, and moves it on every write", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const record = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
@@ -393,7 +393,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("mints a generation into a record written without one, at its first versioned read, keeping its TTL", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		await rewriteWithoutGeneration(key, 600_000);
@@ -416,7 +416,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("answers conflict to a conditional write against a record rewritten without a generation, and mints nothing", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const read = await live(store, "sid-1", "google");
@@ -455,7 +455,7 @@ describe("conditional writes over a real Redis", () => {
 				};
 			},
 		});
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client,
 			encryption: { mode: "required", key: encryptionKey },
@@ -496,7 +496,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("a versioned read past its deadline mints nothing; one on time keeps its mint under its replay key the declared clock skew past its deadline", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const bytes = await rewriteWithoutGeneration(key, 600_000);
@@ -527,7 +527,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("mints a generation into a v2 record without one whatever the order of its fields, splicing it in before the bytes it read", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const { c } = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
@@ -543,7 +543,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("rejects a versioned read of a record get still reads but it cannot mint a generation into, and keeps the record", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const { g: _g, ...rest } = JSON.parse((await raw.get(key)) as string) as Record<
@@ -562,7 +562,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("answers null to a versioned read of an unreadable record, removes it, and keeps its index member", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await raw.set(key, "{not-json", "PX", 600_000);
 		await raw.sadd(`${keyPrefix}idx:sid-1`, "google");
@@ -573,7 +573,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("never shrinks the index, and never adds to it but on updated", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const index = `${keyPrefix}idx:sid-1`;
 		await store.attach("sid-1", "google", tokens);
 		const read = await live(store, "sid-1", "google");
@@ -602,7 +602,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("after updated, the index outlives the record, and an index that had expired is made again", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const index = `${keyPrefix}idx:sid-1`;
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
@@ -627,7 +627,7 @@ describe("conditional writes over a real Redis", () => {
 		const { federationTokenStoreClient } = makeIoredisClients(raw);
 		// The index's TTL is raised, then the replace is held back past that TTL's end.
 		const heldMs = 1_500;
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: {
 				...federationTokenStoreClient,
@@ -659,7 +659,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("a replace the driver sends again answers what its first copy answered and writes nothing, after a later write too", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const read = await live(store, "sid-1", "google");
@@ -706,7 +706,7 @@ describe("conditional writes over a real Redis", () => {
 				};
 			},
 		});
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client,
 			encryption: { mode: "required", key: encryptionKey },
@@ -734,7 +734,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("an attach that reaches the server past its deadline writes nothing; one on time keeps its answer the declared clock skew past its deadline", async () => {
-		const { keyPrefix } = makeEncrypted();
+		const { keyPrefix } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
 		const now = await serverClock(() => raw)();
@@ -760,7 +760,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("a removal the driver sends again answers removed, and leaves a record made since", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const read = await live(store, "sid-1", "google");
@@ -782,7 +782,7 @@ describe("conditional writes over a real Redis", () => {
 	it("a logout between a replace and its resent copy leaves the replay answer: the copy answers updated and writes nothing", async () => {
 		// The migration scan is on, and the session id carries a hash tag: the
 		// shape whose replay key could fall under the session's `${prefix}${sid}:*`.
-		const { keyPrefix, store } = makeStore(true);
+		const { keyPrefix, store } = await makeStore(true);
 		const sid = "{sid-1}";
 		const key = `${keyPrefix}${sid}:google`;
 		await store.attach(sid, "google", tokens);
@@ -807,7 +807,7 @@ describe("conditional writes over a real Redis", () => {
 	});
 
 	it("keeps a write's answer until the declared clock skew past its deadline, and no longer", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const read = await live(store, "sid-1", "google");
@@ -842,7 +842,7 @@ return 0`,
 	});
 
 	it("a conditional write that reaches the server past its deadline writes nothing", async () => {
-		const { keyPrefix, store } = makeEncrypted();
+		const { keyPrefix, store } = await makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
 		const read = await live(store, "sid-1", "google");
@@ -906,7 +906,7 @@ describe("conditional writes on a full noeviction server of its own", () => {
 		if (io === undefined) throw new Error("the container did not start");
 		const admin = io;
 		const client = makeIoredisClients(admin).federationTokenStoreClient;
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client,
 			encryption: { mode: "required", key: encryptionKey },

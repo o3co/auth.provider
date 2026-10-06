@@ -158,6 +158,6 @@ export interface SessionLifecycleStoreClient {
 		index: string,
 		sessions: readonly { readonly sid: string; readonly record: string }[],
 	): Promise<readonly string[]>;
-	/** What the server says about keeping what it is written, read once at boot for its eviction policy. */
+	/** What the server says about keeping what it is written, read once by the factory for its eviction gate. */
 	durability(): Promise<RedisDurability>;
 }

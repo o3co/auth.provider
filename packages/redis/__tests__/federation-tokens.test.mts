@@ -243,8 +243,8 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		redis = createFakeRedis();
 	});
 
-	it("kind is 'redis'", () => {
-		const store = createRedisFederationTokenStore({
+	it("kind is 'redis'", async () => {
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
@@ -253,7 +253,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	});
 
 	it("attach encrypts refreshToken at rest", async () => {
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
@@ -270,7 +270,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	it("round-trips grantedScope, and a record written without one", async () => {
 		// The ceiling a refresh is bounded by has to survive the store, and a
 		// record written before the field existed has to keep opening.
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
@@ -285,7 +285,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	});
 
 	it("removeBySid removes all federations for sid", async () => {
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
@@ -299,93 +299,92 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		expect(await store.get("sid-2", "google")).toStrictEqual(tokens);
 	});
 
-	it("missing encryption key throws at construction", () => {
-		expect(() =>
+	it("missing encryption key throws at construction", async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "required", key: Buffer.alloc(0) },
 			}),
-		).toThrow(/encryption key/i);
+		).rejects.toThrow(/encryption key/i);
 	});
 
-	it("names itself when it refuses plaintext: the guard is shared, the message is not", () => {
+	it("names itself when it refuses plaintext: the guard is shared, the message is not", async () => {
 		// The guard lives in `internal/encryption-mode.mts` and the federation
 		// grant store uses it too, with its own label. An operator reading
 		// a boot failure has to be told which store refused.
 		const previous = process.env.NODE_ENV;
 		process.env.NODE_ENV = "production";
 		try {
-			expect(() =>
+			await expect(
 				createRedisFederationTokenStore({
 					deploymentMode: "unset",
 					client: redis,
 					encryption: { mode: "allow-plaintext" },
 				}),
-			).toThrow(/\[federation-tokens\] mode "allow-plaintext" is refused/);
+			).rejects.toThrow(/\[federation-tokens\] mode "allow-plaintext" is refused/);
 		} finally {
 			if (previous === undefined) delete process.env.NODE_ENV;
 			else process.env.NODE_ENV = previous;
 		}
 	});
 
-	it("refuses an unusable ttl with a RangeError, as the shared expiry rule refuses every lifetime", () => {
+	it("refuses an unusable ttl with a RangeError, as the shared expiry rule refuses every lifetime", async () => {
 		for (const ttl of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1e13]) {
-			expect(
-				() =>
-					createRedisFederationTokenStore({
-						deploymentMode: "unset",
-						client: redis,
-						encryption: { mode: "allow-plaintext" },
-						ttl,
-					}),
+			await expect(
+				createRedisFederationTokenStore({
+					deploymentMode: "unset",
+					client: redis,
+					encryption: { mode: "allow-plaintext" },
+					ttl,
+				}),
 				String(ttl),
-			).toThrow(RangeError);
+			).rejects.toThrow(RangeError);
 		}
 	});
 
-	it("rejects ttl: 0 at construction", () => {
-		expect(() =>
+	it("rejects ttl: 0 at construction", async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "allow-plaintext" },
 				ttl: 0,
 			}),
-		).toThrow(/ttl must be a positive finite number/i);
+		).rejects.toThrow(/ttl must be a positive finite number/i);
 	});
 
-	it("rejects ttl: -1 at construction", () => {
-		expect(() =>
+	it("rejects ttl: -1 at construction", async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "allow-plaintext" },
 				ttl: -1,
 			}),
-		).toThrow(/ttl must be a positive finite number/i);
+		).rejects.toThrow(/ttl must be a positive finite number/i);
 	});
 
-	it("rejects ttl: NaN at construction", () => {
-		expect(() =>
+	it("rejects ttl: NaN at construction", async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "allow-plaintext" },
 				ttl: Number.NaN,
 			}),
-		).toThrow(/ttl must be a positive finite number/i);
+		).rejects.toThrow(/ttl must be a positive finite number/i);
 	});
 
-	it("rejects ttl: Infinity at construction", () => {
-		expect(() =>
+	it("rejects ttl: Infinity at construction", async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "allow-plaintext" },
 				ttl: Number.POSITIVE_INFINITY,
 			}),
-		).toThrow(/ttl must be a positive finite number/i);
+		).rejects.toThrow(/ttl must be a positive finite number/i);
 	});
 });
 
@@ -396,7 +395,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 	});
 
 	it("attach stores refreshToken in clear (opt-in)", async () => {
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -410,7 +409,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 	});
 
 	it("get() self-heals corrupt JSON by deleting the key, only while it holds the bytes read", async () => {
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -427,7 +426,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		// as `null` before `open()` ran, it would keep the key: a record that is
 		// never served and never reclaimed until the TTL. The index member stays:
 		// a concurrent `attach` may have just added it.
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -444,13 +443,13 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		const keyA = Buffer.alloc(32, 1);
 		const keyB = Buffer.alloc(32, 2);
 		// Encrypt with keyA, try to read with keyB.
-		const writer = createRedisFederationTokenStore({
+		const writer = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: keyA },
 		});
 		await writer.attach("sid-1", "google", tokens);
-		const reader = createRedisFederationTokenStore({
+		const reader = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: keyB },
@@ -462,9 +461,9 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 });
 
 describe("redis FederationTokenStore implements SupportsLock", () => {
-	it("supportsLock returns true for the redis store", () => {
+	it("supportsLock returns true for the redis store", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -474,7 +473,7 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 
 	it("acquireLock returns acquired: true and release cleans up", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -492,7 +491,7 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 
 	it("lock key uses the lock: sub-namespace, not the token envelope namespace", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -530,7 +529,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 	});
 
 	it("default TTL (24h) is used regardless of tokens.expiresAt", async () => {
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -553,7 +552,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 	});
 
 	it("custom TTL option is honored", async () => {
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -564,7 +563,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 	});
 
 	it("access token expiresAt is preserved in the envelope for consumer refresh decisions", async () => {
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -581,7 +580,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 		// persist as `null` in the envelope and read back as `null`, so refresh
 		// logic can detect "no finite expiry" rather than get `new Date(null)`,
 		// the epoch.
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -620,37 +619,37 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 
 	const mockClient = createFakeRedis() as unknown as FederationTokenStoreClient;
 
-	it("throws when NODE_ENV=production and mode=allow-plaintext (no override)", () => {
+	it("throws when NODE_ENV=production and mode=allow-plaintext (no override)", async () => {
 		process.env.NODE_ENV = "production";
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
-		expect(() =>
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{ deploymentMode: "unset", client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
-		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
+		).rejects.toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
 	});
 
-	it("throws when NODE_ENV=staging and mode=allow-plaintext (no override)", () => {
+	it("throws when NODE_ENV=staging and mode=allow-plaintext (no override)", async () => {
 		process.env.NODE_ENV = "staging";
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
-		expect(() =>
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{ deploymentMode: "unset", client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
-		).toThrow(/mode "allow-plaintext" is refused because the environment is "staging"/);
+		).rejects.toThrow(/mode "allow-plaintext" is refused because the environment is "staging"/);
 	});
 
-	it("succeeds in production with FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch (logs federation_store_plaintext_override at error)", () => {
+	it("succeeds in production with FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch (logs federation_store_plaintext_override at error)", async () => {
 		process.env.NODE_ENV = "production";
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
-		expect(() =>
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{ deploymentMode: "unset", client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
-		).not.toThrow();
+		).resolves.toBeDefined();
 		expect(errorSpy.mock.calls).toEqual([
 			[
 				expect.objectContaining({
@@ -663,25 +662,25 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 		]);
 	});
 
-	it("succeeds in development with allow-plaintext (warn-only)", () => {
+	it("succeeds in development with allow-plaintext (warn-only)", async () => {
 		process.env.NODE_ENV = "development";
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
-		expect(() =>
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{ deploymentMode: "unset", client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
-		).not.toThrow();
+		).resolves.toBeDefined();
 		expect(warnSpy.mock.calls).toEqual([
 			[{ store: "federation-tokens", mode: "allow-plaintext" }, "federation_store_plaintext"],
 		]);
 	});
 
-	it("succeeds silently with mode=required in production (no warn, no throw)", () => {
+	it("succeeds silently with mode=required in production (no warn, no throw)", async () => {
 		process.env.NODE_ENV = "production";
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
 		const key32 = Buffer.alloc(32, 1).toString("base64");
-		expect(() =>
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{
 					deploymentMode: "unset",
@@ -690,7 +689,7 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 				},
 				{},
 			),
-		).not.toThrow();
+		).resolves.toBeDefined();
 		expect(warnSpy).not.toHaveBeenCalled();
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
@@ -699,17 +698,17 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 	// run the same production guard as the builder: otherwise a consumer
 	// calling the factory directly with `mode: "allow-plaintext"` in
 	// production ships unencrypted refresh tokens.
-	it("createRedisFederationTokenStore (lower-level export) ALSO throws in production+allow-plaintext", () => {
+	it("createRedisFederationTokenStore (lower-level export) ALSO throws in production+allow-plaintext", async () => {
 		process.env.NODE_ENV = "production";
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
 		const fake = createFakeRedis();
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: fake,
 				encryption: { mode: "allow-plaintext" },
 			}),
-		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
+		).rejects.toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
 	});
 });
 
@@ -749,45 +748,45 @@ describe("the plaintext guard reads the selected environment and core.deployment
 
 	const plaintext = { mode: "allow-plaintext" } as const;
 
-	it("refuses plaintext when the explicit environment is production, whatever NODE_ENV says", () => {
+	it("refuses plaintext when the explicit environment is production, whatever NODE_ENV says", async () => {
 		// NODE_ENV=development (see beforeEach): the config was selected by
 		// CONFIG_ENV=production, and that is the environment that counts.
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: createFakeRedis(),
 				encryption: plaintext,
 				environment: "production",
 			}),
-		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
+		).rejects.toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
 	});
 
-	it("still refuses on NODE_ENV=production when the explicit environment is not — the guard unions the two", () => {
+	it("still refuses on NODE_ENV=production when the explicit environment is not — the guard unions the two", async () => {
 		// Passing an environment adds a signal; it does not take NODE_ENV's
 		// away. A process that says production anywhere is production.
 		process.env.NODE_ENV = "production";
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: createFakeRedis(),
 				encryption: plaintext,
 				environment: "development",
 			}),
-		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
+		).rejects.toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
 	});
 
-	it("falls back to NODE_ENV when no environment is passed", () => {
+	it("falls back to NODE_ENV when no environment is passed", async () => {
 		process.env.NODE_ENV = "staging";
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: createFakeRedis(),
 				encryption: plaintext,
 			}),
-		).toThrow(/the environment is "staging"/);
+		).rejects.toThrow(/the environment is "staging"/);
 	});
 
-	it("reads each name whatever its case and the whitespace around it, and reports it trimmed and in lower case", () => {
+	it("reads each name whatever its case and the whitespace around it, and reports it trimmed and in lower case", async () => {
 		// "Production" or "production\n" names production as surely as
 		// "production" does, in the explicit environment and in NODE_ENV alike.
 		for (const environment of [
@@ -797,71 +796,70 @@ describe("the plaintext guard reads the selected environment and core.deployment
 			"STAGING",
 			"\tStaging ",
 		]) {
-			expect(
-				() =>
-					createRedisFederationTokenStore({
-						deploymentMode: "unset",
-						client: createFakeRedis(),
-						encryption: plaintext,
-						environment,
-					}),
+			await expect(
+				createRedisFederationTokenStore({
+					deploymentMode: "unset",
+					client: createFakeRedis(),
+					encryption: plaintext,
+					environment,
+				}),
 				JSON.stringify(environment),
-			).toThrow(
+			).rejects.toThrow(
 				/mode "allow-plaintext" is refused because the environment is "(production|staging)"/,
 			);
 		}
 		for (const nodeEnv of ["Production", " staging\n"]) {
 			process.env.NODE_ENV = nodeEnv;
-			expect(
-				() =>
-					createRedisFederationTokenStore({
-						deploymentMode: "unset",
-						client: createFakeRedis(),
-						encryption: plaintext,
-					}),
+			await expect(
+				createRedisFederationTokenStore({
+					deploymentMode: "unset",
+					client: createFakeRedis(),
+					encryption: plaintext,
+				}),
 				JSON.stringify(nodeEnv),
-			).toThrow(new RegExp(`because the environment is "${nodeEnv.trim().toLowerCase()}"\\. `));
+			).rejects.toThrow(
+				new RegExp(`because the environment is "${nodeEnv.trim().toLowerCase()}"\\. `),
+			);
 		}
 	});
 
-	it("reports the first name that reads as production or staging, the explicit environment before NODE_ENV", () => {
+	it("reports the first name that reads as production or staging, the explicit environment before NODE_ENV", async () => {
 		process.env.NODE_ENV = "staging";
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: createFakeRedis(),
 				encryption: plaintext,
 				environment: " Production ",
 			}),
-		).toThrow(/because the environment is "production"\. /);
+		).rejects.toThrow(/because the environment is "production"\. /);
 	});
 
-	it("an empty or blank environment names none, and does not lift NODE_ENV", () => {
+	it("an empty or blank environment names none, and does not lift NODE_ENV", async () => {
 		process.env.NODE_ENV = "production";
 		for (const environment of ["", "  "]) {
-			expect(
-				() =>
-					createRedisFederationTokenStore({
-						deploymentMode: "unset",
-						client: createFakeRedis(),
-						encryption: plaintext,
-						environment,
-					}),
+			await expect(
+				createRedisFederationTokenStore({
+					deploymentMode: "unset",
+					client: createFakeRedis(),
+					encryption: plaintext,
+					environment,
+				}),
 				JSON.stringify(environment),
-			).toThrow(/because the environment is "production"\. /);
+			).rejects.toThrow(/because the environment is "production"\. /);
 		}
 	});
 
-	it("the escape hatch's error names the environment trimmed and in lower case", () => {
+	it("the escape hatch's error names the environment trimmed and in lower case", async () => {
 		process.env.NODE_ENV = "Production\n";
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client: createFakeRedis(),
 				encryption: plaintext,
 			}),
-		).not.toThrow();
+		).resolves.toBeDefined();
 		expect(errorSpy.mock.calls).toEqual([
 			[
 				{
@@ -875,52 +873,54 @@ describe("the plaintext guard reads the selected environment and core.deployment
 		]);
 	});
 
-	it('refuses plaintext under core.deployment.mode = "multi" regardless of environment', () => {
-		expect(() =>
+	it('refuses plaintext under core.deployment.mode = "multi" regardless of environment', async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				client: createFakeRedis(),
 				encryption: plaintext,
 				environment: "development",
 				deploymentMode: "multi",
 			}),
-		).toThrow(/mode "allow-plaintext" is refused because core\.deployment\.mode is "multi"/);
+		).rejects.toThrow(
+			/mode "allow-plaintext" is refused because core\.deployment\.mode is "multi"/,
+		);
 	});
 
-	it("names both reasons when both apply", () => {
-		expect(() =>
+	it("names both reasons when both apply", async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				client: createFakeRedis(),
 				encryption: plaintext,
 				environment: "production",
 				deploymentMode: "multi",
 			}),
-		).toThrow(/the environment is "production" and core\.deployment\.mode is "multi"/);
+		).rejects.toThrow(/the environment is "production" and core\.deployment\.mode is "multi"/);
 	});
 
-	it('warns and continues under core.deployment.mode = "single" in development', () => {
-		expect(() =>
+	it('warns and continues under core.deployment.mode = "single" in development', async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				client: createFakeRedis(),
 				encryption: plaintext,
 				environment: "development",
 				deploymentMode: "single",
 			}),
-		).not.toThrow();
+		).resolves.toBeDefined();
 		expect(warnSpy.mock.calls).toEqual([
 			[{ store: "federation-tokens", mode: "allow-plaintext" }, "federation_store_plaintext"],
 		]);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
-	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch for the multi refusal too, logged at error", () => {
+	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch for the multi refusal too, logged at error", async () => {
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				client: createFakeRedis(),
 				encryption: plaintext,
 				deploymentMode: "multi",
 			}),
-		).not.toThrow();
+		).resolves.toBeDefined();
 		expect(errorSpy.mock.calls).toEqual([
 			[
 				{
@@ -934,31 +934,31 @@ describe("the plaintext guard reads the selected environment and core.deployment
 		]);
 	});
 
-	it("the builder forwards environment and deploymentMode to the same guard", () => {
+	it("the builder forwards environment and deploymentMode to the same guard", async () => {
 		const client = createFakeRedis() as unknown as FederationTokenStoreClient;
-		expect(() =>
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{ deploymentMode: "unset", client, encryption: plaintext, environment: "production" },
 				{},
 			),
-		).toThrow(/the environment is "production"/);
-		expect(() =>
+		).rejects.toThrow(/the environment is "production"/);
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{ client, encryption: plaintext, deploymentMode: "multi" },
 				{},
 			),
-		).toThrow(/core\.deployment\.mode is "multi"/);
+		).rejects.toThrow(/core\.deployment\.mode is "multi"/);
 	});
 
-	it('mode = "required" is silent under multi in production — the guard is about plaintext only', () => {
-		expect(() =>
+	it('mode = "required" is silent under multi in production — the guard is about plaintext only', async () => {
+		await expect(
 			createRedisFederationTokenStore({
 				client: createFakeRedis(),
 				encryption: { mode: "required", key: encryptionKey },
 				environment: "production",
 				deploymentMode: "multi",
 			}),
-		).not.toThrow();
+		).resolves.toBeDefined();
 		expect(warnSpy).not.toHaveBeenCalled();
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
@@ -972,7 +972,7 @@ describe("the plaintext guard reads the selected environment and core.deployment
 // ---------------------------------------------------------------------------
 
 describe("redisFederationTokenStoreBuilder structural validator", () => {
-	it("rejects clients missing compareAndDelete with a clear message", () => {
+	it("rejects clients missing compareAndDelete with a clear message", async () => {
 		const oldShapeClient = {
 			get: vi.fn(),
 			set: vi.fn(),
@@ -984,7 +984,7 @@ describe("redisFederationTokenStoreBuilder structural validator", () => {
 			scanIterator: vi.fn(),
 			// compareAndDelete intentionally absent
 		};
-		expect(() =>
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{
 					deploymentMode: "unset",
@@ -993,7 +993,7 @@ describe("redisFederationTokenStoreBuilder structural validator", () => {
 				},
 				{},
 			),
-		).toThrow(/missing required method.*compareAndDelete/);
+		).rejects.toThrow(/missing required method.*compareAndDelete/);
 	});
 });
 
@@ -1034,7 +1034,7 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 		});
 
 	it("nothing but a version and a ciphertext reaches Redis", async () => {
-		await requiredStore().attach("sid-1", "google", fullTokens);
+		await (await requiredStore()).attach("sid-1", "google", fullTokens);
 		const raw = redis.data.get("ft:sid-1:google") as string;
 		for (const marker of plaintextMarkers) expect(raw).not.toContain(marker);
 		// The shape, not just the values: no envelope field name is visible.
@@ -1045,13 +1045,13 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 	});
 
 	it("round-trips every field", async () => {
-		const store = requiredStore();
+		const store = await requiredStore();
 		await store.attach("sid-1", "google", fullTokens);
 		expect(await store.get("sid-1", "google")).toStrictEqual(fullTokens);
 	});
 
 	it("replaceIf() writes the same shape and round-trips too", async () => {
-		const store = requiredStore();
+		const store = await requiredStore();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("sid-1/google is not live");
@@ -1067,7 +1067,7 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 	});
 
 	it("round-trips expiresAt: null inside the encrypted envelope", async () => {
-		const store = requiredStore();
+		const store = await requiredStore();
 		await store.attach("sid-gh", "github", { ...fullTokens, expiresAt: null });
 		const round = await store.get("sid-gh", "github");
 		expect(round?.expiresAt).toBeNull();
@@ -1075,7 +1075,7 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 	});
 
 	it("drops a legacy per-field envelope on read: key gone, index member kept, null returned", async () => {
-		const store = requiredStore();
+		const store = await requiredStore();
 		// The legacy per-field shape: token fields encrypted under the SAME key,
 		// the envelope around them in clear. Same key on purpose — it
 		// proves the record is dropped for its shape, not because it happens to
@@ -1101,7 +1101,7 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 	});
 
 	it("refuses a plaintext v2 record — mode=required has no plaintext-readable path", async () => {
-		const store = requiredStore();
+		const store = await requiredStore();
 		redis.data.set(
 			"ft:sid-1:google",
 			JSON.stringify({ v: 2, p: { accessToken: "at-secret", expiresAtMs: null } }),
@@ -1111,7 +1111,7 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 	});
 
 	it("a ciphertext copied under another session's key fails to decrypt and self-heals (AAD)", async () => {
-		const store = requiredStore();
+		const store = await requiredStore();
 		await store.attach("sid-1", "google", fullTokens);
 		const bytes = redis.data.get("ft:sid-1:google") as string;
 
@@ -1132,11 +1132,11 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 	});
 
 	it("the binding is to the full Redis key, keyPrefix included", async () => {
-		const writer = requiredStore();
+		const writer = await requiredStore();
 		await writer.attach("sid-1", "google", fullTokens);
 		const bytes = redis.data.get("ft:sid-1:google") as string;
 		redis.data.set("other:sid-1:google", bytes);
-		const reader = createRedisFederationTokenStore({
+		const reader = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
@@ -1160,7 +1160,7 @@ describe("mode=allow-plaintext keeps the envelope as plain JSON (development onl
 		});
 
 	it("round-trips every field, expiresAt: null included", async () => {
-		const store = plaintextStore();
+		const store = await plaintextStore();
 		await store.attach("sid-1", "google", fullTokens);
 		expect(await store.get("sid-1", "google")).toStrictEqual(fullTokens);
 		await store.attach("sid-gh", "github", { ...fullTokens, expiresAt: null });
@@ -1168,7 +1168,7 @@ describe("mode=allow-plaintext keeps the envelope as plain JSON (development onl
 	});
 
 	it("is readable in clear, under the same versioned wrapper", async () => {
-		await plaintextStore().attach("sid-1", "google", fullTokens);
+		await (await plaintextStore()).attach("sid-1", "google", fullTokens);
 		const raw = redis.data.get("ft:sid-1:google") as string;
 		for (const marker of plaintextMarkers) expect(raw).toContain(marker);
 		const record = JSON.parse(raw) as Record<string, unknown>;
@@ -1177,7 +1177,7 @@ describe("mode=allow-plaintext keeps the envelope as plain JSON (development onl
 	});
 
 	it("drops a legacy per-field envelope here too — one read path, no shape sniffing", async () => {
-		const store = plaintextStore();
+		const store = await plaintextStore();
 		redis.data.set(
 			"ft:sid-1:google",
 			JSON.stringify({ accessToken: "at-secret", expiresAtMs: null, scope: "openid" }),
@@ -1190,13 +1190,13 @@ describe("mode=allow-plaintext keeps the envelope as plain JSON (development onl
 	});
 
 	it("refuses a ciphertext record — allow-plaintext has no key to read it with", async () => {
-		const writer = createRedisFederationTokenStore({
+		const writer = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
 		});
 		await writer.attach("sid-1", "google", fullTokens);
-		expect(await plaintextStore().get("sid-1", "google")).toBeNull();
+		expect(await (await plaintextStore()).get("sid-1", "google")).toBeNull();
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
 });
@@ -1271,7 +1271,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 	for (const mode of ["required", "allow-plaintext"] as const) {
 		describe(`mode=${mode}`, () => {
 			it.each(malformed)("inner envelope is %s", async (_label, innerJson) => {
-				const store = storeFor(mode);
+				const store = await storeFor(mode);
 				writeV2(mode, "ft:sid-1:google", innerJson);
 				redis.sets.set("ft:idx:sid-1", new Set(["google", "github"]));
 
@@ -1282,7 +1282,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 			});
 
 			it("still reads the minimal valid envelope — optional fields may be absent", async () => {
-				const store = storeFor(mode);
+				const store = await storeFor(mode);
 				writeV2(mode, "ft:sid-1:google", '{"accessToken":"at","expiresAtMs":null}');
 				// Absent from the envelope, but named on the record it reads to.
 				expect(await store.get("sid-1", "google")).toStrictEqual({
@@ -1308,7 +1308,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 					// `rawParams` is not a field. An envelope that carries it must not
 					// become unreadable, which would lose the connection's tokens; the
 					// field is ignored, and the next write does not carry it.
-					const store = storeFor(mode);
+					const store = await storeFor(mode);
 					writeV2(
 						mode,
 						"ft:sid-1:google",
@@ -1324,7 +1324,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 			it("reads an envelope carrying a key it does not know, and drops it", async () => {
 				// What lets a replica read a record a newer release wrote: an added
 				// envelope field is ignored, and the wrapper version stays.
-				const store = storeFor(mode);
+				const store = await storeFor(mode);
 				writeV2(
 					mode,
 					"ft:sid-1:google",
@@ -1336,7 +1336,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 			});
 
 			it("reads obtainedAtMs as obtainedAt, and its absence as undefined, the key named", async () => {
-				const store = storeFor(mode);
+				const store = await storeFor(mode);
 				writeV2(
 					mode,
 					"ft:sid-1:google",
@@ -1356,7 +1356,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 				["the start of the Date range", -8_640_000_000_000_000],
 				["an instant before 1970", -86_400_000],
 			])("reads obtainedAtMs at %s as a Date", async (_label, ms) => {
-				const store = storeFor(mode);
+				const store = await storeFor(mode);
 				writeV2(
 					mode,
 					"ft:sid-1:google",
@@ -1367,7 +1367,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 			});
 
 			it("still reads a finite expiresAtMs as a Date", async () => {
-				const store = storeFor(mode);
+				const store = await storeFor(mode);
 				writeV2(mode, "ft:sid-1:google", '{"accessToken":"at","expiresAtMs":1900000000000}');
 				expect((await store.get("sid-1", "google"))?.expiresAt).toEqual(
 					new Date(1_900_000_000_000),
@@ -1403,7 +1403,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		});
 
 	it("getVersioned removes an unreadable record only while it holds the bytes read, and keeps the index member", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		redis.data.set("ft:sid-1:google", "{not-json");
 		// A write lands between the read and the removal: it is kept.
@@ -1420,7 +1420,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("reads a record whose generation is malformed as unreadable, through get and getVersioned alike", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		for (const g of ["", "has space", 42, null]) {
 			await store.attach("sid-1", "google", tokens);
 			const record = JSON.parse(redis.data.get("ft:sid-1:google") as string) as Record<
@@ -1463,7 +1463,7 @@ describe("redis FederationTokenStore conditional members", () => {
 
 	it("an attach the driver sends again after a later replace does not put the older record back", async () => {
 		const { client, calls, resend } = recording(redis);
-		const store = storeOver(client);
+		const store = await storeOver(client);
 		await store.attach("sid-1", "google", tokens);
 		const attachCommands = calls.splice(0);
 		const read = await store.getVersioned("sid-1", "google");
@@ -1482,7 +1482,7 @@ describe("redis FederationTokenStore conditional members", () => {
 
 	it("an attach the driver sends again after a logout does not bring the record back", async () => {
 		const { client, calls, resend } = recording(redis);
-		const store = storeOver(client);
+		const store = await storeOver(client);
 		await store.attach("sid-1", "google", tokens);
 		const attachCommands = calls.splice(0);
 		await store.removeBySid("sid-1");
@@ -1498,7 +1498,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("rejects an attach answered late as an unknown outcome, never as written nothing", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		redis.attachRecord.mockResolvedValueOnce("late");
 		await expect(store.attach("sid-1", "google", tokens)).rejects.toThrow(
 			/attach was answered past its deadline; the outcome is unknown: another copy may have committed, or may still commit within W/,
@@ -1506,7 +1506,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("stamps an attach with a deadline 1 s past its issue and the declared clock skew, and stops waiting there with an unknown outcome", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		vi.useFakeTimers({ now: 1_000_000, toFake: ["Date", "setTimeout", "clearTimeout"] });
 		redis.attachRecord.mockImplementationOnce(() => new Promise(() => {}));
 		const attached = store.attach("sid-1", "google", tokens);
@@ -1522,7 +1522,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("stamps a versioned read with a deadline 1 s past its issue, keys its mint by the generation it may mint, and stops waiting there", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		vi.useFakeTimers({ now: 1_000_000, toFake: ["Date", "setTimeout", "clearTimeout"] });
 		redis.readVersioned.mockImplementationOnce(() => new Promise(() => {}));
 		const read = store.getVersioned("sid-1", "google");
@@ -1537,7 +1537,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("keys each attach's answer by the generation it writes", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const [, input] = redis.attachRecord.mock.calls[0] as [string, FederationTokenAttachInput];
 		const read = await store.getVersioned("sid-1", "google");
@@ -1545,7 +1545,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("rejects a conditional write answered late as an unknown outcome, never as written nothing", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("not live");
@@ -1576,7 +1576,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	};
 
 	it("rejects with an unknown outcome when a resent replace answers late after its first copy wrote, and the record holds that write", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("not live");
@@ -1599,7 +1599,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("rejects with an unknown outcome when a resent removal answers late after its first copy removed, and the record is gone", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("not live");
@@ -1614,7 +1614,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("stamps each conditional write with a deadline 1 s past its issue, and stops waiting there with an unknown outcome", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("not live");
@@ -1635,7 +1635,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("keeps a write's answer the declared clock skew past its deadline: a copy a lagging server judges at deadline + skew/2 answers the first copy's answer and writes nothing", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("not live");
@@ -1679,7 +1679,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("hands each conditional write the declared clock skew, which its replay key outlives the deadline by", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("not live");
@@ -1697,7 +1697,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("judges a conditional write late at its deadline, not only after it", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("not live");
@@ -1714,7 +1714,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("rejects a versioned read of a readable record it found no generation in and could not mint one into, and keeps the record", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const stored = redis.data.get("ft:sid-1:google") as string;
 		redis.readVersioned.mockResolvedValueOnce({ raw: stored, generation: "" });
@@ -1727,7 +1727,7 @@ describe("redis FederationTokenStore conditional members", () => {
 	});
 
 	it("mints a generation into a v2 record without one whatever the order of its fields", async () => {
-		const store = storeOver();
+		const store = await storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const { g: _g, ...rest } = JSON.parse(redis.data.get("ft:sid-1:google") as string) as Record<
 			string,
@@ -1750,7 +1750,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		expect(FT_ATTACH.source.startsWith("#!")).toBe(false);
 	});
 
-	it("the builder refuses a client without the conditional primitives", () => {
+	it("the builder refuses a client without the conditional primitives", async () => {
 		for (const missing of [
 			"attachRecord",
 			"readVersioned",
@@ -1760,7 +1760,7 @@ describe("redis FederationTokenStore conditional members", () => {
 			"durability",
 		] as const) {
 			const { [missing]: _dropped, ...client } = createFakeRedis();
-			expect(() =>
+			await expect(
 				redisFederationTokenStoreBuilder(
 					{
 						deploymentMode: "unset",
@@ -1769,7 +1769,7 @@ describe("redis FederationTokenStore conditional members", () => {
 					},
 					{},
 				),
-			).toThrow(new RegExp(`missing required method.*${missing}`));
+			).rejects.toThrow(new RegExp(`missing required method.*${missing}`));
 		}
 	});
 });

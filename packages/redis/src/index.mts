@@ -211,8 +211,8 @@ export {
 // ---------------------------------------------------------------------------
 // MFA (ADR 2026-09-25-multi-factor-authentication): enrolled second
 // factors, and the transactions, subject lock and email-proof requirement
-// beside them. Each module checks the server's eviction policy and
-// persistence at boot.
+// beside them. Each factory holds the server to `noeviction`; each module
+// also checks persistence at boot.
 // ---------------------------------------------------------------------------
 export {
 	createRedisMfaFactorStore,
