@@ -231,7 +231,7 @@ async function seedRecoveryCodes(factorStore: MfaFactorStore, count = 3) {
 const nonceDropping = (): Module =>
 	defineModule({
 		name: "test:login-completion-dropping-the-nonce",
-		requires: ["sessionCookiePolicy", "userSessionStore", "csrfGuard"],
+		requires: ["sessionCookiePolicy", "userSessionStore", "sessionLifecycle", "csrfGuard"],
 		optional: ["subjectSessionIndex"],
 		provides: {
 			loginCompletion: (deps: unknown): LoginCompletion => {

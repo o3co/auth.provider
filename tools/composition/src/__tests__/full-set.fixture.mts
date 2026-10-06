@@ -497,13 +497,18 @@ function requirementModules(
 			},
 		};
 		return defineModule<
-			"sessionCookiePolicy" | "userSessionStore" | "sessionRequirementResolver" | "csrfGuard",
+			| "sessionCookiePolicy"
+			| "userSessionStore"
+			| "sessionLifecycle"
+			| "sessionRequirementResolver"
+			| "csrfGuard",
 			"subjectSessionIndex" | "logger"
 		>({
 			name: spec.module,
 			requires: [
 				"sessionCookiePolicy",
 				"userSessionStore",
+				"sessionLifecycle",
 				"sessionRequirementResolver",
 				"csrfGuard",
 			],
@@ -585,6 +590,7 @@ function requirementModules(
 							const established = await establishSession(admission.establishment, {
 								req,
 								userSessionStore: deps.userSessionStore,
+								sessionLifecycle: deps.sessionLifecycle,
 								...(deps.subjectSessionIndex
 									? { subjectSessionIndex: deps.subjectSessionIndex }
 									: {}),

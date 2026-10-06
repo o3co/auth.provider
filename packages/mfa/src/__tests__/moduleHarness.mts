@@ -42,6 +42,7 @@ import {
 	type Module,
 	type RateLimiter,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SubjectRevocation,
 	type UserRepository,
 	type UserSessionStore,
@@ -277,6 +278,29 @@ const sessionSupport = (
  * without its login: core's doubles for the CSRF guard and the login's
  * completion.
  */
+/**
+ * Core's session lifecycle over `store`, which the session package requires
+ * beside a user-session store: a login's record opens, a join is taken, and a
+ * close deletes the user session, as core's close does last.
+ */
+const sessionLifecycleOver = (store: UserSessionStore): Module =>
+	providing("test:session-lifecycle", {
+		sessionLifecycle: (): SessionLifecycle => ({
+			open: async () => ({ outcome: "opened" }),
+			join: async () => ({ outcome: "joined" }),
+			close: async (sid) => {
+				await store.delete(sid);
+				return { outcome: "done", rps: [], federations: [] };
+			},
+			liveness: async (sid) => {
+				const session = await store.get(sid);
+				return session ? { outcome: "live", session } : { outcome: "not_live" };
+			},
+			federations: async () => ({ outcome: "listed", federations: [] }),
+			resumePending: async () => ({ done: 0, pending: 0, unavailable: 0 }),
+		}),
+	});
+
 const loginStandIns = (): Module =>
 	providing("test:login-stand-ins", {
 		csrfGuard: () => createTestCsrfGuard(),
@@ -361,7 +385,10 @@ export function modulesFor(options: BootOptions = {}): {
 					]),
 			...(userSessionStore === null
 				? []
-				: [providing("test:user-session-store", { userSessionStore: () => userSessionStore })]),
+				: [
+						providing("test:user-session-store", { userSessionStore: () => userSessionStore }),
+						sessionLifecycleOver(userSessionStore),
+					]),
 			providing("test:mfa-factor-store", { mfaFactorStore: () => factorStore }),
 			providing("test:mfa-transaction-store", { mfaTransactionStore: () => transactionStore }),
 			...(options.tokenIssuer === null ? [] : [oauthTokenSettingsFor(options.tokenIssuer)]),
