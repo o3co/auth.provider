@@ -1361,13 +1361,16 @@ or writes their keys. Under the section's `keyPrefix` (`ss:` by default):
 | `fi-ended:<sid>` | string: the family index's "ended" mark |
 | `fed:<sid>` | sorted set: the federations the session signed in through |
 
-Each expires with its session. Deleting them sooner is recommended, once no
+Each expires with its session; they may be deleted sooner, once no
 v0.16.0 replica remains: by prefix (`SCAN MATCH`, then `UNLINK`), never with
-`FLUSHDB` or `FLUSHALL`, which takes keys this release reads with them. A
-v0.16.0 session has no lifecycle record and reads as closed, so its user
-signs in again, and a v0.16.0 refresh token bound to it is refused.
+`FLUSHDB` or `FLUSHALL`, which takes keys this release reads with them. Never
+delete the refresh-token family records (`rtfam:`): a revoked family's
+record keeps the access tokens it revoked refused, and a family with no
+record reads as not revoked. A v0.16.0 session has no lifecycle record and
+reads as closed, so its user signs in again, and a v0.16.0 refresh token
+bound to it is refused.
 [Upgrading from v0.16.0](../../docs/upgrading-from-v0.16.0.md#rolling-out-across-a-mixed-fleet)
-has the whole procedure, the refresh-token family keys (`rtfam:`) included.
+has the whole procedure.
 
 ## Contract tests
 

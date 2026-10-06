@@ -1939,33 +1939,32 @@ this release's logout does not look: that logout tells no relying party of it
 and leaves its family unrevoked. So:
 
 1. Stop every v0.16.0 replica, draining its traffic.
-2. With none running, delete what v0.16.0 wrote for its sessions; this
-   release reads none of it, and deleting it is recommended to free the
-   storage. Delete by prefix (`SCAN MATCH <prefix>*`, then `UNLINK` what it
-   returns), never with `FLUSHDB` or `FLUSHALL`: the same database holds keys
-   this release reads, the MFA factors among them, whose loss cannot be
-   undone. With the shipped prefixes (`redis-session-stores.keyPrefix` `ss:`,
-   `redis-refresh-token-family-store.keyPrefix` `rtfam:`;
+2. With none running, you may delete the keys of the three per-session
+   stores v0.16.0 wrote; this release reads none of them, and each expires
+   with its session if left. Delete by prefix (`SCAN MATCH <prefix>*`, then
+   `UNLINK` what it returns), never with `FLUSHDB` or `FLUSHALL`: the same
+   database holds keys this release reads, the MFA factors among them, whose
+   loss cannot be undone. With the shipped prefix
+   (`redis-session-stores.keyPrefix` `ss:`;
    [operator runbook, Key families](operator-runbook.md#key-families) lists
    the keyspace):
 
-   | Keys | What they held | Left alone |
-   | --- | --- | --- |
-   | `ss:rp:*`, `ss:fi:*`, `ss:fi-ended:*`, `ss:fed:*` | v0.16.0's RP registry, refresh-token family index (and its "ended" marks) and federation index, whose adapters `@o3co/auth-provider-redis` no longer has | each expires with its session |
-   | `rtfam:*` | the refresh-token families | each expires with its family: at most `oauth.refreshToken.expiresIn` after it was issued, and a revoked one up to `oauth.accessToken.maxExpiresIn` plus about five minutes past its revocation |
+   | Keys | What they held |
+   | --- | --- |
+   | `ss:rp:*`, `ss:fi:*`, `ss:fi-ended:*`, `ss:fed:*` | v0.16.0's RP registry, refresh-token family index (and its "ended" marks) and federation index, whose adapters `@o3co/auth-provider-redis` no longer has |
 
-   Delete `rtfam:*` only now, before this release first starts: a family it
-   issues has the same key, and deleting it ends that refresh token too. Every
-   refresh token bound to a v0.16.0 session is refused anyway
-   ([every user signs in again](#passkeys-users-and-sessions)). With its
-   family gone, a refresh token without a `sid` is refused too
-   (`400 invalid_grant`, `unknown_family`) under the shipped
-   `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`, `"reject"`;
-   delete the families only under `"reject"`, since `"accept"` redeems a
-   token whose family has no record. Kept, a refresh token without a `sid`
-   is not affected by the upgrade: no logout ever reached it, and the
-   subject's revocation boundary (`revokeAllForSubject`, which a password
-   reset calls) or its expiry ends it, as before.
+   **Never delete the refresh-token family records (`rtfam:*`).** A revoked
+   family's record is what keeps the access tokens issued under it refused:
+   a family with no record reads as not revoked, so deleting one would let
+   an unexpired access token it revoked pass introspection and token
+   exchange again. Leave them to expire on their own. The upgrade needs
+   nothing of them: every refresh token bound to a v0.16.0 session is
+   refused at admission anyway
+   ([every user signs in again](#passkeys-users-and-sessions)), and a
+   refresh token without a `sid` is not affected by the upgrade: no logout
+   ever reached it, and the subject's revocation boundary
+   (`revokeAllForSubject`, which a password reset calls) or its expiry ends
+   it, as before.
 3. Start this release on every replica, every package at the same release.
 
 What carries across the step:

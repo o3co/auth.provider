@@ -2692,10 +2692,11 @@ lists every breaking change since, and which of the steps below each needs.
 ### Rolling out
 
 - **From v0.16.0, upgrade in one coordinated step: no rolling upgrade.** Stop
-  every v0.16.0 replica (drain its traffic), delete what v0.16.0 wrote that
-  the new release no longer reads, then start the new release on every
-  replica (`docs/upgrading-from-v0.16.0.md`, "Rolling out across a mixed
-  fleet", has the keys). v0.16.0 records a session's relying parties and
+  every v0.16.0 replica (drain its traffic), optionally delete the retired
+  per-session store keys, then start the new release on every replica
+  (`docs/upgrading-from-v0.16.0.md`, "Rolling out across a mixed fleet", has
+  the keys). Never delete the refresh-token family records (`rtfam:`): a
+  revoked family's record keeps the access tokens it revoked refused. v0.16.0 records a session's relying parties and
   refresh-token families in the per-session stores, and the new release ends
   a session from its lifecycle record alone: a v0.16.0 replica serving beside
   it hands out tokens whose logout tells no relying party and revokes no
