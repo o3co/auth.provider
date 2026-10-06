@@ -1633,12 +1633,47 @@ describe("/authorize on admission — the session's authentication time is read 
 		expect(harness.createCode).not.toHaveBeenCalled();
 	});
 
-	it("neither max_age nor prompt=login, under prompt=none: such a session is login_required", async () => {
+	it("neither max_age nor prompt=login: back from that login trip with a new session whose authentication time can be read, mints and spends the ask", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async (sid) =>
+				sid === SID
+					? record({ authTime: beyondTheSkew() })
+					: sid === "sid-2"
+						? record({ sid: "sid-2", authTime: new Date(), createdAt: new Date() })
+						: null,
+			),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, baseQuery));
+		const askKey = `reauth:${back.searchParams.get("reauth_ask")}`;
+		expect(harness.records.has(askKey)).toBe(true);
+		harness.login({ isAuthenticated: true, user: { id: SUBJECT }, sid: "sid-2" });
+		expect(
+			codeOf(await authorize(harness.app, Object.fromEntries(back.searchParams.entries()))),
+		).toBe("code-x");
+		expect(harness.createCode).toHaveBeenCalledTimes(1);
+		expect(harness.records.has(askKey)).toBe(false);
+	});
+
+	it("neither max_age nor prompt=login, under prompt=none: such a session is login_required, logged", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record({ authTime: beyondTheSkew() })),
 		});
 		const params = redirectParams(await authorize(harness.app, { ...baseQuery, prompt: "none" }));
 		expect(params.get("error")).toBe("login_required");
+		expect(harness.createCode).not.toHaveBeenCalled();
+		expect(harness.logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: SID, clientId: CLIENT_ID }),
+			"auth_time_ahead_of_clock",
+		);
+	});
+
+	it("neither max_age nor prompt=login, with no ask store to bound the trip: such a session is invalid_request", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: beyondTheSkew() })),
+			sessionStore: false,
+		});
+		const params = redirectParams(await authorize(harness.app, baseQuery));
+		expect(params.get("error")).toBe("invalid_request");
 		expect(harness.createCode).not.toHaveBeenCalled();
 	});
 
