@@ -902,7 +902,9 @@ return {1, redis.call('DEL', KEYS[1])}
  * mark whose end is not after the server's clock or whose time lies further from it than
  * the skew: `{0, now}`. Otherwise keeps the later time and the later end of the mark held,
  * while it stands, and this one, as core's `laterFirstBindingMark` does, written to expire at
- * that end (`PXAT`): `{1, now}`.
+ * that end (`PXAT`), and answers what stood before it: `{1, now, 'mark', atMs}` for a mark
+ * whose end is after the server's clock, `{1, now, 'none'}` for none or one ended, and
+ * `{1, now, 'unreadable'}` for a value that is not a mark or a key of another type.
  *
  * A held mark is judged on its shape alone: `atMs` and `untilMs` and no other field, as the
  * adapter's read-back requires, a time whole and from the epoch, an end after it by no more
@@ -933,9 +935,15 @@ local function mark_of(text)
   return h_at, h_until
 end
 local read, held = pcall(redis.call, 'GET', KEYS[1])
-if read and held then
+local earlier = {'none'}
+if not read then
+  earlier = {'unreadable'}
+elseif held then
   local h_at, h_until = mark_of(held)
-  if h_at ~= nil and h_until > now then
+  if h_at == nil then
+    earlier = {'unreadable'}
+  elseif h_until > now then
+    earlier = {'mark', string.format('%.0f', h_at)}
     if h_at > at then at = h_at end
     if h_until > untl then untl = h_until end
   end
@@ -943,7 +951,7 @@ end
 local until_text = string.format('%.0f', untl)
 local value = '{"atMs":' .. string.format('%.0f', at) .. ',"untilMs":' .. until_text .. '}'
 redis.call('SET', KEYS[1], value, 'PXAT', until_text)
-return {1, stamp}
+return {1, stamp, earlier[1], earlier[2]}
 `.trim();
 
 /**

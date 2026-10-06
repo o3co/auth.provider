@@ -1272,6 +1272,9 @@ written with `PXAT` at that end. A held mark is judged on its shape alone
 `MFA_CLOCK_SKEW_ALLOWANCE_MS`), never on where its time sits on the server's
 clock, so a clock stepped back never lets a note move a mark back; a held
 value without that shape, or a key of another type, gives way to the note.
+The note answers, from the same script, the time of the mark that stood
+before it while that mark's end is after the server's clock, or `null`; a
+held value it replaced is answered as an outage, never as no mark.
 The read script answers the value and the server's clock in one step, and the
 read answers the mark absent only once that clock passes its end: this side's
 clock (`now`) decides nothing about a mark. A value that does not read back as

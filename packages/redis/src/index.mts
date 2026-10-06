@@ -88,6 +88,7 @@ export type {
 	MfaFactorSetRemoveIfInput,
 	MfaFactorSetWriteInput,
 	MfaFactorStoreClient,
+	MfaFirstBindingEarlier,
 	MfaFirstBindingRead,
 	MfaRemovedTransaction,
 	MfaSubjectKeys,

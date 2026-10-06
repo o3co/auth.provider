@@ -324,9 +324,14 @@ export function makeIoredisMfaTransactionStoreClient(
 				[key],
 				[String(input.atMs), String(input.untilMs), String(input.skewMs), String(input.longestMs)],
 			);
-			const [noted, now] = Array.isArray(reply) ? reply : [];
+			const [noted, now, kind, at] = Array.isArray(reply) ? reply : [];
 			const serverNowMs = serverMs(now);
-			if (noted === 1 && serverNowMs !== undefined) return { noted: true };
+			if (noted === 1 && serverNowMs !== undefined) {
+				if (kind === "none") return { noted: true, earlier: null };
+				if (kind === "unreadable") return { noted: true, earlier: "unreadable" };
+				const atMs = serverMs(at);
+				if (kind === "mark" && atMs !== undefined) return { noted: true, earlier: { atMs } };
+			}
 			if (noted === 0 && serverNowMs !== undefined) return { noted: false, serverNowMs };
 			throw new Error(
 				"MfaTransactionStore: the first-binding note script answered nothing it knows",
