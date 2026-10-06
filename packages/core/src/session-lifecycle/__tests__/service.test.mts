@@ -214,7 +214,7 @@ type Harness = ReturnType<typeof harness>;
 
 /** The service said nothing of an outage: its caller logs it, once, with the error. */
 const expectSilentOutage = (h: Harness): void => {
-	expect(h.lines.warn.filter(([, event]) => event === "session_lifecycle_unavailable")).toEqual([]);
+	expect(h.lines.warn).toEqual([]);
 	expect(h.lines.error).toEqual([]);
 };
 
@@ -504,6 +504,19 @@ describe("join", () => {
 			}),
 		});
 		await h.establish();
+		await expect(h.lifecycle.join(SID, { rp: relyingParty("a"), familyId: "f1" })).rejects.toBe(
+			down,
+		);
+		expectSilentOutage(h);
+	});
+
+	it("rejects with the per-session store's own error when the bridge cannot write the join, saying nothing", async () => {
+		const down = new Error("relying-party registry down");
+		const h = harness();
+		await h.establish();
+		h.sessionRPRegistry.registerRP = async () => {
+			throw down;
+		};
 		await expect(h.lifecycle.join(SID, { rp: relyingParty("a"), familyId: "f1" })).rejects.toBe(
 			down,
 		);
@@ -937,6 +950,17 @@ describe("close", () => {
 		await expect(h.lifecycle.close(SID, "rp_logout")).rejects.toThrow(
 			"the close work of a session with no lifecycle record failed at revoke_bridged_families",
 		);
+		expect(h.lines.warn).toEqual([
+			[
+				{
+					sid: SID,
+					item: "revoke_bridged_families",
+					err: expect.objectContaining({ name: "Error" }),
+				},
+				"session_close_item_failed",
+			],
+		]);
+		expect(h.lines.error).toEqual([]);
 		expect(h.calls).not.toContain("delete_user_session");
 		expect(await h.sessions.get(SID)).not.toBeNull();
 		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
@@ -982,6 +1006,12 @@ describe("close", () => {
 			await joinAll(h);
 			h.calls.length = 0;
 			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+			expect(h.lines.warn).toEqual([
+				[
+					{ operation: "complete", sid: SID, err: expect.objectContaining({ name: "Error" }) },
+					"session_lifecycle_unavailable",
+				],
+			]);
 			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
 			expect(h.calls.filter((call) => call === "revoke_family:f1")).toHaveLength(2);
 			expect(h.revoked.has("f1")).toBe(true);
@@ -1449,6 +1479,17 @@ describe("liveness", () => {
 		expectSilentOutage(h);
 	});
 
+	it("rejects with the user-session store's own error when it cannot answer, saying nothing", async () => {
+		const down = new Error("user-session store down");
+		const h = harness();
+		await h.establish();
+		h.sessions.get = async () => {
+			throw down;
+		};
+		await expect(h.lifecycle.liveness(SID)).rejects.toBe(down);
+		expectSilentOutage(h);
+	});
+
 	it.each(UNHOLDABLE_SIDS)(
 		"is not_live for a sid the port cannot hold (%s), reading no store",
 		async (_, sid) => {
@@ -1488,6 +1529,34 @@ describe("resumePending", () => {
 		h.failing.set("notify:a", Number.POSITIVE_INFINITY);
 		await h.lifecycle.close(SID, "rp_logout");
 		expect(await h.lifecycle.resumePending()).toEqual({ done: 0, pending: 1, unavailable: 0 });
+		expect((await h.read())?.value.state).toBe("closing");
+	});
+
+	it("counts a closing record it cannot read as unavailable, and warns for it", async () => {
+		let readDown = false;
+		const h = harness({
+			store: (inner) => ({
+				...inner,
+				read: async (sid) => {
+					if (readDown) throw new Error("lifecycle store down");
+					return inner.read(sid);
+				},
+			}),
+		});
+		await h.establish();
+		await joinAll(h);
+		h.failing.set("delete_user_session", 1);
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
+		h.lines.warn.length = 0;
+		readDown = true;
+		expect(await h.lifecycle.resumePending()).toEqual({ done: 0, pending: 0, unavailable: 1 });
+		expect(h.lines.warn).toEqual([
+			[
+				{ operation: "resume", sid: SID, err: expect.objectContaining({ name: "Error" }) },
+				"session_lifecycle_unavailable",
+			],
+		]);
+		readDown = false;
 		expect((await h.read())?.value.state).toBe("closing");
 	});
 

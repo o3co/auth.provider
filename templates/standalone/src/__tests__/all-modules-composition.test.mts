@@ -834,7 +834,7 @@ const csrfTokenOf = (cookies: readonly string[]): string => {
 };
 
 const ROLLBACK_CLOSE_LOGS =
-	"a login that fails after its record's open closes that record (`packages/session/src/establish-session.mts`), and the close's own work meets the same outage: core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) warns `session_close_item_failed` for the item and keeps the close pending for its sweep, a second line for one outage. Fixed before 0.17.0 by the PR that settles the lifecycle's logging (#1030, 14a) At the OIDC federation callback with the session federation index down, the rollback's lifecycle close cannot commit and rejects, and the login's cleanup logs `federation_cleanup_failed` (warn) for it: that one line. Removed with the lifecycle's bridge (#1030, 14a), after which the rollback close no longer meets the per-session stores' outage";
+	"a login that fails after its record's open closes that record (`packages/session/src/establish-session.mts`), and the close's own work meets the same outage: core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) warns `session_close_item_failed` for the item and keeps the close pending for its sweep, a second line for one outage. At the OIDC federation callback with the session federation index down, the rollback's lifecycle close cannot commit and rejects, and the login's cleanup logs `federation_cleanup_failed` (warn) for it: that one line. Both cases are removed with the lifecycle's bridge (#1030, 14a), after which the rollback close no longer meets the per-session stores' outage";
 
 const OUTAGES: readonly OutageCase[] = [
 	{

@@ -1063,6 +1063,14 @@ export function describeOutages<C extends Composition>(
 ): void {
 	describe(title, () => {
 		for (const c of cases) {
+			if (
+				c.defectWarns !== undefined &&
+				(c.defects?.["no-warn"] === undefined || c.defectWarns.length === 0)
+			) {
+				throw new Error(
+					`${c.module}: ${c.slot} down at ${c.surface}: defectWarns pins the lines of a no-warn defect, so it needs defects["no-warn"] and at least one line`,
+				);
+			}
 			describe(`${c.module}: ${c.slot} down at ${c.surface}`, () => {
 				let res: request.Response;
 				let lines: LogLine[] = [];

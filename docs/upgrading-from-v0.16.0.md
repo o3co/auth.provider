@@ -1210,8 +1210,8 @@ modules fills them.
   each consumer logs its own event once, at error, with the error's
   projection. A caller of your own catches the rejection as an outage. The
   close work's and the sweep's own lines (`session_close_item_failed`,
-  `session_lifecycle_unavailable` for a close-work read or a resumed
-  session, `session_lifecycle_sweep_*`) are unchanged.
+  `session_lifecycle_unavailable` for a close-work completion or re-read,
+  or a resumed session, `session_lifecycle_sweep_*`) are unchanged.
 - **The session lifecycle sweeps unless told not to.** Installing
   `sessionLifecycleModule` starts a sweep that resumes the closes left
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
