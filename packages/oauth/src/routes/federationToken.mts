@@ -40,6 +40,7 @@ import {
 import { readRecord, serveStored } from "./federationTokenRecord.mjs";
 import { refreshStoredTokens } from "./federationTokenRefresh.mjs";
 import { REFRESH_FLOOR_MS } from "./federationTokenRefreshAnswer.mjs";
+import { createRefreshBackoff } from "./federationTokenRefreshBackoff.mjs";
 import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
@@ -258,6 +259,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			`federation token route: maxTokenLifetimeMs must be a whole number of milliseconds greater than refreshBufferMs (${refreshBufferMs}) and at most ${MAX_MAX_TOKEN_LIFETIME_DAYS} days (${MAX_MAX_TOKEN_LIFETIME_MS}), got ${opts.maxTokenLifetimeMs === undefined ? `the default ${DEFAULT_MAX_TOKEN_LIFETIME_MS}` : String(opts.maxTokenLifetimeMs)}; with a refreshBufferMs of 24 h or more, pass a larger maxTokenLifetimeMs`,
 		);
 	}
+	const refreshBackoff = createRefreshBackoff();
 	const router = express.Router();
 
 	router.post("/federation/:name/token", async (req: Request, res: Response) => {
@@ -284,6 +286,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			storeUnavailable,
 			refreshBufferMs,
 			maxTokenLifetimeMs,
+			refreshBackoff,
 		};
 		const caller = await identifyCaller(ctx);
 		if (caller === null) return;

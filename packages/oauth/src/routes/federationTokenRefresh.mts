@@ -135,6 +135,21 @@ export const refreshStoredTokens = async (
 		// `invalid_grant` (the refresh token the other spent) still ends the
 		// record under the lapsed lock, and the other's refresh is then
 		// dropped as removed: the user reconnects.
+		// A refresh of this record answered `500 refresh_failed` within the
+		// back-off window: answered the same without calling the upstream.
+		if (
+			ctx.refreshBackoff.holds(
+				{ sid, federationName: name, accessToken: current.value.accessToken },
+				Date.now(),
+			)
+		) {
+			logger.info({ federation }, "federation_token_refresh_backed_off");
+			return res.status(500).json({
+				error: "refresh_failed",
+				error_description: "federation token refresh failed",
+			});
+		}
+
 		let refreshed: Awaited<ReturnType<typeof provider.refreshToken>>;
 		const calledAt = Date.now();
 		try {

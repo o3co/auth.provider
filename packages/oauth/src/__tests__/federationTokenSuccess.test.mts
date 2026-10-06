@@ -32,6 +32,7 @@ import {
 	type FederationTokenRouterOptions,
 } from "#/routes/federationTokenContext.mjs";
 import { isDisclosable } from "#/routes/federationTokenDisclosure.mjs";
+import { createRefreshBackoff } from "#/routes/federationTokenRefreshBackoff.mjs";
 import { answerToken } from "#/routes/federationTokenSuccess.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -63,6 +64,7 @@ const answered = async (
 			storeUnavailable: createStoreUnavailableLog(logger),
 			refreshBufferMs: 30_000,
 			maxTokenLifetimeMs: 86_400_000,
+			refreshBackoff: createRefreshBackoff(),
 		};
 		await answerToken(
 			ctx,
