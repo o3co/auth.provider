@@ -284,8 +284,11 @@ describe("a module rewrites nothing outside its own section", () => {
 	});
 
 	it.each([
-		["core's deployment mode", { core: { deployment: { mode: "single" } } }],
-		["the issuer", { oauth: { jwt: { issuer: "https://rewritten.example" } } }],
+		["core.deployment.mode", { core: { deployment: { mode: "single" } } }],
+		[
+			"core.sessionRequirements",
+			{ core: { sessionRequirements: { expected: ["fixture-requirement"] } } },
+		],
 	])(
 		"writes a section's output back at its name alone: %s stays as written",
 		async (_label, output) => {
@@ -295,13 +298,38 @@ describe("a module rewrites nothing outside its own section", () => {
 				z.unknown().transform(() => output),
 				seen,
 			);
-			const config = await bootAndRead([rewriting], multi());
+			const written = multi();
+			const config = await bootAndRead([rewriting], written);
 			expect(seen["fixture-rewriting"]).toEqual(output);
 			expect(config["fixture-rewriting"]).toEqual(output);
-			expect((config.core as { deployment?: unknown }).deployment).toEqual({ mode: "multi" });
-			expect((config.oauth as { jwt?: unknown }).jwt).toEqual(makeValidCoreConfig().oauth.jwt);
+			expect(config.core).toEqual(written.core);
 		},
 	);
+
+	it("refuses a module named core, the one name whose section would be core's keys", async () => {
+		const rewriting = sectioned(
+			"core",
+			z.unknown().transform(() => ({ deployment: { mode: "single" } })),
+		);
+		const err = await bootRefused([rewriting, replicaUnsafe], multi());
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({ module: "core", at: "core" });
+	});
+
+	it("writes a section naming the issuer, from a module not named oauth, under its own name", async () => {
+		const output = { oauth: { jwt: { issuer: "https://rewritten.example" } } };
+		const config = await bootAndRead(
+			[
+				sectioned(
+					"fixture-rewriting",
+					z.unknown().transform(() => output),
+				),
+			],
+			multi(),
+		);
+		expect(config["fixture-rewriting"]).toEqual(output);
+		expect((config.oauth as { jwt?: unknown }).jwt).toEqual(makeValidCoreConfig().oauth.jwt);
+	});
 
 	it("still refuses a replica-unsafe module under multi when a section's output names single", async () => {
 		const rewriting = sectioned(
@@ -330,6 +358,16 @@ describe("a loaded module's section is never stripped", () => {
 			resolved({ "fixture-section": { retries: "3" } }),
 		);
 		expect(config["fixture-section"]).toEqual({ retries: 3 });
+	});
+
+	it("is written back into a configuration handed over without a prototype, every other section kept", async () => {
+		const config = Object.assign(Object.create(null) as Record<string, unknown>, {
+			...resolved({ other: { kept: 1 }, "fixture-section": { retries: "2" } }),
+		});
+		const parsed = await bootAndRead([sectioned("fixture-section", RetrySection)], config);
+		expect(parsed["fixture-section"]).toEqual({ retries: 2 });
+		expect(parsed.other).toEqual({ kept: 1 });
+		expect(parsed.core).toEqual(makeValidCoreConfig().core);
 	});
 
 	it("is laid over what is at its name, so a schema narrower than core's copy drops nothing", async () => {

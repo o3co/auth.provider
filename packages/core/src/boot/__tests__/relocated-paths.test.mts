@@ -30,6 +30,7 @@ import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
+import { validateManifests } from "../validate-manifests.mjs";
 
 const bootWith = (extra: Record<string, unknown>): BootstrapMap =>
 	({
@@ -634,6 +635,36 @@ describe("a relocated path — more", () => {
 			relocatedFrom: "legacy.a",
 			problem: expect.stringContaining("legacy.a.b"),
 		});
+	});
+
+	it.each([
+		["core's declaration as boot ships it", undefined],
+		["a host's empty declaration for core", {}],
+	])("refuses an old path at or under core, whatever core declares — %s", (_label, core) => {
+		for (const from of ["core", "core.deployment.mode"]) {
+			const relocating = defineModule({
+				name: "fixture-relocating",
+				section: { schema: RetrySection, relocatedFrom: [from] },
+			});
+			let err: unknown;
+			try {
+				validateManifests({
+					modules: [relocating],
+					bootstrapComponents: bootWith(current),
+					...(core === undefined ? {} : { core }),
+				});
+			} catch (caught) {
+				err = caught;
+			}
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe("module-section-path-invalid");
+			expect((err as BootError).details).toEqual({
+				reason: "module-section-path-invalid",
+				module: "fixture-relocating",
+				relocatedFrom: from,
+				problem: "it is or lies under core, core's own section, whose keys no module relocates",
+			});
+		}
 	});
 
 	it("says an old path is the section's own path", async () => {

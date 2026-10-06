@@ -2183,14 +2183,14 @@ const REMOVED: unique symbol = Symbol("removed");
 /**
  * `config` with `value` laid over the section at `name` (`overlayConfig`: a
  * key the value does not hold is kept, one it holds as `undefined` goes), or
- * with the section removed for `REMOVED`. A copy with the same prototype:
- * `config` is not changed. Boot's parse leaves the configuration a plain
- * object (`isPlainConfigObject`), so there is always one to write into.
+ * with the section removed for `REMOVED`. A copy: `config` is not changed.
+ * The configuration is what `validateAndComposeConfig` answers —
+ * `overlayConfig`'s output, a plain object whatever the composition root
+ * handed over — so the copy is one too.
  */
 function writeSection(config: unknown, name: string, value: unknown): unknown {
 	const target = config as Record<string, unknown>;
-	const copy: Record<string, unknown> =
-		Object.getPrototypeOf(target) === null ? Object.setPrototypeOf({}, null) : {};
+	const copy: Record<string, unknown> = {};
 	for (const key of Object.keys(target)) defineConfigKey(copy, key, target[key]);
 	if (value === REMOVED) delete copy[name];
 	else {
@@ -2620,18 +2620,38 @@ function withCoreRelocations(modules: readonly Module[], core: CoreRelocations):
 /**
  * A module's section is at its name, and its configuration is its section: a
  * manifest is plain data at run time, so one may still carry `configSchema`,
- * or a `section` carrying `at`, whatever the value — the module's own name
- * included. Either is refused rather than ignored, since ignoring it would
- * hand the module its configuration somewhere other than where it reads it,
- * unparsed by the schema it declared. The message names the module, the
- * field and the module's name; `details.at` holds the `at` written (a string
- * quoted in the message, anything else named by its type: rendering it could
- * throw), or for `configSchema` the section's path, the module's name
- * (`undefined` without a section). Throws `module-section-path-invalid`.
+ * or a `section` carrying `at`, whatever the value — `null`, `false` and the
+ * module's own name included. Either is refused rather than ignored, since
+ * ignoring it would hand the module its configuration somewhere other than
+ * where it reads it, unparsed by the schema it declared. The message names
+ * the module, the field and the module's name; `details.at` holds the `at`
+ * written (a string quoted in the message, anything else named by its type:
+ * rendering it could throw), or for `configSchema` the section's path, the
+ * module's name (`undefined` without a section). A field whose read throws
+ * (an accessor) is refused the same way, `details.at` `undefined`. Throws
+ * `module-section-path-invalid`.
  */
 function refuseRemovedSectionFields(rawModules: readonly Module[]): void {
 	for (const m of rawModules) {
-		if ((m as { readonly configSchema?: unknown }).configSchema !== undefined) {
+		const unreadable = (field: string, thrown: unknown): BootError =>
+			new BootError({
+				message: `Module "${m.name}" declares ${field}, which could not be read (${failureSummary(thrown)}): a module's section is at its name, "${m.name}".`,
+				reason: "module-section-path-invalid",
+				stage: "validateManifests",
+				details: {
+					reason: "module-section-path-invalid",
+					module: m.name,
+					at: undefined,
+					problem: `reading ${field} threw`,
+				},
+			});
+		let configSchema: unknown;
+		try {
+			configSchema = (m as { readonly configSchema?: unknown }).configSchema;
+		} catch (thrown) {
+			throw unreadable("configSchema", thrown);
+		}
+		if (configSchema !== undefined) {
 			throw new BootError({
 				message: `Module "${m.name}" declares configSchema, which is removed: a module reads its configuration as its section, which is at its name, "${m.name}".`,
 				reason: "module-section-path-invalid",
@@ -2645,14 +2665,21 @@ function refuseRemovedSectionFields(rawModules: readonly Module[]): void {
 				},
 			});
 		}
-		const at: unknown = (m.section as { readonly at?: unknown } | undefined)?.at;
+		let at: unknown;
+		try {
+			at = (m.section as { readonly at?: unknown } | undefined)?.at;
+		} catch (thrown) {
+			throw unreadable("section.at", thrown);
+		}
 		if (at === undefined) continue;
 		const shown =
 			typeof at === "string"
 				? JSON.stringify(at)
-				: typeof at === "object"
-					? "an object"
-					: `a ${typeof at}`;
+				: at === null
+					? "null"
+					: typeof at === "object"
+						? "an object"
+						: `a ${typeof at}`;
 		throw new BootError({
 			message: `Module "${m.name}" declares section.at (${shown}), which is removed: a module's section is at its name, "${m.name}".`,
 			reason: "module-section-path-invalid",
@@ -2668,6 +2695,32 @@ function refuseRemovedSectionFields(rawModules: readonly Module[]): void {
 }
 
 /**
+ * No module is named after a key configuration cannot carry
+ * (`reservedKeyReason`: an `Object.prototype` member's name, or
+ * `prototype`): its section, at its name, would be such a key — refused
+ * wherever the configuration writes it, and found inherited where it does
+ * not. Throws `module-section-path-invalid`, naming the module.
+ */
+function refuseReservedModuleNames(rawModules: readonly Module[]): void {
+	for (const m of rawModules) {
+		const reason = reservedKeyReason(m.name);
+		if (reason === undefined) continue;
+		const problem = `the key its section is read at, its name, ${reason}, which configuration cannot carry`;
+		throw new BootError({
+			message: `Module "${m.name}" is named after a key configuration cannot carry: ${problem}.`,
+			reason: "module-section-path-invalid",
+			stage: "validateManifests",
+			details: {
+				reason: "module-section-path-invalid",
+				module: m.name,
+				at: m.section === undefined ? undefined : m.name,
+				problem,
+			},
+		});
+	}
+}
+
+/**
  * Every section path a manifest writes is one it can have written:
  *
  * - `section.relocatedFrom` is a list of such paths, read at every index (a
@@ -2675,8 +2728,11 @@ function refuseRemovedSectionFields(rawModules: readonly Module[]): void {
  *   `Object.prototype` or `null`) from such paths to `""`, a path inside the
  *   section, `null` (removed), or `{ to, environmentVariable: null }` with
  *   `to` either of the first two, for a new path no variable binds.
- * - No old path is or holds a loaded module's section, its own or another's:
- *   a configuration setting that section would then be refused.
+ * - No old path is a loaded module's section, its own or another's: a
+ *   configuration setting that section would then be refused.
+ * - No old path is or lies under `core`, core's own section, unless core
+ *   declares it: a module does not relocate core's keys, whatever core's
+ *   declaration (`relocating`) holds.
  * - No two loaded modules claim overlapping old paths (the same one, or one
  *   under the other), since a key set there would have two new paths; one
  *   module may cover its own old path with a more specific one. The later
@@ -2688,7 +2744,8 @@ function refuseRemovedSectionFields(rawModules: readonly Module[]): void {
  *
  * `details.relocatedFrom` names the entry, or the value when it is neither
  * form or has a hole. First `refuseRemovedSectionFields` holds each
- * section at its module's name. Core's own section's declaration is held
+ * section at its module's name, and `refuseReservedModuleNames` each name to
+ * a key configuration can carry. Core's own section's declaration is held
  * with the modules', as module "core" (`relocating`), so no loaded module is
  * named `core`. No section is read at, and no old path lies under,
  * `renamed-variables`, the section reserved for the captures of renamed
@@ -2701,6 +2758,7 @@ function checkModuleSectionPaths(
 	relocating: readonly Module[],
 ): void {
 	refuseRemovedSectionFields(rawModules);
+	refuseReservedModuleNames(rawModules);
 	for (const m of rawModules) {
 		if (m.name !== "core") continue;
 		const problem = `"core" is reserved: core's own section, and the name boot gives core's declarations`;
@@ -2808,15 +2866,23 @@ function checkModuleSectionPaths(
 				);
 			}
 			const old = from.split(".");
+			// Core's pseudo-module alone relocates its own keys.
+			if (m.name !== "core" && old[0] === "core") {
+				throw refusal(
+					m,
+					from,
+					"it is or lies under core, core's own section, whose keys no module relocates",
+				);
+			}
+			// A section is one key, so an old path that reaches one is it.
 			const held = sections.find(({ path }) => under(path, old));
 			if (held !== undefined) {
-				const is = held.path.length === old.length ? "is" : "holds";
 				throw refusal(
 					m,
 					from,
 					held.module === m.name
-						? `it ${is} the path the section is read at, so every configuration that sets the section would be refused`
-						: `it ${is} the section of module "${held.module}", so every configuration that sets that section would be refused`,
+						? "it is the path the section is read at, so every configuration that sets the section would be refused"
+						: `it is the section of module "${held.module}", so every configuration that sets that section would be refused`,
 				);
 			}
 			const target = relocationTarget([m.name], inside);

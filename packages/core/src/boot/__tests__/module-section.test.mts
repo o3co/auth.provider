@@ -351,27 +351,6 @@ describe("a module's section — read from the parsed configuration", () => {
 		await handle.dispose();
 	});
 
-	it("reads own keys only: a module named after a key the configuration inherits reads its section as absent", async () => {
-		let seen: unknown = "unset";
-		const sectioned = defineModule({
-			name: "constructor",
-			section: { schema: z.unknown() },
-			contributes: {
-				grantMiddleware: [
-					(deps) => {
-						seen = deps.section;
-						return null;
-					},
-				],
-			},
-		});
-
-		const handle = await createApp({ modules: [sectioned], bootstrapComponents: bootWith({}) });
-
-		expect(seen).toBeUndefined();
-		await handle.dispose();
-	});
-
 	it("reads a module's name as one key, never split on its dots", async () => {
 		let seen: unknown;
 		const sectioned = defineModule({
@@ -629,6 +608,8 @@ describe("a module's section — manifest refusals", () => {
 		["a bigint", 1n, "a bigint"],
 		["a cyclic object", cyclic, "an object"],
 		["a number", 7, "a number"],
+		["null", null, "null"],
+		["false", false, "a boolean"],
 	])(
 		"refuses `section.at` — %s — naming the module, the field, and that the section is at the module's name",
 		async (_label, at, shown) => {
@@ -672,16 +653,32 @@ describe("a module's section — manifest refusals", () => {
 		},
 	);
 
-	it.each<[string, Record<string, unknown>, string | undefined]>([
-		["with a section", { section: { schema: RetrySection } }, "fixture-section"],
-		["without a section", {}, undefined],
+	it.each<[string, Record<string, unknown>, unknown, string | undefined]>([
+		[
+			"a schema, with a section",
+			{ section: { schema: RetrySection } },
+			z.object({ "fixture-section": RetrySection }),
+			"fixture-section",
+		],
+		["a schema, without a section", {}, z.object({ "fixture-section": RetrySection }), undefined],
+		["null, with a section", { section: { schema: RetrySection } }, null, "fixture-section"],
+		["false, without a section", {}, false, undefined],
 	])(
-		"refuses `configSchema` — a module %s — naming the module, the field, and that its section is at its name",
-		async (_label, declared, at) => {
+		"refuses `configSchema` — %s — naming the module, the field, and that its section is at its name",
+		async (_label, declared, configSchema, at) => {
+			let ran = false;
 			const reader = defineModule({
 				name: "fixture-section",
 				...declared,
-				configSchema: z.object({ "fixture-section": RetrySection }),
+				configSchema,
+				contributes: {
+					grantMiddleware: [
+						() => {
+							ran = true;
+							return null;
+						},
+					],
+				},
 			} as never);
 
 			const err = await refusal(
@@ -703,6 +700,114 @@ describe("a module's section — manifest refusals", () => {
 				problem:
 					"configSchema is removed: a module reads its configuration as its section, at its name",
 			});
+			expect(ran).toBe(false);
+		},
+	);
+
+	it("refuses a removed field before the configuration is parsed: an otherwise refused configuration is not what is named", async () => {
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: { schema: RetrySection, at: "legacy.fixture" } as never,
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [sectioned],
+				bootstrapComponents: bootWith({
+					core: { ...makeValidCoreConfig().core, deployment: { mode: "loud" } },
+					"fixture-section": { retries: "many" },
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({ module: "fixture-section", at: "legacy.fixture" });
+	});
+
+	it.each([
+		[
+			"configSchema",
+			() =>
+				Object.defineProperty({ name: "fixture-section" }, "configSchema", {
+					enumerable: true,
+					get: () => {
+						throw new Error("the accessor broke");
+					},
+				}),
+		],
+		[
+			"section.at",
+			() => ({
+				name: "fixture-section",
+				section: Object.defineProperty({ schema: RetrySection }, "at", {
+					enumerable: true,
+					get: () => {
+						throw new Error("the accessor broke");
+					},
+				}),
+			}),
+		],
+	])("refuses `%s` whose read throws, naming the module and the field", async (field, manifest) => {
+		const err = await refusal(
+			createApp({
+				modules: [manifest() as never],
+				bootstrapComponents: bootWith({ "fixture-section": { retries: 1 } }),
+			}),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.message).toContain(
+			`Module "fixture-section" declares ${field}, which could not be read`,
+		);
+		expect(err.message).toContain("the accessor broke");
+		expect(err.details).toEqual({
+			reason: "module-section-path-invalid",
+			module: "fixture-section",
+			at: undefined,
+			problem: `reading ${field} threw`,
+		});
+	});
+
+	it.each([
+		["__proto__", { section: { schema: z.unknown() } }, "__proto__"],
+		["constructor", { section: { schema: z.unknown() } }, "constructor"],
+		["constructor, without a section", {}, undefined],
+	])(
+		"refuses a module named after a key configuration cannot carry — %s — naming the module",
+		async (_label, declared, at) => {
+			const name = _label.split(",")[0] as string;
+			let ran = false;
+			const reserved = defineModule({
+				name,
+				...declared,
+				contributes: {
+					grantMiddleware: [
+						() => {
+							ran = true;
+							return null;
+						},
+					],
+				},
+			} as never);
+
+			const err = await refusal(
+				createApp({ modules: [reserved], bootstrapComponents: bootWith({}) }),
+			);
+
+			expect(err.reason).toBe("module-section-path-invalid");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.message).toBe(
+				`Module "${name}" is named after a key configuration cannot carry: the key its section is read at, its name, is named after an Object.prototype member, which configuration cannot carry.`,
+			);
+			expect(err.details).toEqual({
+				reason: "module-section-path-invalid",
+				module: name,
+				at,
+				problem:
+					"the key its section is read at, its name, is named after an Object.prototype member, which configuration cannot carry",
+			});
+			expect(ran).toBe(false);
 		},
 	);
 

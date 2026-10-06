@@ -60,7 +60,9 @@ export interface RelocationWithoutVariable {
  *
  * A section is always at its module's name: a manifest whose `section` still
  * carries an `at`, or that carries a `configSchema`, is refused
- * (`module-section-path-invalid`), whatever the value.
+ * (`module-section-path-invalid`), whatever the value, and so is a module
+ * named after a key configuration cannot carry (an `Object.prototype`
+ * member, `prototype`) or named `core`.
  *
  * `section` is not a slot: a module declaring a section may not also require
  * or optionally read a component named `section` (`reserved-component-key`).
@@ -97,8 +99,9 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 *   ({@link RelocationWithoutVariable}): the refusal names none, and no
 	 *   variable may be declared renamed onto it.
 	 *
-	 * An old path may not be or hold a loaded module's section, overlap a new
-	 * path, or overlap another loaded module's old path
+	 * An old path may not be a loaded module's section, be or lie under
+	 * `core` (core's own section, whose keys no module relocates), overlap a
+	 * new path, or overlap another loaded module's old path
 	 * (`module-section-path-invalid`).
 	 *
 	 * A switch that decides whether a module loads (an adapter selection,

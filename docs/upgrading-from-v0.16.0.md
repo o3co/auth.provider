@@ -1090,9 +1090,15 @@ modules fills them.
   are removed: a module's section is at its name** (#1478, #728, #777). A
   module reads its configuration as its own section, the top-level key named
   exactly as the module (never split on its dots), declared with
-  `section.schema`; no module parses the whole configuration or rewrites a key
-  outside its section, so none can change what boot reads at a key core owns
-  (`core.deployment.mode`, the issuer). Move a `configSchema`'s keys into the
+  `section.schema`. No module parses the whole configuration, and a section is
+  read and written back only at its own top-level name. Core's own keys are
+  under `core`, a name no module may take, so no section's write-back reaches
+  them (`core.deployment.mode`, for one); `oauth {}` is the oauth module's
+  section, which core's schema still validates as written before the
+  write-back, and core reads `oauth.*` afterwards from that module's output.
+  A module named after a key configuration cannot carry (`__proto__`,
+  `constructor`, …) is refused, and so is a module's `relocatedFrom` naming a
+  path at or under `core`. Move a `configSchema`'s keys into the
   module's section, and a section that sat at `section.at` under the module's
   name, declaring the old path in `section.relocatedFrom` so a configuration
   still setting it is refused naming the new one. A manifest that still
