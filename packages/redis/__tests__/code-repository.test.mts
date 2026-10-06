@@ -401,6 +401,7 @@ describe("RedisCodeRepository", () => {
 				sid: "sid-rt",
 				acr: "urn:example:acr:mfa",
 				amr: ["pwd", "otp", "mfa"],
+				authentication: { primary: "pwd", mfaAt: new Date("2026-10-06T11:59:00.123Z") },
 				expiresIn: 90,
 				grantedScope: ["openid", "read"],
 				grantedAudience: ["https://api.example"],
@@ -410,6 +411,65 @@ describe("RedisCodeRepository", () => {
 			expect(created).toStrictEqual(expected);
 			expect(await repo.findByCode(created.code)).toStrictEqual(expected);
 			expect(await repo.consumeByCode(created.code)).toStrictEqual(expected);
+		});
+
+		it("round-trips authentication with every other field, through createCode and both reads", async () => {
+			const params: CreateCodeInput = {
+				...minimalParams,
+				sid: "sid-rt",
+				amr: ["pwd", "otp", "mfa"],
+				authentication: { primary: "pwd", mfaAt: new Date("2026-10-06T11:59:00.123Z") },
+			};
+			const created = await repo.createCode(params);
+			const expected = { ...params, code: created.code, expiresIn: 600 };
+			expect(created).toStrictEqual(expected);
+			expect(await repo.findByCode(created.code)).toStrictEqual(expected);
+			expect(await repo.consumeByCode(created.code)).toStrictEqual(expected);
+		});
+
+		it("keeps one whose primary could not be told, as recorded", async () => {
+			const authentication = { primary: undefined, mfaAt: undefined };
+			const created = await repo.createCode({ ...minimalParams, authentication });
+			expect(created.authentication).toStrictEqual(authentication);
+			expect((await repo.consumeByCode(created.code))?.authentication).toStrictEqual(
+				authentication,
+			);
+		});
+
+		it("stores mfaAt as epoch milliseconds (mfaAtMs), as the session envelope does", async () => {
+			const created = await repo.createCode({
+				...minimalParams,
+				authentication: { primary: "fed", mfaAt: new Date(1_790_000_000_123) },
+			});
+			const parsed = JSON.parse(store.get(`${KEY_PREFIX}${created.code}`) as string);
+			expect(parsed.authentication).toStrictEqual({ primary: "fed", mfaAtMs: 1_790_000_000_123 });
+		});
+
+		it("reads a stored authentication not in the envelope's shape — or none, as a record an earlier release wrote — as undefined", async () => {
+			const recorded = {
+				client_id: "c",
+				redirect_uri: "https://rp.example/cb",
+				sid: "sid-1",
+				amr: ["pwd"],
+			};
+			const envelopes: unknown[] = [
+				undefined,
+				null,
+				"pwd",
+				[],
+				{ primary: "" },
+				{ primary: 7 },
+				{ primary: "pwd", mfaAtMs: "1790000000000" },
+				{ primary: "pwd", mfaAtMs: null },
+				{ primary: "pwd", mfaAtMs: -1 },
+				{ primary: "pwd", mfaAtMs: Number.MAX_VALUE },
+			];
+			for (const authentication of envelopes) {
+				store.set(`${KEY_PREFIX}old`, JSON.stringify({ ...recorded, authentication }));
+				const read = await repo.consumeByCode("old");
+				expect(read, JSON.stringify(authentication)).toMatchObject(recorded);
+				expect(read, JSON.stringify(authentication)).toHaveProperty("authentication", undefined);
+			}
 		});
 
 		it("names every field it has no value for as undefined, rather than leaving it out", async () => {
@@ -434,6 +494,13 @@ describe("RedisCodeRepository", () => {
 				expect(found, key).toHaveProperty(key, undefined);
 				expect(consumed, key).toHaveProperty(key, undefined);
 			}
+		});
+
+		it("names authentication undefined when none was recorded, through both reads", async () => {
+			const created = await repo.createCode(minimalParams);
+			expect(created).toHaveProperty("authentication", undefined);
+			expect(await repo.findByCode(created.code)).toHaveProperty("authentication", undefined);
+			expect(await repo.consumeByCode(created.code)).toHaveProperty("authentication", undefined);
 		});
 
 		it("findByCode also returns all extended fields", async () => {
@@ -504,7 +571,7 @@ describe("RedisCodeRepository with real Redis", () => {
 		expect(await repo.findByCode(created.code)).toBeNull();
 	});
 
-	it("round-trips sid, nonce, amr, redirect_uri, grantedScope, and grantedAudience through Redis", async () => {
+	it("round-trips sid, nonce, amr, authentication, redirect_uri, grantedScope, and grantedAudience through Redis", async () => {
 		if (!raw) throw new Error("Redis test container did not start");
 		const keyPrefix = `td4:fields:${Date.now()}:`;
 		const { codeRepositoryClient } = makeIoredisClients(raw);
@@ -517,10 +584,15 @@ describe("RedisCodeRepository with real Redis", () => {
 			sid: "sid-real",
 			nonce: "nonce-real",
 			amr: ["pwd", "otp", "mfa"],
+			authentication: { primary: "pwd", mfaAt: new Date("2026-10-06T11:59:00.123Z") },
 			grantedScope: ["openid", "profile"],
 			grantedAudience: ["https://api.example"],
 		});
 		const consumed = await repo.consumeByCode(created.code);
+		expect(consumed?.authentication).toStrictEqual({
+			primary: "pwd",
+			mfaAt: new Date("2026-10-06T11:59:00.123Z"),
+		});
 
 		expect(consumed?.client_id).toBe("client-real");
 		expect(consumed?.redirect_uri).toBe("https://rp.example/callback");

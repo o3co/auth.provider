@@ -18,6 +18,7 @@ import crypto from "node:crypto";
 import {
 	type AdapterBuilder,
 	type Code,
+	type CodeAuthentication,
 	type CodeRepository,
 	type CreateCodeInput,
 	consoleLogger,
@@ -35,15 +36,54 @@ const DEFAULT_KEY_PREFIX = "oauth:code:";
 const DEFAULT_EXPIRES_IN_SECONDS = 600;
 
 /**
+ * `CodeData.authentication` as the payload stores it: `mfaAt` as epoch
+ * milliseconds, as the session envelope stores it.
+ */
+interface StoredCodeAuthentication {
+	readonly primary: string | undefined;
+	readonly mfaAtMs: number | undefined;
+}
+
+/**
  * Shape persisted as JSON in Redis for each authorization code: the record
- * but the code, which is the key.
+ * but the code, which is the key, with `authentication` in its stored form.
  *
  * Derived from `Code` rather than declared again, with every key required,
  * so a field added to `CodeData` but not written in `createCode` or copied
  * back in `parseCodeValue` fails to compile instead of being dropped
  * silently. `JSON.stringify` leaves out a key holding `undefined`.
  */
-type StoredCodePayload = Omit<Code, "code">;
+type StoredCodePayload = Omit<Code, "code" | "authentication"> & {
+	readonly authentication: StoredCodeAuthentication | undefined;
+};
+
+/** The epoch milliseconds a `Date` round-trips: a safe whole number in the `Date` range, never before 1970. */
+const isStoredInstant = (ms: unknown): ms is number =>
+	typeof ms === "number" && Number.isSafeInteger(ms) && ms >= 0 && ms <= 8_640_000_000_000_000;
+
+const storedAuthentication = (
+	authentication: CodeAuthentication | undefined,
+): StoredCodeAuthentication | undefined =>
+	authentication === undefined
+		? undefined
+		: { primary: authentication.primary, mfaAtMs: authentication.mfaAt?.getTime() };
+
+/**
+ * A stored `authentication` read back, or `undefined` for none and for one
+ * not in the stored shape: not an object, a `primary` that is neither absent
+ * nor a non-empty string, an `mfaAtMs` that is neither absent nor an instant
+ * a `Date` round-trips. Mapped at the boundary; the exchange decides what a
+ * code without one is.
+ */
+const readStoredAuthentication = (stored: unknown): CodeAuthentication | undefined => {
+	if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return undefined;
+	const { primary, mfaAtMs } = stored as Partial<Record<keyof StoredCodeAuthentication, unknown>>;
+	if (primary !== undefined && (typeof primary !== "string" || primary.length === 0)) {
+		return undefined;
+	}
+	if (mfaAtMs !== undefined && !isStoredInstant(mfaAtMs)) return undefined;
+	return { primary, mfaAt: mfaAtMs === undefined ? undefined : new Date(mfaAtMs) };
+};
 
 /**
  * Options accepted by the public `RedisCodeRepository` constructor.
@@ -94,6 +134,7 @@ export class RedisCodeRepository implements CodeRepository {
 		sid,
 		acr,
 		amr,
+		authentication,
 		expiresIn = this.defaultExpiresIn,
 		grantedScope,
 		grantedAudience,
@@ -108,6 +149,7 @@ export class RedisCodeRepository implements CodeRepository {
 			);
 		}
 		const code = crypto.randomBytes(32).toString("base64url");
+		const stored = storedAuthentication(authentication);
 		const payload: StoredCodePayload = {
 			client_id,
 			redirect_uri,
@@ -117,6 +159,7 @@ export class RedisCodeRepository implements CodeRepository {
 			sid,
 			acr,
 			amr: amr ? [...amr] : undefined,
+			authentication: stored,
 			expiresIn,
 			grantedScope: grantedScope ? [...grantedScope] : undefined,
 			grantedAudience: grantedAudience ? [...grantedAudience] : undefined,
@@ -130,7 +173,8 @@ export class RedisCodeRepository implements CodeRepository {
 			"PX",
 			Math.ceil(expiresIn * 1000),
 		);
-		return { code, ...payload };
+		// What the payload reads back as, so the answer is what a read answers.
+		return { code, ...payload, authentication: readStoredAuthentication(stored) };
 	}
 
 	async findByCode(code: string): Promise<Code | null> {
@@ -190,6 +234,7 @@ export class RedisCodeRepository implements CodeRepository {
 				sid: p.sid,
 				acr: p.acr,
 				amr,
+				authentication: readStoredAuthentication(p.authentication),
 				expiresIn: p.expiresIn,
 				grantedScope,
 				grantedAudience,
