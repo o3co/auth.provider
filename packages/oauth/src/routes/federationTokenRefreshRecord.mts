@@ -23,7 +23,8 @@
  * answer's lifetime is refused, as it did before it was due. Every write lands only on the record the
  * refresh was made from, and a stored token is answered only from it; a
  * refresh whose record was removed or rewritten meanwhile is dropped, never
- * written over what replaced it.
+ * written over what replaced it. A refreshed token is answered only while the
+ * caller's session is still live once it is written.
  */
 
 import { canonicalScope, emitAuditEvent, loggableError } from "@o3co/auth-provider-core";
@@ -38,6 +39,7 @@ import {
 } from "./federationTokenRecord.mjs";
 import { narrowedScope, type RefreshReading } from "./federationTokenRefreshAnswer.mjs";
 import { stampRefreshFailed } from "./federationTokenRefreshFailure.mjs";
+import { checkSessionLive } from "./federationTokenSession.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
 
 /**
@@ -195,6 +197,10 @@ export const recordRefresh = async (
 	// Removed or rewritten since it was read: this refresh's tokens belong to a
 	// connection that is gone, and are neither stored nor handed on.
 	if (outcome !== "updated") return answerDiscardedRefresh(ctx, caller, outcome);
+
+	// A close that committed during the refresh: its tokens are the close's to
+	// remove, and are not handed on.
+	if (!(await checkSessionLive(ctx, caller))) return res;
 
 	// 11h: `updatedTokens`, not the adapter's object: the answer was read
 	// once, and a getter read a second time may answer differently from what

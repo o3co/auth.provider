@@ -1,0 +1,340 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * The federation token route over core's session lifecycle: a refreshed token
+ * is handed on only to a session that is still live once the refresh is
+ * written. A close whose commit lands during the upstream refresh is answered
+ * as a session that is not live, and its close work removes the stored tokens.
+ */
+
+import { createSecretKey } from "node:crypto";
+import {
+	type AuditSink,
+	type ClientRepository,
+	createInMemorySessionLifecycleStore,
+	createSymmetricKeyStore,
+	type FederationProvider,
+	type FederationTokenStore,
+	type FederationTokens,
+	memoryFederationTokenStoreModule,
+	type SessionLifecycle,
+	type SessionLiveness,
+	type SupportsLock,
+	type UserSession,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
+import express from "express";
+import { SignJWT } from "jose";
+import request from "supertest";
+import { describe, expect, it, vi } from "vitest";
+import { createRouter } from "#/routes/federationToken.mjs";
+import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
+import { expectOutageLine, storeReplyError } from "./_helpers/projectedLog.mjs";
+import { lifecycleOver } from "./_helpers/sessionLifecycle.mjs";
+
+const SECRET = "test-secret-at-least-32-chars!!";
+const keyStore = createSymmetricKeyStore(SECRET);
+const SID = "sid-1";
+const SUB = "u-1";
+const NAME = "google";
+
+const mintAccessToken = (): Promise<string> =>
+	new SignJWT({ sub: SUB, sid: SID, azp: "client-1", family_id: "fam-1" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+		.setExpirationTime("1h")
+		.setIssuedAt()
+		.setIssuer("https://auth.example.com")
+		.sign(createSecretKey(Buffer.from(SECRET)));
+
+/** The stored connection: due unless `expiresAt` says otherwise. */
+const link = (expiresAt = new Date(Date.now() - 1000)): FederationTokens => ({
+	accessToken: "old-at",
+	refreshToken: "old-rt",
+	idToken: "old-id",
+	expiresAt,
+	tokenType: "Bearer",
+	scope: "openid email",
+	grantedScope: "openid email",
+	obtainedAt: undefined,
+});
+
+type Store = FederationTokenStore & SupportsLock;
+
+const memoryStore = (): Store => {
+	const store = memoryFederationTokenStoreModule.provides?.federationTokenStore?.({} as never) as
+		| Store
+		| undefined;
+	if (store === undefined) throw new Error("core's memory module provides no store");
+	return store;
+};
+
+/** Resolves once `open()` is called; `wait` is what callers await. */
+const latch = () => {
+	let open!: () => void;
+	const wait = new Promise<void>((resolve) => {
+		open = resolve;
+	});
+	return { open, wait };
+};
+
+interface Route {
+	readonly store: Store;
+	readonly lifecycle: SessionLifecycle;
+	/** Core's lifecycle, whose `liveness` the route's answers by default. */
+	readonly real: SessionLifecycle;
+	readonly liveness: ReturnType<typeof vi.fn<(sid: string) => Promise<SessionLiveness>>>;
+	readonly logger: MockLogger;
+	readonly auditSink: AuditSink & { record: ReturnType<typeof vi.fn> };
+	readonly refreshToken: ReturnType<typeof vi.fn>;
+	/** Lets the close's removal of the federation tokens run. */
+	readonly releaseRemoval: () => void;
+	/** Resolves once the close's removal of the federation tokens has begun. */
+	readonly removalBegun: Promise<void>;
+	readonly post: () => Promise<request.Response>;
+}
+
+/**
+ * The route over core's lifecycle and in-memory stores, the session opened
+ * for `SUB` and joined by the federation, its record seeded with `seed`. The
+ * close's removal of the federation tokens waits for `releaseRemoval`, so a
+ * close can commit while its work is still outstanding. The provider's
+ * refresh runs `refresh` with the lifecycle.
+ */
+const route = async (opts: {
+	seed: FederationTokens;
+	refresh?: (lifecycle: SessionLifecycle, removalBegun: Promise<void>) => Promise<void>;
+}): Promise<Route> => {
+	const store = memoryStore();
+	await store.attach(SID, NAME, opts.seed);
+
+	const removal = latch();
+	const begun = latch();
+	const heldRemoval = new Proxy(store, {
+		get(target, property) {
+			if (property === "removeBySid") {
+				return async (sid: string) => {
+					begun.open();
+					await removal.wait;
+					return target.removeBySid(sid);
+				};
+			}
+			const value = Reflect.get(target, property, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+
+	const session: UserSession = {
+		sid: SID,
+		sub: SUB,
+		authTime: new Date(),
+		createdAt: new Date(),
+		expiresAt: new Date(Date.now() + 3_600_000),
+		claims: {},
+		amr: undefined,
+		authentication: undefined,
+	};
+	const sessionStore: UserSessionStore = {
+		kind: "memory",
+		create: vi.fn(),
+		get: vi.fn(async () => session),
+		delete: vi.fn(async () => {}),
+	};
+	const lifecycleStore = createInMemorySessionLifecycleStore();
+	expect((await lifecycleStore.open(SID, SUB, session.expiresAt)).outcome).toBe("opened");
+	const real = lifecycleOver({
+		userSessionStore: sessionStore,
+		refreshTokenFamilyRevocation: { isFamilyRevoked: vi.fn(), revokeFamily: vi.fn() },
+		federationTokenStore: heldRemoval,
+		store: lifecycleStore,
+	});
+	expect(await real.join(SID, { federation: NAME })).toEqual({ outcome: "joined" });
+	const liveness = vi.fn((sid: string) => real.liveness(sid));
+	const lifecycle: SessionLifecycle = { ...real, liveness };
+
+	const clientRepository: ClientRepository = {
+		findById: vi.fn().mockResolvedValue({
+			clientId: "client-1",
+			allowedRedirectUris: [],
+			allowedScopes: [],
+			allowedAzpForFederationToken: true,
+		}),
+		authenticate: vi.fn(),
+	};
+	const logger = createMockLogger();
+	const auditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+	const refreshToken = vi.fn(async () => {
+		await opts.refresh?.(lifecycle, begun.wait);
+		return { accessToken: "new-at", expiresIn: 3600, refreshToken: "new-rt" };
+	});
+	const provider = {
+		name: NAME,
+		scope: ["openid"],
+		buildAuthorizationUrl: () => new URL("https://google.example/auth"),
+		exchangeCode: async () => ({ issuer: "https://google.example", sub: "s", expiresAt: null }),
+		refreshToken,
+	} as unknown as FederationProvider;
+	const app = express();
+	app.use(
+		"/oauth",
+		createRouter(express, {
+			keyStore,
+			sessionLifecycle: lifecycle,
+			refreshTokenFamilyRevocation: {
+				isFamilyRevoked: vi.fn().mockResolvedValue(false),
+				revokeFamily: vi.fn(),
+			},
+			federationTokenStore: store,
+			clientRepository,
+			getFederationProviders: () => new Map([[NAME, provider]]),
+			logger,
+			auditSink,
+		}),
+	);
+	const post = async () =>
+		request(app)
+			.post(`/oauth/federation/${NAME}/token`)
+			.set("Authorization", `Bearer ${await mintAccessToken()}`)
+			.send();
+	return {
+		store,
+		lifecycle,
+		real,
+		liveness,
+		logger,
+		auditSink,
+		refreshToken,
+		releaseRemoval: removal.open,
+		removalBegun: begun.wait,
+		post,
+	};
+};
+
+const audited = (r: Route, type: string): unknown[] =>
+	r.auditSink.record.mock.calls.filter(([event]) => (event as { type: string }).type === type);
+
+const expectSessionNotLive = (res: request.Response): void => {
+	expect(res.status).toBe(401);
+	expect(res.body).toEqual({ error: "invalid_token", error_description: "session not found" });
+	expect(res.headers["www-authenticate"]).toBe(
+		'Bearer error="invalid_token", error_description="session not found"',
+	);
+	expect(JSON.stringify(res.body)).not.toContain("new-at");
+};
+
+describe("federation token route — a refreshed token is handed on only to a session still live", () => {
+	it("answers a close that commits during the upstream refresh as a session that is not live", async () => {
+		let closed: Promise<unknown> | undefined;
+		const r = await route({
+			seed: link(),
+			refresh: async (lifecycle, removalBegun) => {
+				closed = lifecycle.close(SID, "rp_logout");
+				// The closing commit has landed; the removal of the tokens has not run.
+				await removalBegun;
+			},
+		});
+
+		const res = await r.post();
+
+		expectSessionNotLive(res);
+		expect(r.refreshToken).toHaveBeenCalledTimes(1);
+		expect(audited(r, "federation.token.success")).toEqual([]);
+		expect(r.logger.error).not.toHaveBeenCalled();
+
+		r.releaseRemoval();
+		await closed;
+		expect(await r.store.get(SID, NAME)).toBeNull();
+	});
+
+	it("answers a session the read after the refresh finds live for another subject as one that is not live", async () => {
+		const r = await route({ seed: link() });
+		r.releaseRemoval();
+		// The first read, before the refresh, is the lifecycle's own.
+		r.liveness
+			.mockImplementationOnce((sid) => r.real.liveness(sid))
+			.mockImplementationOnce(async () => ({
+				outcome: "live",
+				session: {
+					sid: SID,
+					sub: "someone-else",
+					authTime: new Date(),
+					createdAt: new Date(),
+					expiresAt: new Date(Date.now() + 3_600_000),
+					claims: {},
+					amr: undefined,
+					authentication: undefined,
+				},
+			}));
+
+		const res = await r.post();
+
+		expectSessionNotLive(res);
+		expect(r.refreshToken).toHaveBeenCalledTimes(1);
+		expect(audited(r, "federation.token.success")).toEqual([]);
+	});
+
+	it("answers 503 when the liveness read after the refresh rejects", async () => {
+		const r = await route({ seed: link() });
+		r.releaseRemoval();
+		r.liveness
+			.mockImplementationOnce((sid) => r.real.liveness(sid))
+			.mockImplementationOnce(async () => Promise.reject(storeReplyError()));
+
+		const res = await r.post();
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(r.refreshToken).toHaveBeenCalledTimes(1);
+		expect(audited(r, "federation.token.success")).toEqual([]);
+		expectOutageLine(r.logger, "federation_token_store_unavailable", {
+			federation: NAME,
+			store: "session_lifecycle",
+			step: "liveness",
+		});
+	});
+
+	it("answers a live session's refresh as before, reading its liveness once more after the write", async () => {
+		const r = await route({ seed: link() });
+		r.releaseRemoval();
+
+		const res = await r.post();
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("new-at");
+		expect(r.refreshToken).toHaveBeenCalledTimes(1);
+		expect(r.liveness).toHaveBeenCalledTimes(2);
+		expect(r.liveness).toHaveBeenNthCalledWith(2, SID);
+		expect((await r.store.get(SID, NAME))?.accessToken).toBe("new-at");
+		expect(audited(r, "federation.token.success")).toEqual([
+			[expect.objectContaining({ details: { federation: NAME, refreshed: true } })],
+		]);
+	});
+
+	it("reads liveness once for a stored token that is not due", async () => {
+		const r = await route({ seed: link(new Date(Date.now() + 3_600_000)) });
+		r.releaseRemoval();
+
+		const res = await r.post();
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("old-at");
+		expect(r.refreshToken).not.toHaveBeenCalled();
+		expect(r.liveness).toHaveBeenCalledTimes(1);
+	});
+});
