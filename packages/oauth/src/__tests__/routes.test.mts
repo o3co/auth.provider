@@ -261,6 +261,22 @@ describe("createOAuthRouter", () => {
 		expect(calls.post.some((args) => args[0] === "/logout")).toBe(true);
 	});
 
+	it("refuses a userSessionStore wired without core's session lifecycle, naming both slots", async () => {
+		const { expressLike } = createTrackingExpress();
+
+		await expect(
+			createOAuthRouter(expressLike, {
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+				registry: new GrantRegistry(),
+				...routerInputsOf(fullConfig),
+				clientRepository: {} as ClientRepository,
+				codeRepository: {} as CodeRepository,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				userSessionStore: {} as UserSessionStore,
+			}),
+		).rejects.toThrow(/userSessionStore is wired, but sessionLifecycle is not/);
+	});
+
 	// Integration coverage: exercise the full /oauth/token pipeline
 	// end-to-end via supertest + a real express app. The mocked-router tests
 	// above only verify wiring; these tests cover the success-path token
