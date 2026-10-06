@@ -636,7 +636,7 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			const err = await refusal((config) => oauthWith(config, keys));
 			expect(err.reason).toBe("config-validation-failed");
 			expect(err.message).toContain(`${path}: Unrecognized key: "${key}"`);
-			expect(err.message).not.toMatch(/oauth endpoints module/);
+			expect(err.message).not.toMatch(/load oauthEndpointsModule/);
 		},
 	);
 

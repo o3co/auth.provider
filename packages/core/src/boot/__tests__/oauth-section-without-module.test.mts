@@ -19,8 +19,8 @@
  * its keys by path — the issuer, the token lifetimes, the revocation modes two
  * absence policies are keyed in — and refuses every other key the
  * configuration sets there (`config-validation-failed`, one issue per path,
- * naming the oauth endpoints module and never the value), so a retired key, a
- * misspelt one or one only that module reads is not accepted unread. A
+ * telling the operator to load oauthEndpointsModule, never the value), so
+ * a retired key, a misspelt one or one only that module reads is not accepted unread. A
  * configured issuer that is not canonical is refused the same way. Where the
  * module is loaded, its own section refuses, and this check does not run (the
  * oauth package's `sections.test.mts`).
@@ -120,7 +120,7 @@ describe("oauth {} with no loaded module whose section it is", () => {
 		expect(err.stage).toBe("validateManifests");
 		expect(pathsOf(err)).toEqual([path]);
 		expect(err.message).toContain(`${path}: `);
-		expect(err.message).toMatch(/oauth endpoints module/);
+		expect(err.message).toMatch(/load oauthEndpointsModule/);
 		expect(err.message).not.toMatch(/HS256|"dual"|"x"/);
 	});
 
