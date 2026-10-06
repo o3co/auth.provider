@@ -337,24 +337,9 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 	// The token side of the session-admission ADR's D9: not through admission
 	// in this release.
 	{
-		file: "packages/oauth/src/routes.mts",
-		sites: { get: 1 },
-		why: `${TOKEN_SIDE}: introspection's liveness read`,
-	},
-	{
-		file: "packages/oauth/src/routes/federationToken.mts",
-		sites: { get: 1 },
-		why: `${TOKEN_SIDE}: the federation-token route's read`,
-	},
-	{
 		file: "packages/oauth/src/routes/logout.mts",
 		sites: { get: 2 },
 		why: `${TOKEN_SIDE}: the two logout routes' reads`,
-	},
-	{
-		file: "packages/oauth/src/routes/userinfo.mts",
-		sites: { get: 1 },
-		why: `${TOKEN_SIDE}: userinfo's liveness read`,
 	},
 	{
 		file: "packages/oauth-token-exchange/src/grant.mts",
