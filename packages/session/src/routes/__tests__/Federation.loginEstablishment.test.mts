@@ -140,8 +140,11 @@ describe("the federation callback's login establishes without asking", () => {
 });
 
 describe("the federation callback's login — the session lifecycle, where it is installed", () => {
-	const callback = async (outcome: "opened" | "unavailable") => {
-		const open = vi.fn(async () => ({ outcome }));
+	const callback = async (outcome: "opened" | Error) => {
+		const open = vi.fn(async () => {
+			if (outcome instanceof Error) throw outcome;
+			return { outcome };
+		});
 		const harness = buildFederationApp({
 			providers: new Map([["test", provider]]),
 			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
@@ -175,7 +178,7 @@ describe("the federation callback's login — the session lifecycle, where it is
 	});
 
 	it("answers 503 when the record cannot be opened, with nothing written", async () => {
-		const { res, harness } = await callback("unavailable");
+		const { res, harness } = await callback(new Error("lifecycle store down"));
 
 		expect(res.status).toBe(503);
 		expect(harness.userSessionStore.create).not.toHaveBeenCalled();

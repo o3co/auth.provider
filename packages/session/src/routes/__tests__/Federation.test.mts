@@ -492,6 +492,11 @@ type SpyLogger = ReturnType<typeof spyLogger>;
  * `federation_cleanup_failed` warn per best-effort step that failed, in
  * order; and nothing at any other level.
  */
+/** A lifecycle call that rejects with its store's error: the lifecycle's outage. */
+const lifecycleStoreDown = async (): Promise<never> => {
+	throw new Error("lifecycle store down");
+};
+
 function expectOutageLogged(
 	logger: SpyLogger,
 	event: string,
@@ -1795,7 +1800,7 @@ describe("account linking across federations", () => {
 				sessionSeed: seed,
 				userRepository: repo,
 				userSessionStore: liveStore(),
-				sessionLifecycle: fakeSessionLifecycle({ join: async () => ({ outcome: "unavailable" }) }),
+				sessionLifecycle: fakeSessionLifecycle({ join: lifecycleStoreDown }),
 				logger,
 			});
 			const res = await callback(await plantAndGetAgent(app));
@@ -2889,7 +2894,7 @@ describe("Federation routes", () => {
 
 			it("a join the lifecycle cannot answer after create → its record closed, the session rolled back, 503 returned", async () => {
 				const uss = makeUserSessionStore();
-				const lifecycle = fakeSessionLifecycle({ join: async () => ({ outcome: "unavailable" }) });
+				const lifecycle = fakeSessionLifecycle({ join: lifecycleStoreDown });
 
 				const { app } = buildCallbackApp({
 					providers: new Map([["test", makeFakeProvider()]]),
@@ -3220,7 +3225,7 @@ describe("federation login: subject session index", () => {
 			providers,
 			federation: { name: "test", state: "s1", codeVerifier: "v1" },
 			userSessionStore: uss,
-			sessionLifecycle: fakeSessionLifecycle({ join: async () => ({ outcome: "unavailable" }) }),
+			sessionLifecycle: fakeSessionLifecycle({ join: lifecycleStoreDown }),
 			subjectSessionIndex: ssi,
 		});
 		const agent = await plantAndGetAgent(app);
@@ -3322,7 +3327,7 @@ describe("federation login: subject session index", () => {
 		const { app } = buildCallbackApp({
 			providers,
 			federation: { name: "test", state: "s1", codeVerifier: "v1" },
-			sessionLifecycle: fakeSessionLifecycle({ join: async () => ({ outcome: "unavailable" }) }),
+			sessionLifecycle: fakeSessionLifecycle({ join: lifecycleStoreDown }),
 			subjectSessionIndex: ssi,
 		});
 		const agent = await plantAndGetAgent(app);

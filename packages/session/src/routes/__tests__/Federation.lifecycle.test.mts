@@ -273,6 +273,11 @@ const participantsOf = async (w: World, sid: string) =>
 /** The sid of the one user session a login created. */
 const loginSid = (w: World): string => String(w.join.mock.calls[0]?.[0]);
 
+/** A join answering an outcome the lifecycle's types do not declare: anything but a success is acted on as an outage. */
+const UNDECLARED_JOIN = (async () => ({
+	outcome: "undeclared",
+})) as unknown as SessionLifecycle["join"];
+
 /** A logger whose `error` and `warn` are spies; `child` answers the same logger. */
 function spiedLogger() {
 	const error = vi.fn();
@@ -384,9 +389,9 @@ describe("a federated login over the session lifecycle", () => {
 		expect(w.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
 	});
 
-	it("answers 503 when the lifecycle cannot answer the join, undoing the tokens it attached", async () => {
+	it("answers 503 when the lifecycle answers an outcome it does not declare to the join, undoing the tokens it attached", async () => {
 		const w = await world();
-		w.join.mockImplementationOnce(async () => ({ outcome: "unavailable" }));
+		w.join.mockImplementationOnce(UNDECLARED_JOIN);
 
 		const res = await login(w);
 
@@ -505,9 +510,9 @@ describe("a link callback over the session lifecycle", () => {
 		expect(await participantsOf(w, LINKED_SID)).toEqual([]);
 	});
 
-	it("answers 503 when the lifecycle cannot answer the join, undoing the tokens it attached", async () => {
+	it("answers 503 when the lifecycle answers an outcome it does not declare to the join, undoing the tokens it attached", async () => {
 		const w = await world();
-		w.join.mockImplementationOnce(async () => ({ outcome: "unavailable" }));
+		w.join.mockImplementationOnce(UNDECLARED_JOIN);
 
 		const res = await link(w);
 

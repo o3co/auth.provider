@@ -73,6 +73,9 @@ async function passwordEstablishment(redirectTo?: string): Promise<Establishment
 	return admission.establishment;
 }
 
+/** An outcome the lifecycle's types do not declare: anything but a success is acted on as an outage. */
+const UNDECLARED = "undeclared";
+
 type Failures = {
 	readonly create?: Error;
 	readonly addSid?: Error;
@@ -88,8 +91,8 @@ type Failures = {
 	readonly beforeUndo?: Error;
 	readonly after?: Error;
 	readonly afterUndo?: Error;
-	/** The lifecycle's `close` rejects with it, or answers `unavailable`. */
-	readonly close?: Error | "unavailable";
+	/** The lifecycle's `close` rejects with it, or answers an outcome it does not declare. */
+	readonly close?: Error | typeof UNDECLARED;
 };
 
 type FakeSession = Record<string, unknown> & {
@@ -115,7 +118,7 @@ function harness(
 		 * A session lifecycle whose `open` answers this (`opened` when absent), or
 		 * rejects with it; `false`: none is wired.
 		 */
-		readonly lifecycle?: SessionOpenOutcome["outcome"] | Error | false;
+		readonly lifecycle?: "opened" | "refused" | typeof UNDECLARED | Error | false;
 	} = {},
 ) {
 	const trace: string[] = [];
@@ -156,12 +159,14 @@ function harness(
 		open: vi.fn(async (_sid: string, _request: { sub: string; expiresAt: Date }) => {
 			trace.push("open");
 			if (shape.lifecycle instanceof Error) throw shape.lifecycle;
-			return { outcome: shape.lifecycle || "opened" } as SessionOpenOutcome;
+			return { outcome: shape.lifecycle || "opened" } as unknown as SessionOpenOutcome;
 		}),
 		close: vi.fn(async (_sid: string, _cause: SessionCloseCause): Promise<SessionCloseOutcome> => {
 			trace.push("close");
 			if (fail.close instanceof Error) throw fail.close;
-			if (fail.close === "unavailable") return { outcome: "unavailable" };
+			if (fail.close === UNDECLARED) {
+				return { outcome: UNDECLARED } as unknown as SessionCloseOutcome;
+			}
 			return { outcome: "done", rps: [], federations: [] };
 		}),
 	} satisfies Pick<SessionLifecycle, "open" | "close">;
@@ -587,7 +592,7 @@ describe("establishSession", () => {
 			});
 		});
 
-		it.each(["unavailable", "refused"] as const)(
+		it.each(["refused", UNDECLARED] as const)(
 			"an open answered %s is the record's outage at create: nothing else written, nothing undone, the cookie session kept",
 			async (outcome) => {
 				const h = harness({}, { lifecycle: outcome });
@@ -674,7 +679,7 @@ describe("establishSession", () => {
 
 		it.each([
 			["rejects", new Error("lifecycle store down")],
-			["answers unavailable", "unavailable" as const],
+			["answers an outcome it does not declare", UNDECLARED] as const,
 		])(
 			"a close that %s is the record's failed rollback step, reported with the lifecycle's rejection itself or named as the lifecycle's answer; the rest still run",
 			async (_label, close) => {
@@ -689,7 +694,7 @@ describe("establishSession", () => {
 					close instanceof Error
 						? close
 						: expect.objectContaining({
-								message: "the session lifecycle answered unavailable to the close",
+								message: `the session lifecycle answered ${UNDECLARED} to the close`,
 							}),
 				);
 			},
@@ -721,7 +726,7 @@ describe("establishSession", () => {
 		});
 
 		it("closes nothing when the open itself failed: no record was opened", async () => {
-			const h = harness({}, { lifecycle: "unavailable" });
+			const h = harness({}, { lifecycle: "refused" });
 
 			await h.run();
 
