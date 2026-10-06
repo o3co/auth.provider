@@ -28,6 +28,7 @@ import { redisDurability } from "../durability.mjs";
 import {
 	MFA_BINDING_INDEX,
 	MFA_BINDING_UNINDEX,
+	MFA_EMAIL_PROOF_CONSUME,
 	MFA_FACTOR_CREATE_IF,
 	MFA_FACTOR_LIST_VERSIONED,
 	MFA_FACTOR_REMOVE_ALL,
@@ -289,8 +290,20 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 		async emailProofRequired(key) {
 			return (await io.exists(key)) === 1;
 		},
-		async consumeEmailProof(key) {
-			return (await io.del(key)) === 1;
+		async consumeEmailProof(keys, leaseToken) {
+			const reply = await runScript(
+				io,
+				MFA_EMAIL_PROOF_CONSUME,
+				[keys.proof, keys.lease],
+				[leaseToken],
+			);
+			const [held, removed] = Array.isArray(reply) ? reply : [];
+			if (held === 0) return { held: false };
+			if (held === 1 && (removed === 0 || removed === 1))
+				return { held: true, removed: removed === 1 };
+			throw new Error(
+				"MfaTransactionStore: the email-proof consume script answered nothing it knows",
+			);
 		},
 		async recordSessionEmailProof(key, value, ttlMs) {
 			await io.set(key, value, "PX", ttlMs);
