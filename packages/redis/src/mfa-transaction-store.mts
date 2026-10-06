@@ -126,7 +126,8 @@
  * judges that. A value that does not read back as a mark, whatever its end
  * looks like, or a key of another type, is an outage, never absent: an
  * absent mark trusts the session it is there to distrust. A note replaces
- * either.
+ * either, and answers it as an outage too. A note answers the mark that
+ * stood before it, read in the note's own script.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -694,7 +695,16 @@ function buildRedisMfaTransactionStore(
 				skewMs: DEFAULT_CLOCK_SKEW_MS,
 				longestMs: MFA_CLOCK_SKEW_ALLOWANCE_MS,
 			});
-			if (reply.noted) return;
+			if (reply.noted) {
+				const { earlier } = reply;
+				// A held value that is not a mark is replaced, and answered as an outage, never as none.
+				if (earlier === "unreadable") {
+					throw new Error(
+						"MfaTransactionStore.noteFirstBinding: the mark held could not be read; the note replaced it",
+					);
+				}
+				return earlier === null ? null : earlier.atMs;
+			}
 			checkFirstBindingNote(subject, atMs, untilMs, reply.serverNowMs);
 			throw new RangeError(
 				"MfaTransactionStore.noteFirstBinding: the mark does not stand on the store's clock",

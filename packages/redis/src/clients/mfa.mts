@@ -338,9 +338,16 @@ export interface NoteMfaFirstBindingInput {
 	readonly longestMs: number;
 }
 
-/** What a note answers: kept, or refused on the server's clock, which it names. */
+/**
+ * What stood before a note: a mark whose end was after the server's clock, by its time; none
+ * (or one ended); or a value that was not a mark, or a key of another type, which the note
+ * replaced.
+ */
+export type MfaFirstBindingEarlier = { readonly atMs: number } | null | "unreadable";
+
+/** What a note answers: kept, with what stood before it, or refused on the server's clock, which it names. */
 export type NoteMfaFirstBindingReply =
-	| { readonly noted: true }
+	| { readonly noted: true; readonly earlier: MfaFirstBindingEarlier }
 	| { readonly noted: false; readonly serverNowMs: number };
 
 /** A subject's first-binding mark as read, with the server's clock at the read. */
@@ -493,7 +500,7 @@ export interface MfaTransactionStoreClient {
 	 * one, expiring at that `untilMs` (`SET … PXAT`). A held mark is judged on its shape
 	 * alone, never on where its time sits on the server's clock; a held value that is not a
 	 * mark (`input.longestMs` bounding how long one stands), or a key of another type, is
-	 * replaced.
+	 * replaced. A note kept answers what stood before it, read in the same step.
 	 */
 	noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<NoteMfaFirstBindingReply>;
 	/** The subject's first-binding mark at `key`, and the server's clock, in one step. */

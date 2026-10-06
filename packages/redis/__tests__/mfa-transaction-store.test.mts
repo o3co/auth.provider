@@ -42,7 +42,7 @@ import {
 	type MfaTransactionStore,
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { MfaTransactionStoreClient } from "#/clients.mjs";
 import {
 	MFA_FIRST_BINDING_NOTE,
@@ -55,6 +55,7 @@ import {
 import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
 import { createRedisMfaTransactionStore } from "#/mfa-transaction-store.mjs";
 import { runMfaEmailProofRequirementContract } from "./adapters.mfa-email-proof-requirement.contract.mjs";
+import { runMfaFirstBindingNoteContract } from "./adapters.mfa-first-binding-note.contract.mjs";
 import { runMfaTransactionStoreContract } from "./adapters.mfa-transaction-store.contract.mjs";
 import { serverClock, serverPasses, testRedis } from "./support/redis.mjs";
 
@@ -146,6 +147,10 @@ runMfaTransactionStoreContract(async () => alternating(freshPrefix()), {
 });
 
 runMfaEmailProofRequirementContract(async () => alternating(freshPrefix()), {
+	expiry: { now: serverClock(first), passed: serverPasses(first) },
+});
+
+runMfaFirstBindingNoteContract(async () => alternating(freshPrefix()), {
 	expiry: { now: serverClock(first), passed: serverPasses(first) },
 });
 
@@ -1542,7 +1547,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		}
 	});
 
-	it("replaces a mark it cannot read back with the next note", async () => {
+	it("replaces a mark it cannot read back with the next note, which answers it as an outage, never as no mark", async () => {
 		const prefix = freshPrefix();
 		const store = await storeAt(prefix);
 		const key = markKey(prefix, "user-1");
@@ -1554,7 +1559,10 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 			...odd(now - MINUTE),
 		]) {
 			await first().set(key, value, "PX", MINUTE);
-			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			await expect(
+				store.noteFirstBinding("user-1", now, now + 10 * MINUTE),
+				value.slice(0, 60),
+			).rejects.toThrow(/MfaTransactionStore/);
 			expect(await store.firstBindingAt("user-1", now), value.slice(0, 60)).toBe(now);
 		}
 	});
@@ -1568,7 +1576,9 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		const now = Math.floor(await serverClock(first)());
 		const held = { atMs: now + 6 * MINUTE, untilMs: now + 20 * MINUTE, x: 1 };
 		await first().set(key, JSON.stringify(held), "PXAT", held.untilMs);
-		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		await expect(store.noteFirstBinding("user-1", now, now + 10 * MINUTE)).rejects.toThrow(
+			/MfaTransactionStore/,
+		);
 		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual({
 			atMs: now,
 			untilMs: now + 10 * MINUTE,
@@ -1577,7 +1587,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		expect(await store.firstBindingAt("user-1", now)).toBe(now);
 	});
 
-	it("refuses to read a key of another type, an outage, and a note overwrites it", async () => {
+	it("refuses to read a key of another type, an outage, and a note overwrites it, answering it as an outage", async () => {
 		const prefix = freshPrefix();
 		const store = await storeAt(prefix);
 		const key = markKey(prefix, "user-1");
@@ -1593,7 +1603,9 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 			const read = store.firstBindingAt("user-1", now);
 			await expect(read, type).rejects.toThrow();
 			await expect(read, type).rejects.not.toThrow(RangeError);
-			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			await expect(store.noteFirstBinding("user-1", now, now + 10 * MINUTE), type).rejects.toThrow(
+				/MfaTransactionStore/,
+			);
 			expect(await first().type(key), type).toBe("string");
 			expect(await store.firstBindingAt("user-1", now), type).toBe(now);
 		}
@@ -1643,6 +1655,53 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		expect(
 			await first().script("EXISTS", MFA_FIRST_BINDING_NOTE.sha, MFA_FIRST_BINDING_READ.sha),
 		).toEqual([1, 1]);
+	});
+
+	it("reads the note script's answer of what stood before it, and answers any other reply as an outage, never as no mark or a time", async () => {
+		const now = Date.now();
+		const stamp = String(now);
+		/** A store over a server that answers every script `reply`. */
+		const answering = (reply: unknown) => {
+			const io = {
+				evalsha: vi.fn().mockResolvedValue(reply),
+				eval: vi.fn().mockResolvedValue(reply),
+			};
+			const client = makeIoredisMfaTransactionStoreClient(io as never);
+			return createRedisMfaTransactionStore({
+				client: {
+					...client,
+					durability: async () => ({
+						maxmemoryPolicy: "noeviction",
+						appendOnly: true,
+						snapshots: undefined,
+						refusal: undefined,
+					}),
+				},
+				keyPrefix: freshPrefix(),
+			});
+		};
+		const note = async (reply: unknown) =>
+			(await answering(reply)).noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(await note([1, stamp, "none"])).toBeNull();
+		expect(await note([1, stamp, "mark", String(now - MINUTE)])).toBe(now - MINUTE);
+		for (const reply of [
+			[1, stamp],
+			[1, stamp, "mark"],
+			[1, stamp, "mark", "-1"],
+			[1, stamp, "mark", "1.5"],
+			[1, stamp, "mark", "01"],
+			[1, stamp, "mark", now - MINUTE],
+			[1, stamp, "other"],
+			[1, stamp, null],
+			[1, "x", "none"],
+			[2, stamp, "none"],
+			"1",
+			null,
+		]) {
+			const answer = note(reply);
+			await expect(answer, JSON.stringify(reply)).rejects.toThrow(/MfaTransactionStore/);
+			await expect(answer, JSON.stringify(reply)).rejects.not.toThrow(RangeError);
+		}
 	});
 
 	it("rejects a note and a read when the server cannot be reached: an outage, never no mark", async () => {

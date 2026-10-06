@@ -70,6 +70,11 @@ const COPIES: ReadonlyArray<{
 		runners: [["runMfaTransactionStoreContract", "mfa-transaction-store.test.mts"]],
 	},
 	{
+		core: "mfa/__tests__/firstBindingNote.contract.mts",
+		copy: "adapters.mfa-first-binding-note.contract.mts",
+		runners: [["runMfaFirstBindingNoteContract", "mfa-transaction-store.test.mts"]],
+	},
+	{
 		core: "mfa/__tests__/emailProofRequirement.contract.mts",
 		copy: "adapters.mfa-email-proof-requirement.contract.mts",
 		runners: [["runMfaEmailProofRequirementContract", "mfa-transaction-store.test.mts"]],

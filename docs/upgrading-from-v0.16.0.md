@@ -2004,7 +2004,11 @@ with what a store of yours records and refuses. Per port:
   `consumeEmailProof(key)`: it removes the email-proof requirement at
   `keys.proof` only while the lease at `keys.lease` holds `leaseToken`, in one
   atomic step, and answers `{ held: false }` or `{ held: true, removed }`.
-  `makeIoredisMfaTransactionStoreClient` provides it.
+  `makeIoredisMfaTransactionStoreClient` provides it. Its
+  `noteFirstBinding` answers, with a kept note, what stood before it, read
+  in the same atomic step (`earlier`: `{ atMs }` for a mark whose end is
+  after the server's clock, `null` for none, or `"unreadable"` for a value
+  the note replaced).
 - **A second factor of your own (`MfaFactor`)** answers each challenge's and
   enrollment start's `response` as a plain JSON-shaped object — no class
   instance, list or `-0`, every own key an enumerable string, at any depth —
