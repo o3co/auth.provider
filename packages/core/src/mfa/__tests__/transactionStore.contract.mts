@@ -2548,24 +2548,8 @@ export function runMfaTransactionStoreContract(
 			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
 		});
 
-		it("is consumed once: of N consumes in flight one answers true, and it is gone", async () => {
-			const store = await factory();
-			await store.requireEmailProofAtNextBinding("user-1");
-			await store.requireEmailProofAtNextBinding("user-2");
-			const results = await Promise.all(
-				Array.from({ length: 10 }, () => store.consumeEmailProofRequirement("user-1")),
-			);
-			expect(results.filter(Boolean)).toHaveLength(1);
-			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
-			expect(await store.consumeEmailProofRequirement("user-1")).toBe(false);
-			expect(await store.emailProofRequiredAtNextBinding("user-2")).toBe(true);
-		});
-
-		it("answers false to a consume when nothing required the proof", async () => {
-			const store = await factory();
-			expect(await store.consumeEmailProofRequirement("user-1")).toBe(false);
-			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
-		});
+		// Its consume, under the subject's lease, is held by
+		// `runMfaEmailProofRequirementContract`.
 	});
 
 	describe("MfaTransactionStore contract: a session's account-email proof", () => {

@@ -62,6 +62,7 @@ import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import { usableMaxEntries } from "../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import {
+	checkEmailProofRequirementConsume,
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
@@ -80,6 +81,8 @@ import {
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_WEEKLY_WINDOW_MS,
+	type MfaEmailProofRequirementConsume,
+	type MfaEmailProofRequirementConsumeAnswer,
 	type MfaLockoutPolicy,
 	type MfaRecoverySetFloorAnswer,
 	type MfaSubjectAttemptOutcome,
@@ -744,8 +747,14 @@ export function createMemoryMfaTransactionStore(
 			return emailProofRequired.has(subject);
 		},
 
-		async consumeEmailProofRequirement(subject: string): Promise<boolean> {
-			return emailProofRequired.delete(subject);
+		async consumeEmailProofRequirement(
+			subject: string,
+			consume?: MfaEmailProofRequirementConsume,
+		): Promise<boolean | MfaEmailProofRequirementConsumeAnswer> {
+			if (consume === undefined) return emailProofRequired.delete(subject);
+			const { leaseToken } = checkEmailProofRequirementConsume(subject, consume);
+			if (!holds(subject, leaseToken)) return { outcome: "refused", reason: "lease_not_held" };
+			return { outcome: emailProofRequired.delete(subject) ? "consumed" : "absent" };
 		},
 
 		async recordSessionEmailProof(
