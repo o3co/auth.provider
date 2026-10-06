@@ -282,8 +282,9 @@ export const requireSessionLifecycleStore = (
 			"device-grant: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
 				"user-session store is wired, core's session lifecycle is required: " +
 				"POST /oauth/device/verification admits the session behind the cookie through its " +
-				"lifecycle record. Install sessionLifecycleModule from @o3co/auth-provider-core " +
-				"beside the session stores.",
+				"lifecycle record. Wire core's session lifecycle: a session-store module that fills " +
+				"sessionLifecycleStore (memorySessionStoresModule or redisSessionStoresModule) and " +
+				"sessionLifecycleModule.",
 		);
 	}
 };

@@ -333,7 +333,7 @@ describe("the device-grant module — boot", () => {
 		expect(err, "boot must be refused").toBeInstanceOf(BootError);
 		expect(err?.reason).toBe("contribute-factory-failed");
 		expect(err?.message).toMatch(
-			/device-grant: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Install sessionLifecycleModule/,
+			/device-grant: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 

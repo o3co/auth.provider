@@ -1228,7 +1228,8 @@ modules fills them.
     lifecycle cannot hold is therefore a `503` too; such a sid is never
     issued.
   - `deviceAuthorizationGrantModule`, enabled, is refused the same way when
-    no `sessionLifecycleStore` (the slot `sessionLifecycleModule` fills) is
+    no `sessionLifecycleStore` (the port core's session-store modules fill, which
+    `sessionLifecycleModule` requires) is
     wired beside its `userSessionStore`: `contribute-factory-failed`, the
     message naming both slots. `createDeviceVerificationHandler` throws the
     same refusal. The verification's admission reads the session's
