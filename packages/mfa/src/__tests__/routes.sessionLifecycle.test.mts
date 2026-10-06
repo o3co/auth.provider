@@ -74,7 +74,7 @@ describe("the MFA routes and the session lifecycle", () => {
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa", module: "mfa" });
 		expect((err.cause as Error).message).toMatch(
-			/^mfa: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Install sessionLifecycleModule/,
+			/^mfa: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 

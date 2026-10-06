@@ -355,8 +355,9 @@ export function requireSessionLifecycleStore(
 		throw new Error(
 			"mfa: userSessionStore is wired, but sessionLifecycleStore is not. Where a user-session " +
 				"store is wired, core's session lifecycle is required: the MFA routes' admission reads " +
-				"the session's lifecycle record through it. Install sessionLifecycleModule from " +
-				"@o3co/auth-provider-core beside the session stores.",
+				"the session's lifecycle record through it. Wire core's session lifecycle: a " +
+				"session-store module that fills sessionLifecycleStore (memorySessionStoresModule or " +
+				"redisSessionStoresModule) and sessionLifecycleModule.",
 		);
 	}
 }
