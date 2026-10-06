@@ -68,10 +68,11 @@ export interface RevokeAllForSubjectFailure {
 	/** The grant the failing call concerned, for the per-grant operations. */
 	readonly grantId?: string;
 	/**
-	 * Which of a boundary's two writes threw (`revokeBefore`,
-	 * `revokeSessionsBefore`): `1`, the first; `2`, the one made after it
-	 * took effect, when a boundary may be in force without covering what was
-	 * minted while the first was in flight. Run the revocation again.
+	 * Which of a boundary's writes failed (`revokeBefore`,
+	 * `revokeSessionsBefore`): `1`, the first threw; `2`, a write made after
+	 * it threw, or none committed within the settling bound, when a boundary
+	 * may be in force without covering what was minted while an earlier one
+	 * was in flight. Run the revocation again.
 	 */
 	readonly stamp?: 1 | 2;
 	readonly error: unknown;
@@ -117,10 +118,11 @@ export interface RevokeAllForSubjectResult {
 	/** Session ids whose cascade failed — still live, safe to retry. */
 	readonly sessionsFailed: readonly string[];
 	/**
-	 * Whether the access-token watermark was written. It is written twice, the
-	 * second time once the first has settled; true when either write took
-	 * effect. A write that threw is in `failures` with its `stamp`, and
-	 * `complete` is then `false`.
+	 * Whether the access-token watermark was written. It is written again
+	 * once the first write has taken effect, and again while the last write
+	 * was slow to commit, a bounded number of times; true when any write took
+	 * effect. A write that threw, or no write settling, is in `failures` with
+	 * its `stamp`, and `complete` is then `false`.
 	 */
 	readonly tokensRevoked: boolean;
 	/**
@@ -173,9 +175,9 @@ export interface RevokeAllForSubjectResult {
  *     perhaps alive": a live session with no usable token can be cleaned up
  *     on retry; a live token is the thing being revoked.
  *
- * It is stamped again once that write has taken effect
- * (`stampSubjectBoundary`), so it also covers a token minted while the write
- * was in flight.
+ * It is stamped again once that write has taken effect, until a write
+ * commits promptly (`stampSubjectBoundary`), so it also covers a token
+ * minted while a write was in flight.
  *
  * **This never throws** once it has checked its arguments (a `RangeError`
  * for a `watermarkTtlMs` that is not a positive whole number of
