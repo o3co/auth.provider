@@ -59,10 +59,16 @@ const FIELD = "enrollmentFacts";
 /** The declared types whose `enrollmentFacts` is core's own copy, never a stored record's. */
 const COPIES: ReadonlySet<string> = new Set(["SessionView", "PrimaryAuthentication"]);
 
-/** Where a raw read may be: a file, and — when given — the function or constant it must sit in. */
+/**
+ * Where a raw read may be: a file, and — when given — the function or
+ * constant it must sit in, the receiver it must be read off (as written), and
+ * how many such reads the file holds.
+ */
 interface AllowedRawRead {
 	readonly file: string;
 	readonly within?: string;
+	readonly read?: string;
+	readonly count?: number;
 	readonly why: string;
 }
 
@@ -75,6 +81,8 @@ const ALLOWED_RAW_READS: readonly AllowedRawRead[] = [
 	{
 		file: "packages/core/src/session-admission/live-session.mts",
 		within: "copyRecord",
+		read: "record",
+		count: 1,
 		why: "admission copies the store's answer once by its declared fields, inside the guarded live read; viewOf reads the facts off that copy",
 	},
 	{
@@ -262,20 +270,39 @@ function productReads(): Map<string, FactsRead[]> {
 	return byFile;
 }
 
+const matches = (entry: AllowedRawRead, file: string, read: FactsRead): boolean =>
+	entry.file === file &&
+	(entry.within === undefined || read.within.includes(entry.within)) &&
+	(entry.read === undefined || read.receiver === entry.read);
+
 const allowed = (file: string, read: FactsRead): boolean =>
-	ALLOWED_RAW_READS.some(
-		(entry) =>
-			entry.file === file && (entry.within === undefined || read.within.includes(entry.within)),
-	);
+	ALLOWED_RAW_READS.some((entry) => matches(entry, file, read));
+
+/**
+ * What the guard refuses in `byFile`: each raw read no row allows, as
+ * `file:line`, and each row with a `count` that its file's raw reads do not
+ * meet exactly.
+ */
+const violations = (byFile: ReadonlyMap<string, readonly FactsRead[]>): string[] => [
+	...[...byFile].flatMap(([file, reads]) =>
+		reads
+			.filter((read) => !read.copy && !allowed(file, read))
+			.map((read) => `${file}:${read.line}`),
+	),
+	...ALLOWED_RAW_READS.flatMap((entry) => {
+		if (entry.count === undefined) return [];
+		const found = (byFile.get(entry.file) ?? []).filter(
+			(read) => !read.copy && matches(entry, entry.file, read),
+		).length;
+		return found === entry.count
+			? []
+			: [`${entry.file} (${entry.within ?? "anywhere"}): ${found} reads, count ${entry.count}`];
+	}),
+];
 
 describe("a session's stored enrollment facts have one reading", () => {
 	it("are read raw by no product file, the template's included, but admission's record copy and viewOf, the two session stores and establishSession", () => {
-		const offenders = [...productReads()].flatMap(([file, reads]) =>
-			reads
-				.filter((read) => !read.copy && !allowed(file, read))
-				.map((read) => `${file}:${read.line}`),
-		);
-		expect(offenders).toEqual([]);
+		expect(violations(productReads())).toEqual([]);
 	});
 
 	it("scans every package's product sources and the standalone template's, not their tests", () => {
@@ -358,5 +385,40 @@ describe("a session's stored enrollment facts have one reading", () => {
 		expect(allowed("packages/core/src/session-admission/admit.mts", elsewhere as FactsRead)).toBe(
 			false,
 		);
+	});
+
+	const LIVE_SESSION = "packages/core/src/session-admission/live-session.mts";
+	const inLiveSession = (source: string) => new Map([[LIVE_SESSION, factsReads(source)]]);
+
+	it("allows in copyRecord the one destructuring read off the record, and refuses a read off another receiver there", () => {
+		expect(
+			violations(
+				inLiveSession(
+					"const copyRecord = (record: UserSession): UserSession => { const { sid, enrollmentFacts } = record; return { sid, enrollmentFacts }; };",
+				),
+			),
+		).toEqual([]);
+		expect(
+			violations(
+				inLiveSession(
+					"const copyRecord = (record: UserSession, other: UserSession): UserSession => { const { sid, enrollmentFacts } = record; return { sid, enrollmentFacts: other.enrollmentFacts ?? enrollmentFacts }; };",
+				),
+			),
+		).toEqual([`${LIVE_SESSION}:1`]);
+	});
+
+	it("refuses a second read off the record in copyRecord, and a copyRecord that no longer reads it", () => {
+		expect(
+			violations(
+				inLiveSession(
+					"const copyRecord = (record: UserSession): UserSession => { const { sid, enrollmentFacts } = record; return { sid, enrollmentFacts: record.enrollmentFacts ?? enrollmentFacts }; };",
+				),
+			),
+		).not.toEqual([]);
+		expect(
+			violations(
+				inLiveSession("const copyRecord = (record: UserSession) => ({ sid: record.sid });"),
+			),
+		).not.toEqual([]);
 	});
 });
