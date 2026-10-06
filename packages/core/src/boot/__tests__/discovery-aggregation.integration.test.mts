@@ -133,7 +133,9 @@ const conflictingDiscoveryRouteModule = defineModule({
 });
 
 function withIssuer(issuer: string) {
-	const config = makeValidAppConfig() as { oauth?: { jwt?: Record<string, unknown> } };
+	const config = makeValidAppConfig() as {
+		oauth?: { jwt?: Record<string, unknown> };
+	};
 	return {
 		...config,
 		oauth: { ...config.oauth, jwt: { ...config.oauth?.jwt, issuer } },
@@ -351,29 +353,22 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		}
 	});
 
-	it("serves no document on a configured issuer that is not canonical, with no oauthTokenSettings slot", async () => {
-		// No oauth-package module is loaded, so no section schema held
-		// `oauth.jwt.issuer` to the canonical-issuer rule: boot reads the
-		// configuration's issuer only when it holds, and reads none otherwise,
-		// so nothing is advertised on an issuer the deployment cannot mint on.
+	it("refuses a configured issuer that is not canonical, with no oauth module: nothing is served on it", async () => {
+		// No oauth-package module is loaded, so no section schema holds
+		// `oauth.jwt.issuer`: core's stage-1 read of the section refuses it,
+		// so no discovery document, CORS path or page is built on it.
 		for (const issuer of [
 			"http://auth.example.com",
 			"https://auth.example.com/",
 			"https://auth.example.com/tenant?x=1",
 			"https://user:pw@auth.example.com",
 		]) {
-			const handle = await createTestApp({
-				modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
-				bootstrapComponents: { config: withIssuer(issuer), pathResolver: (s) => s },
-			});
-			const app = express();
-			app.use(handle.router);
-
-			expect((await request(app).get("/.well-known/openid-configuration")).status).toBe(404);
-			expect((await request(app).get("/.well-known/oauth-authorization-server")).status).toBe(404);
-			expect((await request(app).get("/tenant/.well-known/openid-configuration")).status).toBe(404);
-
-			await handle.dispose();
+			await expect(
+				createTestApp({
+					modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+					bootstrapComponents: { config: withIssuer(issuer), pathResolver: (s) => s },
+				}),
+			).rejects.toMatchObject({ reason: "config-validation-failed", stage: "validateManifests" });
 		}
 	});
 

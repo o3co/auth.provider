@@ -21,7 +21,12 @@
  */
 
 import type { z } from "zod";
-import { type AppConfig, CoreConfigSchema } from "../config/application.schema.mjs";
+import { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } from "../access-token-denylist/types.mjs";
+import {
+	type AppConfig,
+	CoreConfigSchema,
+	OAUTH_LIFETIME_PATHS,
+} from "../config/application.schema.mjs";
 import {
 	defineConfigKey,
 	isPlainConfigObject,
@@ -34,6 +39,7 @@ import {
 	findRelocatedKeys,
 	findRenamedVariables,
 	type HandedConfiguration,
+	pathsSetBy,
 	RENAMED_VARIABLES_SECTION,
 	type RelocatedPath,
 	type RenamedVariable,
@@ -67,6 +73,7 @@ import {
 	lifetimeBeyondConfiguration,
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
+import { SUBJECT_REVOCATION_ABSENCE_POLICY } from "../user-sessions/types.mjs";
 import { contributesAuditHooks } from "./audit-fan-out.mjs";
 import { type ConfigDefaults, logConfigNotices, readConfigDefaults } from "./config-notices.mjs";
 import { failureSummary } from "./failure-summary.mjs";
@@ -2124,6 +2131,85 @@ function reservedKeyIssues(
 }
 
 /**
+ * The sections of another owner core reads keys of by path, loaded or not:
+ * `oauth {}`, for the issuer the grant-policy check and the discovery document
+ * are built on, the token lifetimes revoking records and a host's token
+ * settings are bounded by, and the revocation modes two absence policies are
+ * keyed in. The oauth module owns the section; while those readers move to its
+ * `oauthTokenSettings` slot, core reads the section where it is written.
+ */
+const SECTIONS_CORE_READS = ["oauth"] as const;
+
+/**
+ * The keys of `oauth {}` core reads by path (`SECTIONS_CORE_READS`), and no
+ * other: the issuer the grant-policy check and `compositionIssuer` read, the
+ * token lifetimes core's resolvers read (`OAUTH_LIFETIME_PATHS`), and the
+ * revocation modes the subject-revocation and access-token denylist absence
+ * policies are keyed in.
+ */
+const OAUTH_ISSUER_PATH = "oauth.jwt.issuer";
+const OAUTH_PATHS_CORE_READS: ReadonlySet<string> = new Set([
+	OAUTH_ISSUER_PATH,
+	...OAUTH_LIFETIME_PATHS,
+	SUBJECT_REVOCATION_ABSENCE_POLICY.configKey.join("."),
+	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY.configKey.join("."),
+]);
+
+/** The value at `path` of `config`, read as own properties; `undefined` where there is none. */
+function ownValueAt(config: unknown, path: readonly string[]): unknown {
+	let value: unknown = config;
+	for (const key of path) {
+		if (value === null || typeof value !== "object" || !Object.hasOwn(value, key)) return undefined;
+		value = (value as Record<string, unknown>)[key];
+	}
+	return value;
+}
+
+/**
+ * Where no loaded module's section is `oauth` — the oauth endpoints module is
+ * not loaded — one issue per key the configuration sets under `oauth` that
+ * core does not read (`OAUTH_PATHS_CORE_READS`), by the reading of what a
+ * configuration sets the relocation refusal uses (`pathsSetBy`, a key whose
+ * value is `undefined` setting nothing), and one for a configured issuer that
+ * is not canonical. Nothing else would read such a key, so it would be
+ * accepted unread: a retired key, a misspelt one, one only the module reads.
+ * Where the module is loaded, its own strict section refuses instead.
+ */
+function oauthKeysNothingReads(raw: unknown, modules: readonly Module[]): z.core.$ZodIssue[] {
+	if (modules.some((m) => m.section !== undefined && m.name === SECTIONS_CORE_READS[0])) {
+		return [];
+	}
+	const section = ownValueAt(raw, [SECTIONS_CORE_READS[0]]);
+	if (section === undefined) return [];
+	const issues: z.core.$ZodIssue[] = [];
+	for (const path of pathsSetBy(section, [SECTIONS_CORE_READS[0]])) {
+		const value = ownValueAt(raw, path);
+		if (value === undefined) continue;
+		const dotted = path.join(".");
+		if (dotted === OAUTH_ISSUER_PATH) {
+			const rejection = checkCanonicalIssuer(value);
+			if (rejection === null) continue;
+			issues.push({
+				code: "custom",
+				path: [...path],
+				message: `${OAUTH_ISSUER_PATH} ${describeIssuerRejection(rejection)}`,
+				input: undefined,
+			} as z.core.$ZodIssue);
+			continue;
+		}
+		if (OAUTH_PATHS_CORE_READS.has(dotted)) continue;
+		issues.push({
+			code: "custom",
+			path: [...path],
+			message:
+				"is read only by the oauth endpoints module (oauthEndpointsModule), which owns oauth {} and is not loaded: load it to use this key, or remove the key",
+			input: undefined,
+		} as z.core.$ZodIssue);
+	}
+	return issues;
+}
+
+/**
  * Step 13: parses the configuration the composition root handed over
  * (`bootstrapComponents.config`) once, with every schema that reads it:
  *
@@ -2137,15 +2223,17 @@ function reservedKeyIssues(
  * `parseModuleSections` writes each section back. Refused values make one
  * `config-validation-failed` naming each operator path: every reserved key
  * (`reservedKeyIssues`: an `Object.prototype` member's name, or
- * `prototype`), then the base's issues. No module is named: a module's own
+ * `prototype`), every key of `oauth {}` nothing reads where its module is not
+ * loaded (`oauthKeysNothingReads`), then the base's issues. No module is named: a module's own
  * configuration is its section, parsed after this.
  * @internal
  */
-function validateAndComposeConfig(bootstrap: BootstrapMap): unknown {
+function validateAndComposeConfig(bootstrap: BootstrapMap, modules: readonly Module[]): unknown {
 	const issues: z.core.$ZodIssue[] = [];
 	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
 	issues.push(...reservedKeyIssues(raw));
+	issues.push(...oauthKeysNothingReads(raw, modules));
 	// Through `parseSection`: a parse that throws instead of answering — a
 	// getter in a configuration built in code that throws — is one more issue
 	// naming the schema, not an error escaping stage 1.
@@ -2162,16 +2250,6 @@ function validateAndComposeConfig(bootstrap: BootstrapMap): unknown {
 	}
 	return overlayConfig(raw, (base as { readonly data: unknown }).data);
 }
-
-/**
- * The sections of another owner core reads keys of by path, loaded or not:
- * `oauth {}`, for the issuer the grant-policy check and the discovery document
- * are built on, the token lifetimes revoking records and a host's token
- * settings are bounded by, and the revocation modes two absence policies are
- * keyed in. The oauth module owns the section; while those readers move to its
- * `oauthTokenSettings` slot, core reads the section where it is written.
- */
-const SECTIONS_CORE_READS = ["oauth"] as const;
 
 /**
  * The top-level sections something loaded reads: every section core's base
@@ -3625,7 +3703,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		config === rawConfig
 			? bootstrapComponents
 			: { ...bootstrapComponents, config: config as BootstrapMap["config"] };
-	const composedConfig = validateAndComposeConfig(parseInput);
+	const composedConfig = validateAndComposeConfig(parseInput, modules);
 	// Each module's own section, parsed out of that configuration by
 	// the module's schema and written back at its path — before any
 	// post-config row, which may assume the configuration is valid.

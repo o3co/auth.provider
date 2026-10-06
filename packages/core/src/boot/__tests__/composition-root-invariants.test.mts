@@ -18,8 +18,9 @@
  * Integration tests for the composition-root grantPolicy / `oauth.jwt.issuer`
  * invariant: boot fails on a missing, empty or non-canonical issuer, however
  * grantPolicy is wired. No oauth-package module is loaded here, so no section
- * schema parses `oauth {}`: the stage-1 check is the only gate, and it holds
- * the issuer to `checkCanonicalIssuer` itself.
+ * schema parses `oauth {}`: core's stage-1 read of the section refuses a
+ * configured issuer that is not canonical (`config-validation-failed`, at the
+ * key), and the grant-policy check one that is missing.
  */
 
 import { describe, expect, it } from "vitest";
@@ -68,6 +69,13 @@ describe("grantPolicy/issuer invariant", () => {
 		err.reason === "grant-policy-without-issuer" &&
 		err.stage === "validateManifests";
 
+	/** Refused by core's stage-1 read of `oauth {}`, at the key, before any grant-policy check. */
+	const refusedAtTheKey = (err: unknown): boolean =>
+		err instanceof BootError &&
+		err.reason === "config-validation-failed" &&
+		err.stage === "validateManifests" &&
+		/oauth\.jwt\.issuer: oauth\.jwt\.issuer must/.test(err.message);
+
 	it("rejects grantPolicy module when config.oauth.jwt.issuer is missing", async () => {
 		await expect(
 			createApp({
@@ -89,7 +97,7 @@ describe("grantPolicy/issuer invariant", () => {
 					pathResolver: (p: string) => p,
 				} as never,
 			}),
-		).rejects.toSatisfy(refusedForIssuer);
+		).rejects.toSatisfy(refusedAtTheKey);
 	});
 
 	it.each([
@@ -112,12 +120,7 @@ describe("grantPolicy/issuer invariant", () => {
 				() => undefined,
 				(e: unknown) => e,
 			);
-			expect(err).toSatisfy(refusedForIssuer);
-			expect((err as BootError).details).toEqual({
-				reason: "grant-policy-without-issuer",
-				providedBy: "test-grant-policy-provider",
-			});
-			expect((err as BootError).message).toMatch(/oauth\.jwt\.issuer/);
+			expect(err).toSatisfy(refusedAtTheKey);
 			expect((err as BootError).message).not.toContain(issuer);
 		},
 	);
@@ -132,7 +135,7 @@ describe("grantPolicy/issuer invariant", () => {
 					grantPolicy: noopGrantPolicy,
 				} as never,
 			}),
-		).rejects.toSatisfy(refusedForIssuer);
+		).rejects.toSatisfy(refusedAtTheKey);
 		await expect(
 			createApp({
 				modules: [],
@@ -142,7 +145,7 @@ describe("grantPolicy/issuer invariant", () => {
 				} as never,
 				overrideComponents: { grantPolicy: noopGrantPolicy } as never,
 			}),
-		).rejects.toSatisfy(refusedForIssuer);
+		).rejects.toSatisfy(refusedAtTheKey);
 	});
 
 	it("accepts grantPolicy module when issuer is a canonical issuer", async () => {
@@ -207,7 +210,7 @@ describe("grantPolicy/issuer invariant", () => {
 					grantPolicy: noopGrantPolicy,
 				} as never,
 			}),
-		).rejects.toSatisfy(refusedForIssuer);
+		).rejects.toSatisfy(refusedAtTheKey);
 	});
 
 	it("accepts bootstrapComponents.grantPolicy when issuer is set", async () => {

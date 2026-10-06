@@ -636,7 +636,6 @@ export function assembleApp(
 	// composition without the slot allows no origin.
 	{
 		const components = frozen.components as Record<string, unknown>;
-		const config = components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined;
 		const logger = components.logger as Logger | undefined;
 		const allowedOrigins = Object.hasOwn(components, "httpSettings")
 			? httpSettingsCorsOrigins(components.httpSettings)
@@ -644,10 +643,11 @@ export function assembleApp(
 		if (allowedOrigins.length > 0) {
 			const mw = corsMw({
 				allowedOrigins,
-				// On the issuer the discovery route is served on (the oauth
-				// module's `oauthTokenSettings` when the composition holds it),
-				// and the JWKS path the jwks module's route serves.
-				routes: browserFacingCorsRoutes(config ?? {}, corsTableOptions(components, allRoutes)),
+				// On the issuer the discovery route is served on
+				// (`compositionIssuer`, none when it answers none: the
+				// configuration is not read again here), and the JWKS path the
+				// jwks module's route serves.
+				routes: browserFacingCorsRoutes({}, corsTableOptions(components, allRoutes)),
 				...(logger ? { logger } : {}),
 			});
 			if (mw !== null) router.use(mw);

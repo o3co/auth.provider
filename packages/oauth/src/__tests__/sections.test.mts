@@ -56,6 +56,7 @@ import {
 	oauthAuthorizationGrantsModule,
 } from "#/oauthAuthorization.mjs";
 import { oauthSessionConfigSchema, oauthSessionGrantModule } from "#/oauthSession.mjs";
+import { appConfigWithOAuthModule } from "./_helpers/oauthModuleConfig.mjs";
 import { capturing, type GrantSwitches, withGrants } from "./_helpers/sections.mjs";
 
 /** The package's defaults, as a composition root finds them. */
@@ -253,7 +254,7 @@ describe("the oauth module's section, as an environment variable carries it", ()
 		["a list written in configuration, as written", ["a.example"], ["a.example"]],
 	] as const)("reads clientIdMetadataDocuments.allowedHosts from %s", (_what, written, read) => {
 		const parsed = oauthSectionSchema.parse({
-			...makeValidAppConfig().oauth,
+			...appConfigWithOAuthModule().oauth,
 			clientIdMetadataDocuments: { enabled: "true", allowedHosts: written },
 		});
 		expect(parsed.clientIdMetadataDocuments?.allowedHosts).toEqual(read);
@@ -433,7 +434,7 @@ describe("the oauth-authorization section, and the switches read from it as boot
 describe("boot, over a configuration that captures the modules' renamed variables", () => {
 	/** The package's modules, and the fixture's configuration with `change` laid over it, captured. */
 	const composition = (change: (config: Record<string, unknown>) => Record<string, unknown>) => {
-		const config = change(makeValidAppConfig() as unknown as Record<string, unknown>);
+		const config = change(appConfigWithOAuthModule() as unknown as Record<string, unknown>);
 		const modules = everyModule();
 		// What the modules require besides their sections, so a refusal names the configuration.
 		const slots = defineModule({
@@ -617,6 +618,25 @@ describe("boot, over a configuration that captures the modules' renamed variable
 				"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS sets oauth.authorize.allowUnmarkedClients, which was removed",
 			);
 			expect(err.message).not.toContain(`"${value}"`);
+		},
+	);
+
+	it.each([
+		[
+			"a retired flat key field",
+			{ jwt: { issuer: "https://auth.test", algorithm: "HS256" } },
+			"oauth.jwt",
+			"algorithm",
+		],
+		["a typo", { oidcMod: "dual" }, "oauth", "oidcMod"],
+		["an unknown nested key", { nonce: { maxLength: 256, extra: 1 } }, "oauth.nonce", "extra"],
+	])(
+		"refuses %s by the module's own section, not by core's read of an unowned oauth {}",
+		async (_, keys, path, key) => {
+			const err = await refusal((config) => oauthWith(config, keys));
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain(`${path}: Unrecognized key: "${key}"`);
+			expect(err.message).not.toMatch(/oauth endpoints module/);
 		},
 	);
 

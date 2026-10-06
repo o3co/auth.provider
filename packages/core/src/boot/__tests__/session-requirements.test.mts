@@ -932,6 +932,60 @@ describe("the reach and the page, checked at the end of stage 4", () => {
 	});
 });
 
+describe("the issuer a requirement's page is held to, with no oauth module and no token settings", () => {
+	// No module parses oauth {} here, so the stage-1 read of oauth.jwt.issuer
+	// is what holds it: a value present and not canonical refuses the boot,
+	// so a page is never registered unchecked beside an issuer that is not one.
+	const riskOn = (url: string) =>
+		contributing("test:risk", {
+			risk: () => requirement("risk", { stepUpPage: { url, params: {} } }),
+		});
+	const withIssuer = (issuer: unknown) => ({
+		core: { sessionRequirements: { expected: ["risk"] } },
+		oauth: { ...makeValidCoreConfig().oauth, jwt: { issuer } },
+	});
+
+	it.each([
+		"https://auth.test/",
+		"http://auth.test",
+		"https://auth.test?tenant=a",
+		"https://u:p@auth.test",
+		"auth.test",
+		"",
+		42,
+	])(
+		"refuses the issuer %j at stage 1, naming the key and never the value, so no foreign page registers",
+		async (issuer) => {
+			const err = await refusal(
+				boot([riskOn("https://untrusted.example/step-up")], withIssuer(issuer)),
+			);
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.message).toMatch(/oauth\.jwt\.issuer/);
+			if (typeof issuer === "string" && issuer.length > 0) {
+				expect(err.message).not.toContain(issuer);
+			}
+		},
+	);
+
+	it("holds a page to a canonical issuer's origin, as before", async () => {
+		const err = await refusal(
+			boot([riskOn("https://untrusted.example/step-up")], withIssuer("https://auth.test")),
+		);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.message).toMatch(/origin/);
+	});
+
+	it("registers a page with no issuer configured at all: there is none to hold it to", async () => {
+		const { jwt: _jwt, ...oauth } = makeValidCoreConfig().oauth;
+		const handle = await boot([riskOn("https://pages.example/step-up")], {
+			core: { sessionRequirements: { expected: ["risk"] } },
+			oauth,
+		});
+		await handle.dispose();
+	});
+});
+
 describe("the declaration: core.sessionRequirements.expected", () => {
 	it("is required whenever a consumer of admission is installed: none declared refuses the boot, naming the key, what is declared and what is registered", async () => {
 		const { core: _none, ...undeclared } = config() as Record<string, unknown>;

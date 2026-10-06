@@ -83,7 +83,8 @@ core のスキーマが宣言しないセクション — モジュールのも�
 
 core は自分のセクションのほかに、oauth モジュールのセクションのいくつかのキーをパスで読みます: ステージ 1 のグラントポリシーの検査と、ディスカバリー文書・CORS の表・セッション要件のページの基になる issuer（`oauth.jwt.issuer`）、失効の記録を保持する期間を決めるトークンの有効期間（`oauth.accessToken.*` は `resolveAccessTokenLifetime`、`oauth.refreshToken.expiresIn` は `resolveRefreshTokenLifetime` で読む）、二つの不在ポリシーのキーがある `oauth.revocation.*` です。oauth モジュールが読み込まれていれば、そのモジュールがパースしたセクションを読みます。oauth パッケージのモジュールが一つも読み込まれていなければ、そのパッケージの `reference.conf` を重ねるものは無く、どの `OAUTH_*` 変数もそこを束縛しないので、core は書かれたものを読み、安全側に倒します:
 
-- issuer が無いか、正規の issuer（`checkCanonicalIssuer`）でないまま `grantPolicy` が配線されていれば、ブートを拒否します（`grant-policy-without-issuer`）。`oauthTokenSettings` スロットが無いとき、正規でない issuer は issuer が無いのと同じです — ディスカバリー文書も、CORS の表のディスカバリーのパスも無く、要件のページを登録する issuer もありません;
+- セクションが `oauth` であるモジュールが読み込まれていない（`oauthEndpointsModule` が無い）間、`oauth {}` の下に書かれたキーのうちそれら以外はすべてブートを拒否します（`config-validation-failed`。パスごとに 1 件で、モジュールを名指し、値は決して示さない）: 廃止されたキー、綴りを誤ったキー、そのモジュールだけが読むキー。正規の issuer（`checkCanonicalIssuer`）でない `oauth.jwt.issuer` も同じくキーの位置で拒否するので、どの読み手も正規の issuer を読むか、issuer を読まないかのどちらかです;
+- issuer が無いまま `grantPolicy` が配線されていればブートを拒否します（`grant-policy-without-issuer`）。issuer が無ければディスカバリー文書は無く、CORS の表はディスカバリーのパスを守らず、要件のページはどの issuer のオリジンにも縛られません;
 - `oauth.revocation.*` をキーとする不在ポリシーを満たすのは、そこに書かれた `"unsupported"` だけです: `OAUTH_REVOCATION_SUBJECT` と `OAUTH_REVOCATION_ACCESS_TOKEN` は何も宣言せず、埋まっていないスロットはブートを拒否します（`component-absence-undeclared`）;
 - 有効期間が無いか、どのセクションのスキーマも読まなかった環境変数の文字列であれば拒否します: ホストが埋める `oauthTokenSettings` はステージ 1 で `config-validation-failed` として、モジュールが provide するものと、既定のリフレッシュトークンファミリーのモジュールは `provides-factory-failed` として。トークン設定がまったく無ければ、コンポジションの中にリフレッシュトークンを発行するものは無く、セッションのライフサイクルは閉じるセッションの記録を保持しません。
 

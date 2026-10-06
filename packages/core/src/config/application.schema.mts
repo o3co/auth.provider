@@ -150,6 +150,17 @@ export interface AccessTokenLifetimeSource {
 const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const;
 
 /**
+ * The keys of `oauth {}` the two lifetime resolvers here read by path:
+ * {@link resolveAccessTokenLifetime}'s and {@link resolveRefreshTokenLifetime}'s.
+ * Internal to core: boot keeps them, among the keys of the section it reads,
+ * where no loaded module's section is `oauth`.
+ */
+export const OAUTH_LIFETIME_PATHS: readonly string[] = [
+	...ACCESS_TOKEN_LIFETIME_KEYS.map((key) => `oauth.accessToken.${key}`),
+	"oauth.refreshToken.expiresIn",
+];
+
+/**
  * Whether a value is a token lifetime this provider accepts: whole seconds from
  * 1 to `MAX_DURATION_SECONDS`. Both lifetime resolvers apply it; hold a lifetime
  * handed over as a number to it too, so a grant built by hand and one built

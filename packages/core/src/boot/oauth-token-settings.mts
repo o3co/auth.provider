@@ -24,11 +24,12 @@
  * The issuer is the `oauthTokenSettings` slot's when the composition holds it
  * — the key is present, whatever a provider answered — otherwise the
  * configuration's, since core runs in compositions without the oauth module.
- * No schema of core's declares `oauth {}`, and without the oauth module none
- * parses it, so the configuration's issuer is read only when it is a
- * canonical issuer, and is none otherwise. The stage-1 checks read the
- * configuration alone because no provider has run by then
- * (`validate-manifests.mts`, the `grantPolicy` issuer check).
+ * Without the oauth module no section schema parses `oauth {}`, so boot's
+ * stage-1 read of it refuses a configured issuer that is not canonical
+ * (`validate-manifests.mts`, `oauthKeysNothingReads`): every reader sees a
+ * canonical issuer, or none. The stage-1 checks read the configuration alone
+ * because no provider has run by then (`validate-manifests.mts`, the
+ * `grantPolicy` issuer check).
  */
 
 import { isCanonicalIssuer } from "../issuer/canonical.mjs";
@@ -43,10 +44,12 @@ type Components = Readonly<Record<string, unknown>>;
  * contract and the configured lifetimes, read whole through
  * `checkOAuthTokenSettings`, so a slot without a canonical issuer refuses
  * rather than the configuration's being read beside it — else
- * `oauth.jwt.issuer` as the configuration carries it when it is a canonical
- * issuer (`isCanonicalIssuer`), and `undefined` otherwise: no discovery
- * document, no discovery path in the CORS table, and no issuer to register a
- * requirement's page on.
+ * `oauth.jwt.issuer` as the configuration carries it, canonical where boot
+ * parsed it (held to `isCanonicalIssuer` here too, for a component map built
+ * by hand), and `undefined` with none: then no discovery document is served,
+ * the CORS table guards no discovery path (`browserFacingCorsRoutes`, handed
+ * this issuer alone), and a requirement's page is held to no issuer's
+ * origin.
  */
 export function compositionIssuer(components: Components): string | undefined {
 	if (Object.hasOwn(components, "oauthTokenSettings")) {

@@ -624,6 +624,17 @@ const documentedOidcUpstream = (): Promise<FakeIdp> => {
  * suite asks about, and each key it reads is one core's schema declares, or
  * the section of a module it loads.
  */
+/**
+ * The oauth module's section, read without its factories: the template always
+ * loads the module, and core refuses keys of `oauth {}` where no loaded
+ * module's section is `oauth`. What refuses `oauth {}` here is the module's
+ * own section — its schema, its removed keys and variables.
+ */
+const oauthSectionReader = defineModule({
+	name: oauthEndpointsModule.name,
+	...(oauthEndpointsModule.section === undefined ? {} : { section: oauthEndpointsModule.section }),
+});
+
 async function bootDispatched(
 	env: Record<string, string>,
 	configEnv = "production",
@@ -638,6 +649,7 @@ async function bootDispatched(
 		modules: [
 			recordingDispatch(googleFederationTypeModule(), dispatched),
 			recordingDispatch(oidcFederationTypeModule({ fetch: upstream.fetch }), dispatched),
+			oauthSectionReader,
 			...modules,
 		],
 		bootstrapComponents: {
@@ -1168,22 +1180,8 @@ describe("the shipped config boots with every documented override supplied as a 
 	});
 
 	describe("variables whose documented behaviour is to fail boot", () => {
-		/**
-		 * The oauth module's section, read without its factories: what refuses
-		 * `oauth {}` is that module's section — its schema, its removed keys and
-		 * variables — since core's schema declares none of it.
-		 */
-		const oauthSectionReader = defineModule({
-			name: oauthEndpointsModule.name,
-			...(oauthEndpointsModule.section === undefined
-				? {}
-				: { section: oauthEndpointsModule.section }),
-		});
-		const bootReadingOauth = (env: Record<string, string>) =>
-			bootParsed(env, "production", undefined, [oauthSectionReader]);
-
 		it("refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS as the variable of a removed key, naming allowUnmarkedClients", async () => {
-			const booting = bootReadingOauth({
+			const booting = bootParsed({
 				...DOCUMENTED_ENV,
 				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "true",
 			});
@@ -1193,7 +1191,7 @@ describe("the shipped config boots with every documented override supplied as a 
 
 		it("refuses an access-token default above the max, naming both keys", async () => {
 			await expect(
-				bootReadingOauth({
+				bootParsed({
 					...DOCUMENTED_ENV,
 					OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "7200",
 					OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN: "3600",
@@ -1207,7 +1205,7 @@ describe("the shipped config boots with every documented override supplied as a 
 			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
 		]) {
 			it(`refuses an empty ${name} rather than minting already-expired tokens`, async () => {
-				await expect(bootReadingOauth({ ...DOCUMENTED_ENV, [name]: "" })).rejects.toMatchObject({
+				await expect(bootParsed({ ...DOCUMENTED_ENV, [name]: "" })).rejects.toMatchObject({
 					reason: "config-validation-failed",
 				});
 			});

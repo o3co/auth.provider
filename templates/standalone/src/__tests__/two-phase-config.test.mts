@@ -41,11 +41,18 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BootError, createApp, type Module, moduleReferences } from "@o3co/auth-provider-core";
+import {
+	BootError,
+	createApp,
+	defineModule,
+	type Module,
+	moduleReferences,
+} from "@o3co/auth-provider-core";
 import {
 	federationGrantsConfigSchema,
 	federationGrantsModules,
 } from "@o3co/auth-provider-federation-grants";
+import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import {
 	redisFederationGrantIntentStoreModule,
 	redisFederationGrantStoreModule,
@@ -550,7 +557,17 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 				const modules = buildModules(switches, { environment });
 				const resolved = resolveForBoot(own, modules, switches);
 				const handle = await createApp({
-					modules: [],
+					// The oauth module's section alone, read without its factories:
+					// the template loads the module, and core refuses keys of
+					// `oauth {}` where no loaded module's section is `oauth`.
+					modules: [
+						defineModule({
+							name: oauthEndpointsModule.name,
+							...(oauthEndpointsModule.section === undefined
+								? {}
+								: { section: oauthEndpointsModule.section }),
+						}),
+					],
 					bootstrapComponents: {
 						config: resolved,
 						pathResolver: (s: string) => s,

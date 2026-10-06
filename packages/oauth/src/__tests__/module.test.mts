@@ -49,7 +49,7 @@ import {
 	createTestApp,
 	createTestLoginEntry,
 	federationTypeForTests,
-	makeValidAppConfig,
+	type makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair, SignJWT } from "jose";
@@ -63,6 +63,7 @@ import {
 import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { appConfigWithOAuthModule } from "./_helpers/oauthModuleConfig.mjs";
 import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
 import { livenessOver, sessionLifecycleModules } from "./_helpers/sessionLifecycle.mjs";
 
@@ -214,7 +215,7 @@ describe("oauthEndpointsModule — createTestApp route inspection", () => {
 		// `discoveryMetadata` collector, so it never appears in the inspected
 		// route ids. jwksModule is co-installed because it owns `jwks_uri`;
 		// without it boot fails the presence contract.
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		const config = {
 			...base,
 			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" } },
@@ -239,7 +240,7 @@ describe("oauthEndpointsModule — createTestApp route inspection", () => {
 	});
 
 	it("oauth-endpoints is mounted at /oauth", async () => {
-		const config = makeValidAppConfig();
+		const config = appConfigWithOAuthModule();
 		// jwksModule is co-installed because every config carries an issuer, so
 		// discovery is always active and needs a module owning `jwks_uri`.
 		const handle = await createTestApp({
@@ -264,7 +265,7 @@ describe("oauthEndpointsModule — createTestApp route inspection", () => {
 		// End-to-end: oauth contributes its endpoints + metadata, jwks contributes
 		// `jwks_uri`, core aggregates and mounts the document at the spec-fixed
 		// path (no path-doubling). Probes the actual path.
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		const config = {
 			...base,
 			oauth: {
@@ -300,7 +301,7 @@ describe("oauthEndpointsModule — the acr table in the served discovery documen
 		"urn:example:mfa": ["pwd", "mfa"],
 	};
 	const acrConfig = (federations: Record<string, unknown> = {}) => {
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		return {
 			...base,
 			oauth: {
@@ -443,7 +444,7 @@ describe("oauthEndpointsModule — the acr table in the served discovery documen
 
 describe("oauthEndpointsModule + jwksModule — discovery/JWKS path agreement", () => {
 	function issuerConfig(extraJwt: Record<string, unknown> = {}) {
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		return {
 			...base,
 			oauth: {
@@ -688,7 +689,7 @@ describe("oauthEndpointsModule — behavioral: rateLimiter + auditSink forwardin
 			provides: { keyStore: () => createSymmetricKeyStore(SECRET) },
 		});
 
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		const config = { ...base };
 
 		const handle = await createTestApp({
@@ -742,7 +743,7 @@ describe("oauthEndpointsModule — no rateLimiter wired", () => {
 
 	it("refuses the boot unless core.declaredAbsent lists rateLimiter, naming the slot and the fix", async () => {
 		const config = {
-			...makeValidAppConfig(),
+			...appConfigWithOAuthModule(),
 			...coreConfigForTests({ declaredAbsent: ["auditSink"] }),
 		};
 		const err = await createTestApp({
@@ -763,7 +764,7 @@ describe("oauthEndpointsModule — no rateLimiter wired", () => {
 		const handle = await createTestApp({
 			modules: modules(),
 			bootstrapComponents: {
-				config: withOauthCaptures({ ...makeValidAppConfig() }),
+				config: withOauthCaptures({ ...appConfigWithOAuthModule() }),
 				pathResolver: (s) => s,
 			},
 		});
@@ -910,7 +911,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			provides: { keyStore: () => createSymmetricKeyStore(SECRET) },
 		});
 
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		const config = {
 			...base,
 			core: {
@@ -1050,7 +1051,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			},
 		});
 
-		const config = makeValidAppConfig();
+		const config = appConfigWithOAuthModule();
 
 		const handle = await createTestApp({
 			modules: [
@@ -1134,7 +1135,7 @@ describe("oauthEndpointsModule — the login trip is the loginEntry slot when a 
 	});
 
 	const loginTrip = async (modules: readonly Module[]): Promise<string> => {
-		const config = makeValidAppConfig();
+		const config = appConfigWithOAuthModule();
 		const handle = await createTestApp({
 			modules: [
 				oauthEndpointsModule,
@@ -1284,7 +1285,7 @@ describe("oauthEndpointsModule — a consumer of session admission", () => {
 		readonly refresh_token: boolean;
 		readonly session: boolean;
 	}) => {
-		return withGrants(makeValidAppConfig(), {
+		return withGrants(appConfigWithOAuthModule(), {
 			authorizationCode: enabled.authorization_code,
 			refreshToken: enabled.refresh_token,
 			session: enabled.session,
@@ -1324,7 +1325,7 @@ describe("oauthEndpointsModule — a composition with no authorization_code gran
 	 * document.
 	 */
 	const headlessConfig = (authorizationCode: boolean) => {
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		return withGrants(
 			{
 				...base,
@@ -1454,7 +1455,7 @@ describe("oauthEndpointsModule — a composition with no authorization_code gran
 
 describe("oauthEndpointsModule — a user-session store needs core's session lifecycle", () => {
 	const config = () => {
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		return withGrants(
 			{
 				...base,

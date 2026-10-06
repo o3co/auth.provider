@@ -144,13 +144,13 @@ afterEach(async () => {
  * credential store holding the authenticator's key, the policy spy in the
  * `grantPolicy` slot, and the `oauthTokenSettings` slot's
  * `resourceIndicatorEnabled` on unless `slot` is false — the switch under
- * which the grant forwards `resource` at all. The configuration's
- * `oauth.resourceIndicator.enabled` is the opposite unless `configuration`
- * says, so a grant that read it would fail.
+ * which the grant forwards `resource` at all. The configuration carries
+ * `oauth.resourceIndicator.enabled` only when `configuration` says: with no
+ * oauth module loaded, core refuses the key, so the slot is the one switch.
  */
 async function boot(options: { readonly slot?: boolean; readonly configuration?: boolean } = {}) {
 	const inSlot = options.slot ?? true;
-	const inConfiguration = options.configuration ?? !inSlot;
+	const inConfiguration = options.configuration;
 	const authenticator = createSoftwareAuthenticator();
 	const credentialStore = createMemoryWebAuthnCredentialStore();
 	await credentialStore.registerCredential({
@@ -171,7 +171,7 @@ async function boot(options: { readonly slot?: boolean; readonly configuration?:
 		oauth: {
 			...base.oauth,
 			jwt: { ...base.oauth.jwt, issuer: ISSUER },
-			resourceIndicator: { enabled: inConfiguration },
+			...(inConfiguration === undefined ? {} : { resourceIndicator: { enabled: inConfiguration } }),
 		},
 	};
 
@@ -249,8 +249,8 @@ describe("webauthn grant — the `resource` grantPolicy receives (RFC 8707)", ()
 		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
 	});
 
-	it("forwards resource when the oauthTokenSettings slot turns resource indicators on, though the configuration leaves them off", async () => {
-		const { evaluate, signIn } = await boot({ slot: true, configuration: false });
+	it("forwards resource when the oauthTokenSettings slot turns resource indicators on", async () => {
+		const { evaluate, signIn } = await boot({ slot: true });
 
 		const { result } = await signIn("https://rs.example");
 
@@ -258,10 +258,14 @@ describe("webauthn grant — the `resource` grantPolicy receives (RFC 8707)", ()
 		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
 	});
 
-	it("forwards no resource when the oauthTokenSettings slot leaves resource indicators off, though the configuration turns them on", async () => {
-		// The slot's `false` is read: a reader that fell back to the
-		// configuration would read its `true` and forward the resource.
-		const { evaluate, signIn } = await boot({ slot: false, configuration: true });
+	it("refuses oauth.resourceIndicator.enabled in the configuration with no oauth module: the slot is the one switch", async () => {
+		await expect(boot({ slot: false, configuration: true })).rejects.toMatchObject({
+			reason: "config-validation-failed",
+		});
+	});
+
+	it("forwards no resource when the oauthTokenSettings slot leaves resource indicators off", async () => {
+		const { evaluate, signIn } = await boot({ slot: false });
 
 		const { result } = await signIn("https://rs.example");
 

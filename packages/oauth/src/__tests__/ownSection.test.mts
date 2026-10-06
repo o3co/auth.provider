@@ -39,7 +39,6 @@ import {
 import {
 	createTestFederationSettings,
 	GrantRegistry,
-	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -48,9 +47,10 @@ import { oauthEndpointsModule } from "#/module.mjs";
 import { resolveRouterSettings } from "#/routerSettings.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { type OAuthSection, oauthSectionSchema } from "#/section.mjs";
+import { appConfigWithOAuthModule } from "./_helpers/oauthModuleConfig.mjs";
 import { withOauthCaptures } from "./_helpers/sections.mjs";
 
-const fixture = (): AppConfig => makeValidAppConfig() as AppConfig;
+const fixture = (): AppConfig => appConfigWithOAuthModule() as AppConfig;
 
 /** `oauth {}` as the module's schema parses it, from the fixture with `change` laid over it. */
 const sectionOf = (change: Record<string, unknown> = {}): OAuthSection =>

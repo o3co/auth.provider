@@ -52,9 +52,10 @@ import {
 import { describe, expect, it } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthTokenSettingsFrom } from "#/tokenSettings.mjs";
+import { appConfigWithOAuthModule } from "./_helpers/oauthModuleConfig.mjs";
 import { withOauthCaptures } from "./_helpers/sections.mjs";
 
-const fixture = () => makeValidAppConfig();
+const fixture = () => appConfigWithOAuthModule();
 
 /** The fixture with every switch on, the strict dispatch policy, and the lifetimes on their current keys. */
 const everySwitchOn = () => {
@@ -269,7 +270,9 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 
 	it("lets a composition without the module fill the slot itself", async () => {
 		const seen: { settings?: OAuthTokenSettings } = {};
-		const config = fixture();
+		// Without the module: core's fixture, carrying only the keys of oauth {}
+		// core reads.
+		const config = makeValidAppConfig();
 		const handle = await createApp({
 			modules: [...stubs, reader(seen)],
 			bootstrapComponents: {

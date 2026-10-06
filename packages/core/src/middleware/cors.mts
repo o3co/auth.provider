@@ -77,7 +77,8 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
  *   - `GET|POST /oauth/userinfo`: OIDC Core §5.3 defines both methods.
  *   - `POST /oauth/revoke`: RFC 7009 §2.1 lets a public client revoke its own
  *     tokens (SPA sign-out).
- *   - the discovery documents ({@link discoveryPathsFor}) and the JWKS path
+ *   - the discovery documents ({@link discoveryPathsFor}) on the issuer, and
+ *     none without one, as no document is served then; and the JWKS path
  *     the caller names (`options.jwksPath`: `assembleApp` passes the path the
  *     jwks module's route serves, and none without the module): public
  *     metadata, with paths from the same sources as the route registration
@@ -111,7 +112,9 @@ export function browserFacingCorsRoutes(
 	} = {},
 ): readonly CorsRoute[] {
 	const issuer = options.issuer ?? config.oauth?.jwt?.issuer;
-	const discovery = discoveryPathsFor(typeof issuer === "string" ? issuer : undefined);
+	// No issuer, no discovery document is served, and no path of one is guarded.
+	const discovery =
+		typeof issuer === "string" ? discoveryPathsFor(issuer) : { oidc: [], oauth: [] };
 	return [
 		{ path: "/oauth/token", methods: ["POST"] },
 		{ path: "/oauth/userinfo", methods: ["GET", "POST"] },

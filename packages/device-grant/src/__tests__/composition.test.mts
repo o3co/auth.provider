@@ -126,6 +126,9 @@ const makeConfig = (deviceGrant: Record<string, unknown>): AppConfig => {
 	const base = makeValidAppConfig();
 	return {
 		...base,
+		// The oauth module is loaded: its own required key, beside the ones
+		// core's fixture carries.
+		oauth: { ...base.oauth, oidcMode: "oidc-required" },
 		// supertest speaks plain HTTP, and express-session sets no `Secure`
 		// cookie on it — which also rules out the fixture's `__Host-` name.
 		"session-store": { ...base["session-store"], name: "auth.session", secure: false },
