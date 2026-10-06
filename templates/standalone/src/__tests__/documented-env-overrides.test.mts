@@ -44,7 +44,12 @@ import {
 	resolveLayers,
 	type Switches,
 } from "../configPath.mjs";
-import { httpModule, keyStoreModule, templateReference } from "../modules.mjs";
+import {
+	httpModule,
+	keyStoreModule,
+	standaloneRedisClientsModule,
+	templateReference,
+} from "../modules.mjs";
 
 /**
  * Boots the shipped config with EVERY documented override supplied the way an
@@ -195,6 +200,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "3",
 	REDIS_CLIENTS_URL: "redis://redis:6379",
 	REDIS_CLIENTS_PASSWORD: "rt-family-password",
+	REDIS_CLIENTS_ASSUME_NO_EVICTION: "true",
 	// The federation token store's Redis branch.
 	REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX: "ft:",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "required",
@@ -782,6 +788,11 @@ describe("the shipped config boots with every documented override supplied as a 
 		// A leftover string here would be read as "on" by a truthiness check
 		// and as "off" by `=== true`, for a feature whose whole default is off.
 		expect(federationGrantsSection(config).enabled).toBe(true);
+		expect(
+			standaloneRedisClientsModule.section?.schema.parse(
+				(config as Record<string, unknown>)["redis-clients"],
+			),
+		).toMatchObject({ assumeNoEviction: true });
 	});
 
 	it("turns every non-boolean override into its declared type", async () => {
