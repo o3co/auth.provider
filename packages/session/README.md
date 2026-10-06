@@ -161,8 +161,8 @@ const handle = await createApp({
     sessionStoreModule,           // first, so every module after it can read req.session; provides csrfTokenSigner too
     sessionModule,                // a const Module, not a factory
     googleFederationTypeModule(), // handles every core.federations entry of type "google"
-    // ... modules providing userRepository, userSessionStore, federationTokenStore,
-    //     and sessionFederationIndex (for sessionLifecycleModule)
+    // ... modules providing userRepository, userSessionStore, federationTokenStore
+    //     and sessionLifecycleStore (for sessionLifecycleModule)
   ],
   bootstrapComponents: { config, pathResolver },
 });
@@ -395,12 +395,7 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `sessionCookiePolicy` slot's cookie), and where a link may start from as
   `linkTrustedOrigins` (the module passes `session.csrf.trustedOrigins`; absent,
   only this site's own pages), and throws without the first two.
-  `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
-  are `oauth`'s.
-- Not `sessionFederationIndex`: a link reads the session's federations from
-  core's session lifecycle. Keep its provider: `sessionLifecycleModule` and
-  the `federation-stores-incomplete` guard still require the slot; only
-  `sessionModule`'s own `requires` and the router option drop it.
+- A link reads the session's federations from core's session lifecycle.
 - `optional`: `logger`, `attemptCounter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads),
   `sessionLifecycleStore` (core's session lifecycle port, which the linking

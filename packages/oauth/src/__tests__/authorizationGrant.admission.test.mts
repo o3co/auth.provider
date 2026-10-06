@@ -51,7 +51,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
-import { joiningLifecycle } from "./_helpers/sessionLifecycle.mjs";
+import { joiningLifecycle, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const SID = "sid-1";
 const SUBJECT = "user-1";
@@ -176,7 +176,11 @@ const makeGrant = (opts: {
 			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
 		...(opts.userSessionStore
-			? { userSessionStore: opts.userSessionStore, sessionLifecycle: lifecycle }
+			? {
+					userSessionStore: opts.userSessionStore,
+					sessionLifecycle: lifecycle,
+					sessionLifecycleStore: openingLifecycleStore(SUBJECT),
+				}
 			: {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),

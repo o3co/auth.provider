@@ -43,6 +43,7 @@ import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs"
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
+import { openingLifecycleStore } from "../../__tests__/_helpers/sessionLifecycle.mjs";
 
 export type SessionCookieAttributes = {
 	sameSite: "lax" | "strict" | "none";
@@ -306,7 +307,7 @@ export function buildFederationApp({
 			userSessionStore,
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			...(subjectRevocation ? { subjectRevocation } : {}),
-			...(sessionLifecycleStore ? { sessionLifecycleStore } : {}),
+			sessionLifecycleStore: sessionLifecycleStore ?? openingLifecycleStore(),
 			sessionLifecycle: lifecycle,
 			federationTokenStore,
 			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,

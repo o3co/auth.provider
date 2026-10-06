@@ -26,7 +26,6 @@
 import {
 	codeChallenge,
 	createFederationTokenStoreFactory,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createSessionLifecycle,
@@ -109,7 +108,6 @@ async function world(options: WorldOptions = {}) {
 			return tokenStore.attach(...args);
 		},
 	});
-	const sessionFederationIndex = createInMemorySessionFederationIndex();
 	const lifecycleStore = createInMemorySessionLifecycleStore();
 	const service = createSessionLifecycle({
 		store: lifecycleStore,
@@ -179,7 +177,6 @@ async function world(options: WorldOptions = {}) {
 		store,
 		userSessionStore,
 		federationTokenStore,
-		sessionFederationIndex,
 		lifecycleStore,
 		service,
 		join,
@@ -237,12 +234,11 @@ async function link(w: World, { open = true, carrying = false }: LinkOptions = {
 		});
 	}
 	if (carrying) {
+		// A session with no record carries the federation's tokens alone.
 		if (open) {
 			expect(await w.service.join(LINKED_SID, { federation: "test" })).toEqual({
 				outcome: "joined",
 			});
-		} else {
-			await w.sessionFederationIndex.addFederation(LINKED_SID, "test", expiresAt);
 		}
 		await w.federationTokenStore.attach(LINKED_SID, "test", EARLIER_TOKENS);
 	}

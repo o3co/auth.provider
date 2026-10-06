@@ -43,7 +43,6 @@ import {
 	type Module,
 	type RateLimiter,
 	readSessionOpenAnswer,
-	type SessionFederationIndex,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
 	type SubjectRevocation,
@@ -260,16 +259,6 @@ const sessionSupport = (
 				removeBySid: async () => {},
 				delete: async () => {},
 			}) as unknown as FederationTokenStore,
-	}),
-	providing("test:session-federation-index", {
-		sessionFederationIndex: () =>
-			({
-				kind: "memory",
-				addFederation: async () => {},
-				listFederations: async () => [],
-				removeFederation: async () => {},
-				removeBySid: async () => {},
-			}) as unknown as SessionFederationIndex,
 	}),
 	...(rateLimiter === null
 		? []

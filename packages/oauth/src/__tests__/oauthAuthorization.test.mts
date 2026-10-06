@@ -54,7 +54,11 @@ import { authorizationServerRegistry } from "./_helpers/authorizationServerRegis
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { capturing, routerInputsOf, withGrants } from "./_helpers/sections.mjs";
-import { joiningLifecycle, sessionLifecycleModules } from "./_helpers/sessionLifecycle.mjs";
+import {
+	joiningLifecycle,
+	openingLifecycleStore,
+	sessionLifecycleModules,
+} from "./_helpers/sessionLifecycle.mjs";
 
 /** `config` with the captures of the renames the module declares, as a resolution under an empty environment makes them. */
 const captured = <C extends object>(config: C): C =>
@@ -902,6 +906,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			tokenBindingSettings: createTestTokenBindingSettings(),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 			codeRepository: {
 				consumeByCode,

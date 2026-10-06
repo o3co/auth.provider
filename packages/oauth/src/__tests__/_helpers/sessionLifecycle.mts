@@ -205,3 +205,40 @@ export function openedLifecycleStore(
 		listClosing: after(store.listClosing.bind(store)),
 	};
 }
+
+/**
+ * Core's in-memory lifecycle store, holding an active record for every
+ * session of `sub` admission asks about, as the login that established it
+ * opened one (a session with no record reads as closed). A record a close
+ * moved on stays as it is.
+ */
+export function openingLifecycleStore(sub: string): SessionLifecycleStore {
+	const store = createInMemorySessionLifecycleStore();
+	const end = new Date(Date.now() + 86_400_000);
+	return {
+		...store,
+		read: async (sid) => {
+			await store.open(sid, sub, end);
+			return store.read(sid);
+		},
+	};
+}
+
+/**
+ * Core's in-memory lifecycle store, holding an active record for every
+ * session `sessions` holds when admission asks about it, as the login that
+ * established it opened one. It reads `sessions` once per lifecycle read: for
+ * a test that does not count the user-session store's reads.
+ */
+export function lifecycleStoreOver(sessions: Pick<UserSessionStore, "get">): SessionLifecycleStore {
+	const store = createInMemorySessionLifecycleStore();
+	const end = new Date(Date.now() + 86_400_000);
+	return {
+		...store,
+		read: async (sid) => {
+			const session = await sessions.get(sid);
+			if (session) await store.open(sid, session.sub, end);
+			return store.read(sid);
+		},
+	};
+}

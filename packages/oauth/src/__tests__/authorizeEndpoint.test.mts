@@ -65,7 +65,7 @@ import { authorizationServerRegistry } from "./_helpers/authorizationServerRegis
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
-import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
+import { livenessOver, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -184,6 +184,7 @@ const makeApp = async (opts: {
 			? {
 					userSessionStore: opts.userSessionStore,
 					sessionLifecycle: livenessOver(opts.userSessionStore),
+					sessionLifecycleStore: openingLifecycleStore("user-1"),
 				}
 			: {}),
 		// The session module's entry for the page, unless the test hands one.

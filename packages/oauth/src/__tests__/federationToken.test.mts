@@ -27,7 +27,6 @@ import {
 	type Logger,
 	memoryFederationTokenStoreModule,
 	type RefreshTokenFamilyRevocation,
-	type SessionFederationIndex,
 	type StoreGeneration,
 	type SupportsLock,
 	type UserSession,
@@ -46,6 +45,16 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+
+/** The federations a session joined, as the fixture lists them for its lifecycle double. */
+interface SessionFederationIndex {
+	readonly kind: string;
+	addFederation(sid: string, federationName: string, expiresAt: Date): Promise<void>;
+	listFederations(sid: string): Promise<ReadonlyArray<string>>;
+	removeFederation(sid: string, federationName: string): Promise<void>;
+	removeBySid(sid: string): Promise<void>;
+}
+
 import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 /**

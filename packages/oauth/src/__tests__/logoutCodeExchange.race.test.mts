@@ -174,6 +174,7 @@ async function world() {
 		refreshTokenFamilyRotation: { ...rotation, register },
 		refreshTokenFamilyRevocation: revocation as RefreshTokenFamilyRevocation,
 		sessionLifecycle: lifecycle,
+		sessionLifecycleStore: lifecycleStore,
 	};
 	const logoutStores = {
 		userSessionStore: userSessionStore as UserSessionStore,
@@ -269,7 +270,7 @@ describe("a code exchange that joins through the session lifecycle", () => {
 		]);
 	});
 
-	it("a close through the lifecycle committed first: the join is refused, the exchange serves nothing, and the family is revoked", async () => {
+	it("a close through the lifecycle committed first: admission refuses the exchange before any family is minted", async () => {
 		const w = await world();
 		const lifecycle = w.lifecycle;
 		// The session joined once before; its close commits and stays
@@ -283,8 +284,13 @@ describe("a code exchange that joins through the session lifecycle", () => {
 
 		const result = await w.exchange();
 
-		expectSessionInvalidated(result);
-		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(result).not.toHaveProperty("tokens");
+		expect(w.grantStores.refreshTokenFamilyRotation.register).not.toHaveBeenCalled();
 	});
 
 	it("a session gone before the join: the exchange serves nothing, and the family is revoked", async () => {

@@ -43,7 +43,7 @@ import session, { MemoryStore } from "express-session";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createLoginCompletion } from "#/login-completion.mjs";
-import { fakeSessionLifecycle } from "./_helpers/sessionLifecycle.mjs";
+import { fakeSessionLifecycle, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const COOKIE = "renewal.session";
 const SUBJECT = "user-1";
@@ -99,6 +99,7 @@ function cookieSessionId(res: request.Response): string | undefined {
 function setup() {
 	const cookieStore = failingStore();
 	const userSessionStore = createInMemoryUserSessionStore();
+	const sessionLifecycleStore = openingLifecycleStore();
 	const completion = createLoginCompletion({
 		userSessionStore,
 		sessionLifecycle: fakeSessionLifecycle(),
@@ -205,6 +206,7 @@ function setup() {
 		const admission = await admitSession(
 			{
 				userSessionStore,
+				sessionLifecycleStore,
 				subjectRevocation: undefined,
 				requirements: resolverForTests([], { actions: { "test.use": { grade: "use" } } }),
 				acrTable: {},
