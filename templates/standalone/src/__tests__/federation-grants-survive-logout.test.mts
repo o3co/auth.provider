@@ -35,7 +35,6 @@ import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
-	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -51,18 +50,17 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths, type Switches } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
+	type BothPhases,
+	bothPhasesOf,
 	capturedRenames,
 	libraryLayers,
-	rootSectionsOf,
-	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
 const DAY = 86_400_000;
@@ -122,19 +120,16 @@ const ENV: Readonly<Record<string, string>> = {
  * that have no environment form written over it: the
  * upstream federation the connection names, and the connection.
  */
-function resolveConfig(): Switches {
+function resolveConfig(): BothPhases {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env: ENV })
 		.withFallback(parseFile(applicationConfPath, { env: ENV }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env: ENV }))
 		.withFallback(libraryLayers(ENV));
-	const config = validate(layers, AppConfigSchema);
+	const config = bothPhasesOf(layers, ENV);
 	return {
-		...sectionsCoreDoesNotDeclare(layers),
-		...rootSectionsOf(layers, ENV),
 		...config,
-		// What the resolution captured of core's renamed variables, which the
-		// schema's parse drops.
+		// What the resolution captured of the renamed variables.
 		"renamed-variables": capturedRenames(ENV),
 		core: {
 			...config.core,
@@ -174,7 +169,7 @@ function resolveConfig(): Switches {
 				},
 			},
 		},
-	} as Switches;
+	} as BothPhases;
 }
 
 const testRepositoriesModule = defineModule({

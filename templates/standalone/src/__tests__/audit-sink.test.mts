@@ -28,6 +28,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
+	type AppConfig,
 	type AuditEvent,
 	type AuditSink,
 	createApp,
@@ -54,8 +55,12 @@ const keyPair = generateKeyPairSync("ed25519", {
 	privateKeyEncoding: { type: "pkcs8", format: "pem" },
 });
 
-/** The template modules' sections sit beside core's, so the configuration is wider than `AppConfig`. */
-const baseConfig: Switches & Record<string, unknown> = {
+/**
+ * Phase one's switches beside the configuration boot is handed; the template
+ * modules' sections sit beside core's, so the configuration is wider than
+ * `AppConfig`.
+ */
+const baseConfig: Switches & AppConfig & Record<string, unknown> = {
 	// The shipped selections, every store in this process.
 	adapters: {
 		...shippedAdapters(),

@@ -30,8 +30,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
-	type AppConfig,
-	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -45,18 +43,17 @@ import {
 } from "@o3co/auth-provider-core";
 import { federationTypeForTests } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
-import { resolveConfigPaths, type Switches } from "#/configPath.mjs";
+import { resolveConfigPaths } from "#/configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
+	type BothPhases,
+	bothPhasesOf,
 	capturedRenames,
 	libraryLayers,
-	rootSectionsOf,
-	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -95,14 +92,14 @@ const ENV: Readonly<Record<string, string>> = {
 };
 
 /** The shipped configuration, with the partner federation and an acr table beside it. */
-function resolveConfig(trustUpstreamAmr: boolean | undefined): Switches {
+function resolveConfig(trustUpstreamAmr: boolean | undefined): BothPhases {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env: ENV })
 		.withFallback(parseFile(applicationConfPath, { env: ENV }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env: ENV }))
 		.withFallback(libraryLayers(ENV));
-	const shipped = validate(layers, AppConfigSchema) as AppConfig;
-	const parsed = AppConfigSchema.parse({
+	const shipped = bothPhasesOf(layers, ENV);
+	return {
 		...shipped,
 		core: {
 			...shipped.core,
@@ -123,15 +120,9 @@ function resolveConfig(trustUpstreamAmr: boolean | undefined): Switches {
 				acrValues: { [MFA_ACR]: ["mfa"], [FED_ACR]: ["fed"] },
 			},
 		},
-	});
-	return {
-		...sectionsCoreDoesNotDeclare(layers),
-		...rootSectionsOf(layers, ENV),
-		...parsed,
-		// What the resolution captured of core's renamed variables, which the
-		// schema's parse drops.
+		// What the resolution captured of the renamed variables.
 		"renamed-variables": capturedRenames(ENV),
-	} as Switches;
+	} as BothPhases;
 }
 
 /** An IdP that authenticates `ext-1` and says it did so with `mfa` and `hwk`. */

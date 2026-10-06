@@ -28,7 +28,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -39,19 +38,18 @@ import {
 } from "@o3co/auth-provider-core";
 import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths, type Switches } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { installGracefulShutdown } from "../shutdown.mjs";
 import {
+	type BothPhases,
+	bothPhasesOf,
 	capturedRenames,
 	libraryLayers,
-	rootSectionsOf,
-	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
@@ -157,29 +155,24 @@ const GRANTS_ON: Readonly<Record<string, string>> = {
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 };
 
-function resolveConfig(env: Record<string, string>): Switches {
+function resolveConfig(env: Record<string, string>): BothPhases {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env })
 		.withFallback(parseFile(applicationConfPath, { env }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 		.withFallback(libraryLayers(env));
-	const config = {
-		...sectionsCoreDoesNotDeclare(layers),
-		...validate(layers, AppConfigSchema),
-		...rootSectionsOf(layers, env),
-	};
+	const config = bothPhasesOf(layers, env);
 	// The key ring has no environment form (a list of { id, key } is HOCON's);
 	// the Redis grant store refuses to construct without one under "required".
 	return {
 		...config,
-		// What the resolution captured of core's renamed variables, which the
-		// schema's parse drops.
+		// What the resolution captured of the renamed variables.
 		"renamed-variables": capturedRenames(env),
 		"redis-federation-grant-store": {
 			...(config["redis-federation-grant-store"] as object | undefined),
 			encryptionKeys: [{ id: "k-test", key: ENCRYPTION_KEY }],
 		},
-	} as Switches;
+	} as BothPhases;
 }
 
 const testRepositoriesModule = defineModule({
@@ -205,7 +198,7 @@ const testKeyStoreModule = defineModule({
 	},
 });
 
-const modulesFor = (config: Switches, memoryOnly = false, environment?: string) =>
+const modulesFor = (config: BothPhases, memoryOnly = false, environment?: string) =>
 	buildModules(config, {
 		keyStoreModule: testKeyStoreModule,
 		repositoriesModule: testRepositoriesModule,
@@ -213,13 +206,13 @@ const modulesFor = (config: Switches, memoryOnly = false, environment?: string) 
 		...(environment === undefined ? {} : { environment }),
 	});
 
-const boot = (config: Switches, memoryOnly = false, environment?: string) =>
+const boot = (config: BothPhases, memoryOnly = false, environment?: string) =>
 	createApp({
 		modules: modulesFor(config, memoryOnly, environment),
 		bootstrapComponents: { config, pathResolver: (s) => s },
 	});
 
-const names = (config: Switches, memoryOnly = false) =>
+const names = (config: BothPhases, memoryOnly = false) =>
 	modulesFor(config, memoryOnly).map((m) => m.name);
 
 /**
@@ -400,7 +393,7 @@ describe("the standalone composes federation grants from its config", () => {
 				upstreamHardTimeoutMs: 60_000,
 				refreshLockTtlMs: 65_000,
 			},
-		} as Switches;
+		} as BothPhases;
 		handleRef = await boot(raised, true);
 		expect(handleRef.cleanupAllowanceMs).toBe(60_000 + 3_000 + 5_000 + 12_000);
 
@@ -620,7 +613,7 @@ describe("the browser consent route parses its own body, with sessionModule list
 	});
 
 	/** The standalone's modules, with `sessionModule` moved ahead of the grant modules. */
-	const sessionFirst = (config: Switches) => {
+	const sessionFirst = (config: BothPhases) => {
 		const modules = modulesFor(config, true);
 		const session = modules.find((m) => m.name === "session");
 		if (session === undefined) throw new Error("sessionModule is not in the standalone's list");
@@ -694,7 +687,7 @@ describe("the grants consent answer is held to the session module's CSRF guard",
 		const trusting = {
 			...config,
 			session: { ...session, csrf: { ...session.csrf, trustedOrigins: [SIBLING] } },
-		} as Switches;
+		} as BothPhases;
 		handleRef = await boot(trusting, true);
 		return express().set("trust proxy", "loopback").use(handleRef.router);
 	};

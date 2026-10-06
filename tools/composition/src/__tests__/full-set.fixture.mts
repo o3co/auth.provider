@@ -318,9 +318,8 @@ function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 		...config,
 		// A deployment that installs MFA declares it — as the template does
 		// from a mode other than `off` — and one that adds requirements of its
-		// own declares them beside it, over the template's `[]`. Applied to
-		// phase one's switches and again to the configuration as resolved, so
-		// each name is kept once.
+		// own declares them beside it, over what the template hands boot, each
+		// name kept once.
 		core: {
 			...c.core,
 			federations: {
@@ -857,7 +856,7 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	 */
 	readonly credentialStore?: Module;
 	/** Adjust the resolved config after the features are laid over it. */
-	readonly adjust?: (config: Switches) => Switches;
+	readonly adjust?: (config: AppConfig) => AppConfig;
 	/** The subjects whose login both fixture requirements interrupt; none by default. */
 	readonly interruptLogins?: readonly string[];
 	/** Where the fixture requirements record each ceremony they open; a list of the boot's own by default. */

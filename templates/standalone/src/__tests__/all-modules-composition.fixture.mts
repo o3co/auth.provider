@@ -213,19 +213,15 @@ export function ownFiles(): string[] {
 }
 
 /**
- * Phase one, as `app.mts` reads it: the switches `buildModules` chooses
- * the modules by — and `reads`, what a module added to the composition reads
- * when it is built — from the composition's own files under `env` over core's
- * `reference.conf`. What the composition expects of session admission is
- * derived from it (`resolveForBoot`), after `config` adjusts it as an
- * operator's layer would.
+ * Phase one, as `app.mts` reads it: the switches `buildModules` chooses the
+ * modules by, from the composition's own files under `env` over the
+ * template's `reference.conf`.
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
-	reads: readonly string[] = [],
 	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
 ): Switches {
-	return readSwitches(own, { reads });
+	return readSwitches(own);
 }
 
 // ---------------------------------------------------------------------------
@@ -573,11 +569,6 @@ export interface ComposeOptions {
 	readonly environment?: string;
 	/** HOCON an operator writes above the composition's own files, read in both phases. */
 	readonly operatorHocon?: string;
-	/**
-	 * Paths read before boot beside the template's switches: what a module
-	 * `extraModules` adds reads when it is built (`readSwitches`'s `reads`).
-	 */
-	readonly reads?: readonly string[];
 	/** The deployment's own mail sender modules, handed to `buildModules` as `mailSenderModules`. */
 	readonly mailSenderModules?: readonly Module[];
 	/** Modules added after the template's own, before the order and the outage apply. */
@@ -589,14 +580,13 @@ export interface ComposeOptions {
 	/** Users beside the fixture's own, keyed by username. */
 	readonly extraUsers?: Readonly<Record<string, Record<string, unknown>>>;
 	/**
-	 * Adjust the configuration before anything reads it, as an operator's own
-	 * layer would: applied to phase one's switches, and to what `createApp` is
-	 * handed, as resolved.
+	 * Adjust what `createApp` is handed, as resolved, as an operator's own
+	 * layer would.
 	 */
-	readonly config?: (config: Switches) => Switches;
+	readonly config?: (config: AppConfig) => AppConfig;
 	/**
-	 * Adjust phase one's switches alone, after `config`: what only phase one
-	 * reads, such as the Store transport settings a hand-built root passes.
+	 * Adjust phase one's switches: what only phase one reads, such as the
+	 * Store transport settings a hand-built root passes.
 	 */
 	readonly switches?: (switches: Switches) => Switches;
 	readonly order?: ModuleOrder;
@@ -652,8 +642,6 @@ export interface Composition {
  */
 export async function compose(options: ComposeOptions = {}): Promise<Composition> {
 	const env = options.env ?? SINGLE_ENV;
-	const adjust = <C extends AppConfig>(config: C): C =>
-		options.config ? (options.config(config as unknown as Switches) as unknown as C) : config;
 	// The composition's own layers, read once for both phases, as `app.mts`
 	// reads them. Phase one: the switches the modules are chosen by.
 	const own = readOwnLayers(
@@ -662,14 +650,15 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 			: [hoconFile(options.operatorHocon), ...ownFiles()],
 		{ env },
 	);
-	const switches = resolveConfig(env, options.reads, own);
-	const config = options.switches ? options.switches(adjust(switches)) : adjust(switches);
+	const switches = resolveConfig(env, own);
+	const config = options.switches ? options.switches(switches) : switches;
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
 	// reference.conf, which createApp parses once, and its defaults.
-	const resolved = adjust(resolveForBoot(own, modules, config));
+	const forBoot = resolveForBoot(own, modules, config);
+	const resolved = options.config ? options.config(forBoot) : forBoot;
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
