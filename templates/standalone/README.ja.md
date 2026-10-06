@@ -510,7 +510,7 @@ core.federations {
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `MFA_MODE` | `required` | `mfaMode`: `required`、`optional` または `off` |
-| `MFA_ENCRYPTION_KEY` | — | MFA の鍵リングの最初の鍵で、すべての要素のデータを封じる: 32 バイトの canonical な base64（`openssl rand -base64 32`）。MFA が有効なら必須。`CONFIG_ENV=development` では `config/development.conf` が代わりに MFA パッケージの公開サンプル鍵を置く: 自分の鍵はそこに書く。そのリングの横でこの変数を設定すると boot は拒否される。サンプル鍵は `CONFIG_ENV` か `NODE_ENV` が `production` か `staging` のとき、また `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
+| `MFA_ENCRYPTION_KEY` | — | MFA の鍵リングの最初の鍵で、すべての要素のデータを封じる: 32 バイトの canonical な base64（`openssl rand -base64 32`）。MFA が有効なら必須。`CONFIG_ENV=development` では `config/development.conf` が代わりに MFA パッケージの公開サンプル鍵を置く: 自分の鍵はそこに書く。そのリングの横でこの変数を設定すると boot は拒否される。サンプル鍵が受け入れられるのは、`CONFIG_ENV` と `NODE_ENV` のうち設定されているものがすべて `development` か `test` を示すときだけで、`CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `MFA_PAGE_URL` | `/mfa` | デプロイの MFA ページ。ログインの第二要素とステップアップはここから始まる。テンプレートはページを同梱しない: ページの契約は [MFA パッケージのもの](../../packages/mfa/README.md#the-routes) |
 | `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`、Store の呼び出し 1 回の時間: 各ストアの呼び出しごとのタイムアウト以上でなければならない。Store を呼ぶ構成（`ADAPTERS_USER_REPOSITORY=http`、または要素を Store に置く）で `REPOSITORIES_USER_HTTP_TIMEOUT` を下回ると boot を拒否するので、二つは一緒に上げる。37500 ms を超えても拒否する |
 | `STANDARD_SMTP_MAIL_SENDER_HOST` | — | development 以外での SMTP リレー。MFA はここにアカウントのメールの証明とメール要素のコードを送る。MFA が有効なら、boot にはこれと `STANDARD_SMTP_MAIL_SENDER_FROM` が要る |
