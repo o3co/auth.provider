@@ -443,10 +443,34 @@ describe("redis-clients", () => {
 		expect(redisClientsSectionSchema.parse({ url: "redis://r:6379", password: "p" })).toEqual({
 			url: "redis://r:6379",
 			password: "p",
+			assumeNoEviction: false,
 		});
 		expect(redisClientsSectionSchema.parse({ url: "redis://r:6379" })).toEqual({
 			url: "redis://r:6379",
+			assumeNoEviction: false,
 		});
+	});
+
+	it.each([
+		[true, true],
+		["true", true],
+		["1", true],
+		["false", false],
+		["", false],
+	])("reads assumeNoEviction %j as %s", (given, read) => {
+		expect(
+			redisClientsSectionSchema.parse({ url: "redis://r:6379", assumeNoEviction: given })
+				.assumeNoEviction,
+		).toBe(read);
+	});
+
+	it("refuses an assumeNoEviction it cannot read as a boolean, naming the key", () => {
+		const parsed = redisClientsSectionSchema.safeParse({
+			url: "redis://r:6379",
+			assumeNoEviction: "yes",
+		});
+		expect(parsed.success).toBe(false);
+		expect(parsed.error?.issues[0]?.path).toEqual(["assumeNoEviction"]);
 	});
 
 	it.each([

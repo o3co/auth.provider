@@ -29,6 +29,7 @@
 import {
 	checkSerializedOrigin,
 	checkTrustedProxyEntry,
+	coerceBooleanFromEnv,
 	describeSerializedOriginRejection,
 	describeTrustedProxyEntryRejection,
 	isWellFormedKid,
@@ -239,9 +240,18 @@ export const keyStoreSectionSchema = z
 	})
 	.strict();
 
-/** `redis-clients`: the one Redis connection every Redis-backed store shares. */
+/**
+ * `redis-clients`: the one Redis connection every Redis-backed store shares.
+ * `assumeNoEviction` is the operator's assertion that the server runs
+ * `maxmemory-policy noeviction`, read by the Redis stores' eviction gate only
+ * where the server will not report its policy.
+ */
 export const redisClientsSectionSchema = z
-	.object({ url: z.string(), password: z.string().optional() })
+	.object({
+		url: z.string(),
+		password: z.string().optional(),
+		assumeNoEviction: coerceBooleanFromEnv.default(false),
+	})
 	.strict();
 
 /**

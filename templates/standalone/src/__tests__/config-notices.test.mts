@@ -149,6 +149,9 @@ describe("configDefaultsFor", () => {
 
 	it("takes nothing from the process's environment", () => {
 		vi.stubEnv("REDIS_CLIENTS_URL", "redis://operator.test:6379");
-		expect(configDefaultsFor(modules)[NOT_LOADED]).toEqual({ url: "redis://localhost:6379" });
+		expect(configDefaultsFor(modules)[NOT_LOADED]).toEqual({
+			url: "redis://localhost:6379",
+			assumeNoEviction: false,
+		});
 	});
 });

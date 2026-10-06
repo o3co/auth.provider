@@ -581,8 +581,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   Set `maxmemory-policy noeviction`, or give these stores a Redis of their
   own. Where the server runs `noeviction` but will not say, assert it:
   `makeIoredisClients(io, { assumeNoEviction: true })` (or the same option
-  on `makeIoredisMfaFactorStoreClient` / `makeIoredisMfaTransactionStoreClient`).
-  A policy the
+  on `makeIoredisMfaFactorStoreClient` / `makeIoredisMfaTransactionStoreClient`;
+  in the standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
+  `redis-clients.assumeNoEviction`). A policy the
   server does report always overrides the assertion. The log lines
   `attempt_counter_durability_unchecked`,
   `session_lifecycle_store_eviction_unchecked`,

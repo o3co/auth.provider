@@ -364,7 +364,9 @@ Module-level messages that arrive wrapped in a factory failure:
   `maxmemoryPolicy` `undefined`, the refusing reply as the error's own
   `cause`. Let the user run `INFO memory`; or, where you know the server runs
   `noeviction`, build the clients with `assumeNoEviction: true`
-  (`makeIoredisClients(io, { assumeNoEviction: true })`). The assertion is read
+  (`makeIoredisClients(io, { assumeNoEviction: true })`; in the standalone
+  template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
+  `redis-clients.assumeNoEviction`). The assertion is read
   only while the policy is unread: a policy the server reports always
   decides. Any other reply error (`BUSY`, `LOADING`, `NOAUTH`, …), and a
   server that cannot be reached, fails the boot with it as the `cause`.
