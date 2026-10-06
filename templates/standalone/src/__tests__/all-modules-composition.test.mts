@@ -1108,6 +1108,7 @@ const OUTAGES: readonly OutageCase[] = [
 		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "federation_callback_store_unavailable",
+		defects: { "no-warn": LIFECYCLE_LOGS },
 	},
 	{
 		module: "core (rate-limit guard)",
