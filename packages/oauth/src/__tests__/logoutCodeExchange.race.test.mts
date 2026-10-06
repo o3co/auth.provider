@@ -44,6 +44,7 @@ import {
 	type RefreshTokenFamilyRevocation,
 	readVersionedSessionLifecycle,
 	type SessionFamilyIndex,
+	type SessionJoinOutcome,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
 	type SupportsSessionEnd,
@@ -64,6 +65,7 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
 
 const HOUR = 3_600_000;
 const SID = "sid-race";
@@ -379,7 +381,7 @@ describe("a code exchange that joins through the session lifecycle", () => {
 			...w.grantStores,
 			sessionLifecycle: {
 				...(w.lifecycle as SessionLifecycle),
-				join: async () => ({ outcome: "unavailable" }),
+				join: async () => outsideAnswer<SessionJoinOutcome>(),
 			},
 		});
 
@@ -400,7 +402,7 @@ describe("a code exchange that joins through the session lifecycle", () => {
 				...w.grantStores,
 				sessionLifecycle: {
 					...(w.lifecycle as SessionLifecycle),
-					join: async () => ({ outcome: "unavailable" }),
+					join: async () => outsideAnswer<SessionJoinOutcome>(),
 				},
 			},
 			logger,

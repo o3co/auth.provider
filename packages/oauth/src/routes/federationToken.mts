@@ -119,8 +119,9 @@ const checkCallerStanding = async (
 		});
 		return false;
 	}
-	if (liveness.outcome === "unavailable") {
-		// The lifecycle logs its own error; this line carries none.
+	// Any answer other than `live` or `not_live` (core's lifecycle gives none,
+	// as it rejects on an outage) is answered as the outage.
+	if (liveness.outcome !== "live" && liveness.outcome !== "not_live") {
 		logger.error(
 			{ federation, store: "session_lifecycle", step: "liveness" },
 			"federation_token_store_unavailable",
@@ -162,8 +163,9 @@ const checkCallerStanding = async (
 		});
 		return false;
 	}
-	if (listed.outcome === "unavailable") {
-		// The lifecycle logs its own error; this line carries none.
+	// Any answer other than `listed` (core's lifecycle gives none, as it
+	// rejects on an outage) is answered as the outage.
+	if (listed.outcome !== "listed") {
 		logger.error(
 			{ federation, store: "session_lifecycle", step: "federations" },
 			"federation_token_store_unavailable",

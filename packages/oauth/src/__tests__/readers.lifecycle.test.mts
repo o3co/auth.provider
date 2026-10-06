@@ -39,6 +39,7 @@ import {
 	type FederationTokenStore,
 	type FederationTokens,
 	SESSION_LIFECYCLE_MAX_KEY_LENGTH,
+	type SessionFederations,
 	type SessionLifecycle,
 	type SessionLiveness,
 	type UserSession,
@@ -56,6 +57,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -306,7 +308,7 @@ describe("/oauth/introspect through the session lifecycle", () => {
 		const { sink, events } = recordingSink();
 		const logger = createMockLogger();
 		const app = await buildApp({
-			lifecycle: lifecycleAnswering({ outcome: "unavailable" }),
+			lifecycle: lifecycleAnswering(outsideAnswer<SessionLiveness>()),
 			userSessionStore: holdingStore(),
 			auditSink: sink,
 			logger,
@@ -431,7 +433,7 @@ describe("/oauth/userinfo through the session lifecycle", () => {
 		const logger = createMockLogger();
 		const res = await userinfo(
 			buildApp({
-				lifecycle: lifecycleAnswering({ outcome: "unavailable" }),
+				lifecycle: lifecycleAnswering(outsideAnswer<SessionLiveness>()),
 				userSessionStore: holdingStore(),
 				logger,
 			}),
@@ -583,7 +585,7 @@ describe("POST /oauth/federation/:name/token through the session lifecycle", () 
 		const logger = createMockLogger();
 		const res = await fedToken(
 			buildApp({
-				lifecycle: lifecycleAnswering({ outcome: "unavailable" }),
+				lifecycle: lifecycleAnswering(outsideAnswer<SessionLiveness>()),
 				userSessionStore: holdingStore(),
 				logger,
 			}),
@@ -613,7 +615,7 @@ describe("POST /oauth/federation/:name/token through the session lifecycle", () 
 	it("a lifecycle that cannot list the federations: 503, one error line", async () => {
 		const logger = createMockLogger();
 		const lifecycle = lifecycleAnswering({ outcome: "live", session: liveSession });
-		lifecycle.federations.mockResolvedValue({ outcome: "unavailable" });
+		lifecycle.federations.mockResolvedValue(outsideAnswer<SessionFederations>());
 		const res = await fedToken(buildApp({ lifecycle, userSessionStore: holdingStore(), logger }));
 
 		expect(res.status).toBe(503);

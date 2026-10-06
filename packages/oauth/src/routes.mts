@@ -283,7 +283,9 @@ const createIntrospectHandler = ({
 						cause,
 					});
 				}
-				if (liveness.outcome === "unavailable") {
+				// Any answer other than `live` or `not_live` (core's lifecycle gives
+				// none, as it rejects on an outage) is answered as the outage.
+				if (liveness.outcome !== "live" && liveness.outcome !== "not_live") {
 					return answerStoreUnavailable(req, res, {
 						store: "session_lifecycle",
 						details: { sid },
