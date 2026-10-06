@@ -8,7 +8,8 @@
  * real Redis, on a hand-moved clock and on the real one, and what the Redis
  * adapter adds: its own key namespace, the key's lifetime on the counter's
  * clock, a refused attempt writing nothing, a reply that is no count rejected,
- * and its module, which refuses a server that may evict a running window.
+ * and the gate its factory and module pass, which refuses a server that may
+ * evict a running window.
  */
 
 import {
@@ -16,11 +17,8 @@ import {
 	ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
 	type AttemptCounter,
 	type AttemptSpec,
-	consoleLogger,
 	createApp,
 	defineModule,
-	type Logger,
-	loggableError,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import {
@@ -85,12 +83,20 @@ const freshPrefix = (): string => {
 	return `attempt:test-${run}:`;
 };
 
-const counterAt = (keyPrefix: string, connection: Redis, now?: () => number): AttemptCounter =>
-	createRedisAttemptCounter({
-		client: makeIoredisClients(connection).attemptCounterClient,
+/** A counter over `connection`; `durable` stands in for a server that cannot answer the gate. */
+const counterAt = (
+	keyPrefix: string,
+	connection: Redis,
+	now?: () => number,
+	durable = false,
+): Promise<AttemptCounter> => {
+	const client = makeIoredisClients(connection).attemptCounterClient;
+	return createRedisAttemptCounter({
+		client: durable ? { ...client, durability: async () => DURABLE } : client,
 		keyPrefix,
 		...(now === undefined ? {} : { now }),
 	});
+};
 
 /** A clock the harness moves by hand, for the counter and for the server's countdowns, starting at the host's time. */
 const handClock = (prefix: string) => {
@@ -116,26 +122,23 @@ const handClock = (prefix: string) => {
 const harness = (clocked: boolean) => async (): Promise<AttemptCounterHarness> => {
 	const prefix = freshPrefix();
 	const clock = clocked ? handClock(prefix) : undefined;
-	const opened: Redis[] = [];
+	const io = new Redis({
+		host: "127.0.0.1",
+		port: 1,
+		lazyConnect: true,
+		enableOfflineQueue: false,
+		maxRetriesPerRequest: 0,
+		retryStrategy: () => null,
+	});
+	io.on("error", () => {});
+	const unreachable = await counterAt(prefix, io, clock?.now, true);
 	return {
-		counter: counterAt(prefix, first(), clock?.now),
-		second: counterAt(prefix, second(), clock?.now),
+		counter: await counterAt(prefix, first(), clock?.now),
+		second: await counterAt(prefix, second(), clock?.now),
 		...(clock === undefined ? {} : { clock }),
-		unreachable: () => {
-			const io = new Redis({
-				host: "127.0.0.1",
-				port: 1,
-				lazyConnect: true,
-				enableOfflineQueue: false,
-				maxRetriesPerRequest: 0,
-				retryStrategy: () => null,
-			});
-			io.on("error", () => {});
-			opened.push(io);
-			return counterAt(prefix, io, clock?.now);
-		},
+		unreachable: () => unreachable,
 		close: async () => {
-			for (const io of opened) io.disconnect();
+			io.disconnect();
 		},
 	};
 };
@@ -164,7 +167,7 @@ describe("createRedisAttemptCounter on Redis", () => {
 	it(`keys its windows under "${DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX}" by default, apart from the rate limiter's keys of the same form`, async () => {
 		const key = `login:ip:192.0.2.${run + 100}`;
 		const clients = makeIoredisClients(first());
-		const counter = createRedisAttemptCounter({ client: clients.attemptCounterClient });
+		const counter = await createRedisAttemptCounter({ client: clients.attemptCounterClient });
 		await counter.consume(key, SPEC);
 		expect(await first().exists(`${DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX}${key}`)).toBe(1);
 		expect(await first().exists(key)).toBe(0);
@@ -182,7 +185,7 @@ describe("createRedisAttemptCounter on Redis", () => {
 		async (_label, offset) => {
 			const prefix = freshPrefix();
 			const now = Date.now() + offset;
-			const counter = counterAt(prefix, first(), () => now);
+			const counter = await counterAt(prefix, first(), () => now);
 			const count = await counter.consume("k", SPEC);
 			expect(count.resetAt.getTime()).toBe(now + 60_000);
 			const lifetime = 60_000 + ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS;
@@ -195,7 +198,7 @@ describe("createRedisAttemptCounter on Redis", () => {
 	it("keeps a running window's key through a later attempt, on a counter clock far behind the server's", async () => {
 		const prefix = freshPrefix();
 		let now = Date.now() - 3_600_000;
-		const counter = counterAt(prefix, first(), () => now);
+		const counter = await counterAt(prefix, first(), () => now);
 		await counter.consume("k", SPEC);
 		now += 30_000;
 		const second = await counter.consume("k", SPEC);
@@ -207,7 +210,7 @@ describe("createRedisAttemptCounter on Redis", () => {
 		const prefix = freshPrefix();
 		const key = `${prefix}k`;
 		let now = Date.now();
-		const counter = counterAt(prefix, first(), () => now);
+		const counter = await counterAt(prefix, first(), () => now);
 		await counter.consume("k", SPEC);
 		await counter.consume("k", SPEC);
 		const before = [await first().hgetall(key), await first().pexpiretime(key)];
@@ -223,19 +226,19 @@ describe("createRedisAttemptCounter on Redis", () => {
 	describe("two replicas whose clocks stand apart, on one Redis", () => {
 		const WINDOW: AttemptSpec = { limit: 3, windowSeconds: 20 };
 
-		const replicas = (aheadMs: number) => {
+		const replicas = async (aheadMs: number) => {
 			const prefix = freshPrefix();
 			const at = Date.now();
 			return {
 				prefix,
 				at,
-				behind: counterAt(prefix, first(), () => at),
-				ahead: counterAt(prefix, second(), () => at + aheadMs),
+				behind: await counterAt(prefix, first(), () => at),
+				ahead: await counterAt(prefix, second(), () => at + aheadMs),
 			};
 		};
 
 		it("a replica 30 s ahead never reopens a window the server still runs: its attempt is answered no count, and the window keeps its end and count", async () => {
-			const { prefix, at, behind, ahead } = replicas(30_000);
+			const { prefix, at, behind, ahead } = await replicas(30_000);
 			const opened = await behind.consume("k", WINDOW);
 			expect(opened.resetAt.getTime()).toBe(at + 20_000);
 			await expect(ahead.consume("k", WINDOW)).rejects.toThrow(/answered no count/);
@@ -249,7 +252,7 @@ describe("createRedisAttemptCounter on Redis", () => {
 		});
 
 		it("a replica ahead by less than the clock allowance past the window's end is counted in the running window, answered its end", async () => {
-			const { at, behind, ahead } = replicas(23_000);
+			const { at, behind, ahead } = await replicas(23_000);
 			await behind.consume("k", WINDOW);
 			const skewed = await ahead.consume("k", WINDOW);
 			expect([skewed.allowed, skewed.remaining, skewed.resetAt.getTime()]).toEqual([
@@ -263,7 +266,9 @@ describe("createRedisAttemptCounter on Redis", () => {
 	it("rejects an attempt whose key holds another type, counting nothing", async () => {
 		const prefix = freshPrefix();
 		await first().set(`${prefix}k`, "x");
-		await expect(counterAt(prefix, first()).consume("k", SPEC)).rejects.toThrow(/WRONGTYPE/);
+		await expect((await counterAt(prefix, first())).consume("k", SPEC)).rejects.toThrow(
+			/WRONGTYPE/,
+		);
 		expect(await first().get(`${prefix}k`)).toBe("x");
 	});
 });
@@ -280,7 +285,7 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 	const good: AttemptCounterConsumeReply = { allowed: true, count: 1, resetAtMs: NOW + 60_000 };
 
 	it("answers a good reply as the count it is", async () => {
-		const counter = createRedisAttemptCounter({ client: answering(good), now: () => NOW });
+		const counter = await createRedisAttemptCounter({ client: answering(good), now: () => NOW });
 		const count = await counter.consume("k", SPEC);
 		expect([count.allowed, count.remaining, count.resetAt.getTime()]).toEqual([
 			true,
@@ -302,7 +307,7 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 		["a window's end already past", { ...good, resetAtMs: NOW - 10_000 }],
 		["a window's end past the longest window", { ...good, resetAtMs: NOW + 86_400_000 + 10_000 }],
 	])("rejects %s", async (_label, reply) => {
-		const counter = createRedisAttemptCounter({ client: answering(reply), now: () => NOW });
+		const counter = await createRedisAttemptCounter({ client: answering(reply), now: () => NOW });
 		await expect(counter.consume("k", SPEC)).rejects.toThrow(/createRedisAttemptCounter/);
 	});
 
@@ -317,16 +322,18 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 		};
 		// The last instant a Date holds: a window opened there would end past the range.
 		for (const now of [Number.NaN, Number.POSITIVE_INFINITY, -1, 8_640_000_000_000_000]) {
-			const counter = createRedisAttemptCounter({ client, now: () => now });
+			const counter = await createRedisAttemptCounter({ client, now: () => now });
 			await expect(counter.consume("k", SPEC)).rejects.toThrow(RangeError);
 		}
 		expect(asked).toBe(0);
 	});
 
-	it("refuses an empty key prefix at construction", () => {
-		expect(() => createRedisAttemptCounter({ client: answering(good), keyPrefix: "" })).toThrow(
-			RangeError,
-		);
+	it("refuses an empty key prefix at construction, before it asks the server", async () => {
+		const durability = vi.fn(async () => DURABLE);
+		await expect(
+			createRedisAttemptCounter({ client: { ...answering(good), durability }, keyPrefix: "" }),
+		).rejects.toThrow(RangeError);
+		expect(durability).not.toHaveBeenCalled();
 	});
 
 	it("hands the client the prefixed key, the caller's clock, the limit, the window's end and the clock allowance", async () => {
@@ -338,7 +345,11 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 				return good;
 			},
 		};
-		const counter = createRedisAttemptCounter({ client, keyPrefix: "p:", now: () => NOW + 0.7 });
+		const counter = await createRedisAttemptCounter({
+			client,
+			keyPrefix: "p:",
+			now: () => NOW + 0.7,
+		});
 		await counter.consume("login:ip:192.0.2.1", SPEC);
 		expect(seen).toEqual([
 			[
@@ -354,26 +365,6 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 	});
 });
 
-/** A logger that records what each level is handed. */
-function recordingLogger(): { logger: Logger; calls: Array<{ level: string; args: unknown[] }> } {
-	const calls: Array<{ level: string; args: unknown[] }> = [];
-	const record =
-		(level: string) =>
-		(...args: unknown[]): void => {
-			calls.push({ level, args });
-		};
-	const logger: Logger = {
-		trace: record("trace"),
-		debug: record("debug"),
-		info: record("info"),
-		warn: record("warn"),
-		error: record("error"),
-		fatal: record("fatal"),
-		child: () => logger,
-	};
-	return { logger, calls };
-}
-
 /** A reply error as ioredis raises one. */
 const replyError = (message: string): Error =>
 	Object.assign(new Error(message), { name: "ReplyError" });
@@ -388,16 +379,13 @@ describe("redisAttemptCounterModule", () => {
 		});
 	};
 
-	const boot = (durability: RedisDurability | (() => Promise<RedisDurability>), logger?: Logger) =>
-		provide({
-			attemptCounterClient: unaskedClient(durability),
-			...(logger === undefined ? {} : { logger }),
-		});
+	const boot = (durability: RedisDurability | (() => Promise<RedisDurability>)) =>
+		provide({ attemptCounterClient: unaskedClient(durability) });
 
-	it("has the canonical name, requires attemptCounterClient alone and reads the logger if there is one", () => {
+	it("has the canonical name, and requires attemptCounterClient alone", () => {
 		expect(redisAttemptCounterModule.name).toBe("redis-attempt-counter");
 		expect(redisAttemptCounterModule.requires).toEqual(["attemptCounterClient"]);
-		expect(redisAttemptCounterModule.optional).toEqual(["logger"]);
+		expect(redisAttemptCounterModule.optional).toBeUndefined();
 	});
 
 	it(`reads its own section, 'redis-attempt-counter', strict, whose keyPrefix defaults to '${DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX}'`, () => {
@@ -425,10 +413,8 @@ describe("redisAttemptCounterModule", () => {
 		expect(keys).toEqual(["tenant-a:attempt:login:ip:192.0.2.1"]);
 	});
 
-	it("boots on noeviction, and says nothing", async () => {
-		const { logger, calls } = recordingLogger();
-		await boot(DURABLE, logger);
-		expect(calls).toEqual([]);
+	it("boots on noeviction", async () => {
+		await expect(boot(DURABLE)).resolves.toBeDefined();
 	});
 
 	it.each([
@@ -445,8 +431,7 @@ describe("redisAttemptCounterModule", () => {
 	])(
 		"refuses %j at boot: any policy but noeviction may evict a running window, whose key carries a TTL",
 		async (policy) => {
-			const { logger, calls } = recordingLogger();
-			const refused = boot({ ...DURABLE, maxmemoryPolicy: policy }, logger);
+			const refused = boot({ ...DURABLE, maxmemoryPolicy: policy });
 			await expect(refused).rejects.toMatchObject({
 				name: "RedisStoreEvictableError",
 				reason: "attempt-counter-evictable",
@@ -455,7 +440,6 @@ describe("redisAttemptCounterModule", () => {
 			await expect(refused).rejects.toThrow(
 				/attemptCounter: .*noeviction.*\(attempt-counter-evictable\)$/,
 			);
-			expect(calls).toEqual([]);
 		},
 	);
 
@@ -468,42 +452,31 @@ describe("redisAttemptCounterModule", () => {
 		);
 	});
 
-	it("warns once that the check could not run when the policy could not be read, naming the refusal, and boots", async () => {
+	it("refuses a policy it could not read, naming the refusal as its cause", async () => {
 		const refusal = replyError("ERR unknown command 'CONFIG'");
-		const { logger, calls } = recordingLogger();
-		await boot(
-			{ maxmemoryPolicy: undefined, appendOnly: undefined, snapshots: undefined, refusal },
-			logger,
-		);
-		expect(calls).toEqual([
-			{
-				level: "warn",
-				args: [
-					{
-						store: "attemptCounter",
-						adapter: "redis",
-						unread: ["maxmemory-policy"],
-						err: loggableError(refusal),
-					},
-					"attempt_counter_durability_unchecked",
-				],
-			},
-		]);
+		const refused = boot({
+			maxmemoryPolicy: undefined,
+			appendOnly: undefined,
+			snapshots: undefined,
+			refusal,
+		});
+		await expect(refused).rejects.toMatchObject({
+			name: "RedisStoreEvictableError",
+			reason: "attempt-counter-evictable",
+			maxmemoryPolicy: undefined,
+			cause: refusal,
+		});
+	});
+
+	it("boots on a policy it could not read when the client assumes noeviction", async () => {
+		await expect(
+			boot({ ...DURABLE, maxmemoryPolicy: undefined, assumeNoEviction: true }),
+		).resolves.toBeDefined();
 	});
 
 	it("fails the boot when the server cannot be asked at all: an outage is not a refusal", async () => {
 		const outage = new Error("Connection is closed.");
 		await expect(boot(() => Promise.reject(outage))).rejects.toBe(outage);
-	});
-
-	it("writes its line on consoleLogger when no logger slot is filled", async () => {
-		const warn = vi.spyOn(consoleLogger, "warn").mockImplementation(() => undefined);
-		await boot({ ...DURABLE, maxmemoryPolicy: undefined });
-		expect(warn).toHaveBeenCalledTimes(1);
-		expect(warn).toHaveBeenCalledWith(
-			{ store: "attemptCounter", adapter: "redis", unread: ["maxmemory-policy"] },
-			"attempt_counter_durability_unchecked",
-		);
 	});
 
 	/** Reads the slot, as the attempt guard's callers will, and contributes a route so it is a closure root. */

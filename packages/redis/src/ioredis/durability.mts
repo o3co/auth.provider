@@ -15,9 +15,9 @@
  */
 
 /**
- * What a Redis server says about keeping what it is written, for the store modules' durability
- * and eviction boot checks. A reply that refuses a question leaves that part unread; any other
- * failure rejects.
+ * What a Redis server says about keeping what it is written, for the stores' eviction gate and
+ * the MFA modules' persistence notices, with the operator's `assumeNoEviction` assertion beside
+ * it. A reply that refuses a question leaves that part unread; any other failure rejects.
  */
 
 import type { Redis } from "ioredis";
@@ -49,14 +49,28 @@ const infoValue = (section: unknown, name: string): string | undefined =>
 		? new RegExp(`^${name}:([^\\r\\n]*)`, "m").exec(section)?.[1]
 		: undefined;
 
+/** What a client's durability report carries beside what the server says. */
+export interface IoredisDurabilityOptions {
+	/**
+	 * The operator's assertion that the server runs `maxmemory-policy noeviction`, reported as
+	 * `RedisDurability.assumeNoEviction`. Set it only for a server that will not say (`INFO` and
+	 * `CONFIG` refused or renamed) and is known to run `noeviction`: a policy the server reports
+	 * always decides. Default `false`.
+	 */
+	readonly assumeNoEviction?: boolean;
+}
+
 /**
  * What `io`'s server says about keeping what it is written. The policy from `INFO memory`
  * (`CONFIG GET maxmemory-policy` only where INFO does not say, so a managed server that blocks
  * `CONFIG` still reports it); AOF from `INFO persistence`; `CONFIG GET save` only when AOF is
  * off, to tell RDB snapshots from none. A refused question leaves its part unread; any other
- * failure is the caller's.
+ * failure is the caller's. `assumeNoEviction` is reported only when set.
  */
-export async function redisDurability(io: Redis): Promise<RedisDurability> {
+export async function redisDurability(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): Promise<RedisDurability> {
 	let refusal: unknown;
 	const ask = async (question: () => Promise<unknown>): Promise<unknown> => {
 		try {
@@ -77,5 +91,11 @@ export async function redisDurability(io: Redis): Promise<RedisDurability> {
 		const save = configValue(await ask(() => io.config("GET", "save")), "save");
 		snapshots = save === undefined ? undefined : save.trim() !== "";
 	}
-	return { maxmemoryPolicy, appendOnly, snapshots, refusal };
+	return {
+		maxmemoryPolicy,
+		appendOnly,
+		snapshots,
+		refusal,
+		...(options.assumeNoEviction === true ? { assumeNoEviction: true } : {}),
+	};
 }

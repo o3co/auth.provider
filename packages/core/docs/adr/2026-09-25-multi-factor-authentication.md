@@ -660,6 +660,8 @@ Rejected: **three separate keys**, three things a copy can forget; **a new `sid`
 
 The template's default is decided in O6.
 
+**Amended 2026-10-06 (owner decision for 0.17.0): the Redis stores run on `noeviction` alone.** Both Redis MFA stores keep keys with a TTL that their guarantees depend on (an emptied set's tombstone, a write's replay key, the subject's lock, lease and first-binding mark), so a `volatile-*` policy is no longer accepted. Each store's factory holds the server to the one eviction gate the Redis package's durable stores share: a policy read as `noeviction` passes; any other policy it reads refuses the boot (`mfa-factor-store-evictable`, `mfa-transaction-store-evictable`); a policy it cannot read refuses too, unless the clients are built with the operator's `assumeNoEviction` assertion, which a policy the server reports always overrides; a server that cannot answer fails the boot. The persistence warnings are unchanged.
+
 ---
 
 ## 4. Tokens, claims and the requirement
@@ -851,7 +853,7 @@ Core's reference and schema hold what core's consumers read with the MFA package
 | key ring empty, a key not 32 bytes, a duplicate id, or the sample key where D11 refuses it | the MFA config schema | `mfa.encryptionKeys` / `MFA_ENCRYPTION_KEY` |
 | `mfa.mode` not `off`, `oauthEndpointsModule` or `deviceAuthorizationGrantModule` without `userSessionStore` *(superseded 2026-09-28: never built; the MFA module `requires: ["userSessionStore"]` instead, and the requires-closure refuses — the amendment at the end of this section)* | their factories (`mfa-requires-user-session-store`; amended: `deviceAuthorizationGrantModule` refuses an enabled grant without it whatever the mode, D16) | the slot |
 | memory MFA stores under `deployment.mode = "multi"` | core, replica safety | the modules and what forks |
-| Redis factor store on an `allkeys-*` eviction policy | `redisMfaFactorStoreModule` (D12) | the policy |
+| Redis MFA store on any eviction policy but `noeviction`, or one it cannot read *(amended 2026-10-06: was `allkeys-*` only)* | the Redis MFA stores' factories (D12) | the policy, or `assumeNoEviction` |
 | `mfaFactorStore.adapter = "store"` *(amended 2026-10-03: `adapters.mfaFactorStore`)* without the four URLs | foundation's builder | the missing URLs |
 | `mail.smtp.secure = "none"` to a host that is not loopback | smtp's schema | the host |
 | an `acrValues` entry nothing installed can satisfy | dropped; warned, or `info` under `off` (D15) | the entry |

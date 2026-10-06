@@ -91,12 +91,14 @@ const freshPrefix = (): string => {
 };
 
 /** One store per connection over one keyspace, every call taken in turn. */
-const alternating = (keyPrefix: string): MfaTransactionStore => {
-	const stores = connections.map((connection) =>
-		createRedisMfaTransactionStore({
-			client: makeIoredisMfaTransactionStoreClient(connection),
-			keyPrefix,
-		}),
+const alternating = async (keyPrefix: string): Promise<MfaTransactionStore> => {
+	const stores = await Promise.all(
+		connections.map((connection) =>
+			createRedisMfaTransactionStore({
+				client: makeIoredisMfaTransactionStoreClient(connection),
+				keyPrefix,
+			}),
+		),
 	);
 	let next = 0;
 	const pick = (): MfaTransactionStore => {
@@ -186,11 +188,28 @@ const CHALLENGE = {
 	expiresAtMs: Date.now() + 10 * MINUTE,
 };
 
-const storeAt = (keyPrefix: string, connection: Redis = first()): MfaTransactionStore =>
-	createRedisMfaTransactionStore({
-		client: makeIoredisMfaTransactionStoreClient(connection),
+/** A store over `connection`; `durable` stands in for a server that cannot answer the gate. */
+const storeAt = (
+	keyPrefix: string,
+	connection: Redis = first(),
+	durable = false,
+): Promise<MfaTransactionStore> => {
+	const client = makeIoredisMfaTransactionStoreClient(connection);
+	return createRedisMfaTransactionStore({
+		client: durable
+			? {
+					...client,
+					durability: async () => ({
+						maxmemoryPolicy: "noeviction",
+						appendOnly: true,
+						snapshots: undefined,
+						refusal: undefined,
+					}),
+				}
+			: client,
 		keyPrefix,
 	});
+};
 
 let resets = 0;
 
@@ -247,13 +266,13 @@ const bindingKey = (prefix: string, binding: { readonly kind: string; readonly i
 		.digest("base64url")}}`;
 
 describe("createRedisMfaTransactionStore — the transaction", () => {
-	it('declares kind "redis"', () => {
-		expect(storeAt(freshPrefix()).kind).toBe("redis");
+	it('declares kind "redis"', async () => {
+		expect((await storeAt(freshPrefix())).kind).toBe("redis");
 	});
 
 	it("keeps a transaction in one hash, <prefix>tx:{<id>}, expiring at its expiresAtMs on the server's clock", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const expiresAtMs = Date.now() + 10 * MINUTE + 0.25;
 		await store.create(TX({ expiresAtMs }));
 		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
@@ -275,8 +294,8 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		// store's own clock (`now`, the host's by default) is the transaction's
 		// too, so get, update and consume cannot complete a ceremony past it.
 		const prefix = freshPrefix();
-		const onTime = storeAt(prefix);
-		const ahead = createRedisMfaTransactionStore({
+		const onTime = await storeAt(prefix);
+		const ahead = await createRedisMfaTransactionStore({
 			client: makeIoredisMfaTransactionStoreClient(first()),
 			keyPrefix: prefix,
 			now: () => Date.now() + 11 * MINUTE,
@@ -296,8 +315,8 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		// server whose clock runs behind would otherwise spend an attempt on,
 		// and hand out the challenge of, a transaction every read calls gone.
 		const prefix = freshPrefix();
-		const onTime = storeAt(prefix);
-		const ahead = createRedisMfaTransactionStore({
+		const onTime = await storeAt(prefix);
+		const ahead = await createRedisMfaTransactionStore({
 			client: makeIoredisMfaTransactionStoreClient(first()),
 			keyPrefix: prefix,
 			now: () => Date.now() + 11 * MINUTE,
@@ -310,7 +329,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 
 	it("answers a reservation and a take on a transaction whose deadline field is missing or no finite number as absent, spending and taking nothing", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
 		for (const value of [undefined, "", "soon", "inf", "-inf", "nan", "1e999"]) {
 			await first().del(key);
@@ -363,7 +382,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 				interruptedBy: "mfa",
 			},
 		});
-		const store = storeAt(freshPrefix());
+		const store = await storeAt(freshPrefix());
 		await store.create(tx);
 		expect((await store.get("tx-1"))?.continuation?.primary.claims).toStrictEqual({ deep });
 		expect(await store.reserveAttempt("tx-1", 5)).toEqual({ ok: true, attempts: 1 });
@@ -373,17 +392,20 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 	it("judges the deadline of a reservation and a take as a read does, to the fraction of a millisecond: at expiresAtMs it is gone, a moment before it is not", async () => {
 		const prefix = freshPrefix();
 		const expiresAtMs = Date.now() + 10 * MINUTE + 0.25;
-		await storeAt(prefix).create(TX({ expiresAtMs, challenge: CHALLENGE }));
-		const at = (nowMs: number): MfaTransactionStore =>
+		await (await storeAt(prefix)).create(TX({ expiresAtMs, challenge: CHALLENGE }));
+		const at = (nowMs: number): Promise<MfaTransactionStore> =>
 			createRedisMfaTransactionStore({
 				client: makeIoredisMfaTransactionStoreClient(first()),
 				keyPrefix: prefix,
 				now: () => nowMs,
 			});
-		expect(await at(expiresAtMs).get("tx-1")).toBeNull();
-		expect(await at(expiresAtMs).reserveAttempt("tx-1", 5)).toEqual({ ok: false, attempts: 0 });
-		expect(await at(expiresAtMs).takeChallenge("tx-1", 1)).toBeNull();
-		const before = at(expiresAtMs - 0.125);
+		expect(await (await at(expiresAtMs)).get("tx-1")).toBeNull();
+		expect(await (await at(expiresAtMs)).reserveAttempt("tx-1", 5)).toEqual({
+			ok: false,
+			attempts: 0,
+		});
+		expect(await (await at(expiresAtMs)).takeChallenge("tx-1", 1)).toBeNull();
+		const before = await at(expiresAtMs - 0.125);
 		expect(await before.reserveAttempt("tx-1", 5)).toEqual({ ok: true, attempts: 1 });
 		expect(await before.takeChallenge("tx-1", 1)).toStrictEqual(CHALLENGE);
 	});
@@ -393,7 +415,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		// the user starts again from the password — where an outage would
 		// answer 503 until the key expired.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
 		for (const [field, value] of [
 			["record", "not json"],
@@ -422,7 +444,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		// send count and a last send bounded mail, which is the sender's now:
 		// neither holds a limit the store still keeps.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
 		const tx = TX({ challenge: CHALLENGE });
 		for (const [sends, lastSentAtMs] of [
@@ -455,7 +477,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		// `sessionId`, or a binding of another kind, is unreadable, and a
 		// transaction it cannot read fails closed.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
 		type Fixed = Record<string, unknown> & { readonly binding: { readonly id: string } };
 		const rewrites: readonly [string, (fixed: Fixed) => Record<string, unknown>][] = [
@@ -479,9 +501,9 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		}
 	});
 
-	it("refuses a keyPrefix that carries a brace, which would take the hash tags over", () => {
+	it("refuses a keyPrefix that carries a brace, which would take the hash tags over", async () => {
 		for (const keyPrefix of ["mfat:{x}:", "mfat}:", "{mfat:"]) {
-			expect(() => storeAt(keyPrefix), keyPrefix).toThrow(RangeError);
+			await expect(storeAt(keyPrefix), keyPrefix).rejects.toThrow(RangeError);
 		}
 	});
 });
@@ -510,7 +532,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 
 	it("indexes a binding's transactions in one sorted set, <prefix>binding:{<digest>}, scored by expiresAtMs and expiring at the latest, rounded up", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const expiries = await opened(store, "tab", 2, A);
 		const index = bindingKey(prefix, A);
 		expect(await first().type(index)).toBe("zset");
@@ -527,7 +549,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 
 	it("keeps the express session id out of every key it writes", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		await opened(store, "tab", N + 1, A);
 		await store.consume("tab-3", 1);
 		for (const key of await first().keys(`${prefix}*`)) {
@@ -538,7 +560,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 
 	it("holds at most N members, its deadline the latest of theirs, and ends an evicted transaction's key", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const expiries = await opened(store, "tab", N + 2, A);
 		const index = bindingKey(prefix, A);
 		expect(await first().zcard(index)).toBe(N);
@@ -549,7 +571,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 
 	it("takes a transaction out of the index when it is consumed or its attempts end, and the key goes with the last", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		await opened(store, "tab", 2, A);
 		const index = bindingKey(prefix, A);
 		await store.consume("tab-0", 1);
@@ -561,7 +583,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 
 	it("brings the index's deadline back to the latest left when the latest-expiring transaction leaves", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const expiries = await opened(store, "tab", 3, A);
 		const index = bindingKey(prefix, A);
 		await store.consume("tab-2", 1);
@@ -576,7 +598,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 		// id taken again by another binding: evicting the member must leave
 		// the other binding's transaction alone.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		await store.create(TX({ id: "shared", binding: A, expiresAtMs: Date.now() + 5 * MINUTE }));
 		await first().del(`${prefix}tx:{${keyPart("shared")}}`);
 		await store.create(TX({ id: "shared", binding: B }));
@@ -588,7 +610,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 
 	it("refuses a create whose binding index it cannot write: an outage", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		await first().set(bindingKey(prefix, A), "not a sorted set");
 		await expect(store.create(TX({ binding: A }))).rejects.toThrow();
 		// Refused after the write: the transaction it wrote stands until it expires.
@@ -596,7 +618,10 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 	});
 
 	/** A store over a client whose `fail` operations reject, and the warnings it logs. */
-	function failing(prefix: string, fail: Partial<Record<keyof MfaTransactionStoreClient, true>>) {
+	async function failing(
+		prefix: string,
+		fail: Partial<Record<keyof MfaTransactionStoreClient, true>>,
+	) {
 		const real = makeIoredisMfaTransactionStoreClient(first());
 		const down = async (): Promise<never> => {
 			throw new Error("connection lost");
@@ -607,7 +632,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 			...(fail.unindexTransaction ? { unindexTransaction: down } : {}),
 		};
 		const warned: [Record<string, unknown>, string][] = [];
-		const store = createRedisMfaTransactionStore({
+		const store = await createRedisMfaTransactionStore({
 			client,
 			keyPrefix: prefix,
 			logger: { warn: (obj, msg) => warned.push([obj, msg]) },
@@ -617,7 +642,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 
 	it("keeps a create whose eviction fails: the new transaction stands, the one not ended stays until it expires, and it warns", async () => {
 		const prefix = freshPrefix();
-		const { store, warned } = failing(prefix, { evictTransaction: true });
+		const { store, warned } = await failing(prefix, { evictTransaction: true });
 		await opened(store, "tab", N + 1, A);
 		expect(await store.get(`tab-${N}`)).not.toBeNull();
 		expect(await store.get("tab-0")).not.toBeNull();
@@ -627,7 +652,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 
 	it("answers a consume and a reservation past max as usual when the member cannot be taken out, and warns", async () => {
 		const prefix = freshPrefix();
-		const { store, warned } = failing(prefix, { unindexTransaction: true });
+		const { store, warned } = await failing(prefix, { unindexTransaction: true });
 		await opened(store, "tab", 2, A);
 		expect(await store.consume("tab-0", 1)).not.toBeNull();
 		expect(await store.reserveAttempt("tab-1", 1)).toEqual({ ok: true, attempts: 1 });
@@ -645,7 +670,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 
 	it("keeps it in a hash and the weekly window in a sorted set of failure times, both under the subject's tag", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY);
 		if (!reserved.ok) throw new Error("expected a reservation");
@@ -666,7 +691,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		// counting (MFA_CLOCK_SKEW_ALLOWANCE_MS), on the server's clock — which
 		// is what Redis reclaims by.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
@@ -699,7 +724,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		// replica per attempt an attacker sends at a held subject. A sentinel
 		// deadline shows it.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
@@ -727,7 +752,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		expect(await deadlineOf(week)).toBe(sentinel);
 		// The weekly hold, with the run ended: the keys carry a deadline.
 		const weeklyPrefix = freshPrefix();
-		const weekly = storeAt(weeklyPrefix);
+		const weekly = await storeAt(weeklyPrefix);
 		const weeklyLock = `${weeklyPrefix}lock:{${keyPart("user-1")}}`;
 		const weeklyWeek = `${weeklyPrefix}week:{${keyPart("user-1")}}`;
 		// No backoff before the hard limit, so ten failures in a row fill the week.
@@ -760,7 +785,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		// A caller far behind the server forgets what stopped counting a day
 		// before its own time; the keys' deadlines follow what is left.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const serverNow = await serverClock(first)();
 		const small: MfaLockoutPolicy = { ...POLICY, threshold: 5, hardLimit: 5 };
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
@@ -784,7 +809,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 
 	it("keeps the hard hold, and no TTL, through an exempt success, the script loaded again after the cache was flushed", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const small: MfaLockoutPolicy = { ...POLICY, threshold: 5, hardLimit: 5 };
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
@@ -807,7 +832,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 
 	it("keeps the hard hold in the lock hash's hard field, the later of the time it was fixed and its run's newest attempt, and the keys with no TTL after the run has ended", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const two: MfaLockoutPolicy = { ...POLICY, threshold: 2, hardLimit: 2 };
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
@@ -839,7 +864,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const six: MfaLockoutPolicy = { ...lower, hardLimit: 6 };
 		for (const fixes of ["reservation", "exempt success"] as const) {
 			const prefix = freshPrefix();
-			const store = storeAt(prefix);
+			const store = await storeAt(prefix);
 			const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 			let at = start();
 			for (let i = 0; i < 5; i++) {
@@ -871,7 +896,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const seven: MfaLockoutPolicy = { ...six, hardLimit: 7 };
 		for (const finds of ["reservation", "exempt success"] as const) {
 			const prefix = freshPrefix();
-			const store = storeAt(prefix);
+			const store = await storeAt(prefix);
 			const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 			let at = start();
 			for (let i = 0; i < 6; i++) {
@@ -902,7 +927,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 
 	it("takes off, at a refusal, a TTL a held hash was given: a deadline another release set does not end the hold", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const two: MfaLockoutPolicy = { ...POLICY, threshold: 2, hardLimit: 2 };
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
@@ -926,7 +951,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 
 	it("refuses every lock operation on a hard field it cannot read: an outage, never a pass, and nothing settled", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY);
@@ -949,7 +974,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 
 	it("refuses an exempt success whose hardLimit argument is missing or not a number, naming the argument, and writes nothing", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
@@ -968,7 +993,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 
 	it("drops the keys once nothing in them counts", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY);
 		if (!reserved.ok) throw new Error("expected a reservation");
@@ -980,7 +1005,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		// Lua's isolation is not a transaction: a script that wrote and then
 		// failed on a corrupt field would leave the reservation half-settled.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
@@ -1002,7 +1027,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		// The lock is what bounds guessing: a state read as empty would lift
 		// every hold. The script refuses, and the store's caller answers 503.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
@@ -1026,7 +1051,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		// nothing, the week holds every attempt, as it holds one from a
 		// browser nobody trusted.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
@@ -1111,7 +1136,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 			const random = seeded(seed);
 			const choose = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)] as T;
 			const memory = createMemoryMfaTransactionStore();
-			const redis = storeAt(freshPrefix());
+			const redis = await storeAt(freshPrefix());
 			const serverNow = await serverClock(first)();
 			const start = Math.ceil(Math.max(Date.now(), serverNow) / 1000) * 1000 + 1000;
 			let at = start;
@@ -1173,7 +1198,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		};
 		const t = Math.floor(Date.now() / 1000) * 1000;
 		const answers: MfaSubjectAttemptReservation[] = [];
-		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
+		for (const store of [createMemoryMfaTransactionStore(), await storeAt(freshPrefix())]) {
 			for (let i = 0; i < 3; i++) {
 				const reserved = await store.reserveSubjectAttempt("user-1", t, tie);
 				if (!reserved.ok) throw new Error("expected a reservation");
@@ -1197,7 +1222,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		};
 		const t = Math.floor(Date.now() / 1000) * 1000;
 		const answers: Array<Array<string | null>> = [];
-		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
+		for (const store of [createMemoryMfaTransactionStore(), await storeAt(freshPrefix())]) {
 			const seen: Array<string | null> = [];
 			const reserve = async (at: number): Promise<string | null> => {
 				const r = await store.reserveSubjectAttempt("user-1", at, four);
@@ -1230,7 +1255,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		// are still short of a lock.
 		const t = Math.floor(Date.now() / 1000) * 1000;
 		const answers: boolean[] = [];
-		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
+		for (const store of [createMemoryMfaTransactionStore(), await storeAt(freshPrefix())]) {
 			for (let i = 0; i < 4; i++) {
 				const reserved = await store.reserveSubjectAttempt("user-1", t + 10 * i, POLICY);
 				if (!reserved.ok) throw new Error("expected a reservation");
@@ -1251,7 +1276,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 describe("createRedisMfaTransactionStore — the email proof at the next first binding", () => {
 	it("keeps it in a key of its own with no TTL, which a reset leaves and a consume removes", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = `${prefix}proof:{${keyPart("user-1")}}`;
 		await store.requireEmailProofAtNextBinding("user-1");
 		expect(await first().pttl(key)).toBe(-1);
@@ -1271,7 +1296,7 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 
 	it("keeps it in a string of its own, <prefix>session-proof:{<subject>}:<sid>, holding when it was given and its end, expiring at its end on the store's clock", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const now = Date.now();
 		const until = now + 10 * MINUTE;
 		await store.recordSessionEmailProof("user-1", "sid-1", now, until);
@@ -1289,7 +1314,7 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 
 	it("sets the key's lifetime from the store's own clock: a store whose clock runs behind keeps it longer, to the same end", async () => {
 		const prefix = freshPrefix();
-		const behind = createRedisMfaTransactionStore({
+		const behind = await createRedisMfaTransactionStore({
 			client: makeIoredisMfaTransactionStoreClient(first()),
 			keyPrefix: prefix,
 			now: () => Date.now() - 5 * MINUTE,
@@ -1301,8 +1326,8 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 
 	it("answers a proof past its end on its own clock as absent, though the server still holds it", async () => {
 		const prefix = freshPrefix();
-		const onTime = storeAt(prefix);
-		const ahead = createRedisMfaTransactionStore({
+		const onTime = await storeAt(prefix);
+		const ahead = await createRedisMfaTransactionStore({
 			client: makeIoredisMfaTransactionStoreClient(first()),
 			keyPrefix: prefix,
 			now: () => Date.now() + 11 * MINUTE,
@@ -1316,7 +1341,7 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 
 	it("answers a proof it cannot read back as absent: the user proves again", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = proofKey(prefix, "user-1", "sid-1");
 		const now = Date.now();
 		for (const value of [
@@ -1335,7 +1360,7 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 
 	it("keeps it apart from the transactions, the subject lock and the requirement an operator reset records", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const now = Date.now();
 		await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
 		// A transaction of the same session, created and consumed beside it.
@@ -1357,7 +1382,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		`${prefix}first-binding:{${keyPart(subject)}}`;
 
 	/** A store over the first connection whose own clock is `offsetMs` off the host's. */
-	const skewedStore = (prefix: string, offsetMs: number): MfaTransactionStore =>
+	const skewedStore = (prefix: string, offsetMs: number): Promise<MfaTransactionStore> =>
 		createRedisMfaTransactionStore({
 			client: makeIoredisMfaTransactionStoreClient(first()),
 			keyPrefix: prefix,
@@ -1366,7 +1391,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 
 	it("keeps it in a string of its own, <prefix>first-binding:{<subject>}, holding when it was noted and its end, expiring at its end on the server's clock", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const now = await serverClock(first)();
 		const until = Math.floor(now) + 10 * MINUTE;
 		await store.noteFirstBinding("user-1", Math.floor(now), until);
@@ -1382,8 +1407,8 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 
 	it("judges a mark on the server's clock alone: a replica whose clock runs ahead neither reads it as ended nor replaces it with an earlier one", async () => {
 		const prefix = freshPrefix();
-		const onTime = storeAt(prefix);
-		const ahead = skewedStore(prefix, 11 * MINUTE);
+		const onTime = await storeAt(prefix);
+		const ahead = await skewedStore(prefix, 11 * MINUTE);
 		const now = Math.floor(await serverClock(first)());
 		await onTime.noteFirstBinding("user-1", now, now + 10 * MINUTE);
 		expect(await ahead.firstBindingAt("user-1", now + 11 * MINUTE)).toBe(now);
@@ -1394,8 +1419,8 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 
 	it("judges a note's bounds on the server's clock, whatever the replica's clock says", async () => {
 		const prefix = freshPrefix();
-		const behind = skewedStore(prefix, -20 * MINUTE);
-		const ahead = skewedStore(prefix, 20 * MINUTE);
+		const behind = await skewedStore(prefix, -20 * MINUTE);
+		const ahead = await skewedStore(prefix, 20 * MINUTE);
 		const now = Math.floor(await serverClock(first)());
 		// On the server's clock these stand, though each replica's clock says otherwise.
 		await ahead.noteFirstBinding("user-1", now, now + 10 * MINUTE);
@@ -1412,7 +1437,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 
 	it("keeps the later time and the later end: the key's value and deadline move only forward", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const now = Math.floor(await serverClock(first)());
 		const key = markKey(prefix, "user-1");
 		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
@@ -1436,7 +1461,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		// No mark lets a session's recorded witness stand: a mark read as
 		// absent would trust the session it is there to distrust.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = markKey(prefix, "user-1");
 		const now = Math.floor(await serverClock(first)());
 		for (const value of [
@@ -1469,7 +1494,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 
 	it("replaces a mark it cannot read back with the next note", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = markKey(prefix, "user-1");
 		const now = Math.floor(await serverClock(first)());
 		for (const value of [
@@ -1488,7 +1513,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		// Merged, its later times would stay, and this side refuses them as an
 		// outage no note could then repair.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = markKey(prefix, "user-1");
 		const now = Math.floor(await serverClock(first)());
 		const held = { atMs: now + 6 * MINUTE, untilMs: now + 20 * MINUTE, x: 1 };
@@ -1504,7 +1529,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 
 	it("refuses to read a key of another type, an outage, and a note overwrites it", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = markKey(prefix, "user-1");
 		const now = Math.floor(await serverClock(first)());
 		for (const [type, write] of [
@@ -1528,7 +1553,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		// The script sees a mark noted before its server's clock stepped back
 		// as one ahead of it. Implausible on the clock, it is still a mark.
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const key = markKey(prefix, "user-1");
 		const now = Math.floor(await serverClock(first)());
 		const held = { atMs: now + 6 * MINUTE, untilMs: now + 20 * MINUTE };
@@ -1550,15 +1575,15 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 				return { ...read, serverNowMs: read.serverNowMs - 10 * MINUTE };
 			},
 		};
-		const store = createRedisMfaTransactionStore({ client: stepped, keyPrefix: prefix });
+		const store = await createRedisMfaTransactionStore({ client: stepped, keyPrefix: prefix });
 		const now = Math.floor(await serverClock(first)());
-		await storeAt(prefix).noteFirstBinding("user-1", now, now + 20 * MINUTE);
+		await (await storeAt(prefix)).noteFirstBinding("user-1", now, now + 20 * MINUTE);
 		expect(await store.firstBindingAt("user-1", now)).toBe(now);
 	});
 
 	it("notes and reads through EVAL once the server has forgotten the scripts", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const now = Math.floor(await serverClock(first)());
 		await store.noteFirstBinding("user-1", now - MINUTE, now + 10 * MINUTE);
 		await store.firstBindingAt("user-1", now);
@@ -1573,7 +1598,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 	it("rejects a note and a read when the server cannot be reached: an outage, never no mark", async () => {
 		const unreachable = first().duplicate({ lazyConnect: true, enableOfflineQueue: false });
 		try {
-			const store = storeAt(freshPrefix(), unreachable);
+			const store = await storeAt(freshPrefix(), unreachable, true);
 			const now = Date.now();
 			await expect(store.noteFirstBinding("user-1", now, now + 10 * MINUTE)).rejects.toThrow();
 			await expect(store.firstBindingAt("user-1", now)).rejects.toThrow();
@@ -1584,7 +1609,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 
 	it("keeps it apart from the transactions, the subject lock, the requirement and a session's proof", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const now = Math.floor(await serverClock(first)());
 		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
 		await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
@@ -1617,15 +1642,15 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		};
 	};
 
-	it("has no clearSubjectState, on the store or its client: an applied recovery is the one way the lock state ends", () => {
+	it("has no clearSubjectState, on the store or its client: an applied recovery is the one way the lock state ends", async () => {
 		const client = makeIoredisMfaTransactionStoreClient(first());
-		expect("clearSubjectState" in storeAt(freshPrefix())).toBe(false);
+		expect("clearSubjectState" in (await storeAt(freshPrefix()))).toBe(false);
 		expect("clearSubjectState" in client).toBe(false);
 	});
 
 	it("keeps the lease and the recovery hash under the subject's tag beside its lock and week", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const keys = keysOf(prefix);
 		await store.reserveSubjectAttempt("user-1", Date.now() - MINUTE, POLICY);
 		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
@@ -1641,7 +1666,7 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 
 	it("gives the recovery hash a deadline while it holds authorizations alone, and none once it holds a generation or a floor", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const { recovery } = keysOf(prefix);
 		const ends = Math.floor(Date.now()) + 10 * MINUTE;
 		await store.authorizeSubjectRecovery("user-1", {
@@ -1665,7 +1690,7 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 
 	it("answers a generation, a floor or an authorization it cannot read as an outage, never as none", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const { recovery } = keysOf(prefix);
 		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
 		if (lease.outcome !== "acquired") throw new Error("expected a lease");
@@ -1697,7 +1722,7 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 
 	it("answers a lease with no deadline, which it never writes, as an outage", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		await first().set(keysOf(prefix).lease, "someone");
 		await expect(
 			store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 }),
@@ -1706,7 +1731,7 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 
 	it("ends at a reset a lock state the scripts cannot read", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const { lock, week } = keysOf(prefix);
 		await store.reserveSubjectAttempt("user-1", Date.now(), POLICY);
 		await first().hset(lock, "r:x", "garbage");
@@ -1730,7 +1755,7 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 
 	/** A subject with failures in its run and week, a pending recover and reset authorized, and the lease held. */
 	async function primed(prefix: string): Promise<{ store: MfaTransactionStore; token: string }> {
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		for (let i = 0; i < 3; i++) {
 			const reserved = await store.reserveSubjectAttempt("user-1", Date.now() - HOUR + i, POLICY);
 			if (!reserved.ok) throw new Error("expected a reservation");
@@ -1819,7 +1844,7 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 
 	it("reads a generation or a floor with a leading zero as an outage, in the reads and in the scripts alike", async () => {
 		const prefix = freshPrefix();
-		const store = storeAt(prefix);
+		const store = await storeAt(prefix);
 		const { recovery } = keysOf(prefix);
 		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
 		if (lease.outcome !== "acquired") throw new Error("expected a lease");
@@ -1899,14 +1924,14 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 	it("answers a release at the lease's last millisecond false, as a lease that lapsed, never an outage", async () => {
 		const prefix = freshPrefix();
 		const { token } = await primed(prefix);
-		const store = storeAt(prefix, atLastMillisecond());
+		const store = await storeAt(prefix, atLastMillisecond());
 		expect(await store.releaseSubjectLease("user-1", token)).toBe(false);
 	});
 
 	it("refuses an apply and a floor raise at the lease's last millisecond lease_not_held, never an outage", async () => {
 		const prefix = freshPrefix();
 		const { token } = await primed(prefix);
-		const store = storeAt(prefix, atLastMillisecond());
+		const store = await storeAt(prefix, atLastMillisecond());
 		expect(await applyOf(store, "reset", token)).toMatchObject({
 			outcome: "refused",
 			reason: "lease_not_held",
@@ -2065,7 +2090,7 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 			["refused", "unauthorized", "1", "9007199254740992"],
 		],
 	])("answers an apply an outage when the script's reply carries %s", async (_label, reply) => {
-		const store = createRedisMfaTransactionStore({
+		const store = await createRedisMfaTransactionStore({
 			client: {
 				...makeIoredisMfaTransactionStoreClient(first()),
 				applySubjectRecovery: async () => reply,
@@ -2085,14 +2110,16 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 	});
 
 	it("reads a time to rebind after as the script's decimal text, 0 included", async () => {
-		const answered = (reply: readonly string[]) =>
-			createRedisMfaTransactionStore({
-				client: {
-					...makeIoredisMfaTransactionStoreClient(first()),
-					applySubjectRecovery: async () => reply,
-				},
-				keyPrefix: freshPrefix(),
-			}).applySubjectRecovery("user-1", {
+		const answered = async (reply: readonly string[]) =>
+			(
+				await createRedisMfaTransactionStore({
+					client: {
+						...makeIoredisMfaTransactionStoreClient(first()),
+						applySubjectRecovery: async () => reply,
+					},
+					keyPrefix: freshPrefix(),
+				})
+			).applySubjectRecovery("user-1", {
 				operation: "reset",
 				sid: undefined,
 				nowMs: Date.now(),

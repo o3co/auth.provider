@@ -24,7 +24,7 @@ import type { Redis } from "ioredis";
 import type { MfaFactorStoreClient, MfaTransactionStoreClient } from "../../clients.mjs";
 import { fgNumber, hashFields } from "../codec.mjs";
 import { runScript } from "../commands.mjs";
-import { redisDurability } from "../durability.mjs";
+import { type IoredisDurabilityOptions, redisDurability } from "../durability.mjs";
 import {
 	MFA_BINDING_INDEX,
 	MFA_BINDING_UNINDEX,
@@ -71,7 +71,10 @@ function outcomeOf<const O extends string>(
  * {@link makeIoredisClients}; exported alone so a deployment can keep enrolled factors on a
  * dedicated database or instance, as the MFA ADR's durability requirements prefer.
  */
-export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient {
+export function makeIoredisMfaFactorStoreClient(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): MfaFactorStoreClient {
 	return {
 		async list(key) {
 			return await io.hgetall(key);
@@ -147,7 +150,7 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 			);
 			return outcomeOf(reply, ["removed", "late"], "removeAll");
 		},
-		durability: () => redisDurability(io),
+		durability: () => redisDurability(io, options),
 	};
 }
 
@@ -168,7 +171,10 @@ const rebindArgument = (since: number | null | undefined): string =>
  * {@link makeIoredisClients}; exported alone so a deployment can give it a dedicated database
  * or instance.
  */
-export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionStoreClient {
+export function makeIoredisMfaTransactionStoreClient(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): MfaTransactionStoreClient {
 	return {
 		async create(key, fields, deadlineMs) {
 			const reply = await runScript(
@@ -394,6 +400,6 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			}
 			return reply;
 		},
-		durability: () => redisDurability(io),
+		durability: () => redisDurability(io, options),
 	};
 }

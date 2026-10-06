@@ -562,10 +562,35 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   a composition of your own installs `redisAttemptCounterModule` from
   `@o3co/auth-provider-redis`, whose client the template's `redis-clients`
   module provides as `attemptCounterClient`. Its Redis must run
-  `maxmemory-policy noeviction` (the default). The module refuses the boot on
-  any other policy it reads; a server that will not say boots with the
-  warning `attempt_counter_durability_unchecked`, and the policy is then
-  yours to confirm.
+  `maxmemory-policy noeviction` (the default), which the module holds it to
+  as the next entry says.
+- **BREAKING: the Redis stores that keep durable keys refuse to boot unless
+  the server's `maxmemory-policy` is `noeviction`.** The attempt counter,
+  the session lifecycle store, the federation token store and the two MFA
+  stores are built only once the server reports `noeviction` (`INFO memory`,
+  then `CONFIG GET maxmemory-policy`). Any other policy refuses the boot —
+  `volatile-*` included, which the MFA stores used to accept with a warning,
+  and a policy the check does not know, which the session lifecycle,
+  federation token and MFA stores used to accept with a log line. So does a
+  policy the server will not report (`INFO` and `CONFIG` refused or renamed
+  for the connection's user), which every one of them used to accept with a
+  log line, and a server that cannot answer at boot, which the session
+  lifecycle and federation token stores used to accept. The refusal is a
+  `provides-factory-failed` whose `cause` is a `RedisStoreEvictableError`
+  (`reason` `<store>-evictable`, `maxmemoryPolicy`, `undefined` when unread).
+  Set `maxmemory-policy noeviction`, or give these stores a Redis of their
+  own. Where the server runs `noeviction` but will not say, assert it:
+  `makeIoredisClients(io, { assumeNoEviction: true })` (or the same option
+  on `makeIoredisMfaFactorStoreClient` / `makeIoredisMfaTransactionStoreClient`;
+  in the standalone template, the `redis-clients` section). A policy the
+  server does report always overrides the assertion. The log lines
+  `attempt_counter_durability_unchecked`,
+  `session_lifecycle_store_eviction_unchecked`,
+  `federation_token_store_eviction_unchecked`,
+  `mfa_factor_store_tombstone_evictable` and
+  `mfa_transaction_store_lock_evictable` are gone; the MFA stores'
+  `…_durability_unchecked` now names only the persistence it could not read
+  (`appendonly`, `save`).
 - **BREAKING: the Redis federation stores read the environment's name
   trimmed and in lower case (#826).** The plaintext guard of
   `redis-federation-token-store` and `redis-federation-grant-store` matched
@@ -1814,6 +1839,17 @@ modules fills them.
   `RedirectUriRejection` `query-name-invalid` and `reserved-parameter` (#1044);
   `FederationGrantReauthorizationResult` loses `connection_not_configured`
   (#963). An exhaustive `switch` over one needs the change.
+- **BREAKING: the Redis factories of the stores that keep durable keys are
+  async.** `createRedisAttemptCounter`, `createRedisSessionLifecycleStore`,
+  `createRedisFederationTokenStore`, `createRedisMfaFactorStore` and
+  `createRedisMfaTransactionStore` return a `Promise` of the store, and so
+  does `redisFederationTokenStoreBuilder`: each resolves once the server
+  passes the eviction gate (the entry under
+  [Values read more strictly](#values-read-more-strictly)), and an option it
+  refuses rejects rather than throws. `await` them. A client of your own
+  that implements `durability()` may report the operator's assertion as
+  `RedisDurability.assumeNoEviction`. `redisAttemptCounterModule` no longer
+  reads the `logger` slot.
 
 ## Stores and records you implement
 

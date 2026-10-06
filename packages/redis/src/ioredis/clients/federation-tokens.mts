@@ -24,7 +24,7 @@
 import type { Redis } from "ioredis";
 import type { FederationTokenStoreClient } from "../../clients.mjs";
 import { assertPipelineSucceeded, runScript } from "../commands.mjs";
-import { redisDurability } from "../durability.mjs";
+import { type IoredisDurabilityOptions, redisDurability } from "../durability.mjs";
 import {
 	FT_ATTACH,
 	FT_READ_VERSIONED,
@@ -43,7 +43,10 @@ const answerOf = <const A extends string>(
 	throw new Error(`federationTokenStoreClient.${operation}: unexpected script reply`);
 };
 
-export function makeIoredisFederationTokenStoreClient(io: Redis): FederationTokenStoreClient {
+export function makeIoredisFederationTokenStoreClient(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): FederationTokenStoreClient {
 	const federationTokenStoreClient: FederationTokenStoreClient = {
 		get: (k) => io.get(k),
 		// Cast required for overloaded `set`; see the user session store's in `./user-sessions.mts`.
@@ -158,7 +161,7 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 		pExpireGT: async (key, ttlMs) => {
 			await io.pexpire(key, ttlMs, "GT");
 		},
-		durability: () => redisDurability(io),
+		durability: () => redisDurability(io, options),
 	};
 	return federationTokenStoreClient;
 }

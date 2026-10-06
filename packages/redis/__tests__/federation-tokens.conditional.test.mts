@@ -43,23 +43,38 @@ afterAll(() => {
 
 let harnesses = 0;
 
-const storeOn = (io: Redis, keyPrefix: string) =>
-	createRedisFederationTokenStore({
+/** A store over `io`; `durable` stands in for a server that cannot answer the gate. */
+const storeOn = (io: Redis, keyPrefix: string, durable = false) => {
+	const client = makeIoredisClients(io).federationTokenStoreClient;
+	return createRedisFederationTokenStore({
 		deploymentMode: "unset",
-		client: makeIoredisClients(io).federationTokenStoreClient,
+		client: durable
+			? {
+					...client,
+					durability: async () => ({
+						maxmemoryPolicy: "noeviction",
+						appendOnly: undefined,
+						snapshots: undefined,
+						refusal: undefined,
+					}),
+				}
+			: client,
 		encryption: { mode: "required", key: Buffer.alloc(32, 9) },
 		keyPrefix,
 		scanFallback: false,
 	});
+};
 
 describe("federationTokenStoreConditionalContract over the Redis store, on two connections", () => {
 	for (const contractCase of federationTokenStoreConditionalContract({
 		build: async () => {
 			harnesses += 1;
 			const keyPrefix = `ftcw:${harnesses}:`;
+			const offline = one.duplicate({ lazyConnect: true, enableOfflineQueue: false });
+			const unreachable = await storeOn(offline, keyPrefix, true);
 			return {
-				store: storeOn(one, keyPrefix),
-				second: storeOn(two, keyPrefix),
+				store: await storeOn(one, keyPrefix),
+				second: await storeOn(two, keyPrefix),
 				forceExpire: async (sid, federationName) => {
 					const key = `${keyPrefix}${sid}:${federationName}`;
 					await one.pexpire(key, 1);
@@ -69,10 +84,7 @@ describe("federationTokenStoreConditionalContract over the Redis store, on two c
 						Date.now() + EXPIRY_GRACE_MS,
 					);
 				},
-				unreachable: () => {
-					const offline = one.duplicate({ lazyConnect: true, enableOfflineQueue: false });
-					return storeOn(offline, keyPrefix);
-				},
+				unreachable: () => unreachable,
 			};
 		},
 		supports: { forceExpire: true, unreachable: true },

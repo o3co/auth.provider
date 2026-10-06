@@ -23,10 +23,13 @@
 import type { Redis } from "ioredis";
 import type { AttemptCounterClient } from "../../clients.mjs";
 import { runScript } from "../commands.mjs";
-import { redisDurability } from "../durability.mjs";
+import { type IoredisDurabilityOptions, redisDurability } from "../durability.mjs";
 import { ATTEMPT_COUNTER_CONSUME } from "../scripts/attempt-counter.mjs";
 
-export function makeIoredisAttemptCounterClient(io: Redis): AttemptCounterClient {
+export function makeIoredisAttemptCounterClient(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): AttemptCounterClient {
 	return {
 		async consume(key, input) {
 			const reply = await runScript(
@@ -53,6 +56,6 @@ export function makeIoredisAttemptCounterClient(io: Redis): AttemptCounterClient
 			}
 			return { allowed: allowed === 1, count, resetAtMs };
 		},
-		durability: () => redisDurability(io),
+		durability: () => redisDurability(io, options),
 	};
 }

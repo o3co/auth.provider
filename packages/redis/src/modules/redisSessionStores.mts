@@ -14,9 +14,8 @@
  * limitations under the License.
  */
 
-import { consoleLogger, defineModule } from "@o3co/auth-provider-core";
+import { defineModule } from "@o3co/auth-provider-core";
 import { keyPrefixSection, redisReference } from "../internal/section.mjs";
-import { checkSessionLifecycleEviction } from "../internal/session-lifecycle-eviction.mjs";
 import { createRedisSessionLifecycleStore } from "../session-lifecycle-store.mjs";
 import { createRedisSubjectRevocation } from "../subjectRevocation.mjs";
 import { createRedisSubjectSessionIndex } from "../subjectSessionIndex.mjs";
@@ -47,11 +46,9 @@ import { createRedisUserSessionStore } from "../userSessionStore.mjs";
  * revocation store, which says a clamped boundary
  * (`subject_revocation_boundary_clamped`); `consoleLogger` when it is empty.
  *
- * Once the lifecycle store is built, the module reads the server's eviction
- * policy once (`internal/session-lifecycle-eviction.mts`): an eviction policy
- * refuses the boot with a `RedisStoreEvictableError`; a policy it could not
- * read or does not know is a warning on the `logger` slot, and the boot goes
- * on.
+ * The lifecycle store is built by `createRedisSessionLifecycleStore`, so a
+ * server that fails the eviction gate (`internal/eviction-policy.mts`)
+ * refuses the boot with a `RedisStoreEvictableError`.
  */
 export const redisSessionStoresModule = defineModule({
 	name: "redis-session-stores",
@@ -91,17 +88,10 @@ export const redisSessionStoresModule = defineModule({
 				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
 			});
 		},
-		sessionLifecycleStore: async (deps) => {
-			// Built first, so a prefix it refuses throws before the server is asked.
-			const store = createRedisSessionLifecycleStore({
+		sessionLifecycleStore: (deps) =>
+			createRedisSessionLifecycleStore({
 				client: deps.sessionLifecycleStoreClient,
 				keyPrefix: `${deps.section.keyPrefix}lc:`,
-			});
-			await checkSessionLifecycleEviction(
-				() => deps.sessionLifecycleStoreClient.durability(),
-				deps.logger ?? consoleLogger,
-			);
-			return store;
-		},
+			}),
 	},
 });

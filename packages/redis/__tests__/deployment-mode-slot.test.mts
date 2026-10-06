@@ -162,16 +162,18 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 		}
 	});
 
-	it("refuses plaintext when the slot says multi, whatever the configuration's deployment says", () => {
+	it("refuses plaintext when the slot says multi, whatever the configuration's deployment says", async () => {
 		const { logger } = recordingLogger();
-		expect(() =>
-			provide(store.module, store.provided, {
-				...store.client,
-				config: { ...store.plaintext, core: { deployment: { mode: "single" } } },
-				deploymentMode: "multi",
-				logger,
-			}),
-		).toThrow(new RangeError(refusedUnderMulti(store.label)));
+		await expect(
+			Promise.resolve().then(() =>
+				provide(store.module, store.provided, {
+					...store.client,
+					config: { ...store.plaintext, core: { deployment: { mode: "single" } } },
+					deploymentMode: "multi",
+					logger,
+				}),
+			),
+		).rejects.toThrow(new RangeError(refusedUnderMulti(store.label)));
 	});
 
 	it.each(["single", "unset"] as const)(
@@ -300,35 +302,37 @@ describe("the token store's factory and builder hold the deployment mode they ar
 	] as const;
 
 	describe.each(ENTRIES)("$name", (entry) => {
-		it("refuses a mode it cannot read — none, MULTI, null, 1 — as a TypeError naming it, before anything is built", () => {
+		it("refuses a mode it cannot read — none, MULTI, null, 1 — as a TypeError naming it, before anything is built", async () => {
 			const refusal = new TypeError(
 				`${entry.name}: deploymentMode must be "single", "multi" or "unset"`,
 			);
 			for (const encryption of [{ mode: "allow-plaintext" }, { mode: "required", key: KEY }]) {
-				expect(() => entry.build({ encryption }), `none, ${encryption.mode}`).toThrow(refusal);
+				await expect(entry.build({ encryption }), `none, ${encryption.mode}`).rejects.toThrow(
+					refusal,
+				);
 				for (const deploymentMode of ["MULTI", null, 1]) {
-					expect(
-						() => entry.build({ encryption, deploymentMode }),
+					await expect(
+						entry.build({ encryption, deploymentMode }),
 						`${String(deploymentMode)}, ${encryption.mode}`,
-					).toThrow(refusal);
+					).rejects.toThrow(refusal);
 				}
 			}
 		});
 
-		it("refuses plaintext under multi", () => {
-			expect(() =>
+		it("refuses plaintext under multi", async () => {
+			await expect(
 				entry.build({ encryption: { mode: "allow-plaintext" }, deploymentMode: "multi" }),
-			).toThrow(new RangeError(refusedUnderMulti("federation-tokens")));
+			).rejects.toThrow(new RangeError(refusedUnderMulti("federation-tokens")));
 		});
 
 		it.each(["single", "unset"] as const)(
 			"allows plaintext with the warning under %s",
-			(deploymentMode) => {
+			async (deploymentMode) => {
 				const { logger, warn } = recordingLogger();
-				const store = entry.build(
+				const store = (await entry.build(
 					{ encryption: { mode: "allow-plaintext" }, deploymentMode },
 					logger,
-				) as { kind: string };
+				)) as { kind: string };
 				expect(store.kind).toBe("redis");
 				expect(warn).toHaveBeenCalledWith(
 					{ store: "federation-tokens", mode: "allow-plaintext" },

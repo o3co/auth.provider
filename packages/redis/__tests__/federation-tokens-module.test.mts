@@ -86,19 +86,19 @@ describe("the module hands the guard the selected environment and the deployment
 		expect(m.section?.schema).toBe(redisFederationTokenStoreModule.section?.schema);
 	});
 
-	it("refuses plaintext when the composition root passes a production environment", () => {
-		expect(() =>
+	it("refuses plaintext when the composition root passes a production environment", async () => {
+		await expect(
 			provideFrom(redisFederationTokenStoreModuleFor({ environment: "production" })),
-		).toThrow(/the environment is "production"/);
+		).rejects.toThrow(/the environment is "production"/);
 	});
 
-	it('refuses plaintext when the deploymentMode slot is "multi" — default module included', () => {
-		expect(() => provideFrom(redisFederationTokenStoreModule, "multi")).toThrow(
+	it('refuses plaintext when the deploymentMode slot is "multi" — default module included', async () => {
+		await expect(provideFrom(redisFederationTokenStoreModule, "multi")).rejects.toThrow(
 			/core\.deployment\.mode is "multi"/,
 		);
-		expect(() =>
+		await expect(
 			provideFrom(redisFederationTokenStoreModuleFor({ environment: "development" }), "multi"),
-		).toThrow(/core\.deployment\.mode is "multi"/);
+		).rejects.toThrow(/core\.deployment\.mode is "multi"/);
 	});
 
 	it("warns and builds the store in development with the deployment mode unset or single", async () => {
@@ -145,13 +145,13 @@ describe("redisFederationTokenStoreModule", () => {
 });
 
 describe("redisFederationTokenStoreBuilder", () => {
-	it("rejects missing client", () => {
-		expect(() => redisFederationTokenStoreBuilder({ deploymentMode: "unset" }, {})).toThrow(
+	it("rejects missing client", async () => {
+		await expect(redisFederationTokenStoreBuilder({ deploymentMode: "unset" }, {})).rejects.toThrow(
 			/'client' option is required/,
 		);
 	});
 
-	it("rejects encryption.required without 32-byte key", () => {
+	it("rejects encryption.required without 32-byte key", async () => {
 		const fakeClient = {
 			get: () => null,
 			set: () => null,
@@ -174,7 +174,7 @@ describe("redisFederationTokenStoreBuilder", () => {
 				refusal: undefined,
 			}),
 		};
-		expect(() =>
+		await expect(
 			redisFederationTokenStoreBuilder(
 				{
 					deploymentMode: "unset",
@@ -183,10 +183,10 @@ describe("redisFederationTokenStoreBuilder", () => {
 				},
 				{},
 			),
-		).toThrow(/32 bytes/);
+		).rejects.toThrow(/32 bytes/);
 	});
 
-	it("accepts encryption.allow-plaintext", () => {
+	it("accepts encryption.allow-plaintext", async () => {
 		const fakeClient = {
 			get: () => null,
 			set: () => null,
@@ -210,14 +210,14 @@ describe("redisFederationTokenStoreBuilder", () => {
 			}),
 		};
 		// No throw expected
-		const store = redisFederationTokenStoreBuilder(
+		const store = (await redisFederationTokenStoreBuilder(
 			{
 				deploymentMode: "unset",
 				client: fakeClient,
 				encryption: { mode: "allow-plaintext" },
 			},
 			{},
-		) as { kind: string };
+		)) as { kind: string };
 		expect(store.kind).toBe("redis");
 	});
 });
@@ -287,42 +287,46 @@ describe("every setting the token store is given and cannot use is refused as a 
 		if (insecure !== undefined) process.env.FEDERATION_TOKENS_ALLOW_INSECURE = insecure;
 	});
 
-	it("through the factory: a key that is not 32 bytes, plaintext where it is refused, a TTL past the Date range", () => {
+	it("through the factory: a key that is not 32 bytes, plaintext where it is refused, a TTL past the Date range", async () => {
 		const client = fakeClient() as unknown as FederationTokenStoreClient;
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client,
 				encryption: { mode: "required", key: Buffer.alloc(16, 7) },
 			}),
-		).toThrow(new RangeError("FederationTokenStore redis: encryption key must be 32 bytes"));
+		).rejects.toThrow(
+			new RangeError("FederationTokenStore redis: encryption key must be 32 bytes"),
+		);
 		// A 32-character string has the length, and would be used as its UTF-8
 		// bytes: 32 printable characters, not 32 bytes of key material.
-		expect(() =>
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client,
 				encryption: { mode: "required", key: "k".repeat(32) as unknown as Buffer },
 			}),
-		).toThrow(new RangeError("FederationTokenStore redis: encryption key must be 32 bytes"));
-		expect(() =>
+		).rejects.toThrow(
+			new RangeError("FederationTokenStore redis: encryption key must be 32 bytes"),
+		);
+		await expect(
 			createRedisFederationTokenStore({
 				client,
 				encryption: { mode: "allow-plaintext" },
 				deploymentMode: "multi",
 			}),
-		).toThrow(new RangeError(PLAINTEXT_UNDER_MULTI));
-		expect(() =>
+		).rejects.toThrow(new RangeError(PLAINTEXT_UNDER_MULTI));
+		await expect(
 			createRedisFederationTokenStore({
 				deploymentMode: "unset",
 				client,
 				encryption: { mode: "required", key: Buffer.alloc(32, 7) },
 				ttl: 1e20,
 			}),
-		).toThrow(RangeError);
+		).rejects.toThrow(RangeError);
 	});
 
-	it("through the builder: a configured key that is not canonical base64 of 32 bytes is refused, not tidied up", () => {
+	it("through the builder: a configured key that is not canonical base64 of 32 bytes is refused, not tidied up", async () => {
 		// `Buffer.from(…, "base64")` reads a key with a trailing newline, in the
 		// URL alphabet, or without its padding as the same 32 bytes: a value an
 		// operator has to tidy up to read is not the value they checked. Core's
@@ -333,34 +337,33 @@ describe("every setting the token store is given and cannot use is refused as a 
 			Buffer.alloc(32, 0xfb).toString("base64url"),
 			KEY_OF_32.replace(/=+$/, ""),
 		]) {
-			expect(
-				() =>
-					redisFederationTokenStoreBuilder(
-						{
-							deploymentMode: "unset",
-							client: fakeClient(),
-							encryption: { mode: "required", key },
-						},
-						{},
-					),
+			await expect(
+				redisFederationTokenStoreBuilder(
+					{
+						deploymentMode: "unset",
+						client: fakeClient(),
+						encryption: { mode: "required", key },
+					},
+					{},
+				),
 				JSON.stringify(key),
-			).toThrow(new RangeError(MESSAGE_KEY));
+			).rejects.toThrow(new RangeError(MESSAGE_KEY));
 		}
 		// The canonical spelling, and 32 bytes handed over as a Buffer, build.
 		for (const key of [KEY_OF_32, Buffer.alloc(32, 0xfb)]) {
-			const store = redisFederationTokenStoreBuilder(
+			const store = (await redisFederationTokenStoreBuilder(
 				{
 					deploymentMode: "unset",
 					client: fakeClient(),
 					encryption: { mode: "required", key },
 				},
 				{},
-			) as { kind: string };
+			)) as { kind: string };
 			expect(store.kind).toBe("redis");
 		}
 	});
 
-	it("refuses an encryption mode it does not know, rather than reading it as plaintext", () => {
+	it("refuses an encryption mode it does not know, rather than reading it as plaintext", async () => {
 		// A typo such as "requried" must not be taken for `allow-plaintext`,
 		// which stores in the clear with a warning outside production, and is
 		// refused in production with a message about plaintext the operator
@@ -368,7 +371,7 @@ describe("every setting the token store is given and cannot use is refused as a 
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			const message = '[federation-tokens] mode must be "required" or "allow-plaintext"';
-			expect(() =>
+			await expect(
 				redisFederationTokenStoreBuilder(
 					{
 						deploymentMode: "unset",
@@ -377,35 +380,34 @@ describe("every setting the token store is given and cannot use is refused as a 
 					},
 					{},
 				),
-			).toThrow(new RangeError(message));
-			expect(() =>
+			).rejects.toThrow(new RangeError(message));
+			await expect(
 				createRedisFederationTokenStore({
 					deploymentMode: "unset",
 					client: fakeClient() as unknown as FederationTokenStoreClient,
 					encryption: { mode: "requried" } as never,
 				}),
-			).toThrow(new RangeError(message));
+			).rejects.toThrow(new RangeError(message));
 			expect(warn).not.toHaveBeenCalled();
 		} finally {
 			warn.mockRestore();
 		}
 	});
 
-	it("through the builder: a configured key that does not decode to 32 bytes, or none", () => {
+	it("through the builder: a configured key that does not decode to 32 bytes, or none", async () => {
 		const message = MESSAGE_KEY;
 		for (const key of [KEY_OF_16, Buffer.alloc(16, 7), undefined]) {
-			expect(
-				() =>
-					redisFederationTokenStoreBuilder(
-						{
-							deploymentMode: "unset",
-							client: fakeClient(),
-							encryption: { mode: "required", key },
-						},
-						{},
-					),
+			await expect(
+				redisFederationTokenStoreBuilder(
+					{
+						deploymentMode: "unset",
+						client: fakeClient(),
+						encryption: { mode: "required", key },
+					},
+					{},
+				),
 				String(key),
-			).toThrow(new RangeError(message));
+			).rejects.toThrow(new RangeError(message));
 		}
 	});
 
@@ -439,15 +441,12 @@ describe("every setting the token store is given and cannot use is refused as a 
 		expect(cause).toBeInstanceOf(RangeError);
 	});
 
-	it("leaves a missing client an Error: a composition fault, refused as every Redis builder refuses it", () => {
+	it("leaves a missing client an Error: a composition fault, refused as every Redis builder refuses it", async () => {
 		// Not a setting that is given and unusable, but a dependency that was not
 		// given; the module path never reaches it (`requires` refuses first).
-		let thrown: unknown;
-		try {
-			redisFederationTokenStoreBuilder({ deploymentMode: "unset" }, {});
-		} catch (err) {
-			thrown = err;
-		}
+		const thrown = await Promise.resolve(
+			redisFederationTokenStoreBuilder({ deploymentMode: "unset" }, {}),
+		).catch((err: unknown) => err);
 		expect((thrown as Error).constructor).toBe(Error);
 		expect((thrown as Error).message).toBe(
 			"federationTokenStore.redis: 'client' option is required",

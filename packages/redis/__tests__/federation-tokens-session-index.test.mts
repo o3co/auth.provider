@@ -137,7 +137,7 @@ const indexMembers = (redis: ReturnType<typeof createFakeRedis>, sid: string): s
 describe("per-session federation key index", () => {
 	it("attach records the federation name in the sid's index SET", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -149,7 +149,7 @@ describe("per-session federation key index", () => {
 
 	it("the index key carries the store TTL, not the access-token expiry", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -161,7 +161,7 @@ describe("per-session federation key index", () => {
 
 	it("the index key lives in the idx: sub-namespace, clear of the envelope keys", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -173,7 +173,7 @@ describe("per-session federation key index", () => {
 
 	it("delete(sid, name) drops the name from the index", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -186,7 +186,7 @@ describe("per-session federation key index", () => {
 
 	it("get() keeps the name in the index when it self-heals a corrupt envelope: a concurrent attach may have just added it", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -202,7 +202,7 @@ describe("per-session federation key index", () => {
 describe("removeBySid is O(the session's federations)", () => {
 	it("removes every indexed envelope without scanning the keyspace", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -222,7 +222,7 @@ describe("removeBySid is O(the session's federations)", () => {
 
 	it("removes the index key itself", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -235,7 +235,7 @@ describe("removeBySid is O(the session's federations)", () => {
 
 	it("uses UNLINK, never DEL, for the removal", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -250,7 +250,7 @@ describe("removeBySid is O(the session's federations)", () => {
 
 	it("reads the index in bounded batches — no unbounded fan-out on a heavily-linked session", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -274,7 +274,7 @@ describe("removeBySid is O(the session's federations)", () => {
 
 	it("is idempotent on a sid that was never attached", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -287,7 +287,7 @@ describe("removeBySid is O(the session's federations)", () => {
 describe("scanFallback migration flag", () => {
 	it("defaults to enabled, so an upgrade still reaches tokens written before the index existed", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -307,7 +307,7 @@ describe("scanFallback migration flag", () => {
 
 	it("scanFallback: false leaves pre-index envelopes behind — the flag is what makes the upgrade safe", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -325,7 +325,7 @@ describe("scanFallback migration flag", () => {
 
 	it("the fallback also unlinks in bounded batches", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
@@ -347,7 +347,7 @@ describe("scanFallback migration flag", () => {
 
 	it("the builder forwards scanFallback", async () => {
 		const redis = createFakeRedis();
-		const store = redisFederationTokenStoreBuilder(
+		const store = (await redisFederationTokenStoreBuilder(
 			{
 				deploymentMode: "unset",
 				client: redis,
@@ -355,7 +355,7 @@ describe("scanFallback migration flag", () => {
 				scanFallback: false,
 			},
 			{},
-		) as FederationTokenStore;
+		)) as FederationTokenStore;
 		await store.attach("sid-1", "google", tokens);
 		await store.removeBySid("sid-1");
 		expect(redis.scanIterator).not.toHaveBeenCalled();
@@ -372,15 +372,15 @@ describe("scanFallback migration flag", () => {
 describe("builder structural validator covers the index methods", () => {
 	it.each(["unlink", "sAddWithTtl", "sRem", "sScanIterator"])(
 		"rejects a client missing %s",
-		(method) => {
+		async (method) => {
 			const client = createFakeRedis() as unknown as Record<string, unknown>;
 			delete client[method];
-			expect(() =>
+			await expect(
 				redisFederationTokenStoreBuilder(
 					{ deploymentMode: "unset", client, encryption: { mode: "allow-plaintext" } },
 					{},
 				),
-			).toThrow(new RegExp(`missing required method.*${method}`));
+			).rejects.toThrow(new RegExp(`missing required method.*${method}`));
 		},
 	);
 });

@@ -24,7 +24,7 @@
 import type { Redis } from "ioredis";
 import type { SessionLifecycleStoreClient } from "../../clients.mjs";
 import { runScript } from "../commands.mjs";
-import { redisDurability } from "../durability.mjs";
+import { type IoredisDurabilityOptions, redisDurability } from "../durability.mjs";
 import {
 	LC_BEGIN_CLOSE,
 	LC_COMPLETE,
@@ -68,7 +68,10 @@ const stringsOf = (reply: unknown, operation: string): string[] => {
 	return reply as string[];
 };
 
-export function makeIoredisSessionLifecycleStoreClient(io: Redis): SessionLifecycleStoreClient {
+export function makeIoredisSessionLifecycleStoreClient(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): SessionLifecycleStoreClient {
 	return {
 		openRecord: async (key, input) =>
 			answerOf(
@@ -168,6 +171,6 @@ export function makeIoredisSessionLifecycleStoreClient(io: Redis): SessionLifecy
 				"confirmClosing",
 			);
 		},
-		durability: () => redisDurability(io),
+		durability: () => redisDurability(io, options),
 	};
 }

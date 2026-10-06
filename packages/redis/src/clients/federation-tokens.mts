@@ -213,9 +213,9 @@ export interface FederationTokenStoreClient {
 	 */
 	pExpireGT(key: string, ttlMs: number): Promise<void>;
 	/**
-	 * What the server says about keeping what it is written, read once at boot
-	 * by the store's module for its eviction policy: a policy that may evict a
-	 * replay key lets a resent write apply again.
+	 * What the server says about keeping what it is written, read once by the
+	 * store's factory for its eviction gate: a policy that may evict a replay
+	 * key lets a resent write apply again.
 	 */
 	durability(): Promise<RedisDurability>;
 }
