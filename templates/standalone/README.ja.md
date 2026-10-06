@@ -295,12 +295,13 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 |---|---|---|
 | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` | `3600` | リクエストが有効期間を指定しないときに全グラントが発行するアクセストークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
 | `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN` | デフォルトと同じ | token exchange リクエストの `expires_in` パラメータで得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、これを設定しない限りどのトークンも延長されない。デフォルトがこれを超えると、両キーを名指しして起動に失敗する。オフラインで検証するリソースサーバーに対し、交換で発行されたトークンが失効後も通用し得る期間の上限でもある。 |
-| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` の**非推奨（deprecated）**エイリアス（config キーでは `oauth.accessToken.expiresIn` が `oauth.accessToken.defaultExpiresIn` のエイリアス）。新しい変数が未設定の間だけ読まれる。値は新しい変数へ移すこと。 |
 | `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | リフレッシュトークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
 
 どれも 10 進数字だけを読む。空文字で export すると、フォールバックではなく起動失敗になる（HOCON は `FOO=` を `""` に解決する）。16 進（`0x10`）、指数（`1e3`）、符号（`+5`）、小数（`5.0`）も同じく起動失敗になる。
 
 `expires_in` リクエストパラメータを読むのは token exchange（RFC 8693）だけで、他のグラントはそれを無視してデフォルトを発行する。
+
+デフォルトの旧名 `OAUTH_ACCESS_TOKEN_EXPIRES_IN`（config キーでは `oauth.accessToken.expiresIn`）は、単独で、または `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` と異なる値で設定されているとブートを拒否し、同じ値で並べて設定されていればブートする。旧キーは値が何であれブートを拒否する。値は消さずに新しい名前へ移すこと: 消すとデフォルトは `3600` になる。
 
 ### グラントタイプ
 

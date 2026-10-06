@@ -481,7 +481,6 @@ every relying party must be handed the shared secret — which also lets it
 |---|---|---|
 | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` | `3600` | Access token lifetime in seconds that every grant mints when the request asks for none. Whole positive number, at most one year (`31536000`). |
 | `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN` | the default | The most a token-exchange request's `expires_in` parameter can obtain; a larger request is clamped to it. Unset means the default, so no token is extended unless you set this. A default above it is a boot failure naming both keys. It also bounds how long an exchanged token outlives a revocation at a resource server that validates it offline. |
-| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | **Deprecated** alias of `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` (config key `oauth.accessToken.expiresIn`, of `oauth.accessToken.defaultExpiresIn`), read only while the new one is unset. Move the value to the new variable. |
 | `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | Refresh token lifetime in seconds. Whole positive number, at most one year (`31536000`). |
 
 Each is read only as decimal digits. Exporting one as an empty string is a
@@ -490,6 +489,12 @@ boot failure, not a fallback (HOCON resolves `FOO=` to `""`), and so is a hex
 
 Only token exchange (RFC 8693) reads an `expires_in` request parameter; every
 other grant ignores it and mints the default.
+
+The default's old name, `OAUTH_ACCESS_TOKEN_EXPIRES_IN` (config key
+`oauth.accessToken.expiresIn`), refuses boot set alone or beside
+`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` at a different value; beside it at the
+same value, it boots. The old key refuses boot at any value. Move the value to
+the new name rather than deleting it: without it, the default is `3600`.
 
 ### Grant Types
 
