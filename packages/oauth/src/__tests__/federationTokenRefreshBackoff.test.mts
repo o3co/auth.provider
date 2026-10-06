@@ -76,6 +76,16 @@ describe("createRefreshBackoff", () => {
 		expect(backoff.holds(key("sid-3"), 1_004)).toBe(true);
 	});
 
+	it("digests an access token that is not a string, never throwing", () => {
+		const backoff = createRefreshBackoff();
+		const broken = { sid: "sid-1", federationName: "google", accessToken: undefined };
+		expect(() => backoff.stamp(broken, 1_000)).not.toThrow();
+
+		expect(backoff.holds(broken, 1_000)).toBe(true);
+		expect(backoff.holds({ ...broken, accessToken: 42 }, 1_000)).toBe(true);
+		expect(backoff.holds(key("sid-1"), 1_000)).toBe(false);
+	});
+
 	it("keeps no two stamps whose session and federation would join to the same text", () => {
 		const backoff = createRefreshBackoff();
 		backoff.stamp(key("a", "at-1", "b:c"), 1_000);

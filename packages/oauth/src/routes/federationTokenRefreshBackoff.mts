@@ -32,7 +32,8 @@ const REFRESH_BACKOFF_MAX_ENTRIES = 10_000;
 export interface RefreshBackoffKey {
 	readonly sid: string;
 	readonly federationName: string;
-	readonly accessToken: string;
+	/** As the record holds it: a value that is not a string is digested as `""`, never thrown on. */
+	readonly accessToken: unknown;
 }
 
 export interface RefreshBackoff {
@@ -52,8 +53,10 @@ export const createRefreshBackoff = (
 	// the first entry is always the oldest.
 	const stamps = new Map<string, { readonly digest: string; readonly at: number }>();
 	const slot = (key: RefreshBackoffKey): string => JSON.stringify([key.sid, key.federationName]);
-	const digest = (accessToken: string): string =>
-		createHash("sha256").update(accessToken).digest("base64url");
+	const digest = (accessToken: unknown): string =>
+		createHash("sha256")
+			.update(typeof accessToken === "string" ? accessToken : "")
+			.digest("base64url");
 	const stands = (at: number, now: number): boolean => now >= at && now - at < limits.windowMs;
 
 	return {

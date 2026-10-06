@@ -128,13 +128,6 @@ export const refreshStoredTokens = async (
 			});
 		}
 
-		// 11e: refresh with the freshest snapshot. The lock is held across the
-		// IdP call; its TTL should cover the IdP timeout, else a second waiter
-		// also calls the IdP. Each write lands only on the record it refreshed
-		// from, so at most one of theirs lands. One that the upstream refuses
-		// `invalid_grant` (the refresh token the other spent) still ends the
-		// record under the lapsed lock, and the other's refresh is then
-		// dropped as removed: the user reconnects.
 		// A refresh of this record answered `500 refresh_failed` within the
 		// back-off window: answered the same without calling the upstream.
 		if (
@@ -150,6 +143,13 @@ export const refreshStoredTokens = async (
 			});
 		}
 
+		// 11e: refresh with the freshest snapshot. The lock is held across the
+		// IdP call; its TTL should cover the IdP timeout, else a second waiter
+		// also calls the IdP. Each write lands only on the record it refreshed
+		// from, so at most one of theirs lands. One that the upstream refuses
+		// `invalid_grant` (the refresh token the other spent) still ends the
+		// record under the lapsed lock, and the other's refresh is then
+		// dropped as removed: the user reconnects.
 		let refreshed: Awaited<ReturnType<typeof provider.refreshToken>>;
 		const calledAt = Date.now();
 		try {
