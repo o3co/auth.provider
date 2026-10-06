@@ -29,6 +29,7 @@ import {
 	type Switches,
 } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
+import { configuredMfaMode } from "./configured-mfa-mode.fixture.mjs";
 import { type BothPhases, withSwitches } from "./library-references.fixture.mjs";
 
 // config/ is two levels above this test file:
@@ -109,15 +110,18 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(grants(config).authorizationCode?.enabled).toBe("false");
 	});
 
-	it("reads the MFA switch, mfaMode, as required where MFA_MODE is unset, and installs no MFA module under MFA_MODE=off", () => {
-		// The template's reference.conf ships the switch required and binds MFA_MODE.
+	it("reads the MFA switch, mfaMode, as the files write it where MFA_MODE is unset, and installs no MFA module under MFA_MODE=off", () => {
+		// The template's reference.conf ships the switch required and binds
+		// MFA_MODE; a project's application.conf may write it over that.
 		const mfaNames = (config: Switches) =>
 			buildModules(config)
 				.map((m) => m.name)
 				.filter((name) => /mfa/i.test(name));
 		const shipped = buildResolvedConfig("development");
-		expect(shipped.mfaMode).toBe("required");
-		expect(mfaNames(shipped)).toContain("mfa");
+		const configured = configuredMfaMode("development");
+		expect(shipped.mfaMode).toBe(configured);
+		if (configured === "off") expect(mfaNames(shipped)).toEqual([]);
+		else expect(mfaNames(shipped)).toContain("mfa");
 		const off = buildResolvedConfig("development", { MFA_MODE: "off" });
 		expect(off.mfaMode).toBe("off");
 		expect(mfaNames(off)).toEqual([]);

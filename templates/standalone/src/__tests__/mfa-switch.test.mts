@@ -15,14 +15,15 @@
  */
 
 /**
- * The template's MFA switch, `mfaMode` (`MFA_MODE`): `off`, the
- * default, installs nothing of MFA; `optional` and `required` install the MFA
- * package's modules — the MFA module, the TOTP, recovery-code and email
- * factors, the operator reset — with the session package's login completion
- * and the two MFA stores `adapters` selects, and declare `mfa` in
- * `core.sessionRequirements.expected`. Booted through the all-modules
- * fixture, and, where the shipped user repository or the development files
- * are the question, the way `app.mts` boots.
+ * The template's MFA switch, `mfaMode` (`MFA_MODE`): `off` installs nothing of
+ * MFA; `optional` and `required` install the MFA package's modules — the MFA
+ * module, the TOTP, recovery-code and email factors, the operator reset —
+ * with the session package's login completion and the two MFA stores
+ * `adapters` selects, and declare `mfa` in `core.sessionRequirements.expected`.
+ * With `MFA_MODE` unset, the switch is what the project's files write
+ * (`configured-mfa-mode.fixture.mts`). Booted through the all-modules fixture,
+ * and, where the shipped user repository or the development files are the
+ * question, the way `app.mts` boots.
  */
 
 import { generateKeyPairSync } from "node:crypto";
@@ -43,6 +44,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { MFA_DEVELOPMENT_SAMPLE_KEY, mfaModules, mfaResetModule } from "@o3co/auth-provider-mfa";
 import { loginCompletionModule } from "@o3co/auth-provider-session";
+import { parseFile } from "@o3co/ts.hocon";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
@@ -54,20 +56,24 @@ import {
 	resolveForBoot,
 } from "#/configPath.mjs";
 import { mfaModulesFor } from "#/mfaSwitch.mjs";
+import { templateReference } from "#/modules.mjs";
 import {
 	ALICE,
 	authorize,
 	type Composition,
+	codeFrom,
 	compose,
 	contributionNames,
 	cookiesOf,
 	createRecordingLogger,
 	ISSUER,
+	login,
 	ownFiles,
 	type RecordingLogger,
 	SINGLE_ENV,
 	WEB,
 } from "./all-modules-composition.fixture.mjs";
+import { configuredMfaMode } from "./configured-mfa-mode.fixture.mjs";
 
 /** 32 bytes, base64: a key of the deployment's own for the MFA key ring. */
 const MFA_KEY = Buffer.alloc(32, 9).toString("base64");
@@ -134,17 +140,22 @@ const textOf = (err: unknown): string => {
 const warned = (logger: RecordingLogger, event: string) =>
 	logger.lines.filter((line) => line.level === "warn" && line.args[1] === event);
 
-/** `env` with MFA_MODE unset: the switch as the template ships it. */
+/** `env` with MFA_MODE unset: the switch as the configuration's files write it (`configuredMfaMode`). */
 const unset = (env: Readonly<Record<string, string>>): Record<string, string> => {
 	const { MFA_MODE: _unset, ...rest } = env;
 	return rest;
 };
 
 describe("the switch is the template's own key, mfaMode, bound to MFA_MODE", () => {
-	it("is required unless MFA_MODE says otherwise", () => {
+	it("ships required in the template's reference.conf, which --no-mfa leaves as it is", () => {
+		const reference = parseFile(fileURLToPath(templateReference()), { env: {} }).toObject();
+		expect((reference as Record<string, unknown>).mfaMode).toBe("required");
+	});
+
+	it("is what the configuration's files write unless MFA_MODE says otherwise", () => {
 		const switches = (env: Readonly<Record<string, string>>) =>
 			readSwitches(readOwnLayers(ownFiles(), { env })).mfaMode;
-		expect(switches(unset(SINGLE_ENV))).toBe("required");
+		expect(switches(unset(SINGLE_ENV))).toBe(configuredMfaMode("production"));
 		for (const mode of ["off", "optional", "required"] as const) {
 			expect(switches({ ...SINGLE_ENV, MFA_MODE: mode })).toBe(mode);
 		}
@@ -201,22 +212,37 @@ describe("the switch is the template's own key, mfaMode, bound to MFA_MODE", () 
 	});
 });
 
-describe("MFA_MODE unset: the template requires a second factor", () => {
-	it("installs every MFA module and declares mfa, as MFA_MODE=required does", async () => {
+describe("MFA_MODE unset: the switch the configuration's files write decides (required as the template ships it)", () => {
+	const mode = configuredMfaMode("production");
+
+	it("installs every MFA module and declares mfa while the switch is on, and nothing of MFA while it is off", async () => {
 		current = await boot({ env: unset(on("required")) });
 		const names = current.modules.map((m) => m.name);
-		expect(names.filter((name) => MFA_MODULE_NAMES.includes(name)).sort()).toEqual(
-			MFA_MODULE_NAMES,
-		);
+		const installed = names.filter((name) => MFA_MODULE_NAMES.includes(name)).sort();
+		if (mode === "off") {
+			expect(installed).toEqual([]);
+			expect(current.config.core?.sessionRequirements?.expected ?? []).not.toContain("mfa");
+			expect(current.config).not.toHaveProperty("mfa");
+			return;
+		}
+		expect(installed).toEqual(MFA_MODULE_NAMES);
 		expect(current.config.core?.sessionRequirements).toEqual({
 			expected: ["mfa"],
 			secondFactorAuthority: "mfa",
 		});
-		expect((current.config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("required");
+		expect((current.config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe(mode);
 	});
 
-	it("interrupts a password login, opening no session /authorize accepts", async () => {
+	it("interrupts a password login while the switch is on, opening no session /authorize accepts; lets it through to a code while off", async () => {
 		current = await boot({ env: unset(on("required")) });
+		if (mode === "off") {
+			const { res, cookies } = await login(current.app);
+			expect(res.status).toBe(200);
+			const answer = await authorize(current.app, cookies);
+			expect(String(answer.headers.location ?? "").startsWith(WEB.redirectUri)).toBe(true);
+			expect(codeFrom(answer)).not.toBe("");
+			return;
+		}
 		const csrf = await request(current.app).get("/session/csrf");
 		const res = await request(current.app)
 			.post("/session/login")
@@ -758,14 +784,27 @@ describe("a deployment that takes MFA's modules out of buildModules() under MFA_
 });
 
 describe("the shipped configuration with nothing set about MFA", () => {
-	it("boots under CONFIG_ENV=development with MFA required: the sample key, the development mail sender, the MFA stores in memory", async () => {
+	it("boots under CONFIG_ENV=development with the switch its files write: with MFA on, on the sample key, the development mail sender and the MFA stores in memory", async () => {
+		const mode = configuredMfaMode("development");
 		const { logger, config } = await bootShipped(unset(SHIPPED_ENV), "development");
-		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("required");
+		if (mode === "off") {
+			expect(config).not.toHaveProperty("mfa");
+			expect(config.core?.sessionRequirements?.expected ?? []).not.toContain("mfa");
+			expect(warned(logger, "mfa_development_sample_key_in_use")).toEqual([]);
+			return;
+		}
+		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe(mode);
 		expect(config.core?.sessionRequirements?.expected).toContain("mfa");
 		expect(warned(logger, "mfa_development_sample_key_in_use")).toHaveLength(1);
 	});
 
-	it("is refused in production before boot, naming the MFA stores, MFA_ENCRYPTION_KEY, the SMTP relay and MFA_MODE=off", async () => {
+	it("in production, with MFA on, is refused before boot, naming the MFA stores, MFA_ENCRYPTION_KEY, the SMTP relay and MFA_MODE=off; with it off, boots", async () => {
+		if (configuredMfaMode("production") === "off") {
+			const { config } = await bootShipped(unset(SHIPPED_ENV), "production");
+			expect(config).not.toHaveProperty("mfa");
+			expect(config.core?.sessionRequirements?.expected ?? []).not.toContain("mfa");
+			return;
+		}
 		let err: unknown;
 		await bootShipped(unset(SHIPPED_ENV), "production").catch((caught: unknown) => {
 			err = caught;
