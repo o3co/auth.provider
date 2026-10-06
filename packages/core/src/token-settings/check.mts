@@ -133,9 +133,9 @@ export function lifetimeBeyondConfigurationMessage(
 		`oauthTokenSettings.${found.member} is ${found.slotSeconds} s` +
 		`${from === undefined ? "" : ` in the slot from ${from}`}, longer than the ` +
 		`${found.configurationSeconds} s core resolves from the configuration (${found.configKey}). ` +
-		"That configured lifetime sizes retention — the refresh-token family modules keep a revoked " +
-		"family, and the subject revocation boundary lasts, only that long — so a token minted on " +
-		"the slot's lifetime would outlive the record that revokes it. Lower the slot's lifetime to " +
+		"The refresh-token family modules keep a revoked family only that long, and they read the " +
+		"configuration, not the slot, so a token minted on the slot's lifetime would outlive the " +
+		"record that revokes it. Lower the slot's lifetime to " +
 		"the configuration's or below, or raise the configuration's."
 	);
 }

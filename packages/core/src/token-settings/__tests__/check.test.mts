@@ -117,6 +117,23 @@ describe("checkOAuthTokenSettings", () => {
 		);
 	});
 
+	it("says the configured lifetime bounds the refresh-token family retention, which does not read the slot", () => {
+		const longerRefresh = createTestOAuthTokenSettings({ refreshTokenExpiresIn: 86_401 });
+		const message = (() => {
+			try {
+				checkOAuthTokenSettings(longerRefresh, CONFIG);
+			} catch (err) {
+				return (err as Error).message;
+			}
+			throw new Error("expected a refusal");
+		})();
+		expect(message).toMatch(/refresh-token family modules keep a revoked family/);
+		expect(message).toMatch(/read the configuration, not the slot/);
+		// The subject revocation boundary is sized from the slot where one is
+		// held, so the refusal does not claim it is bounded by the configuration.
+		expect(message).not.toMatch(/subject revocation/);
+	});
+
 	it("answers lifetimes at or under the configuration's", () => {
 		for (const settings of [
 			createTestOAuthTokenSettings(),

@@ -25,7 +25,7 @@
  * A name is a string literal; a `const` in the same file initialised with
  * one; or a template literal whose static parts must form a kebab-case name
  * with each substitution read as one kebab-case word
- * (`federation-oidc-${name}`, named per federation). Any other name cannot be
+ * (e.g. `mfa-${kind}-factor`, a name built per instance). Any other name cannot be
  * read, and fails as a name that is not kebab-case would.
  *
  * Boot does not refuse a name that is not kebab-case, so an out-of-tree
@@ -172,7 +172,7 @@ describe("the module-name scan", () => {
 				'defineModule({ name: "a-literal" });',
 				"defineModule({ name: NAME });",
 				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source under test
-				"defineModule({ name: `federation-oidc-${name}` });",
+				"defineModule({ name: `mfa-${kind}-factor` });",
 				"core.defineModule({ name: 'from-a-namespace' });",
 				"defineModule({ name: computeName() });",
 				"defineModule(spec);",
@@ -181,7 +181,7 @@ describe("the module-name scan", () => {
 		expect(names.map(({ name }) => name)).toEqual([
 			"a-literal",
 			"named-by-const",
-			"federation-oidc-x",
+			"mfa-x-factor",
 			"from-a-namespace",
 			undefined,
 			undefined,
