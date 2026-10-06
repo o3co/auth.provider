@@ -2042,6 +2042,18 @@ if you run a Store, then go `optional` — users enroll at their own pace — an
 of a user with no counting factor is asked to log in again, and that login
 binds their first factor.
 
+**Email factors enrolled on a 0.17.0 pre-release, for an address whose local
+part has upper-case letters, are enrolled again.** The provider now keeps an
+address's local part in the case the user record holds it, and lower-cases
+only the domain (`normaliseMailAddress`): a code goes to the local part as it
+is written, and the digest an email factor records is of that spelling. A
+factor such a pre-release enrolled for `Alice@example.com` recorded the
+digest of `alice@example.com`, so it now reads as `address_changed`: no
+login code is sent for it, and the user removes it and enrolls the address
+again ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
+A user with no other factor needs a recovery code or an operator reset.
+Factors for addresses whose local part is all lower case are not affected.
+
 ### The standalone template
 
 `MFA_MODE` binds the template's own key, `mfaMode` (#1245), default
