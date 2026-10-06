@@ -15,10 +15,14 @@
  */
 
 /**
- * An email address as the provider digests and compares it — the email
- * factor's enrolled address against the account's current one — so every
- * reader spells one mailbox alike: surrounding whitespace dropped, Unicode
- * NFC, the domain in its ASCII form (IDNA), all in lower case. One mailbox
+ * An email address as the provider digests, compares and delivers to it —
+ * the email factor's enrolled address against the account's current one, and
+ * the recipient a code goes to — so every reader spells one mailbox alike:
+ * surrounding whitespace dropped, Unicode NFC, the domain in its ASCII form
+ * (IDNA) and in lower case. The local part keeps its case: a mail host may
+ * read two cases as two mailboxes (RFC 5321 §2.4), so what is compared is
+ * what is delivered to, and an address whose local part changes case is
+ * another address. One mailbox
  * alone: an addr-spec (RFC 5322, widened to UTF-8 by RFC 6531), never a list,
  * an angle address, a comment or a domain literal — and never a local part a
  * relay could route onward or a mail user agent decode into another address:
@@ -61,21 +65,18 @@ const MAX_LABEL_OCTETS = 63;
 const MAX_DOMAIN_OCTETS = 253;
 
 /**
- * `local` as an addr-spec's local part reads it — a dot-atom or a quoted
- * string, without what a relay could route on or decode — in lower case, or
- * `undefined`. It is held to the grammar and the
- * octet limit as it is answered: lower-cased, then in NFC, since lower-casing
- * can lengthen a character or leave one a precomposed form exists for — so
- * reading the answer again changes nothing.
+ * `local`, already in NFC, as an addr-spec's local part reads it — a dot-atom
+ * or a quoted string, without what a relay could route on or decode — as it
+ * is written, or `undefined`. It is held to the grammar and the octet limit as
+ * it is answered, so reading the answer again changes nothing.
  */
 function localPartOf(local: string): string | undefined {
-	const lowered = local.toLowerCase().normalize("NFC");
-	if (Buffer.byteLength(lowered, "utf8") > MAX_LOCAL_OCTETS) return undefined;
-	if (ENCODED_WORD.test(lowered)) return undefined;
-	if (QUOTED.test(lowered)) return QUOTED_REFUSED.test(lowered.slice(1, -1)) ? undefined : lowered;
+	if (Buffer.byteLength(local, "utf8") > MAX_LOCAL_OCTETS) return undefined;
+	if (ENCODED_WORD.test(local)) return undefined;
+	if (QUOTED.test(local)) return QUOTED_REFUSED.test(local.slice(1, -1)) ? undefined : local;
 	const readable =
-		!DOT_ATOM_REFUSED.test(lowered) && lowered.split(".").every((atom) => ATOM.test(atom));
-	return readable ? lowered : undefined;
+		!DOT_ATOM_REFUSED.test(local) && local.split(".").every((atom) => ATOM.test(atom));
+	return readable ? local : undefined;
 }
 
 /**
@@ -104,7 +105,7 @@ function domainOf(domain: string): string | undefined {
  * `address` as {@link normaliseMailAddress} spells it, or `undefined` for a
  * value that is no address: not a string, not well-formed, carrying a
  * control character, a format character or whitespace, or not one addr-spec
- * — a dot-atom or a quoted local part of at most 64 octets once lower-cased,
+ * — a dot-atom or a quoted local part of at most 64 octets as it is written,
  * holding nothing a relay could route on or decode ({@link localPartOf}),
  * then `@`, then a domain of labels as {@link domainOf} reads them.
  */

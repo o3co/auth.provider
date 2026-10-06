@@ -1070,7 +1070,8 @@ ADR's D5, D21, D24).
   digest of the one its enrollment code went to. A login code goes to the
   account's current address only while that digest matches, so **a change of
   the address in the Store makes the email factor unusable until the user
-  enrolls it again**, after recent MFA; the provider records
+  enrolls it again**, after recent MFA — a change of the local part's case
+  alone included, since a code goes to the local part as it is written; the provider records
   `mfa.email_address_mismatch` when it refuses the factor for it. A user with
   no other factor needs a recovery code or an operator reset. The stale
   record stays — listed, refused at each challenge, and counted toward
