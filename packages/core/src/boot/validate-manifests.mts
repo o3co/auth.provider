@@ -2133,18 +2133,19 @@ function reservedKeyIssues(
  * `parseModuleSections` writes each section back. Refused values make one
  * `config-validation-failed` naming each operator path: every reserved key
  * (`reservedKeyIssues`: an `Object.prototype` member's name, or
- * `prototype`), a `cors` section that sets anything (`unreadCorsSection`:
- * core reads its CORS origins from the `httpSettings` slot alone), then the
+ * `prototype`), a `cors` section that sets anything while no loaded module
+ * owns `cors` (`owned`; `unreadCorsSection`: core reads its CORS origins from
+ * the `httpSettings` slot alone), then the
  * base's issues. No module is named: a module's own
  * configuration is its section, parsed after this.
  * @internal
  */
-function validateAndComposeConfig(bootstrap: BootstrapMap): unknown {
+function validateAndComposeConfig(bootstrap: BootstrapMap, owned: ReadonlySet<string>): unknown {
 	const issues: z.core.$ZodIssue[] = [];
 	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
 	issues.push(...reservedKeyIssues(raw));
-	const unreadCors = unreadCorsSection(raw);
+	const unreadCors = unreadCorsSection(raw, owned);
 	if (unreadCors !== undefined) {
 		issues.push({ code: "custom", path: ["cors"], message: unreadCors, input: undefined });
 	}
@@ -3583,7 +3584,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		config === rawConfig
 			? bootstrapComponents
 			: { ...bootstrapComponents, config: config as BootstrapMap["config"] };
-	const composedConfig = validateAndComposeConfig(parseInput);
+	const composedConfig = validateAndComposeConfig(parseInput, ownedSections(modules));
 	// Each module's own section, parsed out of that configuration by
 	// the module's schema and written back at its path — before any
 	// post-config row, which may assume the configuration is valid.

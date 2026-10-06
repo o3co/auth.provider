@@ -410,6 +410,67 @@ describe("cors, which core does not read", () => {
 		});
 		await handle.dispose();
 	});
+
+	it("refuses cors = null: a value written is set, and a relocating module refuses it once, in its words", async () => {
+		const alone = await refusal(boot({}, "cors = null\n"));
+
+		expect(alone.reason).toBe("config-validation-failed");
+		expect(alone.details).toMatchObject({ issues: [{ path: ["cors"] }] });
+		expect(alone.message).toContain("cors is no longer read by core");
+
+		const relocating = defineModule({
+			name: "fixture-http",
+			section: {
+				schema: z.object({ cors: z.object({ allowedOrigins: z.array(z.string()) }) }).optional(),
+				relocatedFrom: { cors: "cors" },
+			},
+		});
+		const relocated = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootstrap(resolved({}, "cors = null\n")),
+			}),
+		);
+
+		expect(relocated.reason).toBe("config-path-relocated");
+		expect(relocated.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "fixture-http",
+					from: "cors",
+					to: "fixture-http.cors",
+					environmentVariable: "FIXTURE_HTTP_CORS",
+				},
+			],
+		});
+		expect(relocated.message).not.toContain("no longer read by core");
+	});
+
+	it("boots a configuration built in code whose cors is an own undefined: it sets nothing, as the relocation refusal reads it", async () => {
+		const handle = await createApp({
+			modules: [],
+			bootstrapComponents: bootstrap({ ...resolved({}), cors: undefined }),
+		});
+		await handle.dispose();
+	});
+
+	it("boots a module whose section is cors, which reads it", async () => {
+		const corsModule = defineModule({
+			name: "cors",
+			section: { schema: z.object({ allowedOrigins: z.array(z.string()) }).strict() },
+		});
+		const handle = await createApp({
+			modules: [corsModule],
+			bootstrapComponents: bootstrap(
+				resolved({}, 'cors.allowedOrigins = ["https://app.example"]\n'),
+			),
+		});
+		const config = handle.components.config as unknown as Record<string, unknown>;
+		await handle.dispose();
+
+		expect(config.cors).toEqual({ allowedOrigins: ["https://app.example"] });
+	});
 });
 
 describe("the JWKS module's section, shipped in core's reference.conf, in a composition without the module", () => {

@@ -2626,7 +2626,8 @@ lists every breaking change since, and which of the steps below each needs.
      module that relocates it names its new path (the standalone template's
      `http` module names `http.cors.allowedOrigins`); without one, core
      refuses it (`config-validation-failed`), naming `cors` and the slot,
-     never the value. Move the origins to where the module that provides
+     never the value — unless a loaded module's own section is `cors`, which
+     reads it. Move the origins to where the module that provides
      `httpSettings` reads them. An empty `cors {}` sets nothing and starts.
      A composition with no `httpSettings` provider mounts no CORS. The
      `cors_allowed_origins_unreadable` warning is gone, as the module that

@@ -262,24 +262,25 @@ value that used to refuse the boot there (`webauthn.userVerification =
 "optional"`, `federation-grants.enabled = "sometimes"`) now boots, kept as
 written. An old path no loaded module relocates is kept the same way.
 
-**A written `cors` refuses the boot in every composition.** Core reads no
-`cors`: a composition's CORS origins come from the `httpSettings` slot, so
-move them to where the module that provides it reads them (in the standalone
-template, `http.cors.allowedOrigins`, `HTTP_CORS_ALLOWED_ORIGINS`). A loaded
-module that relocates `cors` refuses it naming its new path
-(`config-path-relocated`), as the standalone template's `http` does; without
-one, core refuses a `cors` that sets anything (`config-validation-failed`),
-naming `cors` and the slot and never a value, whether or not a logger is
-bootstrapped. An empty `cors {}` sets nothing and boots.
-
-The only signal for such a section is one line at `warn`, naming the
-sections and never a value, and only to the logger the composition
+The only signal for a section nothing reads is one line at `warn`, naming
+the sections and never a value, and only to the logger the composition
 bootstraps beside the configuration (`bootstrapComponents.logger`): without
-one, a section nothing reads boots silently. The line is `config_sections_ignored`, or
+one, such a section boots silently. The line is `config_sections_ignored`, or
 `config_sections_not_loaded` where the composition hands boot
 `configDefaults` that hold the section and the configuration changed it; a
 section left equal to those defaults is not named. After the upgrade, treat
 either line naming a section you set as a setting nothing applies.
+
+**A written `cors` refuses the boot.** Core reads no `cors`: a
+composition's CORS origins come from the `httpSettings` slot, so move them
+to where the module that provides it reads them (in the standalone template,
+`http.cors.allowedOrigins`, `HTTP_CORS_ALLOWED_ORIGINS`). A loaded module
+that relocates `cors` refuses it naming its new path
+(`config-path-relocated`), as the standalone template's `http` does; without
+one, core refuses a `cors` that sets anything (`config-validation-failed`),
+naming `cors` and the slot and never a value, whether or not a logger is
+bootstrapped — unless a loaded module's own section is `cors`, which reads
+it. An empty `cors {}` sets nothing and boots.
 
 ### Keys removed
 

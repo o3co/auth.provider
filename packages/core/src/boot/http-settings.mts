@@ -33,21 +33,23 @@ const UNREAD_CORS = unreadSectionMessage(
 
 /**
  * Why `config`'s top-level `cors` section refuses boot, or `undefined` when
- * it sets nothing (`pathsSetBy`: absent, `{}`, or holding only empty
- * sections). Core reads its CORS origins from the `httpSettings` slot alone,
- * so a `cors` that sets anything is read by nothing; a loaded module that
- * relocates `cors` refuses it first, before parse, naming its own path. A
- * section whose read throws refuses the same way. Names the section, never
- * a value.
+ * a loaded module's section is `cors` (`owned`, the top-level sections
+ * something loaded owns), which reads it, or when it sets nothing: absent,
+ * an own `undefined` (as the relocation refusal reads it), or a value
+ * `pathsSetBy` finds nothing in (`{}`, or only empty sections). Core reads
+ * its CORS origins from the `httpSettings` slot alone, so any other `cors`
+ * is read by nothing; a loaded module that relocates `cors` refuses it
+ * first, before parse, naming its own path. A section whose read throws
+ * refuses the same way. Names the section, never a value.
  */
-export function unreadCorsSection(config: unknown): string | undefined {
+export function unreadCorsSection(config: unknown, owned: ReadonlySet<string>): string | undefined {
+	if (owned.has("cors")) return undefined;
 	if (typeof config !== "object" || config === null || !Object.hasOwn(config, "cors")) {
 		return undefined;
 	}
 	try {
-		return pathsSetBy((config as Record<string, unknown>).cors).length > 0
-			? UNREAD_CORS
-			: undefined;
+		const cors: unknown = (config as Record<string, unknown>).cors;
+		return cors !== undefined && pathsSetBy(cors).length > 0 ? UNREAD_CORS : undefined;
 	} catch {
 		return UNREAD_CORS;
 	}
