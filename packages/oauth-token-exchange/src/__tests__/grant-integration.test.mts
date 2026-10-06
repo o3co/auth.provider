@@ -751,6 +751,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 							[EMPTY_FAMILY_TOKEN_TYPE]: () => ({
 								validate: async () => ({
 									sub: "user-1",
+									aud: "client-a",
 									claims: { sub: "user-1", family_id: "" },
 									familyId: "",
 								}),
@@ -780,7 +781,12 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 						tokenExchangeValidators: {
 							[REPORTING_TOKEN_TYPE]: () => ({
 								validate: async () =>
-									({ sub: "user-1", claims: { sub: "user-1" }, ...answer }) as never,
+									({
+										sub: "user-1",
+										aud: "client-a",
+										claims: { sub: "user-1" },
+										...answer,
+									}) as never,
 							}),
 						},
 					},
@@ -832,7 +838,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				"reads the %s's familyId and sid once each, for the check and the issued token alike",
 				async (role) => {
 					const reads = { familyId: 0, sid: 0 };
-					const answer = { sub: "user-1", claims: { sub: "user-1" } };
+					const answer = { sub: "user-1", aud: "client-a", claims: { sub: "user-1" } };
 					for (const field of ["familyId", "sid"] as const) {
 						Object.defineProperty(answer, field, {
 							enumerable: true,
@@ -926,6 +932,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					[EXPIRED_TOKEN_TYPE]: () => ({
 						validate: async () => ({
 							sub: "user-1",
+							aud: "client-a",
 							claims: { sub: "user-1", exp: Math.floor(Date.now() / 1000) - 30 },
 						}),
 					}),
@@ -1033,6 +1040,12 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				async () => withActor(await actor({ cnf: { jkt: JKT, "x5t#S256": X5T } })),
 				dpop(JKT),
 				"actor_token has compound cnf binding which is not supported",
+			],
+			[
+				"a subject_token whose azp and aud do not name the calling client",
+				() => subject({ aud: "billing", azp: "client-b" }),
+				undefined,
+				"subject_token azp and aud do not name this client",
 			],
 			[
 				"a subject_token whose may_act does not name the actor_token's subject",

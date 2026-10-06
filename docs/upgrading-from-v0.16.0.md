@@ -672,6 +672,21 @@ The boot refusals you can meet, with their messages, are in
   `403` (#859). `token.issued.failure`'s `details.reason` is the refusal's
   description, or its error code: a dashboard keyed on `denied by policy` or
   `grant policy evaluation failed` stops matching (#889).
+- **BREAKING: token exchange requires the caller to be an audience of the
+  subject token by default.** A `subject_token` is accepted only when its
+  `azp` is the calling client's id or its `aud` (a string or an array)
+  contains it; otherwise the exchange is `400 invalid_request` /
+  `subject_token azp and aud do not name this client`, logged at warn as
+  `token_exchange_subject_not_for_client`. A resource server exchanging a
+  token it received, and the client the token was issued to, keep working.
+  **What to do:** grep for `token_exchange_subject_not_for_client` against a
+  staging copy, and for each client that exchanges tokens issued to other
+  clients — a gateway, an on-behalf-of service — add
+  `allowExchangeOfTokensIssuedToOthers: true` to its client registration.
+  Only a strict `true` counts. `may_act`, the scope and audience ceilings and
+  the grant allowlist still apply to it. See the
+  [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
+  note 18.
 - **Federation grants.** `/reauthorize` answers a removed connection, or a
   client that may no longer use it, `403 access_denied/connection_not_permitted`
   (#883), and a revoked or pending grant whose boundary cannot be read `410` /
