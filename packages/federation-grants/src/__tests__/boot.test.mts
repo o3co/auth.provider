@@ -894,9 +894,16 @@ describe("what creating a grant needs", () => {
 	});
 
 	it("refuses a csrfGuard with no check to ask, naming it", async () => {
-		await expect(boot({ withCsrfGuard: "without-check" })).rejects.toThrow(
-			/the csrfGuard installed has no check/,
+		// Core holds the `csrfGuard` slot to its contract where boot fills it
+		// (`boot/csrf-guard-slot.mts`, every case in core's
+		// `boot/__tests__/csrf-guard-slot.test.mts`): the consent answer asks a
+		// `check` that was checked, and a guard without one still refuses boot.
+		const caught = await boot({ withCsrfGuard: "without-check" }).then(
+			() => undefined,
+			(err: unknown) => err,
 		);
+		expect(caught).toBeInstanceOf(RangeError);
+		expect((caught as Error).message).toMatch(/csrfGuard\.check is not a function.*sessionModule/s);
 	});
 
 	it("boots disabled without a csrfGuard: a deployment that leaves grants off owes nothing", async () => {
