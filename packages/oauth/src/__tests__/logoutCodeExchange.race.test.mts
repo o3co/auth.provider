@@ -58,6 +58,12 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
+import {
+	expectOutageLine,
+	REFUSED_COMMAND_MARKER,
+	serialisedCalls,
+	storeReplyError,
+} from "./_helpers/projectedLog.mjs";
 
 const HOUR = 3_600_000;
 const SID = "sid-race";
@@ -406,19 +412,81 @@ describe("a code exchange that joins through the session lifecycle", () => {
 		);
 	});
 
-	it("a lifecycle join that throws: the family is revoked before the throw leaves", async () => {
+	it("a lifecycle join that rejects with its store's error: 503, no token, the family revoked", async () => {
 		const w = await world({ lifecycle: true });
-		await expect(
-			w.exchange({
+		const result = await w.exchange({
+			...w.grantStores,
+			sessionLifecycle: {
+				...(w.lifecycle as SessionLifecycle),
+				join: async () => {
+					throw storeReplyError();
+				},
+			},
+		});
+
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session linking unavailable",
+		});
+		expect(result).not.toHaveProperty("tokens");
+		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
+	});
+
+	it("a lifecycle join that rejects with its store's error: one error line at the grant, carrying the error's projection", async () => {
+		const w = await world({ lifecycle: true });
+		const logger = createMockLogger();
+		await w.exchange(
+			{
 				...w.grantStores,
 				sessionLifecycle: {
 					...(w.lifecycle as SessionLifecycle),
 					join: async () => {
-						throw new RangeError("session lifecycle: sid must be 1 to 512 characters");
+						throw storeReplyError();
 					},
 				},
-			}),
-		).rejects.toThrow(RangeError);
+			},
+			logger,
+		);
+		expectOutageLine(logger, "authorization_grant_store_unavailable", {
+			store: "session_lifecycle",
+			step: "join",
+			clientId: CLIENT_ID,
+		});
+		expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
+	});
+
+	it("a lifecycle join that rejects with a store-style RangeError: 503, no token, one error line with the projection, the family revoked", async () => {
+		const w = await world({ lifecycle: true });
+		const logger = createMockLogger();
+		const result = await w.exchange(
+			{
+				...w.grantStores,
+				sessionLifecycle: {
+					...(w.lifecycle as SessionLifecycle),
+					join: async () => {
+						throw Object.assign(new RangeError("Invalid array length"), {
+							command: { name: "hset", args: [REFUSED_COMMAND_MARKER] },
+						});
+					},
+				},
+			},
+			logger,
+		);
+
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session linking unavailable",
+		});
+		expect(result).not.toHaveProperty("tokens");
+		expectOutageLine(
+			logger,
+			"authorization_grant_store_unavailable",
+			{ store: "session_lifecycle", step: "join", clientId: CLIENT_ID },
+			"RangeError",
+		);
+		expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 	});
 });

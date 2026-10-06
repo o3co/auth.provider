@@ -1166,6 +1166,21 @@ modules fills them.
     send that upstream an end-session request again; it is idempotent.
   - The boot warnings `session_family_index_without_session_end` and
     `refresh_token_family_rotation_without_revocation` are no longer logged.
+  - A session lifecycle that rejects with its store's error is answered as
+    the outage it is, where it was a `500`: the code exchange's join answers
+    `503 temporarily_unavailable` ("session linking unavailable"), logged
+    `authorization_grant_store_unavailable` with the error's projection, and
+    `/oauth/logout`'s close answers `503` ("session store unavailable"),
+    logged `logout_store_unavailable` with the projection and audited
+    `logout.cascade_failed`. A federation listing that rejects only leaves
+    the logout without its upstream hint.
+  - A `RangeError` is no exception, as a store's own error can be one. A
+    code exchange whose join rejects with one is that same `503`, where the
+    throw was a `500`. A `/oauth/logout` whose close rejects with one is
+    that same `503`, where it answered `200 {"logged_out": true}` as a
+    session already gone, reporting a logout that revoked nothing. A sid the
+    lifecycle cannot hold is therefore a `503` too; such a sid is never
+    issued.
 - **BREAKING: `POST /session/logout` closes the session through the
   lifecycle only.** The path that deleted the `UserSession`, the subject-index
   entry and the federation tokens itself, without the lifecycle, is removed,
