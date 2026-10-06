@@ -11,9 +11,8 @@ import {
 	defaultChallengeCeremonyModule,
 	memoryChallengeStoreModule,
 } from "#/challenges/module.mjs";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { defineModule, type Module } from "#/modules/manifest/index.mjs";
-import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * Boots `module` over the core fixture with `extra` merged in at the top,
@@ -79,17 +78,6 @@ describe("memoryChallengeStoreModule", () => {
 			await handle.dispose();
 			return store;
 		};
-
-		it("keeps the path the cap moved from through the schema a composition root parses with, for the refusal", () => {
-			// `AppConfigSchema` strips what it does not declare, before any module runs.
-			const parsed = AppConfigSchema.parse({
-				...makeValidAppConfig(),
-				challengeStore: { memory: { maxEntries: "5000" } },
-			});
-			expect((parsed.challengeStore as { memory?: unknown } | undefined)?.memory).toEqual({
-				maxEntries: "5000",
-			});
-		});
 
 		it("refuses challengeStore.memory.maxEntries at boot, naming core-challenge-store-memory.maxEntries", async () => {
 			const err = await refusalOf(

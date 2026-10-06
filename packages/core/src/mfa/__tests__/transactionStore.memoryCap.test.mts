@@ -29,7 +29,6 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
 import { BootError, type BootstrapMap } from "#/boot/types.mjs";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
 import {
 	createMfaTransactionStoreFactory,
 	registerBuiltinMfaTransactionStores,
@@ -43,7 +42,7 @@ import {
 import { memoryMfaTransactionStoreModule } from "#/mfa/module.mjs";
 import { MFA_MAX_TRANSACTIONS_PER_BINDING, type MfaTransaction } from "#/mfa/transactionStore.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
-import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 const T0 = Date.UTC(2026, 8, 1);
 
@@ -497,18 +496,6 @@ describe("core-mfa-transaction-store-memory.maxEntries", () => {
 		await handle.dispose();
 		return store;
 	};
-
-	it("keeps the path the cap moved from through the schema a composition root parses with, for the refusal", () => {
-		// `AppConfigSchema` strips what it does not declare, before any module runs.
-		const parsed = AppConfigSchema.parse({
-			...makeValidAppConfig(),
-			mfaTransactionStore: { adapter: "memory", memory: { maxEntries: "5000" } },
-		});
-		expect(parsed.mfaTransactionStore).toEqual({
-			adapter: "memory",
-			memory: { maxEntries: "5000" },
-		});
-	});
 
 	it("is read from the module's own section", async () => {
 		expect(memoryMfaTransactionStoreModule.requires ?? []).toEqual([]);

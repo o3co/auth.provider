@@ -21,13 +21,12 @@
  */
 
 import type { z } from "zod";
-import type { AppConfig } from "../config/application.schema.mjs";
+import { type AppConfig, CoreConfigSchema } from "../config/application.schema.mjs";
 import {
 	defineConfigKey,
 	isPlainConfigObject,
 	operatorPath,
 	overlayConfig,
-	TransitionalConfigSchema,
 } from "../config/composed.mjs";
 import { CORE_RELOCATIONS, type CoreRelocations } from "../config/core-relocations.mjs";
 import { environmentVariableFor } from "../config/environment-variable.mjs";
@@ -2123,10 +2122,9 @@ function reservedKeyIssues(
  * Step 13: parses the configuration the composition root handed over
  * (`bootstrapComponents.config`) once, with every schema that reads it:
  *
- * 1. the transitional base (`TransitionalConfigSchema`): core's own sections
- *    and every section core's schema still mirrors for a package, each
- *    optional, so a mirrored section is validated whenever the configuration
- *    carries it, whether or not the module that reads it is loaded;
+ * 1. core's base (`CoreConfigSchema`): core's own sections. Every other
+ *    section is a module's, validated by that module's schema when it is
+ *    loaded and by nothing when it is not;
  * 2. laid over what was written (`overlayConfig`), so a key no schema
  *    declares is kept.
  *
@@ -2146,7 +2144,7 @@ function validateAndComposeConfig(bootstrap: BootstrapMap): unknown {
 	// Through `parseSection`: a parse that throws instead of answering — a
 	// getter in a configuration built in code that throws — is one more issue
 	// naming the schema, not an error escaping stage 1.
-	const base = parseSection(TransitionalConfigSchema, raw, "core's configuration schema");
+	const base = parseSection(CoreConfigSchema, raw, "core's configuration schema");
 	if ("issues" in base) issues.push(...(base.issues as z.core.$ZodIssue[]));
 
 	if (issues.length > 0) {
@@ -2161,14 +2159,14 @@ function validateAndComposeConfig(bootstrap: BootstrapMap): unknown {
 }
 
 /**
- * The top-level sections something loaded owns: every section core's
- * transitional base declares — its own, or one it mirrors — and every loaded
- * module's section, at its name. What the configuration sets outside them is
- * what stage 1's notices name (`logConfigNotices`).
+ * The top-level sections something loaded owns: every section core's base
+ * declares and every loaded module's section, at its name. What the
+ * configuration sets outside them is what stage 1's notices name
+ * (`logConfigNotices`).
  * @internal
  */
 function ownedSections(modules: readonly Module[]): ReadonlySet<string> {
-	const owned = new Set<string>(Object.keys(TransitionalConfigSchema.shape));
+	const owned = new Set<string>(Object.keys(CoreConfigSchema.shape));
 	for (const m of modules) if (m.section !== undefined) owned.add(m.name);
 	return owned;
 }

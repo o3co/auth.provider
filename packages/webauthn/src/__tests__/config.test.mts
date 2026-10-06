@@ -67,6 +67,22 @@ describe("webauthnConfigSchema", () => {
 		).toBe(false);
 	});
 
+	it("refuses a user-verification requirement WebAuthn does not have, naming the key", () => {
+		for (const bad of ["optional", "REQUIRED", "", 1, null]) {
+			const result = webauthnConfigSchema.safeParse({ ...VALID, userVerification: bad });
+			expect(result.success, JSON.stringify(bad)).toBe(false);
+			expect(
+				result.error?.issues.map((issue) => issue.path.join(".")),
+				JSON.stringify(bad),
+			).toEqual(["userVerification"]);
+		}
+		for (const good of ["required", "preferred", "discouraged"]) {
+			expect(webauthnConfigSchema.safeParse({ ...VALID, userVerification: good }).success).toBe(
+				true,
+			);
+		}
+	});
+
 	describe("authentication/options security knobs", () => {
 		it("carries no allowCredentialsForKnownUser: the key is refused as one the schema does not declare", () => {
 			const result = webauthnConfigSchema.safeParse({

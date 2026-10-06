@@ -15,12 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import {
-	AppConfigSchema,
-	CoreConfigSchema,
-	composeConfigSchema,
-} from "#/config/application.schema.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 
 const minimalCoreConfig = {
@@ -117,50 +112,8 @@ describe("CoreConfigSchema", () => {
 	});
 });
 
-describe("composeConfigSchema", () => {
-	it("merges module schemas with core", () => {
-		const moduleSchema = z.object({
-			myModule: z.object({ enabled: z.boolean() }),
-		});
-		const composed = composeConfigSchema([moduleSchema]);
-		const result = composed.safeParse({
-			...minimalCoreConfig,
-			myModule: { enabled: true },
-		});
-		expect(result.success).toBe(true);
-	});
-
-	it("rejects when module-required field is missing", () => {
-		const moduleSchema = z.object({
-			myModule: z.object({ enabled: z.boolean() }),
-		});
-		const composed = composeConfigSchema([moduleSchema]);
-		// Missing myModule
-		const result = composed.safeParse(minimalCoreConfig);
-		expect(result.success).toBe(false);
-	});
-
-	it("merges multiple module schemas", () => {
-		const moduleA = z.object({ moduleA: z.object({ value: z.string() }) });
-		const moduleB = z.object({ moduleB: z.object({ count: z.number() }) });
-		const composed = composeConfigSchema([moduleA, moduleB]);
-		const result = composed.safeParse({
-			...minimalCoreConfig,
-			moduleA: { value: "hello" },
-			moduleB: { count: 42 },
-		});
-		expect(result.success).toBe(true);
-	});
-
-	it("returns CoreConfigSchema when no modules are provided", () => {
-		const composed = composeConfigSchema([]);
-		const result = composed.safeParse(minimalCoreConfig);
-		expect(result.success).toBe(true);
-	});
-});
-
-describe("AppConfigSchema", () => {
-	it("still validates full config with all sections", () => {
+describe("CoreConfigSchema beside other packages' sections", () => {
+	it("accepts a configuration carrying other packages' sections beside core's", () => {
 		const fullConfig = {
 			oauth: {
 				jwt: {
@@ -211,16 +164,10 @@ describe("AppConfigSchema", () => {
 				code: { type: "memory", memory: { defaultExpiresIn: 600 } },
 			},
 			endpoints: {
-				// login.url is required at the base schema level.
-				// client / authCallback are not in the schema — stripped if present.
 				login: { url: "/login" },
 			},
 		};
-		const result = AppConfigSchema.safeParse(fullConfig);
+		const result = CoreConfigSchema.safeParse(fullConfig);
 		expect(result.success).toBe(true);
-	});
-
-	it("AppConfigSchema is still exported and defined", () => {
-		expect(AppConfigSchema).toBeDefined();
 	});
 });

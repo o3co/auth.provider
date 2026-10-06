@@ -17,11 +17,11 @@
 /**
  * Boot's one composed parse. A composition root hands `createApp` the
  * configuration it resolved — never parsed first — and boot parses it once:
- * with the transitional base (core's sections and every section core still
- * mirrors for a package, each optional), laid over what was written so
- * nothing is stripped; then each module's section at its name, over the
- * base's output, written back there. A top-level section nobody owns is kept,
- * and named once in the log.
+ * with core's base (`CoreConfigSchema`, core's sections alone), laid over
+ * what was written so nothing is stripped; then each module's section at its
+ * name, over the base's output, written back there. A top-level section
+ * nobody owns is kept as written, validated by nothing, and named once in
+ * the log.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -51,9 +51,23 @@ function recordingLogger(): Logger & { readonly warn: ReturnType<typeof vi.fn> }
 	} as unknown as Logger & { readonly warn: ReturnType<typeof vi.fn> };
 }
 
+/**
+ * The fixture's configuration less the oauth package's grant switches
+ * (`oauth-session`, `oauth-authorization`): no module here reads them, so
+ * boot would name them as ignored.
+ */
+function withoutGrantSwitches(): Record<string, unknown> {
+	const {
+		"oauth-session": _session,
+		"oauth-authorization": _authorization,
+		...config
+	} = makeValidCoreConfig();
+	return config;
+}
+
 /** A resolved configuration: core's sections, plus whatever `extra` adds at the top. */
 const resolved = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
-	...makeValidCoreConfig(),
+	...withoutGrantSwitches(),
 	...extra,
 });
 
@@ -115,19 +129,22 @@ function sectioned(name: string, schema: z.ZodType, seen: Record<string, unknown
 	});
 }
 
-describe("one composed parse over the transitional base", () => {
-	it("coerces a section core mirrors that no loaded module owns, and keeps it", async () => {
+describe("one composed parse over core's base", () => {
+	it("keeps a section no loaded module owns as written: core's base coerces nothing in it", async () => {
 		const config = await bootAndRead(
 			[],
 			resolved({ webauthn: { challengeTtlMs: "120000", rpId: "example.com" } }),
 		);
-		expect(config.webauthn).toEqual({ challengeTtlMs: 120000, rpId: "example.com" });
+		expect(config.webauthn).toEqual({ challengeTtlMs: "120000", rpId: "example.com" });
 	});
 
-	it("refuses a value a mirrored section's schema refuses, naming the operator's path", async () => {
-		const err = await bootRefused([], resolved({ webauthn: { attestationPreference: "several" } }));
+	it("refuses a value core's base refuses, naming the operator's path", async () => {
+		const err = await bootRefused(
+			[],
+			resolved({ core: { ...makeValidCoreConfig().core, deployment: { mode: "loud" } } }),
+		);
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/webauthn\.attestationPreference: /);
+		expect(err.message).toMatch(/core\.deployment\.mode: /);
 	});
 
 	it.each([
@@ -203,12 +220,13 @@ describe("one composed parse over the transitional base", () => {
 		const err = await bootRefused(
 			[],
 			resolved({
-				webauthn: { challengeTtlMs: "not-a-lifetime", attestationPreference: "several" },
+				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "not-a-number" } },
+				core: { ...makeValidCoreConfig().core, deployment: { mode: "loud" } },
 			}),
 		);
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/webauthn\.challengeTtlMs: /);
-		expect(err.message).toMatch(/webauthn\.attestationPreference: /);
+		expect(err.message).toMatch(/oauth\.nonce\.maxLength: /);
+		expect(err.message).toMatch(/core\.deployment\.mode: /);
 	});
 
 	it("keeps a key no schema declares under a section core declares", async () => {
@@ -219,29 +237,46 @@ describe("one composed parse over the transitional base", () => {
 		expect((config.oauth as Record<string, unknown>).extra).toBe("kept");
 	});
 
-	it("hands a module's section the base's output: an environment string arrives coerced", async () => {
+	it("hands a module's section the base's output where the base declares the section: an environment string arrives coerced", async () => {
 		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
-			[sectioned("webauthn", z.object({ challengeTtlMs: z.number() }), seen)],
+			[sectioned("oauth", z.object({ nonce: z.object({ maxLength: z.number() }) }), seen)],
+			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } } }),
+		);
+		expect(seen.oauth).toEqual({ nonce: { maxLength: 128 } });
+		expect((config.oauth as { nonce?: unknown }).nonce).toEqual({ maxLength: 128 });
+	});
+
+	it("hands a module's section what was written where the base does not declare it: the module's own schema reads an environment string", async () => {
+		const err = await bootRefused(
+			[sectioned("webauthn", z.object({ challengeTtlMs: z.number() }))],
+			resolved({ webauthn: { challengeTtlMs: "120000" } }),
+		);
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toMatch(/webauthn\.challengeTtlMs: /);
+
+		const seen: Record<string, unknown> = {};
+		const config = await bootAndRead(
+			[sectioned("webauthn", z.object({ challengeTtlMs: z.coerce.number() }), seen)],
 			resolved({ webauthn: { challengeTtlMs: "120000" } }),
 		);
 		expect(seen.webauthn).toEqual({ challengeTtlMs: 120000 });
-		expect((config.webauthn as { challengeTtlMs?: unknown }).challengeTtlMs).toBe(120000);
+		expect(config.webauthn).toEqual({ challengeTtlMs: 120000 });
 	});
 
 	it("reports only the base's refusals when the base refuses, not a module's section reading what the base would have coerced", async () => {
 		// Run over what was written, a section's schema would refuse the
 		// environment string the base reads as a number: an error nobody made.
 		const err = await bootRefused(
-			[sectioned("webauthn", z.object({ challengeTtlMs: z.number() }))],
+			[sectioned("oauth", z.object({ nonce: z.object({ maxLength: z.number() }) }))],
 			resolved({
-				webauthn: { challengeTtlMs: "120000" },
+				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } },
 				core: { ...makeValidCoreConfig().core, deployment: { mode: "loud" } },
 			}),
 		);
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toMatch(/core\.deployment\.mode: /);
-		expect(err.message).not.toMatch(/webauthn\.challengeTtlMs/);
+		expect(err.message).not.toMatch(/oauth\.nonce\.maxLength/);
 		expect(
 			(err.details as unknown as { issues: { path: PropertyKey[] }[] }).issues.map((issue) =>
 				issue.path.join("."),
@@ -345,11 +380,15 @@ describe("a loaded module's section is never stripped", () => {
 	it("is written back at a section core's base also declares", async () => {
 		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
-			[sectioned("webauthn", z.object({ rpId: z.string() }), seen)],
-			resolved({ webauthn: { rpId: "example.com", challengeTtlMs: "120000" } }),
+			[sectioned("oauth", z.object({ oidcMode: z.string() }), seen)],
+			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } } }),
 		);
-		expect(seen.webauthn).toEqual({ rpId: "example.com" });
-		expect(config.webauthn).toEqual({ rpId: "example.com", challengeTtlMs: 120000 });
+		expect(seen.oauth).toEqual({ oidcMode: makeValidCoreConfig().oauth.oidcMode });
+		expect(config.oauth).toMatchObject({
+			oidcMode: makeValidCoreConfig().oauth.oidcMode,
+			jwt: makeValidCoreConfig().oauth.jwt,
+			nonce: { maxLength: 128 },
+		});
 	});
 
 	it("is written back at a top-level path core does not declare", async () => {
@@ -370,8 +409,8 @@ describe("a loaded module's section is never stripped", () => {
 		expect(parsed.core).toEqual(makeValidCoreConfig().core);
 	});
 
-	it("is laid over what is at its name, so a schema narrower than core's copy drops nothing", async () => {
-		// A section schema that reads one key of a section core mirrors whole:
+	it("is laid over what is at its name, so a schema narrower than what is written drops nothing", async () => {
+		// A section schema that reads one key of a section written whole:
 		// written back in place of the section, it would take every other key
 		// from every module reading `config`.
 		const repositories = {
@@ -527,5 +566,61 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 		expect(
 			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
 		).toEqual([]);
+	});
+});
+
+describe("another package's section, its module not loaded", () => {
+	// Core's base declares core's sections alone: a section another package's
+	// module reads, or a path one moved from, is validated by that module when
+	// it is loaded and by nothing when it is not. Kept as written, and named
+	// as nothing loaded reads it.
+	it.each([
+		["webauthn", { userVerification: "optional", challengeTtlMs: "not-a-lifetime" }],
+		["federation-grants", { enabled: "sometimes", maxExpiresIn: "not-a-duration" }],
+		["oauth-session", { enabled: "sometimes" }],
+		["oauth-authorization", { grants: { authorizationCode: { enabled: "x" } } }],
+		["session", { loginPage: { url: "" }, secret: "moved" }],
+		["session-store", { storage: { type: 42 }, maxAge: "0" }],
+		["rateLimit", { login: { windowMs: 0 }, failMode: "sometimes" }],
+		["cors", { allowedOrigins: ["https://app.example"] }],
+		["endpoints", { login: { url: "/login" } }],
+		["repositories", { client: { type: "yaml" } }],
+		["audit", { sink: { type: "splunk-hec" } }],
+		["core-rate-limiter-memory", { limits: { token: { limit: "0", windowSeconds: 1e13 } } }],
+		["redis-rate-limiter", { keyPrefix: "{x}" }],
+		["redis-consent-store", { keyPrefix: "tenant-a:consent:" }],
+		["redis-federation-token-store", { encryptionMode: "optional", keyPrefix: "tenant-a:ft:" }],
+		["core-federation-grant-store-memory", { tombstoneRetention: "not-a-duration" }],
+		["redis-federation-grant-store", { keyPrefix: "{x}" }],
+		["redis-federation-grant-intent-store", { keyPrefix: "{x}" }],
+		["redis-mfa-factor-store", { keyPrefix: "t:mfaf:" }],
+		["federationGrants", { enabled: "sometimes" }],
+		["consentStore", { adapter: "postgres" }],
+		["federationTokenStore", { type: "postgres" }],
+		["federationGrantStore", { adapter: "postgres" }],
+		["federationGrantIntentStore", { adapter: "postgres" }],
+		["memoryRateLimiter", { maxBuckets: "many" }],
+		["redisRateLimiter", { keyPrefix: "{x}" }],
+		["redisConsentStore", { keyPrefix: "tenant-a:consent:" }],
+		["redisDeviceCodeStore", { keyPrefix: "tenant-a:devauth:" }],
+		["redisFederationTokenStore", { keyPrefix: "tenant-a:ft:" }],
+		["redisFederationGrantStore", { keyPrefix: "{x}" }],
+	] as const)(
+		"boots with %s, whatever it holds, kept as written and named as ignored",
+		async (section, written) => {
+			const logger = recordingLogger();
+			const config = await bootAndRead([], resolved({ [section]: written }), logger);
+			expect(config[section]).toEqual(written);
+			expect(
+				logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
+			).toEqual([[{ sections: [section] }, "config_sections_ignored"]]);
+		},
+	);
+
+	it("is absent from the config slot when not written: core's base supplies no default for it", async () => {
+		const config = await bootAndRead([], resolved());
+		for (const section of ["webauthn", "federation-grants", "session-store", "cors", "audit"]) {
+			expect(Object.hasOwn(config, section), section).toBe(false);
+		}
 	});
 });

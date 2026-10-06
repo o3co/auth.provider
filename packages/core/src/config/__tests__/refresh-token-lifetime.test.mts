@@ -23,9 +23,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema, resolveRefreshTokenLifetime } from "#/config/application.schema.mjs";
+import { CoreConfigSchema, resolveRefreshTokenLifetime } from "#/config/application.schema.mjs";
 import * as core from "#/index.mjs";
-import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 const withRefreshToken = (refreshToken: Record<string, unknown>) => ({ oauth: { refreshToken } });
 
@@ -64,8 +64,8 @@ describe("resolveRefreshTokenLifetime", () => {
 
 	it("refuses every number the schema refuses, so a hand-built configuration meets the same rule", () => {
 		for (const expiresIn of [0, -1, 1.5, Number.NaN, 31_536_001]) {
-			const base = makeValidAppConfig();
-			const parsed = AppConfigSchema.safeParse({
+			const base = makeValidCoreConfig();
+			const parsed = CoreConfigSchema.safeParse({
 				...base,
 				oauth: { ...base.oauth, refreshToken: { ...base.oauth.refreshToken, expiresIn } },
 			});

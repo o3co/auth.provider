@@ -540,10 +540,10 @@ describe("enabling the feature", () => {
 		await expect(boot({ grants: { maxExpiresIn: 31_536_001 } })).rejects.toThrow(/maxExpiresIn/);
 	});
 
-	it("refuses a connection whose shape core's own schema can already see is wrong", async () => {
-		// The block is declared in `fullSectionsSchema`, so the parse catches a
-		// missing boundary before any module reads it. That is the earliest
-		// this can be caught and it is where it should be caught.
+	it("refuses a connection whose shape the module's section schema can already see is wrong", async () => {
+		// The block is declared in the module's section schema, so boot's parse
+		// catches a missing boundary before any factory reads it. That is the
+		// earliest this can be caught and it is where it should be caught.
 		const error = await boot({ connections: { calendar: { ...CONNECTION, boundary: "" } } }).then(
 			() => undefined,
 			(thrown: unknown) => thrown,

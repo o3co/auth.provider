@@ -19,12 +19,12 @@
  * environment variable arrives as. HOCON substitutes `${?VAR}` as a string,
  * always, and boot's composed parse is plain Zod, which does not coerce a
  * bare `z.boolean()` or `z.number()`. A module's leaf is covered when core's
- * transitional base declares the same path with a leaf that reads a string
- * (and coerces it first); otherwise the module's own leaf must read it.
+ * base (`CoreConfigSchema`) declares the same path with a leaf that reads a
+ * string (and coerces it first); otherwise the module's own leaf must read it.
  */
 
 import type { z } from "zod";
-import { TransitionalConfigSchema } from "../config/composed.mjs";
+import { CoreConfigSchema } from "../config/application.schema.mjs";
 import {
 	outputKinds,
 	readsEnvironmentString,
@@ -41,7 +41,7 @@ import type { Module } from "../modules/manifest/module-spec.mjs";
  */
 function coveredByBase(path: readonly string[], leaf: z.ZodType): boolean {
 	const wanted = outputKinds(leaf);
-	const leaves = schemasAtPath(TransitionalConfigSchema, path);
+	const leaves = schemasAtPath(CoreConfigSchema, path);
 	return (
 		wanted !== undefined &&
 		leaves.length > 0 &&

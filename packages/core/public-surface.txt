@@ -29,7 +29,6 @@
 . AdmissionRequest type
 . Algorithm type
 . AppConfig type
-. AppConfigSchema value
 . AppHandle type
 . ApproveDeviceAuthorizationInput type
 . AssertionClaimReaders type
@@ -800,7 +799,6 @@
 . codeClaimRevalidation value
 . coerceBooleanFromEnv value
 . composeAmr value
-. composeConfigSchema value
 . configuredNumber value
 . consentCovers value
 . consoleLogger value
@@ -928,7 +926,6 @@
 . formatObject value
 . formatUserCode value
 . fromMfaStoreFactor value
-. fullSectionsSchema value
 . generateDeviceCode value
 . generateIdToken value
 . generateLogoutToken value
@@ -1078,7 +1075,6 @@
 . readSessionOpenAnswer value
 . readSpaceDelimitedParameter value
 . readTargetParameter value
-. readTransitionalConfig value
 . readUpstreamAuthTime value
 . readUpstreamTokenLifetime value
 . readUserSnapshot value

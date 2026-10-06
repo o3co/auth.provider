@@ -148,12 +148,26 @@ function expectOneCleanupFailureLine(
 	expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
 }
 
+/**
+ * The fixture's configuration less the oauth package's grant switches
+ * (`oauth-session`, `oauth-authorization`): no module here reads them, so
+ * boot would name them as ignored.
+ */
+function withoutGrantSwitches(): Record<string, unknown> {
+	const {
+		"oauth-session": _session,
+		"oauth-authorization": _authorization,
+		...config
+	} = makeValidCoreConfig();
+	return config;
+}
+
 // Per ADR 2026-04-30-config-schema-strict-defaults-from-hocon, defaults live
 // in HOCON and validateAndComposeConfig parses CoreConfigSchema, so the
 // fixture supplies a minimal schema-valid baseline (it diverges from
 // reference.conf on purpose; see makeValidCoreConfig).
 const minBoot = {
-	config: makeValidCoreConfig() as never,
+	config: withoutGrantSwitches() as never,
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BootstrapMap;
 
