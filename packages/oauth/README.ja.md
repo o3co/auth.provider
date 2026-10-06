@@ -135,7 +135,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `consentStore` が `pendingConsentStore` 無しで配線されたとき（またはその逆）、および `oauth.revocation.accessToken = "denylist"` を宣言して `accessTokenDenylist` が無いとき、ルーターは構築を拒否する — `createApp` 経由では boot の失敗になる。
 
-**ディスカバリー。** `oauthEndpointsModule` は自分のエンドポイントとメタデータを core の `/.well-known/openid-configuration` に提供し、core は issuer が設定されているときだけそれを提供する。各機能は守れる場合にだけ広告される: `revocation_endpoint` はエンドポイントが何かを失効できるとき、`private_key_jwt` は `replaySeenSet` が配線されているとき、`client_id_metadata_document_supported` は機能が有効で同意ストアが配線され、`authorization_code` グラントが登録されているとき、ログアウトのフィールドは上の 6 スロットのチェックに従う。`grant_types_supported` は `/oauth/token` が振り分けに使う resolver から読み、authorization endpoint の有無も同じ resolver から読む: `authorization_code` グラントがあれば、ドキュメントはそれを示し、`response_types_supported: ["code"]`、`response_modes_supported: ["query"]`、`code_challenge_methods_supported: ["S256"]`、`request_uri_parameter_supported`、`authorization_response_iss_parameter_supported: true` と acr の表を広告する。無ければ `response_types_supported: []` で、残りはどれも出さない。規則はそれを計算している [`module.mts`](./src/module.mts) に書かれており、[`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts) で固定されている。
+**ディスカバリー。** `oauthEndpointsModule` は自分のエンドポイントとメタデータを core の `/.well-known/openid-configuration` に提供し、core は issuer が設定されているときだけそれを提供する。各機能は守れる場合にだけ広告される: `revocation_endpoint` はエンドポイントが何かを失効できるとき、`private_key_jwt` は `replaySeenSet` が配線されているとき、`client_id_metadata_document_supported` は機能が有効で同意ストアが配線され、`authorization_code` グラントが登録されているとき、ログアウトのフィールドはログアウトのルートをマウントするのと同じチェックに従う（[エンドポイント](#エンドポイント)を参照）。`grant_types_supported` は `/oauth/token` が振り分けに使う resolver から読み、authorization endpoint の有無も同じ resolver から読む: `authorization_code` グラントがあれば、ドキュメントはそれを示し、`response_types_supported: ["code"]`、`response_modes_supported: ["query"]`、`code_challenge_methods_supported: ["S256"]`、`request_uri_parameter_supported`、`authorization_response_iss_parameter_supported: true` と acr の表を広告する。無ければ `response_types_supported: []` で、残りはどれも出さない。規則はそれを計算している [`module.mts`](./src/module.mts) に書かれており、[`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts) で固定されている。
 
 ## パブリック API
 
@@ -554,7 +554,7 @@ refresh グラントは仕組みごと（DPoP の `cnf.jkt`、mTLS の `cnf.x5t#
 
 ## ログアウト
 
-OIDC のログアウトエンドポイントは、セッションのストアと core のセッションライフサイクルが配線されたときにマウントされる（[エンドポイント](#エンドポイント)を参照）。ここでのログアウトはすべてライフサイクルを通してセッションを終了する。
+OIDC のログアウトエンドポイントは、セッションのストアと core のセッションライフサイクルが配線されたときにマウントされる（[エンドポイント](#エンドポイント)を参照）。RP-Initiated Logout（`/oauth/logout`）はライフサイクルを通してセッションを終了し、フェデレーションのログアウトはそれを読んで 1 つのフェデレーションのトークンを消す。
 
 > **3 つ目のログアウトエンドポイントがあり、それはこのパッケージには無い。**
 > `POST /session/logout`（`@o3co/auth-provider-session`）はブラウザー自身の

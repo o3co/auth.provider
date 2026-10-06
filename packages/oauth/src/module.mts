@@ -98,7 +98,7 @@ const SECTION = {
  *
  * `grantPolicy.evaluate` gates `/oauth/token`, and
  * `refreshTokenFamilyRevocation.isFamilyRevoked` is read by introspect,
- * userinfo, the logout cascade and federation-token.
+ * userinfo and the federation routes.
  */
 export const oauthEndpointsModule: Module = defineModule<
 	| "federationSettings"

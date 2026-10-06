@@ -19,11 +19,13 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	checkRedirectUri,
+	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
 	createSessionLifecycle,
 	createSymmetricKeyStore,
 	type FederationProvider,
 	type FederationTokenStore,
+	type FederationTokens,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
@@ -3092,3 +3094,90 @@ const mintTypMarkerToken = (): Promise<string> =>
 		.setIssuedAt()
 		.setIssuer("https://auth.example.com")
 		.sign(secretKey);
+
+/**
+ * A federation logout over core's real session lifecycle, as `buildApp`
+ * composes it: the federation's tokens go, the lifecycle keeps it listed as
+ * having joined, and the session's later close ends it upstream again with
+ * no hint left to send.
+ */
+describe("a federation logout, then RP-initiated logout, over core's session lifecycle", () => {
+	it("leaves the federation listed with no tokens, answers a repeat the same, and the close ends it upstream without a hint", async () => {
+		const sessions = new Map<string, UserSession>([["sid-1", baseSession]]);
+		const userSessionStore: UserSessionStore = {
+			kind: "memory",
+			create: vi.fn(),
+			get: vi.fn(async (sid: string) => sessions.get(sid) ?? null),
+			delete: vi.fn(async (sid: string) => {
+				sessions.delete(sid);
+			}),
+		};
+		const tokens = new Map<string, { idToken: string }>([
+			["sid-1:google", { idToken: "upstream-id-token" }],
+		]);
+		const fedTokenStore = makeFedTokenStore({
+			get: vi.fn(
+				async (sid: string, name: string) =>
+					(tokens.get(`${sid}:${name}`) ?? null) as FederationTokens | null,
+			),
+			delete: vi.fn(async (sid: string, name: string) => {
+				tokens.delete(`${sid}:${name}`);
+			}),
+			removeBySid: vi.fn(async (sid: string) => {
+				for (const key of [...tokens.keys()]) if (key.startsWith(`${sid}:`)) tokens.delete(key);
+			}),
+		});
+		const sessionFederationIndex = createInMemorySessionFederationIndex();
+		await sessionFederationIndex.addFederation("sid-1", "google", baseSession.expiresAt);
+		const refreshFamilyRevocation = makeFamilyRevocation();
+		const sessionLifecycle = createSessionLifecycle({
+			store: createInMemorySessionLifecycleStore(),
+			userSessionStore,
+			refreshTokenFamilyRevocation: refreshFamilyRevocation,
+			federationTokenStore: fedTokenStore,
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex: makeSessionFamilyIndex({ listFamilyIds: vi.fn(async () => []) }),
+			sessionFederationIndex,
+			retainMs: 3_600_000,
+			logger: { warn: () => undefined, error: () => undefined },
+		});
+		const close = vi.spyOn(sessionLifecycle, "close");
+		const endSession = vi.fn(async (request: { idTokenHint?: string }) => ({
+			url: new URL(
+				`https://accounts.google.com/Logout${request.idTokenHint === undefined ? "" : "?hinted=1"}`,
+			),
+			method: "GET" as const,
+		}));
+		const app = buildApp({
+			sessionStore: userSessionStore,
+			fedTokenStore,
+			refreshFamilyRevocation,
+			sessionLifecycle,
+			getFederationProviders: () =>
+				new Map([["google", { ...federationBase("google"), endSession } as FederationProvider]]),
+		});
+
+		const first = await postFedLogout(app, "google", await mintAccessToken());
+		expect(first.status).toBe(303);
+		expect(first.headers.location).toBe("https://accounts.google.com/Logout?hinted=1");
+		expect(tokens.get("sid-1:google")).toBeUndefined();
+		expect(await sessionLifecycle.federations("sid-1")).toEqual({
+			outcome: "listed",
+			federations: ["google"],
+		});
+
+		// The federation is still listed: a repeat is the same disconnect, now
+		// with no token to hand upstream.
+		const repeat = await postFedLogout(app, "google", await mintAccessToken());
+		expect(repeat.status).toBe(303);
+		expect(repeat.headers.location).toBe("https://accounts.google.com/Logout");
+
+		const logout = await postLogout(app, { id_token_hint: await mintIdToken() });
+		expect(logout.status).toBe(303);
+		expect(logout.headers.location).toBe("https://accounts.google.com/Logout");
+		expect(endSession).toHaveBeenLastCalledWith(
+			expect.objectContaining({ idTokenHint: undefined }),
+		);
+		expect(await close.mock.results[0]?.value).toMatchObject({ federations: ["google"] });
+	});
+});

@@ -213,13 +213,11 @@ describe("sessionModule (static manifest)", () => {
 		// and MUST NOT appear in sessionModule.requires.
 		expect(sessionModule.requires).not.toContain("sessionRPRegistry");
 		expect(sessionModule.requires).not.toContain("sessionFamilyIndex");
-		// …and this is also the pin on how far `POST /session/logout` cascades.
-		// It invalidates the `UserSession` record, the subject index and the
-		// federation pair — every store in the list above. It does NOT revoke
-		// refresh-token families: that needs these three keys, and reaching
-		// them would mean depending on `@o3co/auth-provider-oauth` (a
-		// forbidden sibling edge) or writing a second `cascadeLogout`. A widened
-		// cascade must widen this list first, deliberately, not by accident.
+		// …and this is also the pin on what `POST /session/logout` reaches
+		// itself: nothing of a session's teardown. Core's session lifecycle
+		// closes the session — revoking its refresh-token families among the
+		// rest — so this module needs none of these keys. One that reads them
+		// must widen this list first, deliberately, not by accident.
 		expect(sessionModule.requires).not.toContain("refreshTokenFamilyRevocation");
 		expect(sessionModule.optional ?? []).not.toContain("refreshTokenFamilyRevocation");
 	});

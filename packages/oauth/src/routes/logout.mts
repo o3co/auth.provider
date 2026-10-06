@@ -862,7 +862,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 		// Held to the initiating client's registered list once, here — before the
 		// confirmation page echoes it, before any RP or upstream hears of the
-		// logout, and before the cascade — and the only value later steps read.
+		// logout, and before the close — and the only value later steps read.
 		// Unregistered or unknowable, it is `undefined` and the logout goes on.
 		const validatedPostLogoutRedirectUri = await registeredPostLogoutRedirectUri(
 			postLogoutRedirectUri,

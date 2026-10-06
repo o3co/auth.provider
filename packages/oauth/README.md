@@ -141,7 +141,7 @@ All mounted under `/oauth` by `oauthEndpointsModule`.
 
 The router refuses to be built — which through `createApp` is a boot failure — when `consentStore` is wired without `pendingConsentStore` or the reverse, and when `oauth.revocation.accessToken = "denylist"` is declared with no `accessTokenDenylist`.
 
-**Discovery.** `oauthEndpointsModule` contributes its endpoints and metadata to core's `/.well-known/openid-configuration`, which core serves only when an issuer is configured. Each capability is advertised only where it can be honoured: `revocation_endpoint` when the endpoint can revoke something, `private_key_jwt` when a `replaySeenSet` is wired, `client_id_metadata_document_supported` when the feature is on, a consent store is wired and the `authorization_code` grant is registered, the logout fields under the six-slot check above. `grant_types_supported` is read off the resolver `/oauth/token` dispatches against, and so is the authorization endpoint's presence: with the `authorization_code` grant the document names it and advertises `response_types_supported: ["code"]`, `response_modes_supported: ["query"]`, `code_challenge_methods_supported: ["S256"]`, `request_uri_parameter_supported`, `authorization_response_iss_parameter_supported: true` and the acr table; without it, `response_types_supported: []` and none of the rest. The rules are stated where they are computed, in [`module.mts`](./src/module.mts), and pinned by [`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts).
+**Discovery.** `oauthEndpointsModule` contributes its endpoints and metadata to core's `/.well-known/openid-configuration`, which core serves only when an issuer is configured. Each capability is advertised only where it can be honoured: `revocation_endpoint` when the endpoint can revoke something, `private_key_jwt` when a `replaySeenSet` is wired, `client_id_metadata_document_supported` when the feature is on, a consent store is wired and the `authorization_code` grant is registered, the logout fields under the check that mounts the logout routes (see [Endpoints](#endpoints)). `grant_types_supported` is read off the resolver `/oauth/token` dispatches against, and so is the authorization endpoint's presence: with the `authorization_code` grant the document names it and advertises `response_types_supported: ["code"]`, `response_modes_supported: ["query"]`, `code_challenge_methods_supported: ["S256"]`, `request_uri_parameter_supported`, `authorization_response_iss_parameter_supported: true` and the acr table; without it, `response_types_supported: []` and none of the rest. The rules are stated where they are computed, in [`module.mts`](./src/module.mts), and pinned by [`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts).
 
 ## Public API
 
@@ -564,7 +564,7 @@ A `cnf` member is honoured only for its own mechanism, so a confirmation shape a
 
 ## Logout
 
-The OIDC logout endpoints are mounted when the session stores and core's session lifecycle are wired (see [Endpoints](#endpoints)). Every logout here ends the session through the lifecycle.
+The OIDC logout endpoints are mounted when the session stores and core's session lifecycle are wired (see [Endpoints](#endpoints)). RP-initiated logout (`/oauth/logout`) ends the session through the lifecycle; the federation logout reads it and removes one federation's tokens.
 
 > **There is a third logout endpoint, and it is not in this package.**
 > `POST /session/logout` (`@o3co/auth-provider-session`) is the browser's own

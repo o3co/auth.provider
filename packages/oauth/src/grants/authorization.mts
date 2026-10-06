@@ -792,7 +792,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					const rp = {
 						clientId: authenticatedClientId,
 						// Typed reads: a misspelt field would silently drop the RP
-						// from the logout cascade.
+						// from the session's logout fanout.
 						backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
 						backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
 						// http(s) only: the record is the boundary's validated

@@ -18,7 +18,8 @@
  * A subject-wide revocation, and what a grant disclosure makes of it.
  *
  * Core writes the two boundaries and orchestrates, `@o3co/auth-provider-oauth`
- * wires the service over the session cascade, and this package compares a
+ * wires the service over core's session lifecycle, which closes each session,
+ * and this package compares a
  * grant against the boundary on every disclosure. Each is tested alone
  * elsewhere; these run the real service against the real route in one composed
  * application, to show the three agree. Two claims:
@@ -132,7 +133,7 @@ const CASCADE_STORES = {
 
 /**
  * Core's session lifecycle, which the service closes each of the subject's
- * sessions through, over in-memory stores and the cascade's revocation.
+ * sessions through, over in-memory stores and the stubs' family revocation.
  */
 const sessionLifecycle = () =>
 	createSessionLifecycle({

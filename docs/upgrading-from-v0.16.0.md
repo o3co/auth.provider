@@ -1179,9 +1179,9 @@ modules fills them.
     `oauthEndpointsModule` no longer declares them; drop them from a router
     you build by hand.
   - `POST /oauth/federation/:name/logout` reads whether the session is live
-    and which federations it joined from the lifecycle. It now answers
-    `401 invalid_token` ("session not found") for a live session of a subject
-    other than the access token's `sub`, where it disconnected before. It
+    and which federations it joined from the lifecycle. A token whose `sub`
+    differs from the live session's, or is absent, now gets
+    `401 invalid_token` ("session not found"), where it disconnected before. It
     removes the federation's tokens and leaves the federation listed as
     having joined the session: the federation-token route then answers it
     `404 federation_not_linked`, and the session's close may end it upstream
