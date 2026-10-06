@@ -749,9 +749,8 @@ export function createMemoryMfaTransactionStore(
 
 		async consumeEmailProofRequirement(
 			subject: string,
-			consume?: MfaEmailProofRequirementConsume,
-		): Promise<boolean | MfaEmailProofRequirementConsumeAnswer> {
-			if (consume === undefined) return emailProofRequired.delete(subject);
+			consume: MfaEmailProofRequirementConsume,
+		): Promise<MfaEmailProofRequirementConsumeAnswer> {
 			const { leaseToken } = checkEmailProofRequirementConsume(subject, consume);
 			if (!holds(subject, leaseToken)) return { outcome: "refused", reason: "lease_not_held" };
 			return { outcome: emailProofRequired.delete(subject) ? "consumed" : "absent" };

@@ -1496,14 +1496,11 @@ export interface MfaTransactionStore {
 	 * written, so a failed binding leaves the requirement standing. Keep it as
 	 * durably as the factor store: a lost requirement lets a password holder
 	 * bind without the proof.
-	 *
-	 * Without `consume`, the unleased form: `true` for the one caller that
-	 * cleared it, `false` otherwise. It is to be removed.
 	 */
 	consumeEmailProofRequirement(
 		subject: string,
-		consume?: MfaEmailProofRequirementConsume,
-	): Promise<boolean | MfaEmailProofRequirementConsumeAnswer>;
+		consume: MfaEmailProofRequirementConsume,
+	): Promise<MfaEmailProofRequirementConsumeAnswer>;
 
 	// A session's account-email proof: verification state whose loss fails
 	// closed — the user proves again.

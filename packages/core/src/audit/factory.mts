@@ -142,12 +142,15 @@ export interface AuditFanOutSources {
  * - `record` resolves once every sink has settled and never rejects. Core
  *   neither retries nor times a sink out.
  *
- * It carries the slot's sink's `kind`, or `audit-hooks` without one.
+ * It carries the slot's sink's `kind`, or `audit-hooks` without one. The
+ * answer is frozen, so a write to it throws in strict-mode code and every
+ * reader keeps the `record` core built; the slot's own sink and the hooks are
+ * not frozen, being the provider's, the host's or the module's.
  */
 export function createAuditFanOut(sources: AuditFanOutSources): AuditSink {
 	/** Set while a hook's `record` runs, and in the async work it starts. */
 	const insideHook = new AsyncLocalStorage<true>();
-	return {
+	return Object.freeze({
 		kind: sources.sink?.kind ?? "audit-hooks",
 		async record(event: AuditEvent): Promise<void> {
 			const reentered = insideHook.getStore() === true;
@@ -183,7 +186,7 @@ export function createAuditFanOut(sources: AuditFanOutSources): AuditSink {
 				),
 			);
 		},
-	};
+	});
 }
 
 /**

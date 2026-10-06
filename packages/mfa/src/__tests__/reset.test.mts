@@ -457,7 +457,7 @@ describe("resetMfaForSubject", () => {
 		if (held.outcome !== "acquired") throw new Error("not held");
 		setTimeout(() => {
 			void transactionStore
-				.consumeEmailProofRequirement(ALICE.id)
+				.consumeEmailProofRequirement(ALICE.id, { leaseToken: held.token })
 				.then(() => transactionStore.releaseSubjectLease(ALICE.id, held.token));
 		}, 200);
 
@@ -660,11 +660,17 @@ describe("resetMfaForSubject", () => {
 
 	it("sets D25's flag again as its last write under the lease: a consume landing during the reset does not leave it cleared", async () => {
 		const { reset, factorStore, transactionStore } = await setup();
+		const binding = await transactionStore.acquireSubjectLease(ALICE.id, {
+			ttlMs: 60_000,
+			generation: 0,
+		});
+		if (binding.outcome !== "acquired") throw new Error("not held");
+		await transactionStore.releaseSubjectLease(ALICE.id, binding.token);
 		const removeAll = factorStore.removeAllForSubject.bind(factorStore);
 		vi.spyOn(factorStore, "removeAllForSubject").mockImplementation(async (subject) => {
 			await removeAll(subject);
 			// A binding's consume that timed out before the reset, landing now.
-			await transactionStore.consumeEmailProofRequirement(subject);
+			await transactionStore.consumeEmailProofRequirement(subject, { leaseToken: binding.token });
 		});
 		const flag = vi.spyOn(transactionStore, "requireEmailProofAtNextBinding");
 

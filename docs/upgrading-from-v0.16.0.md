@@ -915,6 +915,13 @@ modules fills them.
   `contribute-factory-failed`); in sloppy-mode code the write is silently
   ignored. Either way the value does not change. Copy what the module needs,
   or set the value in the configuration (#1492).
+- **A write to the audit fan-out throws.** When a module contributes
+  `auditHooks`, the `auditSink` slot holds core's fan-out, and it is now
+  frozen: assigning to it (`deps.auditSink.record = ...`) throws a
+  `TypeError` in strict-mode code, which refuses boot when a factory does it.
+  The sink the fan-out wraps — the host's or a provider's — is not frozen,
+  and without a hook the slot holds that sink as it was given. Wrap the sink
+  in a module of your own, or contribute a hook, instead (#1532).
 - **Core checks the `csrfGuard` slot where boot fills it, and every reader
   receives a frozen copy of the guard.** Whatever fills the slot — a module's
   `provides`, or a `bootstrapComponents` or `overrideComponents` entry — boot
@@ -1958,7 +1965,19 @@ with what a store of yours records and refuses. Per port:
   writes are `createIf`, `removeIf` and the reset `removeAllForSubject`, at
   the generation `listVersioned` answered; it has no unconditional `create`
   or `remove` (#1121, #1179, #1236). An `MfaTransactionStore` answers
-  `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
+  `rebindAfterMs` on every subject-recovery answer (#1238). One written
+  against a 0.17 release candidate implements
+  `consumeEmailProofRequirement(subject, { leaseToken })` in place of
+  `consumeEmailProofRequirement(subject)`: consuming the email-proof
+  requirement is checked against the subject's lease, atomically, the lease
+  checked and the requirement cleared in one step. It answers
+  `{ outcome: "consumed" }`, `{ outcome: "absent" }` or
+  `{ outcome: "refused", reason: "lease_not_held" }`, and refuses a call
+  without a lease token with a `RangeError`
+  (`checkEmailProofRequirementConsume`). Run
+  `runMfaEmailProofRequirementContract` beside the store's suite: copy
+  `packages/redis/__tests__/adapters.mfa-email-proof-requirement.contract.mts`,
+  which imports only `@o3co/auth-provider-core`. The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
   and the [test kit](../packages/test-kit/README.md). An
   `MfaTransactionStoreClient` of your own, written against a 0.17 release

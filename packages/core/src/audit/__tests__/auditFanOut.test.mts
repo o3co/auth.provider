@@ -504,4 +504,17 @@ describe("createAuditFanOut", () => {
 
 		expect(fanOut.kind).toBe("recording");
 	});
+
+	it("is frozen, so a write to it throws, and leaves the slot's own sink and the hooks as they were", () => {
+		const own = createRecordingAuditSink();
+		const hook = createRecordingAuditSink();
+		const fanOut = createAuditFanOut({ sink: own, hooks: () => [hook], logger: () => undefined });
+
+		expect(Object.isFrozen(fanOut)).toBe(true);
+		expect(() => {
+			(fanOut as { record: unknown }).record = async () => {};
+		}).toThrow(TypeError);
+		expect(Object.isFrozen(own)).toBe(false);
+		expect(Object.isFrozen(hook)).toBe(false);
+	});
 });
