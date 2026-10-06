@@ -415,7 +415,7 @@ outage once, at error, with the error's projection, where it used to log an
 answers `unavailable` — the closing commit did not land, whether it did could
 not be read, or an item of the close work run with no record to save it in
 failed — the close now rejects. `pending` and `done` are unchanged.
-`unavailable` stays in the answer types until it is removed. The close work's
+`unavailable` is removed from the five answer types. The close work's
 and the sweep's own lines are unchanged: `session_lifecycle_unavailable`
 (warn) is still logged where a close's item ran but recording it failed, or a
 closing record could not be re-read by a close or the sweep.

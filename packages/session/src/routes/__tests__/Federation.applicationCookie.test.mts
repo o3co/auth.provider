@@ -45,7 +45,6 @@ import {
 	HARNESS_TRANSACTION_COOKIE_NAME,
 	makeFederationTokenStore,
 	makePermissivePolicy,
-	makeSessionFederationIndex,
 	makeUserRepository,
 	makeUserSessionStore,
 } from "./federation-harness.mjs";
@@ -162,7 +161,6 @@ function buildRealApp({ rolling = false }: { rolling?: boolean } = {}): RealApp 
 			userRepository: makeUserRepository(),
 			userSessionStore: makeUserSessionStore(),
 			sessionLifecycle: fakeSessionLifecycle(),
-			sessionFederationIndex: makeSessionFederationIndex(),
 			federationTokenStore: makeFederationTokenStore(),
 		}),
 	);

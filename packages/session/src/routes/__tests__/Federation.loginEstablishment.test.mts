@@ -182,7 +182,6 @@ describe("the federation callback's login — the session lifecycle, where it is
 
 		expect(res.status).toBe(503);
 		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
-		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
 		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
 		expect(harness.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
 	});
@@ -213,7 +212,6 @@ describe("the federation callback's login — a user whose field the login needs
 
 		expect(res.status).toBe(500);
 		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
-		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
 		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
 		const session = harness.store.get("browser")?.data ?? {};
 		for (const field of ["isAuthenticated", "user", "sid"]) {
@@ -426,7 +424,6 @@ describe("the federation callback's login — a User the snapshot refuses", () =
 			expect(reads.get(field), field).toBe(1);
 		}
 		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
-		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
 		expect(subjectSessionIndex.addSid).not.toHaveBeenCalled();
 		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
 		const session = harness.store.get("browser")?.data ?? {};

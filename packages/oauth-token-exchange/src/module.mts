@@ -75,15 +75,16 @@ const OPTIONAL = [
 	// declare `oauth.revocation.accessToken = "unsupported"`.
 	"accessTokenDenylist",
 	"subjectRevocation",
-	// Read by the grant alone (`sessionRefusal` in grant.mts): a subject or
-	// actor token carrying a `sid` is refused once its session has ended, and
-	// the issued token carries the subject's `sid`, so the logout that ends
-	// the one ends the other. Optional as it is on `oauthEndpointsModule`: without a
-	// store no surface judges a `sid`.
+	// Read by the grant's construction alone: where a user-session store is
+	// wired, `sessionLifecycle` is required beside it, or the grant refuses to
+	// build. Optional as it is on `oauthEndpointsModule`: without a store no
+	// surface judges a `sid`.
 	"userSessionStore",
-	// Core's session lifecycle: where installed, the same check reads its
-	// `liveness`, so a session closing or closed is refused from the closing
-	// commit on.
+	// Core's session lifecycle, read by the grant alone (`sessionRefusal` in
+	// grant.mts): a subject or actor token carrying a `sid` is refused once
+	// its `liveness` is not live, from the closing commit on, and the issued
+	// token carries the subject's `sid`, so the logout that ends the one ends
+	// the other.
 	"sessionLifecycle",
 ] as const;
 
