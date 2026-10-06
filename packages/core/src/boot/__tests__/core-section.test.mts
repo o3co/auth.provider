@@ -312,42 +312,59 @@ describe("the federations, under core.federations", () => {
 });
 
 describe("cors, which core does not read", () => {
-	/**
-	 * The notices of sections nothing loaded reads that `operator` boots with,
-	 * no module loaded, and the config slot it boots to.
-	 */
-	const bootLogged = async (
-		operator: string,
-	): Promise<{ warnings: unknown[][]; config: Record<string, unknown> }> => {
+	it("refuses a configuration that writes it with no module relocating it, saying core reads its CORS origins from the httpSettings slot, with no logger", async () => {
+		const err = await refusal(boot({}, 'cors.allowedOrigins = ["https://app.example"]\n'));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.details).toMatchObject({ issues: [{ path: ["cors"] }], modules: [] });
+		expect(err.message).toContain("cors is no longer read by core");
+		expect(err.message).toContain("httpSettings");
+		// Core's words, not a composition's: no module's path is named.
+		expect(err.message).not.toContain("http.cors");
+		expect(err.message).not.toContain("https://app.example");
+	});
+
+	it.each([
+		["an empty list", "cors.allowedOrigins = []\n"],
+		["a key of its own", 'cors.allowedOrigin = "https://app.example"\n'],
+		["a value at the section itself", 'cors = "https://app.example"\n'],
+	])("refuses %s under it: a value written is set", async (_name, operator) => {
+		const err = await refusal(boot({}, operator));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("cors is no longer read by core");
+		expect(err.message).not.toContain("https://app.example");
+	});
+
+	it("refuses a cors section whose read throws, in the same words, as a refusal rather than the throw", async () => {
+		const cors = {};
+		Object.defineProperty(cors, "allowedOrigins", {
+			enumerable: true,
+			get: () => {
+				throw new Error("cors-getter-7f1a");
+			},
+		});
+		const config = { ...resolved({}), cors };
+		const err = await refusal(createApp({ modules: [], bootstrapComponents: bootstrap(config) }));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("cors is no longer read by core");
+		expect(err.message).not.toContain("cors-getter-7f1a");
+	});
+
+	it("boots an empty cors section and names nothing: it sets nothing", async () => {
 		const logger = recordingLogger();
-		const handle = await boot({}, operator, logger);
-		const config = handle.components.config as unknown as Record<string, unknown>;
+		const handle = await boot({}, "cors {}\n", logger);
 		await handle.dispose();
-		const warnings = logger.warn.mock.calls.filter(([, message]) =>
-			String(message).startsWith("config_sections_"),
-		);
-		return { warnings, config };
-	};
 
-	it("boots a configuration that writes it with no module relocating it, naming the section once as ignored and never its value", async () => {
-		const { warnings, config } = await bootLogged(
-			'cors.allowedOrigins = ["https://app.example"]\n',
-		);
-
-		expect(warnings).toEqual([[{ sections: ["cors"] }, "config_sections_ignored"]]);
-		expect(JSON.stringify(warnings)).not.toContain("https://app.example");
-		// Kept as written, read by nothing: no CORS is mounted without the
-		// httpSettings slot.
-		expect(config.cors).toEqual({ allowedOrigins: ["https://app.example"] });
+		expect(
+			logger.warn.mock.calls.filter(([, message]) =>
+				String(message).startsWith("config_sections_"),
+			),
+		).toEqual([]);
 	});
 
-	it("names nothing for an empty cors section: it sets nothing", async () => {
-		const { warnings } = await bootLogged("cors {}\n");
-
-		expect(warnings).toEqual([]);
-	});
-
-	it("leaves the refusal to a loaded module that relocates cors, in its words", async () => {
+	it("leaves the refusal to a loaded module that relocates cors, in its words alone", async () => {
 		const relocating = defineModule({
 			name: "fixture-http",
 			section: {
@@ -365,15 +382,33 @@ describe("cors, which core does not read", () => {
 		);
 
 		expect(err.reason).toBe("config-path-relocated");
-		expect(err.details).toMatchObject({
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
 			relocated: [
 				{
 					module: "fixture-http",
 					from: "cors.allowedOrigins",
 					to: "fixture-http.cors.allowedOrigins",
+					environmentVariable: "FIXTURE_HTTP_CORS_ALLOWED_ORIGINS",
 				},
 			],
 		});
+		expect(err.message).not.toContain("no longer read by core");
+	});
+
+	it("boots a relocating module's section beside an empty cors section", async () => {
+		const relocating = defineModule({
+			name: "fixture-http",
+			section: {
+				schema: z.object({ cors: z.object({ allowedOrigins: z.array(z.string()) }) }).optional(),
+				relocatedFrom: { cors: "cors" },
+			},
+		});
+		const handle = await createApp({
+			modules: [relocating],
+			bootstrapComponents: bootstrap(resolved({}, "cors {}\n")),
+		});
+		await handle.dispose();
 	});
 });
 

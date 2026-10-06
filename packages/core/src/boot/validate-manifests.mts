@@ -76,6 +76,7 @@ import {
 	federationTypeSnapshot,
 	parseFederationEntries,
 } from "./federation-entries.mjs";
+import { unreadCorsSection } from "./http-settings.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
 import {
 	checkReplicaSafety,
@@ -2132,7 +2133,9 @@ function reservedKeyIssues(
  * `parseModuleSections` writes each section back. Refused values make one
  * `config-validation-failed` naming each operator path: every reserved key
  * (`reservedKeyIssues`: an `Object.prototype` member's name, or
- * `prototype`), then the base's issues. No module is named: a module's own
+ * `prototype`), a `cors` section that sets anything (`unreadCorsSection`:
+ * core reads its CORS origins from the `httpSettings` slot alone), then the
+ * base's issues. No module is named: a module's own
  * configuration is its section, parsed after this.
  * @internal
  */
@@ -2141,6 +2144,10 @@ function validateAndComposeConfig(bootstrap: BootstrapMap): unknown {
 	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
 	issues.push(...reservedKeyIssues(raw));
+	const unreadCors = unreadCorsSection(raw);
+	if (unreadCors !== undefined) {
+		issues.push({ code: "custom", path: ["cors"], message: unreadCors, input: undefined });
+	}
 	// Through `parseSection`: a parse that throws instead of answering — a
 	// getter in a configuration built in code that throws — is one more issue
 	// naming the schema, not an error escaping stage 1.
