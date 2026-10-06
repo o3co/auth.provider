@@ -1451,3 +1451,51 @@ describe("oauthEndpointsModule — a composition with no authorization_code gran
 		await handle.dispose();
 	});
 });
+
+describe("oauthEndpointsModule — a user-session store needs core's session lifecycle", () => {
+	const config = () => {
+		const base = makeValidAppConfig();
+		return withGrants(
+			{
+				...base,
+				oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" } },
+			},
+			{ authorizationCode: false, refreshToken: false, clientCredentials: true },
+		) as ReturnType<typeof makeValidAppConfig>;
+	};
+	const boot = (extra: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthEndpointsModule,
+				oauthAuthorizationGrantsModule,
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				keyStoreModule,
+				...extra,
+			],
+			bootstrapComponents: { config: withOauthCaptures(config()), pathResolver: (s) => s },
+		});
+
+	it("refuses to boot with userSessionStore wired and no sessionLifecycle, naming both slots", async () => {
+		const refusal = await boot([memorySessionStoresModule]).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught as BootError,
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth" },
+		});
+		expect(refusal?.message).toMatch(/userSessionStore is wired, but sessionLifecycle is not/);
+	});
+
+	it("boots sessionless, with neither wired", async () => {
+		const handle = await boot([]);
+		expect(handle.inspect.routes.length).toBeGreaterThan(0);
+		await handle.dispose();
+	});
+});

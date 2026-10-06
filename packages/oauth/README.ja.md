@@ -622,7 +622,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 プロバイダー単位のフェデレーション切断。Authorization に `typ: at+jwt` の `Bearer <access_token>`。ボディ（任意）: `post_logout_redirect_uri`、`state`。
 
-フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → `post_logout_redirect_uri` をクライアントのリストと照合 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → `post_logout_redirect_uri` をクライアントのリストと照合 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。フェデレーションのトークンとインデックスのエントリーは消えるが、core のセッションライフサイクルのレコードは参加したものとして一覧に残すので、フェデレーショントークンのルートはそれをトークンの無いフェデレーションとして `404 federation_not_linked` と答える。
 
 `post_logout_redirect_uri` を IdP の end-session 呼び出しに渡すのは、アクセストークンの発行先クライアント（その `azp`）の `postLogoutRedirectUris` のいずれかと完全一致したときだけである — このルートも呼び出し側が選んだ先へのリダイレクトで終わるので、`/oauth/logout` と同じ規則を適用する。一致しなければ捨て、アダプターは指定が無いときと同じように答える: Google と GitHub はブラウザーを自身のログアウトページへ送り、end-session エンドポイントが設定されていない Apple は拒否する。このルートはそれを失敗した end-session 呼び出しと同じく `200 {"disconnected": true}` で答える。`azp` の無いトークンには照合するリストが無く、一致したものは `/oauth/logout` と同じく `checkRedirectUri` を満たさなければならない。答えられないクライアントリポジトリは切断を止めない: URI を捨て、それが無いときと同じように答え、`site: "federation_logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。ボディの無い `POST` は URI を指定しない切断である。
 
@@ -655,7 +655,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 
 ## フェデレーショントークンエンドポイント
 
-`POST /oauth/federation/:name/token` は呼び出し元のセッションに紐付いた上流 IdP のアクセストークンを取り出す。これにより利用者は、ユーザーの代わりに Google Calendar / GitHub API などへサーバーサイドの API 呼び出しを行える。`userSessionStore`、core のセッションライフサイクル、`federationTokenStore`、ファミリーの失効が配線されているときにマウントされる（[エンドポイント](#エンドポイント)を参照）。呼び出し元のセッションが live か、セッションがどのフェデレーションに参加したかはライフサイクルから読む（`sessionLifecycle.liveness`、`sessionLifecycle.federations`）。フェデレーションのログアウトはフェデレーションのトークンを消すが、参加したものとしての記載は残す。ルートはそのようなフェデレーションを飛ばし、トークンレコードの無いものとして `404 federation_not_linked` と答える。オフライン委譲 — ユーザーのセッション無しのトークン — は別の機能で、`@o3co/auth-provider-federation-grants` である。
+`POST /oauth/federation/:name/token` は呼び出し元のセッションに紐付いた上流 IdP のアクセストークンを取り出す。これにより利用者は、ユーザーの代わりに Google Calendar / GitHub API などへサーバーサイドの API 呼び出しを行える。`userSessionStore`、core のセッションライフサイクル、`federationTokenStore`、ファミリーの失効が配線されているときにマウントされる（[エンドポイント](#エンドポイント)を参照）。呼び出し元のセッションが live か、セッションがどのフェデレーションに参加したかはライフサイクルから読む（`sessionLifecycle.liveness`、`sessionLifecycle.federations`）。フェデレーションのログアウトはフェデレーションのトークンとインデックスのエントリーを消すが、ライフサイクルのレコードは一覧に残す。ルートはそのようなフェデレーションを飛ばし、トークンの無いものとして `404 federation_not_linked` と答える。オフライン委譲 — ユーザーのセッション無しのトークン — は別の機能で、`@o3co/auth-provider-federation-grants` である。
 
 ### 認証
 
