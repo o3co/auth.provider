@@ -289,18 +289,28 @@ describe("the process each development run describes", () => {
 		expect(existsSync(resolveConfigPaths(configDir, configEnv as string).envConfPath)).toBe(true);
 	});
 
-	it("boots with MFA on and the SMTP sender in the mailSender slot, relaying to Mailpit", async () => {
-		const env = containerEnv();
+	/** The key the operator writes into `.env` for the Mailpit run (`openssl rand -base64 32`). */
+	const OWN_MFA_KEY = Buffer.alloc(32, 7).toString("base64");
+
+	/** The Mailpit run's modules and the configuration boot is handed, under `env`. */
+	function mailpitRun(env: Record<string, string>) {
 		const configEnv = env.CONFIG_ENV as string;
 		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
 		const own = readOwnLayers([envConfPath, applicationConfPath], { env });
 		const switches = readSwitches(own);
-		expect(switches.mfaMode).toBe("required");
-
 		const modules = buildModules(switches, {
 			environment: configEnv,
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		});
+		return { switches, modules, config: () => resolveForBoot(own, modules, switches) };
+	}
+
+	it("boots with MFA on and the SMTP sender in the mailSender slot, relaying to Mailpit", async () => {
+		const { switches, modules, config } = mailpitRun({
+			...containerEnv(),
+			MFA_ENCRYPTION_KEY: OWN_MFA_KEY,
+		});
+		expect(switches.mfaMode).toBe("required");
 		const names = modules.map((module) => module.name);
 		expect(names).toContain(standardSmtpMailSenderModule.name);
 		expect(names).not.toContain(
@@ -310,17 +320,45 @@ describe("the process each development run describes", () => {
 		const handle = await createApp({
 			modules,
 			bootstrapComponents: {
-				config: resolveForBoot(own, modules, switches),
+				config: config(),
 				pathResolver: (s: string) => s,
 				logger: createRecordingLogger(),
 			},
 		});
 		handles.push(handle);
 		expect((handle.components.mailSender as MailSender | undefined)?.kind).toBe("standard-smtp");
+		const ring = (handle.components.config as { mfa?: { encryptionKeys?: { key?: unknown }[] } })
+			.mfa?.encryptionKeys;
+		expect(ring?.map((entry) => entry.key)).toEqual([OWN_MFA_KEY]);
 		expect(
 			(handle.components.config as Record<string, unknown> | undefined)?.[
 				"standard-smtp-mail-sender"
 			],
 		).toMatchObject({ host: "localhost", port: 1025, secure: "none" });
+	});
+
+	it("does not carry the development sample key: without MFA_ENCRYPTION_KEY the run is refused", async () => {
+		const env = containerEnv();
+		expect(env.MFA_ENCRYPTION_KEY).toBeUndefined();
+		const { modules, config } = mailpitRun(env);
+		const refused = await (async () => {
+			try {
+				handles.push(
+					await createApp({
+						modules,
+						bootstrapComponents: {
+							config: config(),
+							pathResolver: (s: string) => s,
+							logger: createRecordingLogger(),
+						},
+					}),
+				);
+			} catch (error) {
+				return error;
+			}
+			return undefined;
+		})();
+		expect(refused).toBeInstanceOf(Error);
+		expect(String((refused as Error).message)).toMatch(/mfa\.encryptionKeys/);
 	});
 });

@@ -4,6 +4,9 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
 #
+# Write MFA_ENCRYPTION_KEY into .env first (openssl rand -base64 32): this run
+# reads its MFA key from it, not the development sample key.
+#
 # Mailpit keeps every mail the provider sends and delivers none; read them at
 # http://localhost:8025. Never use it in production, where
 # STANDARD_SMTP_MAIL_SENDER_* name a real relay. Leave every
