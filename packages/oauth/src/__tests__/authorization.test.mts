@@ -53,8 +53,9 @@ const S256_CHALLENGE = crypto.createHash("sha256").update(CODE_VERIFIER).digest(
 
 /**
  * What `/authorize` records of how the session had authenticated over a
- * record whose primary cannot be told. The exchange reads such a code over
- * any record as it was minted: nothing told.
+ * record whose primary cannot be told: one that carries no `authentication`
+ * and an `amr` that names no primary, as most records stubbed here do. A
+ * code over a record that names one carries it as `/authorize` records it.
  */
 const UNTOLD = { primary: undefined, mfaAt: undefined };
 
@@ -1375,7 +1376,9 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
-							authentication: UNTOLD,
+							// What /authorize recorded of a password session it admitted
+							// with a second factor: more than the record holds now.
+							authentication: { primary: "pwd", mfaAt: new Date("2026-04-21T00:10:00Z") },
 							grantedScope: ["openid"],
 							acr: "urn:example:mfa",
 							amr: ["pwd", "otp", "mfa"],
@@ -1437,7 +1440,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
-							authentication: UNTOLD,
+							authentication: { primary: "pwd", mfaAt: undefined },
 							grantedScope: ["openid"],
 							amr,
 						}),
@@ -1463,9 +1466,14 @@ describe("createAuthorizationGrant", () => {
 				}
 			});
 
-			/** Redeems the code "c1" bound to "sid-1" against `userSessionStore`, when one is given. */
+			/**
+			 * Redeems the code "c1" bound to "sid-1" against `userSessionStore`, when
+			 * one is given, the code carrying `authentication` as `/authorize`
+			 * recorded it over that record.
+			 */
 			const redeemSessionCode = async (
 				userSessionStore?: ReturnType<typeof makeUserSessionStore>,
+				authentication: unknown = UNTOLD,
 			) => {
 				const deps = {
 					...makeDepsWithIssuer(
@@ -1476,7 +1484,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
-							authentication: UNTOLD,
+							authentication,
 							grantedScope: ["openid"],
 						}),
 					),
@@ -1508,6 +1516,7 @@ describe("createAuthorizationGrant", () => {
 				const authTime = new Date("2026-04-21T00:00:00.750Z");
 				const tokens = await redeemSessionCode(
 					makeUserSessionStore({ sid: "sid-1", sub: "u-1", authTime, claims: {}, amr: ["pwd"] }),
+					{ primary: "pwd", mfaAt: undefined },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.id_token as string).auth_time).toBe(seconds);
@@ -1531,6 +1540,7 @@ describe("createAuthorizationGrant", () => {
 							mfaAt: new Date("2026-04-21T00:10:00Z"),
 						},
 					}),
+					{ primary: "pwd", mfaAt: new Date("2026-04-21T00:10:00Z") },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.access_token).auth_time).toBe(seconds);
@@ -1554,6 +1564,7 @@ describe("createAuthorizationGrant", () => {
 							upstreamAuthTime: new Date("2026-04-20T00:00:00Z"),
 						},
 					}),
+					{ primary: "fed", mfaAt: undefined },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.id_token as string).auth_time).toBe(seconds);

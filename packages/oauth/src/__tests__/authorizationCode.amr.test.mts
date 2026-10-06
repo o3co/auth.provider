@@ -378,6 +378,25 @@ describe("an authorization code carries how its session had authenticated at /au
 		);
 	});
 
+	it("records what admission read, not the record as it is when the code is minted: a step-up landing between the two does not reach the code", async () => {
+		const w = await world();
+		const mint = InMemoryCodeRepository.prototype.createCode;
+		w.createCode.mockImplementationOnce(async function (
+			this: InMemoryCodeRepository,
+			params: Parameters<InMemoryCodeRepository["createCode"]>[0],
+		) {
+			await w.stepUp();
+			return mint.call(this, params);
+		});
+		await w.authorize();
+		expect(w.createCode).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				amr: ["pwd"],
+				authentication: { primary: "pwd", mfaAt: undefined },
+			}),
+		);
+	});
+
 	/** A requirement that holds the exchange, not `/authorize`, to a second factor. */
 	const exchangeNeedsSecondFactor: SessionRequirement = {
 		name: "exchange-mfa",
