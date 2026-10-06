@@ -177,6 +177,27 @@ describe("token exchange through oauthEndpointsModule's POST /oauth/token", () =
 				...form,
 			});
 
+	it("carries the subject token's acr, amr and auth_time when this provider issued it", async () => {
+		const app = await boot();
+		const authTime = Math.floor(Date.now() / 1000) - 60;
+		const res = await exchange(app, gateway.clientId, {
+			subject_token: await signSelfIssuedAccessToken({
+				acr: "urn:o3co:acr:mfa",
+				amr: ["pwd", "otp", "mfa"],
+				auth_time: authTime,
+			}),
+			subject_token_type: ACCESS_TOKEN_TYPE,
+		});
+
+		expect(res.status).toBe(200);
+		expect(decodeJwt(res.body.access_token as string)).toMatchObject({
+			iss: ISSUER,
+			acr: "urn:o3co:acr:mfa",
+			amr: ["pwd", "otp", "mfa"],
+			auth_time: authTime,
+		});
+	});
+
 	it("issues a narrower access token for the requested audience", async () => {
 		const app = await boot();
 		const subjectToken = await signSelfIssuedAccessToken({ scope: "read write", aud: "billing" });

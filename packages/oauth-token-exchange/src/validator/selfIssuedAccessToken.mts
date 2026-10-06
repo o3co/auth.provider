@@ -25,9 +25,41 @@ import {
 	type SubjectRevocation,
 	type ValidatedToken,
 	verifyJwt,
+	wellFormedAcr,
+	wellFormedAmr,
+	wellFormedAuthTime,
 } from "@o3co/auth-provider-core";
 
 export const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
+
+/**
+ * The authentication context of a token this file's validator verified, read
+ * once off the verified payload: the issuer it was verified against, its
+ * `iat`, and its `acr`, `amr` and `auth_time` where each is well formed.
+ */
+export interface VerifiedAuthentication {
+	readonly issuer: string;
+	readonly issuedAt: number | undefined;
+	readonly acr: string | undefined;
+	readonly amr: readonly string[] | undefined;
+	readonly authTime: number | undefined;
+}
+
+/**
+ * Keyed by the answer object the validator returned, so an answer any other
+ * validator gives, a copy included, has no entry.
+ */
+const verifiedAuthentications = new WeakMap<ValidatedToken, VerifiedAuthentication>();
+
+/**
+ * The authentication context the built-in validator verified for this answer,
+ * or `undefined` when another validator gave it.
+ */
+export function verifiedAuthenticationOf(
+	validated: ValidatedToken,
+): VerifiedAuthentication | undefined {
+	return verifiedAuthentications.get(validated);
+}
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -78,6 +110,10 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  *
  * `issuer` is required (a non-empty string, else the constructor throws): without
  * it an at+jwt from the same `KeyStore` with another `iss` could be accepted.
+ *
+ * Each answer it gives is recorded with the authentication context read off
+ * the verified payload ({@link verifiedAuthenticationOf}), which the grant
+ * reads to carry the subject's `acr`, `amr` and `auth_time`.
  *
  * `validate` returns `null` for an unacceptable token (bad signature, wrong
  * `typ`, missing `sub`, expired, issuer mismatch, denylisted or watermarked) and
@@ -146,7 +182,7 @@ export function createSelfIssuedAccessTokenValidator(
 					? payload.may_act
 					: undefined;
 
-			return {
+			const answer: ValidatedToken = {
 				sub: payload.sub,
 				claims: payload,
 				...(typeof payload.scope === "string" ? { scope: payload.scope } : {}),
@@ -166,6 +202,18 @@ export function createSelfIssuedAccessTokenValidator(
 						}
 					: {}),
 			};
+			const amr = wellFormedAmr(payload.amr);
+			verifiedAuthentications.set(
+				answer,
+				Object.freeze({
+					issuer,
+					issuedAt: wellFormedAuthTime(payload.iat),
+					acr: wellFormedAcr(payload.acr),
+					amr: amr && Object.freeze(amr),
+					authTime: wellFormedAuthTime(payload.auth_time),
+				}),
+			);
+			return answer;
 		},
 	};
 }
