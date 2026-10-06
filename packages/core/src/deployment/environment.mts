@@ -20,11 +20,15 @@
  * development-only thing reads it: trimmed and in lower case, so
  * "Production" or "production\n" names production as surely; and
  * production or staging whichever of the names consulted says so, none
- * lifting another's.
+ * lifting another's; and development or test only when every name set says
+ * so and at least one is set.
  */
 
 /** The names that make a deployment one no development-only thing may run in. */
 const PRODUCTION_NAMES: ReadonlySet<string> = new Set(["production", "staging"]);
+
+/** The names a development-only thing may run under. */
+const DEVELOPMENT_NAMES: ReadonlySet<string> = new Set(["development", "test"]);
 
 /** `name` trimmed and in lower case, or `undefined` for a value that is no name or an empty one. */
 export function readEnvironmentName(name: unknown): string | undefined {
@@ -42,4 +46,13 @@ export function productionEnvironmentIn(
 		if (read !== undefined && PRODUCTION_NAMES.has(read)) return read as "production" | "staging";
 	}
 	return undefined;
+}
+
+/**
+ * Whether `names` name a development or test environment: at least one of
+ * them reads as a name, and every one that does reads as development or test.
+ */
+export function isDevelopmentEnvironment(names: readonly unknown[]): boolean {
+	const read = names.map(readEnvironmentName).filter((name) => name !== undefined);
+	return read.length > 0 && read.every((name) => DEVELOPMENT_NAMES.has(name));
 }
