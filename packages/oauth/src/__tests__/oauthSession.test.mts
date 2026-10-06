@@ -16,6 +16,8 @@
 
 import {
 	BootError,
+	createInMemorySessionLifecycleStore,
+	createInMemoryUserSessionStore,
 	createSymmetricKeyStore,
 	defineModule,
 	type GrantHandler,
@@ -76,6 +78,7 @@ describe("oauthSessionGrantModule", () => {
 							create: async () => {},
 							delete: async () => {},
 						}),
+						sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 					},
 				}),
 			],
@@ -126,6 +129,7 @@ describe("oauthSessionGrantModule", () => {
 							create: async () => {},
 							delete: async () => {},
 						}),
+						sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 					},
 				}),
 			],
@@ -256,6 +260,33 @@ describe("oauthSessionGrantModule", () => {
 		} finally {
 			await handle.dispose();
 		}
+	});
+
+	it("refuses boot with the grant on, userSessionStore wired and no sessionLifecycleStore, naming both slots", async () => {
+		const config = withGrants(makeValidAppConfig(), { session: true });
+		const err = await createTestApp({
+			modules: [oauthSessionGrantModule, keyStoreModule],
+			bootstrapComponents: {
+				config: captured(config),
+				pathResolver: (s) => s,
+				oauthTokenSettings,
+				userSessionStore: createInMemoryUserSessionStore(),
+			},
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-session" },
+		});
+		expect(String((err as BootError).message)).toMatch(
+			/userSessionStore is wired, but sessionLifecycleStore is not/,
+		);
 	});
 
 	it("refuses boot with the grant on and no oauthTokenSettings, naming the slot", async () => {

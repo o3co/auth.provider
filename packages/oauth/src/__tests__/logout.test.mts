@@ -49,6 +49,7 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
 
 /**
  * A federation that satisfies the `FederationProvider` contract, with whatever
@@ -1568,7 +1569,7 @@ describe("POST /oauth/logout", () => {
 		});
 
 		it("503 on a close that cannot commit sets Cache-Control: no-store and Pragma: no-cache", async () => {
-			const app = buildApp({ sessionLifecycle: closing({ outcome: "unavailable" }) });
+			const app = buildApp({ sessionLifecycle: closing(outsideAnswer<never>()) });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });

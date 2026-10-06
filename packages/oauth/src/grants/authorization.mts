@@ -159,9 +159,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	};
 	/**
 	 * The session lifecycle's outage at the join, said once at error on the
-	 * grant's line: with the error's projection when the lifecycle rejected
-	 * with its store's error; an `unavailable` answer's error is on the
-	 * lifecycle's own line.
+	 * grant's line: with the error's projection when the lifecycle rejected;
+	 * without `err` for any other answer than `joined` or `refused`, the
+	 * defensive fallback.
 	 */
 	const lifecycleUnavailable = (clientId: string, thrown?: { readonly error: unknown }): void => {
 		logger?.error(
@@ -837,7 +837,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						return await linkingUnavailable({ error });
 					}
 					if (joined.outcome === "refused") return { result: sessionInvalidated(at) };
-					if (joined.outcome === "unavailable") return await linkingUnavailable();
+					// Any answer other than `joined` (core's lifecycle gives none, as it
+					// rejects on an outage) is answered as the outage: fail-closed.
+					if (joined.outcome !== "joined") return await linkingUnavailable();
 				} catch (err) {
 					// The family is registered and its tokens are never served: revoked
 					// before the throw leaves, so none is left live outside the index.

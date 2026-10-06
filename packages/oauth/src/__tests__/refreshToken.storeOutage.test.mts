@@ -28,11 +28,11 @@
 
 import { createSecretKey } from "node:crypto";
 import {
+	createInMemorySessionLifecycleStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type GrantContext,
-	type GrantDependencies,
 	type RefreshTokenFamilyRevocation,
 	type RefreshTokenFamilyRotation,
 	type RefreshTokenFamilyStore,
@@ -87,7 +87,7 @@ const failingFamilyStore = (): RefreshTokenFamilyStore => {
 	};
 };
 
-const grant = (deps: Partial<GrantDependencies>, logger: MockLogger) =>
+const grant = (deps: Partial<RefreshTokenGrantDeps>, logger: MockLogger) =>
 	createRefreshTokenGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		// The grant verifies the presented token against the request's issuer.
@@ -158,9 +158,10 @@ describe("refresh grant — a store outage is logged, not only answered", () => 
 			},
 			delete: async () => {},
 		} as unknown as UserSessionStore;
-		const { result } = await grant({ userSessionStore }, logger).handle(
-			await ctx({ sid: "sid-1" }),
-		);
+		const { result } = await grant(
+			{ userSessionStore, sessionLifecycleStore: createInMemorySessionLifecycleStore() },
+			logger,
+		).handle(await ctx({ sid: "sid-1" }));
 		expect(result).toMatchObject({
 			status: 503,
 			error: "temporarily_unavailable",

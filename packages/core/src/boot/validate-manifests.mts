@@ -84,6 +84,7 @@ import {
 	federationTypeSnapshot,
 	parseFederationEntries,
 } from "./federation-entries.mjs";
+import { unreadCorsSection } from "./http-settings.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
 import {
 	checkReplicaSafety,
@@ -2224,8 +2225,11 @@ function oauthKeysNothingReads(raw: unknown, modules: readonly Module[]): z.core
  * `config-validation-failed` naming each operator path: every reserved key
  * (`reservedKeyIssues`: an `Object.prototype` member's name, or
  * `prototype`), every key of `oauth {}` nothing reads where its module is not
- * loaded (`oauthKeysNothingReads`), then the base's issues. No module is named: a module's own
- * configuration is its section, parsed after this.
+ * loaded (`oauthKeysNothingReads`), a `cors` section that sets anything while
+ * no loaded module owns `cors` (`unreadCorsSection`: core reads its CORS
+ * origins from the `httpSettings` slot alone), then the base's issues. No
+ * module is named: a module's own configuration is its section, parsed after
+ * this.
  * @internal
  */
 function validateAndComposeConfig(bootstrap: BootstrapMap, modules: readonly Module[]): unknown {
@@ -2234,6 +2238,10 @@ function validateAndComposeConfig(bootstrap: BootstrapMap, modules: readonly Mod
 
 	issues.push(...reservedKeyIssues(raw));
 	issues.push(...oauthKeysNothingReads(raw, modules));
+	const unreadCors = unreadCorsSection(raw, ownedSections(modules));
+	if (unreadCors !== undefined) {
+		issues.push({ code: "custom", path: ["cors"], message: unreadCors, input: undefined });
+	}
 	// Through `parseSection`: a parse that throws instead of answering — a
 	// getter in a configuration built in code that throws — is one more issue
 	// naming the schema, not an error escaping stage 1.

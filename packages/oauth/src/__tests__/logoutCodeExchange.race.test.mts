@@ -44,6 +44,7 @@ import {
 	type RefreshTokenFamilyRevocation,
 	readVersionedSessionLifecycle,
 	type SessionFamilyIndex,
+	type SessionJoinOutcome,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
 	type SupportsSessionEnd,
@@ -64,6 +65,7 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
 
 const HOUR = 3_600_000;
 const SID = "sid-race";
@@ -379,7 +381,7 @@ describe("a code exchange that joins through the session lifecycle", () => {
 			...w.grantStores,
 			sessionLifecycle: {
 				...(w.lifecycle as SessionLifecycle),
-				join: async () => ({ outcome: "unavailable" }),
+				join: async () => outsideAnswer<SessionJoinOutcome>(),
 			},
 		});
 
@@ -400,7 +402,7 @@ describe("a code exchange that joins through the session lifecycle", () => {
 				...w.grantStores,
 				sessionLifecycle: {
 					...(w.lifecycle as SessionLifecycle),
-					join: async () => ({ outcome: "unavailable" }),
+					join: async () => outsideAnswer<SessionJoinOutcome>(),
 				},
 			},
 			logger,
@@ -452,6 +454,50 @@ describe("a code exchange that joins through the session lifecycle", () => {
 			store: "session_lifecycle",
 			step: "join",
 			clientId: CLIENT_ID,
+		});
+		expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
+	});
+
+	it("a lifecycle join that rejects, and a revocation of its family that rejects too: 503, no token, the outage's line and then the revocation's", async () => {
+		const w = await world({ lifecycle: true });
+		const logger = createMockLogger();
+		const result = await w.exchange(
+			{
+				...w.grantStores,
+				refreshTokenFamilyRevocation: {
+					...w.grantStores.refreshTokenFamilyRevocation,
+					revokeFamily: async () => {
+						throw storeReplyError();
+					},
+				},
+				sessionLifecycle: {
+					...(w.lifecycle as SessionLifecycle),
+					join: async () => {
+						throw storeReplyError();
+					},
+				},
+			},
+			logger,
+		);
+
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session linking unavailable",
+		});
+		expect(result).not.toHaveProperty("tokens");
+		expect(logger.error.mock.calls.map(([, event]) => event)).toEqual([
+			"authorization_grant_store_unavailable",
+			"authorization_grant_refused_family_revocation_failed",
+		]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+			store: "session_lifecycle",
+			step: "join",
+			err: expect.objectContaining({ name: "ReplyError" }),
+		});
+		expect(logger.error.mock.calls[1]?.[0]).toMatchObject({
+			familyId: w.familyId(),
+			err: expect.objectContaining({ name: "ReplyError" }),
 		});
 		expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 	});

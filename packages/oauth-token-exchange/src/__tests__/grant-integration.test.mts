@@ -18,6 +18,7 @@ import {
 	type AppHandle,
 	type ClientRepository,
 	createApp,
+	createInMemoryUserSessionStore,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
 	evaluateGrantPolicy,
@@ -325,6 +326,21 @@ describe("tokenExchangeModule booted without the oauth module", () => {
 		expect(result.status).toBe(200);
 		if (!("tokens" in result)) return;
 		expect(result.tokens.expires_in).toBe(120);
+	});
+
+	it("refuses to boot with userSessionStore wired and no sessionLifecycle, naming both slots", async () => {
+		await expect(
+			boot({
+				config: configWith(),
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+				userSessionStore: createInMemoryUserSessionStore(),
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-token-exchange" },
+			message: expect.stringMatching(/userSessionStore is wired, but sessionLifecycle is not/),
+		});
 	});
 
 	it("is refused at boot when nothing fills oauthTokenSettings, naming the slot", async () => {

@@ -37,6 +37,9 @@
  * and warn-and-ignore (`INERT_PKCE_KEYS` in `@o3co/auth-provider-oauth`, for
  * keys whose ignored value leaves behavior strictly stronger).
  *
+ * A top-level section core reads none of is refused in the same words
+ * (`unreadSectionMessage`), by whoever owns what the section used to set.
+ *
  * Not for a value removed from a live enum (Zod's error names the accepted
  * values).
  */
@@ -186,6 +189,20 @@ export function findRelocatedKeys<R extends RelocatedPath>(
 
 /** What every relocated key's message ends with: remove it, from the file or the environment. */
 const THIS_FIELD = "this field from your config (or unset the environment variable that sets it).";
+
+/**
+ * What to tell the operator still writing a top-level section core reads
+ * none of, in the words a removed key is refused in: the section, what to do
+ * instead (`remedy`, full sentences), and to remove it. Quotes nothing of
+ * its value.
+ */
+export function unreadSectionMessage(section: string, remedy: string): string {
+	return goneKeyMessage(
+		section,
+		"is no longer read by core",
+		`${remedy} Remove this section from your config (or unset the environment variable that sets it).`,
+	);
+}
 
 /** What to tell the operator still setting a relocated key, in the words a removed key is refused in. */
 export function relocatedKeyMessage(key: RelocatedKey): string {

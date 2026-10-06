@@ -131,6 +131,15 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
 	const { keyStore, logger, subjectRevocation } = deps;
+	if (deps.userSessionStore !== undefined && deps.sessionLifecycleStore === undefined) {
+		throw new Error(
+			"The refresh_token grant: userSessionStore is wired, but sessionLifecycleStore is not. " +
+				"Where a user-session store is wired, core's session lifecycle is required: the grant " +
+				"admits the token's session through its lifecycle record. Wire core's session " +
+				"lifecycle: a session-store module that fills sessionLifecycleStore " +
+				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
+		);
+	}
 	// Read once, here. Only `"accept"` issues for an unknown family: any other
 	// value a hand-built deps carries refuses, as absent does.
 	const acceptUnknownFamily = deps.unknownFamilyPolicy === "accept";

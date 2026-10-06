@@ -5,6 +5,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createSymmetricKeyStore,
 	type TokenBinding,
@@ -95,6 +96,7 @@ async function buildApp(
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			userSessionStore: store,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 		} as SessionGrantDeps),
 	);
 	const { router } = await createOAuthRouter(express, {

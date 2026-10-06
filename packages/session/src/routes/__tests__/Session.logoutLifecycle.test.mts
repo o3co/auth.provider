@@ -242,10 +242,12 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		});
 	});
 
-	it("unavailable: 503, one error line, and the cookie kept for a retry", async () => {
+	it("an outcome the lifecycle does not declare: the outage, 503, one error line, and the cookie kept for a retry", async () => {
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
-			sessionLifecycle: fakeLifecycle({ close: async () => ({ outcome: "unavailable" }) }),
+			sessionLifecycle: fakeLifecycle({
+				close: (async () => ({ outcome: "undeclared" })) as unknown as SessionLifecycle["close"],
+			}),
 			logger,
 		});
 

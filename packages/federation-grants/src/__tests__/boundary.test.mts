@@ -36,6 +36,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
+	createInMemorySessionLifecycleStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
 	defineModule,
@@ -105,6 +106,8 @@ const storeModule = defineModule({
 /** Everything core's federation guard asks for the moment a federation is enabled. */
 const SESSION_FEDERATION_STORES = {
 	userSessionStore: {},
+	// Core's session lifecycle port, required beside the user-session store.
+	sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 	sessionRPRegistry: {},
 	sessionFamilyIndex: {},
 	sessionFederationIndex: {},

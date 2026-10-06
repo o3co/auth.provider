@@ -262,22 +262,25 @@ value that used to refuse the boot there (`webauthn.userVerification =
 "optional"`, `federation-grants.enabled = "sometimes"`) now boots, kept as
 written. An old path no loaded module relocates is kept the same way.
 
-**`cors` is no longer refused outright.** A loaded module that relocates it
-refuses it (`config-path-relocated`), as the standalone template's `http`
-does. Without one, a written `cors.allowedOrigins` boots, unread, where it
-used to refuse the boot; an empty `cors {}` sets nothing. Core reads no
-`cors`: a composition's CORS origins come from the `httpSettings` slot, so
-move them to the module that provides it.
-
-The only signal for such a section is one line at `warn`, naming the
-sections and never a value, and only to the logger the composition
+The only signal for a section nothing reads is one line at `warn`, naming
+the sections and never a value, and only to the logger the composition
 bootstraps beside the configuration (`bootstrapComponents.logger`): without
-one, a section nothing reads — a written `cors.allowedOrigins` among them —
-boots silently. The line is `config_sections_ignored`, or
+one, such a section boots silently. The line is `config_sections_ignored`, or
 `config_sections_not_loaded` where the composition hands boot
 `configDefaults` that hold the section and the configuration changed it; a
 section left equal to those defaults is not named. After the upgrade, treat
 either line naming a section you set as a setting nothing applies.
+
+**A written `cors` refuses the boot.** Core reads no `cors`: a
+composition's CORS origins come from the `httpSettings` slot, so move them
+to where the module that provides it reads them (in the standalone template,
+`http.cors.allowedOrigins`, `HTTP_CORS_ALLOWED_ORIGINS`). A loaded module
+that relocates `cors` refuses it naming its new path
+(`config-path-relocated`), as the standalone template's `http` does; without
+one, core refuses a `cors` that sets anything (`config-validation-failed`),
+naming `cors` and the slot and never a value, whether or not a logger is
+bootstrapped — unless a loaded module's own section is `cors`, which reads
+it. An empty `cors {}` sets nothing and boots.
 
 ### Keys removed
 
@@ -906,6 +909,13 @@ modules fills them.
   is on provides the slot itself, or the boot is refused
   (`missing-required-component`, naming `oauthTokenSettings`). A factor
   switched off by `mfa-totp-factor.enabled = false` requires nothing.
+- **BREAKING: `mfaModule` requires core's session lifecycle beside its
+  `userSessionStore` (#1030).** Without a `sessionLifecycleStore` (the port
+  core's session-store modules fill, which `sessionLifecycleModule` requires)
+  the boot is refused: `contribute-factory-failed`, the message naming
+  `userSessionStore` and `sessionLifecycleStore`. Its routes' admission reads
+  the session's lifecycle record, so a session closing or closed is admitted
+  to nothing.
 - **BREAKING: an enabled `authorization_code` grant with `subjectRevocation`
   wired requires `userSessionStore`.** Without one the boot is refused
   (`contribute-factory-failed`, naming both slots): wire a
@@ -1033,6 +1043,12 @@ modules fills them.
   `tokenBindingSettings` (`resolveTokenBindingSettings(config)`; in a test,
   `createTestTokenBindingSettings()`) instead of `config`; without it the
   grant throws a `TypeError` naming the slot when it is built.
+- **BREAKING: `webauthnSessionSubjectModule` requires core's session lifecycle
+  beside its `userSessionStore` (#1030).** Without a `sessionLifecycleStore`
+  (the port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) the boot is refused: `contribute-factory-failed`, the message
+  naming both slots. Its admission reads the session's lifecycle record, so a
+  session closing or closed registers no passkey.
 - **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
   section's defaults live only in the package's `config/reference.conf`. A
   configuration that layers the modules' references (`moduleReferences`, as
@@ -1068,6 +1084,14 @@ modules fills them.
   or the boot is refused for the missing component. A deps object handed to
   the module's factories carries `oauthTokenSettings` and `section`; `config`
   is no longer read. Disabled, the module requires nothing.
+- **BREAKING: an enabled device grant requires core's session lifecycle beside
+  its `userSessionStore` (#1030).** Without a `sessionLifecycleStore` (the
+  port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) `deviceAuthorizationGrantModule` is refused at boot:
+  `contribute-factory-failed`, the message naming both slots.
+  `createDeviceVerificationHandler` throws the same refusal. The
+  verification's admission reads the session's lifecycle record, so a session
+  closing or closed approves nothing.
 - **BREAKING: `deviceGrantConfigSchema` fills no default (#728).** The
   `device-grant` section's defaults live only in the package's
   `config/reference.conf`. A configuration that layers the modules'
@@ -1097,6 +1121,14 @@ modules fills them.
   throws a `RangeError` naming it when it is missing or breaks the slot's
   contract; `SessionGrantDeps` no longer has `config` (in a test,
   `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
+- **BREAKING: an enabled session grant with a `userSessionStore` requires
+  core's session lifecycle (#1030).** Without a `sessionLifecycleStore` (the
+  port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) `oauthSessionGrantModule` is refused at boot:
+  `contribute-factory-failed`, the message naming both slots, and
+  `createSessionGrant` throws the same refusal. The grant's admission reads
+  the session's lifecycle record, so a session closing or closed mints
+  nothing. A sessionless grant is unaffected.
 - **BREAKING: `subjectRevocationServiceModule` requires `oauthTokenSettings`,
   reads `federationGrantPolicy`, and no longer reads the configuration
   (#728).** It sizes the subject's revocation boundary from the token
@@ -1185,6 +1217,13 @@ modules fills them.
   refusals, and no longer with the module's own
   `federationGrantsModule: … with no auditSink component` error; match on
   the reason. Disabled, the module requires nothing.
+- **BREAKING: enabled federation grants require core's session lifecycle
+  beside the `userSessionStore` (#1030).** Without a `sessionLifecycleStore`
+  (the port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) `federationGrantsModule` is refused at boot:
+  `contribute-factory-failed`, the message naming both slots. The connect
+  flow's admission reads the session's lifecycle record, so a session closing
+  or closed connects nothing.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
@@ -1208,11 +1247,21 @@ modules fills them.
   place of the six session-cascade slots. A sessionless composition (client
   credentials, jwt-bearer) wires neither and is unaffected. A test or
   composition of your own that fills the slots by hand provides a
-  `sessionLifecycle` too.
+  `sessionLifecycle` too. Where another package's module admits a session,
+  it requires `sessionLifecycleStore` beside the store the same way; each
+  such refusal is listed with that module's own entry in this section.
   - The code exchange joins its session through the lifecycle alone: the
     grant no longer reads `sessionRPRegistry` or `sessionFamilyIndex`, and
     `oauthAuthorizationGrantsModule` no longer declares them, nor
     `sessionFederationIndex`.
+  - The `refresh_token` grant (`oauthAuthorizationGrantsModule`) is refused
+    the same way when no `sessionLifecycleStore` (the port core's
+    session-store modules fill, which `sessionLifecycleModule` requires) is
+    wired beside its `userSessionStore`: `contribute-factory-failed`, the
+    message naming both slots, and `createRefreshTokenGrant` throws the same
+    refusal. The grant's admission reads the token's session lifecycle
+    record, so a session closing or closed refreshes nothing. A composition
+    whose session-store module fills both is unaffected.
   - Introspection, `/oauth/userinfo` and `POST /oauth/federation/:name/token`
     read a session through the lifecycle alone. Their outage lines no longer
     carry `store: "user_session"`, nor (the federation-token route)
@@ -1241,6 +1290,14 @@ modules fills them.
     session already gone, reporting a logout that revoked nothing. A sid the
     lifecycle cannot hold is therefore a `503` too; such a sid is never
     issued.
+  - The `token_exchange` grant (`tokenExchangeModule`) is refused the same
+    way, with `contribute-factory-failed`, and `createTokenExchangeGrant`
+    throws the same refusal. The grant reads a presented token's session
+    through the lifecycle's `liveness` alone: the `userSessionStore`
+    fallback is removed, so `token_exchange_session_store_unavailable` no
+    longer carries `store: "user_session"` (`step: "get"`), only
+    `store: "session_lifecycle"` (`step: "liveness"`). Move an alert keyed
+    on the old value.
 - **BREAKING: `POST /session/logout` closes the session through the
   lifecycle only.** The path that deleted the `UserSession`, the subject-index
   entry and the federation tokens itself, without the lifecycle, is removed,
@@ -1251,6 +1308,18 @@ modules fills them.
   is core's `session_close_item_failed`. A federated login and a link join
   their federation through the lifecycle only; the federated login no longer
   writes the `sessionFederationIndex` entry itself.
+- **BREAKING: the session module no longer needs `sessionFederationIndex`.**
+  `sessionModule` and the federation router no longer require the slot (the
+  router's `sessionFederationIndex` option is removed). A link reads whether
+  the session already carries the federation from core's session lifecycle
+  (`sessionLifecycle.federations`) and no longer removes an index entry on
+  rollback; the lifecycle's join records the federation. A link's outage
+  there is logged as `federation_link_store_unavailable` with
+  `store: "session_lifecycle"`, `step: "federations"`, in place of
+  `store: "session_federation_index"`, `step: "list"` and `"remove"`.
+  Keep its provider: `sessionLifecycleModule` and the
+  `federation-stores-incomplete` guard still require the slot; only
+  `sessionModule`'s own `requires` and the router option drop it.
 - **BREAKING: every failed close at `POST /session/logout` is an outage.** A
   logout whose `sid` the session lifecycle cannot hold now answers
   `503 temporarily_unavailable` and keeps the cookie, as any close the
@@ -1263,6 +1332,19 @@ modules fills them.
   opened, cause `session_logout`, before it deletes the `UserSession`. A
   federated login whose join the lifecycle refuses (the session was closed
   during the sign-in) is still `401 login_required`, and logs nothing.
+- **Core's session lifecycle rejects an outage with the store's own error,
+  and logs nothing for it** (#1030). `open`, `join`, `close`, `federations`
+  and `liveness` reject where they answered `{ outcome: "unavailable" }`,
+  and the warn `session_lifecycle_unavailable` is no longer logged for them;
+  each consumer logs its own event once, at error, with the error's
+  projection. A caller of your own catches the rejection as an outage.
+  `{ outcome: "unavailable" }` is removed from `SessionOpenOutcome`,
+  `SessionJoinOutcome`, `SessionCloseOutcome`, `SessionFederations` and
+  `SessionLiveness`: a comparison against it no longer compiles, and a
+  lifecycle of your own rejects instead of answering it. The
+  close work's and the sweep's own lines (`session_close_item_failed`,
+  `session_lifecycle_unavailable` for a close-work completion or re-read,
+  or a resumed session, `session_lifecycle_sweep_*`) are unchanged.
 - **The session lifecycle sweeps unless told not to.** Installing
   `sessionLifecycleModule` starts a sweep that resumes the closes left
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`

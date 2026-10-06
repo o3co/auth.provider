@@ -41,6 +41,7 @@ import type {
 import {
 	consoleLogger,
 	coveredByRevocationBoundary,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
@@ -193,6 +194,7 @@ const makeHarness = (
 			...(overrides.attemptCounter ? { attemptCounter: overrides.attemptCounter } : {}),
 			deploymentMode: overrides.deploymentMode ?? "single",
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			// No requirement registered; what admission changes here (the
 			// session-admission ADR's D8) is admission.test.mts's.
 			requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
@@ -730,6 +732,7 @@ describe("verification attempts — no counter wired", () => {
 			attemptLimit: SHIPPED_ATTEMPT_LIMIT,
 			deploymentMode: deploymentMode as DeploymentMode,
 			userSessionStore: liveSessionStore(),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 			requireEmailVerified: false,
 			logger,
@@ -757,6 +760,7 @@ describe("verification attempts — no counter wired", () => {
 				attemptCounter: createMemoryAttemptCounter(),
 				deploymentMode: "multi",
 				userSessionStore: liveSessionStore(),
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 				requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 				requireEmailVerified: false,
 				logger,
@@ -797,6 +801,7 @@ describe("verification attempts — no counter wired", () => {
 						attemptLimit: attemptLimit as never,
 						deploymentMode: "single",
 						userSessionStore: liveSessionStore(),
+						sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 						requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 						requireEmailVerified: false,
 					}),
@@ -2171,6 +2176,20 @@ describe("the session check, further", () => {
 				requireEmailVerified: false,
 			} as never),
 		).toThrow(/userSessionStore/);
+	});
+
+	it("refuses to build a handler with a userSessionStore and no sessionLifecycleStore, naming both slots", () => {
+		expect(() =>
+			createDeviceVerificationHandler({
+				store: createMemoryDeviceCodeStore(),
+				settings,
+				attemptLimit: SHIPPED_ATTEMPT_LIMIT,
+				deploymentMode: "single",
+				userSessionStore: liveSessionStore(),
+				requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
+				requireEmailVerified: false,
+			}),
+		).toThrow(/userSessionStore is wired, but sessionLifecycleStore is not/);
 	});
 });
 

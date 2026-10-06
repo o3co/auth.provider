@@ -15,6 +15,8 @@ store and the callers' switch follow in the order below
 - Amended 2026-10-05: the service opens a record where a session is
   established (D8).
 - Amended 2026-10-06: the memory store, full, evicts a closed record.
+- Amended 2026-10-06: an outage rejects with the store's own error and is
+  logged by the caller; the service never answers `unavailable` (D8, D9).
 
 ## Context
 
@@ -402,3 +404,18 @@ its close work undone. A close run overlapping one that completed may
 answer `pending` once the closed record has left the store, as after its
 retention; a subject revocation may then report that sid not revoked until
 a retry. The port and its contract are unchanged.
+
+## Amendment 2026-10-06 — an outage rejects with the store's own error
+
+`open`, `join`, `close`, `federations` and `liveness` no longer answer
+`unavailable` (D8). A store that cannot answer rejects the call with its own
+error, unwrapped, and the service logs nothing for it: the caller logs the
+outage once, at error, with the error's projection, where it used to log an
+`unavailable` answer beside the service's own warn. Where D9 says a close
+answers `unavailable` — the closing commit did not land, whether it did could
+not be read, or an item of the close work run with no record to save it in
+failed — the close now rejects. `pending` and `done` are unchanged.
+`unavailable` is removed from the five answer types. The close work's
+and the sweep's own lines are unchanged: `session_lifecycle_unavailable`
+(warn) is still logged where a close's item ran but recording it failed, or a
+closing record could not be re-read by a close or the sweep.

@@ -20,7 +20,8 @@
  * opens a session's record as it is established, joins a session, closes it
  * and runs the close work, says whether it is live, and resumes closes left
  * pending. Its callers see `opened` / `joined` / `refused`, `done` /
- * `pending`, `live` / `not_live` and `unavailable`;
+ * `pending` and `live` / `not_live`; an outage rejects with the store's own
+ * error and logs nothing, so its caller logs it once, with the error;
  * generations, states, work items, the cause policy and the bridge to the
  * per-session stores stay here.
  *
@@ -89,13 +90,10 @@ export interface SessionOpenRequest {
  * `opened`: the session's record is active for that subject and end, written
  * now or already. `refused`: the sid holds another session's record (another
  * subject or end, or one closing or closed), or the end has passed; nothing
- * was written, and nothing is established on that sid. `unavailable`: the
- * store could not answer; nothing is established on it.
+ * was written, and nothing is established on that sid. A store that cannot
+ * answer rejects the call with its own error; nothing is established on it.
  */
-export type SessionOpenOutcome =
-	| { readonly outcome: "opened" }
-	| { readonly outcome: "refused" }
-	| { readonly outcome: "unavailable" };
+export type SessionOpenOutcome = { readonly outcome: "opened" } | { readonly outcome: "refused" };
 
 /** What a join adds to a session. At least one is named. */
 export interface SessionJoinRequest {
@@ -110,13 +108,10 @@ export interface SessionJoinRequest {
 /**
  * `joined`: hand out what joined. `refused`: the session is closing, closed
  * or gone; hand out nothing (the service has already revoked the family and
- * removed the federation's tokens). `unavailable`: a store could not answer;
- * hand out nothing.
+ * removed the federation's tokens). A store that cannot answer rejects the
+ * call with its own error; hand out nothing.
  */
-export type SessionJoinOutcome =
-	| { readonly outcome: "joined" }
-	| { readonly outcome: "refused" }
-	| { readonly outcome: "unavailable" };
+export type SessionJoinOutcome = { readonly outcome: "joined" } | { readonly outcome: "refused" };
 
 /**
  * `done`: the session is closed and every item of its close work ran.
@@ -131,35 +126,38 @@ export type SessionJoinOutcome =
  * answer `pending` once the closed record has left the store (evicted, as
  * after its retention); a subject revocation may then report that sid not
  * revoked until a retry.
- * `unavailable`: the closing commit did not land, or whether it did could
- * not be read; or, where the commit found no live record (the session's end
- * passed on the store's clock), an item of the close work, run with no
- * record to save it in, failed.
+ * The call rejects when the closing commit did not land, or whether it did
+ * could not be read (with the store's own error), or, where the commit found
+ * no live record (the session's end passed on the store's clock), when an
+ * item of the close work, run with no record to save it in, failed.
  */
-export type SessionCloseOutcome =
-	| {
-			readonly outcome: "done" | "pending";
-			readonly rps: readonly string[];
-			readonly federations: readonly string[];
-	  }
-	| { readonly outcome: "unavailable" };
+export type SessionCloseOutcome = {
+	readonly outcome: "done" | "pending";
+	readonly rps: readonly string[];
+	readonly federations: readonly string[];
+};
 
 /**
  * `listed`: the federations a session joined, in the order they joined:
  * while the per-session stores are read elsewhere, those of their index in
  * the order they were added (every join writes the index before the record),
  * then the record's, each once — the union and order the close that makes the
- * closing commit answers. `unavailable`: a store could not answer.
+ * closing commit answers. A store that cannot answer rejects the call with
+ * its own error.
  */
-export type SessionFederations =
-	| { readonly outcome: "listed"; readonly federations: readonly string[] }
-	| { readonly outcome: "unavailable" };
+export type SessionFederations = {
+	readonly outcome: "listed";
+	readonly federations: readonly string[];
+};
 
-/** `live`, with the user session; `not_live` from the closing commit on, or once the user session is gone. */
+/**
+ * `live`, with the user session; `not_live` from the closing commit on, or
+ * once the user session is gone. A store that cannot answer rejects the call
+ * with its own error.
+ */
 export type SessionLiveness =
 	| { readonly outcome: "live"; readonly session: UserSession }
-	| { readonly outcome: "not_live" }
-	| { readonly outcome: "unavailable" };
+	| { readonly outcome: "not_live" };
 
 /** How many closing sessions one resumption left `done`, still `pending`, or could not read. */
 export interface SessionResumeReport {
@@ -565,7 +563,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 	 * read — has no record to save the work in, so the work runs here, in its
 	 * phases, over the record the commit would have saved: the read record's
 	 * participants, or none. Any item that fails throws, and the close
-	 * answers `unavailable`; a later close runs it all again, except once the
+	 * rejects; a later close runs it all again, except once the
 	 * user session is deleted: a close then finds neither a record nor a user
 	 * session and answers `done`, and an entry the last phase left in the
 	 * subject's index lapses at its retention or goes with a subject-wide
@@ -707,25 +705,13 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			checkSessionLifecycleKey(sid, "sid");
 			checkSessionLifecycleKey(sub, "sub");
 			const end = checkSessionExpiresAt(expiresAt);
-			try {
-				return readSessionOpenAnswer(await store.open(sid, sub, end));
-			} catch (error) {
-				unavailable("open", sid, error);
-				return { outcome: "unavailable" };
-			}
+			return readSessionOpenAnswer(await store.open(sid, sub, end));
 		},
 
 		async join(sid, request) {
 			checkSessionLifecycleKey(sid, "sid");
 			const participants = participantsOf(request);
-			let joined: boolean;
-			try {
-				joined = await joins(sid, request, participants);
-			} catch (error) {
-				unavailable("join", sid, error);
-				return { outcome: "unavailable" };
-			}
-			if (joined) return { outcome: "joined" };
+			if (await joins(sid, request, participants)) return { outcome: "joined" };
 			await withdraw(sid, request);
 			return { outcome: "refused" };
 		},
@@ -742,19 +728,14 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 			let closing: Versioned<SessionLifecycleRecord> | undefined;
 			let record: SessionLifecycleRecord;
 			let bridged: BridgedClose = { rps: [], federations: [] };
-			try {
-				const read = readVersionedSessionLifecycle(await store.read(sid));
-				if (read !== null && read.value.state !== "active") {
-					closing = read;
-					record = read.value;
-				} else {
-					const begun = await begin(sid, cause, read?.value);
-					if (begun === null) return { outcome: "done", rps: [], federations: [] };
-					({ closing, record, bridged } = begun);
-				}
-			} catch (error) {
-				unavailable("close", sid, error);
-				return { outcome: "unavailable" };
+			const read = readVersionedSessionLifecycle(await store.read(sid));
+			if (read !== null && read.value.state !== "active") {
+				closing = read;
+				record = read.value;
+			} else {
+				const begun = await begin(sid, cause, read?.value);
+				if (begun === null) return { outcome: "done", rps: [], federations: [] };
+				({ closing, record, bridged } = begun);
 			}
 			const outcome =
 				closing === undefined || closing.value.state === "closed"
@@ -775,35 +756,25 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 		async federations(sid) {
 			// A sid the port cannot hold names no session; only a write refuses it.
 			if (!isSessionLifecycleKey(sid)) return { outcome: "listed", federations: [] };
-			try {
-				const read = readVersionedSessionLifecycle(await store.read(sid));
-				const own = read === null ? [] : idsOf(read.value, "federation");
-				// The index first: every join writes it before the record.
-				return {
-					outcome: "listed",
-					federations: [...new Set([...(await bridge.federations(sid)), ...own])],
-				};
-			} catch (error) {
-				unavailable("federations", sid, error);
-				return { outcome: "unavailable" };
-			}
+			const read = readVersionedSessionLifecycle(await store.read(sid));
+			const own = read === null ? [] : idsOf(read.value, "federation");
+			// The index first: every join writes it before the record.
+			return {
+				outcome: "listed",
+				federations: [...new Set([...(await bridge.federations(sid)), ...own])],
+			};
 		},
 
 		async liveness(sid) {
 			// A sid the port cannot hold names no session; only a write refuses it.
 			if (!isSessionLifecycleKey(sid)) return { outcome: "not_live" };
-			try {
-				const read = readVersionedSessionLifecycle(await store.read(sid));
-				// A logout through the per-session stores alone leaves a record
-				// active until it lapses; such a session is not live once its user
-				// session is deleted, which the read below answers.
-				if (read !== null && read.value.state !== "active") return { outcome: "not_live" };
-				const session = await userSessionOf(sid);
-				return session === null ? { outcome: "not_live" } : { outcome: "live", session };
-			} catch (error) {
-				unavailable("liveness", sid, error);
-				return { outcome: "unavailable" };
-			}
+			const read = readVersionedSessionLifecycle(await store.read(sid));
+			// A logout through the per-session stores alone leaves a record
+			// active until it lapses; such a session is not live once its user
+			// session is deleted, which the read below answers.
+			if (read !== null && read.value.state !== "active") return { outcome: "not_live" };
+			const session = await userSessionOf(sid);
+			return session === null ? { outcome: "not_live" } : { outcome: "live", session };
 		},
 
 		async resumePending() {

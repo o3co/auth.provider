@@ -67,8 +67,9 @@ export const recordedTokenType = (named: unknown): string | undefined => {
  * whose envelope was verified like a login's. An identity resolving to
  * nobody asks the Store to link; to someone else is `409` (linking never
  * merges accounts); to this account links nothing new. The federation is
- * then attached to the live session (index entry and upstream tokens under
- * the current `sid`); no `UserSession` is created and the session is not
+ * then attached to the live session (its upstream tokens under the current
+ * `sid`, and a join through core's session lifecycle); no `UserSession` is
+ * created and the session is not
  * regenerated. The session is admitted as `session.link_callback`; a
  * step-up is `login_required`, since the IdP's callback has no page to
  * return to.
@@ -86,14 +87,7 @@ export const completeLink = async (
 	res: Response,
 	log: Logger,
 ): Promise<unknown> => {
-	const {
-		admitLink,
-		auditSink,
-		userRepository,
-		sessionFederationIndex,
-		federationTokenStore,
-		sessionLifecycle,
-	} = ctx;
+	const { admitLink, auditSink, userRepository, federationTokenStore, sessionLifecycle } = ctx;
 	// The link belongs to the session the start recorded, not whichever
 	// session the browser holds now: a `form_post` callback arrives without
 	// the session cookie (SameSite=Lax), so the recorded `sid` is the only
@@ -202,22 +196,26 @@ export const completeLink = async (
 		});
 	}
 
-	// Whether the session already carried this federation: a failed re-link
-	// must not take an existing attachment down with it. `listed` says the
-	// read answered at all — until it has, nothing was written and there is
-	// nothing this request may undo.
+	// Whether the session already carried this federation, as the lifecycle
+	// lists the federations it joined: a failed re-link must not take an
+	// existing attachment down with it. `listed` says the read answered at
+	// all — until it has, nothing was attached to the session and there is
+	// nothing this request may undo (the Store's link above stands either
+	// way).
 	let hadFederation = false;
 	let listed = false;
-	// The write in flight, so the one catch that answers them all can log
+	// The step in flight, so the one catch that answers them all can log
 	// the one that failed.
 	let linking: { store: FederationStore; step: FederationStoreStep } = {
-		store: "session_federation_index",
-		step: "list",
+		store: "session_lifecycle",
+		step: "federations",
 	};
 	try {
-		hadFederation = (await sessionFederationIndex.listFederations(currentSid)).includes(
-			provider.name,
-		);
+		const carried = await sessionLifecycle.federations(currentSid);
+		if (carried.outcome !== "listed") {
+			throw new Error("the session lifecycle did not list the session's federations");
+		}
+		hadFederation = carried.federations.includes(provider.name);
 		listed = true;
 		if (profile.accessToken) {
 			linking = { store: "federation_token", step: "attach" };
@@ -246,10 +244,12 @@ export const completeLink = async (
 		// session closed since its admission is refused, and the lifecycle
 		// removes those tokens.
 		linking = { store: "session_lifecycle", step: "join" };
-		const joined = await sessionLifecycle.join(currentSid, { federation: provider.name });
-		if (joined.outcome === "refused") return notLive();
-		if (joined.outcome === "unavailable") {
-			throw new Error("the session lifecycle could not answer the join");
+		const { outcome: joined } = await sessionLifecycle.join(currentSid, {
+			federation: provider.name,
+		});
+		if (joined === "refused") return notLive();
+		if (joined !== "joined") {
+			throw new Error(`the session lifecycle answered ${joined} to the join`);
 		}
 	} catch (err) {
 		logStoreUnavailable(
@@ -261,23 +261,16 @@ export const completeLink = async (
 			linkContext,
 		);
 		// Best-effort rollback. The Store's link stands (the identity is the
-		// account's), but a half-attached federation must not be left on the
-		// live session: token record first, then index entry — unless the
-		// session already carried the federation, or the index could not even
-		// be read (then nothing was written).
+		// account's), but a half-attached federation's tokens must not be left
+		// on the live session — unless the session already carried the
+		// federation, or its federations could not even be read (then nothing
+		// was written). Membership is the lifecycle's, written by the join.
 		if (listed && !hadFederation) {
 			await cleanUp(
 				log,
 				"federation_token",
 				"delete",
 				() => federationTokenStore.delete(currentSid, provider.name),
-				linkContext,
-			);
-			await cleanUp(
-				log,
-				"session_federation_index",
-				"remove",
-				() => sessionFederationIndex.removeFederation(currentSid, provider.name),
 				linkContext,
 			);
 		}

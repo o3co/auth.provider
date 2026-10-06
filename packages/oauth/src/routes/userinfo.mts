@@ -209,8 +209,9 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 					error_description: "session store unavailable",
 				});
 			}
-			if (liveness.outcome === "unavailable") {
-				// The lifecycle logs its own error; this line carries none.
+			// Any answer other than `live` or `not_live` (core's lifecycle gives
+			// none, as it rejects on an outage) is answered as the outage.
+			if (liveness.outcome !== "live" && liveness.outcome !== "not_live") {
 				opts.logger?.error({ store: "session_lifecycle" }, "userinfo_store_unavailable");
 				return res.status(503).json({
 					error: "temporarily_unavailable",

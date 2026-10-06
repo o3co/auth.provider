@@ -17,15 +17,15 @@
 /**
  * The origins core's CORS middleware lets read are the `httpSettings` slot's,
  * and nothing else's: a composition without the slot allows no origin, and a
- * `cors` section in the configuration is read by nothing — kept as written
- * and named as ignored, unless a loaded module relocates it.
+ * `cors` section in the configuration that sets anything refuses the boot,
+ * since core reads none.
  * A slot whose origins break the slot's contract refuses the boot, naming the
  * member.
  */
 
 import express, { Router } from "express";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { HttpSettings } from "../../deployment/types.mjs";
 import { createApp } from "../../index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
@@ -131,42 +131,26 @@ describe("the CORS mount reads the httpSettings slot when the composition holds 
 		await expect(boot([httpModule(undefined)])).rejects.toThrow(/httpSettings/);
 	});
 
-	it("lets the slot's origins alone read when the configuration writes cors beside it, naming the section as ignored", async () => {
-		const warn = vi.fn();
-		const handle = await createApp({
+	it("refuses a configuration that still writes cors, beside the slot too, naming httpSettings and no origin", async () => {
+		const err: unknown = await createApp({
 			modules: [tokenRoute, httpModule(createTestHttpSettings({ allowedOrigins: [SLOT_ORIGIN] }))],
 			bootstrapComponents: {
 				config: { ...makeValidCoreConfig(), cors: { allowedOrigins: [CONFIG_ORIGIN] } },
 				pathResolver: (s: string) => s,
-				logger: {
-					trace: vi.fn(),
-					debug: vi.fn(),
-					info: vi.fn(),
-					warn,
-					error: vi.fn(),
-					fatal: vi.fn(),
-				},
 			} as never,
-		});
-		try {
-			const app = express();
-			app.use(handle.router);
-			expect((await preflight(app, SLOT_ORIGIN)).headers["access-control-allow-origin"]).toBe(
-				SLOT_ORIGIN,
-			);
-			expect(
-				(await preflight(app, CONFIG_ORIGIN)).headers["access-control-allow-origin"],
-			).toBeUndefined();
-			const ignored = warn.mock.calls.filter(
-				([, message]) => message === "config_sections_ignored",
-			);
-			expect(ignored).toEqual([
-				[{ sections: expect.arrayContaining(["cors"]) }, "config_sections_ignored"],
-			]);
-			expect(JSON.stringify(warn.mock.calls)).not.toContain(CONFIG_ORIGIN);
-		} finally {
-			await handle.dispose();
-		}
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return expect.fail("boot should have been refused");
+			},
+			(thrown: unknown) => thrown,
+		);
+
+		expect(err).toMatchObject({ reason: "config-validation-failed" });
+		expect(String((err as Error).message)).toMatch(
+			/cors is no longer read by core[\s\S]*httpSettings/,
+		);
+		expect(String((err as Error).message)).not.toContain(CONFIG_ORIGIN);
 	});
 
 	it("reads a slot the host fills through overrideComponents", async () => {

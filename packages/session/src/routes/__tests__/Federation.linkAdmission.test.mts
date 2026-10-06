@@ -574,7 +574,6 @@ describe("the link callback reads the session the start bound through admission 
 				error_description: "Linking a federated identity requires a live session",
 			});
 			expect(harness.repo.linkFederatedIdentity).not.toHaveBeenCalled();
-			expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
 		},
 	);
 

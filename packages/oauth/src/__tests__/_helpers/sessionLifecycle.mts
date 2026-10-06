@@ -39,9 +39,11 @@ import {
 	memoryFederationTokenStoreModule,
 	type RefreshTokenFamilyRevocation,
 	type SessionCloseNotifier,
+	type SessionFederations,
 	type SessionJoinOutcome,
 	type SessionJoinRequest,
 	type SessionLifecycle,
+	type SessionLiveness,
 	sessionLifecycleModule,
 	type UserSession,
 	type UserSessionStore,
@@ -101,20 +103,28 @@ export function joiningLifecycle(
 }
 
 /**
+ * An answer outside the outcomes any route acts on, typed as `T`: what a
+ * route's defensive fallback is pinned with. Core's lifecycle gives none, as
+ * it rejects on an outage.
+ */
+export const outsideAnswer = <T,>(): T => ({ outcome: "unrecognised" }) as unknown as T;
+
+/**
  * A session lifecycle whose `liveness` answers from `store` as core's does for
  * an active record: `live` with the user session it reads, `not_live` when
- * there is none, and `unavailable` when the read throws. Its `federations`
- * answers `federations` (none by default), or what the function answers for
- * the sid, `unavailable` when it throws. With `onOutage: "reject"`, a read
- * that throws rejects instead, as a lifecycle the host fills may. Its other
- * members are not expected to be called.
+ * there is none. Its `federations` answers `federations` (none by default),
+ * or what the function answers for the sid. A read that throws rejects with
+ * that error, as core's lifecycle does on an outage; with
+ * `onOutage: "answer"`, it answers outside the outcomes instead
+ * (`outsideAnswer`), for a route's defensive fallback. Its other members are
+ * not expected to be called.
  */
 export function livenessOver(
 	store: Partial<UserSessionStore>,
 	federations: readonly string[] | ((sid: string) => Promise<readonly string[]>) = [],
 	options: { readonly onOutage?: "answer" | "reject" } = {},
 ): SessionLifecycle {
-	const rejects = options.onOutage === "reject";
+	const rejects = options.onOutage !== "answer";
 	const unexpected = async (): Promise<never> => {
 		throw new Error("this test's session lifecycle only answers liveness and federations");
 	};
@@ -128,7 +138,7 @@ export function livenessOver(
 				session = await store.get?.(sid);
 			} catch (err) {
 				if (rejects) throw err;
-				return { outcome: "unavailable" };
+				return outsideAnswer<SessionLiveness>();
 			}
 			return session ? { outcome: "live", session } : { outcome: "not_live" };
 		},
@@ -138,7 +148,7 @@ export function livenessOver(
 				return { outcome: "listed", federations: await federations(sid) };
 			} catch (err) {
 				if (rejects) throw err;
-				return { outcome: "unavailable" };
+				return outsideAnswer<SessionFederations>();
 			}
 		},
 		resumePending: unexpected,
