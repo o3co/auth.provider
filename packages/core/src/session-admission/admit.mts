@@ -332,8 +332,9 @@ const copyView = (view: SessionView): SessionView =>
  *    token's own `amr`, record or not; a code carrier, over a record, on
  *    how its session had authenticated at `/authorize` as the code carries
  *    it (`codeReadingOver`), and on the record when it carries nothing
- *    readable.
- * 6. `acr_values`: `selectAcr` over the vouched `amr`, with reach the union
+ *    readable. A code whose primary is not the record's is
+ *    `unauthenticated`, nothing asked.
+ * 6. `acr_values`: `selectAcr` over the `amr` step 5 judged on, with reach the union
  *    of every requirement's when the session is live.
  * 7. `merge` of 5 and 6. In the met + step_up row, a step-up through the
  *    second-factor authority is never offered for `acr_values` onto a
@@ -385,15 +386,20 @@ export async function admitSession(
 	// the code carries, over the record. Each requirement session is a frozen
 	// copy of its own: the merge's here, and each requirement's below, so what
 	// one does to its copy reaches no other.
-	const reading: AuthenticationReading | null =
-		presented.carrier === "token"
-			? tokenReading(presented.tokenAmr)
-			: session === null
-				? null
-				: presented.carrier === "code" && checked.codeReading !== undefined
-					? codeReadingOver(checked.codeReading, session)
-					: sessionReading(session);
+	let reading: AuthenticationReading | null;
+	if (presented.carrier === "token") reading = tokenReading(presented.tokenAmr);
+	else if (session === null) reading = null;
+	else if (presented.carrier === "code" && checked.codeReading !== undefined) {
+		const over = codeReadingOver(checked.codeReading, session);
+		// The record's primary is not the code's: its other facts are not the
+		// code's session's, and nothing is asked of them.
+		if (over === undefined) return { outcome: "unauthenticated" };
+		reading = over;
+	} else reading = sessionReading(session);
 	const authentication = reading === null ? null : requirementSessionOf(reading);
+	// The amr every requirement is handed, held by the merge, and what a code
+	// carrier's acr is selected over.
+	const held = authentication?.amr ?? [];
 	let verdict: RequirementOutcome = { outcome: "met" };
 	let asked = false;
 	if (effective.grade !== "remediation") {
@@ -443,13 +449,15 @@ export async function admitSession(
 	const selection: AcrSelection | undefined =
 		requested.length === 0
 			? undefined
-			: // The amr step 5 judged on: a token's own, else the record's.
+			: // The amr step 5 judged on: a token's own, a code's, else the record's.
 				selectAcr(
 					requested,
-					(presented.carrier === "token"
-						? requirementSessionFromAmr(presented.tokenAmr)
-						: requirementSession(session)
-					)?.amr ?? [],
+					reading !== null && presented.carrier === "code"
+						? held
+						: ((presented.carrier === "token"
+								? requirementSessionFromAmr(presented.tokenAmr)
+								: requirementSession(session)
+							)?.amr ?? []),
 					checked.acrTable,
 					reach,
 				);
@@ -462,7 +470,7 @@ export async function admitSession(
 		noneConfigured,
 		requirements,
 		// What step 5 handed the requirements, from a reading no requirement was handed.
-		held: authentication?.amr ?? [],
+		held,
 		table: checked.acrTable,
 		codeFields: codeFieldsOf(reading),
 	});

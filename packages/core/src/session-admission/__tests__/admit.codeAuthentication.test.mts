@@ -43,6 +43,7 @@ import type {
 	SessionRequirement,
 } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
+import { authenticationFreshness } from "#/user-sessions/authentication.mjs";
 import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
 
@@ -227,26 +228,78 @@ describe("a code is judged on how its session had authenticated at /authorize", 
 		});
 	});
 
-	it("cannot tell the primary when the live record's is not the code's, or the code recorded none", async () => {
-		for (const authentication of [
-			{ primary: "fed", mfaAt: undefined },
-			{ primary: undefined, mfaAt: undefined },
-		]) {
-			expect(
-				await judgedOn(
-					steppedUp(),
-					codeClaimFirstRead(record({ sid: "sid-1", amr: ["pwd"], authentication })),
-				),
-				String(authentication.primary),
-			).toEqual({ authentication: undefined, amr: ["pwd"] });
-		}
-		// A record whose authentication cannot be read tells nothing either.
+	it("cannot tell the primary when the code recorded none, as /authorize could not", async () => {
 		expect(
 			await judgedOn(
-				session({ authentication: { primary: "" } as never }),
-				codeClaimFirstRead(passwordCode),
+				steppedUp(),
+				codeClaimFirstRead(
+					record({
+						sid: "sid-1",
+						amr: ["pwd"],
+						authentication: { primary: undefined, mfaAt: undefined },
+					}),
+				),
 			),
 		).toEqual({ authentication: undefined, amr: ["pwd"] });
+	});
+
+	it("refuses, asking no requirement, a code whose primary is not the live record's, or over a record whose authentication cannot be read", async () => {
+		const cases: readonly [string, UserSession, CodeCarrier][] = [
+			["a password code over a federated record", federatedSteppedUp(), passwordCode],
+			[
+				"a federated code over a password record",
+				steppedUp(),
+				record({
+					sid: "sid-1",
+					amr: ["fed"],
+					authentication: { primary: "fed", mfaAt: undefined },
+				}),
+			],
+			[
+				"a password code over a record whose authentication cannot be read",
+				session({ authentication: { primary: "" } as never }),
+				passwordCode,
+			],
+		];
+		for (const [label, live, code] of cases) {
+			const { requirement, seen } = watching();
+			for (const claim of [codeClaimFirstRead(code), codeClaimRevalidation(code, "user-1")]) {
+				expect(
+					await admitSession(deps(live, [requirement]), { claim, action: "test.use" }),
+					label,
+				).toEqual({ outcome: "unauthenticated" });
+			}
+			expect(seen, label).toEqual([]);
+		}
+	});
+
+	it("never reads a session the upstream left never fresh as fresh because the code names another primary", async () => {
+		// A requirement that holds the exchange to a fresh authentication: a
+		// federated record whose upstream showed no time is never fresh.
+		const { requirement } = watching((input) =>
+			input.session !== null &&
+			authenticationFreshness(input.session.authTime, input.authentication?.authentication) !==
+				undefined
+				? "met"
+				: "unmet",
+		);
+		const fed = record({
+			sid: "sid-1",
+			amr: ["fed"],
+			authentication: { primary: "fed", mfaAt: undefined },
+		});
+		expect(
+			await admitSession(deps(federatedSteppedUp(), [requirement]), {
+				claim: codeClaimFirstRead(fed),
+				action: "test.use",
+			}),
+		).toEqual({ outcome: "unmet", requirement: "watch", session: federatedSteppedUp() });
+		expect(
+			await admitSession(deps(federatedSteppedUp(), [requirement]), {
+				claim: codeClaimFirstRead(passwordCode),
+				action: "test.use",
+			}),
+		).toEqual({ outcome: "unauthenticated" });
 	});
 
 	it("reads an amr the code carries in no admissible shape as vouching for nothing", async () => {
@@ -289,6 +342,38 @@ describe("a code is judged on how its session had authenticated at /authorize", 
 		expect(second.seen[0]?.authentication?.authentication?.mfaAt).toEqual(MFA_AT);
 		// The claim read the code once, when it was built.
 		expect(authentication.mfaAt.getTime()).toBe(0);
+	});
+
+	it("selects an acr from what the code carries, not from the record a step-up moved since", async () => {
+		const asks = { acrValues: ["urn:example:mfa"] };
+		const withTable = (requirements: SessionRequirement[] = []): AdmissionDeps => ({
+			...deps(steppedUp(), requirements),
+			acrTable: readAcrTable({ "urn:example:mfa": ["mfa"] }),
+		});
+		expect(
+			await admitSession(withTable(), {
+				claim: codeClaimFirstRead(passwordCode),
+				action: "test.use",
+				asks,
+			}),
+		).toEqual({ outcome: "unmet", requirement: "acr", session: steppedUp() });
+		expect(
+			await admitSession(withTable(), {
+				claim: codeClaimFirstRead(
+					record({
+						sid: "sid-1",
+						amr: ["pwd", "otp", "mfa"],
+						authentication: { primary: "pwd", mfaAt: MFA_AT },
+					}),
+				),
+				action: "test.use",
+				asks,
+			}),
+		).toMatchObject({
+			outcome: "admitted",
+			acr: "urn:example:mfa",
+			codeFields: { amr: ["pwd", "otp", "mfa"] },
+		});
 	});
 
 	it("leaves the claim's shape as it was: what the code carries is not a field of the claim", () => {

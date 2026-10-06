@@ -644,22 +644,24 @@ export interface CodeReading {
  * A code over the live record `session` names: the code's primary, `mfaAt`
  * and `amr` — a step-up recorded since moves the session, not the code — and
  * what a step-up never changes (`federation`, `upstreamAmr`,
- * `upstreamAuthTime`) from the record, only while the record's primary is the
- * code's. Otherwise, or when the code recorded no primary, how the session
- * was established cannot be told.
+ * `upstreamAuthTime`) from the record. A code that recorded no primary
+ * cannot tell it, as `/authorize` could not. `undefined` when the record's
+ * primary is not the code's, or cannot be read: the record's other facts are
+ * not that code's, and the code is refused rather than read as one whose
+ * primary cannot be told, which a freshness ask reads as fresh.
  */
-export function codeReadingOver(code: CodeReading, session: UserSession): AuthenticationReading {
+export function codeReadingOver(
+	code: CodeReading,
+	session: UserSession,
+): AuthenticationReading | undefined {
+	if (code.primary === undefined) return { established: undefined, vouched: code.vouched };
 	const { established } = readRecord(session);
+	if (established === undefined || established.primary !== code.primary) return undefined;
 	return {
-		established:
-			code.primary === undefined ||
-			established === undefined ||
-			established.primary !== code.primary
-				? undefined
-				: {
-						...established,
-						mfaAt: code.mfaAt === undefined ? undefined : new Date(code.mfaAt.getTime()),
-					},
+		established: {
+			...established,
+			mfaAt: code.mfaAt === undefined ? undefined : new Date(code.mfaAt.getTime()),
+		},
 		vouched: code.vouched,
 	};
 }
