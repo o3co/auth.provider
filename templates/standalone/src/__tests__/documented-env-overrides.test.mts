@@ -480,11 +480,11 @@ function commentedFederationBindings(): string {
 }
 
 /**
- * The provider environment `o3co/auth`'s `tests/docker-compose.yml` sets,
- * transcribed: each renamed variable under its old and its new name, the two
- * at one value. The umbrella E2E boots the shipped template with exactly this,
- * so a parse failure here is a red umbrella build that this repository can see
- * first. `SESSION_STORE_SECURE=false` is the one it cannot run without: the
+ * The provider environment `o3co/auth`'s `tests/docker-compose.yml` is to
+ * set, transcribed: each renamed variable under its new name alone, since an
+ * old name set refuses boot beside its new one too. The umbrella E2E boots
+ * the shipped template with this, so a parse failure here is a red umbrella
+ * build that this repository can see first. `SESSION_STORE_SECURE=false` is the one it cannot run without: the
  * suite speaks plain HTTP.
  *
  * The two `FEDERATION_TOKEN_STORE` lines are required: the federation token
@@ -493,37 +493,23 @@ function commentedFederationBindings(): string {
  * Redis store is selected with its encryption key.
  */
 const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
-	OAUTH_JWT_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: "e2e-shared-hs256-secret.at-least-32-bytes.ok",
 	KEY_STORE_LOCAL_SECRET: "e2e-shared-hs256-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.e2e.test",
-	SESSION_SECRET: "lO0QH09fuKSGuViZ9myJbH3jsgai99A2GpC3RYRuy6Y=",
 	SESSION_STORE_SECRET: "lO0QH09fuKSGuViZ9myJbH3jsgai99A2GpC3RYRuy6Y=",
-	SESSION_SECURE: "false",
 	SESSION_STORE_SECURE: "false",
-	SESSION_NAME: "auth.session",
 	SESSION_STORE_NAME: "auth.session",
-	DEPLOYMENT_MODE: "multi",
 	CORE_DEPLOYMENT_MODE: "multi",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
 	REDIS_CLIENTS_URL: "redis://redis:6379",
-	SESSION_STORAGE_REDIS_URL: "redis://redis:6379",
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis:6379",
-	USER_SESSION_STORES_ADAPTER: "redis",
 	ADAPTERS_USER_SESSION_STORES: "redis",
-	RATE_LIMITER_ADAPTER: "redis",
 	ADAPTERS_RATE_LIMITER: "redis",
-	OAUTH_CODE_ADAPTER: "redis",
 	ADAPTERS_CODE_REPOSITORY: "redis",
-	FEDERATION_TOKEN_STORE_TYPE: "redis",
 	ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
-	CLIENT_USER_TYPE: "yaml",
 	ADAPTERS_USER_REPOSITORY: "yaml",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
-	OAUTH_GRANTS_SESSION_ENABLED: "true",
 	OAUTH_SESSION_ENABLED: "true",
 	MFA_MODE: "off",
 };
@@ -1245,12 +1231,18 @@ describe("the shipped config boots with every documented override supplied as a 
 			).rejects.toMatchObject({ reason: "environment-variable-renamed" });
 		});
 
-		it("boots with OAUTH_ACCESS_TOKEN_EXPIRES_IN beside its new name set to the same value, reading the new name", async () => {
-			const config = await bootParsed({
+		it("refuses OAUTH_ACCESS_TOKEN_EXPIRES_IN beside its new name set to the same value", async () => {
+			const booting = bootParsed({
 				...DOCUMENTED_ENV,
 				OAUTH_ACCESS_TOKEN_EXPIRES_IN:
 					DOCUMENTED_ENV.OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN as string,
 			});
+			await expect(booting).rejects.toMatchObject({ reason: "environment-variable-renamed" });
+			await expect(booting).rejects.toThrow(/unset OAUTH_ACCESS_TOKEN_EXPIRES_IN/);
+		});
+
+		it("boots with OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN alone, reading it", async () => {
+			const config = await bootParsed(DOCUMENTED_ENV);
 			expect(oauthSection(config).accessToken).toEqual({
 				defaultExpiresIn: 900,
 				maxExpiresIn: 7200,

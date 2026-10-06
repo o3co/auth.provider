@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import { environmentVariableFor } from "#/config/environment-variable.mjs";
 import {
 	findRelocatedKeys,
+	findRenamedVariables,
 	pathsSetBy,
 	relocatedKeyMessage,
 	renamedVariableMessage,
@@ -206,6 +207,51 @@ describe("findRelocatedKeys — a key that moved", () => {
 		expect(relocatedKeyMessage({ from: "old", to: null })).toBe(
 			"old was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md). Remove this field from your config " +
 				"(or unset the environment variable that sets it).",
+		);
+	});
+});
+
+describe("findRenamedVariables — an old name set refuses, whatever the new one holds", () => {
+	const moved = { from: "OLD", oldPath: "old", to: "NEW", path: "new" } as const;
+	const removed = { from: "GONE", oldPath: "gone", to: null, path: null } as const;
+	const captured = (values: Record<string, string | null>) => ({
+		"renamed-variables": { OLD: null, NEW: null, GONE: null, ...values },
+	});
+
+	it("finds the old name set alone: the new one unset", () => {
+		expect(findRenamedVariables(captured({ OLD: "5" }), [moved])).toEqual([
+			{ ...moved, state: "unset" },
+		]);
+	});
+
+	it.each([
+		["a different value", "5", "6"],
+		["the same value", "5", "5"],
+		["the empty string, both", "", ""],
+	])("finds the old name set beside the new one at %s", (_what, old, current) => {
+		expect(findRenamedVariables(captured({ OLD: old, NEW: current }), [moved])).toEqual([
+			{ ...moved, state: "different" },
+		]);
+	});
+
+	it("finds nothing when the new name alone is set, or neither", () => {
+		expect(findRenamedVariables(captured({ NEW: "5" }), [moved])).toEqual([]);
+		expect(findRenamedVariables(captured({}), [moved])).toEqual([]);
+	});
+
+	it("finds a removed key's variable set, the empty string included", () => {
+		for (const value of ["true", ""]) {
+			expect(findRenamedVariables(captured({ GONE: value }), [removed])).toEqual([
+				{ ...removed, state: "removed" },
+			]);
+		}
+	});
+
+	it("tells the operator to unset the old name, quoting neither value", () => {
+		const message = renamedVariableMessage({ ...moved, module: "core", state: "different" });
+		expect(message).toBe(
+			"OLD was renamed NEW, the variable new is bound to; see the upgrade guide (docs/upgrading-from-v0.16.0.md). " +
+				"NEW is set as well: keep the value you mean in NEW and unset OLD.",
 		);
 	});
 });

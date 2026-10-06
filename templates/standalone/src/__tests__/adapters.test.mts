@@ -285,9 +285,12 @@ describe("a variable renamed with a selection", () => {
 	);
 
 	it.each(SELECTIONS)(
-		"adapters.%s: the old variable beside ADAPTERS_%s at the same value is read",
-		(key, name, _oldPath, oldName, value) => {
-			expect(adaptersFrom({ [oldName]: value, [`ADAPTERS_${name}`]: value })[key]).toBe(value);
+		"adapters.%s: the old variable beside ADAPTERS_%s at the same value is refused all the same",
+		(_key, name, _oldPath, oldName, value) => {
+			const err = refusal({ [oldName]: value, [`ADAPTERS_${name}`]: value });
+			expect(err.reason).toBe("environment-variable-renamed");
+			expect(err.message).toContain(`unset ${oldName}`);
+			expect(err.details).toMatchObject({ renamed: [{ from: oldName, state: "different" }] });
 		},
 	);
 });

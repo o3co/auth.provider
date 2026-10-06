@@ -20,8 +20,8 @@
  * `oauth-session.enabled` and the other grants' under
  * `oauth-authorization.grants`, with their defaults in the package's
  * `config/reference.conf`. A path they moved from refuses boot naming the new
- * one, a variable renamed with them refuses boot unless its new name carries
- * the same value, and the authorization-code grant's `pkce` block, and its
+ * one, a variable renamed with them refuses boot while its old name is set,
+ * whatever its new name holds, and the authorization-code grant's `pkce` block, and its
  * variable, refuse boot as removed. The refresh grant's unknown-family policy
  * sits beside its switch, moved from `oauth.refreshToken`; `legacyRtPolicy`,
  * `legacyTokenCompat` and `oauth.authorize.allowUnmarkedClients` refuse boot
@@ -790,7 +790,28 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			});
 		});
 
-		it("boots with OAUTH_ACCESS_TOKEN_EXPIRES_IN beside its new name set to the same value, minting the new name's", async () => {
+		it("refuses OAUTH_ACCESS_TOKEN_EXPIRES_IN beside its new name set to the same value", async () => {
+			const err = await refusal((config) => config, {
+				OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900",
+				OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "900",
+			});
+
+			expect(err.details).toEqual({
+				reason: "environment-variable-renamed",
+				renamed: [
+					{
+						module: "oauth",
+						from: "OAUTH_ACCESS_TOKEN_EXPIRES_IN",
+						to: "OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
+						path: "oauth.accessToken.defaultExpiresIn",
+						state: "different",
+					},
+				],
+			});
+			expect(err.message).toContain("unset OAUTH_ACCESS_TOKEN_EXPIRES_IN");
+		});
+
+		it("boots with OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN alone, minting its value", async () => {
 			const seen: { settings?: OAuthTokenSettings } = {};
 			const reader = defineModule({
 				name: "test:token-settings-reader",
@@ -828,7 +849,6 @@ describe("boot, over a configuration that captures the modules' renamed variable
 						...config,
 						"renamed-variables": {
 							...(config["renamed-variables"] as object),
-							OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900",
 							OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "900",
 						},
 					},
@@ -872,7 +892,19 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		});
 	});
 
-	it("boots with OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY beside its new name set to the same value", async () => {
+	it("refuses OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY beside its new name set to the same value", async () => {
+		const err = await refusal((config) => config, {
+			OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
+			OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
+		});
+
+		expect(err.details).toMatchObject({
+			reason: "environment-variable-renamed",
+			renamed: [{ from: "OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY", state: "different" }],
+		});
+	});
+
+	it("boots with OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY alone", async () => {
 		const modules = [oauthAuthorizationGrantsModule];
 		const slots = defineModule({
 			name: "test:slots",
@@ -902,7 +934,6 @@ describe("boot, over a configuration that captures the modules' renamed variable
 					},
 					"renamed-variables": {
 						...config["renamed-variables"],
-						OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
 						OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "accept",
 					},
 				} as never,

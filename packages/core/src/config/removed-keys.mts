@@ -29,8 +29,8 @@
  * the move, or bound to a removed key, is declared beside them
  * (`section.renamedVariables`) and captured by the declaring package's
  * `reference.conf` (`RENAMED_VARIABLES_SECTION`): while the resolution saw its
- * old name set, boot refuses unless it saw the new name set to the same
- * string, and always for a removed key's (`environment-variable-renamed`).
+ * old name set, boot refuses, whether or not it saw the new name set, and
+ * whatever either holds (`environment-variable-renamed`).
  * Both refusals are removed at the first major release;
  * `relocatedPaths.drift.test.mts` fails the cut that forgets.
  * `docs/release-policy.md` §"Retiring a config key" decides between a removal
@@ -249,9 +249,10 @@ export interface RenamedVariable {
 
 /**
  * Why a rename refuses boot: the old name set and the new one `unset`, or set
- * to a `different` string; the variable of a `removed` key set; or a name the
- * configuration does not capture (`uncaptured`), which cannot be told apart
- * from one set. No value is carried.
+ * as well — `different` names, whatever either holds; the variable of a
+ * `removed` key set; or a name the configuration does not capture
+ * (`uncaptured`), which cannot be told apart from one set. No value is
+ * carried, and none is compared.
  */
 export type RenamedVariableState = "unset" | "different" | "removed" | "uncaptured";
 
@@ -265,9 +266,9 @@ const capturedIn = (section: unknown, name: string): string | null | undefined =
 /**
  * Every rename `config`'s captures break, in `renames` order: a name not
  * captured; a removed key's variable set (the empty string included); the old
- * name set while the new one is unset or set to a different string. The two
- * set to the same string, or the old name unset, break nothing. A default at
- * the new path is not the new name set.
+ * name set, whether the new one is unset or set, to any string. Only the old
+ * name unset breaks nothing. A default at the new path is not the new name
+ * set.
  */
 export function findRenamedVariables<V extends RenamedVariable>(
 	config: unknown,
@@ -278,7 +279,7 @@ export function findRenamedVariables<V extends RenamedVariable>(
 		const old = capturedIn(section, rename.from);
 		const current = rename.to === null ? null : capturedIn(section, rename.to);
 		if (old === undefined || current === undefined) return [{ ...rename, state: "uncaptured" }];
-		if (old === null || current === old) return [];
+		if (old === null) return [];
 		if (rename.to === null) return [{ ...rename, state: "removed" }];
 		return [{ ...rename, state: current === null ? "unset" : "different" }];
 	});
@@ -354,7 +355,7 @@ export function renamedVariableMessage(
 			return goneKeyMessage(
 				rename.from,
 				`was renamed ${rename.to}, the variable ${rename.path} is bound to`,
-				`${rename.to} is set to a different value: keep the one you mean in ${rename.to} and unset ${rename.from}.`,
+				`${rename.to} is set as well: keep the value you mean in ${rename.to} and unset ${rename.from}.`,
 			);
 	}
 }

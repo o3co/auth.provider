@@ -22,9 +22,8 @@
  * bundles are listed whatever the map says (`federation-types.test.mts`
  * boots them). A variable the
  * template bound before, `FEDERATIONS_<NAME>_<KEY>`, set alone or beside its
- * new name at a different value is refused before any module is chosen,
- * naming the new variable and path and never a value; the two at one value
- * are accepted. The map written at the top level refuses boot, naming its
+ * new name, at any value, is refused before any module is chosen, naming the
+ * new variable and path and never a value. The map written at the top level refuses boot, naming its
  * paths under `core.federations`.
  */
 
@@ -206,9 +205,13 @@ describe("a variable the template bound before, FEDERATIONS_<NAME>_<KEY>", () =>
 	);
 
 	it.each(RENAMED)(
-		"core.federations.%s.%s: %s beside its new name at the same value is read",
-		(name, key, old, variable, value) => {
-			expect(String(federationsOf({ [old]: value, [variable]: value })[name]?.[key])).toBe(value);
+		"core.federations.%s.%s: %s beside its new name at the same value is refused all the same",
+		(_name, _key, old, variable, value) => {
+			const err = refusal({ [old]: value, [variable]: value });
+			expect(err).toMatchObject({
+				reason: "environment-variable-renamed",
+				details: { renamed: [{ from: old, state: "different" }] },
+			});
 		},
 	);
 });

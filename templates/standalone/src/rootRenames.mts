@@ -17,12 +17,12 @@
 /**
  * The variables renamed with a path of the composition root's own layers,
  * which no module declares: the adapter selections and the federations the
- * template ships. Phase one refuses an old name set alone, or beside its new
- * name at a different value, before any module is chosen, as boot refuses a
- * variable a module declares renamed (`environment-variable-renamed`); the
- * two at one value are accepted. Boot's own check cannot hold these: an
- * adapter selection decides which modules are chosen before boot, and a
- * federation's key sits in core's section, whose renames core alone declares.
+ * template ships. Phase one refuses an old name set, alone or beside its new
+ * name at any value, before any module is chosen, as boot refuses a
+ * variable a module declares renamed (`environment-variable-renamed`).
+ * Boot's own check cannot hold these: an adapter selection decides which
+ * modules are chosen before boot, and a federation's key sits in core's
+ * section, whose renames core alone declares.
  */
 
 import { variablesRenamed } from "./bootRefusal.mjs";
@@ -41,9 +41,9 @@ export interface RootRename {
 
 /**
  * Refuses, with an `environment-variable-renamed` `BootError`, an old name in
- * `env` set alone (`unset`), or beside its new name at a different value
- * (`different`); the two at one value are accepted. Every such rename is
- * named at once; no value is quoted or carried.
+ * `env` set alone (`unset`), or beside its new name (`different`, whatever
+ * either holds), in the words core refuses a module's rename in. Every such
+ * rename is named at once; no value is compared, quoted or carried.
  */
 export function refuseRenamedVariables(
 	env: Readonly<Record<string, string>>,
@@ -51,8 +51,7 @@ export function refuseRenamedVariables(
 ): void {
 	const refused = renames.flatMap((rename) => {
 		const { from, to } = rename;
-		const old = env[from];
-		if (old === undefined || env[to] === old) return [];
+		if (env[from] === undefined) return [];
 		return [
 			{ ...rename, state: env[to] === undefined ? ("unset" as const) : ("different" as const) },
 		];
@@ -62,7 +61,7 @@ export function refuseRenamedVariables(
 		const renamed = `${from} was renamed ${to}, the variable ${path} is bound to; see the upgrade guide (docs/upgrading-from-v0.16.0.md).`;
 		return state === "unset"
 			? `${renamed} Set ${to} instead and unset ${from}.`
-			: `${renamed} ${to} is set to a different value: keep the one you mean in ${to} and unset ${from}.`;
+			: `${renamed} ${to} is set as well: keep the value you mean in ${to} and unset ${from}.`;
 	});
 	throw variablesRenamed(
 		`The environment sets ${refused.length} variable(s) that were renamed: ${named.join(" ")}`,

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -128,10 +128,10 @@ naming each key's new path, and `oauth.dpop.replay-store` as removed: the
 seen-set's own module chooses the backend. The nonce variables are
 `DPOP_NONCE_REQUIRED`, `DPOP_NONCE_TTL_SECONDS` and `DPOP_NONCE_SECRET`, and
 the module declares `OAUTH_DPOP_NONCE_REQUIRED`, `OAUTH_DPOP_NONCE_TTL_SECONDS`
-and `OAUTH_DPOP_NONCE_SECRET` their old names: an old name set alone, or
-beside its new name at a different value, refuses boot
-(`environment-variable-renamed`, naming no value); both set to the same value
-boot.
+and `OAUTH_DPOP_NONCE_SECRET` their old names: an old name set, alone or
+beside its new name at any value, refuses boot
+(`environment-variable-renamed`, naming no value). Set the new name and unset
+the old one.
 
 **Which tokens are bound.** A public client's access token and refresh token
 both carry `cnf.jkt`. A confidential client's access token is bound and its
