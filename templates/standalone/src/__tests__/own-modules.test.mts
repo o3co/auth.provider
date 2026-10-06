@@ -214,19 +214,26 @@ const REFERENCED_MODULES = [
 	auditSinkModuleFor("logger"),
 ];
 
+/** The rate limiters' sections, in which the template's reference gives the MFA routes' budget. */
+const LIMITER_SECTIONS = ["core-rate-limiter-memory", "redis-rate-limiter"] as const;
+
 describe("the template's config/reference.conf", () => {
-	it("holds only its own modules' sections and the composition root's adapters and mfaMode, each module's parsing its part without losing a path", () => {
+	it("holds only its own modules' sections, the composition root's adapters and mfaMode, and the limiters' MFA budget, each module's parsing its part without losing a path", () => {
 		expect(
 			packageReferenceProblems({
 				reference: TEMPLATE_REFERENCE,
 				modules: REFERENCED_MODULES,
 				// `adapters` and `mfaMode` are the composition root's own,
 				// which phase one reads with its own schema
-				// (`adapters.test.mts`, `mfa-switch.test.mts`).
+				// (`adapters.test.mts`, `mfa-switch.test.mts`); the limiters'
+				// sections hold the MFA budget alone (below), each parsed by its
+				// own module where it is loaded (`mfa-routes-budget.test.mts`).
 				read: (path, env) => {
 					const {
 						[ADAPTERS_SECTION]: _adapters,
 						[MFA_SWITCH]: _mfaMode,
+						[LIMITER_SECTIONS[0]]: _memoryLimiter,
+						[LIMITER_SECTIONS[1]]: _redisLimiter,
 						...tree
 					} = parseFile(path, {
 						env: { ...env },
@@ -235,6 +242,14 @@ describe("the template's config/reference.conf", () => {
 				},
 			}),
 		).toEqual([]);
+	});
+
+	it.each(LIMITER_SECTIONS)("gives %s the MFA routes' budget, and nothing else", (section) => {
+		const tree = parseFile(fileURLToPath(TEMPLATE_REFERENCE), { env: {} }).toObject() as Record<
+			string,
+			unknown
+		>;
+		expect(tree[section]).toEqual({ limits: { mfa: { limit: 60, windowSeconds: 300 } } });
 	});
 
 	it.each(REFERENCED_MODULES)("is among the references $name alone brings", (module) => {

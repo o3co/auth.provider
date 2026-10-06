@@ -63,6 +63,26 @@ rather than `workspace:*`, and refresh the lockfile. Then:
   store (#1177).
 - A mail sender of your own goes through `buildModules`'
   `overrides.mailSenderModules`, never into the module list (#1241).
+- The new `application.conf` writes no section for a module a default boot
+  does not load. If you keep an `application.conf` copied before this change,
+  edit it in three places:
+  - Replace the whole `federation-grants { … }` block with the single line
+    `federation-grants.enabled = ${?FEDERATION_GRANTS_ENABLED}`. The feature
+    stays off while the variable is unset, and the federation-grants
+    package's `reference.conf` sets the rest of the section, bound to the
+    same variables.
+  - Delete the `redis-federation-grant-store { encryptionMode … }` block. The
+    Redis package's `reference.conf` sets the same `"required"`, bound to the
+    same variable.
+  - Delete the two `limits.mfa` lines (`core-rate-limiter-memory.limits.mfa`,
+    `redis-rate-limiter.limits.mfa`), and take the new `config/reference.conf`
+    with them: it is the file that now sets both. Deleting the lines while
+    keeping an older `reference.conf` loses the budget: the MFA routes fall
+    back to the limiter's `defaultLimit`, 60 per 60 s, five times looser than
+    the 60 per 300 s they had.
+
+  Done this way, the values the loaded modules read do not change. A section
+  written for a module the composition does not load reaches nothing.
 - **BREAKING: federations are handled by their `type`** (#1291). The
   template's federation config bridges (`googleFederationConfigModule`,
   `oidcFederationConfigModule`) and its reading of the federation map before
@@ -293,7 +313,7 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   `limits.mfa` on it instead (`redis-rate-limiter.limits.mfa` or
   `core-rate-limiter-memory.limits.mfa`), or its `defaultLimit` (60 per 60 s
   on the bundled limiters) applies. The standalone template's
-  `config/application.conf` sets `limits.mfa { limit = 60, windowSeconds = 300 }`
+  `config/reference.conf` sets `limits.mfa { limit = 60, windowSeconds = 300 }`
   on both limiters, the old budget, so a scaffold keeps it; a composition of
   your own sets it on its limiter to keep it. Without a `rateLimiter` —
   declared in `core.declaredAbsent` — the MFA routes are no longer limited

@@ -38,7 +38,7 @@
  * `token` has no owner, and `webauthn-authentication-options` an owner that
  * claims it with no budget: the limiter's `defaultLimit`, or its own `limits`
  * entry. `mfa`'s owner claims it with no budget too: the limiter's own
- * `limits` entry, which the template's application.conf ships. `login` and
+ * `limits` entry, which the template's reference.conf ships. `login` and
  * `device_verification` are claimed with no budget: their
  * owners count attempts on the attempt counter, against
  * `session.rateLimit.login` and `device-grant.rateLimit`, so the limiter
@@ -109,7 +109,7 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		offConfigured: spec(60, 60),
 	},
 	mfa: {
-		// The template's application.conf gives both limiters `limits.mfa`, 60 per 300 s.
+		// The template's reference.conf gives both limiters `limits.mfa`, 60 per 300 s.
 		shipped: spec(60, 300),
 		configured: spec(60, 300),
 		declared: spec(6, 75),
