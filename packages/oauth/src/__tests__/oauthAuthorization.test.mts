@@ -887,6 +887,8 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 		const consumeByCode = vi.fn().mockResolvedValue({
 			code: "auth-code",
 			sid: "sid-wired",
+			// What /authorize records over this record, whose primary cannot be told.
+			authentication: { primary: undefined, mfaAt: undefined },
 			client_id: "client1",
 			redirect_uri: "https://rp.example/cb",
 			// A redeemable code always carries an S256 challenge.

@@ -122,6 +122,8 @@ async function exchangeCodeWithoutCookie() {
 				client_id: CLIENT_ID,
 				redirect_uri: RP_URI,
 				sid: SID,
+				// What /authorize records over this record, whose primary cannot be told.
+				authentication: { primary: undefined, mfaAt: undefined },
 				// A redeemable code always carries an S256 challenge.
 				code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 				code_challenge_method: "S256",

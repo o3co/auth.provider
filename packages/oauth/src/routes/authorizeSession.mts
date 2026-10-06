@@ -348,6 +348,8 @@ export const decideOnAdmission = async (
 interface Decided {
 	readonly session: UserSession | null;
 	readonly acr: string | undefined;
+	/** What the code records of how the session had authenticated: the admission's. */
+	readonly codeFields: Extract<Admission, { readonly outcome: "admitted" }>["codeFields"];
 	/** The session is fresh because of the login the presented ask asked for. */
 	readonly freshByAsk: boolean;
 }
@@ -385,7 +387,12 @@ const decideWithAsk = async (
 	) {
 		return null;
 	}
-	return { session: admission.session, acr: admission.acr, freshByAsk: reauth === "fresh_by_ask" };
+	return {
+		session: admission.session,
+		acr: admission.acr,
+		codeFields: admission.codeFields,
+		freshByAsk: reauth === "fresh_by_ask",
+	};
 };
 
 // Refuse before a code is minted when a verified email is required and the

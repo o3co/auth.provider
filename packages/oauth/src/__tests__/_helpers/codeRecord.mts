@@ -17,10 +17,12 @@ import type { Code } from "@o3co/auth-provider-core";
 
 /**
  * A `Code` for a stub repository: the fields a test names, every other one
- * `undefined`. `Code` names each field as a required key so that a
- * repository's copy cannot forget one; a stub that returns a fixed record has
- * nothing to forget, and spelling nine `undefined`s into each would hide
- * the fields the test is about.
+ * `undefined` — but `authentication`, which a code minted from a session
+ * (one with a `sid`) carries: a password login's, with no second factor,
+ * unless the test names its own. `Code` names each field as a required key so
+ * that a repository's copy cannot forget one; a stub that returns a fixed
+ * record has nothing to forget, and spelling ten `undefined`s into each would
+ * hide the fields the test is about.
  */
 export const codeRecord = (
 	fields: Pick<Code, "code" | "client_id" | "redirect_uri"> & Partial<Code>,
@@ -31,6 +33,7 @@ export const codeRecord = (
 	sid: undefined,
 	acr: undefined,
 	amr: undefined,
+	authentication: fields.sid === undefined ? undefined : { primary: "pwd", mfaAt: undefined },
 	expiresIn: undefined,
 	grantedScope: undefined,
 	grantedAudience: undefined,

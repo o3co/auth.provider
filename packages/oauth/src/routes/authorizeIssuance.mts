@@ -17,20 +17,19 @@
 /**
  * Issuing the code (RFC 6749 §4.1.2): the audience it carries (RFC 8707 §2),
  * the code record, which alone carries the identity binding and how the
- * session had authenticated when the code was issued (`acr`, `amr`), and the
- * redirect that delivers it with `state` and the `authorize.granted` audit
- * event.
+ * session had authenticated when the code was issued (`acr`, `amr`,
+ * `authentication`), and the redirect that delivers it with `state` and the
+ * `authorize.granted` audit event.
  */
 
 import {
+	type Admission,
 	type CodeRepository,
 	deriveAudienceFromResources,
 	emitAuditEvent,
 	loggableError,
 	type PublicClient,
-	type UserSession,
 	unrepresentedResources,
-	vouchedAmr,
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import { redirectError } from "./authorizeAnswers.mjs";
@@ -96,8 +95,8 @@ export const mintCode = async (
 		grantedAudience: readonly string[] | undefined;
 		/** The `acr` the session met. */
 		acr: string | undefined;
-		/** The record admission admitted the request on; `null` without a user-session store. */
-		session: UserSession | null;
+		/** What admission read of how the session had authenticated: the code's `amr` and `authentication`. */
+		codeFields: Extract<Admission, { readonly outcome: "admitted" }>["codeFields"];
 	},
 ): Promise<{ code: string } | null> => {
 	let issue: Awaited<ReturnType<CodeRepository["createCode"]>>;
@@ -113,10 +112,10 @@ export const mintCode = async (
 			nonce: typeof ctx.params.nonce === "string" ? ctx.params.nonce : undefined,
 			sid: typeof ctx.req.session?.sid === "string" ? ctx.req.session.sid : undefined,
 			acr: params.acr,
-			// Decided here, as `acr` is: what the admitted session vouches for
-			// now. `/token` stamps it, so a step-up recorded after this does
-			// not reach the code's tokens.
-			amr: params.session === null ? undefined : vouchedAmr(params.session),
+			// What admission judged the session on, as `acr` is: `/token` stamps
+			// the `amr` and judges the code on both, so a step-up recorded after
+			// this reaches neither the code's tokens nor its exchange.
+			...params.codeFields,
 		});
 	} catch (err) {
 		ctx.opts.logger.error(

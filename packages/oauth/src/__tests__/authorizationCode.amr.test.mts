@@ -36,6 +36,7 @@ import {
 	type FederationTokenStore,
 	InMemoryCodeRepository,
 	passwordSessionAuthentication,
+	type SessionRequirement,
 } from "@o3co/auth-provider-core";
 import {
 	createTestLoginEntry,
@@ -79,6 +80,8 @@ const world = async (
 	> = passwordSessionAuthentication(),
 	/** When given, the `amr` the repository answers each code with, in place of the one it holds. */
 	answered?: { readonly amr: unknown },
+	/** The session requirements every consumer here admits through. */
+	registered: readonly SessionRequirement[] = [],
 ) => {
 	const userSessionStore = createInMemoryUserSessionStore();
 	const expiresAt = new Date(Date.now() + 3_600_000);
@@ -101,7 +104,10 @@ const world = async (
 		});
 	}
 	const keyStore = createSymmetricKeyStore(SECRET);
-	const requirements = resolverForTests([], { issuer: ISSUER, actions: OAUTH_ADMISSION_ACTIONS });
+	const requirements = resolverForTests(registered, {
+		issuer: ISSUER,
+		actions: OAUTH_ADMISSION_ACTIONS,
+	});
 	const client = {
 		clientId: CLIENT_ID,
 		tokenEndpointAuthMethod: "none" as const,
@@ -349,5 +355,83 @@ describe("an authorization code carries the amr /authorize vouched for", () => {
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_grant");
 		expect(res.body).not.toHaveProperty("access_token");
+	});
+});
+
+describe("an authorization code carries how its session had authenticated at /authorize, and is judged on it", () => {
+	it("/authorize records the admitted session's primary and second factor on the code, beside its amr", async () => {
+		const w = await world();
+		await w.authorize();
+		expect(w.createCode).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				amr: ["pwd"],
+				authentication: { primary: "pwd", mfaAt: undefined },
+			}),
+		);
+		await w.stepUp();
+		await w.authorize();
+		expect(w.createCode).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				amr: ["pwd", "otp", "mfa"],
+				authentication: { primary: "pwd", mfaAt: expect.any(Date) },
+			}),
+		);
+	});
+
+	it("records what admission read, not the record as it is when the code is minted: a step-up landing between the two does not reach the code", async () => {
+		const w = await world();
+		const mint = InMemoryCodeRepository.prototype.createCode;
+		w.createCode.mockImplementationOnce(async function (
+			this: InMemoryCodeRepository,
+			params: Parameters<InMemoryCodeRepository["createCode"]>[0],
+		) {
+			await w.stepUp();
+			return mint.call(this, params);
+		});
+		await w.authorize();
+		expect(w.createCode).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				amr: ["pwd"],
+				authentication: { primary: "pwd", mfaAt: undefined },
+			}),
+		);
+	});
+
+	/** A requirement that holds the exchange, not `/authorize`, to a second factor. */
+	const exchangeNeedsSecondFactor: SessionRequirement = {
+		name: "exchange-mfa",
+		reach: new Set(),
+		stepUpPage: undefined,
+		remediations: [],
+		hintKeys: [],
+		admit: async ({ action, authentication }) =>
+			action.name === "oauth.code_exchange" && authentication?.authentication?.mfaAt === undefined
+				? { outcome: "unmet" }
+				: { outcome: "met" },
+	};
+
+	it("a code minted before a step-up is refused by a requirement that holds the exchange to a second factor, though the session has one now", async () => {
+		const w = await world(passwordSessionAuthentication(), undefined, [exchangeNeedsSecondFactor]);
+		const code = await w.authorize();
+		await w.stepUp();
+
+		const res = await w.exchange(code);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(400);
+		expect(res.body).toMatchObject({
+			error: "invalid_grant",
+			error_description: "the session does not meet the exchange-mfa requirement",
+		});
+		expect(res.body).not.toHaveProperty("access_token");
+	});
+
+	it("a code minted after the step-up meets it", async () => {
+		const w = await world(passwordSessionAuthentication(), undefined, [exchangeNeedsSecondFactor]);
+		await w.stepUp();
+		const code = await w.authorize();
+
+		const res = await w.exchange(code);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
 	});
 });

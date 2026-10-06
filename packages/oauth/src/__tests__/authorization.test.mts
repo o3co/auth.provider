@@ -51,11 +51,20 @@ const RP_URI = "https://rp.example/cb";
 const CODE_VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(CODE_VERIFIER).digest("base64url");
 
+/**
+ * What `/authorize` records of how the session had authenticated over a
+ * record whose primary cannot be told: one that carries no `authentication`
+ * and an `amr` that names no primary, as most records stubbed here do. A
+ * code over a record that names one carries it as `/authorize` records it.
+ */
+const UNTOLD = { primary: undefined, mfaAt: undefined };
+
 const validCode = {
 	client_id: "client1",
 	redirect_uri: RP_URI,
 	code_challenge: S256_CHALLENGE,
 	code_challenge_method: "S256",
+	authentication: UNTOLD,
 };
 
 // The authorization grant requires `ctx.authenticatedClient` to be present and
@@ -133,6 +142,7 @@ describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 					sid: undefined,
 					acr: undefined,
 					amr: undefined,
+					authentication: undefined,
 				});
 				const deps = {
 					...makeDeps(vi.fn()),
@@ -524,6 +534,7 @@ describe("createAuthorizationGrant", () => {
 					code_challenge: S256_CHALLENGE,
 					code_challenge_method: "S256",
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					grantedScope: ["read"] as readonly string[],
 				}),
 			);
@@ -554,6 +565,7 @@ describe("createAuthorizationGrant", () => {
 					code_challenge: S256_CHALLENGE,
 					code_challenge_method: "S256",
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					grantedScope: [] as readonly string[],
 				}),
 			);
@@ -699,6 +711,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: challenge,
 					code_challenge_method: "S256",
 				}),
@@ -728,6 +741,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: verifier,
 					code_challenge_method: "plain",
 				}),
@@ -754,6 +768,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: verifier,
 					code_challenge_method: "plain",
 				}),
@@ -942,6 +957,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
 						code_challenge: S256_CHALLENGE,
@@ -981,6 +997,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						redirect_uri: "http://127.0.0.1:49152/cb",
 						code_challenge: S256_CHALLENGE,
@@ -1014,6 +1031,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						// redirect_uri intentionally omitted to model legacy/corrupt records.
 					}),
@@ -1301,6 +1319,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication: UNTOLD,
 							nonce: "client-nonce",
 							grantedScope: ["openid", "email"],
 						}),
@@ -1357,6 +1376,9 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							// What /authorize recorded of a password session it admitted
+							// with a second factor: more than the record holds now.
+							authentication: { primary: "pwd", mfaAt: new Date("2026-04-21T00:10:00Z") },
 							grantedScope: ["openid"],
 							acr: "urn:example:mfa",
 							amr: ["pwd", "otp", "mfa"],
@@ -1418,6 +1440,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication: { primary: "pwd", mfaAt: undefined },
 							grantedScope: ["openid"],
 							amr,
 						}),
@@ -1443,9 +1466,14 @@ describe("createAuthorizationGrant", () => {
 				}
 			});
 
-			/** Redeems the code "c1" bound to "sid-1" against `userSessionStore`, when one is given. */
+			/**
+			 * Redeems the code "c1" bound to "sid-1" against `userSessionStore`, when
+			 * one is given, the code carrying `authentication` as `/authorize`
+			 * recorded it over that record.
+			 */
 			const redeemSessionCode = async (
 				userSessionStore?: ReturnType<typeof makeUserSessionStore>,
+				authentication: unknown = UNTOLD,
 			) => {
 				const deps = {
 					...makeDepsWithIssuer(
@@ -1456,6 +1484,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication,
 							grantedScope: ["openid"],
 						}),
 					),
@@ -1487,6 +1516,7 @@ describe("createAuthorizationGrant", () => {
 				const authTime = new Date("2026-04-21T00:00:00.750Z");
 				const tokens = await redeemSessionCode(
 					makeUserSessionStore({ sid: "sid-1", sub: "u-1", authTime, claims: {}, amr: ["pwd"] }),
+					{ primary: "pwd", mfaAt: undefined },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.id_token as string).auth_time).toBe(seconds);
@@ -1510,6 +1540,7 @@ describe("createAuthorizationGrant", () => {
 							mfaAt: new Date("2026-04-21T00:10:00Z"),
 						},
 					}),
+					{ primary: "pwd", mfaAt: new Date("2026-04-21T00:10:00Z") },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.access_token).auth_time).toBe(seconds);
@@ -1533,6 +1564,7 @@ describe("createAuthorizationGrant", () => {
 							upstreamAuthTime: new Date("2026-04-20T00:00:00Z"),
 						},
 					}),
+					{ primary: "fed", mfaAt: undefined },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.id_token as string).auth_time).toBe(seconds);
@@ -1562,6 +1594,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-noiss",
+							authentication: UNTOLD,
 							grantedScope: ["openid", "email"],
 							nonce: "client-nonce",
 						}),
@@ -1608,6 +1641,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-2",
+							authentication: UNTOLD,
 							grantedScope: ["profile", "email"],
 						}),
 					),
@@ -1644,6 +1678,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "sid-3",
+						authentication: UNTOLD,
 						grantedScope: ["openid"],
 					}),
 				);
@@ -1690,6 +1725,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1720,6 +1756,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1749,6 +1786,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "real-client",
 						redirect_uri: "https://rp.example/cb",
 						code_challenge: S256_CHALLENGE,

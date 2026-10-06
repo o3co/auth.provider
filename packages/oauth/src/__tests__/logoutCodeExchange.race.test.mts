@@ -200,6 +200,8 @@ async function world() {
 						code_challenge_method: "S256",
 						grantedScope: ["read"],
 						sid: SID,
+						// What /authorize records over this record, whose primary cannot be told.
+						authentication: { primary: undefined, mfaAt: undefined },
 					}),
 				createCode: vi.fn(),
 				findByCode: vi.fn(),
