@@ -42,7 +42,7 @@ import {
 	type MfaTransactionStore,
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { MfaTransactionStoreClient } from "#/clients.mjs";
 import {
 	MFA_FIRST_BINDING_NOTE,
@@ -1655,6 +1655,53 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		expect(
 			await first().script("EXISTS", MFA_FIRST_BINDING_NOTE.sha, MFA_FIRST_BINDING_READ.sha),
 		).toEqual([1, 1]);
+	});
+
+	it("reads the note script's answer of what stood before it, and answers any other reply as an outage, never as no mark or a time", async () => {
+		const now = Date.now();
+		const stamp = String(now);
+		/** A store over a server that answers every script `reply`. */
+		const answering = (reply: unknown) => {
+			const io = {
+				evalsha: vi.fn().mockResolvedValue(reply),
+				eval: vi.fn().mockResolvedValue(reply),
+			};
+			const client = makeIoredisMfaTransactionStoreClient(io as never);
+			return createRedisMfaTransactionStore({
+				client: {
+					...client,
+					durability: async () => ({
+						maxmemoryPolicy: "noeviction",
+						appendOnly: true,
+						snapshots: undefined,
+						refusal: undefined,
+					}),
+				},
+				keyPrefix: freshPrefix(),
+			});
+		};
+		const note = async (reply: unknown) =>
+			(await answering(reply)).noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(await note([1, stamp, "none"])).toBeNull();
+		expect(await note([1, stamp, "mark", String(now - MINUTE)])).toBe(now - MINUTE);
+		for (const reply of [
+			[1, stamp],
+			[1, stamp, "mark"],
+			[1, stamp, "mark", "-1"],
+			[1, stamp, "mark", "1.5"],
+			[1, stamp, "mark", "01"],
+			[1, stamp, "mark", now - MINUTE],
+			[1, stamp, "other"],
+			[1, stamp, null],
+			[1, "x", "none"],
+			[2, stamp, "none"],
+			"1",
+			null,
+		]) {
+			const answer = note(reply);
+			await expect(answer, JSON.stringify(reply)).rejects.toThrow(/MfaTransactionStore/);
+			await expect(answer, JSON.stringify(reply)).rejects.not.toThrow(RangeError);
+		}
 	});
 
 	it("rejects a note and a read when the server cannot be reached: an outage, never no mark", async () => {
