@@ -20,8 +20,10 @@
  * the template's `config/reference.conf`. The template ships it `required`;
  * a project `create-auth-provider --no-mfa` scaffolds writes it `off` at the
  * end of its `application.conf`. A suite whose subject depends on the switch
- * asserts what this value implies, so the suite that ships with a scaffold
- * holds either way and tests the mode the project is in.
+ * asserts what MFA on (`required`, as the template ships it) or off (as
+ * `--no-mfa` writes it) implies, so the suite that ships with a scaffold holds
+ * in either project. A project whose files write another mode, such as
+ * `optional`, is not what these suites claim to cover.
  *
  * Read with the HOCON parser alone, not through phase one (`readSwitches`),
  * so that a suite about phase one can state what phase one should answer.

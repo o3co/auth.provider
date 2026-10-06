@@ -651,7 +651,9 @@ jobs:
 
       - name: Build and test every template against packed tarballs
         run: |
-          set -euo pipefail
+          # -E: the ERR trap below reaches into wire_to_tarballs, so a failure
+          # there closes the template's log group too.
+          set -Eeuo pipefail
           # The templates are what create-app's scripts/templates.mjs says they
           # are — the rule the package is built by — so this builds and tests
           # exactly the set that ships, each the way a scaffold of it runs. It

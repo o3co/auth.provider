@@ -44,6 +44,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { MFA_DEVELOPMENT_SAMPLE_KEY, mfaModules, mfaResetModule } from "@o3co/auth-provider-mfa";
 import { loginCompletionModule } from "@o3co/auth-provider-session";
+import { parseFile } from "@o3co/ts.hocon";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
@@ -54,6 +55,7 @@ import {
 	resolveConfigPaths,
 	resolveForBoot,
 } from "#/configPath.mjs";
+import { templateReference } from "#/modules.mjs";
 import {
 	ALICE,
 	authorize,
@@ -144,6 +146,11 @@ const unset = (env: Readonly<Record<string, string>>): Record<string, string> =>
 };
 
 describe("the switch is the template's own key, mfaMode, bound to MFA_MODE", () => {
+	it("ships required in the template's reference.conf, which --no-mfa leaves as it is", () => {
+		const reference = parseFile(fileURLToPath(templateReference()), { env: {} }).toObject();
+		expect((reference as Record<string, unknown>).mfaMode).toBe("required");
+	});
+
 	it("is what the configuration's files write unless MFA_MODE says otherwise", () => {
 		const switches = (env: Readonly<Record<string, string>>) =>
 			readSwitches(readOwnLayers(ownFiles(), { env })).mfaMode;
