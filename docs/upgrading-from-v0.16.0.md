@@ -1928,7 +1928,19 @@ with what a store of yours records and refuses. Per port:
   writes are `createIf`, `removeIf` and the reset `removeAllForSubject`, at
   the generation `listVersioned` answered; it has no unconditional `create`
   or `remove` (#1121, #1179, #1236). An `MfaTransactionStore` answers
-  `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
+  `rebindAfterMs` on every subject-recovery answer (#1238). One written
+  against a 0.17 release candidate implements
+  `consumeEmailProofRequirement(subject, { leaseToken })` in place of
+  `consumeEmailProofRequirement(subject)`: consuming the email-proof
+  requirement is checked against the subject's lease, atomically, the lease
+  checked and the requirement cleared in one step. It answers
+  `{ outcome: "consumed" }`, `{ outcome: "absent" }` or
+  `{ outcome: "refused", reason: "lease_not_held" }`, and refuses a call
+  without a lease token with a `RangeError`
+  (`checkEmailProofRequirementConsume`). Run
+  `runMfaEmailProofRequirementContract` beside the store's suite: copy
+  `packages/redis/__tests__/adapters.mfa-email-proof-requirement.contract.mts`,
+  which imports only `@o3co/auth-provider-core`. The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
   and the [test kit](../packages/test-kit/README.md). An
   `MfaTransactionStoreClient` of your own, written against a 0.17 release

@@ -93,12 +93,13 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(createMemoryMfaTransactionStore().kind).toBe("memory");
 	});
 
-	it("still takes the unleased consume, until it is removed: true for the one that cleared it, false after", async () => {
+	it("refuses a consume that names no lease, with a RangeError, clearing nothing", async () => {
 		const store = createMemoryMfaTransactionStore();
 		await store.requireEmailProofAtNextBinding("user-1");
-		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
-		expect(await store.consumeEmailProofRequirement("user-1")).toBe(false);
-		expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
+		await expect(store.consumeEmailProofRequirement("user-1", undefined as never)).rejects.toThrow(
+			RangeError,
+		);
+		expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
 	});
 
 	it("hands out copies: changing a returned transaction changes nothing it holds", async () => {
