@@ -111,7 +111,20 @@ const BROKEN: ReadonlyArray<readonly [string, () => unknown, RegExp]> = [
 		() => ({ ...createTestCsrfGuard(), check: { outcome: "accepted" } }),
 		/csrfGuard\.check is not a function.*sessionModule/s,
 	],
+	[
+		"a middleware whose length is not a number",
+		() => ({
+			...createTestCsrfGuard(),
+			middleware: Object.defineProperty(() => undefined, "length", { value: "3" }),
+		}),
+		/csrfGuard\.middleware is not a request handler.*a function whose length is the string "3"/s,
+	],
 	["no guard object at all", () => null, /csrfGuard must be the guard object.*null/s],
+	[
+		"a primitive in place of a guard",
+		() => "guard",
+		/csrfGuard must be the guard object.*the string "guard"/s,
+	],
 ];
 
 /** Guards one of whose reads throws, each with the member the refusal names. */
@@ -199,6 +212,17 @@ describe("the csrfGuard slot is held to core's contract where boot fills it", ()
 			expect(cleaned).toEqual([provided]);
 		},
 	);
+
+	it("takes a guard that is itself a function carrying the members", async () => {
+		const guard = Object.assign(function guard() {}, createTestCsrfGuard());
+		const seen: unknown[] = [];
+		const handle = await bootWithHostGuard(guard, seen);
+		const snapshot = seen[0] as CsrfGuard;
+		expect(snapshot).not.toBe(guard);
+		expect(snapshot.cookieName).toBe(guard.cookieName);
+		expect(snapshot.middleware.length).toBe(3);
+		await handle.dispose();
+	});
 
 	it("leaves a slot a host fills with undefined unfilled", async () => {
 		const seen: unknown[] = [];
