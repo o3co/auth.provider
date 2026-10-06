@@ -1586,15 +1586,13 @@ function checkGrantPolicyIssuerInvariant(
 
 const FEDERATION_REQUIRED_STORES = [
 	"userSessionStore",
-	"sessionRPRegistry",
-	"sessionFamilyIndex",
-	"sessionFederationIndex",
+	"sessionLifecycle",
 	"federationTokenStore",
 	"refreshTokenFamilyRevocation",
 ] as const;
 
 /**
- * The stores an enabled federation needs: all six when any
+ * The slots an enabled federation needs: all four when any
  * `core.federations` entry is enabled, else none.
  */
 function federationStoreSlotsOf(config: AppConfig): readonly ComponentKey[] {
@@ -1602,10 +1600,11 @@ function federationStoreSlotsOf(config: AppConfig): readonly ComponentKey[] {
 }
 
 /**
- * If any `core.federations.<name>.enabled === true`, all six session,
- * federation and refresh-token-family slots must be wired. A missing one
- * makes federation routes either fail at runtime with an opaque 503 (the
- * session and federation-token stores) or never mount, surfacing as
+ * If any `core.federations.<name>.enabled === true`, the user-session
+ * store, the session lifecycle, the federation-token store and the
+ * refresh-token-family revocation must be wired. A missing one makes
+ * federation routes either fail at runtime with an opaque 503 (the session
+ * and federation-token stores) or never mount, surfacing as
  * unexpected 404s (refreshTokenFamilyRevocation, per the `logoutSupported` /
  * `federationTokenSupported` gates in `packages/oauth/src/routes.mts`).
  * Refusing at boot makes both visible. Stage 1 counts a planned slot as

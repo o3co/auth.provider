@@ -41,7 +41,6 @@ import type {
 import {
 	consoleLogger,
 	coveredByRevocationBoundary,
-	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
@@ -61,7 +60,7 @@ import { createDeviceAuthorizationHandler } from "#/deviceAuthorizationEndpoint.
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { createDeviceVerificationHandler } from "#/verificationEndpoint.mjs";
-import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
+import { liveCookieSession, liveSessionLifecycleStore, liveSessionStore } from "./liveSessions.mjs";
 
 const CLIENT_ID = "tv-app";
 const ISSUER = "https://as.example.test";
@@ -194,7 +193,7 @@ const makeHarness = (
 			...(overrides.attemptCounter ? { attemptCounter: overrides.attemptCounter } : {}),
 			deploymentMode: overrides.deploymentMode ?? "single",
 			userSessionStore,
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			sessionLifecycleStore: liveSessionLifecycleStore(),
 			// No requirement registered; what admission changes here (the
 			// session-admission ADR's D8) is admission.test.mts's.
 			requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
@@ -732,7 +731,7 @@ describe("verification attempts — no counter wired", () => {
 			attemptLimit: SHIPPED_ATTEMPT_LIMIT,
 			deploymentMode: deploymentMode as DeploymentMode,
 			userSessionStore: liveSessionStore(),
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			sessionLifecycleStore: liveSessionLifecycleStore(),
 			requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 			requireEmailVerified: false,
 			logger,
@@ -760,7 +759,7 @@ describe("verification attempts — no counter wired", () => {
 				attemptCounter: createMemoryAttemptCounter(),
 				deploymentMode: "multi",
 				userSessionStore: liveSessionStore(),
-				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+				sessionLifecycleStore: liveSessionLifecycleStore(),
 				requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 				requireEmailVerified: false,
 				logger,
@@ -801,7 +800,7 @@ describe("verification attempts — no counter wired", () => {
 						attemptLimit: attemptLimit as never,
 						deploymentMode: "single",
 						userSessionStore: liveSessionStore(),
-						sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+						sessionLifecycleStore: liveSessionLifecycleStore(),
 						requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 						requireEmailVerified: false,
 					}),

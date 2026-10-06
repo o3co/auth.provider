@@ -837,28 +837,12 @@ const csrfTokenOf = (cookies: readonly string[]): string => {
 };
 
 const ROLLBACK_CLOSE_LOGS =
-	"a login that fails after its record's open closes that record (`packages/session/src/establish-session.mts`), and the close's own work meets the same outage: core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) warns `session_close_item_failed` for the item and keeps the close pending for its sweep, a second line for one outage. At the OIDC federation callback with the session federation index down, the rollback's lifecycle close cannot commit and rejects, and the login's cleanup logs `federation_cleanup_failed` (warn) for it: that one line. Both cases are removed with the lifecycle's bridge (#1030, 14a), after which the rollback close no longer meets the per-session stores' outage";
+	"a login that fails after its record's open closes that record (`packages/session/src/establish-session.mts`), and the close's own work meets the same outage: core's session lifecycle (`packages/core/src/session-lifecycle/service.mts`) warns `session_close_item_failed` for the item and keeps the close pending for its sweep, a second line for one outage";
 
 const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "oauth-authorization",
 		slot: "codeRepository",
-		surface: "the code exchange",
-		run: codeExchange,
-		answer: { status: 503, error: "temporarily_unavailable" },
-		event: "authorization_grant_store_unavailable",
-	},
-	{
-		module: "oauth-authorization",
-		slot: "sessionFamilyIndex",
-		surface: "the code exchange",
-		run: codeExchange,
-		answer: { status: 503, error: "temporarily_unavailable" },
-		event: "authorization_grant_store_unavailable",
-	},
-	{
-		module: "oauth-authorization",
-		slot: "sessionRPRegistry",
 		surface: "the code exchange",
 		run: codeExchange,
 		answer: { status: 503, error: "temporarily_unavailable" },
@@ -1100,16 +1084,6 @@ const OUTAGES: readonly OutageCase[] = [
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "federation_callback_store_unavailable",
 		defects: { "no-warn": ROLLBACK_CLOSE_LOGS },
-	},
-	{
-		module: "session",
-		slot: "sessionFederationIndex",
-		surface: "the OIDC federation callback",
-		run: oidcCallback,
-		answer: { status: 503, error: "temporarily_unavailable" },
-		event: "federation_callback_store_unavailable",
-		defects: { "no-warn": ROLLBACK_CLOSE_LOGS },
-		defectWarns: ["federation_cleanup_failed"],
 	},
 	{
 		module: "core (rate-limit guard)",

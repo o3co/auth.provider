@@ -24,10 +24,7 @@
 import {
 	type AuditEvent,
 	type AuditSink,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRevocation,
@@ -413,9 +410,6 @@ describe("POST /session/logout through the session lifecycle: what the close run
 					notices.push(notice);
 				},
 			}),
-			sessionRPRegistry: createInMemorySessionRPRegistry(),
-			sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-			sessionFederationIndex: createInMemorySessionFederationIndex(),
 			retainMs: HOUR,
 			logger: { warn: () => undefined, error: () => undefined },
 		});
@@ -427,6 +421,13 @@ describe("POST /session/logout through the session lifecycle: what the close run
 			frontchannelLogoutSessionRequired: undefined,
 			registeredAt: new Date(),
 		};
+		const established = await userSessionStore.get(SID);
+		expect(
+			await sessionLifecycle.open(SID, {
+				sub: "u-1",
+				expiresAt: established?.expiresAt ?? new Date(0),
+			}),
+		).toEqual({ outcome: "opened" });
 		expect(await sessionLifecycle.join(SID, { rp, familyId: "fam-1" })).toEqual({
 			outcome: "joined",
 		});

@@ -27,7 +27,6 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
-	createInMemorySessionLifecycleStore,
 	createSymmetricKeyStore,
 	type SessionRequirement,
 	type UserSession,
@@ -49,7 +48,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
-import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
+import { livenessOver, openedLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const ISSUER = "https://issuer.test";
 const SECRET = "acceptance-test-secret-32-bytes-long!";
@@ -148,6 +147,8 @@ const buildApp = async (requirement: SessionRequirement) => {
 		consumeByCode: async () => null,
 		removeByCode: async () => {},
 	} as unknown as CodeRepository;
+	// The records the session's login opened, which both grants' admission reads.
+	const lifecycleRecords = openedLifecycleStore([SID, SUBJECT]);
 	const registry = authorizationServerRegistry();
 	registry.register(
 		"session",
@@ -155,7 +156,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			userSessionStore,
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			sessionLifecycleStore: lifecycleRecords,
 			sessionRequirementResolver: requirements,
 		}),
 	);
@@ -165,7 +166,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			sessionLifecycleStore: lifecycleRecords,
 			sessionRequirementResolver: requirements,
 		}),
 	);

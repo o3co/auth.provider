@@ -28,10 +28,7 @@ import {
 	type AuditEvent,
 	BootError,
 	createApp,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
 	createInMemoryUserSessionStore,
@@ -327,11 +324,11 @@ describe("subjectRevocationServiceModule", () => {
 						notices.push(notice);
 					},
 				}),
-				sessionRPRegistry: createInMemorySessionRPRegistry(),
-				sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-				sessionFederationIndex: createInMemorySessionFederationIndex(),
 				retainMs: HOUR,
 				logger: { warn: () => undefined, error: () => undefined },
+			});
+			expect(await lifecycle.open("sid-1", { sub: "u-1", expiresAt })).toEqual({
+				outcome: "opened",
 			});
 			expect(
 				await lifecycle.join("sid-1", {

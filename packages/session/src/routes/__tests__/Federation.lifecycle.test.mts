@@ -26,10 +26,8 @@
 import {
 	codeChallenge,
 	createFederationTokenStoreFactory,
-	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createSessionLifecycle,
 	type FederationProvider,
@@ -121,9 +119,6 @@ async function world(options: WorldOptions = {}) {
 			isFamilyRevoked: async () => false,
 		},
 		federationTokenStore,
-		sessionRPRegistry: createInMemorySessionRPRegistry(),
-		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-		sessionFederationIndex,
 		retainMs: 0,
 		logger: silent,
 	});
@@ -466,14 +461,15 @@ describe("a link callback over the session lifecycle", () => {
 		expect((await w.federationTokenStore.get(LINKED_SID, "test"))?.accessToken).toBe("upstream-at");
 	});
 
-	it("refuses a session with no lifecycle record: a federation alone cannot adopt it, and a re-link removes that federation's tokens", async () => {
+	it("refuses a session with no lifecycle record before it attaches or joins anything: an absent record reads as closed", async () => {
 		const w = await world();
 
 		const res = await link(w, { open: false, carrying: true });
 
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("login_required");
-		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
+		expect(w.join).not.toHaveBeenCalled();
+		expect((await w.federationTokenStore.get(LINKED_SID, "test"))?.accessToken).toBe("earlier-at");
 		expect(readVersionedSessionLifecycle(await w.lifecycleStore.read(LINKED_SID))).toBeNull();
 	});
 

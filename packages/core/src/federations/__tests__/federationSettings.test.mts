@@ -264,14 +264,12 @@ const bootstrap = (
 		...extra,
 	}) as unknown as BootstrapMap;
 
-/** The six slots an enabled federation needs wired (`federation-stores-wiring`). */
+/** The four slots an enabled federation needs wired (`federation-stores-wiring`). */
 const federationStores = defineModule({
 	name: "test:federation-stores",
 	provides: {
 		userSessionStore: () => ({ kind: "stub" }),
-		sessionRPRegistry: () => ({ kind: "stub" }),
-		sessionFamilyIndex: () => ({ kind: "stub" }),
-		sessionFederationIndex: () => ({ kind: "stub" }),
+		sessionLifecycle: () => ({ kind: "stub" }),
 		federationTokenStore: () => ({ kind: "stub" }),
 		refreshTokenFamilyRevocation: () => ({ kind: "stub" }),
 	} as never,

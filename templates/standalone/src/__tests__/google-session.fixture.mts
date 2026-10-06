@@ -43,7 +43,7 @@ import {
 	InMemoryUserRepository,
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
-	type SessionFederationIndex,
+	type SessionLifecycle,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
@@ -234,15 +234,15 @@ export interface GoogleSession {
 	/** The access token the `session` grant minted for the session; it carries `azp`. */
 	readonly accessToken: string;
 	readonly userSessionStore: UserSessionStore;
-	readonly sessionFederationIndex: SessionFederationIndex;
+	readonly sessionLifecycle: SessionLifecycle;
 	readonly federationTokenStore: FederationTokenStore;
 	readonly dispose: () => Promise<void>;
 }
 
 /**
  * Boots the deployment, signs alice in with her password, and links Google to
- * her session as a federated sign-in would: the session's federation index
- * names it and the token store holds `tokens`.
+ * her session as a federated sign-in would: the token store holds `tokens`,
+ * and Google joins the session through its lifecycle.
  */
 export async function signInLinkedToGoogle(options: {
 	readonly google: GoogleWiring;
@@ -267,7 +267,7 @@ export async function signInLinkedToGoogle(options: {
 	try {
 		const components = handle.components as {
 			userSessionStore: UserSessionStore;
-			sessionFederationIndex: SessionFederationIndex;
+			sessionLifecycle: SessionLifecycle;
 			federationTokenStore: FederationTokenStore;
 		};
 		const app = express();
@@ -296,10 +296,10 @@ export async function signInLinkedToGoogle(options: {
 		const sid = claims.sid as string;
 		expect(typeof sid).toBe("string");
 
-		const session = await components.userSessionStore.get(sid);
-		if (session === null) throw new Error("fixture: the sign-in left no session");
-		await components.sessionFederationIndex.addFederation(sid, "google", session.expiresAt);
 		await components.federationTokenStore.attach(sid, "google", tokens);
+		expect(await components.sessionLifecycle.join(sid, { federation: "google" })).toEqual({
+			outcome: "joined",
+		});
 		return { app, sid, accessToken, ...components, dispose: () => handle.dispose() };
 	} catch (error) {
 		await handle.dispose();

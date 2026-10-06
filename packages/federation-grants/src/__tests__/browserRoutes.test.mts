@@ -170,7 +170,24 @@ function world(options: WorldOptions = {}) {
 	const background = options.background ?? createFederationGrantBackground();
 	const events: AuditEvent[] = [];
 	const browsers = new Map<string, Browser>();
-	const durable = new Map<string, UserSession>();
+	// Core's lifecycle store, unless the case hands its own: every durable
+	// session written opens its record, active, as the login that wrote it
+	// does (a session with no record reads as closed).
+	const records = createInMemorySessionLifecycleStore();
+	const opening: Promise<unknown>[] = [];
+	const durable = new (class extends Map<string, UserSession> {
+		override set(sid: string, session: UserSession): this {
+			opening.push(records.open(sid, session.sub, new Date(Date.now() + DAY)));
+			return super.set(sid, session);
+		}
+	})();
+	const opened: SessionLifecycleStore = {
+		...records,
+		read: async (sid) => {
+			await Promise.all(opening);
+			return records.read(sid);
+		},
+	};
 	const authorized: Parameters<
 		FederationGrantDelegatedAuthorizer["buildDelegatedAuthorizationUrl"]
 	>[0][] = [];
@@ -311,8 +328,7 @@ function world(options: WorldOptions = {}) {
 			...(options.sessionLifecycleStore === null
 				? {}
 				: {
-						sessionLifecycleStore:
-							options.sessionLifecycleStore ?? createInMemorySessionLifecycleStore(),
+						sessionLifecycleStore: options.sessionLifecycleStore ?? opened,
 					}),
 			requirements: resolverForTests(options.requirements ?? [], {
 				issuer: ISSUER,

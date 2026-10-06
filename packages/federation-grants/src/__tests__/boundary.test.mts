@@ -108,9 +108,7 @@ const SESSION_FEDERATION_STORES = {
 	userSessionStore: {},
 	// Core's session lifecycle port, required beside the user-session store.
 	sessionLifecycleStore: createInMemorySessionLifecycleStore(),
-	sessionRPRegistry: {},
-	sessionFamilyIndex: {},
-	sessionFederationIndex: {},
+	sessionLifecycle: {},
 	federationTokenStore: {},
 	refreshTokenFamilyRevocation: {},
 };

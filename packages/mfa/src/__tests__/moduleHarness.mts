@@ -42,6 +42,7 @@ import {
 	type MfaTransactionStore,
 	type Module,
 	type RateLimiter,
+	readSessionOpenAnswer,
 	type SessionFederationIndex,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
@@ -282,13 +283,20 @@ const sessionSupport = (
  */
 /**
  * Core's session lifecycle over `store`, which the session package requires
- * beside a user-session store: a login's record opens, a join is taken, and a
- * close deletes the user session, as core's close does last.
+ * beside a user-session store: a login's record opens in `records` (where
+ * one is wired), as core's open does, a join is taken, and a close deletes
+ * the user session, as core's close does last.
  */
-const sessionLifecycleOver = (store: UserSessionStore): Module =>
+const sessionLifecycleOver = (
+	store: UserSessionStore,
+	records: SessionLifecycleStore | null,
+): Module =>
 	providing("test:session-lifecycle", {
 		sessionLifecycle: (): SessionLifecycle => ({
-			open: async () => ({ outcome: "opened" }),
+			open: async (sid, { sub, expiresAt }) =>
+				records === null
+					? { outcome: "opened" }
+					: readSessionOpenAnswer(await records.open(sid, sub, expiresAt)),
 			join: async () => ({ outcome: "joined" }),
 			close: async (sid) => {
 				await store.delete(sid);
@@ -401,7 +409,7 @@ export function modulesFor(options: BootOptions = {}): {
 				? []
 				: [
 						providing("test:user-session-store", { userSessionStore: () => userSessionStore }),
-						sessionLifecycleOver(userSessionStore),
+						sessionLifecycleOver(userSessionStore, sessionLifecycleStore),
 					]),
 			...(sessionLifecycleStore === null
 				? []
