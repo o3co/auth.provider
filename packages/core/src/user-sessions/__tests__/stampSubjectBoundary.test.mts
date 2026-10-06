@@ -59,6 +59,7 @@ const harness = (
 
 const slow = { wall: 5_000, monotonic: 5_000 };
 const settling = { wall: 250, monotonic: 250 };
+const instant = { wall: 0, monotonic: 0 };
 
 describe("stampSubjectBoundary — what a settled write covers", () => {
 	it.each([0, 100, 500, 899, 900, 950, 999])(
@@ -85,8 +86,6 @@ describe("stampSubjectBoundary — what a settled write covers", () => {
 
 describe("stampSubjectBoundary — a write's commit time is measured on the monotonic clock", () => {
 	it.each([
-		["the wall clock stepped back across it", { wall: -5_000, monotonic: 5_000 }],
-		["the wall clock stepped back by as long as it took", { wall: 0, monotonic: 5_000 }],
 		["the monotonic clock read backwards", { wall: 0, monotonic: -1 }],
 		["the wall clock jumped ahead across it", { wall: 5_000, monotonic: 0 }],
 	] as const)("a second write is not settled when %s, and is stamped again", async (_, step) => {
@@ -94,5 +93,52 @@ describe("stampSubjectBoundary — a write's commit time is measured on the mono
 		const stamped = await stampSubjectBoundary(h.write, h.now, TTL, h.elapsed);
 		expect(stamped).toEqual({ written: true });
 		expect(h.writes).toHaveLength(3);
+	});
+});
+
+describe("stampSubjectBoundary — a wall clock seen going back is a failure, whatever the later writes do", () => {
+	it("an issuer mints during a slow second write, the wall clock then rolls back, and a third write settles at once", async () => {
+		// Write 1 moves both clocks 5 s. During write 2 the wall clock reaches
+		// T0 + 9999 ms, where an issuer mints, then rolls back 5 s: across the
+		// write it reads no later than before, while 5 s passed. Write 3 is
+		// instant.
+		const h = harness(T0, [slow, { wall: 0, monotonic: 5_000 }, instant]);
+		const mintedIat = Math.floor((T0 + 9_999) / 1000);
+		const stamped = await stampSubjectBoundary(h.write, h.now, TTL, h.elapsed);
+		expect(stamped).toEqual({ written: true, failure: { error: expect.any(Error), stamp: 2 } });
+		// Why it is a failure: what the stamping left does not cover that token.
+		expect(
+			claimCoveredByRevocationBoundary(
+				mintedIat,
+				await h.store.revokedBefore("user-1"),
+				DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+			),
+		).toBe(false);
+	});
+
+	it.each([
+		[
+			"a write's wall reading is lower than the one before it",
+			[slow, slow, { wall: -5_000, monotonic: 0 }, instant],
+		],
+		[
+			"the wall clock stepped back across a write",
+			[slow, { wall: -5_000, monotonic: 5_000 }, instant],
+		],
+		[
+			"the wall clock fell behind the monotonic clock across a write",
+			[slow, { wall: 0, monotonic: 5_000 }, instant],
+		],
+		[
+			"the wall clock stepped back across the first write",
+			[
+				{ wall: -60_000, monotonic: 0 },
+				{ wall: 0, monotonic: 0 },
+			],
+		],
+	] as const)("reports the second stamp as failed when %s", async (_, steps) => {
+		const h = harness(T0, steps);
+		const stamped = await stampSubjectBoundary(h.write, h.now, TTL, h.elapsed);
+		expect(stamped).toEqual({ written: true, failure: { error: expect.any(Error), stamp: 2 } });
 	});
 });

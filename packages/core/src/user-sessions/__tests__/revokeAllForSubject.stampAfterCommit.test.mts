@@ -129,14 +129,14 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 		}
 	});
 
-	it("measures each write's commit on the monotonic clock: a wall clock stepped back across a slow write does not settle it", async () => {
+	it("measures each write's commit on the monotonic clock: a wall clock stepped back across a slow write is a failure of the second stamp", async () => {
 		const clock = clockAt(T0);
 		const inner = createInMemorySubjectRevocation({ now: clock.now });
 		let monotonic = 0;
 		const ticking = vi.spyOn(performance, "now").mockImplementation(() => monotonic);
 		try {
 			let calls = 0;
-			await revokeAllForSubject({
+			const result = await revokeAllForSubject({
 				subject: "user-1",
 				watermarkTtlMs: TTL,
 				subjectRevocation: {
@@ -153,7 +153,10 @@ describe("revokeAllForSubject stamps its boundary after the write commits", () =
 				cascadeSession: async () => ({ ok: true }),
 				now: clock.now,
 			});
-			expect(calls).toBe(3);
+			expect(result.tokensRevoked).toBe(true);
+			expect(result.failures).toEqual([
+				expect.objectContaining({ operation: "revokeBefore", stamp: 2 }),
+			]);
 		} finally {
 			ticking.mockRestore();
 		}
