@@ -89,11 +89,13 @@ const refuseInvalidSubject = (res: Response): void => {
 };
 
 /**
- * The module: requires the resolver and the user-session store; takes
+ * The module: requires the resolver and the user-session store, and core's
+ * session lifecycle port (`sessionLifecycleStore`) beside the store; takes
  * `subjectRevocation`, `auditSink` and `logger` when they are wired, the
  * first two under their shared absence policies. Throws a `TypeError` when
  * `subjectFor` is not a function, and its route factory a `RangeError` for a
- * resolver missing or not the planner's (core's `checkResolver`).
+ * resolver missing or not the planner's (core's `checkResolver`), and an
+ * `Error` for a missing lifecycle port.
  */
 export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOptions): Module {
 	if (typeof options !== "object" || options === null || typeof options.subjectFor !== "function") {
@@ -109,7 +111,8 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 		name: "webauthn-session-subject",
 		requires: ["sessionRequirementResolver", "userSessionStore"],
 		// `sessionLifecycleStore`: the lifecycle port admission reads after a
-		// live record; a session closing or closed registers nothing.
+		// live record; a session closing or closed registers nothing. Required
+		// beside the user-session store: the route factory refuses without it.
 		optional: ["subjectRevocation", "sessionLifecycleStore", "auditSink", "logger"],
 		// Optional to wire, not optional to decide — the same constants every
 		// module attaches to these keys, which the declared-absence check
@@ -130,6 +133,14 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 						"webauthnSessionSubjectModule",
 						Object.keys(SESSION_SUBJECT_ADMISSION_ACTIONS),
 					);
+					if (deps.sessionLifecycleStore === undefined) {
+						throw new Error(
+							"webauthn: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
+								"user-session store is wired, core's session lifecycle is required: registering " +
+								"from a browser session admits it through its lifecycle record. Install " +
+								"sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+						);
+					}
 					const logger = deps.logger ?? consoleLogger;
 					const admitRegistration: RequestHandler = async (req, res, next) => {
 						const admission = await admitSession(
