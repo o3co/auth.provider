@@ -912,8 +912,11 @@ function makeSubjectSessionIndex(override?: Partial<SubjectSessionIndex>): Subje
 }
 
 describe("Session routes — the session lifecycle, where it is installed", () => {
-	const lifecycleAnswering = (outcome: "opened" | "unavailable") => {
-		const open = vi.fn(async () => ({ outcome }));
+	const lifecycleAnswering = (outcome: "opened" | Error) => {
+		const open = vi.fn(async () => {
+			if (outcome instanceof Error) throw outcome;
+			return { outcome };
+		});
 		return { open, lifecycle: { open } as unknown as SessionLifecycle };
 	};
 
@@ -940,7 +943,7 @@ describe("Session routes — the session lifecycle, where it is installed", () =
 
 	it("a login whose lifecycle record cannot be opened is a 503, with no session record", async () => {
 		const store = makeUserSessionStore();
-		const { lifecycle } = lifecycleAnswering("unavailable");
+		const { lifecycle } = lifecycleAnswering(new Error("lifecycle store down"));
 		const { app, capturedSession } = buildApp({
 			userSessionStore: store,
 			sessionLifecycle: lifecycle,
