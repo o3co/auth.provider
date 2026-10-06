@@ -2491,7 +2491,12 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 		const store = await liveSessions();
 		const get = vi.spyOn(store, "get");
 		const foreign: ExchangeTokenValidator = {
-			validate: async () => ({ sub: "user-1", scope: "read", claims: { sid: "sid-foreign" } }),
+			validate: async () => ({
+				sub: "user-1",
+				scope: "read",
+				aud: "client-a",
+				claims: { sid: "sid-foreign" },
+			}),
 		};
 		const g = createTokenExchangeGrant({
 			oauthTokenSettings: tokenSettings,

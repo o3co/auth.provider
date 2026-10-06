@@ -34,8 +34,9 @@ import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
  * mismatched `actor_token`/`actor_token_type`, a body `client_id` that is not the
  * authenticated client, a malformed `expires_in`, an unsupported token type (RFC
  * 6749 §5.2; `unsupported_token_type` is RFC 7009's, for revocation), and every
- * refused token: validator `null`, sender constraint, family, session,
- * `may_act`, actor-chain depth, expiry. `invalid_grant` is not open to this grant.
+ * refused token: validator `null`, a subject token that does not name the
+ * client, sender constraint, family, session, `may_act`, actor-chain depth,
+ * expiry. `invalid_grant` is not open to this grant.
  *
  * One code covers all of these, so `error_description` tells a client which check
  * refused it and is part of the wire contract (the README names each). Quote

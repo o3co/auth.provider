@@ -1348,6 +1348,35 @@ describe("every added module's primary route answers in the one app", () => {
 		});
 	});
 
+	it("token exchange: a client registered without allowExchangeOfTokensIssuedToOthers cannot exchange the web client's access token", async () => {
+		const exchanger = { id: "exchanger", secret: "exchanger-secret" } as const;
+		const { app } = await boot({
+			extraClients: {
+				[exchanger.id]: {
+					tokenEndpointAuthMethod: "client_secret_basic",
+					clientSecret: exchanger.secret,
+					allowedScopes: ["openid", "profile"],
+					allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
+				},
+			},
+		});
+		const { access_token } = await webTokens(app);
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", basic(exchanger))
+			.type("form")
+			.send({
+				grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+				subject_token: access_token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({
+			error: "invalid_request",
+			error_description: "subject_token azp and aud do not name this client",
+		});
+	});
+
 	it("DPoP: a client_credentials token bound to the proof's key", async () => {
 		const { app } = await boot();
 		const res = await request(app)

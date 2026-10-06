@@ -371,7 +371,7 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 	it("refuses a subject token that has already expired rather than minting a dead token", async () => {
 		const past = Math.floor(Date.now() / 1000) - 30;
 		const g = buildGrant({
-			stub: { sub: "user-1", scope: "read", claims: { sub: "user-1", exp: past } },
+			stub: { sub: "user-1", scope: "read", aud: "client-a", claims: { sub: "user-1", exp: past } },
 		});
 		const { result } = await g.handle(
 			ctx({
@@ -391,7 +391,7 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 	it("refuses a subject token whose remaining lifetime rounds to zero", async () => {
 		const now = Math.floor(Date.now() / 1000);
 		const g = buildGrant({
-			stub: { sub: "user-1", scope: "read", claims: { sub: "user-1", exp: now } },
+			stub: { sub: "user-1", scope: "read", aud: "client-a", claims: { sub: "user-1", exp: now } },
 		});
 		const { result } = await g.handle(
 			ctx({
@@ -424,7 +424,12 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 			});
 			const subjectExp = start + 60;
 			const g = buildGrant({
-				stub: { sub: "user-1", scope: "read", claims: { sub: "user-1", exp: subjectExp } },
+				stub: {
+					sub: "user-1",
+					scope: "read",
+					aud: "client-a",
+					claims: { sub: "user-1", exp: subjectExp },
+				},
 			});
 			const { result } = await g.handle(
 				ctx({
@@ -451,7 +456,7 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 		// `expires_in` is the time left when answered: read on a frozen clock.
 		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 		const g = buildGrant({
-			stub: { sub: "user-1", scope: "read", claims: { sub: "user-1" } },
+			stub: { sub: "user-1", scope: "read", aud: "client-a", claims: { sub: "user-1" } },
 		});
 		const { result } = await g.handle(
 			ctx({

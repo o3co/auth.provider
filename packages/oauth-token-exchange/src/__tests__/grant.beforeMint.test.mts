@@ -449,7 +449,7 @@ describe("token exchange — the issued token's iat is the instant fixed before 
 		const now = Math.floor(Date.now() / 1000);
 		// A validator of its own that holds no expiry: the grant's own backstop is all there is.
 		const reporting = (exp: number): ExchangeTokenValidator => ({
-			validate: async () => ({ sub: SUBJECT, claims: { sub: SUBJECT, exp } }),
+			validate: async () => ({ sub: SUBJECT, aud: "client-a", claims: { sub: SUBJECT, exp } }),
 		});
 		const advance = allowAfter(() => {
 			vi.setSystemTime(Date.now() + 5_000);
