@@ -28,7 +28,6 @@ import type {
 	FederationProvider,
 	FederationTokenStore,
 	Logger,
-	SessionFederationIndex,
 	SessionLifecycle,
 	SessionLifecycleStore,
 	SessionRequirementResolver,
@@ -221,16 +220,6 @@ export function makeUserSessionStore(): UserSessionStore & {
 	};
 }
 
-export function makeSessionFederationIndex(): SessionFederationIndex {
-	return {
-		kind: "memory",
-		addFederation: vi.fn(async () => {}),
-		listFederations: vi.fn(async () => []),
-		removeFederation: vi.fn(async () => {}),
-		removeBySid: vi.fn(async () => {}),
-	} as SessionFederationIndex;
-}
-
 export function makeFederationTokenStore(): FederationTokenStore & {
 	attach: ReturnType<typeof vi.fn>;
 	delete: ReturnType<typeof vi.fn>;
@@ -264,7 +253,6 @@ export type HarnessApp = {
 	records: HarnessRecordStore;
 	userSessionStore: ReturnType<typeof makeUserSessionStore>;
 	federationTokenStore: ReturnType<typeof makeFederationTokenStore>;
-	sessionFederationIndex: SessionFederationIndex;
 	/** The session lifecycle the router was handed: a fake whose members are spies, by default. */
 	sessionLifecycle: SessionLifecycle;
 };
@@ -304,7 +292,6 @@ export function buildFederationApp({
 	const app = makeSessionApp(store, records);
 	const userSessionStore = makeUserSessionStore();
 	const federationTokenStore = makeFederationTokenStore();
-	const sessionFederationIndex = makeSessionFederationIndex();
 	const lifecycle = sessionLifecycle ?? fakeSessionLifecycle();
 
 	app.use(
@@ -317,7 +304,6 @@ export function buildFederationApp({
 			providerCallbackUrls,
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore,
-			sessionFederationIndex,
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			...(subjectRevocation ? { subjectRevocation } : {}),
 			...(sessionLifecycleStore ? { sessionLifecycleStore } : {}),
@@ -336,7 +322,6 @@ export function buildFederationApp({
 		records,
 		userSessionStore,
 		federationTokenStore,
-		sessionFederationIndex,
 		sessionLifecycle: lifecycle,
 	};
 }

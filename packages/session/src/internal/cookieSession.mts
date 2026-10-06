@@ -30,7 +30,7 @@ import type { Request, RequestHandler } from "express";
 /**
  * What the session package answers, with `503`, when a session-side store —
  * the cookie session's, a `form_post` transaction's, the `UserSession`
- * store, a federation index or token store — cannot answer. RFC 6749's code
+ * store, the federation token store, core's session lifecycle — cannot answer. RFC 6749's code
  * for a temporary condition, one wording everywhere.
  */
 export const SESSION_STORE_UNAVAILABLE = Object.freeze({

@@ -203,12 +203,15 @@ describe("sessionModule (static manifest)", () => {
 				"userRepository",
 				"userSessionStore",
 				"federationTokenStore",
-				"sessionFederationIndex",
 				"csrfTokenSigner",
 				"federationProviders",
 				"federationRedirectPolicyResolver",
 			]),
 		);
+		// A link reads the federations a session joined from core's session
+		// lifecycle; the per-session index is not this module's.
+		expect(sessionModule.requires).not.toContain("sessionFederationIndex");
+		expect(sessionModule.optional ?? []).not.toContain("sessionFederationIndex");
 		// `sessionRPRegistry` and `sessionFamilyIndex` are oauth-package concerns
 		// and MUST NOT appear in sessionModule.requires.
 		expect(sessionModule.requires).not.toContain("sessionRPRegistry");
