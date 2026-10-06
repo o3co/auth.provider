@@ -20,7 +20,8 @@
  * — `[]` in the shipped `config/application.conf` — with `mfa` added when the
  * template's MFA switch, `mfaMode` (`MFA_MODE`), is not `off`
  * (`expectedSessionRequirements`); under that switch the template installs
- * the MFA module, whose requirement registers `mfa`. And what it hands boot
+ * the MFA module, whose requirement registers `mfa`; a value boot refuses is
+ * handed on as written, for boot to refuse. And what it hands boot
  * of the MFA module's section, `mfa`: nothing unless a loaded module owns it,
  * its mode written from the switch when the template installs MFA, and a
  * mode the configuration writes that the switch does not say refused.
@@ -38,8 +39,8 @@ import {
 	readSwitches,
 	resolveForBoot,
 	resolveLayers,
-	type Switches,
 } from "../configPath.mjs";
+import type { MfaSwitch } from "../sections.mjs";
 import {
 	type Composition,
 	compose,
@@ -116,6 +117,45 @@ describe("what the template expects of session admission", () => {
 		expect((err as BootError).details).toMatchObject({
 			missing: ["risk"],
 			declared: ["risk", "mfa"],
+		});
+	});
+
+	it.each([
+		["a name, not a list", 'core.sessionRequirements.expected = "risk"\n'],
+		["a list holding something other than a name", "core.sessionRequirements.expected = [1]\n"],
+		["a key core does not declare beside the list", "core.sessionRequirements.extra = 1\n"],
+	])(
+		"hands boot %s as written under the switch on, and boot refuses it naming core.sessionRequirements",
+		async (_label, operatorHocon) => {
+			const err = await refusal(
+				compose({
+					env: { ...SINGLE_ENV, ...MFA_ENV, MFA_MODE: "required" },
+					environment: "test",
+					operatorHocon,
+				}),
+			);
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe("config-validation-failed");
+			expect(String((err as BootError).message)).toContain("core.sessionRequirements");
+		},
+	);
+
+	it("hands boot the configuration's own section as written under the switch off", () => {
+		const own = readOwnLayers(
+			[
+				operatorLayer(
+					'core.sessionRequirements { expected = ["risk"], secondFactorAuthority = "risk" }\n',
+				),
+				...ownFiles(),
+			],
+			{ env: SINGLE_ENV },
+		);
+		const resolved = resolveForBoot(own, [], readSwitches(own)) as unknown as {
+			readonly core?: { readonly sessionRequirements?: unknown };
+		};
+		expect(resolved.core?.sessionRequirements).toEqual({
+			expected: ["risk"],
+			secondFactorAuthority: "risk",
 		});
 	});
 
@@ -228,24 +268,21 @@ describe("what the template hands boot of the mfa section", () => {
 });
 
 describe("expectedSessionRequirements", () => {
-	const of = (mfa: string, expected?: readonly string[], authority?: string) =>
-		expectedSessionRequirements({
-			mfaMode: mfa,
-			...(expected === undefined && authority === undefined
-				? {}
+	const of = (mfa: MfaSwitch, expected?: readonly string[], authority?: string) =>
+		expectedSessionRequirements(
+			expected === undefined && authority === undefined
+				? undefined
 				: {
-						core: {
-							sessionRequirements: {
-								...(expected === undefined ? {} : { expected }),
-								...(authority === undefined ? {} : { secondFactorAuthority: authority }),
-							},
-						},
-					}),
-		} as unknown as Switches);
+						...(expected === undefined ? {} : { expected }),
+						...(authority === undefined ? {} : { secondFactorAuthority: authority }),
+					},
+			mfa,
+		);
 	const AUTHORITY = { secondFactorAuthority: "mfa" } as const;
 
 	it("is the configuration's list, with mfa added once and named the second-factor authority when the switch is not off", () => {
-		expect(of("off", ["risk"])).toEqual({ expected: ["risk"] });
+		// `undefined`: the section is handed on as written.
+		expect(of("off", ["risk"])).toBeUndefined();
 		expect(of("optional", ["risk"])).toEqual({ expected: ["risk", "mfa"], ...AUTHORITY });
 		expect(of("required", ["mfa"])).toEqual({ expected: ["mfa"], ...AUTHORITY });
 		expect(of("required")).toEqual({ expected: ["mfa"], ...AUTHORITY });
@@ -260,15 +297,12 @@ describe("expectedSessionRequirements", () => {
 			expected: ["mfa", "risk", "mfa"],
 			...AUTHORITY,
 		});
-		expect(of("off", ["risk", "risk"])).toEqual({ expected: ["risk", "risk"] });
+		expect(of("off", ["risk", "risk"])).toBeUndefined();
 	});
 
 	it("accepts a written second-factor authority the switch says, and keeps one written under the switch off", () => {
 		expect(of("required", ["mfa"], "mfa")).toEqual({ expected: ["mfa"], ...AUTHORITY });
-		expect(of("off", ["risk"], "risk")).toEqual({
-			expected: ["risk"],
-			secondFactorAuthority: "risk",
-		});
+		expect(of("off", ["risk"], "risk")).toBeUndefined();
 	});
 
 	it("refuses, with the switch on, a written second-factor authority other than mfa, naming the key and the switch and quoting nothing", () => {
@@ -288,6 +322,21 @@ describe("expectedSessionRequirements", () => {
 
 	it("declares nothing when the configuration writes no list and the switch is off, so boot's own rule for an unwritten key applies", () => {
 		expect(of("off")).toBeUndefined();
+	});
+
+	it("hands on as written, under the switch on, what is not a section with a list of names, for boot to refuse", () => {
+		expect(expectedSessionRequirements("mfa", "required")).toBeUndefined();
+		expect(expectedSessionRequirements({ expected: "mfa" }, "required")).toBeUndefined();
+		expect(expectedSessionRequirements({ expected: ["mfa", 1] }, "required")).toBeUndefined();
+		expect(expectedSessionRequirements({}, "required")).toBeUndefined();
+	});
+
+	it("keeps, under the switch on, every other key written beside the list, for boot to refuse", () => {
+		expect(expectedSessionRequirements({ expected: [], extra: 1 }, "required")).toEqual({
+			expected: ["mfa"],
+			extra: 1,
+			...AUTHORITY,
+		});
 	});
 });
 

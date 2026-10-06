@@ -262,7 +262,6 @@ describe("the process each development run describes", () => {
 
 		const modules = buildModules(switches, {
 			environment: "development",
-			logger: createRecordingLogger(),
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		});
 		const handle = await createApp({
@@ -300,7 +299,6 @@ describe("the process each development run describes", () => {
 
 		const modules = buildModules(switches, {
 			environment: configEnv,
-			logger: createRecordingLogger(),
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		});
 		const names = modules.map((module) => module.name);

@@ -33,7 +33,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
 import {
-	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -43,19 +42,18 @@ import {
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths, type Switches } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 import { repositoriesModuleFor, templateReference } from "../modules.mjs";
 import { repositoriesSectionSchema } from "../sections.mjs";
 import {
+	type BothPhases,
+	bothPhasesOf,
 	capturedRenames,
 	libraryLayers,
-	rootSectionsOf,
-	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -103,24 +101,21 @@ const recordingStore = async (
 };
 
 /** The shipped config for the production overlay, resolved against `env`. */
-const resolve = (env: Record<string, string>): Switches => {
+const resolve = (env: Record<string, string>): BothPhases => {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env })
 		.withFallback(parseFile(applicationConfPath, { env }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 		.withFallback(libraryLayers(env));
 	return {
-		...sectionsCoreDoesNotDeclare(layers),
-		...rootSectionsOf(layers, env),
-		...validate(layers, AppConfigSchema),
-		// What the resolution captured of core's renamed variables, which the
-		// schema's parse drops.
+		...bothPhasesOf(layers, env),
+		// What the resolution captured of the renamed variables.
 		"renamed-variables": capturedRenames(env),
-	} as Switches;
+	} as BothPhases;
 };
 
 /** The user repository the production `repositories` module builds from `config`'s section. */
-const userRepositoryFrom = (config: Switches): Promise<UserRepository> =>
+const userRepositoryFrom = (config: BothPhases): Promise<UserRepository> =>
 	Promise.resolve(
 		repositoriesModuleFor({
 			client: config.adapters.clientRepository,

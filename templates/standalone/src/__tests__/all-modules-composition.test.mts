@@ -34,11 +34,10 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import { federationsOf } from "@o3co/auth-provider-core";
+import { type AppConfig, federationsOf } from "@o3co/auth-provider-core";
 import type express from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { Switches } from "#/configPath.mjs";
 import {
 	ALICE,
 	AS_LISTED,
@@ -390,18 +389,18 @@ describe("discovery", () => {
 	});
 
 	/** The grant connections dropped: they name the OIDC federation. */
-	const withoutConnections = (config: Switches): Switches =>
+	const withoutConnections = (config: AppConfig): AppConfig =>
 		({
 			...config,
 			"federation-grants": { ...config["federation-grants"], connections: {} },
-		}) as Switches;
+		}) as AppConfig;
 
 	const FEATURE_SWITCHES: ReadonlyArray<
 		readonly [
 			feature: string,
 			variable: string,
 			path: string,
-			config: ((config: Switches) => Switches) | undefined,
+			config: ((config: AppConfig) => AppConfig) | undefined,
 		]
 	> = [
 		["federation grants", "FEDERATION_GRANTS_ENABLED", "/oauth/federation-grants", undefined],
@@ -582,13 +581,13 @@ describe("every module's primary route answers in the one app", () => {
 	knownDefect(
 		"a federation enabled from the documented variables alone either refuses to boot or completes a login",
 		async () => {
-			const withoutLanding = (config: Switches): Switches => {
+			const withoutLanding = (config: AppConfig): AppConfig => {
 				const federations = federationsOf(config) as Record<string, Record<string, unknown>>;
 				const { clientUrl: _dropped, ...oidc } = federations.oidc ?? {};
 				return {
 					...config,
 					core: { ...config.core, federations: { ...federations, oidc } },
-				} as unknown as Switches;
+				} as unknown as AppConfig;
 			};
 			let composed: Composition;
 			try {

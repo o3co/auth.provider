@@ -625,7 +625,6 @@ async function bootShipped(
 	const modules = adjustModules(
 		buildModules(switches, {
 			environment,
-			logger,
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		}),
 	);

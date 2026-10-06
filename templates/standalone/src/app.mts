@@ -44,9 +44,7 @@ const { applicationConfPath, envConfPath } = resolveConfigPaths(configDirPath, e
 const own = readOwnLayers([envConfPath, applicationConfPath]);
 // Phase one: what the template reads before it knows its modules, only for
 // those choices — its own `adapters` and MFA switch (`mfaMode`, MFA_MODE),
-// and the switches core's reader parses — and for what the composition
-// expects of session admission: the configuration's list, with `mfa` added
-// when the MFA switch installs MFA.
+// and whether federation grants are installed.
 const switches: Switches = readSwitches(own);
 
 // From the `logging` module's section, so the level holds from the first line;
@@ -87,7 +85,7 @@ await (async (): Promise<void> => {
 	// every loaded module's schema (`configPath.mts`), and names each section
 	// nothing loaded reads by the configuration's defaults. From here on the
 	// template reads the parsed configuration.
-	const modules = buildModules(switches, { environment: env, logger });
+	const modules = buildModules(switches, { environment: env });
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {

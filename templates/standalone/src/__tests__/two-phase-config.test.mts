@@ -17,52 +17,51 @@
 /**
  * The template reads its configuration in two phases, as `app.mts` does:
  *
- * 1. `readSwitches` — its own files over core's `reference.conf`, read with
- *    core's transitional reader — parses only `SWITCHES`, what the template
- *    reads before it knows its modules: the switches `buildModules` chooses
- *    them by, and the configuration's `core.sessionRequirements`, which
- *    `expectedSessionRequirements` reads (the log level is the `logging`
- *    module's section, which `readLogging` reads with that module's schema:
- *    `own-modules.test.mts`) — and the composition root's own `adapters` and
- *    `mfaMode`, over the template's own reference, with the template's
- *    schema (`adapters.test.mts`, `mfa-switch.test.mts`), and the Store
- *    transport settings beside them, unparsed;
+ * 1. `readSwitches` — its own files over the template's own `reference.conf`
+ *    — reads only what the template reads before it knows its modules: the
+ *    composition root's own `adapters` and `mfaMode`, with the template's
+ *    schema (`adapters.test.mts`, `mfa-switch.test.mts`), the Store transport
+ *    settings beside them, unparsed, and whether federation grants are
+ *    installed, from `federation-grants.enabled` read with core's
+ *    `coerceBooleanFromEnv` (the log level is the `logging` module's
+ *    section, which `readLogging` reads with that module's schema:
+ *    `own-modules.test.mts`);
  * 2. `resolveForBoot` — its own files over the `reference.conf` of every
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
  *
- * Phase one must read each switch as a parse of the same layers with
- * `AppConfigSchema` (through the HOCON library's Zod bridge) does, and nothing
- * but its switches, so that a section a package's reference completes (known
- * only in phase two) does not refuse it.
+ * Phase one must read `federation-grants.enabled` as the federation-grants
+ * module's own schema and boot's parse do, and install the module for a value
+ * they refuse, so that boot refuses it; and it reads nothing else, so that a
+ * section a package's reference completes (known only in phase two) does not
+ * refuse it.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AppConfigSchema, coreReference, createApp, type Module } from "@o3co/auth-provider-core";
+import { BootError, createApp, type Module, moduleReferences } from "@o3co/auth-provider-core";
+import {
+	federationGrantsConfigSchema,
+	federationGrantsModules,
+} from "@o3co/auth-provider-federation-grants";
 import {
 	redisFederationGrantIntentStoreModule,
 	redisFederationGrantStoreModule,
 } from "@o3co/auth-provider-redis";
-import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { ADAPTERS_SECTION } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
 import {
-	expectedSessionRequirements,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
 	resolveLayers,
-	SWITCHES,
 	type Switches,
 } from "../configPath.mjs";
 import { MFA_SWITCH } from "../mfaSwitch.mjs";
-import { templateReference } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -93,22 +92,24 @@ const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 	},
 };
 
+/** What phase one answers: the composition root's own keys, and the one switch of a module's section it decides by. */
+const PHASE_ONE_PATHS: readonly string[] = [
+	ADAPTERS_SECTION,
+	MFA_SWITCH,
+	"storeTransport",
+	"federation-grants.enabled",
+];
+
 const ownFiles = (environment: string): string[] => {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, environment);
 	return [envConfPath, applicationConfPath];
 };
 
-/** The layers parsed with `AppConfigSchema` through the bridge: how phase one must read each switch. */
-function preParsed(environment: string, env: Readonly<Record<string, string>>): unknown {
-	const read = (file: string) => parseFile(file, { env: { ...env } });
-	const [top, application] = ownFiles(environment) as [string, string];
-	return validate(
-		read(top)
-			.withFallback(read(application))
-			.withFallback(read(fileURLToPath(templateReference())))
-			.withFallback(read(fileURLToPath(coreReference()))),
-		AppConfigSchema,
-	);
+/** `federation-grants.enabled` as the federation-grants module's own schema parses the same layers. */
+function ownerReads(environment: string, env: Readonly<Record<string, string>>): unknown {
+	const own = readOwnLayers(ownFiles(environment), { env });
+	const resolved = resolveLayers(own, moduleReferences(federationGrantsModules));
+	return federationGrantsConfigSchema.parse(resolved["federation-grants"])?.enabled;
 }
 
 /** The value at a dotted path, or `undefined`. */
@@ -145,27 +146,91 @@ function recording(config: unknown): { readonly config: Switches; readonly reads
 	return { config: wrap(config as object, "") as Switches, reads };
 }
 
-describe("phase one reads each switch as the template's AppConfigSchema pre-parse read it", () => {
+describe("phase one reads federation-grants.enabled as the federation-grants module reads it", () => {
 	for (const environment of ["development", "production"]) {
 		for (const [name, env] of Object.entries(ENVIRONMENTS)) {
 			it(`${environment}, ${name}`, () => {
-				const before = preParsed(environment, env);
 				const switches = readSwitches(readOwnLayers(ownFiles(environment), { env }));
-				const changed = SWITCHES.filter(
-					(path) =>
-						JSON.stringify(valueAt(before, path)) !== JSON.stringify(valueAt(switches, path)),
-				);
-				expect(changed).toEqual([]);
+				expect(switches["federation-grants"]?.enabled).toBe(ownerReads(environment, env) ?? false);
 			});
 		}
 	}
 
+	it.each([
+		["true", true],
+		["1", true],
+		[" TRUE ", true],
+		["false", false],
+		["0", false],
+		["", false],
+	])("reads FEDERATION_GRANTS_ENABLED=%j as the module's schema does: %s", (value, enabled) => {
+		const env = { ...REQUIRED_ENV, FEDERATION_GRANTS_ENABLED: value };
+		const switches = readSwitches(readOwnLayers(ownFiles("production"), { env }));
+		expect(switches["federation-grants"]?.enabled).toBe(enabled);
+		expect(ownerReads("production", env)).toBe(enabled);
+	});
+
+	it.each([
+		["true", true],
+		["false", false],
+	])("reads federation-grants.enabled = %s written in HOCON", (literal, enabled) => {
+		const operator = operatorLayer(`federation-grants.enabled = ${literal}\n`);
+		const switches = readSwitches(
+			readOwnLayers([operator, ...ownFiles("production")], { env: REQUIRED_ENV }),
+		);
+		expect(switches["federation-grants"]?.enabled).toBe(enabled);
+	});
+
+	it("reads the switch unwritten as off", () => {
+		const operator = operatorLayer('mfaMode = "off"\n');
+		const switches = readSwitches(readOwnLayers([operator], { env: {} }));
+		expect(switches["federation-grants"]?.enabled).toBe(false);
+	});
+
+	it("installs the modules for a value the module's schema refuses, so that boot refuses it naming the key", async () => {
+		const env = { ...REQUIRED_ENV, MFA_MODE: "off", FEDERATION_GRANTS_ENABLED: "yes" };
+		expect(() => ownerReads("production", env)).toThrow();
+		const own = readOwnLayers(ownFiles("production"), { env });
+		const switches = readSwitches(own);
+		expect(switches["federation-grants"]?.enabled).toBe(true);
+		const modules = buildModules(switches, { environment: "production" });
+		expect(modules.map((module) => module.name)).toContain("federation-grants");
+		const err = await createApp({
+			modules,
+			bootstrapComponents: {
+				config: resolveForBoot(own, modules, switches),
+				pathResolver: (s: string) => s,
+			},
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain("federation-grants.enabled");
+	});
+
+	it("installs the modules for a setting at the section's old path, which boot refuses naming the new one", () => {
+		const operator = operatorLayer("federationGrants.enabled = true\n");
+		const switches = readSwitches(
+			readOwnLayers([operator, ...ownFiles("production")], {
+				env: { ...REQUIRED_ENV, MFA_MODE: "off" },
+			}),
+		);
+		expect(switches["federation-grants"]?.enabled).toBe(true);
+		expect(
+			buildModules(switches, { environment: "production" }).map((module) => module.name),
+		).toContain("federation-grants");
+	});
+
 	it("reads the MFA switch as its own mfaMode, as the environment sets it, and no key of the MFA module's", () => {
-		expect(SWITCHES.filter((path) => path.split(".")[0] === "mfa")).toEqual([]);
 		for (const [name, env] of Object.entries(ENVIRONMENTS)) {
-			expect(readSwitches(readOwnLayers(ownFiles("production"), { env })).mfaMode, name).toBe(
-				env.MFA_MODE ?? "required",
-			);
+			const switches = readSwitches(readOwnLayers(ownFiles("production"), { env }));
+			expect(switches.mfaMode, name).toBe(env.MFA_MODE ?? "required");
+			expect(switches, name).not.toHaveProperty("mfa");
 		}
 	});
 });
@@ -184,16 +249,22 @@ describe("phase one reads its switches and nothing else", () => {
 		).not.toThrow();
 	});
 
+	it("answers the composition root's own keys and federation-grants.enabled, nothing of core's section or any other module's", () => {
+		const switches = readSwitches(readOwnLayers(ownFiles("production"), { env }));
+		expect(Object.keys(switches).sort()).toEqual(
+			[ADAPTERS_SECTION, MFA_SWITCH, "storeTransport", "federation-grants"].sort(),
+		);
+		expect(Object.keys(switches["federation-grants"] ?? {})).toEqual(["enabled"]);
+	});
+
 	it("reads, before boot, only paths among its switches", () => {
 		const { config, reads } = recording(
 			readSwitches(readOwnLayers(ownFiles("production"), { env })),
 		);
-		// What `app.mts` reads of phase one: the modules, and what the
-		// composition expects of session admission.
-		expectedSessionRequirements(config);
+		// What `app.mts` reads of phase one before boot: the modules.
 		buildModules(config, { environment: "production" });
 		const covered = (path: string) =>
-			[...SWITCHES, ADAPTERS_SECTION, MFA_SWITCH, "storeTransport"].some(
+			PHASE_ONE_PATHS.some(
 				(switchPath) =>
 					path === switchPath ||
 					path.startsWith(`${switchPath}.`) ||
@@ -204,7 +275,6 @@ describe("phase one reads its switches and nothing else", () => {
 	});
 
 	it("reads no federation entry: core dispatches each by its type at boot", () => {
-		expect(SWITCHES.filter((path) => path.startsWith("core.federations"))).toEqual([]);
 		const federationEnvs: readonly Readonly<Record<string, string>>[] = [
 			{},
 			{ CORE_FEDERATIONS_GOOGLE_ENABLED: "true" },
@@ -213,7 +283,7 @@ describe("phase one reads its switches and nothing else", () => {
 			const { config, reads } = recording(
 				readSwitches(readOwnLayers(ownFiles("production"), { env: { ...env, ...federations } })),
 			);
-			expectedSessionRequirements(config);
+			expect(config).not.toHaveProperty("core");
 			buildModules(config, { environment: "production" });
 			expect(
 				[...reads].filter(
@@ -421,21 +491,23 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 				const own = readOwnLayers(ownFiles(environment), { env: variables });
 				const switches = readSwitches(own);
 				const modules = buildModules(switches, { environment });
+				const resolved = resolveForBoot(own, modules, switches);
 				const handle = await createApp({
 					modules: [],
 					bootstrapComponents: {
-						config: resolveForBoot(own, modules, switches),
+						config: resolved,
 						pathResolver: (s: string) => s,
 						...FEDERATION_STORES,
 					} as never,
 				});
 				const parsed = handle.components.config;
 				await handle.dispose();
-				const differing = SWITCHES.filter(
-					(path) =>
-						JSON.stringify(valueAt(switches, path)) !== JSON.stringify(valueAt(parsed, path)),
+				expect(valueAt(switches, "federation-grants.enabled"), `${environment}, ${name}`).toBe(
+					valueAt(parsed, "federation-grants.enabled"),
 				);
-				expect(differing, `${environment}, ${name}`).toEqual([]);
+				expect(valueAt(resolved, "core.sessionRequirements"), `${environment}, ${name}`).toEqual(
+					valueAt(parsed, "core.sessionRequirements"),
+				);
 			}
 		}
 	});

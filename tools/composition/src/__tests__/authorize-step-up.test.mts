@@ -32,6 +32,7 @@
 
 import { randomBytes } from "node:crypto";
 import {
+	type AppConfig,
 	createInMemoryUserSessionStore,
 	type MfaFactorStore,
 	type UserSessionStore,
@@ -50,7 +51,6 @@ import {
 	THIRD,
 	WEB,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import type { Switches } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import type { Express } from "express";
 import request from "supertest";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -91,14 +91,14 @@ afterEach(async () => {
 /** The configuration every boot here runs on: MFA optional, the TOTP factor on, the acr table. */
 const adjust =
 	(mode: "optional" | "required") =>
-	(config: Switches): Switches => {
+	(config: AppConfig): AppConfig => {
 		const oauth = (config as unknown as { oauth?: Record<string, unknown> }).oauth;
 		return {
 			...config,
 			...mfaConfigForTests({ key: MFA_KEY, mode }),
 			...mfaTotpFactorConfigForTests(),
 			oauth: { ...oauth, authorize: oauthConfigForTests({ acrValues: ACR_TABLE }).oauth.authorize },
-		} as unknown as Switches;
+		} as unknown as AppConfig;
 	};
 
 /** Boots the full set for `users`, with `options` laid over this file's configuration. */

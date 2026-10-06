@@ -38,6 +38,7 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
+	resolveLayers,
 	type Switches,
 } from "../configPath.mjs";
 import { httpModule, keyStoreModule, templateReference } from "../modules.mjs";
@@ -46,8 +47,8 @@ import { httpModule, keyStoreModule, templateReference } from "../modules.mjs";
  * Boots the shipped config with EVERY documented override supplied the way an
  * operator supplies one: as a string.
  *
- * HOCON substitutes `${?VAR}` as a string, always. `app.mts` reads its switches
- * with core's transitional reader and hands `createApp` what it resolved,
+ * HOCON substitutes `${?VAR}` as a string, always. `app.mts` reads its own
+ * switches with the template's schema and hands `createApp` what it resolved,
  * which boot parses once with plain Zod, so every schema leaf must read the
  * string itself. This suite reads through that path: `readSwitches` for what
  * is read before boot, `resolveForBoot` and `createApp` for the configuration
@@ -1054,9 +1055,11 @@ describe("the shipped config boots with every documented override supplied as a 
 		const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
 		// Each module's section at its name: a declaration made from the
 		// section is answered for it.
-		const switches = readShippedSwitches(UMBRELLA_E2E_ENV);
-		const sections = switches as unknown as Record<string, unknown>;
-		for (const module of buildModules(switches)) {
+		const own = readOwnLayers(ownFiles("production"), { env: UMBRELLA_E2E_ENV });
+		const switches = readSwitches(own);
+		const modules = buildModules(switches);
+		const sections = resolveForBoot(own, modules, switches) as unknown as Record<string, unknown>;
+		for (const module of modules) {
 			expect(replicaUnsafeReason(module, sections[module.name]), module.name).toBeUndefined();
 		}
 	});
@@ -1195,9 +1198,14 @@ describe("the shipped config boots with every documented override supplied as a 
 
 		for (const mode of ["optional", "required"] as const) {
 			it(`reads MFA_MODE=${mode} as the switch that installs MFA, expecting mfa`, () => {
-				const switches = readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: mode });
+				const own = readOwnLayers(ownFiles("production"), {
+					env: { ...DOCUMENTED_ENV, MFA_MODE: mode },
+				});
+				const switches = readSwitches(own);
 				expect(switches.mfaMode).toBe(mode);
-				expect(expectedSessionRequirements(switches)).toEqual({
+				const shipped = (resolveLayers(own, []).core as { sessionRequirements?: unknown })
+					.sessionRequirements;
+				expect(expectedSessionRequirements(shipped, switches.mfaMode)).toEqual({
 					expected: ["mfa"],
 					secondFactorAuthority: "mfa",
 				});

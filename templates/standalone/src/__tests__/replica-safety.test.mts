@@ -39,7 +39,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -53,16 +52,15 @@ import {
 import { sessionStoreModule } from "@o3co/auth-provider-session";
 import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths, type Switches } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
+	type BothPhases,
+	bothPhasesOf,
 	capturedRenames,
 	libraryLayers,
-	rootSectionsOf,
-	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
 // The redis session-store builder, which the baseline selects, dynamically
@@ -166,20 +164,17 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	ADAPTERS_CONSENT_STORE: "redis",
 };
 
-function resolveConfig(env: Record<string, string>): Switches {
+function resolveConfig(env: Record<string, string>): BothPhases {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env })
 		.withFallback(parseFile(applicationConfPath, { env }))
 		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 		.withFallback(libraryLayers(env));
 	return {
-		...sectionsCoreDoesNotDeclare(layers),
-		...rootSectionsOf(layers, env),
-		...validate(layers, AppConfigSchema),
-		// What the resolution captured of core's renamed variables, which the
-		// schema's parse drops.
+		...bothPhasesOf(layers, env),
+		// What the resolution captured of the renamed variables.
 		"renamed-variables": capturedRenames(env),
-	} as Switches;
+	} as BothPhases;
 }
 
 /** Drops a variable, so the HOCON default takes over. */
@@ -214,7 +209,7 @@ const testKeyStoreModule = defineModule({
 	},
 });
 
-const modulesFor = (config: Switches, environment?: string) =>
+const modulesFor = (config: BothPhases, environment?: string) =>
 	buildModules(config, {
 		keyStoreModule: testKeyStoreModule,
 		repositoriesModule: testRepositoriesModule,
@@ -225,10 +220,10 @@ const modulesFor = (config: Switches, environment?: string) =>
  * `module`'s section in `config`, for a declaration made from it: each module
  * here that has one sits at its name.
  */
-const sectionOf = (config: Switches, module: Module): unknown =>
+const sectionOf = (config: BothPhases, module: Module): unknown =>
 	(config as unknown as Record<string, unknown>)[module.name];
 
-const boot = (config: Switches, environment?: string) =>
+const boot = (config: BothPhases, environment?: string) =>
 	createApp({
 		modules: modulesFor(config, environment),
 		bootstrapComponents: { config, pathResolver: (s) => s },
@@ -359,7 +354,7 @@ describe("express-session's store declares its replica safety from its own secti
 	];
 
 	/** What a boot of `modules` settles as: the refusal, or the replica-safety warnings it logged. */
-	async function outcomeOf(config: Switches, modules: readonly Module[]): Promise<unknown> {
+	async function outcomeOf(config: BothPhases, modules: readonly Module[]): Promise<unknown> {
 		const warn = vi.fn();
 		const logger = {
 			warn,

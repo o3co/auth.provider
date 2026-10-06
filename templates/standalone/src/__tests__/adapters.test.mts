@@ -350,17 +350,14 @@ describe("boot and the section", () => {
 	});
 
 	it.each([
-		["named adapters", "adapters", undefined],
-		["with its section at adapters.custom", "custom-thing", "adapters.custom"],
-	] as const)("refuses a module %s: its section would never reach boot", (_label, name, at) => {
+		["named adapters", "adapters"],
+		["named mfaMode", "mfaMode"],
+	] as const)("refuses a module %s: its section would never reach boot", (_label, name) => {
 		const own = readOwnLayers(ownFiles(), { env: MFA_OFF });
 		const switches = readSwitches(own);
 		const mine = defineModule({
 			name,
-			section: {
-				schema: z.object({}).passthrough().optional(),
-				...(at === undefined ? {} : { at }),
-			},
+			section: { schema: z.object({}).passthrough().optional() },
 		});
 		expect(() =>
 			resolveForBoot(
@@ -368,6 +365,6 @@ describe("boot and the section", () => {
 				[...buildModules(switches, { environment: "production" }), mine],
 				switches,
 			),
-		).toThrow(new RegExp(`"${name}".*adapters`));
+		).toThrow(new RegExp(`"${name}".*composition root's own section`));
 	});
 });
