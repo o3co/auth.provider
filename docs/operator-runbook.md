@@ -48,7 +48,7 @@ Core's own in-memory modules declare it as follows
 
 | Module name | What forks per replica |
 | --- | --- |
-| `core-session-stores-memory` | user sessions, RP registrations, family indexes and the subject-level revocation pair — back-channel logout reaches only the replica that received it; a credential change watermarks only the replica that handled it |
+| `core-session-stores-memory` | user sessions, their lifecycle records and the subject-level revocation pair — back-channel logout reaches only the replica that received it; a credential change watermarks only the replica that handled it |
 | `core-rate-limiter-memory` | rate-limit counters — every limit is multiplied by the replica count and resets on each deploy |
 | `core-access-token-denylist-memory` | access-token revocation — a revoked token keeps working on every replica that did not receive the revocation |
 | `core-replay-seen-set-memory` | single-use records — a `private_key_jwt` client assertion, the `jti` of an ID-JAG (jwt-bearer) assertion, a consumed WebAuthn challenge (the ceremony marks it seen here) or, with DPoP enabled, a DPoP proof captured once can be replayed once against each replica |

@@ -48,6 +48,7 @@ import type {
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
+import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
 
 const NOW = new Date("2026-09-30T12:00:00Z");
 
@@ -715,6 +716,7 @@ describe("the enrollment facts across an interruption — the continuation carri
 
 	const deps = (): AdmissionDeps => ({
 		userSessionStore: undefined,
+		sessionLifecycleStore: undefined,
 		subjectRevocation: undefined,
 		requirements: resolverForTests([verifier], { issuer: "https://auth.test" }),
 		acrTable: readAcrTable({}),
@@ -784,6 +786,7 @@ describe("the enrollment facts of a login's continuation — read by its holder 
 
 	const deps = (): AdmissionDeps => ({
 		userSessionStore: undefined,
+		sessionLifecycleStore: undefined,
 		subjectRevocation: undefined,
 		requirements: resolverForTests([interrupting], { issuer: "https://auth.test" }),
 		acrTable: readAcrTable({}),
@@ -929,6 +932,7 @@ describe("the enrollment facts in the view a requirement is handed", () => {
 		await admitSession(
 			{
 				userSessionStore: store,
+				sessionLifecycleStore: openedLifecycleStore(),
 				subjectRevocation: undefined,
 				requirements: resolverForTests(
 					[

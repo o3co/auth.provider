@@ -209,9 +209,8 @@ export interface GrantHandler {
  *   persistence and replay revocation (RFC 6819 §5.2.2); without rotation
  *   there is no replay path.
  * - `grantPolicy`: absent means no policy declared.
- * - `userSessionStore` / `sessionRPRegistry` / `sessionFamilyIndex` /
- *   `sessionFederationIndex`: session liveness and the four-store cascade; a
- *   back-channel deployment with no browser sessions wires none.
+ * - `userSessionStore`: session liveness; a back-channel deployment with no
+ *   browser sessions wires none.
  * - `subjectRevocation`: the subject-revocation watermark, checked by the
  *   refresh grant at RT redemption as the backstop for a partial cascade
  *   failure, so a family the cascade could not revoke stops minting access
@@ -238,9 +237,6 @@ export type GrantDependencies = ProviderDeps<
 	| "refreshTokenFamilyRevocation"
 	| "grantPolicy"
 	| "userSessionStore"
-	| "sessionRPRegistry"
-	| "sessionFamilyIndex"
-	| "sessionFederationIndex"
 	| "subjectRevocation"
 	| "logger"
 	| "oauthTokenSettings"

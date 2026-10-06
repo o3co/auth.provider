@@ -634,10 +634,6 @@
 . SessionData type
 . SessionEmailProof type
 . SessionEnrollmentFacts type
-. SessionFamilyIndex type
-. SessionFamilyIndexFactory type
-. SessionFederationIndex type
-. SessionFederationIndexFactory type
 . SessionFederations type
 . SessionJoinAnswer type
 . SessionJoinOutcome type
@@ -654,8 +650,6 @@
 . SessionOpenRequest type
 . SessionParticipant type
 . SessionParticipantKind type
-. SessionRPRegistry type
-. SessionRPRegistryFactory type
 . SessionRenewalCall type
 . SessionRenewalReporter type
 . SessionRenewalResult type
@@ -685,7 +679,6 @@
 . SupportsMfaEnrollmentWitness type
 . SupportsRefresh type
 . SupportsSecondFactorUpdate type
-. SupportsSessionEnd type
 . SupportsSessionsOnlyRevocation type
 . SyntheticKeyCollisionDetails type
 . TRUSTED_PROXY_NAMED_RANGES value
@@ -826,10 +819,7 @@
 . createFederationTokenStoreFactory value
 . createGrantPolicyHookFactory value
 . createHealthcheckRouter value
-. createInMemorySessionFamilyIndex value
-. createInMemorySessionFederationIndex value
 . createInMemorySessionLifecycleStore value
-. createInMemorySessionRPRegistry value
 . createInMemorySubjectRevocation value
 . createInMemorySubjectSessionIndex value
 . createInMemoryUserSessionStore value
@@ -868,10 +858,7 @@
 . createRemoteSigningKeyStore value
 . createReplaySeenSetFactory value
 . createRepositoryFactories value
-. createSessionFamilyIndexFactory value
-. createSessionFederationIndexFactory value
 . createSessionLifecycle value
-. createSessionRPRegistryFactory value
 . createSubjectRevocationService value
 . createSymmetricKeyStore value
 . createTrustedProxyMatcher value
@@ -1144,7 +1131,6 @@
 . supportsMfaEnrollmentWitness value
 . supportsRefresh value
 . supportsSecondFactorUpdate value
-. supportsSessionEnd value
 . supportsSessionsOnlyRevocation value
 . terminalErrorHandler value
 . toAssertionIssuerEntry value

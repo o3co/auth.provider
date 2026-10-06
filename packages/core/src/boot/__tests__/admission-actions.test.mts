@@ -143,6 +143,7 @@ const admit = (resolver: SessionRequirementResolver, action: string) =>
 	admitSession(
 		{
 			userSessionStore: undefined,
+			sessionLifecycleStore: undefined,
 			subjectRevocation: undefined,
 			requirements: resolver,
 			acrTable: readAcrTable({}),

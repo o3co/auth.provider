@@ -58,6 +58,7 @@ import {
 	type UserSessionStore,
 } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
+import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
 
 const { MFA, PHR, KBA } = MERGE_ACR;
 
@@ -137,6 +138,7 @@ const depsOver = (
 	requirements: SessionRequirementResolver,
 ): AdmissionDeps => ({
 	userSessionStore: store,
+	sessionLifecycleStore: openedLifecycleStore(),
 	subjectRevocation: undefined,
 	requirements,
 	acrTable: MERGE_ACR_TABLE,

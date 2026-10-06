@@ -164,6 +164,7 @@ const primary = (subject = "user-1") =>
 
 const deps = (requirements: readonly SessionRequirement[]) => ({
 	userSessionStore: undefined,
+	sessionLifecycleStore: undefined,
 	subjectRevocation: undefined,
 	requirements: resolverForTests(requirements),
 	acrTable: readAcrTable({}),

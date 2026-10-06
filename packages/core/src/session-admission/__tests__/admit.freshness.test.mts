@@ -45,6 +45,7 @@ import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
+import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 const ISSUER = "https://auth.test";
@@ -213,6 +214,7 @@ const depsOver = (
 	over: Partial<AdmissionDeps> = {},
 ): AdmissionDeps => ({
 	userSessionStore: w.store,
+	sessionLifecycleStore: openedLifecycleStore(),
 	subjectRevocation: w.revocation,
 	requirements: resolverForTests([...requirements], {
 		allowAnyReach: true,

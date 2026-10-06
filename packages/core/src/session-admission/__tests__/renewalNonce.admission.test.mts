@@ -42,6 +42,7 @@ import { createInMemoryUserSessionStore } from "#/user-sessions/memory/userSessi
 import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 import type { UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
+import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
 
 const SID = "sid-1";
 const SUB = "user-1";
@@ -72,6 +73,7 @@ async function holding(renewalNonce?: string) {
 
 const deps = (store: UserSessionStore): AdmissionDeps => ({
 	userSessionStore: store,
+	sessionLifecycleStore: openedLifecycleStore(),
 	subjectRevocation: undefined,
 	requirements: resolverForTests([], { actions: TEST_ACTIONS }),
 	acrTable: readAcrTable({}),
