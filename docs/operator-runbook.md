@@ -2625,11 +2625,13 @@ lists every breaking change since, and which of the steps below each needs.
      repository's section does not declare is refused, naming it — a block
      for a key store of your own beside `key-store.local` among them.
    - **Core reads no `cors` section.** It reads CORS origins from the
-     `httpSettings` slot alone. A composition of your own that still writes
-     `cors.allowedOrigins` refuses to start, naming `cors` and the slot,
-     unless a loaded module relocates it (the standalone template's `http`
-     module names `http.cors.allowedOrigins`); one with no `httpSettings`
-     provider mounts no CORS. The `cors_allowed_origins_unreadable` warning
+     `httpSettings` slot alone. A configuration that still writes
+     `cors.allowedOrigins` refuses to start where a loaded module relocates
+     it (the standalone template's `http` module names
+     `http.cors.allowedOrigins`); in a composition of your own with no such
+     module, it starts, the value unread, and `cors` is named at `warn` as
+     `config_sections_ignored`. One with no `httpSettings` provider mounts no
+     CORS. The `cors_allowed_origins_unreadable` warning
      is gone, as the module that provides the slot refuses such a value at
      boot.
    - **Messages name the new paths.** `core.federations.<name>…` for the

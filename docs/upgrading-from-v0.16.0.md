@@ -233,6 +233,25 @@ the default and binds the variable. A root that builds its configuration
 without layering that file — core's `reference.conf` alone — carries neither:
 the policy reads `"reject"`, whatever the variable says.
 
+**A section is validated only by its own module** (#728). Core's schema
+validates core's sections, `core` and `oauth`, and nothing else. A module's
+section — `webauthn`, `federation-grants` (its `enabled` included),
+`session-store`, a store's section — is checked by that module's schema
+while the module is loaded. Without the module nothing reads or checks it: a
+value that used to refuse the boot there (`webauthn.userVerification =
+"optional"`, `federation-grants.enabled = "sometimes"`) now boots, kept as
+written and named once at `warn` as `config_sections_ignored`, or as
+`config_sections_not_loaded` where the composition hands boot its
+`configDefaults` and the section differs from them. An old path no loaded
+module relocates is named the same way instead of being kept silently.
+**`cors` is no longer refused outright**: a loaded module that relocates it
+refuses it (`config-path-relocated`), as the standalone template's `http`
+does, and without one it is named as `config_sections_ignored`; an empty
+`cors {}` sets nothing and is not named. Core reads no `cors`: a
+composition's CORS origins come from the `httpSettings` slot. After the
+upgrade, treat either warning naming a section you set as a setting nothing
+applies.
+
 ### Keys removed
 
 The table in [operator runbook §7](operator-runbook.md#before-you-upgrade),
@@ -260,8 +279,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   per 60 s to the limiter's `defaultLimit`, 60 per 60 s in both bundled
   `reference.conf` files. To keep the old bound, set
   `limits.webauthn-authentication-options { limit = 30, windowSeconds = 60 }`
-  in the limiter's section. In code, `AppConfig["webauthn"]["rateLimit"]` is
-  now `unknown`: core keeps the key only so the refusal still sees it.
+  in the limiter's section. In code, `AppConfig["webauthn"]` is `unknown`:
+  core declares no part of the section (`AppConfig` below).
 - `oauth.grants.authorization_code.pkce.*` and
   `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` refuse the boot; S256
   is mandatory regardless (#827).
@@ -1189,6 +1208,23 @@ modules fills them.
   among others; the pull request lists all 42. Stop importing them; for a
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
+- **BREAKING: `AppConfigSchema`, `fullSectionsSchema`, `composeConfigSchema`
+  and `readTransitionalConfig` are removed (#728).** Boot parses the
+  configuration once: core's sections with `CoreConfigSchema`, each module's
+  section with its own schema. Hand `createApp` the configuration you
+  resolved, unparsed. Read core's own section before boot with
+  `readCoreSection`, and the switches a composition root chooses its modules
+  by from its own files (the standalone template's `readSwitches`). A schema
+  composed with `composeConfigSchema` becomes each module's `section.schema`.
+- **BREAKING: `AppConfig` narrows to `CoreConfig & Readonly<Record<string,
+  unknown>>` (#728).** It keeps its name and stays the type of the `config`
+  slot and of `bootstrapComponents.config`; no schema stands behind it. Core's
+  sections are typed as before, and every other section is `unknown`: code
+  that read `config.webauthn`, `config["federation-grants"]` or
+  `config["session-store"]` off the slot's type reads the module's own
+  section from `deps.section`, or narrows the value where it reads it.
+  `makeValidAppConfig` and `makeValidCoreConfig` on `./testing` keep their
+  names and contents, typed as the literals they build.
 - **`establishSession`** (`@o3co/auth-provider-session`) refuses a
   `userSessionStore` handed without a `sessionLifecycle`, with a `TypeError`
   before anything is written, and `EstablishSessionDeps.sessionLifecycle` is
