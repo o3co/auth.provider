@@ -16,14 +16,19 @@
 
 /**
  * How a session was established and what this provider vouches for, read
- * one way by every consumer (session admission through `requirementSession`,
- * `/authorize`, which records it on the code `/token` stamps, and the
- * `session` grant through `vouchedAmr`), beside what each
+ * one way by every consumer (session admission through `sessionReading`,
+ * `tokenReading` and `codeReadingOver`, projected by `requirementSessionOf`
+ * for the requirements and `codeFieldsOf` for the code `/authorize` mints and
+ * `/token` stamps, and the `session` grant through `vouchedAmr`), beside what each
  * login path records (`passwordSessionAuthentication`,
  * `federatedSessionAuthentication`, `federationTrustsUpstreamAmr`,
  * `federationCallbackMeetsFreshness`), so the write and the read are one
  * design. See ADR
  * 2026-09-25-multi-factor-authentication.
+ *
+ * Also what a code record carries of it (`readCodeAuthentication`,
+ * `readCodeAtExchange`): the one reading a code repository copies the code's
+ * `authentication` by and the exchange judges the code on.
  *
  * Also how fresh a session's authentication is (`authenticationFreshness`,
  * `sessionFreshness`): what a freshness ask is judged against — the earlier
