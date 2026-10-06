@@ -480,7 +480,7 @@ describe("the code's primary is held to the record on the last reading too", () 
 				expect(
 					await admitSession(
 						{
-							...deps(undefined, [requirement]),
+							...deps(steppedUp(), [requirement]),
 							userSessionStore: changing(steppedUp(), later),
 						},
 						{ claim, action: "test.use" },
@@ -496,7 +496,10 @@ describe("the code's primary is held to the record on the last reading too", () 
 		const { requirement } = watching();
 		expect(
 			await admitSession(
-				{ ...deps(undefined, [requirement]), userSessionStore: changing(steppedUp(), steppedUp()) },
+				{
+					...deps(steppedUp(), [requirement]),
+					userSessionStore: changing(steppedUp(), steppedUp()),
+				},
 				{ claim: codeClaimFirstRead(passwordCode), action: "test.use" },
 			),
 		).toMatchObject({ outcome: "admitted" });
