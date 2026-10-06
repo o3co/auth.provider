@@ -23,6 +23,7 @@ import {
 	InMemoryCodeRepository,
 	type RefreshTokenFamilyRotation,
 	type SessionAuthentication,
+	type SessionJoinOutcome,
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -34,7 +35,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
-import { joiningLifecycle } from "./_helpers/sessionLifecycle.mjs";
+import { joiningLifecycle, outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -3151,7 +3152,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		const handler = createAuthorizationGrant({
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			userSessionStore: sessionStore(async () => liveSession("sid-1")),
-			sessionLifecycle: joiningLifecycle({ outcome: "unavailable" }).lifecycle,
+			sessionLifecycle: joiningLifecycle(outsideAnswer<SessionJoinOutcome>()).lifecycle,
 			refreshTokenFamilyRotation: {
 				register,
 				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
@@ -3166,7 +3167,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 			errorDescription: "session linking unavailable",
 		});
 		expect(logger.warn).not.toHaveBeenCalled();
-		// The error is on the lifecycle's own line; the grant's names the step only.
+		// The defensive fallback has no error to project: the grant's line names the step only.
 		expect(logger.error.mock.calls).toEqual([
 			[
 				{ store: "session_lifecycle", step: "join", clientId: "client1" },

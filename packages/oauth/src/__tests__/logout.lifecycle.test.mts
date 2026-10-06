@@ -60,6 +60,7 @@ import {
 	serialisedCalls,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
 
 const ISSUER = "https://auth.example.com";
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -312,9 +313,9 @@ describe("/oauth/logout through the session lifecycle: the close's answer", () =
 		expect(browserSession.destroyed).toBe(true);
 	});
 
-	it("unavailable: 503, audited as logout.cascade_failed, one error line, and the browser session kept for a retry", async () => {
+	it("an answer outside the close's outcomes: 503, audited as logout.cascade_failed, one error line, and the browser session kept for a retry", async () => {
 		const lifecycle = fakeLifecycle({
-			close: vi.fn(async () => ({ outcome: "unavailable" as const })),
+			close: vi.fn(async () => outsideAnswer<never>()),
 		});
 		const { sink, events } = recordingSink();
 		const logger = createMockLogger();
@@ -873,7 +874,7 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 		const google = endingFederation("google");
 		const federationTokenStore = fedTokenStore({ google: "upstream-id-token" });
 		const lifecycle = fakeLifecycle({
-			federations: vi.fn(async () => ({ outcome: "unavailable" as const })),
+			federations: vi.fn(async () => outsideAnswer<never>()),
 			close: vi.fn(async () => ({ outcome: "done" as const, rps: [], federations: ["google"] })),
 		});
 		const app = buildApp({
@@ -921,6 +922,30 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 		expect(
 			logger.warn.mock.calls.filter(([, event]) => event !== "jwt_verify_aud_skipped"),
 		).toEqual([]);
+	});
+
+	it("a federation listing that throws before it answers leaves the logout without the hint, and says nothing", async () => {
+		const google = endingFederation("google");
+		const logger = createMockLogger();
+		const lifecycle = fakeLifecycle({
+			federations: vi.fn(() => {
+				throw storeReplyError();
+			}) as unknown as SessionLifecycle["federations"],
+			close: vi.fn(async () => ({ outcome: "done" as const, rps: [], federations: ["google"] })),
+		});
+		const app = buildApp({
+			lifecycle,
+			providers: new Map([["google", google.provider]]),
+			logger,
+		});
+
+		const res = await postLogout(app);
+
+		expect(res.status).toBe(303);
+		expect(google.endSession).toHaveBeenCalledWith(
+			expect.objectContaining({ idTokenHint: undefined }),
+		);
+		expect(logger.error).not.toHaveBeenCalled();
 	});
 
 	it("a token record that cannot be read leaves the logout without the hint, said once at warn", async () => {
@@ -974,7 +999,7 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 		const google = endingFederation("google");
 		const lifecycle = fakeLifecycle({
 			federations: vi.fn(async () => ({ outcome: "listed" as const, federations: ["google"] })),
-			close: vi.fn(async () => ({ outcome: "unavailable" as const })),
+			close: vi.fn(async () => outsideAnswer<never>()),
 		});
 		const app = buildApp({
 			lifecycle,
@@ -1075,15 +1100,12 @@ describe("POST /oauth/federation/:name/logout through the session lifecycle", ()
 
 	it("a lifecycle that cannot answer: 503, one error line naming its step", async () => {
 		for (const [step, lifecycle] of [
-			[
-				"liveness",
-				fakeLifecycle({ liveness: vi.fn(async () => ({ outcome: "unavailable" as const })) }),
-			],
+			["liveness", fakeLifecycle({ liveness: vi.fn(async () => outsideAnswer<never>()) })],
 			[
 				"federations",
 				fakeLifecycle({
 					liveness: vi.fn(async () => ({ outcome: "live" as const, session: baseSession })),
-					federations: vi.fn(async () => ({ outcome: "unavailable" as const })),
+					federations: vi.fn(async () => outsideAnswer<never>()),
 				}),
 			],
 		] as const) {
