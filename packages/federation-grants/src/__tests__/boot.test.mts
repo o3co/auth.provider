@@ -856,7 +856,7 @@ describe("what creating a grant needs", () => {
 			reason: "contribute-factory-failed",
 		});
 		await expect(refusal).rejects.toThrow(
-			/federation-grants: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Install sessionLifecycleModule/,
+			/federation-grants: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 

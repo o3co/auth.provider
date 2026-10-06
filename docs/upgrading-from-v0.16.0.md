@@ -1228,8 +1228,8 @@ modules fills them.
     lifecycle cannot hold is therefore a `503` too; such a sid is never
     issued.
   - `federationGrantsModule`, with grants enabled, is refused the same way
-    when no `sessionLifecycleStore` (the slot `sessionLifecycleModule`
-    fills) is wired beside its `userSessionStore`:
+    when no `sessionLifecycleStore` (the port core's session-store modules fill, which
+    `sessionLifecycleModule` requires) is wired beside its `userSessionStore`:
     `contribute-factory-failed`, the message naming both slots. The connect
     flow's admission reads the session's lifecycle record, so a session
     closing or closed connects nothing.

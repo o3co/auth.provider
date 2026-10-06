@@ -179,8 +179,9 @@ export function requireSessionLifecycleStore(deps: {
 		throw new Error(
 			"federation-grants: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
 				"user-session store is wired, core's session lifecycle is required: the connect flow " +
-				"admits the session behind the cookie through its lifecycle record. Install " +
-				"sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+				"admits the session behind the cookie through its lifecycle record. Wire core's " +
+				"session lifecycle: a session-store module that fills sessionLifecycleStore " +
+				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
 		);
 	}
 }
