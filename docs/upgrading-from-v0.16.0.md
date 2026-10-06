@@ -889,6 +889,13 @@ modules fills them.
   `contribute-factory-failed`); in sloppy-mode code the write is silently
   ignored. Either way the value does not change. Copy what the module needs,
   or set the value in the configuration (#1492).
+- **A write to the audit fan-out throws.** When a module contributes
+  `auditHooks`, the `auditSink` slot holds core's fan-out, and it is now
+  frozen: assigning to it (`deps.auditSink.record = ...`) throws a
+  `TypeError` in strict-mode code, which refuses boot when a factory does it.
+  The sink the fan-out wraps — the host's or a provider's — is not frozen,
+  and without a hook the slot holds that sink as it was given. Wrap the sink
+  in a module of your own, or contribute a hook, instead (#1532).
 - **Core checks the `csrfGuard` slot where boot fills it, and every reader
   receives a frozen copy of the guard.** Whatever fills the slot — a module's
   `provides`, or a `bootstrapComponents` or `overrideComponents` entry — boot

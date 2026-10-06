@@ -429,3 +429,72 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		).rejects.toThrow(/invariant violated/);
 	});
 });
+
+describe("auditHooks — the composed sink is frozen", () => {
+	/** Whether `sink` is frozen and refuses a write to `record` with a TypeError. */
+	const refusesWrites = (sink: AuditSink | undefined): void => {
+		expect(Object.isFrozen(sink)).toBe(true);
+		expect(() => {
+			(sink as { record: unknown }).record = async () => {};
+		}).toThrow(TypeError);
+	};
+
+	it("holds a frozen fan-out over the hooks alone, the one a reader is handed", async () => {
+		const reader = auditReader();
+
+		const handle = await createApp({
+			modules: [auditHooksModule("test", createRecordingAuditSink()), reader.module],
+			bootstrapComponents: bootWith(),
+		});
+
+		expect(reader.handed.sink).toBe(handle.components.auditSink);
+		refusesWrites(handle.components.auditSink);
+	});
+
+	it("holds a frozen fan-out over a provider's sink with Symbol.asyncDispose, the provider's own sink left unfrozen", async () => {
+		const sink = Object.assign(createRecordingAuditSink(), {
+			[Symbol.asyncDispose]: async () => {},
+		});
+		const reader = auditReader();
+
+		const handle = await createApp({
+			modules: [
+				sinkProvider(sink),
+				auditHooksModule("test", createRecordingAuditSink()),
+				reader.module,
+			],
+			bootstrapComponents: bootWith(),
+		});
+
+		expect(reader.handed.sink).toBe(handle.components.auditSink);
+		expect(
+			typeof (handle.components.auditSink as Partial<AsyncDisposable>)[Symbol.asyncDispose],
+		).toBe("function");
+		refusesWrites(handle.components.auditSink);
+		expect(Object.isFrozen(sink)).toBe(false);
+	});
+
+	it("holds a frozen fan-out over a host's sink, the host's own sink left unfrozen", async () => {
+		const sink = createRecordingAuditSink();
+
+		const handle = await createApp({
+			modules: [auditHooksModule("test", createRecordingAuditSink()), auditReader().module],
+			bootstrapComponents: { ...bootWith(), auditSink: sink } as BootstrapMap,
+		});
+
+		refusesWrites(handle.components.auditSink);
+		expect(Object.isFrozen(sink)).toBe(false);
+	});
+
+	it("hands a provider's sink through as it is, unfrozen, when no module contributes a hook", async () => {
+		const sink = createRecordingAuditSink();
+
+		const handle = await createApp({
+			modules: [sinkProvider(sink), auditReader().module],
+			bootstrapComponents: bootWith(),
+		});
+
+		expect(handle.components.auditSink).toBe(sink);
+		expect(Object.isFrozen(sink)).toBe(false);
+	});
+});
