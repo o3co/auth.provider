@@ -188,9 +188,11 @@ Workspace-domain restriction belongs in the Store, which decides who
 
 `/authorize`'s `prompt=login` and `max_age`, and the MFA module's first
 binding (a recent primary), judge a federated session by when the upstream
-last authenticated the user. This adapter cannot ask Google for that, and
-Google sends `auth_time` only when it is requested and enabled for the client,
-so a Google login usually reports none. With
+last authenticated the user. Google sends `auth_time` only when the
+authorization request asks for it through the `claims` parameter
+(`{"id_token":{"auth_time":{"essential":true}}}`) and the claim is enabled in
+the client's settings. This adapter does not send that parameter, so a Google
+login reports none. With
 `core.federations.<name>.callbackMeetsFreshness` at its default `false`, such a
 session meets no `prompt=login` or `max_age` (`login_required`) and binds no
 first factor: the user is sent to log in again each time. **To use `prompt=login`, `max_age` or an MFA
