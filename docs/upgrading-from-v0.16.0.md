@@ -1026,6 +1026,12 @@ modules fills them.
   `tokenBindingSettings` (`resolveTokenBindingSettings(config)`; in a test,
   `createTestTokenBindingSettings()`) instead of `config`; without it the
   grant throws a `TypeError` naming the slot when it is built.
+- **BREAKING: `webauthnSessionSubjectModule` requires core's session lifecycle
+  beside its `userSessionStore` (#1030).** Without a `sessionLifecycleStore`
+  (the port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) the boot is refused: `contribute-factory-failed`, the message
+  naming both slots. Its admission reads the session's lifecycle record, so a
+  session closing or closed registers no passkey.
 - **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
   section's defaults live only in the package's `config/reference.conf`. A
   configuration that layers the modules' references (`moduleReferences`, as

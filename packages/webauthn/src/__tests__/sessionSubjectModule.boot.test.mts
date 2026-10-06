@@ -26,6 +26,7 @@
 import {
 	BootError,
 	createApp,
+	createInMemorySessionLifecycleStore,
 	createSymmetricKeyStore,
 	defaultChallengeCeremonyModule,
 	defineModule,
@@ -86,18 +87,27 @@ const webauthnSupport: readonly Module[] = [
 	memoryWebAuthnCredentialStoreModule,
 ];
 
-/** The user-session store the module requires. */
+const userSessionStore = (): UserSessionStore =>
+	({
+		kind: "test",
+		create: async () => {},
+		get: async () => null,
+		delete: async () => {},
+	}) as unknown as UserSessionStore;
+
+/** The user-session store the module requires, with core's session lifecycle port beside it. */
 const userSessionStoreModule = defineModule({
 	name: "test:user-session-store",
 	provides: {
-		userSessionStore: () =>
-			({
-				kind: "test",
-				create: async () => {},
-				get: async () => null,
-				delete: async () => {},
-			}) as unknown as UserSessionStore,
+		userSessionStore,
+		sessionLifecycleStore: () => createInMemorySessionLifecycleStore(),
 	},
+});
+
+/** The user-session store alone, without the lifecycle port. */
+const userSessionStoreOnlyModule = defineModule({
+	name: "test:user-session-store",
+	provides: { userSessionStore },
 });
 
 /** A stand-in for the session package's session-store module: the route it contributes. */
@@ -179,6 +189,24 @@ describe("webauthnSessionSubjectModule — composed", () => {
 				id: "session-middleware",
 			},
 		});
+	});
+
+	it("is refused at boot with a user-session store and no session lifecycle store, naming both slots", async () => {
+		const err = await refusal([
+			sessionMiddlewareModule,
+			webauthnModule,
+			...webauthnSupport,
+			userSessionStoreOnlyModule,
+			subjectModule,
+		]);
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "contribute-factory-failed",
+			details: { module: "webauthn-session-subject" },
+		});
+		expect(String((err as Error).message)).toMatch(
+			/userSessionStore is wired, but sessionLifecycleStore is not/,
+		);
 	});
 
 	it("is refused at boot without a user-session store, naming the slot", async () => {
