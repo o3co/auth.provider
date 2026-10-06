@@ -34,6 +34,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
+import { openedLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -1825,7 +1826,7 @@ describe("createRefreshTokenGrant", () => {
 			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				userSessionStore: store,
-				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+				sessionLifecycleStore: openedLifecycleStore(["sid-1", "u1"]),
 			};
 			const handler = createRefreshTokenGrant(deps);
 
@@ -2619,7 +2620,7 @@ describe("refresh carries how the user authenticated", () => {
 		};
 		const { at, rt } = await refresh(await presentedWith({ sid: "sid-1", amr: ["pwd"] }), {
 			userSessionStore,
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			sessionLifecycleStore: openedLifecycleStore(["sid-1", "u1"]),
 		});
 		expect(at.sub).toBe("u1");
 		expect(at).not.toHaveProperty("auth_time");

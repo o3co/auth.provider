@@ -119,13 +119,33 @@ const revocation = (at: Date | Error): SubjectRevocation =>
 		revokeBefore: vi.fn(async () => {}),
 	}) as unknown as SubjectRevocation;
 
+/**
+ * An in-memory lifecycle store holding `SID`'s record, active for `SUBJECT`:
+ * a session with no record reads as closed. Opened before its first read.
+ */
+const openedLifecycleStore = (): SessionLifecycleStore => {
+	const store = createInMemorySessionLifecycleStore();
+	const opened = store.open(SID, SUBJECT, new Date(Date.now() + 3_600_000));
+	return {
+		...store,
+		read: async (sid) => {
+			await opened;
+			return store.read(sid);
+		},
+	};
+};
+
 interface Setup {
 	readonly subjectFor?: (session: UserSession) => WebAuthnSubject;
 	readonly session?: Record<string, unknown>;
 	readonly record?: UserSession | null | Error;
 	readonly requirement?: SessionRequirement;
 	readonly subjectRevocation?: SubjectRevocation;
-	/** Core's session lifecycle port beside the store; an in-memory one by default, none when `null`. */
+	/**
+	 * Core's session lifecycle port beside the store; by default an in-memory
+	 * one holding the session's record, active, as its login opened it; none
+	 * when `null`.
+	 */
 	readonly sessionLifecycleStore?: SessionLifecycleStore | null;
 	readonly logger?: ReturnType<typeof spyLogger>;
 	/** Leave the store out of the deps, as no composition can (the module requires it). */
@@ -179,8 +199,7 @@ function setup(options: Setup = {}) {
 		...(options.sessionLifecycleStore === null
 			? {}
 			: {
-					sessionLifecycleStore:
-						options.sessionLifecycleStore ?? createInMemorySessionLifecycleStore(),
+					sessionLifecycleStore: options.sessionLifecycleStore ?? openedLifecycleStore(),
 				}),
 		...(options.logger ? { logger: options.logger as unknown as Logger } : {}),
 	});

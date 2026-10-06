@@ -35,6 +35,7 @@ import type {
 	FederatedIdentityRegistration,
 	Logger,
 	OAuthTokenSettings,
+	SessionLifecycleStore,
 	SessionRequirement,
 	SubjectRevocation,
 	UserRepository,
@@ -196,7 +197,24 @@ interface Browser {
 	readonly sid: string;
 }
 const browsers = new Map<string, Browser>();
-const durable = new Map<string, UserSession>();
+// Core's lifecycle store: every durable session written opens its record,
+// active, as the login that wrote it does (a session with no record reads
+// as closed).
+const records = createInMemorySessionLifecycleStore();
+const opening: Promise<unknown>[] = [];
+const durable = new (class extends Map<string, UserSession> {
+	override set(sid: string, session: UserSession): this {
+		opening.push(records.open(sid, session.sub, new Date(Date.now() + 86_400_000)));
+		return super.set(sid, session);
+	}
+})();
+const openedRecords: SessionLifecycleStore = {
+	...records,
+	read: async (sid) => {
+		await Promise.all(opening);
+		return records.read(sid);
+	},
+};
 
 /**
  * Stands in for express-session under the id the browser half mounts after.
@@ -303,7 +321,7 @@ const boot = async (
 			clientRepository,
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			sessionLifecycleStore: openedRecords,
 			// The login page and the CSRF policy, which the session module
 			// provides in a real composition.
 			loginEntry: acquisitionLoginEntry(),

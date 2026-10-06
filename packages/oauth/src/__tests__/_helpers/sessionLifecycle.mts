@@ -23,8 +23,10 @@
  * - for a route or grant built by hand, focused doubles — one that only joins
  *   and records each join (`joiningLifecycle`), and one that answers liveness
  *   and federations from a user-session store (`livenessOver`);
- * - and core's real lifecycle over in-memory stores, for a router whose
- *   logout closes (`lifecycleOver`).
+ * - core's real lifecycle over in-memory stores, for a router whose logout
+ *   closes (`lifecycleOver`);
+ * - and core's in-memory lifecycle store holding the records the sessions'
+ *   logins opened, for admission to read (`openedLifecycleStore`).
  */
 
 import {
@@ -40,6 +42,7 @@ import {
 	type SessionJoinOutcome,
 	type SessionJoinRequest,
 	type SessionLifecycle,
+	type SessionLifecycleStore,
 	type SessionLiveness,
 	sessionLifecycleModule,
 	type UserSession,
@@ -169,4 +172,36 @@ export function lifecycleOver(stores: {
 		retainMs: 3_600_000,
 		logger: { warn: () => undefined, error: () => undefined },
 	});
+}
+
+/**
+ * Core's in-memory lifecycle store holding an active record for each
+ * `[sid, sub]` of `sessions`, ending an hour from now: what each session's
+ * login opened (a session with no record reads as closed). Opened before any
+ * member answers.
+ */
+export function openedLifecycleStore(
+	...sessions: readonly (readonly [sid: string, sub: string])[]
+): SessionLifecycleStore {
+	const store = createInMemorySessionLifecycleStore();
+	const opened = (async () => {
+		for (const [sid, sub] of sessions) {
+			await store.open(sid, sub, new Date(Date.now() + 3_600_000));
+		}
+	})();
+	const after =
+		<A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
+		async (...args: A): Promise<R> => {
+			await opened;
+			return call(...args);
+		};
+	return {
+		kind: store.kind,
+		open: after(store.open.bind(store)),
+		join: after(store.join.bind(store)),
+		beginClose: after(store.beginClose.bind(store)),
+		completeIf: after(store.completeIf.bind(store)),
+		read: after(store.read.bind(store)),
+		listClosing: after(store.listClosing.bind(store)),
+	};
 }

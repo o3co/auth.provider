@@ -118,8 +118,9 @@ const world = async (
 	// Core's own lifecycle over the same stores, the session opened in it as
 	// a login opens it: the grant joins the session through it, and the
 	// router reads and ends sessions through it.
+	const sessionLifecycleStore = createInMemorySessionLifecycleStore();
 	const sessionLifecycle = createSessionLifecycle({
-		store: createInMemorySessionLifecycleStore(),
+		store: sessionLifecycleStore,
 		userSessionStore,
 		refreshTokenFamilyRevocation: createRefreshTokenFamilyRevocation({
 			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
@@ -154,7 +155,7 @@ const world = async (
 			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			sessionLifecycleStore,
 			sessionRequirementResolver: requirements,
 		}),
 	);

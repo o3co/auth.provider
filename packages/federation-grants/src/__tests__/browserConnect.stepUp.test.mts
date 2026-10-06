@@ -38,6 +38,7 @@ import {
 	passwordSessionAuthentication,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type UserSession,
 	validatedClientRepository,
@@ -105,7 +106,24 @@ function world(options: WorldOptions = {}) {
 	const background = createFederationGrantBackground();
 	const events: AuditEvent[] = [];
 	const browsers = new Map<string, Browser>();
-	const durable = new Map<string, UserSession>();
+	// Core's lifecycle store: every durable session written opens its record,
+	// active, as the login that wrote it does (a session with no record reads
+	// as closed).
+	const records = createInMemorySessionLifecycleStore();
+	const opening: Promise<unknown>[] = [];
+	const durable = new (class extends Map<string, UserSession> {
+		override set(sid: string, session: UserSession): this {
+			opening.push(records.open(sid, session.sub, new Date(Date.now() + 86_400_000)));
+			return super.set(sid, session);
+		}
+	})();
+	const openedRecords: SessionLifecycleStore = {
+		...records,
+		read: async (sid) => {
+			await Promise.all(opening);
+			return records.read(sid);
+		},
+	};
 	const spy = createLogSpy();
 	const state = {
 		now: new Date(Date.now() + 3 * DAY),
@@ -173,7 +191,7 @@ function world(options: WorldOptions = {}) {
 				options.withoutUserSessionStore === true
 					? (undefined as never)
 					: ({ get: async (sid: string) => durable.get(sid) ?? null } as never),
-			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			sessionLifecycleStore: openedRecords,
 			subjectRevocation: {
 				kind: "test",
 				revokeBefore: async () => undefined,

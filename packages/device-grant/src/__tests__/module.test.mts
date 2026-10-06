@@ -34,7 +34,6 @@ import type {
 import {
 	BootError,
 	createApp,
-	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
@@ -58,7 +57,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
-import { LIVE_AUTH_TIME_MS, liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
+import {
+	LIVE_AUTH_TIME_MS,
+	liveCookieSession,
+	liveSessionLifecycleStore,
+	liveSessionStore,
+} from "./liveSessions.mjs";
 import { shippedDeviceGrantSection } from "./shippedSection.mjs";
 
 afterEach(() => {
@@ -175,7 +179,7 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			: { userSessionStore: createInMemoryUserSessionStore() }),
 		...(overrides.withSessionLifecycleStore === false || overrides.withUserSessionStore === false
 			? {}
-			: { sessionLifecycleStore: createInMemorySessionLifecycleStore() }),
+			: { sessionLifecycleStore: liveSessionLifecycleStore() }),
 		// The verification route's CSRF guard is the `csrfGuard` slot, which
 		// the session module provides: core's double stands in for it.
 		...(overrides.withCsrfGuard === false ? {} : { csrfGuard: createTestCsrfGuard() }),
@@ -632,7 +636,7 @@ describe("the device-grant module — the route it actually contributes", () => 
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		userSessionStore: liveSessionStore(),
-		sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+		sessionLifecycleStore: liveSessionLifecycleStore(),
 		// The `csrfGuard` slot: core's double, which accepts this origin.
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
