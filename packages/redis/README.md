@@ -1348,7 +1348,7 @@ implements core's `SessionLifecycleStore` (core's session-lifecycle ADR).
 
 ## Upgrading from v0.16.0: the per-session keys
 
-Before 0.17.0, `redisSessionStoresModule` also built an RP registry, a
+Up to v0.16.0, `redisSessionStoresModule` also built an RP registry, a
 refresh-token family index and a federation index for each session. Core's
 session lifecycle record (`lc:`, [above](#session-lifecycle-one-key-per-session-in-fixed-shards))
 holds what they held, so the package no longer has them, and nothing reads
@@ -1366,7 +1366,7 @@ v0.16.0 replica remains: by prefix (`SCAN MATCH`, then `UNLINK`), never with
 `FLUSHDB` or `FLUSHALL`, which takes keys this release reads with them. A
 v0.16.0 session has no lifecycle record and reads as closed, so its user
 signs in again, and a v0.16.0 refresh token bound to it is refused.
-[Upgrading from v0.16.0](../../docs/upgrading-from-v0.16.0.md#sessions-and-refresh-tokens-from-v0160)
+[Upgrading from v0.16.0](../../docs/upgrading-from-v0.16.0.md#rolling-out-across-a-mixed-fleet)
 has the whole procedure, the refresh-token family keys (`rtfam:`) included.
 
 ## Contract tests
