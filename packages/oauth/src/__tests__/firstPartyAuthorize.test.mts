@@ -19,8 +19,9 @@
  * Minting a code for any registered client once `req.session.isAuthenticated`
  * is true is defensible only in a pure first-party OP; one semi-trusted client
  * would turn the endpoint into an account-linking vector. The removed
- * `oauth.authorize.allowUnmarkedClients` flag has no effect: the schema
- * rejects it at boot, and hand-built configs bypass the schema, so the handler
+ * `oauth.authorize.allowUnmarkedClients` flag has no effect: boot refuses it,
+ * as a path the oauth module's manifest declares removed, before any schema
+ * runs; a hand-built config handed to the router bypasses boot, so the handler
  * must not read it either.
  *
  * Not pinned: "forced navigation is impossible" — it is not. A client marked
