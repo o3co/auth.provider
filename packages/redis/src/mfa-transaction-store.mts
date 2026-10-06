@@ -107,7 +107,9 @@
  * The requirement must last as enrolled factors do: it has no TTL, and the
  * factory holds the server to `noeviction` (`internal/eviction-policy.mts`),
  * as the factor store's does: the lock, lease and first-binding mark carry a
- * TTL.
+ * TTL. It is consumed only under the subject's lease, one script checking the
+ * lease and removing it, so a consume that reaches the server after its lease
+ * ended removes nothing.
  *
  * A session's proof is JSON `{provedAtMs, untilMs}` written with `PX` on
  * this side's clock (`untilMs` less `now`, rounded up), and answered absent
@@ -129,6 +131,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import {
+	checkEmailProofRequirementConsume,
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
@@ -654,8 +657,14 @@ function buildRedisMfaTransactionStore(
 			return client.emailProofRequired(proofKey(subject));
 		},
 
-		async consumeEmailProofRequirement(subject) {
-			return client.consumeEmailProof(proofKey(subject));
+		async consumeEmailProofRequirement(subject, consume) {
+			const { leaseToken } = checkEmailProofRequirementConsume(subject, consume);
+			const reply = await client.consumeEmailProof(
+				{ proof: proofKey(subject), lease: subjectKeys(subject).lease },
+				leaseToken,
+			);
+			if (!reply.held) return { outcome: "refused", reason: "lease_not_held" };
+			return { outcome: reply.removed ? "consumed" : "absent" };
 		},
 
 		async recordSessionEmailProof(subject, sid, provedAtMs, untilMs) {

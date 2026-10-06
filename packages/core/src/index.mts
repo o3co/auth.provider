@@ -263,7 +263,11 @@ export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // The reference.conf files a composition layers beneath its own
 // configuration — core's, and each loaded module's package's (`section.reference`).
 export { coreReference, moduleReferences } from "./config/references.mjs";
-export { productionEnvironmentIn, readEnvironmentName } from "./deployment/environment.mjs";
+export {
+	isDevelopmentEnvironment,
+	productionEnvironmentIn,
+	readEnvironmentName,
+} from "./deployment/environment.mjs";
 // How the deployment runs — what its HTTP behaviour depends on of the
 // `http` module's settings, and how many replicas the operator says run —
 // each through a slot rather than the configuration. `deploymentModeOf` is
@@ -700,6 +704,7 @@ export {
 } from "./mfa/storeWire.mjs";
 export {
 	checkConfiguredMfaLockoutPolicy,
+	checkEmailProofRequirementConsume,
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
@@ -728,6 +733,8 @@ export {
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
 	MFA_WEEKLY_WINDOW_MS,
+	type MfaEmailProofRequirementConsume,
+	type MfaEmailProofRequirementConsumeAnswer,
 	type MfaLockoutPolicy,
 	type MfaRecoverySetFloorAnswer,
 	type MfaRecoverySetFloorRaise,
@@ -751,6 +758,7 @@ export {
 	newMfaTransactionRecord,
 	readFirstBindingAt,
 	readMfaAttemptReservation,
+	readMfaEmailProofRequirementConsumeAnswer,
 	readMfaRecoverySetFloorAnswer,
 	readMfaSubjectAttemptReservation,
 	readMfaSubjectCount,

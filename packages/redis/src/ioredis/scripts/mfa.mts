@@ -881,6 +881,17 @@ redis.call('PERSIST', KEYS[1])
 return {1, floor}
 `;
 
+/**
+ * `MfaTransactionStoreClient.consumeEmailProof`. `KEYS[1]` = the email-proof requirement,
+ * `KEYS[2]` = the subject's lease; `ARGV[1]` = the lease token. Answers `{0}` when the lease is
+ * not held under the token, removing nothing. Otherwise removes the requirement and answers
+ * `{1, removed}`, `removed` 1 when this call removed it and 0 when none stood.
+ */
+const LUA_MFA_EMAIL_PROOF_CONSUME = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
+if not lease_held(KEYS[2], ARGV[1]) then return {0} end
+return {1, redis.call('DEL', KEYS[1])}
+`;
+
 // A subject's first-binding mark is judged on one clock, the server's (`TIME`): its end, which
 // mark a note keeps, and the key's deadline. A replica's clock decides none of them.
 
@@ -998,3 +1009,4 @@ export const MFA_SUBJECT_LEASE_RELEASE = defineScript(LUA_MFA_SUBJECT_LEASE_RELE
 export const MFA_SUBJECT_RECOVERY_AUTHORIZE = defineScript(LUA_MFA_SUBJECT_RECOVERY_AUTHORIZE);
 export const MFA_SUBJECT_RECOVERY_APPLY = defineScript(LUA_MFA_SUBJECT_RECOVERY_APPLY);
 export const MFA_RECOVERY_SET_FLOOR_RAISE = defineScript(LUA_MFA_RECOVERY_SET_FLOOR_RAISE);
+export const MFA_EMAIL_PROOF_CONSUME = defineScript(LUA_MFA_EMAIL_PROOF_CONSUME);
