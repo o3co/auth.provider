@@ -497,6 +497,42 @@ describe("D25's flag", () => {
 		expect(await store.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
 	});
 
+	it.each<[string, () => Promise<unknown>]>([
+		[
+			"refused without the lease",
+			() => Promise.resolve({ outcome: "refused", reason: "lease_not_held" }),
+		],
+		["answered outside its port", () => Promise.resolve(true)],
+		["rejected", () => Promise.reject(new Error("store down"))],
+	])(
+		"stands when the binding's consume is %s: the factor stands, said at warn, not tried again",
+		async (_label, answer) => {
+			const store = createMemoryMfaTransactionStore();
+			await store.requireEmailProofAtNextBinding(ALICE.id);
+			const consume = vi
+				.spyOn(store, "consumeEmailProofRequirement")
+				.mockImplementation(answer as never);
+			const { app, sender, factorStore, logger } = await withMail({ transactionStore: store });
+			const { agent, transaction } = await beginFirstBinding(app);
+			await challengeProof(agent, transaction);
+			await verify(agent, transaction, ACCOUNT_EMAIL, lastCode(sender));
+			const begun = await beginEnrollment(agent, transaction, "totp");
+
+			const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+			expect(done.status).toBe(200);
+			expect((await factorStore.list(ALICE.id)).find((r) => r.kind === "totp")?.binding).toBe(
+				"email_proof",
+			);
+			expect(await store.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
+			expect(consume).toHaveBeenCalledTimes(1);
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.objectContaining({ sub: ALICE.id }),
+				"mfa_email_proof_flag_uncleared",
+			);
+		},
+	);
+
 	it("stands when the binding fails before the factor is written", async () => {
 		const store = createMemoryMfaTransactionStore();
 		await store.requireEmailProofAtNextBinding(ALICE.id);
