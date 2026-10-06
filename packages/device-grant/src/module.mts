@@ -79,7 +79,10 @@ import {
 	DEVICE_VERIFICATION_ATTEMPT_TAG,
 	readVerificationAttemptSpec,
 } from "./verificationAttempts.mjs";
-import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
+import {
+	createDeviceVerificationHandler,
+	requireSessionLifecycleStore,
+} from "./verificationEndpoint.mjs";
 
 /**
  * `device-grant.rateLimit` — the attempts RFC 8628 §5.1 sizes the user code
@@ -183,6 +186,8 @@ const OPTIONAL = [
 	"subjectRevocation",
 	// The session lifecycle port the verification endpoint's admission reads
 	// after a live record: a session closing or closed approves nothing.
+	// Required beside `userSessionStore` once the grant is enabled
+	// (`requireSessionLifecycleStore`).
 	"sessionLifecycleStore",
 	// The session module's CSRF policy, run on the whole verification route.
 	// Required once the grant is enabled (`requireCsrfMiddleware`).
@@ -599,6 +604,7 @@ export const deviceAuthorizationGrantModule = defineModule<
 				// on `approve` / `deny` alone, so no future action can forget it.
 				const csrfMiddleware = requireCsrfMiddleware(deps);
 				const userSessionStore = requireUserSessionStore(deps);
+				requireSessionLifecycleStore(deps);
 				router.post(
 					"/",
 					csrfMiddleware,
