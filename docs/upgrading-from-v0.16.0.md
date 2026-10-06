@@ -26,7 +26,8 @@ describes.
 
 1. Fix the configuration. Every moved or removed key, and every value now
    read strictly, refuses to start and names itself, so a start against a
-   staging copy lists what is left.
+   staging copy lists what is left. A refusal of a moved, removed or renamed
+   key or variable points at this guide.
 2. Check the data the provider reads from you: client records, redirect URIs,
    the users your Store answers.
 3. Update code that implements a port or calls an API that changed, and run
@@ -325,7 +326,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
 - `oauth.refreshToken.legacyTokenCompat` and
   `oauth.authorize.allowUnmarkedClients` still refuse the boot, now wherever
   `oauthEndpointsModule` is installed, as `config-path-relocated`
-  (`<key> was removed; see CHANGELOG. Remove this field …`) instead of
+  (`<key> was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md).
+  Remove this field …`) instead of
   `config-validation-failed` naming the release that removed the key. An
   exported `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` — any value, the empty
   string included — refuses it as `environment-variable-renamed`

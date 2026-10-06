@@ -91,9 +91,9 @@ message: "the key was removed in 1.0 GA"
 message: "the key was removed in vX.Y.Z"   // when vX.Y.Z is still pending
 
 // ✅ — no version: a retired key is a `relocatedFrom` entry to `null` in the
-// module that owns its path, and its refusal points at the CHANGELOG
+// module that owns its path, and its refusal points at the upgrade guide
 relocatedFrom: { "oauth.authorize.allowUnmarkedClients": null }
-// → "oauth.authorize.allowUnmarkedClients was removed; see CHANGELOG. …"
+// → "oauth.authorize.allowUnmarkedClients was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md). …"
 ```
 
 If a removal is announced in advance (deprecated now, will be removed later), the error path during the deprecated window emits a *deprecation warning* (not yet an error). The removed-in version is filled in **at the release-cut PR that actually performs the removal** (per R6, step 5), not at the sweep/refactor PR before it. Operators running the release that contains the removal naturally know their own version; the "in version X" context inside the error message is optional and can be omitted to avoid pre-stamping pressure.
@@ -106,7 +106,7 @@ Before tagging a release `vX.Y.Z` (in `auth.provider`, the tag is cut from `main
 2. Write `## [X.Y.Z] - YYYY-MM-DD` in CHANGELOG from `git log <lastTag>..HEAD` (where `X.Y.Z` is the tag being cut), and list that range in the cut PR's description so completeness can be reviewed (R2)
 3. In the new CHANGELOG section: replace any forward-version reference (e.g., "removed in 1.0 GA", "this release", "next release") with the actual release name `X.Y.Z`
 4. JSDoc / code comments / config comments: replace forward-version references with `X.Y.Z` or remove the version mention entirely
-5. Operator-facing strings that name a release (a Zod message, a log field): replace neutral / forward-version values with `X.Y.Z`. A retired key's refusal (`relocatedFrom: null`) names no release — it points at the CHANGELOG, whose section names it — so it needs no stamp
+5. Operator-facing strings that name a release (a Zod message, a log field): replace neutral / forward-version values with `X.Y.Z`. A retired key's refusal (`relocatedFrom: null`) names no release — it points at the upgrade guide, which names what to do — so it needs no stamp
 6. PR title for the release-cut PR uses "release: vX.Y.Z" (no Phase / GA / "next-release" labels)
 7. Release notes (`gh release create` body) include a brief retirement note if any pre-existing label was retired in this cut
 
@@ -138,8 +138,9 @@ change observable behavior for traffic that works today?*
 
 A moved key always fails boot: ignoring it drops the operator's setting for the default at the new path. So does a renamed variable set alone, or set to a value its new name does not carry, and a removed key's variable set at all; one set to the same value as its new name boots, so a deployment can export both names while it moves. The relocation rows are a bridge for the 0.x line and are removed at the first major release — `relocatedPaths.drift.test.mts` fails the cut that forgets.
 
-A removal's message names no release: it points at the CHANGELOG, whose
-section names the release that removed the key (R5).
+A removal's message names no release: it points at the upgrade guide
+(`docs/upgrading-from-v0.16.0.md`), which says what to do, in every release
+and before the CHANGELOG section that names the release is written (R5).
 
 ## "1.0 GA" label retirement (2026-05-12)
 

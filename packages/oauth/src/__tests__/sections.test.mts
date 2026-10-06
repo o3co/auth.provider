@@ -588,7 +588,7 @@ describe("boot, over a configuration that captures the modules' renamed variable
 				relocated: [{ module: "oauth", from: `oauth.${block}.${key}`, to: null }],
 			});
 			expect(err.message).toContain(
-				`oauth.${block}.${key} was removed; see CHANGELOG. Remove this field from your config (or unset the environment variable that sets it).`,
+				`oauth.${block}.${key} was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md). Remove this field from your config (or unset the environment variable that sets it).`,
 			);
 		},
 	);

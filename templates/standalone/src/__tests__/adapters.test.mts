@@ -211,7 +211,9 @@ describe("a path a selection moved from, written in the operator's own layer", (
 		"adapters.%s: refused where it was, %s's old path, naming the new path and ADAPTERS_%s",
 		(key, name, oldPath, _oldName, value) => {
 			const err = refusal({}, `${oldPath} = "${value}"\n`);
-			expect(err.message).toContain(`${oldPath} has moved to adapters.${key}`);
+			expect(err.message).toContain(
+				`${oldPath} has moved to adapters.${key}; see the upgrade guide (docs/upgrading-from-v0.16.0.md).`,
+			);
 			expect(err.message).toContain(`ADAPTERS_${name}`);
 			expect(err.reason).toBe("config-path-relocated");
 			expect(err.details).toEqual({
@@ -251,8 +253,9 @@ describe("a variable renamed with a selection", () => {
 		"adapters.%s: %s's old variable set alone is refused, naming ADAPTERS_%s",
 		(key, name, _oldPath, oldName, value) => {
 			const err = refusal({ [oldName]: value });
-			expect(err.message).toContain(`${oldName} was renamed ADAPTERS_${name}`);
-			expect(err.message).toContain(`adapters.${key}`);
+			expect(err.message).toContain(
+				`${oldName} was renamed ADAPTERS_${name}, the variable adapters.${key} is bound to; see the upgrade guide (docs/upgrading-from-v0.16.0.md).`,
+			);
 			expect(err.reason).toBe("environment-variable-renamed");
 			expect(err.details).toEqual({
 				reason: "environment-variable-renamed",

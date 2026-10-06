@@ -47,12 +47,20 @@
 import { environmentVariableFor } from "./environment-variable.mjs";
 
 /**
+ * Where every refusal of a retired name sends the operator: the upgrade
+ * guide, which lists each moved, removed or renamed key and variable with
+ * what to do, and is in the repository before the release's CHANGELOG
+ * section is written.
+ */
+const UPGRADE_GUIDE = "see the upgrade guide (docs/upgrading-from-v0.16.0.md)";
+
+/**
  * Every "this key is gone" message has one shape — the path the operator
- * wrote, what became of it, the CHANGELOG, and what to do — so a removed key
- * and a relocated one read alike.
+ * wrote, what became of it, the upgrade guide, and what to do — so a removed
+ * key and a relocated one read alike.
  */
 function goneKeyMessage(path: string, whatBecameOfIt: string, remedy: string): string {
-	return `${path} ${whatBecameOfIt}; see CHANGELOG. ${remedy}`;
+	return `${path} ${whatBecameOfIt}; ${UPGRADE_GUIDE}. ${remedy}`;
 }
 
 /**

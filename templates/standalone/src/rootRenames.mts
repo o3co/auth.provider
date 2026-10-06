@@ -59,7 +59,7 @@ export function refuseRenamedVariables(
 	});
 	if (refused.length === 0) return;
 	const named = refused.map(({ from, to, path, state }) => {
-		const renamed = `${from} was renamed ${to}, the variable ${path} is bound to; see CHANGELOG.`;
+		const renamed = `${from} was renamed ${to}, the variable ${path} is bound to; see the upgrade guide (docs/upgrading-from-v0.16.0.md).`;
 		return state === "unset"
 			? `${renamed} Set ${to} instead and unset ${from}.`
 			: `${renamed} ${to} is set to a different value: keep the one you mean in ${to} and unset ${from}.`;

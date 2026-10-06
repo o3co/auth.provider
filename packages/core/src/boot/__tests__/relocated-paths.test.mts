@@ -94,7 +94,7 @@ describe("a relocated path — refused", () => {
 			],
 		});
 		expect(err.message).toContain(
-			"legacy.retries has moved to fixture-relocating.retries; see CHANGELOG.",
+			"legacy.retries has moved to fixture-relocating.retries; see the upgrade guide (docs/upgrading-from-v0.16.0.md).",
 		);
 		expect(err.message).toContain("FIXTURE_RELOCATING_RETRIES");
 		expect(ran).toBe(false);
@@ -154,7 +154,7 @@ describe("a relocated path — refused", () => {
 				],
 			});
 			expect(err.message, String(value)).toContain(
-				"legacy.fixture has moved to fixture-relocating; see CHANGELOG. Write it there and remove",
+				"legacy.fixture has moved to fixture-relocating; see the upgrade guide (docs/upgrading-from-v0.16.0.md). Write it there and remove",
 			);
 			expect(err.message, String(value)).not.toContain("(environment variable");
 		}
@@ -405,7 +405,7 @@ describe("a relocated path — to a new path no variable binds", () => {
 			],
 		});
 		expect(err.message).toContain(
-			"legacy.label has moved to fixture-relocating.label; see CHANGELOG. Write it there and remove",
+			"legacy.label has moved to fixture-relocating.label; see the upgrade guide (docs/upgrading-from-v0.16.0.md). Write it there and remove",
 		);
 		expect(err.message).not.toContain("FIXTURE_RELOCATING_LABEL");
 	});
@@ -573,7 +573,7 @@ describe("a relocated path — more", () => {
 			],
 		});
 		expect(err.message).toContain(
-			"oauth-legacy.grants.authorization_code.pkce.requireS256 was removed; see CHANGELOG.",
+			"oauth-legacy.grants.authorization_code.pkce.requireS256 was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md).",
 		);
 	});
 
@@ -608,9 +608,9 @@ describe("a relocated path — more", () => {
 		});
 		expect(err.message).toContain("Configuration sets 3 path(s) that moved:");
 		for (const sentence of [
-			"legacy-first.retries has moved to fixture-first.retries; see CHANGELOG.",
-			"legacy-second.retries has moved to fixture-second.retries; see CHANGELOG.",
-			"legacy-second.label has moved to fixture-second.label; see CHANGELOG.",
+			"legacy-first.retries has moved to fixture-first.retries; see the upgrade guide (docs/upgrading-from-v0.16.0.md).",
+			"legacy-second.retries has moved to fixture-second.retries; see the upgrade guide (docs/upgrading-from-v0.16.0.md).",
+			"legacy-second.label has moved to fixture-second.label; see the upgrade guide (docs/upgrading-from-v0.16.0.md).",
 		]) {
 			expect(err.message).toContain(sentence);
 		}
