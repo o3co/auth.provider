@@ -174,7 +174,7 @@ standalone テンプレートのような構成での主なエンドポイント
 
 HOCON 設定ファイル + 環境変数オーバーライド。設定スキーマは登録されたモジュールに依存する。`@o3co/auth-provider-core` と、デフォルトを持つ各パッケージは、それを自分のモジュールが宣言する `reference.conf` として同梱する。コンポジションルートは、読み込むモジュールの reference（`moduleReferences(modules)`、core のものを最後）の上に自前のファイルを重ね、その結果を `createApp` に渡し、boot はそれを一度だけパースする（[#728](https://github.com/o3co/auth.provider/issues/728)）。
 
-**常に設定するもの** — issuer、署名鍵、ポート。`oauth.jwt.issuer` は core のもの。署名鍵と `http` は、鍵ストアを組み立てるモジュールとサーバーをホストするモジュールのもの（standalone テンプレートでは `key-store` と `http` モジュールで、デフォルトはテンプレートの `config/reference.conf` にある）:
+**常に設定するもの** — issuer、署名鍵、ポート。`oauth.jwt.issuer` は oauth モジュールのもの（`oauth {}` はそのセクションで、デフォルトは oauth パッケージの `reference.conf` にある: core のものはその何も設定しない）。署名鍵と `http` は、鍵ストアを組み立てるモジュールとサーバーをホストするモジュールのもの（standalone テンプレートでは `key-store` と `http` モジュールで、デフォルトはテンプレートの `config/reference.conf` にある）:
 
 ```hocon
 http { port = 3000 }

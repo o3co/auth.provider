@@ -1,6 +1,6 @@
 # grants
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 ## Responsibility
 
@@ -30,7 +30,7 @@ It is separate because every grant package — `oauth`, `device-grant`, `oauth-t
 
 ## Dependencies
 
-- Depends on, type-only: `keys/` (the `KeyStore` it signs through), `user-sessions/` (the `UserSessionClaims` the id_token and the claim filter read), `repositories/` (`TokenEndpointAuthMethod`), `policy/` (the hook `evaluateGrantPolicy` calls) and `modules/manifest/` (`ProviderDeps`); the `logging/` leaf for values (`loggableError`, for the `grant_policy_unavailable` line `evaluateGrantPolicy` and `logGrantPolicyUnavailable` write when a policy throws, and `consoleLogger`, where that line and `grant_policy_decision_invalid` go when the caller has no logger, and `grant_policy_refusal_rewritten` when it has none with `warn`); the `errors/` leaf (`auditErrorText`, which `policyDenied` sanitises and caps a deny's code and description with); `node:crypto`. `GrantDependencies` is `ProviderDeps` over `ComponentMap`, so the config, the stores, the policy hook and the logger a handler receives reach it through the slots each directory augments, not through imports here.
+- Depends on, type-only: `keys/` (the `KeyStore` it signs through), `user-sessions/` (the `UserSessionClaims` the id_token and the claim filter read), `repositories/` (`TokenEndpointAuthMethod`), `policy/` (the hook `evaluateGrantPolicy` calls) and `modules/manifest/` (`ProviderDeps`); the `logging/` leaf for values (`loggableError`, for the `grant_policy_unavailable` line `evaluateGrantPolicy` and `logGrantPolicyUnavailable` write when a policy throws, and `consoleLogger`, where that line and `grant_policy_decision_invalid` go when the caller has no logger, and `grant_policy_refusal_rewritten` when it has none with `warn`); the `errors/` leaf (`auditErrorText`, which `policyDenied` sanitises and caps a deny's code and description with); `node:crypto`. `GrantDependencies` is `ProviderDeps` over `ComponentMap`, `keyStore` required and no `config`, so the key store, the stores, the settings slots, the policy hook and the logger a handler receives reach it through the slots each directory augments, not through imports here.
 - Depended on by: `boot/` (the registry), `middleware/` (the binding profiles, `matchConfirmation`, the `TokenBinding` type), `../accessTokenHeader.mts` (the binding profiles), `modules/manifest/` (`GrantHandler`), `repositories/` (`SenderConstraint`, type-only), the root barrel, `testing/`.
 - The `grants` ↔ `repositories` edge is type-only in both directions. This directory must never import `boot/`, `middleware/`, `routes/`, an adapter package, or `testing/`.
 

@@ -133,19 +133,16 @@ change observable behavior for traffic that works today?*
 
 | What happened | Mechanism | Home |
 | --- | --- | --- |
-| Key removed outright | `withRemovedKeys(sectionPath, table, schema)` — fails boot naming key, release, and remedy | `core/src/config/removed-keys.mts` |
+| Key removed outright | the owning module's `section.relocatedFrom`, the key's path mapped to `null` — `config-path-relocated` fails boot, before any section is parsed, naming the key as removed and telling the operator to delete it; a variable bound to the key is declared removed beside it (`section.renamedVariables`, captured in the module's reference as the next row says), and `environment-variable-renamed` fails boot while it is set at all | the module's manifest; detection and message in `core/src/config/removed-keys.mts` |
 | Key moved to another path (#728) | the owning module's `section.relocatedFrom` (a switch that decides whether a module is loaded: a module that is always loaded) — `config-path-relocated` fails boot naming the old path, the new one and the environment variable bound to it — none for an entry written `{ to, environmentVariable: null }`, a new path no variable binds — or, mapped to `null`, that the key was removed; the path's defaults and its `${?VAR}` binding move with it, and nothing stays bound at the old path; a variable whose name changed — or whose key was removed — is declared beside it (`section.renamedVariables`: the old name → the old path it was bound to; the new name is the one the new path is bound to; the old path may lie outside the module's section, or stay in place inside it; core's own section declares its renames the same way, its in-place renames limited to paths under `core`), and the declaring module's own `section.reference` — core's own `reference.conf` for core, and for a composition root's own module the root's `config/reference.conf`, never its `application.conf` — captures each declared name in the reserved `renamed-variables` section (`NAME = null`, then `NAME = ${?NAME}`), which no other layer writes (a composition that builds its configuration by hand captures every declared name from the environment it substitutes with, `null` when unset: `renamedVariableCaptures`); from what the resolution captured, `environment-variable-renamed` fails boot while the old name is set unless the new name is set to the same string, while a removed key's variable is set at all, and when a name is not captured, naming the variables and the new path and never a value; a rename carries the value unchanged — a move that changes a value's meaning is not declared as one; an old path the root's schema must keep for the pre-parse is presence-only (no `.default()`, preferably `z.unknown()`) | the module's manifest; detection and message in `core/src/config/removed-keys.mts` |
 | A VALUE removed from a live key | shrink the `z.enum` — the key stays, and Zod's `invalid_value` issue names the surviving values | in place, in the key's schema (e.g. a `mode` key that drops one of its values) |
-| Key moved to a new shape | bespoke preprocess with a migration pointer, not a removal notice | `LEGACY_JWT_FIELDS` |
+| Key moved to a new shape | a relocation to the new path where one value maps to one value; otherwise a removal (`null`), with the migration in its CHANGELOG entry | the module's manifest |
 | Key ignored (warn path) | warn-once keyed on the config object | none: no key takes this path today |
 
 A moved key always fails boot: ignoring it drops the operator's setting for the default at the new path. So does a renamed variable set alone, or set to a value its new name does not carry, and a removed key's variable set at all; one set to the same value as its new name boots, so a deployment can export both names while it moves. The relocation rows are a bridge for the 0.x line and are removed at the first major release — `relocatedPaths.drift.test.mts` fails the cut that forgets.
 
-`removedIn` strings follow R5/R6 above: neutral phase markers on HEAD,
-replaced with the actual tag at release-cut. Note `withRemovedKeys` wraps
-the section in `z.preprocess`, which the hocon bridge's coercion walk does
-not enter — fields under a wrapped section must own their coercion
-(`coerceBooleanFromEnv`, `z.coerce.number()`) per #288.
+A removal's message names no release: it points at the CHANGELOG, whose
+section names the release that removed the key (R5).
 
 ## "1.0 GA" label retirement (2026-05-12)
 

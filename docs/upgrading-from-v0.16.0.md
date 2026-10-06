@@ -316,15 +316,26 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   lacking `jti` or `family_id` while family rotation is wired is always
   refused. Delete the key.
 - `oauth.refreshToken.legacyTokenCompat` and
-  `oauth.authorize.allowUnmarkedClients`, and an exported
-  `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, still refuse the boot, now
-  wherever `oauthEndpointsModule` is installed as `config-path-relocated`
+  `oauth.authorize.allowUnmarkedClients` still refuse the boot, now wherever
+  `oauthEndpointsModule` is installed, as `config-path-relocated`
   (`<key> was removed; see CHANGELOG. Remove this field …`) instead of
-  `config-validation-failed` naming the release that removed the key. Delete
-  the key and unset the variable. For `allowUnmarkedClients`, first mark
+  `config-validation-failed` naming the release that removed the key. An
+  exported `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` — any value, the empty
+  string included — refuses it as `environment-variable-renamed`
+  (`OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS sets
+  oauth.authorize.allowUnmarkedClients, which was removed`), captured by the
+  oauth package's `reference.conf`, no longer by core's (#1500). Delete the
+  key and unset the variable. For `allowUnmarkedClients`, first mark
   `firstParty: true` every client you operate that you would trust to
   receive a user's identity without the user being asked: `/authorize`
-  refuses every other client.
+  refuses every other client. Without `oauthEndpointsModule` nothing reads
+  `oauth {}`: the keys are named among the sections nothing loaded reads.
+- `oauth.jwt`'s flat key fields (`algorithm`, `kid`, `secret`, `privateKey`,
+  `privateKeyPath`, `publicKey`, `publicKeyPath`, `previousKeys`,
+  `previousSecrets`) are refused by the oauth module's strict section as
+  `config-validation-failed`, `oauth.jwt: Unrecognized key: "<field>"`,
+  instead of core's message pointing at `key-store.local` (#1500). Move each
+  field to the key store's section, `key-store.local`, as before.
 - `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
   `ADAPTERS_CODE_REPOSITORY` (#853).
 - `device-grant.store` (and `oauth.deviceAuthorization.store`), at any value,
@@ -1328,6 +1339,53 @@ modules fills them.
   `device-grant.store`, the key it named, is refused
   ([Keys removed](#keys-removed)). A module of your own that attached it
   requires `deviceCodeStore` instead, or reads the slot without a policy.
+- **BREAKING: core's schema declares `core` alone, and core's `reference.conf`
+  sets no `oauth {}` (#1500).** `oauth {}` is the oauth module's section, its
+  defaults and `OAUTH_*` bindings in the oauth package's `reference.conf`
+  alone: layer every loaded package's reference with
+  `moduleReferences(modules)`, as the standalone template does. A
+  composition loading no oauth-package module now boots without
+  `oauth.jwt.issuer` unless something wires `grantPolicy`, and binds no
+  `OAUTH_*` variable. What changes for one that reads `oauth.*` through core
+  without the oauth module:
+  - `OAUTH_REVOCATION_SUBJECT` and `OAUTH_REVOCATION_ACCESS_TOKEN` no longer
+    declare an absence: a module that attaches
+    `SUBJECT_REVOCATION_ABSENCE_POLICY` or
+    `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` (mfa, oauth-token-exchange,
+    oauth-authorization, device-grant, or one of your own) over an unfilled
+    slot refuses the boot (`component-absence-undeclared`) unless an
+    oauth-package module is loaded — whose reference binds them — or
+    `oauth.revocation.subject` / `oauth.revocation.accessToken =
+    "unsupported"` is written in your own files. A written value counts only
+    as exactly `"unsupported"`.
+  - A `grantPolicy` from any source needs a canonical `oauth.jwt.issuer`
+    (`checkCanonicalIssuer`: an absolute https URL, http only for loopback, no
+    query, fragment, credentials or trailing slash), else
+    `grant-policy-without-issuer`; it used to be held only to non-empty
+    there. With no `oauthTokenSettings` slot, an issuer that is not canonical
+    is read as none: no discovery document and no discovery path in the CORS
+    table.
+  - The token lifetimes core sizes its revoking records by
+    (`oauth.accessToken.*`, `oauth.refreshToken.expiresIn`) are read as
+    written: an environment string no section schema coerced is refused, not
+    read as a number. A host's `oauthTokenSettings` over a configuration that
+    resolves no lifetime refuses the boot as `config-validation-failed`
+    naming the key, and the default refresh-token family modules as
+    `provides-factory-failed`. A composition that loads
+    `oauthAuthorizationGrantsModule` or `oauthSessionGrantModule` without
+    `oauthEndpointsModule` therefore needs `OAUTH_ACCESS_TOKEN_*` and
+    `OAUTH_REFRESH_TOKEN_EXPIRES_IN` unset, or the lifetimes written as
+    numbers in its own files.
+  In code, `CoreConfig` loses `oauth` (`AppConfig["oauth"]` is `unknown`:
+  read the oauth module's section from `deps.section`, or its settings from
+  the `oauthTokenSettings` slot); `makeValidCoreConfig` keeps carrying
+  `oauth {}`, typed as written.
+- **BREAKING: `GrantDependencies` no longer carries `config` (#1500).** Its
+  required slot is `keyStore`. A grant of your own that read `deps.config`
+  reads the oauth module's settings from `oauthTokenSettings`, core's
+  token-binding settings from `tokenBindingSettings`, and its own from its
+  module's section; a module that still lists `config` in `requires` keeps
+  compiling.
 - **`ModuleSpec.configSchema`, the `ConfigSchema` type and `ModuleSection.at`
   are removed: a module's section is at its name** (#1478, #728, #777). A
   module reads its configuration as its own section, the top-level key named
@@ -1336,8 +1394,8 @@ modules fills them.
   read and written back only at its own top-level name. Core's own keys are
   under `core`, a name no module may take, so no section's write-back reaches
   them (`core.deployment.mode`, for one); `oauth {}` is the oauth module's
-  section, which core's schema still validates as written before the
-  write-back, and core reads `oauth.*` afterwards from that module's output.
+  section, which core's schema does not declare, and core reads `oauth.*`
+  afterwards from that module's output.
   A module named after a key configuration cannot carry (`__proto__`,
   `constructor`, …) is refused, and so is a module's `relocatedFrom` naming a
   path at or under `core`. Move a `configSchema`'s keys into the
