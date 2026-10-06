@@ -25,10 +25,7 @@
 import {
 	type ClientRepository,
 	type CodeRepository,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createSessionLifecycle,
 	createSymmetricKeyStore,
 	type FederationTokenStore,
@@ -96,7 +93,8 @@ const refreshTokenFamilyRevocation = {
 } as unknown as RefreshTokenFamilyRevocation;
 
 /**
- * Core's own lifecycle over the session store: the grant joins the code's
+ * Core's own lifecycle over the session store, the session opened in it
+ * before each exchange as a login opens it: the grant joins the code's
  * session through it, and userinfo reads the session's liveness through it.
  */
 const sessionLifecycle = createSessionLifecycle({
@@ -107,9 +105,6 @@ const sessionLifecycle = createSessionLifecycle({
 		removeBySid: vi.fn(),
 		delete: vi.fn(),
 	} as unknown as FederationTokenStore,
-	sessionRPRegistry: createInMemorySessionRPRegistry(),
-	sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-	sessionFederationIndex: createInMemorySessionFederationIndex(),
 	retainMs: 0,
 	logger: { warn: () => undefined, error: () => undefined },
 });
@@ -176,6 +171,9 @@ function buildUserinfoApp() {
 
 describe("authorization_code → userinfo over a back channel", () => {
 	it("serves claims for an access token minted without a token-request cookie", async () => {
+		expect(
+			await sessionLifecycle.open(SID, { sub: SUB, expiresAt: userSession.expiresAt }),
+		).toEqual({ outcome: "opened" });
 		const { result } = await exchangeCodeWithoutCookie();
 
 		expect(result.status).toBe(200);

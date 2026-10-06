@@ -27,10 +27,7 @@ import {
 	type AuditEvent,
 	type AuditSink,
 	type ClientRepository,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRevocation,
@@ -483,9 +480,6 @@ describe("/oauth/logout through the session lifecycle: back-channel", () => {
 			refreshTokenFamilyStore: familyStore,
 			accessTokenHorizonMs: HOUR,
 		});
-		const sessionRPRegistry = createInMemorySessionRPRegistry();
-		const sessionFamilyIndex = createInMemorySessionFamilyIndex();
-		const sessionFederationIndex = createInMemorySessionFederationIndex();
 		const federationTokenStore = fedTokenStore();
 		const lifecycleStore = createInMemorySessionLifecycleStore();
 		const notifier = createSessionCloseNotifier({
@@ -500,9 +494,6 @@ describe("/oauth/logout through the session lifecycle: back-channel", () => {
 			refreshTokenFamilyRevocation: revocation,
 			federationTokenStore,
 			notifier: () => notifier,
-			sessionRPRegistry,
-			sessionFamilyIndex,
-			sessionFederationIndex,
 			retainMs: HOUR,
 			logger: { warn: () => undefined, error: () => undefined },
 		});
@@ -514,14 +505,15 @@ describe("/oauth/logout through the session lifecycle: back-channel", () => {
 			frontchannelLogoutSessionRequired: undefined,
 			registeredAt: new Date(),
 		};
+		expect(
+			await lifecycle.open(SID, { sub: baseSession.sub, expiresAt: baseSession.expiresAt }),
+		).toEqual({ outcome: "opened" });
 		expect(await lifecycle.join(SID, { rp, familyId: "fam-bc" })).toEqual({ outcome: "joined" });
 		const app = buildApp({
 			lifecycle,
 			sessionStore: userSessionStore,
 			stores: {
-				sessionRPRegistry,
-				sessionFamilyIndex,
-				sessionFederationIndex,
+				...untouchedStores(),
 				refreshTokenFamilyRevocation: revocation,
 			} as unknown as ReturnType<typeof untouchedStores>,
 			federationTokenStore,
@@ -564,9 +556,6 @@ describe("/oauth/logout through the session lifecycle: a pending close", () => {
 			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
 			accessTokenHorizonMs: HOUR,
 		});
-		const sessionRPRegistry = createInMemorySessionRPRegistry();
-		const sessionFamilyIndex = createInMemorySessionFamilyIndex();
-		const sessionFederationIndex = createInMemorySessionFederationIndex();
 		const federationTokenStore = fedTokenStore();
 		const lifecycleStore = createInMemorySessionLifecycleStore();
 		const notifier = createSessionCloseNotifier({
@@ -581,9 +570,6 @@ describe("/oauth/logout through the session lifecycle: a pending close", () => {
 			refreshTokenFamilyRevocation: revocation,
 			federationTokenStore,
 			notifier: () => notifier,
-			sessionRPRegistry,
-			sessionFamilyIndex,
-			sessionFederationIndex,
 			retainMs: HOUR,
 			logger: { warn: () => undefined, error: () => undefined },
 		});
@@ -595,15 +581,16 @@ describe("/oauth/logout through the session lifecycle: a pending close", () => {
 			frontchannelLogoutSessionRequired: undefined,
 			registeredAt: new Date(),
 		};
+		expect(
+			await lifecycle.open(SID, { sub: baseSession.sub, expiresAt: baseSession.expiresAt }),
+		).toEqual({ outcome: "opened" });
 		expect(await lifecycle.join(SID, { rp, familyId: "fam-bc" })).toEqual({ outcome: "joined" });
 		const { sink, events } = recordingSink();
 		const app = buildApp({
 			lifecycle,
 			sessionStore: userSessionStore,
 			stores: {
-				sessionRPRegistry,
-				sessionFamilyIndex,
-				sessionFederationIndex,
+				...untouchedStores(),
 				refreshTokenFamilyRevocation: revocation,
 			} as unknown as ReturnType<typeof untouchedStores>,
 			federationTokenStore,
@@ -815,9 +802,6 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
 			accessTokenHorizonMs: HOUR,
 		});
-		const sessionRPRegistry = createInMemorySessionRPRegistry();
-		const sessionFamilyIndex = createInMemorySessionFamilyIndex();
-		const sessionFederationIndex = createInMemorySessionFederationIndex();
 		const federationTokenStore = fedTokenStore({ google: "google-id-token" });
 		const lifecycleStore = createInMemorySessionLifecycleStore();
 		const real = createSessionLifecycle({
@@ -825,14 +809,14 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 			userSessionStore,
 			refreshTokenFamilyRevocation: revocation,
 			federationTokenStore,
-			sessionRPRegistry,
-			sessionFamilyIndex,
-			sessionFederationIndex,
 			retainMs: HOUR,
 			logger: { warn: () => undefined, error: () => undefined },
 		});
 		// The session holds a lifecycle record; the federation joins it right
 		// after the logout read the session's federations, and before the close.
+		expect(
+			await real.open(SID, { sub: baseSession.sub, expiresAt: baseSession.expiresAt }),
+		).toEqual({ outcome: "opened" });
 		expect(await real.join(SID, { familyId: "fam-0" })).toEqual({ outcome: "joined" });
 		const lifecycle: SessionLifecycle = {
 			...real,
@@ -846,9 +830,7 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 			lifecycle,
 			sessionStore: userSessionStore,
 			stores: {
-				sessionRPRegistry,
-				sessionFamilyIndex,
-				sessionFederationIndex,
+				...untouchedStores(),
 				refreshTokenFamilyRevocation: revocation,
 			} as unknown as ReturnType<typeof untouchedStores>,
 			federationTokenStore,

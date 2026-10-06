@@ -94,6 +94,9 @@ describe("the template, which composes the session lifecycle module", () => {
 				amr: ["pwd"],
 				authentication: undefined,
 			});
+			expect(await lifecycle.open("sid-bc", { sub: "u-bc", expiresAt })).toEqual({
+				outcome: "opened",
+			});
 			const rp = {
 				clientId: "rp-bc",
 				backchannelLogoutUri: "https://rp-bc.test/logout",

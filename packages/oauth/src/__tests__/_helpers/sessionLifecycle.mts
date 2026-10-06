@@ -28,10 +28,7 @@
  */
 
 import {
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createSessionLifecycle,
 	defineModule,
 	type FederationTokenStore,
@@ -157,8 +154,9 @@ export function livenessOver(
 
 /**
  * Core's session lifecycle over the stores a test composition hands it, with
- * in-memory stores for its own record and the per-session indexes, and no
- * relying party to tell: for a router built by hand whose logout closes.
+ * an in-memory store for its own record, and no relying party to tell: for a
+ * router built by hand whose logout closes. A session it closes is one it
+ * opened: a sid with no record reads as closed.
  */
 export function lifecycleOver(stores: {
 	readonly userSessionStore: UserSessionStore;
@@ -168,9 +166,6 @@ export function lifecycleOver(stores: {
 	return createSessionLifecycle({
 		...stores,
 		store: createInMemorySessionLifecycleStore(),
-		sessionRPRegistry: createInMemorySessionRPRegistry(),
-		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-		sessionFederationIndex: createInMemorySessionFederationIndex(),
 		retainMs: 3_600_000,
 		logger: { warn: () => undefined, error: () => undefined },
 	});

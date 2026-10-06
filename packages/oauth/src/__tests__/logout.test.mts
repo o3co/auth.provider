@@ -19,7 +19,6 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	checkRedirectUri,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
 	createSessionLifecycle,
 	createSymmetricKeyStore,
@@ -28,10 +27,9 @@ import {
 	type FederationTokens,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
+	type RegisteredRP,
 	type SessionLifecycle,
-	type SessionRPRegistry,
+	type SessionLifecycleOptions,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -142,39 +140,6 @@ function makeSessionStore(override?: Partial<UserSessionStore>): UserSessionStor
 	};
 }
 
-function makeSessionRPRegistry(override?: Partial<SessionRPRegistry>): SessionRPRegistry {
-	return {
-		kind: "memory",
-		registerRP: vi.fn(async () => {}),
-		listRPs: vi.fn(async () => []),
-		removeBySid: vi.fn(async () => {}),
-		...override,
-	} as SessionRPRegistry;
-}
-
-function makeSessionFamilyIndex(override?: Partial<SessionFamilyIndex>): SessionFamilyIndex {
-	return {
-		kind: "memory",
-		addFamilyId: vi.fn(async () => {}),
-		listFamilyIds: vi.fn(async () => ["fam-1"]),
-		removeBySid: vi.fn(async () => {}),
-		...override,
-	} as SessionFamilyIndex;
-}
-
-function makeSessionFederationIndex(
-	override?: Partial<SessionFederationIndex>,
-): SessionFederationIndex {
-	return {
-		kind: "memory",
-		addFederation: vi.fn(async () => {}),
-		listFederations: vi.fn(async () => []),
-		removeFederation: vi.fn(async () => {}),
-		removeBySid: vi.fn(async () => {}),
-		...override,
-	} as SessionFederationIndex;
-}
-
 function makeFamilyRevocation(
 	override?: Partial<RefreshTokenFamilyRevocation>,
 ): RefreshTokenFamilyRevocation {
@@ -209,9 +174,15 @@ function makeClientRepo(override?: Partial<ClientRepository>): ClientRepository 
 
 interface BuildAppOpts {
 	sessionStore?: UserSessionStore;
-	sessionRPRegistry?: SessionRPRegistry;
-	sessionFamilyIndex?: SessionFamilyIndex;
-	sessionFederationIndex?: SessionFederationIndex;
+	/**
+	 * What `sid-1` joined, written to its lifecycle record before the first
+	 * request: relying parties (a client repository answers each one's
+	 * registration as recorded, under what `clientRepo` answers), families
+	 * (`fam-1` by default) and federations, in that order.
+	 */
+	joinedRps?: readonly RegisteredRP[];
+	joinedFamilies?: readonly string[];
+	joinedFederations?: readonly string[];
 	refreshFamilyRevocation?: RefreshTokenFamilyRevocation;
 	fedTokenStore?: FederationTokenStore;
 	clientRepo?: ClientRepository;
@@ -297,6 +268,57 @@ function rejecting(step: "liveness" | "federations", error: unknown): SessionLif
 	return { ...lifecycle, [step]: vi.fn().mockRejectedValue(error) };
 }
 
+/**
+ * Core's session lifecycle over the stores `buildApp` composes, with `sid-1`
+ * opened for `baseSession` and `joined` written to its record before any
+ * member answers: the session the suite logs out, as a login and its
+ * exchanges would have left it, written to the record directly so that no
+ * store a case spies on is read to set it up.
+ */
+function joinedLifecycle(
+	stores: Pick<
+		SessionLifecycleOptions,
+		"userSessionStore" | "refreshTokenFamilyRevocation" | "federationTokenStore" | "notifier"
+	> & { readonly logger: Logger | undefined },
+	joined: {
+		readonly rps: readonly string[];
+		readonly families: readonly string[];
+		readonly federations: readonly string[];
+	},
+): SessionLifecycle {
+	const store = createInMemorySessionLifecycleStore();
+	const lifecycle = createSessionLifecycle({
+		...stores,
+		store,
+		retainMs: 3_600_000,
+		logger: stores.logger ?? { warn: () => undefined, error: () => undefined },
+	});
+	const seeded = (async () => {
+		await store.open("sid-1", baseSession.sub, baseSession.expiresAt);
+		for (const [kind, ids] of [
+			["rp", joined.rps],
+			["family", joined.families],
+			["federation", joined.federations],
+		] as const) {
+			for (const id of ids) await store.join("sid-1", { kind, id, data: "" });
+		}
+	})();
+	const after =
+		<A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
+		async (...args: A): Promise<R> => {
+			await seeded;
+			return call(...args);
+		};
+	return {
+		open: after(lifecycle.open),
+		join: after(lifecycle.join),
+		close: after(lifecycle.close),
+		liveness: after(lifecycle.liveness),
+		federations: after(lifecycle.federations),
+		resumePending: after(lifecycle.resumePending),
+	};
+}
+
 function buildApp(opts: BuildAppOpts = {}) {
 	const app = express();
 	if (opts.browserSession) {
@@ -309,18 +331,15 @@ function buildApp(opts: BuildAppOpts = {}) {
 	const userSessionStore = opts.sessionStore ?? makeSessionStore();
 	const refreshTokenFamilyRevocation = opts.refreshFamilyRevocation ?? makeFamilyRevocation();
 	const federationTokenStore = opts.fedTokenStore ?? makeFedTokenStore();
-	const sessionRPRegistry = opts.sessionRPRegistry ?? makeSessionRPRegistry();
+	const joinedRps = opts.joinedRps ?? [];
 	// A relying party the session joined is registered as a client: the close
 	// answers its id, and the notifier and the front-channel page read its
-	// registration. Its registration carries what the registry recorded of it
-	// at the join, under what the case's repository answers; one the
-	// repository does not know is the recorded one alone. Read once.
-	let joined: Promise<ReadonlyMap<string, object>> | undefined;
+	// registration. Its registration carries what was recorded of it at the
+	// join, under what the case's repository answers; one the repository does
+	// not know is the recorded one alone. Read once.
+	let joined: ReadonlyMap<string, object> | undefined;
 	const joinedClients = () => {
-		joined ??= sessionRPRegistry
-			.listRPs("sid-1")
-			.then((rps) => new Map(rps.map((rp) => [rp.clientId, rp])))
-			.catch(() => new Map());
+		joined ??= new Map(joinedRps.map((rp) => [rp.clientId, rp]));
 		return joined;
 	};
 	const baseClients = opts.clientRepo ?? makeClientRepo();
@@ -328,7 +347,7 @@ function buildApp(opts: BuildAppOpts = {}) {
 		...baseClients,
 		findById: async (clientId) => {
 			const registered = await baseClients.findById(clientId);
-			const recorded = (await joinedClients()).get(clientId);
+			const recorded = joinedClients().get(clientId);
 			if (recorded === undefined) return registered ?? null;
 			if (registered === null || registered === undefined) {
 				return recorded as Awaited<ReturnType<ClientRepository["findById"]>>;
@@ -347,18 +366,20 @@ function buildApp(opts: BuildAppOpts = {}) {
 	});
 	const sessionLifecycle =
 		opts.sessionLifecycle ??
-		createSessionLifecycle({
-			store: createInMemorySessionLifecycleStore(),
-			userSessionStore,
-			refreshTokenFamilyRevocation,
-			federationTokenStore,
-			sessionRPRegistry,
-			sessionFamilyIndex: opts.sessionFamilyIndex ?? makeSessionFamilyIndex(),
-			sessionFederationIndex: opts.sessionFederationIndex ?? makeSessionFederationIndex(),
-			notifier: () => notifier,
-			retainMs: 3_600_000,
-			logger: opts.logger ?? { warn: () => undefined, error: () => undefined },
-		});
+		joinedLifecycle(
+			{
+				userSessionStore,
+				refreshTokenFamilyRevocation,
+				federationTokenStore,
+				notifier: () => notifier,
+				logger: opts.logger,
+			},
+			{
+				rps: joinedRps.map((rp) => rp.clientId),
+				families: opts.joinedFamilies ?? ["fam-1"],
+				federations: opts.joinedFederations ?? [],
+			},
+		);
 	const router = createRouter(express, {
 		keyStore,
 		issuer: "https://auth.example.com",
@@ -427,24 +448,6 @@ describe("POST /oauth/logout", () => {
 			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
 			expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
-		});
-
-		it("ends the session in a family index with the session-end capability before it lists the relying parties", async () => {
-			const sessionFamilyIndex = {
-				...makeSessionFamilyIndex(),
-				endSession: vi.fn(async (_sid: string, _expiresAt: Date) => ["fam-1"]),
-				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
-			};
-			const sessionRPRegistry = makeSessionRPRegistry();
-			const app = buildApp({ sessionFamilyIndex, sessionRPRegistry });
-
-			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
-
-			expect(res.status).toBe(200);
-			const ended = sessionFamilyIndex.endSession.mock.invocationCallOrder[0] as number;
-			const listed = (sessionRPRegistry.listRPs as ReturnType<typeof vi.fn>).mock
-				.invocationCallOrder[0] as number;
-			expect(ended).toBeLessThan(listed);
 		});
 
 		it("confirmed=1 form-submission shape (hint + confirmed + state) completes hint-based logout, not 400", async () => {
@@ -606,8 +609,8 @@ describe("POST /oauth/logout", () => {
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry, fetchImpl: fetchSpy });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps, fetchImpl: fetchSpy });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
@@ -641,8 +644,8 @@ describe("POST /oauth/logout", () => {
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
@@ -677,8 +680,8 @@ describe("POST /oauth/logout", () => {
 				...NON_HTTP_URIS.map((uri, i) => storedRP(`rp-skipped-${i}`, uri)),
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry, logger });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps, logger });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
@@ -726,8 +729,8 @@ describe("POST /oauth/logout", () => {
 				counted("rp-skipped", "com.example.app:/x"),
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry, logger: createMockLogger() });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps, logger: createMockLogger() });
 
 			const res = await postLogout(
 				app,
@@ -758,8 +761,8 @@ describe("POST /oauth/logout", () => {
 			try {
 				const rpData = [storedRP("rp-skipped", "com.example.app:/x")];
 				const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-				const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-				const app = buildApp({ sessionStore, sessionRPRegistry });
+				const joinedRps = rpData;
+				const app = buildApp({ sessionStore, joinedRps });
 				const token = await mintIdToken();
 
 				const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
@@ -783,8 +786,8 @@ describe("POST /oauth/logout", () => {
 			const logger = createMockLogger();
 			const rpData = NON_HTTP_URIS.map((uri, i) => storedRP(`rp-skipped-${i}`, uri));
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry, logger });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps, logger });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
@@ -808,10 +811,10 @@ describe("POST /oauth/logout", () => {
 				}),
 			});
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const joinedRps = rpData;
 			const app = buildApp({
 				sessionStore,
-				sessionRPRegistry,
+				joinedRps,
 				clientRepo,
 				logger: createMockLogger(),
 			});
@@ -858,8 +861,8 @@ describe("POST /oauth/logout", () => {
 					},
 				];
 				const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-				const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-				const app = buildApp({ sessionStore, sessionRPRegistry, logger });
+				const joinedRps = rpData;
+				const app = buildApp({ sessionStore, joinedRps, logger });
 				const token = await mintIdToken();
 
 				const res = await postLogout(app, { id_token_hint: token }, { Accept: accept });
@@ -901,8 +904,8 @@ describe("POST /oauth/logout", () => {
 				}),
 			});
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry, clientRepo });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps, clientRepo });
 			const token = await mintIdToken();
 
 			const res = await postLogout(
@@ -940,8 +943,8 @@ describe("POST /oauth/logout", () => {
 				}),
 			});
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry, clientRepo });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps, clientRepo });
 			const token = await mintIdToken();
 
 			const res = await postLogout(
@@ -980,8 +983,8 @@ describe("POST /oauth/logout", () => {
 					postLogoutRedirectUris: ["https://trusted.example.com/logged-out"],
 				}),
 			});
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionRPRegistry, clientRepo });
+			const joinedRps = rpData;
+			const app = buildApp({ joinedRps, clientRepo });
 
 			const res = await postLogout(
 				app,
@@ -1049,9 +1052,7 @@ describe("POST /oauth/logout", () => {
 	describe("federation end-session redirect", () => {
 		it("session.federations has provider with endSession → 303 to mock endSession URL", async () => {
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionFederationIndex = makeSessionFederationIndex({
-				listFederations: vi.fn(async () => ["google"]),
-			});
+			const joinedFederations = ["google"];
 
 			const mockEndSessionUrl = new URL("https://accounts.google.com/logout?id_token_hint=x");
 			const mockProvider: FederationProvider & {
@@ -1064,7 +1065,7 @@ describe("POST /oauth/logout", () => {
 
 			const app = buildApp({
 				sessionStore,
-				sessionFederationIndex,
+				joinedFederations,
 				getFederationProviders: () => federationProviders,
 			});
 			const token = await mintIdToken();
@@ -1088,9 +1089,7 @@ describe("POST /oauth/logout", () => {
 			const logger = createMockLogger();
 			const app = buildApp({
 				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
-				sessionFederationIndex: makeSessionFederationIndex({
-					listFederations: vi.fn(async () => ["google"]),
-				}),
+				joinedFederations: ["google"],
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
 				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
 				logger,
@@ -1122,9 +1121,7 @@ describe("POST /oauth/logout", () => {
 			});
 			const provider = { ...federationBase("google"), endSession } as unknown as FederationProvider;
 			const app = buildApp({
-				sessionFederationIndex: makeSessionFederationIndex({
-					listFederations: vi.fn(async () => ["google"]),
-				}),
+				joinedFederations: ["google"],
 				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
 				clientRepo: makeClientRepo({
 					findById: vi.fn().mockResolvedValue({
@@ -1207,24 +1204,22 @@ describe("POST /oauth/logout", () => {
 			const logger = createMockLogger();
 			const sessionStore = makeSessionStore();
 			const refreshFamilyRevocation = makeFamilyRevocation();
-			const sessionRPRegistry = makeSessionRPRegistry({
-				listRPs: vi.fn(async () => [
-					{
-						clientId: "rp-1",
-						backchannelLogoutUri: "https://rp-1.example/backchannel",
-						backchannelLogoutSessionRequired: true,
-						frontchannelLogoutUri: undefined,
-						frontchannelLogoutSessionRequired: undefined,
-						registeredAt: new Date(),
-					},
-				]),
-			});
+			const joinedRps = [
+				{
+					clientId: "rp-1",
+					backchannelLogoutUri: "https://rp-1.example/backchannel",
+					backchannelLogoutSessionRequired: true,
+					frontchannelLogoutUri: undefined,
+					frontchannelLogoutSessionRequired: undefined,
+					registeredAt: new Date(),
+				},
+			];
 			const fetchImpl = vi.fn().mockResolvedValue({ ok: true });
 			const browserSession = makeBrowserSession({ sid: "sid-1" });
 			const { app, endSession } = buildWithUpstream({
 				sessionStore,
 				refreshFamilyRevocation,
-				sessionRPRegistry,
+				joinedRps,
 				fetchImpl,
 				browserSession,
 				// The registration read for the redirect fails; the relying party's,
@@ -1382,19 +1377,17 @@ describe("POST /oauth/logout", () => {
 				"is not where the front-channel page sends the browser (7a): %s",
 				async (_label, entry, reason) => {
 					const logger = createMockLogger();
-					const sessionRPRegistry = makeSessionRPRegistry({
-						listRPs: vi.fn(async () => [
-							{
-								clientId: "client-1",
-								frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
-								registeredAt: new Date(),
-								backchannelLogoutUri: undefined,
-								backchannelLogoutSessionRequired: undefined,
-								frontchannelLogoutSessionRequired: undefined,
-							},
-						]),
-					});
-					const app = buildApp({ sessionRPRegistry, clientRepo: registering(entry), logger });
+					const joinedRps = [
+						{
+							clientId: "client-1",
+							frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+							registeredAt: new Date(),
+							backchannelLogoutUri: undefined,
+							backchannelLogoutSessionRequired: undefined,
+							frontchannelLogoutSessionRequired: undefined,
+						},
+					];
+					const app = buildApp({ joinedRps, clientRepo: registering(entry), logger });
 
 					const res = await postLogout(
 						app,
@@ -1539,23 +1532,6 @@ describe("POST /oauth/logout", () => {
 		});
 	});
 
-	describe("reverse-index pre-fetch throws (fail-closed)", () => {
-		it("POST /logout returns 503 when reverse-index pre-fetch fails", async () => {
-			const sessionRPRegistry = makeSessionRPRegistry({
-				listRPs: vi.fn(async () => {
-					throw new Error("redis down");
-				}),
-			});
-			const app = buildApp({ sessionRPRegistry });
-			const token = await mintIdToken();
-
-			const res = await postLogout(app, { id_token_hint: token });
-
-			expect(res.status).toBe(503);
-			expect(res.body.error).toBe("temporarily_unavailable");
-		});
-	});
-
 	describe("Cache-Control / Pragma headers", () => {
 		it("200 JSON success path sets Cache-Control: no-store and Pragma: no-cache", async () => {
 			const app = buildApp();
@@ -1601,8 +1577,8 @@ describe("POST /oauth/logout", () => {
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
@@ -1626,8 +1602,8 @@ describe("POST /oauth/logout", () => {
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps });
 			const token = await mintIdToken();
 
 			const res = await postLogout(
@@ -1652,8 +1628,8 @@ describe("POST /oauth/logout", () => {
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
-			const app = buildApp({ sessionStore, sessionRPRegistry });
+			const joinedRps = rpData;
+			const app = buildApp({ sessionStore, joinedRps });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token }, { Accept: "*/*" });
@@ -1666,9 +1642,7 @@ describe("POST /oauth/logout", () => {
 	describe("logger routing for handler-level warnings", () => {
 		it("routes federation endSession failure warning to opts.logger (not console)", async () => {
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
-			const sessionFederationIndex = makeSessionFederationIndex({
-				listFederations: vi.fn(async () => ["google"]),
-			});
+			const joinedFederations = ["google"];
 			const throwingProvider: FederationProvider & {
 				endSession: () => Promise<never>;
 			} = {
@@ -1679,7 +1653,7 @@ describe("POST /oauth/logout", () => {
 			const warnSpy = logger.warn;
 			const app = buildApp({
 				sessionStore,
-				sessionFederationIndex,
+				joinedFederations,
 				getFederationProviders: () =>
 					new Map<string, FederationProvider>([["google", throwingProvider]]),
 				logger,
@@ -2048,9 +2022,7 @@ const googleFederations = ["google"];
 function buildFedLogoutApp(opts: BuildAppOpts = {}) {
 	return buildApp({
 		sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithGoogle) }),
-		sessionFederationIndex: makeSessionFederationIndex({
-			listFederations: vi.fn(async () => googleFederations),
-		}),
+		joinedFederations: googleFederations,
 		...opts,
 	});
 }
@@ -2110,12 +2082,8 @@ describe("POST /oauth/federation/:name/logout", () => {
 			});
 			const provider = { ...federationBase("google"), endSession } as unknown as FederationProvider;
 			const fedTokenStore = makeFedTokenStore({ delete: vi.fn().mockResolvedValue(undefined) });
-			const sessionFederationIndex = makeSessionFederationIndex({
-				listFederations: vi.fn(async () => googleFederations),
-			});
 			const app = buildFedLogoutApp({
 				fedTokenStore,
-				sessionFederationIndex,
 				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
 				clientRepo: makeClientRepo({
 					findById: vi.fn().mockResolvedValue({
@@ -2127,7 +2095,7 @@ describe("POST /oauth/federation/:name/logout", () => {
 				}),
 				...opts,
 			});
-			return { app, endSession, fedTokenStore, sessionFederationIndex };
+			return { app, endSession, fedTokenStore };
 		}
 
 		it("is none when the token's client has not registered it", async () => {
@@ -2202,7 +2170,7 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 		it("disconnects without the redirect when the client repository cannot answer", async () => {
 			const logger = createMockLogger();
-			const { app, endSession, fedTokenStore, sessionFederationIndex } = buildWithUpstream({
+			const { app, endSession, fedTokenStore } = buildWithUpstream({
 				clientRepo: makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) }),
 				logger,
 			});
@@ -2222,8 +2190,6 @@ describe("POST /oauth/federation/:name/logout", () => {
 				clientId: "client-1",
 			});
 			expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
-			// The federation stays listed as having joined the session.
-			expect(sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
 		});
 
 		// The same gap on this route: an entry a custom ClientRepository holds
@@ -2292,9 +2258,7 @@ describe("POST /oauth/federation/:name/logout", () => {
 			const bareProvider = federationBase("github");
 			const app = buildApp({
 				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
-				sessionFederationIndex: makeSessionFederationIndex({
-					listFederations: vi.fn(async () => ["github"]),
-				}),
+				joinedFederations: ["github"],
 				getFederationProviders: () =>
 					new Map<string, FederationProvider>([["github", bareProvider]]),
 			});
@@ -2816,9 +2780,7 @@ describe("audit events", () => {
 			const app = buildApp({
 				auditSink,
 				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
-				sessionFederationIndex: makeSessionFederationIndex({
-					listFederations: vi.fn(async () => ["github"]),
-				}),
+				joinedFederations: ["github"],
 				getFederationProviders: () =>
 					new Map<string, FederationProvider>([["github", bareProvider]]),
 			});
@@ -2849,9 +2811,7 @@ describe("audit events", () => {
 				const app = buildApp({
 					auditSink,
 					sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
-					sessionFederationIndex: makeSessionFederationIndex({
-						listFederations: vi.fn(async () => [raw]),
-					}),
+					joinedFederations: [raw],
 					getFederationProviders: () => new Map<string, FederationProvider>(),
 				});
 				const res = await postFedLogout(app, encodeURIComponent(raw), await mintAccessToken());
@@ -2957,19 +2917,17 @@ describe("POST /oauth/logout — browser session", () => {
 
 	it("destroys on the front-channel HTML response branch", async () => {
 		const browserSession = makeBrowserSession({ sid: "sid-1" });
-		const sessionRPRegistry = makeSessionRPRegistry({
-			listRPs: vi.fn(async () => [
-				{
-					clientId: "client-1",
-					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
-					registeredAt: new Date(),
-					backchannelLogoutUri: undefined,
-					backchannelLogoutSessionRequired: undefined,
-					frontchannelLogoutSessionRequired: undefined,
-				},
-			]),
-		});
-		const app = buildApp({ browserSession, sessionRPRegistry });
+		const joinedRps = [
+			{
+				clientId: "client-1",
+				frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+				registeredAt: new Date(),
+				backchannelLogoutUri: undefined,
+				backchannelLogoutSessionRequired: undefined,
+				frontchannelLogoutSessionRequired: undefined,
+			},
+		];
+		const app = buildApp({ browserSession, joinedRps });
 		const token = await mintIdToken();
 
 		const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
@@ -2987,12 +2945,10 @@ describe("POST /oauth/logout — browser session", () => {
 				.fn()
 				.mockResolvedValue({ url: new URL("https://idp.example/end"), method: "GET" }),
 		} as unknown as FederationProvider;
-		const sessionFederationIndex = makeSessionFederationIndex({
-			listFederations: vi.fn(async () => ["google"]),
-		});
+		const joinedFederations = ["google"];
 		const app = buildApp({
 			browserSession,
-			sessionFederationIndex,
+			joinedFederations,
 			getFederationProviders: () => new Map([["google", mockProvider]]),
 		});
 		const token = await mintIdToken();
@@ -3128,19 +3084,23 @@ describe("a federation logout, then RP-initiated logout, over core's session lif
 				for (const key of [...tokens.keys()]) if (key.startsWith(`${sid}:`)) tokens.delete(key);
 			}),
 		});
-		const sessionFederationIndex = createInMemorySessionFederationIndex();
-		await sessionFederationIndex.addFederation("sid-1", "google", baseSession.expiresAt);
 		const refreshFamilyRevocation = makeFamilyRevocation();
 		const sessionLifecycle = createSessionLifecycle({
 			store: createInMemorySessionLifecycleStore(),
 			userSessionStore,
 			refreshTokenFamilyRevocation: refreshFamilyRevocation,
 			federationTokenStore: fedTokenStore,
-			sessionRPRegistry: makeSessionRPRegistry(),
-			sessionFamilyIndex: makeSessionFamilyIndex({ listFamilyIds: vi.fn(async () => []) }),
-			sessionFederationIndex,
 			retainMs: 3_600_000,
 			logger: { warn: () => undefined, error: () => undefined },
+		});
+		expect(
+			await sessionLifecycle.open("sid-1", {
+				sub: baseSession.sub,
+				expiresAt: baseSession.expiresAt,
+			}),
+		).toEqual({ outcome: "opened" });
+		expect(await sessionLifecycle.join("sid-1", { federation: "google" })).toEqual({
+			outcome: "joined",
 		});
 		const close = vi.spyOn(sessionLifecycle, "close");
 		const endSession = vi.fn(async (request: { idTokenHint?: string }) => ({

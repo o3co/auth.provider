@@ -26,10 +26,7 @@ import crypto from "node:crypto";
 import {
 	type AppConfig,
 	type ClientRepository,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryAccessTokenDenylist,
 	createMemoryRefreshTokenFamilyStore,
@@ -84,11 +81,12 @@ const world = async (
 	answered?: { readonly amr: unknown },
 ) => {
 	const userSessionStore = createInMemoryUserSessionStore();
+	const expiresAt = new Date(Date.now() + 3_600_000);
 	await userSessionStore.create({
 		sid: SID,
 		sub: SUBJECT,
 		authTime: new Date(Date.now() - 60_000),
-		expiresAt: new Date(Date.now() + 3_600_000),
+		expiresAt,
 		claims: {},
 		...recorded,
 	});
@@ -117,10 +115,9 @@ const world = async (
 		findById: async (id) => (id === CLIENT_ID ? client : null),
 		authenticate: async () => null,
 	};
-	const sessionFamilyIndex = createInMemorySessionFamilyIndex();
-	const sessionRPRegistry = createInMemorySessionRPRegistry();
-	// Core's own lifecycle over the same stores: the grant joins the session
-	// through it, and the router reads and ends sessions through it.
+	// Core's own lifecycle over the same stores, the session opened in it as
+	// a login opens it: the grant joins the session through it, and the
+	// router reads and ends sessions through it.
 	const sessionLifecycle = createSessionLifecycle({
 		store: createInMemorySessionLifecycleStore(),
 		userSessionStore,
@@ -132,11 +129,11 @@ const world = async (
 			removeBySid: vi.fn(),
 			delete: vi.fn(),
 		} as unknown as FederationTokenStore,
-		sessionRPRegistry,
-		sessionFamilyIndex,
-		sessionFederationIndex: createInMemorySessionFederationIndex(),
 		retainMs: 0,
 		logger: { warn: () => undefined, error: () => undefined },
+	});
+	expect(await sessionLifecycle.open(SID, { sub: SUBJECT, expiresAt })).toEqual({
+		outcome: "opened",
 	});
 	const registry = new GrantRegistry();
 	registry.register(

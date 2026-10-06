@@ -306,9 +306,7 @@ const boot = async (
 			// provides in a real composition.
 			loginEntry: acquisitionLoginEntry(),
 			csrfGuard: csrfGuard ?? acquisitionCsrfGuard(),
-			sessionRPRegistry: {},
-			sessionFamilyIndex: {},
-			sessionFederationIndex: {},
+			sessionLifecycle: {},
 			federationTokenStore: {},
 			refreshTokenFamilyRevocation: {},
 			subjectRevocation,

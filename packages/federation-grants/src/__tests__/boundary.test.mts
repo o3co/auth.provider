@@ -105,9 +105,7 @@ const storeModule = defineModule({
 /** Everything core's federation guard asks for the moment a federation is enabled. */
 const SESSION_FEDERATION_STORES = {
 	userSessionStore: {},
-	sessionRPRegistry: {},
-	sessionFamilyIndex: {},
-	sessionFederationIndex: {},
+	sessionLifecycle: {},
 	federationTokenStore: {},
 	refreshTokenFamilyRevocation: {},
 };

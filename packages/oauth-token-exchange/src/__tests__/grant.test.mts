@@ -2324,9 +2324,6 @@ describe("createTokenExchangeGrant — the session rule through the session life
 			userSessionStore: createInMemoryUserSessionStore(),
 			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			federationTokenStore: {} as never,
-			sessionRPRegistry: {} as never,
-			sessionFamilyIndex: {} as never,
-			sessionFederationIndex: {} as never,
 			retainMs: 60_000,
 		});
 		const { result } = await buildGrant({ sessionLifecycle: lifecycle }).handle(

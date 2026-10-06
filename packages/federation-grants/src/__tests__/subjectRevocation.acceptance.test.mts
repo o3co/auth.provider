@@ -44,10 +44,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
 	createInMemoryUserSessionStore,
@@ -124,9 +121,6 @@ const shared = () => ({
 /** The stores a session's close reaches. Nothing here logs anyone in; the sessions are the service's business. */
 const CASCADE_STORES = {
 	userSessionStore: { delete: async () => undefined },
-	sessionRPRegistry: { removeBySid: async () => undefined },
-	sessionFamilyIndex: { listFamilyIds: async () => [], removeBySid: async () => undefined },
-	sessionFederationIndex: { removeBySid: async () => undefined },
 	federationTokenStore: { removeBySid: async () => undefined },
 	refreshTokenFamilyRevocation: { revokeFamily: async () => undefined },
 };
@@ -141,9 +135,6 @@ const sessionLifecycle = () =>
 		userSessionStore: createInMemoryUserSessionStore(),
 		refreshTokenFamilyRevocation: CASCADE_STORES.refreshTokenFamilyRevocation as never,
 		federationTokenStore: CASCADE_STORES.federationTokenStore as never,
-		sessionRPRegistry: createInMemorySessionRPRegistry(),
-		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-		sessionFederationIndex: createInMemorySessionFederationIndex(),
 		retainMs: 3_600_000,
 	});
 

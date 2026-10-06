@@ -74,9 +74,7 @@ const clientRepository: ClientRepository = {
 /** What core's federation guard asks for once a federation is enabled. */
 const SESSION_FEDERATION_STORES = {
 	userSessionStore: {},
-	sessionRPRegistry: {},
-	sessionFamilyIndex: {},
-	sessionFederationIndex: {},
+	sessionLifecycle: {},
 	federationTokenStore: {},
 	refreshTokenFamilyRevocation: {},
 };

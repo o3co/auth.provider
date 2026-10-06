@@ -82,9 +82,7 @@ const clientRepository: ClientRepository = {
  */
 const SESSION_FEDERATION_STORES = {
 	userSessionStore: {},
-	sessionRPRegistry: {},
-	sessionFamilyIndex: {},
-	sessionFederationIndex: {},
+	sessionLifecycle: {},
 	federationTokenStore: {},
 	refreshTokenFamilyRevocation: {},
 };
