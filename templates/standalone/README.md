@@ -1214,6 +1214,10 @@ development sender, which only logs each code:
 docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
 ```
 
+Before the first run, write a key of your own into `.env` as
+`MFA_ENCRYPTION_KEY` (`openssl rand -base64 32`): this run does not use the
+development sample key, and without a key the boot is refused.
+
 Read the mail at <http://localhost:8025>. Mailpit keeps it and delivers
 nothing onward. A plain `docker compose up` (`make dev`) starts no Mailpit, and
 the production file names none. It is for development only: a deployment
@@ -1224,9 +1228,11 @@ What the overlay sets on the app service:
 
 - `CONFIG_ENV=mailpit`. Under `development` the template installs the sender
   that logs each code ([Module Composition Order](#module-composition-order),
-  rule 7). [`config/mailpit.conf`](config/mailpit.conf) includes
-  `development.conf`, so the run is otherwise the development one, the MFA
-  sample key included.
+  rule 7). [`config/mailpit.conf`](config/mailpit.conf) does not include
+  `development.conf`, whose one setting is the MFA sample key: the MFA
+  package accepts that key only where every environment name set says
+  `development` or `test`. The key ring's first key is `MFA_ENCRYPTION_KEY`,
+  as the MFA package's `reference.conf` binds it.
 - Nothing of `MFA_MODE`: MFA is on as the template ships it, or as your
   `.env` sets it. With MFA off nothing sends mail.
 - `ADAPTERS_MFA_FACTOR_STORE=redis` and `ADAPTERS_MFA_TRANSACTION_STORE=redis`,
