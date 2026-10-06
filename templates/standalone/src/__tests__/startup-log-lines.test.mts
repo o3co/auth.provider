@@ -23,7 +23,10 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -34,6 +37,13 @@ const keyPair = generateKeyPairSync("ed25519", {
 	publicKeyEncoding: { type: "spki", format: "pem" },
 	privateKeyEncoding: { type: "pkcs8", format: "pem" },
 });
+
+/** An empty client registry: a scaffolded project's clone has no `config/clients.yaml`. */
+const clientsFile = (() => {
+	const file = join(mkdtempSync(join(tmpdir(), "startup-log-lines-")), "clients.yaml");
+	writeFileSync(file, "");
+	return file;
+})();
 
 /**
  * Development, with every store the `adapters` section selects in memory.
@@ -65,6 +75,7 @@ const ENV: Readonly<Record<string, string>> = {
 	ADAPTERS_MFA_FACTOR_STORE: "memory",
 	ADAPTERS_MFA_TRANSACTION_STORE: "memory",
 	REDIS_CLIENTS_URL: "redis://127.0.0.1:9",
+	REPOSITORIES_CLIENT_YAML_PATH: clientsFile,
 	REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: "http://127.0.0.1:9/authenticate",
 	REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL: "http://127.0.0.1:9/authenticate-by-token",
 };
