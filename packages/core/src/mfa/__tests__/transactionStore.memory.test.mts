@@ -93,6 +93,14 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(createMemoryMfaTransactionStore().kind).toBe("memory");
 	});
 
+	it("still takes the unleased consume, until it is removed: true for the one that cleared it, false after", async () => {
+		const store = createMemoryMfaTransactionStore();
+		await store.requireEmailProofAtNextBinding("user-1");
+		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
+		expect(await store.consumeEmailProofRequirement("user-1")).toBe(false);
+		expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
+	});
+
 	it("hands out copies: changing a returned transaction changes nothing it holds", async () => {
 		const store = createMemoryMfaTransactionStore({ now: () => T0 });
 		const written = TX();

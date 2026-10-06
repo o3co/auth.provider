@@ -750,6 +750,24 @@ describe("readMfaEmailProofRequirementConsumeAnswer", () => {
 	])("reads %s as no answer", (_label, answer) => {
 		expect(readMfaEmailProofRequirementConsumeAnswer(answer)).toBeUndefined();
 	});
+
+	it("reads each field once, and a getter that throws as no answer", () => {
+		let reads = 0;
+		const answer = {
+			get outcome() {
+				reads++;
+				return reads === 1 ? "consumed" : "absent";
+			},
+		};
+		expect(readMfaEmailProofRequirementConsumeAnswer(answer)).toEqual({ outcome: "consumed" });
+		expect(
+			readMfaEmailProofRequirementConsumeAnswer({
+				get outcome(): string {
+					throw new Error("boom");
+				},
+			}),
+		).toBeUndefined();
+	});
 });
 
 describe("readMfaSubjectCount", () => {
