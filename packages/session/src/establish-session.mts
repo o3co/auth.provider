@@ -49,9 +49,9 @@
  * Rollback is best effort and ordered: completed caller steps in reverse,
  * then the record — its lifecycle record closed, then the user session
  * deleted — then its index entry. A close that fails is reported as the
- * record's `delete`, its error naming the session lifecycle. From step 4 on, a failure also
- * drops the request's cookie session, which must be neither saved against
- * the failed store nor named by a cookie. Without a `UserSessionStore` only
+ * record's `delete`, with the lifecycle's own error when it rejects. From
+ * step 4 on, a failure also drops the request's cookie session, which must be
+ * neither saved against the failed store nor named by a cookie. Without a `UserSessionStore` only
  * steps 4, 6 and 7 run. The CSRF token and the response stay with the routes.
  *
  * `renewSession` moves a signed-in session to a new id: the signed-in state
@@ -185,38 +185,33 @@ export type EstablishSessionResult<S extends string = never, T extends string = 
 	  };
 
 /**
- * Opens `record`'s lifecycle in `lifecycle`. Anything but `opened` throws,
- * named as the lifecycle's so its line tells it apart from the store's.
+ * Opens `record`'s lifecycle in `lifecycle`. A rejection propagates as the
+ * lifecycle's own error, so the reporter's line carries its projection; any
+ * answer but `opened` throws, named as the lifecycle's.
  */
 const openLifecycle = async (
 	lifecycle: Pick<SessionLifecycle, "open">,
 	record: EstablishedRecord,
 ): Promise<void> => {
-	let opened: Awaited<ReturnType<SessionLifecycle["open"]>>;
-	try {
-		opened = await lifecycle.open(record.sid, { sub: record.sub, expiresAt: record.expiresAt });
-	} catch (cause) {
-		throw new Error("the session lifecycle could not open the session", { cause });
-	}
+	const opened = await lifecycle.open(record.sid, {
+		sub: record.sub,
+		expiresAt: record.expiresAt,
+	});
 	if (opened.outcome !== "opened") {
 		throw new Error(`the session lifecycle answered ${opened.outcome} to the open`);
 	}
 };
 
 /**
- * Closes `record`'s lifecycle in `lifecycle`, for a rollback. A close that
- * throws or answers `unavailable` throws, named as the lifecycle's.
+ * Closes `record`'s lifecycle in `lifecycle`, for a rollback. A rejection
+ * propagates as the lifecycle's own error; an `unavailable` answer throws,
+ * named as the lifecycle's.
  */
 const closeLifecycle = async (
 	lifecycle: Pick<SessionLifecycle, "close">,
 	record: EstablishedRecord,
 ): Promise<void> => {
-	let closed: Awaited<ReturnType<SessionLifecycle["close"]>>;
-	try {
-		closed = await lifecycle.close(record.sid, "session_logout");
-	} catch (cause) {
-		throw new Error("the session lifecycle could not close the session", { cause });
-	}
+	const closed = await lifecycle.close(record.sid, "session_logout");
 	if (closed.outcome === "unavailable") {
 		throw new Error("the session lifecycle answered unavailable to the close");
 	}

@@ -34,6 +34,7 @@ import {
 	createSessionLifecycle,
 	type FederationTokenStore,
 	type Logger,
+	loggableError,
 	newRenewalNonce,
 	readVersionedSessionLifecycle,
 	type SessionCloseNotice,
@@ -259,12 +260,13 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		expect(bag.destroyed).toBe(false);
 	});
 
-	it("a lifecycle that throws: the same 503, logged with the error's projection, the cookie kept", async () => {
+	it("a lifecycle that rejects: the same 503, logged once at error with the rejection's projection, the cookie kept", async () => {
+		const thrown = new Error("lifecycle exploded");
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
 			sessionLifecycle: fakeLifecycle({
 				close: async () => {
-					throw new Error("lifecycle exploded");
+					throw thrown;
 				},
 			}),
 			logger,
@@ -278,10 +280,11 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 				sid: SID,
 				store: "session_lifecycle",
 				step: "close",
-				err: expect.any(Object),
+				err: loggableError(thrown),
 			}),
 			"session_logout_store_unavailable",
 		);
+		expect(logger.warn).not.toHaveBeenCalled();
 		expect(bag.destroyed).toBe(false);
 	});
 

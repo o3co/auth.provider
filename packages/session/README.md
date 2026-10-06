@@ -557,7 +557,8 @@ written. It runs, in order: the
 `authTime`), its lifecycle record opened first in core's session lifecycle,
 required beside a `UserSessionStore` (one handed without it is a `TypeError`
 before anything is written; an `open` that fails, throws or is refused is the
-record's outage at `create`, its error naming the session lifecycle, and a
+record's outage at `create` — reported with the lifecycle's own error when it
+rejects, with an error naming the session lifecycle otherwise — and a
 `create` that fails after the open closes the opened record again); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the
 regeneration; the express session's regeneration (session fixation); the
@@ -576,8 +577,9 @@ What holds:
 - **Every failure after the record exists rolls back in reverse order**,
   best-effort: the caller's steps that completed, then the record — its
   lifecycle record closed (`session_logout`), then the `UserSession` deleted;
-  a close that fails is reported as the record's `delete`, its error naming
-  the session lifecycle — then its subject-index entry last. From the regeneration on, the request's cookie
+  a close that fails is reported as the record's `delete`, with the
+  lifecycle's own error when it rejects, with an error naming the session
+  lifecycle when it answers `unavailable` — then its subject-index entry last. From the regeneration on, the request's cookie
   session is dropped too (`abandonCookieSession`), so express-session neither
   saves the fresh session against the store that failed nor sets a cookie
   naming it; before it, the cookie session is untouched. A rollback step that
