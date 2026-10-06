@@ -1,10 +1,10 @@
 # repositories
 
-Last updated: 2026-10-03
+Last updated: 2026-10-06
 
 ## Responsibility
 
-The three data-access ports and their records: `ClientRepository` (`findById`, `authenticate`), `UserRepository` (`authenticate`, `authenticateByToken`, and the optional `linkFederatedIdentity`, `supportsFederatedIdentityLookup`, `findSubjectByFederatedIdentity`, `markMfaEnrolled`), `CodeRepository` (`createCode`, `findByCode`, `consumeByCode`, `removeByCode`); `Client`, `PublicClient`, `User`, `CodeData`, `Code`, `TokenEndpointAuthMethod`. Beside them: the YAML / in-memory adapters with their entry schemas, `createRepositoryFactories`, `loadYamlMap`, and `isGrantTypeAllowed` — the one central grant-type allowlist rule (#268).
+The three data-access ports and their records: `ClientRepository` (`findById`, `authenticate`), `UserRepository` (`authenticate`, `authenticateByToken`, and the optional `linkFederatedIdentity`, `supportsFederatedIdentityLookup`, `findSubjectByFederatedIdentity`, `markMfaEnrolled`), `CodeRepository` (`createCode`, `findByCode`, `consumeByCode`, `removeByCode`); `Client`, `PublicClient`, `User`, `CodeData` (with `CodeAuthentication`), `Code`, `TokenEndpointAuthMethod`. Beside them: the YAML / in-memory adapters with their entry schemas, `createRepositoryFactories`, `loadYamlMap`, and `isGrantTypeAllowed` — the one central grant-type allowlist rule (#268).
 
 The Store — the consumer's user service — is the system of record; this directory reads what it publishes (the `User` doc in `types.mts` is the term's definition). Two optional calls relay a write for a flow this library drives end to end: `linkFederatedIdentity`, where the Store decides, and `markMfaEnrolled`, the MFA enrollment witness, where the provider decides and the Store only persists ([the adapter-surface boundary](../../../../docs/adapter-surface.md#the-boundary-verify-only)). The bundled adapters are for development and tests; a deployment brings its own (`packages/foundation` for the HTTP user repository, `packages/redis` for codes). Request-time policy is not decided here: `/authorize` and `/token` in `packages/oauth` consume the ports and apply the field semantics documented on `Client`.
 

@@ -16,14 +16,19 @@
 
 /**
  * How a session was established and what this provider vouches for, read
- * one way by every consumer (session admission through `requirementSession`,
- * `/authorize`, which records it on the code `/token` stamps, and the
- * `session` grant through `vouchedAmr`), beside what each
+ * one way by every consumer (session admission through `sessionReading`,
+ * `tokenReading` and `codeReadingOver`, projected by `requirementSessionOf`
+ * for the requirements and `codeFieldsOf` for the code `/authorize` mints and
+ * `/token` stamps, and the `session` grant through `vouchedAmr`), beside what each
  * login path records (`passwordSessionAuthentication`,
  * `federatedSessionAuthentication`, `federationTrustsUpstreamAmr`,
  * `federationCallbackMeetsFreshness`), so the write and the read are one
  * design. See ADR
  * 2026-09-25-multi-factor-authentication.
+ *
+ * Also what a code record carries of it (`readCodeAuthentication`,
+ * `readCodeAtExchange`): the one reading a code repository copies the code's
+ * `authentication` by and the exchange judges the code on.
  *
  * Also how fresh a session's authentication is (`authenticationFreshness`,
  * `sessionFreshness`): what a freshness ask is judged against — the earlier
@@ -55,7 +60,8 @@ import {
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
-import type { RequirementSession } from "../session-admission/requirement.mjs";
+import type { CodeAuthentication } from "../repositories/types.mjs";
+import type { Admission, RequirementSession } from "../session-admission/requirement.mjs";
 import { isRenewalNonce } from "./renewalNonce.mjs";
 import type { SecondFactorEvent, SessionAuthentication, UserSession } from "./types.mjs";
 
@@ -584,63 +590,196 @@ export function sessionAfterSecondFactor(
 }
 
 /**
- * What a session requirement is asked about `session`: how it was
- * established and what it vouches for, as the two readers above answer them
- * from one reading of the record, or `null` when there is no session (no
- * `sid`, or no `UserSessionStore`). Admission builds it here and nowhere
- * else, and its `acr` selection reads the `amr` from it: one built from the
- * record's own `amr` would let a value an untrusted IdP asserted in a
- * pre-upgrade session meet an `acr`.
+ * How a carrier had authenticated, as admission judges it: how the session
+ * was established (`undefined` when that cannot be told) and what this
+ * provider vouches for. One reading, two projections: what a requirement is
+ * handed ({@link requirementSessionOf}) and what a code minted on the
+ * admission records ({@link codeFieldsOf}).
  */
-export function requirementSession(session: UserSession | null): RequirementSession | null {
-	if (session === null) return null;
+export interface AuthenticationReading {
+	readonly established: SessionAuthentication | undefined;
+	readonly vouched: readonly string[];
+}
+
+/** `session` read once by the D9 reading: a copy. */
+export function sessionReading(session: UserSession): AuthenticationReading {
 	const { established, vouched } = readRecord(session);
-	return frozenRequirementSession(established, vouched ?? []);
+	return { established, vouched: vouched ?? [] };
 }
 
 /**
- * A requirement's reading, frozen with its `amr` and `upstreamAmr`: each
- * call's own copy (its `mfaAt` a `Date` of its own), so what one holder does
- * to it reaches no other.
+ * A token that carries no live session: the primary read from the token's
+ * `amr` (`fed`, else `pwd`, else unknown, as for an older token that carries
+ * no `amr`), no second factor on record, and the `amr` as vouched, since a
+ * token is minted from `vouchedAmr` and carries nothing an IdP asserted.
  */
-const frozenRequirementSession = (
-	authentication: SessionAuthentication | undefined,
-	amr: readonly string[],
-): RequirementSession =>
-	Object.freeze({
-		authentication:
-			authentication === undefined
-				? undefined
-				: Object.freeze({
-						...authentication,
-						upstreamAmr:
-							authentication.upstreamAmr === undefined
-								? undefined
-								: Object.freeze([...authentication.upstreamAmr]),
-					}),
-		amr: Object.freeze([...amr]),
-	});
-
-/**
- * What a session requirement is asked about a token that carries no live
- * session: the primary read from the token's `amr` (`fed`, else `pwd`, else
- * unknown, as for an older token that carries no `amr`), no second factor
- * on record, and the `amr` as vouched, since a token is minted from
- * `vouchedAmr` and carries nothing an IdP asserted. A frozen copy.
- */
-export function requirementSessionFromAmr(amr: readonly string[] | undefined): RequirementSession {
+export function tokenReading(amr: readonly string[] | undefined): AuthenticationReading {
 	const held = amr === undefined ? [] : [...amr];
 	const primary = held.includes(FEDERATED_AMR)
 		? FEDERATED_AMR
 		: held.includes(PASSWORD_AMR)
 			? PASSWORD_AMR
 			: undefined;
-	return frozenRequirementSession(
-		primary === undefined
-			? undefined
-			: { primary, federation: undefined, upstreamAmr: undefined, mfaAt: undefined },
-		held,
-	);
+	return {
+		established:
+			primary === undefined
+				? undefined
+				: { primary, federation: undefined, upstreamAmr: undefined, mfaAt: undefined },
+		vouched: held,
+	};
+}
+
+/**
+ * What a code carries of how its session had authenticated at `/authorize`,
+ * read once ({@link readCodeAtExchange}): the primary, `mfaAt` and the
+ * vouched `amr`.
+ */
+export interface CodeReading {
+	readonly primary: string | undefined;
+	readonly mfaAt: Date | undefined;
+	readonly vouched: readonly string[];
+}
+
+/**
+ * A code over the live record `session` names: the code's primary, `mfaAt`
+ * and `amr` — a step-up recorded since moves the session, not the code — and
+ * what a step-up never changes (`federation`, `upstreamAmr`,
+ * `upstreamAuthTime`) from the record. A code that recorded no primary
+ * cannot tell it, as `/authorize` could not. `undefined` when the record's
+ * primary is not the code's, or cannot be read: the record's other facts are
+ * not that code's, and the code is refused rather than read as one whose
+ * primary cannot be told, which a freshness ask reads as fresh.
+ */
+export function codeReadingOver(
+	code: CodeReading,
+	session: UserSession,
+): AuthenticationReading | undefined {
+	if (code.primary === undefined) return { established: undefined, vouched: code.vouched };
+	const { established } = readRecord(session);
+	if (established === undefined || established.primary !== code.primary) return undefined;
+	return {
+		established: {
+			...established,
+			mfaAt: code.mfaAt === undefined ? undefined : new Date(code.mfaAt.getTime()),
+		},
+		vouched: code.vouched,
+	};
+}
+
+/**
+ * What a session requirement is handed: `reading` as a frozen copy of its
+ * own (its `mfaAt` a `Date` of its own), so what one holder does to it
+ * reaches no other.
+ */
+export function requirementSessionOf(reading: AuthenticationReading): RequirementSession {
+	return frozenRequirementSession(reading.established, reading.vouched);
+}
+
+/**
+ * What a session requirement is asked about `session`: how it was
+ * established and what it vouches for, as the two readers above answer them
+ * from one reading of the record, or `null` when there is no session (no
+ * `sid`, or no `UserSessionStore`). Its `acr` selection reads the `amr` from
+ * it: one built from the record's own `amr` would let a value an untrusted
+ * IdP asserted in a pre-upgrade session meet an `acr`.
+ */
+export function requirementSession(session: UserSession | null): RequirementSession | null {
+	return session === null ? null : requirementSessionOf(sessionReading(session));
+}
+
+/**
+ * A requirement's reading, frozen with its `amr` and `upstreamAmr`: each
+ * call's own copy (its dates of its own), so what one holder does to it
+ * reaches no other.
+ */
+const frozenRequirementSession = (
+	authentication: SessionAuthentication | undefined,
+	amr: readonly string[],
+): RequirementSession => {
+	const copy = authentication === undefined ? undefined : copySessionAuthentication(authentication);
+	return Object.freeze({
+		authentication:
+			copy === undefined
+				? undefined
+				: Object.freeze({
+						...copy,
+						upstreamAmr:
+							copy.upstreamAmr === undefined ? undefined : Object.freeze(copy.upstreamAmr),
+					}),
+		amr: Object.freeze([...amr]),
+	});
+};
+
+/**
+ * What a session requirement is asked about a token that carries no live
+ * session: {@link tokenReading} of its `amr`. A frozen copy.
+ */
+export function requirementSessionFromAmr(amr: readonly string[] | undefined): RequirementSession {
+	return requirementSessionOf(tokenReading(amr));
+}
+
+/** The `CodeData` fields a code records of how its session had authenticated: the admitted answer's. */
+type CodeFields = Extract<Admission, { readonly outcome: "admitted" }>["codeFields"];
+
+/**
+ * What a code minted on `reading` records, a frozen copy: the vouched `amr`
+ * and the primary with `mfaAt` — the primary `undefined` when it cannot be
+ * told, never left out. Nothing for no reading (no user-session store).
+ */
+export function codeFieldsOf(reading: AuthenticationReading | null): CodeFields {
+	if (reading === null) return Object.freeze({ amr: undefined, authentication: undefined });
+	const mfaAt = reading.established?.mfaAt;
+	return Object.freeze({
+		amr: Object.freeze([...reading.vouched]),
+		authentication: Object.freeze({
+			primary: reading.established?.primary,
+			mfaAt: mfaAt === undefined ? undefined : new Date(mfaAt.getTime()),
+		}),
+	});
+}
+
+/**
+ * A code record's `authentication` as a frozen copy (its `mfaAt` a `Date`
+ * of its own), or `undefined` when the record carries none or one not in a
+ * shape a code records: not an object; a `primary` that is neither absent
+ * nor a non-empty string; an `mfaAt` that is neither absent nor a `Date` at
+ * or after the epoch. The one rule a code repository copies it by and the
+ * exchange reads it by: the record is a deployment's store's, not trusted for
+ * its shape.
+ */
+export function readCodeAuthentication(code: {
+	readonly authentication?: unknown;
+}): CodeAuthentication | undefined {
+	const stored: unknown = code.authentication;
+	if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return undefined;
+	const { primary, mfaAt } = stored as Partial<Record<keyof CodeAuthentication, unknown>>;
+	if (primary !== undefined && (typeof primary !== "string" || primary.length === 0)) {
+		return undefined;
+	}
+	const mfaAtMs = mfaAt instanceof Date ? mfaAt.getTime() : Number.NaN;
+	if (mfaAt !== undefined && !READ_RULES.admitsInstant(mfaAtMs)) return undefined;
+	return Object.freeze({
+		primary,
+		mfaAt: mfaAt === undefined ? undefined : new Date(mfaAtMs),
+	});
+}
+
+/**
+ * What the exchange judges a code on, read once: its `authentication`
+ * ({@link readCodeAuthentication}) and its `amr` — vouching for nothing when
+ * not `wellFormedAmr` — or `undefined` when it carries no readable
+ * `authentication`. `carrier` is the code record a claim builder was handed,
+ * read by `CodeData`'s field names.
+ */
+export function readCodeAtExchange(carrier: object): CodeReading | undefined {
+	const code = carrier as { readonly authentication?: unknown; readonly amr?: unknown };
+	const authentication = readCodeAuthentication(code);
+	if (authentication === undefined) return undefined;
+	return Object.freeze({
+		primary: authentication.primary,
+		mfaAt: authentication.mfaAt,
+		vouched: Object.freeze([...(wellFormedAmr(code.amr) ?? [])]),
+	});
 }
 
 /**

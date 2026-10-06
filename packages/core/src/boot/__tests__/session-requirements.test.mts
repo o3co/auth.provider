@@ -264,6 +264,7 @@ describe("the sessionRequirements kind and sessionRequirementResolver", () => {
 				session: null,
 				view: null,
 				acr: undefined,
+				codeFields: { amr: undefined, authentication: undefined },
 			});
 		} finally {
 			await handle.dispose();

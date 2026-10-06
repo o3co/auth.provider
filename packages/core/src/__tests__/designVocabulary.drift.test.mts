@@ -1300,6 +1300,21 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: CODE_AMR_STORE_WHY,
 	},
+	// The authorization code's authentication: how the session had
+	// authenticated when `/authorize` admitted it, which the exchange judges
+	// the code on.
+	{
+		file: "packages/core/src/user-sessions/authentication.mts",
+		read: "code.authentication",
+		count: 1,
+		why: "readCodeAuthentication reads a code record's authentication — the primary and mfaAt /authorize recorded of the session it admitted — once, and checks it; the exchange reads the code through it and the memory code repository copies it through it: a code record, never a session record",
+	},
+	{
+		file: "packages/core/src/user-sessions/authentication.mts",
+		read: "code.amr",
+		count: 1,
+		why: "readCodeAtExchange reads a code record's amr — what /authorize filled with vouchedAmr — once, for the requirements the exchange asks: a code record, never a session record",
+	},
 	// A device approval's amr: what the approving session vouched for at
 	// device verification (`vouchedAmr`), carried on the record to the poll.
 	{

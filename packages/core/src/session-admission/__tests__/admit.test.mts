@@ -618,7 +618,13 @@ describe("step 2 — the live read", () => {
 				}),
 				request({ claim: tokenClaim({ sub: "user-1", amr: ["pwd"] }) }),
 			),
-		).toEqual({ outcome: "admitted", session: null, view: null, acr: undefined });
+		).toEqual({
+			outcome: "admitted",
+			session: null,
+			view: null,
+			acr: undefined,
+			codeFields: { amr: ["pwd"], authentication: { primary: "pwd", mfaAt: undefined } },
+		});
 		expect(asked).toBe(0);
 		expect(seen[0]).toMatchObject({ session: null, carrier: "token" });
 	});
@@ -748,7 +754,13 @@ describe("step 2 — the live read", () => {
 				}),
 				request(),
 			),
-		).toEqual({ outcome: "admitted", session: null, view: null, acr: undefined });
+		).toEqual({
+			outcome: "admitted",
+			session: null,
+			view: null,
+			acr: undefined,
+			codeFields: { amr: undefined, authentication: undefined },
+		});
 		expect(seen).toHaveLength(1);
 		expect(seen[0]).toMatchObject({ session: null, authentication: null });
 	});
@@ -761,6 +773,7 @@ describe("step 2 — the live read", () => {
 			session: record,
 			view: viewOf(record, false),
 			acr: undefined,
+			codeFields: { amr: ["pwd"], authentication: { primary: "pwd", mfaAt: undefined } },
 		});
 	});
 });
@@ -1963,7 +1976,16 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 					asks: { acrValues: ["urn:o3co:acr:mfa"] },
 				}),
 			),
-		).toEqual({ outcome: "admitted", session: null, view: null, acr: "urn:o3co:acr:mfa" });
+		).toEqual({
+			outcome: "admitted",
+			session: null,
+			view: null,
+			acr: "urn:o3co:acr:mfa",
+			codeFields: {
+				amr: ["pwd", "otp", "mfa"],
+				authentication: { primary: "pwd", mfaAt: undefined },
+			},
+		});
 	});
 
 	it("judges a token with a sid on its own amr when the record's differs, in both directions", async () => {
@@ -1997,6 +2019,10 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 			session: plain,
 			view: viewOf(plain, false),
 			acr: "urn:o3co:acr:mfa",
+			codeFields: {
+				amr: ["pwd", "otp", "mfa"],
+				authentication: { primary: "pwd", mfaAt: undefined },
+			},
 		});
 	});
 
@@ -2077,6 +2103,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 				session: session(),
 				view: viewOf(session(), false),
 				acr: undefined,
+				codeFields: { amr: ["pwd"], authentication: { primary: "pwd", mfaAt: undefined } },
 			});
 		}
 	});

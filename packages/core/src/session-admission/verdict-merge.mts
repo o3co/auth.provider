@@ -38,6 +38,8 @@ export interface MergeContext {
 	/** The vouched `amr`. */
 	readonly held: readonly string[];
 	readonly table: AdmissionDeps["acrTable"];
+	/** What a code minted on an admitted answer records: the answer's `codeFields`. */
+	readonly codeFields: Extract<Admission, { readonly outcome: "admitted" }>["codeFields"];
 }
 
 /** The merge table of ADR 2026-09-28-session-admission: `R` the requirements' verdict, `A` the acr selection (`undefined` when nothing was asked). */
@@ -57,6 +59,7 @@ export function merge(
 					session,
 					view: live?.view ?? null,
 					acr: A?.acr,
+					codeFields: context.codeFields,
 					...(live?.renewalNonce === undefined ? {} : { renewalNonce: live.renewalNonce }),
 				};
 			}

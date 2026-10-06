@@ -94,6 +94,7 @@
 . ClientRepositoryBoundaryOptions type
 . ClientRepositoryOutage type
 . Code type
+. CodeAuthentication type
 . CodeCarrier type
 . CodeData type
 . CodeRepository type

@@ -17,5 +17,5 @@
 export type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 export type { CodeRepository, CreateCodeInput } from "./CodeRepository.mjs";
 export { InMemoryClientRepository } from "./InMemoryClientRepository.mjs";
-export type { Client, Code, CodeData, User } from "./types.mjs";
+export type { Client, Code, CodeAuthentication, CodeData, User } from "./types.mjs";
 export type { UserRepository } from "./UserRepository.mjs";
