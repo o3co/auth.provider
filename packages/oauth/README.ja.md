@@ -14,7 +14,7 @@
 - クライアント認証が要るすべてのエンドポイントでのクライアント認証 — `client_secret_basic`、`client_secret_post`、`private_key_jwt`、ルートが許す場合の public クライアント — を 1 つのミドルウェア `createClientAuthMiddleware` として。[`@o3co/auth-provider-device-grant`](../device-grant/README.md) と [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md) もこれを再利用する;
 - 組み込みのグラント: `authorization_code`、`refresh_token`、`client_credentials`、`session`、RFC 7523 jwt-bearer;
 - セッションを使う各コンシューマーが、アドミッションの結果それぞれに何を返すか — リダイレクト、RFC 6749 のエラー、`401` — と、`/authorize` がブラウザーを送り出すステップアップの往復（[セッションアドミッション](#セッションアドミッション) を参照）;
-- ログアウトカスケード（`cascadeLogout`）、OIDC のバックチャネル / フロントチャネルログアウト、そのカスケードの上に core の subject revocation service を配線するモジュール;
+- ログアウトカスケード（`cascadeLogout`）、OIDC のバックチャネル / フロントチャネルログアウト、core のセッションライフサイクルの上に core の subject revocation service を配線するモジュール;
 - Client ID Metadata Documents の解決: 取得、その SSRF ガード、キャッシュ;
 - このサーバーのエンドポイントと機能が提供するディスカバリーの一部。
 
@@ -173,8 +173,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 | ディレクトリ | 責務 |
 |---|---|
-| `src/`（ルート） | 組み立て: `oauthEndpointsModule`、`oauthAuthorizationGrantsModule`、`oauthSessionGrantModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（`routes.mts`。下のすべてのルートを組み合わせる）、オプションの解決（`oauth.*` のオプションを解決する `resolveOAuthOptions.mts` と、ルーターが組み立て時にそこから 1 度だけ解決するもの — acr の表、正規の issuer、クライアントリポジトリ — を持つ `routerSettings.mts`）、core のアクセストークンヘッダーパーサーの再 export、そして依存先が落ちていて検証できなかったトークンに全ルートが返す 1 つの答え（`verificationUnavailable.mts`）。 |
-| [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー（`/authorize` はハンドラーと、それが順に呼ぶ段階ごとのファイル） — authorize、consent、logout、federation token（ハンドラーと、それが順に呼ぶ段階ごとのファイル。呼び出し元がまだ有効かの確認は `routes/federationToken.mts` に残る。そのセッションの読み取りを core のドリフトガードがそのファイルに固定しているため）、revoke、token（`/oauth/token` のディスパッチ）、introspect（誰が問い合わせてよいかと、必要なストアが落ちているときの答え。トークンそのものへの答えは `routes.mts` に残る。そのセッションと `amr` の読み取りを core のドリフトガードがそのファイルに固定しているため）、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorizeRequest.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
+| `src/`（ルート） | 組み立て: `oauthEndpointsModule`、`oauthAuthorizationGrantsModule`、`oauthSessionGrantModule`（4 つ目の `subjectRevocationServiceModule` は `logout/` にあり、各セッションを core のセッションライフサイクルで終了する）、`createOAuthRouter`（`routes.mts`。下のすべてのルートを組み合わせる）、オプションの解決（`oauth.*` のオプションを解決する `resolveOAuthOptions.mts` と、ルーターが組み立て時にそこから 1 度だけ解決するもの — acr の表、正規の issuer、クライアントリポジトリ — を持つ `routerSettings.mts`）、core のアクセストークンヘッダーパーサーの再 export、そして依存先が落ちていて検証できなかったトークンに全ルートが返す 1 つの答え（`verificationUnavailable.mts`）。 |
+| [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー（`/authorize` はハンドラーと、それが順に呼ぶ段階ごとのファイル） — authorize、consent、logout、federation token（ハンドラーと、それが順に呼ぶ段階ごとのファイル。呼び出し元がまだ有効かの確認は `routes/federationToken.mts` に残り、セッションが live かと参加したフェデレーションは core のセッションライフサイクルから読む）、revoke、token（`/oauth/token` のディスパッチ）、introspect（誰が問い合わせてよいかと、必要なストアが落ちているときの答え。トークンそのものへの答えは `routes.mts` に残る。セッションが live かは core のセッションライフサイクルから読み、`amr` の読み取りは core のドリフトガードがそのファイルに固定している）、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorizeRequest.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
 | [`grants/`](./src/grants) | グラントハンドラー: core のグラント契約の上での、リクエストからトークンへの純粋な判断。HTTP を持たない。 |
 | [`middleware/`](./src/middleware) | クライアント認証。兄弟パッケージが再利用する。 |
 | [`logout/`](./src/logout) | 順序の決まったセッションカスケード（`cascadeLogout`）、RP へのバックチャネル POST、モジュールが core のセッションライフサイクルに寄与するセッション終了の通知器、フロントチャネルのページ、subject revocation service を配線するモジュール。 |

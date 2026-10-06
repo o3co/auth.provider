@@ -17,8 +17,8 @@
 /**
  * The federation token route: the handler, which runs the stages in order and
  * stops at the first that answers, and the caller's standing (refresh family,
- * session, client, linked federation), whose session read core's
- * session-admission drift guard pins to this file.
+ * session, client, linked federation). Whether the session is live and which
+ * federations it joined are read from core's session lifecycle.
  */
 
 import {

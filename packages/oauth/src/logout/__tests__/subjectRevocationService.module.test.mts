@@ -17,7 +17,8 @@
 /**
  * `subjectRevocationServiceModule`: the wiring, and what it refuses to wire.
  * The service itself is core's and is tested there. Here is what only this
- * module can get wrong: the cascade closure over `cascadeLogout`, the horizon
+ * module can get wrong: each session closed through `SessionLifecycle.close`
+ * for `subject_revocation`, the horizon
  * and the allowance read off the `oauthTokenSettings`, `sessionCookiePolicy`
  * and `federationGrantPolicy` slots, and the compositions that would let a
  * subject-wide revocation report success over grants it could not reach.

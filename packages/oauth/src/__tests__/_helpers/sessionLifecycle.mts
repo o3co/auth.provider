@@ -15,11 +15,16 @@
  */
 
 /**
- * Core's session lifecycle for a test composition that wires a user-session
- * store, which oauth's modules then require it beside: the lifecycle module,
- * the federation-token store it requires, and a session-close notifier for a
- * composition whose own modules contribute none (the oauth endpoints module
- * contributes one).
+ * Core's session lifecycle for oauth's tests, which every composition that
+ * wires a user-session store now needs beside it:
+ * - for a booted composition, the lifecycle module, the federation-token store
+ *   it requires, and a session-close notifier where the composition's own
+ *   modules contribute none (`sessionLifecycleModules`);
+ * - for a route or grant built by hand, focused doubles — one that only joins
+ *   and records each join (`joiningLifecycle`), and one that answers liveness
+ *   and federations from a user-session store (`livenessOver`);
+ * - and core's real lifecycle over in-memory stores, for a router whose
+ *   logout closes (`lifecycleOver`).
  */
 
 import {
