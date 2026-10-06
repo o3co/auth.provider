@@ -24,6 +24,6 @@ describe("library reference.conf subpath resolution", () => {
 		const path = fileURLToPath(url);
 		expect(existsSync(path)).toBe(true);
 		const content = readFileSync(path, "utf-8");
-		expect(content).toMatch(/oauth\s*\{/); // sanity: HOCON content
+		expect(content).toMatch(/^core\s*\{/m); // sanity: HOCON content, core's own section
 	});
 });

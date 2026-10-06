@@ -22,6 +22,7 @@ import {
 	type AppConfig,
 	BootError,
 	createApp,
+	defineModule,
 	type Module,
 	moduleReferences,
 	resolveAccessTokenLifetime,
@@ -1167,8 +1168,22 @@ describe("the shipped config boots with every documented override supplied as a 
 	});
 
 	describe("variables whose documented behaviour is to fail boot", () => {
+		/**
+		 * The oauth module's section, read without its factories: what refuses
+		 * `oauth {}` is that module's section — its schema, its removed keys and
+		 * variables — since core's schema declares none of it.
+		 */
+		const oauthSectionReader = defineModule({
+			name: oauthEndpointsModule.name,
+			...(oauthEndpointsModule.section === undefined
+				? {}
+				: { section: oauthEndpointsModule.section }),
+		});
+		const bootReadingOauth = (env: Record<string, string>) =>
+			bootParsed(env, "production", undefined, [oauthSectionReader]);
+
 		it("refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS as the variable of a removed key, naming allowUnmarkedClients", async () => {
-			const booting = bootParsed({
+			const booting = bootReadingOauth({
 				...DOCUMENTED_ENV,
 				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "true",
 			});
@@ -1178,7 +1193,7 @@ describe("the shipped config boots with every documented override supplied as a 
 
 		it("refuses an access-token default above the max, naming both keys", async () => {
 			await expect(
-				bootParsed({
+				bootReadingOauth({
 					...DOCUMENTED_ENV,
 					OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "7200",
 					OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN: "3600",
@@ -1192,7 +1207,9 @@ describe("the shipped config boots with every documented override supplied as a 
 			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
 		]) {
 			it(`refuses an empty ${name} rather than minting already-expired tokens`, async () => {
-				await expect(bootParsed({ ...DOCUMENTED_ENV, [name]: "" })).rejects.toThrow();
+				await expect(bootReadingOauth({ ...DOCUMENTED_ENV, [name]: "" })).rejects.toMatchObject({
+					reason: "config-validation-failed",
+				});
 			});
 		}
 

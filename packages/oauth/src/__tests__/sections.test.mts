@@ -37,6 +37,7 @@ import {
 	createSymmetricKeyStore,
 	defineModule,
 	InMemoryClientRepository,
+	jwksModule,
 	type Module,
 	moduleReferences,
 } from "@o3co/auth-provider-core";
@@ -620,13 +621,25 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	);
 
 	it("boots with OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS unset, captured as null", async () => {
-		const { modules, config } = composition((c) => c);
+		// Nothing here fills the denylist or a code repository: the denylist's
+		// absence is declared, and the grants are off.
+		const { modules, config } = composition((c) =>
+			oauthWith(
+				withGrants(c as never, {
+					authorizationCode: false,
+					refreshToken: false,
+					clientCredentials: false,
+				}) as Record<string, unknown>,
+				{ revocation: { accessToken: "unsupported", subject: "unsupported" } },
+			),
+		);
 		expect(
 			(config["renamed-variables"] as Record<string, unknown>)
 				.OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS,
 		).toBeNull();
 		const handle = await createApp({
-			modules,
+			// The JWKS module completes the discovery document an issuer turns on.
+			modules: [...modules, jwksModule],
 			bootstrapComponents: { config, pathResolver: (s: string) => s } as never,
 		});
 		await handle.dispose();
