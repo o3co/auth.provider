@@ -32,6 +32,7 @@ import { auditSlotFor } from "./audit-fan-out.mjs";
 import { clientRecordSlotFor } from "./client-record-slot.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { federationSettingsOf } from "./federation-settings.mjs";
+import { runCleanupsReverse } from "./run-cleanups.mjs";
 import { tokenSettingsSlotFor } from "./token-settings-slot.mjs";
 import type {
 	BootPlan,
@@ -81,37 +82,6 @@ function buildDeps(
 	}
 
 	return deps;
-}
-
-/**
- * Runs cleanup records in reverse order, best-effort: a failing cleanup does
- * not stop the loop, and its error is returned.
- * @internal
- */
-async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Promise<
-	readonly {
-		readonly module: string;
-		readonly componentKey: ComponentKey;
-		readonly error: unknown;
-	}[]
-> {
-	const errors: { module: string; componentKey: ComponentKey; error: unknown }[] = [];
-
-	for (let i = cleanupRecords.length - 1; i >= 0; i--) {
-		// biome-ignore lint/style/noNonNullAssertion: i is bounded by cleanupRecords.length - 1
-		const record = cleanupRecords[i]!;
-		try {
-			await record.cleanup(record.value);
-		} catch (err) {
-			errors.push({
-				module: record.module,
-				componentKey: record.componentKey,
-				error: err,
-			});
-		}
-	}
-
-	return errors;
 }
 
 /**

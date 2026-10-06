@@ -460,6 +460,97 @@ describe("createApp — 6. stage 6 error: route-order-cycle → stage: assembleA
 });
 
 // ---------------------------------------------------------------------------
+// 6b. A refusal after stage 3 runs the providers' lifecycle cleanups once
+// ---------------------------------------------------------------------------
+
+describe("createApp — 6b. a refusal after stage 3 runs the providers' lifecycle cleanups", () => {
+	/**
+	 * Two providers whose lifecycle cleanups record their names, materialised
+	 * A then B (B requires A's slot).
+	 */
+	function providersWithCleanups(cleaned: string[]): ReturnType<typeof defineModule>[] {
+		return [
+			defineModule({
+				name: "ProvA",
+				provides: { slotCA: () => 1 },
+				lifecycle: { slotCA: { eager: true, cleanup: () => void cleaned.push("A") } },
+			}),
+			defineModule({
+				name: "ProvB",
+				requires: ["slotCA"] as never,
+				provides: { slotCB: () => "b" },
+				lifecycle: { slotCB: { eager: true, cleanup: () => void cleaned.push("B") } },
+			}),
+		];
+	}
+
+	const routeOf = (id: string, before: string) => ({
+		mountPath: `/${id}`,
+		handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+		id,
+		before: [before],
+	});
+
+	it.each([
+		{
+			stage: "assembleApp",
+			reason: "route-order-cycle",
+			modules: [
+				defineModule({
+					name: "RoutesCycleMod",
+					contributes: {
+						routes: [routeOf("route-a", "route-b"), routeOf("route-b", "route-a")],
+					},
+				}),
+			],
+		},
+		{
+			stage: "applyContributions",
+			reason: "override-target-missing",
+			// Stage 1 sees the target contributed; the pre-scan finds it switched off.
+			modules: [
+				defineModule({
+					name: "GrantsOwner",
+					contributes: { grants: { "urn:off": () => null } },
+				}),
+				defineModule({
+					name: "Overrider",
+					overrides: {
+						grants: { "urn:off": () => ({ handle: async () => ({}) }) as never },
+					},
+				}),
+			],
+		},
+		{
+			stage: "applyContributions",
+			reason: "contribute-factory-failed",
+			modules: [
+				defineModule({
+					name: "FailContribMod",
+					contributes: {
+						grants: {
+							"urn:fail-grant": () => {
+								throw new Error("contribution boom");
+							},
+						},
+					},
+				}),
+			],
+		},
+	])("$stage $reason: each cleanup runs once, in reverse", async ({ stage, reason, modules }) => {
+		const cleaned: string[] = [];
+
+		const promise = createApp({
+			modules: [...providersWithCleanups(cleaned), ...modules],
+			bootstrapComponents: minBoot,
+		});
+
+		await expect(promise).rejects.toMatchObject({ reason, stage });
+		expect(cleaned).toEqual(["B", "A"]);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // 7. Boot-failure LifecycleRegistrar drain
 // ---------------------------------------------------------------------------
 
