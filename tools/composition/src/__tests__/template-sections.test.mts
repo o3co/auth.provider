@@ -23,8 +23,8 @@
  * section named after it; which adapter fills a slot is the composition
  * root's own `adapters`, which phase one reads alone. A path they moved from
  * refuses naming the new one, a key a section does not declare is refused,
- * and a variable renamed with them refuses unless its new name carries the
- * same value.
+ * and a variable renamed with them refuses while its old name is set,
+ * whatever its new name holds.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -328,18 +328,25 @@ describe("a variable the template's own modules renamed, through the template's 
 		},
 	);
 
-	it.each(ROWS)(
-		"$from set beside $to at the same value: boots, $path parsed from it",
-		async (row) => {
-			const { from, to, path, value, parsed } = row;
-			const composition = await boot({
-				...loading(row),
-				env: { ...SINGLE_ENV, [from]: value, [to]: value },
-			});
+	it.each(ROWS)("$from set beside $to at the same value: refused all the same", async (row) => {
+		const { from, to, value } = row;
+		const err = await refused({
+			...loading(row),
+			env: { ...SINGLE_ENV, [from]: value, [to]: value },
+		});
 
-			expect(parsedAt(composition, path)).toEqual(parsed);
-		},
-	);
+		expect(err.details).toMatchObject({ renamed: [{ from, to, state: "different" }] });
+	});
+
+	it.each(ROWS)("$to set alone: boots, $path parsed from it", async (row) => {
+		const { to, path, value, parsed } = row;
+		const composition = await boot({
+			...loading(row),
+			env: { ...SINGLE_ENV, [to]: value },
+		});
+
+		expect(parsedAt(composition, path)).toEqual(parsed);
+	});
 });
 
 /**
@@ -517,8 +524,19 @@ describe("the federations, under core.federations", () => {
 		}
 	});
 
-	it("boots the old names beside the new ones at the same values", async () => {
-		const composition = await boot({ env: { ...SINGLE_ENV, ...withOldNames(SINGLE_ENV) } });
+	it("refuses, before any module is chosen, the old names beside the new ones at the same values", async () => {
+		const err = await phaseOneRefused({ env: { ...SINGLE_ENV, ...withOldNames(SINGLE_ENV) } });
+
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toMatchObject({
+			renamed: expect.arrayContaining([
+				expect.objectContaining({ from: "FEDERATIONS_OIDC_CLIENT_ID", state: "different" }),
+			]),
+		});
+	});
+
+	it("boots the new names alone", async () => {
+		const composition = await boot({ env: SINGLE_ENV });
 
 		expect(parsedAt(composition, "core.federations.oidc.clientId")).toBe("oidc-client");
 	});

@@ -22,7 +22,14 @@
  */
 import { describe, expect, it } from "vitest";
 import { environmentVariableFor } from "#/config/environment-variable.mjs";
-import { findRelocatedKeys, pathsSetBy, relocatedKeyMessage } from "#/config/removed-keys.mjs";
+import {
+	findRelocatedKeys,
+	findRenamedVariables,
+	pathsSetBy,
+	relocatedKeyMessage,
+	renamedVariableMessage,
+	unreadSectionMessage,
+} from "#/config/removed-keys.mjs";
 
 describe("pathsSetBy — what a configuration value sets", () => {
 	const set = (value: unknown) => pathsSetBy(value, ["at"]).map((path) => path.join("."));
@@ -189,18 +196,83 @@ describe("findRelocatedKeys — a key that moved", () => {
 				environmentVariable: "DPOP_IAT_WINDOW_SECONDS",
 			}),
 		).toBe(
-			"oauth.dpop.iat-window-seconds has moved to dpop.iatWindowSeconds; see CHANGELOG. " +
+			"oauth.dpop.iat-window-seconds has moved to dpop.iatWindowSeconds; see the upgrade guide (docs/upgrading-from-v0.16.0.md). " +
 				"Write it there (environment variable DPOP_IAT_WINDOW_SECONDS) and remove this field from your config " +
 				"(or unset the environment variable that sets it).",
 		);
 		expect(relocatedKeyMessage({ from: "old", to: "new" })).toBe(
-			"old has moved to new; see CHANGELOG. Write it there and remove this field from your config " +
+			"old has moved to new; see the upgrade guide (docs/upgrading-from-v0.16.0.md). Write it there and remove this field from your config " +
 				"(or unset the environment variable that sets it).",
 		);
 		expect(relocatedKeyMessage({ from: "old", to: null })).toBe(
-			"old was removed; see CHANGELOG. Remove this field from your config " +
+			"old was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md). Remove this field from your config " +
 				"(or unset the environment variable that sets it).",
 		);
+	});
+});
+
+describe("findRenamedVariables — an old name set refuses, whatever the new one holds", () => {
+	const moved = { from: "OLD", oldPath: "old", to: "NEW", path: "new" } as const;
+	const removed = { from: "GONE", oldPath: "gone", to: null, path: null } as const;
+	const captured = (values: Record<string, string | null>) => ({
+		"renamed-variables": { OLD: null, NEW: null, GONE: null, ...values },
+	});
+
+	it("finds the old name set alone: the new one unset", () => {
+		expect(findRenamedVariables(captured({ OLD: "5" }), [moved])).toEqual([
+			{ ...moved, state: "unset" },
+		]);
+	});
+
+	it.each([
+		["a different value", "5", "6"],
+		["the same value", "5", "5"],
+		["the empty string, both", "", ""],
+	])("finds the old name set beside the new one at %s", (_what, old, current) => {
+		expect(findRenamedVariables(captured({ OLD: old, NEW: current }), [moved])).toEqual([
+			{ ...moved, state: "different" },
+		]);
+	});
+
+	it("finds nothing when the new name alone is set, or neither", () => {
+		expect(findRenamedVariables(captured({ NEW: "5" }), [moved])).toEqual([]);
+		expect(findRenamedVariables(captured({}), [moved])).toEqual([]);
+	});
+
+	it("finds a removed key's variable set, the empty string included", () => {
+		for (const value of ["true", ""]) {
+			expect(findRenamedVariables(captured({ GONE: value }), [removed])).toEqual([
+				{ ...removed, state: "removed" },
+			]);
+		}
+	});
+
+	it("tells the operator to unset the old name, quoting neither value", () => {
+		const message = renamedVariableMessage({ ...moved, module: "core", state: "different" });
+		expect(message).toBe(
+			"OLD was renamed NEW, the variable new is bound to; see the upgrade guide (docs/upgrading-from-v0.16.0.md). " +
+				"NEW is set as well: keep the value you mean in NEW and unset OLD.",
+		);
+	});
+});
+
+describe("the refusals of a retired name — where they send the operator", () => {
+	const GUIDE = "see the upgrade guide (docs/upgrading-from-v0.16.0.md).";
+	const rename = { module: "core", from: "OLD", oldPath: "old", to: "NEW", path: "new" } as const;
+
+	it("points every moved, removed or renamed name at the upgrade guide, never at the CHANGELOG", () => {
+		const messages = [
+			relocatedKeyMessage({ from: "old", to: "new", environmentVariable: "NEW" }),
+			relocatedKeyMessage({ from: "old", to: null }),
+			unreadSectionMessage("cors", "Provide httpSettings."),
+			renamedVariableMessage({ ...rename, state: "unset" }),
+			renamedVariableMessage({ ...rename, state: "different" }),
+			renamedVariableMessage({ ...rename, to: null, path: null, state: "removed" }),
+		];
+		for (const message of messages) {
+			expect(message).toContain(GUIDE);
+			expect(message).not.toContain("CHANGELOG");
+		}
 	});
 });
 

@@ -181,7 +181,7 @@ where per-user identity still exists.
 
 **Set `CORE_DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, a single-use client assertion or WebAuthn challenge replayable once per replica. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`ADAPTERS_USER_SESSION_STORES=memory`), the authorization-code repository (`ADAPTERS_CODE_REPOSITORY=memory`) and the federation token store (`ADAPTERS_FEDERATION_TOKEN_STORE=memory`, the default) — are refused by name too. So are express-session's own store under `SESSION_STORE_STORAGE_TYPE=memory` (#474) and the default memory rate limiter (`core-rate-limiter-memory`, `ADAPTERS_RATE_LIMITER=memory`). With the mode unset nothing is refused: every one of them is listed in a single `replica_unsafe_adapters` warning at boot. (The WebAuthn-options route carries a per-process fallback limiter that warns on its own, but only in a composition that wires no `rateLimiter` at all, which this template never does. The login counts per process under `ADAPTERS_ATTEMPT_COUNTER=memory`: `multi` refuses the boot, naming the login, and an unset mode warns `attempt_counter_not_shared`; see the operator runbook.) With `CORE_DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica. This template does not install DPoP; a composition that adds it records every accepted proof in the same replay seen-set as `private_key_jwt` (`ADAPTERS_REPLAY_SEEN_SET`), so it gets the same answer — `memory` is refused under `CORE_DEPLOYMENT_MODE=multi` and listed in the unset-mode warning, and the shipped `redis` shares DPoP's records across replicas — see the dpop package's [operator requirements](../../packages/dpop/README.md#operator-requirements).
 
-The variable sets `core.deployment.mode`. `DEPLOYMENT_MODE`, its old name, refuses boot set alone or beside `CORE_DEPLOYMENT_MODE` at a different value; beside it at the same value, it boots.
+The variable sets `core.deployment.mode`. `DEPLOYMENT_MODE`, its old name, refuses boot while it is set, alone or beside `CORE_DEPLOYMENT_MODE` at any value: unset it.
 
 Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `CORE_DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
 
@@ -412,9 +412,8 @@ fails before boot, naming it.
 A selection still written where it was — `rateLimiter.adapter`,
 `oauth.code.adapter`, `audit.sink.type`, `repositories.user.type` and the
 like — or a variable renamed with it (`RATE_LIMITER_ADAPTER`, `CLIENT_TYPE`,
-…) set alone or to a different value, fails before boot, naming the new path
-and variable; the old variable beside the new one at the same value is
-accepted.
+…) set, alone or beside the new one at any value, fails before boot, naming
+the new path and variable: unset the old variable.
 
 ### HTTP
 
@@ -493,9 +492,8 @@ Only token exchange (RFC 8693) reads an `expires_in` request parameter; every
 other grant ignores it and mints the default.
 
 The default's old name, `OAUTH_ACCESS_TOKEN_EXPIRES_IN` (config key
-`oauth.accessToken.expiresIn`), refuses boot set alone or beside
-`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` at a different value; beside it at the
-same value, it boots. The old key refuses boot at any value. Move the value to
+`oauth.accessToken.expiresIn`), refuses boot while it is set, alone or beside
+`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` at any value. The old key refuses boot at any value. Move the value to
 the new name rather than deleting it: without it, the default is `3600`.
 
 ### Grant Types
@@ -512,8 +510,8 @@ Each switch is its module's key — `oauth-session.enabled`, and
 `oauth-authorization.grants.<grant>.enabled` for the others. Both modules are
 always loaded and read their switches at boot, from the configuration boot
 parses; the template reads none of them before boot. `OAUTH_GRANTS_<GRANT>_ENABLED`,
-the old names, refuse boot set alone or beside the new name at a different
-value; beside it at the same value, they boot.
+the old names, refuse boot while they are set, alone or beside the new name at
+any value.
 
 ### Session
 
@@ -533,8 +531,8 @@ value; beside it at the same value, they boot.
 The cookie and its store are the session store's section, `session-store`; the
 CSRF token's lifetime, the login page and the login's budget are the session
 module's, `session`. `SESSION_<KEY>`, the old names of the `SESSION_STORE_*`
-variables, refuse boot set alone or beside the new name at a different value;
-beside it at the same value, they boot.
+variables, refuse boot while they are set, alone or beside the new name at any
+value.
 
 If you set `SESSION_STORE_SECURE=false` for local HTTP development or set `SESSION_STORE_DOMAIN`
 for shared-domain cookies, also set `SESSION_STORE_NAME` to a non-`__Host-` value such as
@@ -639,8 +637,8 @@ each is reached at (`/session/oauth/federation/<name>`). A key of one is bound
 to the variable named after its path, `CORE_FEDERATIONS_<NAME>_<KEY>`. The map
 written at the top level (`federations { ... }`) refuses boot, naming each
 key's path under `core.federations`; a `FEDERATIONS_GOOGLE_*` or
-`FEDERATIONS_OIDC_*` variable set alone, or beside its new name at a different
-value, is refused before any module is chosen.
+`FEDERATIONS_OIDC_*` variable set, alone or beside its new name at any value,
+is refused before any module is chosen.
 
 Every entry names its `type`, and boot hands each enabled entry to the module
 that handles that type, under the entry's name. The template always loads the
@@ -808,8 +806,8 @@ its own.
 
 `CLIENT_CODE_DEFAULT_EXPIRES_IN` and `CLIENT_CODE_KEY_PREFIX` were renamed
 with them, and `CLIENT_CODE_ENDPOINT_URI` and `CLIENT_CODE_PASSWORD` removed. A
-renamed one set alone, or beside its new name at a different value, and a
-removed one set at all, fails boot naming what to set instead.
+renamed one set, alone or beside its new name at any value, and a removed one
+set at all, fails boot naming what to set instead.
 
 ### Federation Token Store
 

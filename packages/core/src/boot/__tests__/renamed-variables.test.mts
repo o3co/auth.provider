@@ -20,10 +20,10 @@
  * name to the old path it was bound to; the new name is the variable the
  * path's new place is bound to. What the resolution saw of both is captured in
  * the configuration's reserved `renamed-variables` section (each name `null`,
- * then `${?NAME}`, in the package's `reference.conf`): the old name set and the
- * new one unset, or set to a different string, refuses boot with
- * `environment-variable-renamed`; the two set to the same string boot; a name
- * the configuration does not capture refuses boot. The section is removed
+ * then `${?NAME}`, in the package's `reference.conf`): the old name set
+ * refuses boot with `environment-variable-renamed`, whether the new one is
+ * unset or set, to any string; the new name alone boots; a name the
+ * configuration does not capture refuses boot. The section is removed
  * before the configuration is parsed. A manifest that declares a rename boot
  * cannot hold is refused at stage 1 (`module-section-path-invalid`).
  */
@@ -190,17 +190,26 @@ describe("a renamed variable — the old name set", () => {
 		}
 	});
 
-	it("with the new name set to the same value: boots, and the module reads it at the new path", async () => {
-		let seen: unknown;
-		const handle = await boot({ LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: "5" }, [
-			renaming((section) => (seen = section)),
-		]);
-		await handle.dispose();
+	it("with the new name set to the same value: refused all the same, naming both variables", async () => {
+		const err = await refusal(boot({ LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: "5" }));
 
-		expect(seen).toEqual({ retries: 5 });
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toEqual({
+			reason: "environment-variable-renamed",
+			renamed: [
+				{
+					module: "fixture-renaming",
+					from: "LEGACY_RETRIES",
+					to: "FIXTURE_RENAMING_RETRIES",
+					path: "fixture-renaming.retries",
+					state: "different",
+				},
+			],
+		});
+		expect(err.message).toContain("unset LEGACY_RETRIES");
 	});
 
-	it("compares the raw strings: the same number written differently is a different value", async () => {
+	it("with the new name set to the same number written differently: refused", async () => {
 		const err = await refusal(boot({ LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: "05" }));
 
 		expect(err.details).toMatchObject({
@@ -242,9 +251,15 @@ describe("a renamed variable — an empty value is a value", () => {
 		expect(err.details).toMatchObject({ renamed: [{ from: "LEGACY_LABEL", state: "different" }] });
 	});
 
-	it("both names set to the empty string boot, and the module reads the empty string", async () => {
+	it("an old name set to the empty string beside a new name set to it too is refused", async () => {
+		const err = await refusal(boot({ LEGACY_LABEL: "", FIXTURE_RENAMING_LABEL: "" }));
+
+		expect(err.details).toMatchObject({ renamed: [{ from: "LEGACY_LABEL", state: "different" }] });
+	});
+
+	it("a new name set to the empty string alone boots, and the module reads the empty string", async () => {
 		let seen: unknown;
-		const handle = await boot({ LEGACY_LABEL: "", FIXTURE_RENAMING_LABEL: "" }, [
+		const handle = await boot({ FIXTURE_RENAMING_LABEL: "" }, [
 			renaming((section) => (seen = section)),
 		]);
 		await handle.dispose();
@@ -271,10 +286,10 @@ describe("a renamed variable — what the resolution saw, not the process's envi
 		expect(err.details).toMatchObject({ renamed: [{ from: "LEGACY_RETRIES", state: "unset" }] });
 	});
 
-	it("boots when the resolution saw both names agree, though the process's environment sets the old one alone", async () => {
+	it("boots when the resolution saw the new name alone, though the process's environment sets the old one", async () => {
 		vi.stubEnv("LEGACY_RETRIES", "5");
 
-		const handle = await boot({ LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: "5" });
+		const handle = await boot({ FIXTURE_RENAMING_RETRIES: "5" });
 		await handle.dispose();
 	});
 });
@@ -285,12 +300,9 @@ describe("a renamed variable — the capture", () => {
 		const logger = { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() };
 		const handle = await createApp({
 			modules: [renaming()],
-			bootstrapComponents: bootstrap(
-				resolved({ LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: "5" }),
-				{
-					logger: { ...logger, fatal: vi.fn(), child: () => logger },
-				},
-			),
+			bootstrapComponents: bootstrap(resolved({ FIXTURE_RENAMING_RETRIES: "5" }), {
+				logger: { ...logger, fatal: vi.fn(), child: () => logger },
+			}),
 		});
 		const config = handle.components.config as unknown as Record<string, unknown>;
 		await handle.dispose();
@@ -438,10 +450,8 @@ describe("a renamed variable — more", () => {
 		expect(await order([second, renaming()])).toEqual(["OLDER_RETRIES", "LEGACY_LABEL"]);
 	});
 
-	it("a rename that agrees beside one that does not: only the one that does not is named", async () => {
-		const err = await refusal(
-			boot({ LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: "5", LEGACY_LABEL: "a" }),
-		);
+	it("a rename set under its new name alone beside one set under its old: only the old is named", async () => {
+		const err = await refusal(boot({ FIXTURE_RENAMING_RETRIES: "5", LEGACY_LABEL: "a" }));
 
 		expect(err.details).toEqual({
 			reason: "environment-variable-renamed",
@@ -500,13 +510,18 @@ describe("a renamed variable — a key that stays where it is", () => {
 		});
 	});
 
-	it("boots with both names set to the same value", async () => {
-		const handle = await boot(
-			{ FIXTURE_RETRY_COUNT: "5", FIXTURE_IN_PLACE_RETRIES: "5" },
-			[inPlace],
-			"",
-			reference,
+	it("refuses both names set to the same value", async () => {
+		const err = await refusal(
+			boot({ FIXTURE_RETRY_COUNT: "5", FIXTURE_IN_PLACE_RETRIES: "5" }, [inPlace], "", reference),
 		);
+
+		expect(err.details).toMatchObject({
+			renamed: [{ from: "FIXTURE_RETRY_COUNT", state: "different" }],
+		});
+	});
+
+	it("boots with the new name alone", async () => {
+		const handle = await boot({ FIXTURE_IN_PLACE_RETRIES: "5" }, [inPlace], "", reference);
 		const config = handle.components.config as unknown as Record<string, { retries?: unknown }>;
 		await handle.dispose();
 
@@ -595,10 +610,16 @@ describe("a renamed variable — core's own section, as it ships", () => {
 		});
 	});
 
-	it("accepts its old and new names set to the same value", () => {
-		expect(() =>
-			validate(captured({ DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: "multi" })),
-		).not.toThrow();
+	it("refuses its old and new names set to the same value", () => {
+		const err = refusedBy(captured({ DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: "multi" }));
+
+		expect(err.details).toMatchObject({
+			renamed: [{ module: "core", from: "DEPLOYMENT_MODE", state: "different" }],
+		});
+	});
+
+	it("accepts its new name alone", () => {
+		expect(() => validate(captured({ CORE_DEPLOYMENT_MODE: "multi" }))).not.toThrow();
 	});
 
 	it("refuses its old path written in the configuration, naming core's section", () => {

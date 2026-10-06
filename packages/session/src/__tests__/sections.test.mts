@@ -21,7 +21,7 @@
  * secret that signs it, and the store express-session keeps sessions in),
  * with their defaults in the package's `config/reference.conf`. A path they
  * moved from refuses boot naming the new one, and a variable renamed with
- * them refuses boot unless its new name carries the same value.
+ * them refuses boot while its old name is set, whatever its new name holds.
  */
 
 import { readFileSync } from "node:fs";
@@ -598,14 +598,27 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		expect(err.message).not.toContain("new-secret-value");
 	});
 
-	it("boots with SESSION_SECRET and SESSION_STORE_SECRET set to the same value", async () => {
+	it("refuses SESSION_SECRET and SESSION_STORE_SECRET set to the same value, printing it nowhere", async () => {
 		const secret = (makeValidAppConfig() as unknown as { "session-store": { secret: string } })[
 			"session-store"
 		].secret;
-		const handle = await boot((config) => config, {
+		const err = await refusal((config) => config, {
 			SESSION_SECRET: secret,
 			SESSION_STORE_SECRET: secret,
 		});
+
+		expect(err.details).toMatchObject({
+			reason: "environment-variable-renamed",
+			renamed: [{ from: "SESSION_SECRET", to: "SESSION_STORE_SECRET", state: "different" }],
+		});
+		expect(err.message).not.toContain(secret);
+	});
+
+	it("boots with SESSION_STORE_SECRET alone", async () => {
+		const secret = (makeValidAppConfig() as unknown as { "session-store": { secret: string } })[
+			"session-store"
+		].secret;
+		const handle = await boot((config) => config, { SESSION_STORE_SECRET: secret });
 		await handle.dispose();
 	});
 

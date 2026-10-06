@@ -20,8 +20,8 @@
  * environment, phase one's switches, then the layers over every loaded
  * package's `reference.conf` handed to boot. A path they moved from, written
  * in the operator's own layer, refuses boot naming the new one;
- * `DEPLOYMENT_MODE`, renamed `CORE_DEPLOYMENT_MODE`, refuses boot unless the
- * new name carries the same value.
+ * `DEPLOYMENT_MODE`, renamed `CORE_DEPLOYMENT_MODE`, refuses boot while it is
+ * set, whatever the new name holds.
  */
 
 import { BootError } from "@o3co/auth-provider-core";
@@ -176,10 +176,12 @@ describe("DEPLOYMENT_MODE, renamed CORE_DEPLOYMENT_MODE, through the template's 
 		expect(err.message).not.toContain("new-mode-c81a");
 	});
 
-	it("set beside the new name at the same value: boots with that mode", async () => {
-		const composition = await boot({ DEPLOYMENT_MODE: "single", CORE_DEPLOYMENT_MODE: "single" });
+	it("set beside the new name at the same value: refused all the same", async () => {
+		const err = await refused({ DEPLOYMENT_MODE: "single", CORE_DEPLOYMENT_MODE: "single" });
 
-		expect(composition.handle.components.deploymentMode).toBe("single");
+		expect(err.details).toMatchObject({
+			renamed: [{ from: "DEPLOYMENT_MODE", to: "CORE_DEPLOYMENT_MODE", state: "different" }],
+		});
 	});
 
 	it("unset, with the new name set: boots with its mode", async () => {

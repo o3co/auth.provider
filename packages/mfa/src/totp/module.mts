@@ -24,8 +24,8 @@
  * module's schema before any factory runs and refuses what it cannot read,
  * naming the key; a configuration still setting the section's old path,
  * `mfa.factors.totp`, is refused naming the new one, and so is an environment
- * setting a variable renamed with the move unless its new name carries the
- * same value. It requires the `oauthTokenSettings` slot for the deployment's
+ * setting a variable renamed with the move, whether or not its new name is
+ * set. It requires the `oauthTokenSettings` slot for the deployment's
  * issuer, whose host an unset TOTP issuer defaults to, and reads nothing of
  * the whole configuration. Stateless: nothing forks per replica.
  */

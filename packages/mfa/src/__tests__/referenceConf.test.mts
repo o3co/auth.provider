@@ -340,13 +340,9 @@ describe("the package's reference.conf", () => {
 				expect(err.message).not.toContain("new-value-2a9f");
 			});
 
-			it("set beside the new name at the same value: boots, and the factor's section reads it", async () => {
-				const handle = await boot({ [old]: value, [renamed]: value });
-				const section = (
-					handle.components.config as unknown as Record<string, Record<string, unknown>>
-				)["mfa-totp-factor"];
-				await handle.dispose();
-				expect(section?.[key]).toBe(read);
+			it("set beside the new name at the same value: refused all the same", async () => {
+				const err = await refusal({ [old]: value, [renamed]: value });
+				expect(err.details).toEqual(refused("different"));
 			});
 
 			it("unset, with the new name set: boots, and the factor's section reads it", async () => {

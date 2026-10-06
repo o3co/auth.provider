@@ -59,7 +59,7 @@ is how `removedIn: "this release (#330)"` shipped in v0.10.0 *and* v0.11.0
 (#458): the grep below has to be read rather than merely run — it matches the
 doc comments that describe the convention as well as any real placeholder, and
 the block says how to tell them apart. No retired key's refusal carries a
-release any more — it points at the CHANGELOG — so the hits to stamp are the
+release any more — it points at the upgrade guide — so the hits to stamp are the
 strings that still name one.
 
 ```bash
