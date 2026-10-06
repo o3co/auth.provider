@@ -53,6 +53,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -215,7 +216,12 @@ const makeApp = async (opts: {
 			...(opts.anyPageOrigin === true ? {} : { issuer: ISSUER }),
 			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
-		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		...(opts.userSessionStore
+			? {
+					userSessionStore: opts.userSessionStore,
+					sessionLifecycle: livenessOver(opts.userSessionStore),
+				}
+			: {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		...(opts.consent === true ? { consentStore, pendingConsentStore } : {}),

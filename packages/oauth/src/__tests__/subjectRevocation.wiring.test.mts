@@ -31,7 +31,6 @@ import {
 	createInMemorySubjectRevocation,
 	createSymmetricKeyStore,
 	type UserSession,
-	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	GrantRegistry,
@@ -46,6 +45,7 @@ import { createRouter as createUserinfoRouter } from "#/routes/userinfo.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -205,10 +205,7 @@ describe("the subject watermark reaches /oauth/userinfo", () => {
 			createUserinfoRouter(express, {
 				keyStore,
 				issuer: ISSUER,
-				userSessionStore: {
-					kind: "memory",
-					get: vi.fn().mockResolvedValue(session),
-				} as unknown as UserSessionStore,
+				sessionLifecycle: livenessOver({ get: vi.fn().mockResolvedValue(session) }),
 				...(subjectRevocation ? { subjectRevocation } : {}),
 			}),
 		);

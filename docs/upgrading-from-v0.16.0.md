@@ -1081,6 +1081,32 @@ modules fills them.
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
   sets another interval, and `0` turns it off. It is stopped on dispose,
   and its timer never keeps the process alive.
+- **BREAKING: where a user-session store is wired, core's session lifecycle
+  is required** (#1030). With a `userSessionStore` wired, the
+  `authorization_code` grant (`oauthAuthorizationGrantsModule`) and
+  `oauthEndpointsModule` refuse to boot without `sessionLifecycle` (core's
+  `sessionLifecycleModule`), `contribute-factory-failed` naming both slots;
+  `createOAuthRouter` throws the same refusal. `subjectRevocationServiceModule`
+  requires `sessionLifecycle` in place of the six session-cascade slots. A
+  composition that keeps no sessions (client_credentials, jwt-bearer) wires
+  neither and is unaffected. The standalone template installs the lifecycle.
+  - The code exchange joins its session through the lifecycle alone: the
+    grant no longer reads `sessionRPRegistry` or `sessionFamilyIndex`, and
+    `oauthAuthorizationGrantsModule` no longer declares them, nor
+    `sessionFederationIndex`.
+  - Introspection, `/oauth/userinfo` and `POST /oauth/federation/:name/token`
+    read a session through the lifecycle alone. Their outage lines no longer
+    carry `store: "user_session"`, nor (the federation-token route)
+    `store: "session_federation_index"`; they carry
+    `store: "session_lifecycle"` (`step: "liveness"` or `"federations"` on
+    the federation-token route). Move an alert keyed on the old values.
+  - The federation-token route lists the session's federations from the
+    lifecycle. A federation logout removes that federation's tokens and
+    leaves it listed, so the route answers it `404 federation_not_linked`,
+    as a federation with no token record. A later close of the session may
+    send that upstream an end-session request again; it is idempotent.
+  - The boot warnings `session_family_index_without_session_end` and
+    `refresh_token_family_rotation_without_revocation` are no longer logged.
 
 ### Exports removed, and signatures changed
 

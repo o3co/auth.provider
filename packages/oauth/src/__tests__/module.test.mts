@@ -64,6 +64,7 @@ import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
+import { livenessOver, sessionLifecycleModules } from "./_helpers/sessionLifecycle.mjs";
 
 /**
  * A federation that satisfies the `FederationProvider` contract, with whatever
@@ -360,14 +361,15 @@ describe("oauthEndpointsModule — the acr table in the served discovery documen
 
 	/**
 	 * What an enabled federation needs beside it (boot refuses one without
-	 * them): the session stores, the federation-token store and family
-	 * revocation.
+	 * them): the session stores and core's session lifecycle, the
+	 * federation-token store and family revocation.
 	 */
 	const federationStores = [
 		memorySessionStoresModule,
 		memoryFederationTokenStoreModule,
 		memoryRefreshTokenFamilyStoreModule,
 		defaultRefreshTokenFamilyRevocationModule,
+		...sessionLifecycleModules({ notifier: false, federationTokenStore: false }),
 	];
 
 	it("advertises only what a login this composition performs can meet, and says once at boot what it dropped", async () => {
@@ -889,6 +891,13 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			name: "test:refresh-token-family-revocation",
 			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
+		const sessionLifecycleOverStoreModule = defineModule({
+			name: "test:session-lifecycle",
+			provides: {
+				sessionLifecycle: () =>
+					livenessOver(sessionStore, (sid) => sessionFederationIndex.listFederations(sid)),
+			},
+		});
 		// federationProviders is SYNTHETIC: boot builds it from the enabled
 		// `core.federations` entries a registered federation type handles and
 		// injects it as deps.federationProviders. The type `google` answers
@@ -938,6 +947,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 				sessionFederationIndexModule,
 				federationTokenStoreModule,
 				refreshTokenFamilyRevocationModule,
+				sessionLifecycleOverStoreModule,
 				federationModule,
 			],
 			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
@@ -1032,6 +1042,13 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			name: "test:refresh-token-family-revocation-noissuer",
 			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
+		const sessionLifecycleOverStoreModule = defineModule({
+			name: "test:session-lifecycle-noissuer",
+			provides: {
+				sessionLifecycle: () =>
+					livenessOver(sessionStore, (sid) => sessionFederationIndex.listFederations(sid)),
+			},
+		});
 
 		const config = makeValidAppConfig();
 
@@ -1051,6 +1068,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 				sessionFederationIndexModule,
 				federationTokenStoreModule,
 				refreshTokenFamilyRevocationModule,
+				sessionLifecycleOverStoreModule,
 			],
 			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});

@@ -53,6 +53,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { lifecycleOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example.com";
@@ -136,6 +137,19 @@ async function buildApp(userSessionStore: UserSessionStore) {
 		} as unknown as SessionGrantDeps),
 	);
 
+	const federationTokenStore = {
+		kind: "memory",
+		attach: vi.fn(async () => {}),
+		get: vi.fn(async () => null),
+		removeIf: vi.fn(async () => ({ outcome: "removed" })),
+		delete: vi.fn(async () => {}),
+		removeBySid: vi.fn(async () => {}),
+	} as unknown as FederationTokenStore;
+	const refreshTokenFamilyRevocation = {
+		isFamilyRevoked: vi.fn(async () => false),
+		revokeFamily: vi.fn(async () => {}),
+	} as unknown as RefreshTokenFamilyRevocation;
+
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
@@ -144,6 +158,11 @@ async function buildApp(userSessionStore: UserSessionStore) {
 		codeRepository,
 		keyStore,
 		userSessionStore,
+		sessionLifecycle: lifecycleOver({
+			userSessionStore,
+			refreshTokenFamilyRevocation,
+			federationTokenStore,
+		}),
 		sessionRPRegistry: {
 			kind: "memory",
 			registerRP: vi.fn(async () => {}),
@@ -163,17 +182,8 @@ async function buildApp(userSessionStore: UserSessionStore) {
 			removeFederation: vi.fn(async () => {}),
 			removeBySid: vi.fn(async () => {}),
 		} as unknown as SessionFederationIndex,
-		federationTokenStore: {
-			kind: "memory",
-			attach: vi.fn(async () => {}),
-			get: vi.fn(async () => null),
-			delete: vi.fn(async () => {}),
-			removeBySid: vi.fn(async () => {}),
-		} as unknown as FederationTokenStore,
-		refreshTokenFamilyRevocation: {
-			isFamilyRevoked: vi.fn(async () => false),
-			revokeFamily: vi.fn(async () => {}),
-		} as unknown as RefreshTokenFamilyRevocation,
+		federationTokenStore,
+		refreshTokenFamilyRevocation,
 	});
 
 	const app = express();
@@ -242,7 +252,7 @@ describe("session grant + logout", () => {
 		expect(beforeIntrospect.status).toBe(200);
 		expect(beforeIntrospect.body.active).toBe(true);
 
-		// The logout an RP initiates: the cascade deletes the UserSession.
+		// The logout an RP initiates: the session's close deletes the UserSession.
 		const logoutRes = await request(app)
 			.post("/oauth/logout")
 			.type("form")

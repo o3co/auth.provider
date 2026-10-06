@@ -30,24 +30,20 @@ import {
 	type Logger,
 	loggableError,
 	type RefreshTokenFamilyRevocation,
-	type SessionFederationIndex,
 	type SessionLifecycle,
 	type SubjectRevocation,
-	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, Response } from "express";
 
 export interface FederationTokenRouterOptions {
 	keyStore: KeyStore;
 	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
-	userSessionStore: UserSessionStore;
 	/**
-	 * Core's session lifecycle. Where installed, it answers whether the
-	 * caller's session is live in place of `userSessionStore`: a session whose
-	 * close has committed is not live.
+	 * Core's session lifecycle: it answers whether the caller's session is
+	 * live (a session whose close has committed is not), and which federations
+	 * the session joined.
 	 */
-	sessionLifecycle?: SessionLifecycle;
-	sessionFederationIndex: SessionFederationIndex;
+	sessionLifecycle: SessionLifecycle;
 	federationTokenStore: FederationTokenStore;
 	clientRepository: ClientRepository;
 	/** RFC 7009: when wired, verifyJwt consults the denylist so revoked access tokens answer 401. */
@@ -105,10 +101,9 @@ export const createStoreUnavailableLog =
 	(logger: Logger | Console) =>
 	(
 		federation: string,
-		store: "user_session" | "session_federation_index" | "federation_token",
+		store: "federation_token",
 		step:
 			| "get"
-			| "list"
 			| "acquire_lock"
 			| "get_after_lock"
 			| "get_after_conflict"

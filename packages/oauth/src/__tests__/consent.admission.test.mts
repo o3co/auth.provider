@@ -53,6 +53,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "third-party-chat";
 const REDIRECT_URI = "https://chat.example/cb";
@@ -165,7 +166,12 @@ const makeApp = async (opts: {
 			issuer: ISSUER,
 			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
-		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		...(opts.userSessionStore
+			? {
+					userSessionStore: opts.userSessionStore,
+					sessionLifecycle: livenessOver(opts.userSessionStore),
+				}
+			: {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.sessionLifecycleStore ? { sessionLifecycleStore: opts.sessionLifecycleStore } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),

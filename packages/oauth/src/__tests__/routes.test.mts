@@ -29,6 +29,7 @@ import {
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
+	type SessionLifecycle,
 	type SessionRPRegistry,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -248,6 +249,7 @@ describe("createOAuthRouter", () => {
 			codeRepository: {} as CodeRepository,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			userSessionStore: {} as UserSessionStore,
+			sessionLifecycle: {} as SessionLifecycle,
 			sessionRPRegistry: {} as SessionRPRegistry,
 			sessionFamilyIndex: {} as SessionFamilyIndex,
 			sessionFederationIndex: {} as SessionFederationIndex,

@@ -26,6 +26,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/userinfo.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -59,7 +60,9 @@ function buildApp(opts: {
 
 	const router = createRouter(express, {
 		keyStore,
-		userSessionStore: opts.userSessionStore as UserSessionStore | undefined,
+		...(opts.userSessionStore === undefined
+			? {}
+			: { sessionLifecycle: livenessOver(opts.userSessionStore) }),
 		refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation as
 			| RefreshTokenFamilyRevocation
 			| undefined,

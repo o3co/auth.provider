@@ -23,8 +23,6 @@ import crypto from "node:crypto";
 import {
 	type AppConfig,
 	type CodeRepository,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRotation,
@@ -39,18 +37,13 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
-import { joinSession } from "#/logout/sessionEnd.mjs";
 import { createTokenHandler } from "#/routes/token.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-
-vi.mock("#/logout/sessionEnd.mjs", async (importOriginal) => {
-	const original = await importOriginal<typeof import("#/logout/sessionEnd.mjs")>();
-	return { ...original, joinSession: vi.fn(original.joinSession) };
-});
+import { joiningLifecycle } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client1";
 const REDIRECT_URI = "https://rp.example/cb";
@@ -72,7 +65,9 @@ const client: PublicClient = {
 
 describe("createAuthorizationGrant — a throw after the family is registered", () => {
 	it("revokes the registered family, and the token endpoint answers 500 without the throw's message", async () => {
-		vi.mocked(joinSession).mockRejectedValueOnce(new Error(INTERNAL));
+		const { lifecycle } = joiningLifecycle(async () => {
+			throw new Error(INTERNAL);
+		});
 		const logger = createMockLogger();
 		const userSessionStore = createInMemoryUserSessionStore();
 		await userSessionStore.create({
@@ -110,8 +105,7 @@ describe("createAuthorizationGrant — a throw after the family is registered", 
 			} as unknown as CodeRepository,
 			clientRepository: { findById: async () => client, authenticate: async () => null },
 			userSessionStore,
-			sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-			sessionRPRegistry: createInMemorySessionRPRegistry(),
+			sessionLifecycle: lifecycle,
 			refreshTokenFamilyRotation: { ...rotation, register },
 			refreshTokenFamilyRevocation: { revokeFamily } as unknown as RefreshTokenFamilyRevocation,
 			logger,

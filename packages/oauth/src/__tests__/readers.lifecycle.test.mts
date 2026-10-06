@@ -39,7 +39,6 @@ import {
 	type FederationTokenStore,
 	type FederationTokens,
 	SESSION_LIFECYCLE_MAX_KEY_LENGTH,
-	type SessionFederationIndex,
 	type SessionLifecycle,
 	type SessionLiveness,
 	type UserSession,
@@ -95,9 +94,10 @@ function lifecycleAnswering(answer: SessionLiveness) {
 			federations: [],
 		})),
 		liveness: vi.fn<SessionLifecycle["liveness"]>(async () => answer),
+		// The session joined the federation the token route serves.
 		federations: vi.fn<SessionLifecycle["federations"]>(async () => ({
 			outcome: "listed",
-			federations: [],
+			federations: ["google"],
 		})),
 		resumePending: vi.fn<SessionLifecycle["resumePending"]>(async () => ({
 			done: 0,
@@ -341,7 +341,6 @@ describe("/oauth/userinfo through the session lifecycle", () => {
 			userinfoRoute.createRouter(express, {
 				keyStore,
 				issuer: ISSUER,
-				userSessionStore: opts.userSessionStore,
 				sessionLifecycle: opts.lifecycle,
 				...(opts.logger ? { logger: opts.logger } : {}),
 			}),
@@ -473,15 +472,7 @@ describe("POST /oauth/federation/:name/token through the session lifecycle", () 
 			federationTokenRoute.createRouter(express, {
 				keyStore,
 				issuer: ISSUER,
-				userSessionStore: opts.userSessionStore,
 				sessionLifecycle: opts.lifecycle,
-				sessionFederationIndex: {
-					kind: "memory",
-					addFederation: vi.fn(async () => {}),
-					listFederations: vi.fn(async () => ["google"]),
-					removeFederation: vi.fn(async () => {}),
-					removeBySid: vi.fn(async () => {}),
-				} as unknown as SessionFederationIndex,
 				refreshTokenFamilyRevocation: {
 					isFamilyRevoked: vi.fn(async () => false),
 					revokeFamily: vi.fn(async () => undefined),
@@ -605,6 +596,33 @@ describe("POST /oauth/federation/:name/token through the session lifecycle", () 
 		});
 		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
 			{ federation: "google", store: "session_lifecycle", step: "liveness" },
+			"federation_token_store_unavailable",
+		);
+	});
+
+	it("reads the federations the session joined from the lifecycle, and refuses one it did not join: 404", async () => {
+		const lifecycle = lifecycleAnswering({ outcome: "live", session: liveSession });
+		lifecycle.federations.mockResolvedValue({ outcome: "listed", federations: ["github"] });
+		const res = await fedToken(buildApp({ lifecycle, userSessionStore: holdingStore() }));
+
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("federation_not_linked");
+		expect(lifecycle.federations).toHaveBeenCalledExactlyOnceWith(SID);
+	});
+
+	it("a lifecycle that cannot list the federations: 503, one error line", async () => {
+		const logger = createMockLogger();
+		const lifecycle = lifecycleAnswering({ outcome: "live", session: liveSession });
+		lifecycle.federations.mockResolvedValue({ outcome: "unavailable" });
+		const res = await fedToken(buildApp({ lifecycle, userSessionStore: holdingStore(), logger }));
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			{ federation: "google", store: "session_lifecycle", step: "federations" },
 			"federation_token_store_unavailable",
 		);
 	});
