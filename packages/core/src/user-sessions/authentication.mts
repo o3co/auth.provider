@@ -741,9 +741,10 @@ export function codeFieldsOf(reading: AuthenticationReading | null): CodeFields 
 /**
  * A code record's `authentication` as a frozen copy (its `mfaAt` a `Date`
  * of its own), or `undefined` when the record carries none or one not in a
- * shape a code records: not an object; a `primary` that is neither absent
- * nor a non-empty string; an `mfaAt` that is neither absent nor a `Date` at
- * or after the epoch. The one rule a code repository copies it by and the
+ * shape a code records: not an object, or one without both keys — each is
+ * recorded, `undefined` included; a `primary` that is neither `undefined`
+ * nor a non-empty string; an `mfaAt` that is neither `undefined` nor a
+ * `Date` at or after the epoch. The one rule a code repository copies it by and the
  * exchange reads it by: the record is a deployment's store's, not trusted for
  * its shape.
  */
@@ -751,7 +752,15 @@ export function readCodeAuthentication(code: {
 	readonly authentication?: unknown;
 }): CodeAuthentication | undefined {
 	const stored: unknown = code.authentication;
-	if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return undefined;
+	if (
+		typeof stored !== "object" ||
+		stored === null ||
+		Array.isArray(stored) ||
+		!("primary" in stored) ||
+		!("mfaAt" in stored)
+	) {
+		return undefined;
+	}
 	const { primary, mfaAt } = stored as Partial<Record<keyof CodeAuthentication, unknown>>;
 	if (primary !== undefined && (typeof primary !== "string" || primary.length === 0)) {
 		return undefined;

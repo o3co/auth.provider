@@ -450,6 +450,10 @@ describe("InMemoryCodeRepository", () => {
 			for (const authentication of [
 				null,
 				"pwd",
+				{},
+				{ primary: "pwd" },
+				{ mfaAt: undefined },
+				new Date(),
 				{ primary: "" },
 				{ primary: "pwd", mfaAt: new Date(Number.NaN) },
 			]) {

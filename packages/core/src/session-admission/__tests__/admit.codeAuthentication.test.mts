@@ -397,6 +397,13 @@ describe("a code that carries no readable authentication is refused once its ses
 		{ primary: "pwd", mfaAt: "2026-10-06T11:59:00Z" },
 		{ primary: "pwd", mfaAt: new Date(Number.NaN) },
 		{ primary: "pwd", mfaAt: new Date(-1) },
+		// Both keys are recorded, an undefined one included: a snapshot that
+		// leaves one out is not one /authorize recorded.
+		{},
+		{ mfaAt: undefined },
+		{ primary: undefined },
+		{ primary: "pwd" },
+		new Date("2026-10-06T11:59:00Z"),
 	];
 
 	it("as unauthenticated, on both reads, before any requirement is asked — one an earlier release issued included", async () => {
@@ -427,6 +434,55 @@ describe("a code that carries no readable authentication is refused once its ses
 		).toMatchObject({ outcome: "admitted", session: null });
 		expect(seen).toHaveLength(1);
 		expect(seen[0]?.authentication).toBeNull();
+	});
+});
+
+describe("the code's primary is held to the record on the last reading too", () => {
+	/** A store whose record changes after its first read: what a store in flux answers. */
+	const changing = (first: UserSession, then: UserSession): UserSessionStore => {
+		let reads = 0;
+		return {
+			kind: "test",
+			create: async () => {},
+			get: async (sid) => (sid === first.sid ? (reads++ === 0 ? first : then) : null),
+			delete: async () => {},
+		};
+	};
+
+	it("refuses as unauthenticated a code whose primary the record no longer holds, or whose record can no longer be read, once the requirements were asked", async () => {
+		const laters: readonly [string, UserSession][] = [
+			["federated", federatedSteppedUp()],
+			["unreadable", session({ authentication: { primary: "" } as never })],
+		];
+		for (const [label, later] of laters) {
+			const { requirement, seen } = watching();
+			for (const claim of [
+				codeClaimFirstRead(passwordCode),
+				codeClaimRevalidation(passwordCode, "user-1"),
+			]) {
+				expect(
+					await admitSession(
+						{
+							...deps(undefined, [requirement]),
+							userSessionStore: changing(steppedUp(), later),
+						},
+						{ claim, action: "test.use" },
+					),
+					label,
+				).toEqual({ outcome: "unauthenticated" });
+			}
+			expect(seen.length, label).toBe(2);
+		}
+	});
+
+	it("admits a code whose record holds its primary on both readings", async () => {
+		const { requirement } = watching();
+		expect(
+			await admitSession(
+				{ ...deps(undefined, [requirement]), userSessionStore: changing(steppedUp(), steppedUp()) },
+				{ claim: codeClaimFirstRead(passwordCode), action: "test.use" },
+			),
+		).toMatchObject({ outcome: "admitted" });
 	});
 });
 

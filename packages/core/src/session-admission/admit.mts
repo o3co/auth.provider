@@ -347,7 +347,9 @@ const copyView = (view: SessionView): SessionView =>
  *    steps 1 to 4 again, on a fresh clock reading and with the claim's
  *    subject held to the first reading's, whatever step 7 answered. An
  *    answer they give is the admission's; else step 7's stands, carrying the
- *    first reading's session, view and renewal nonce. A requirement that
+ *    first reading's session, view and renewal nonce. A code whose primary
+ *    the record read last does not hold, or whose record can no longer be
+ *    read, is `unauthenticated`, as on the first reading. A requirement that
  *    throws has already answered `unavailable`.
  */
 export async function admitSession(
@@ -489,6 +491,15 @@ export async function admitSession(
 			unavailable,
 		);
 		if ("answer" in last) return last.answer;
+		// The code's primary is held to the record read last, as to the first.
+		if (
+			presented.carrier === "code" &&
+			(checked.codeReading === undefined ||
+				last.session === null ||
+				codeReadingOver(checked.codeReading, last.session) === undefined)
+		) {
+			return { outcome: "unauthenticated" };
+		}
 	}
 	return answer;
 }
