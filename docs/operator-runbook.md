@@ -739,6 +739,16 @@ A boundary later than the subject revocation store's clock plus 5 minutes
 replica that far ahead leaves the tokens it minted just before the revocation
 uncovered, and the store says so at warn (`subject_revocation_boundary_clamped`).
 
+**Slew the replicas' clocks; do not step them back** (NTP slewing, for
+example). The revoking replica stamps the boundary 250 ms past its clock
+reading, and stamps it again until a write commits within 250 ms. That
+assumes its wall clock does not step backwards during the revocation. A step
+back that the replica sees is reported as a failed watermark write
+(`revoke_all_watermark_failed`, `complete: false`); one that rises and falls
+back within a single write is not seen. With the lead and the whole-second
+comparison, new tokens may be refused for up to about a second longer after a
+revocation.
+
 The allowance stays at 1 s, not the 5 minutes (`DEFAULT_CLOCK_SKEW_MS`) allowed
 elsewhere. Each second of allowance refuses another second of sign-ins after
 the boundary, so 5 minutes would refuse the first logins after a password
