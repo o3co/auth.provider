@@ -608,7 +608,7 @@ worker:
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | ユーザーセッション、RP レジストリ、session-family インデックス、session-federation インデックスの外側の prefix。 |
+| `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | ユーザーセッション、subject のセッションインデックス、subject の失効境界、セッションライフサイクルのレコードの外側の prefix。 |
 | `REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | refresh token family レコードの prefix。 |
 | `REDIS_CODE_REPOSITORY_KEY_PREFIX` | `oauth:code:` | OAuth 認可コードの prefix。 |
 | `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX` | `ft:` | フェデレーショントークンのレコード、そのセッションごとのインデックス、およびそのロックキーの prefix。 |

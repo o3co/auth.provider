@@ -167,8 +167,9 @@ Each one implements a port core declares; the slot name is in parentheses.
   [Session lifecycle](#session-lifecycle-one-key-per-session-in-fixed-shards).
   `redisSessionStoresModule` provides it, keyed under its section's
   `keyPrefix` plus `lc:`; `createRedisSessionLifecycleStore` builds it over
-  `makeIoredisClients(io).sessionLifecycleStoreClient` directly. Nothing reads
-  the slot yet.
+  `makeIoredisClients(io).sessionLifecycleStoreClient` directly. Core's
+  `sessionLifecycleModule` requires the slot and is its one writer; session
+  admission reads it too.
 - `UserSessionStore`, `SubjectSessionIndex`, `SubjectRevocation` — the
   session record and the subject-revocation stores, installed together by
   `redisSessionStoresModule`. The `UserSessionStore` has the step-up
@@ -1361,16 +1362,12 @@ or writes their keys. Under the section's `keyPrefix` (`ss:` by default):
 | `fi-ended:<sid>` | string: the family index's "ended" mark |
 | `fed:<sid>` | sorted set: the federations the session signed in through |
 
-Each expires with its session; they may be deleted sooner, once no
-v0.16.0 replica remains: by prefix (`SCAN MATCH`, then `UNLINK`), never with
-`FLUSHDB` or `FLUSHALL`, which takes keys this release reads with them. Never
-delete the refresh-token family records (`rtfam:`): a revoked family's
-record keeps the access tokens it revoked refused, and a family with no
-record reads as not revoked. A v0.16.0 session has no lifecycle record and
-reads as closed, so its user signs in again, and a v0.16.0 refresh token
-bound to it is refused.
-[Upgrading from v0.16.0](../../docs/upgrading-from-v0.16.0.md#rolling-out-across-a-mixed-fleet)
-has the whole procedure.
+Each expires with its session. Deleting them sooner is step 2 of the
+coordinated upgrade in
+[Upgrading from v0.16.0](../../docs/upgrading-from-v0.16.0.md#rolling-out-across-a-mixed-fleet);
+never delete the refresh-token family records (`rtfam:*`). A v0.16.0 session
+has no lifecycle record and reads as closed, so its user signs in again, and
+a v0.16.0 refresh token bound to it is refused.
 
 ## Contract tests
 
