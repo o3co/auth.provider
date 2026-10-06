@@ -119,8 +119,9 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 		throw new Error(
 			"oauth-session: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
 				"user-session store is wired, core's session lifecycle is required: the session " +
-				"grant's admission reads the session's lifecycle record through it. Install " +
-				"sessionLifecycleModule from @o3co/auth-provider-core beside the session stores.",
+				"grant's admission reads the session's lifecycle record through it. Wire core's " +
+				"session lifecycle: a session-store module that fills sessionLifecycleStore " +
+				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
 		);
 	}
 	// What admission reads for this grant: the module's own slots as wired,

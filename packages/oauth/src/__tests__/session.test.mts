@@ -107,7 +107,7 @@ describe("createSessionGrant — where a user-session store is wired, core's ses
 		expect(() =>
 			createSessionGrant(makeDeps({ userSessionStore: createInMemoryUserSessionStore() })),
 		).toThrow(
-			/^oauth-session: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Install sessionLifecycleModule/,
+			/^oauth-session: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 
