@@ -22,6 +22,7 @@ import {
 	type AppConfig,
 	BootError,
 	createApp,
+	defineModule,
 	type Module,
 	moduleReferences,
 	resolveAccessTokenLifetime,
@@ -30,7 +31,7 @@ import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 import { federationGrantsModule } from "@o3co/auth-provider-federation-grants";
 import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
-import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
+import { type OAuthSection, oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
@@ -311,7 +312,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
  */
 const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 	OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS:
-		"#330 tombstone — any value must fail boot, refused as a removed key",
+		"the variable of a removed key, and only captured — any value fails boot",
 	DEPLOYMENT_MODE:
 		"renamed CORE_DEPLOYMENT_MODE, and only captured — set alone, or to another value, it fails boot",
 	MEMORY_RATE_LIMITER_MAX_BUCKETS:
@@ -621,6 +622,17 @@ const documentedOidcUpstream = (): Promise<FakeIdp> => {
  * suite asks about, and each key it reads is one core's schema declares, or
  * the section of a module it loads.
  */
+/**
+ * The oauth module's section, read without its factories: the template always
+ * loads the module, and core refuses keys of `oauth {}` where no loaded
+ * module's section is `oauth`. What refuses `oauth {}` here is the module's
+ * own section — its schema, its removed keys and variables.
+ */
+const oauthSectionReader = defineModule({
+	name: oauthEndpointsModule.name,
+	...(oauthEndpointsModule.section === undefined ? {} : { section: oauthEndpointsModule.section }),
+});
+
 async function bootDispatched(
 	env: Record<string, string>,
 	configEnv = "production",
@@ -635,6 +647,7 @@ async function bootDispatched(
 		modules: [
 			recordingDispatch(googleFederationTypeModule(), dispatched),
 			recordingDispatch(oidcFederationTypeModule({ fetch: upstream.fetch }), dispatched),
+			oauthSectionReader,
 			...modules,
 		],
 		bootstrapComponents: {
@@ -697,13 +710,10 @@ function httpSectionOf(config: AppConfig): {
 }
 
 /** `oauth {}` as the oauth module's own schema parses it. */
-function oauthSection(config: AppConfig): {
-	readonly consentPage?: { readonly url: string };
-	readonly clientIdMetadataDocuments?: Readonly<Record<string, unknown>>;
-} {
+function oauthSection(config: AppConfig): OAuthSection {
 	const schema = oauthEndpointsModule.section?.schema;
 	if (schema === undefined) throw new Error("the oauth module declares no section");
-	return schema.parse(config.oauth) as ReturnType<typeof oauthSection>;
+	return schema.parse(config.oauth) as OAuthSection;
 }
 
 /** Every `${?VAR}` in a HOCON layer, ignoring commented-out lines. */
@@ -765,9 +775,9 @@ describe("the shipped config boots with every documented override supplied as a 
 		// Each of these arrives from HOCON as a string. A leftover string is
 		// not a cosmetic defect: `=== true` is how the runtime reads them.
 		expect(sessionStoreSection(config).secure).toBe(false);
-		expect(config.oauth.jwt.legacyTypAccept).toBe(true);
-		expect(config.oauth.requireEmailVerified).toBe(true);
-		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
+		expect(oauthSection(config).jwt.legacyTypAccept).toBe(true);
+		expect(oauthSection(config).requireEmailVerified).toBe(true);
+		expect(oauthSection(config).resourceIndicator?.enabled).toBe(true);
 		expect(config.core?.federations?.google?.enabled).toBe(true);
 		expect(config.core?.federations?.oidc?.enabled).toBe(true);
 		// A leftover string here would be read as "on" by a truthiness check
@@ -786,15 +796,15 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.core?.federations?.google?.accessType).toBe("online");
 		// The new default wins over the deprecated variable, and the parsed
 		// config mirrors it onto the old key for readers that predate the split.
-		expect(resolveAccessTokenLifetime(config)).toEqual({
+		expect(resolveAccessTokenLifetime({ oauth: oauthSection(config) })).toEqual({
 			defaultExpiresIn: 900,
 			maxExpiresIn: 7200,
 		});
-		expect(config.oauth.accessToken.expiresIn).toBe(900);
-		expect(config.oauth.refreshToken.expiresIn).toBe(86400);
+		expect(oauthSection(config).accessToken.expiresIn).toBe(900);
+		expect(oauthSection(config).refreshToken.expiresIn).toBe(86400);
 		expect(sessionStoreSection(config).maxAge).toBe(3600000);
 		expect(sessionSection(config).csrf?.ttlSeconds).toBe(7200);
-		expect(config.oauth.nonce?.maxLength).toBe(256);
+		expect(oauthSection(config).nonce?.maxLength).toBe(256);
 		expect(readShippedSwitches(DOCUMENTED_ENV).adapters.consentStore).toBe("redis");
 		// A Redis store's section, which its module (not loaded here) parses.
 		const sections = config as unknown as Record<string, { keyPrefix?: unknown } | undefined>;
@@ -1048,8 +1058,8 @@ describe("the shipped config boots with every documented override supplied as a 
 	it("parses the environment the umbrella E2E boots, with SESSION_STORE_SECURE=false as a string", async () => {
 		const config = await bootParsed(UMBRELLA_E2E_ENV);
 		expect(sessionStoreSection(config).secure).toBe(false);
-		expect(config.oauth.requireEmailVerified).toBe(true);
-		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
+		expect(oauthSection(config).requireEmailVerified).toBe(true);
+		expect(oauthSection(config).resourceIndicator?.enabled).toBe(true);
 		expect(config.core?.deployment?.mode).toBe("multi");
 	});
 
@@ -1104,7 +1114,7 @@ describe("the shipped config boots with every documented override supplied as a 
 					...DOCUMENTED_ENV,
 					OAUTH_JWT_LEGACY_TYP_ACCEPT: supplied,
 				});
-				expect(config.oauth.jwt.legacyTypAccept).toBe(expected);
+				expect(oauthSection(config).jwt.legacyTypAccept).toBe(expected);
 			});
 		}
 
@@ -1168,13 +1178,13 @@ describe("the shipped config boots with every documented override supplied as a 
 	});
 
 	describe("variables whose documented behaviour is to fail boot", () => {
-		it("refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS, naming allowUnmarkedClients", async () => {
-			await expect(
-				bootParsed({
-					...DOCUMENTED_ENV,
-					OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "true",
-				}),
-			).rejects.toThrow(/allowUnmarkedClients/);
+		it("refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS as the variable of a removed key, naming allowUnmarkedClients", async () => {
+			const booting = bootParsed({
+				...DOCUMENTED_ENV,
+				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "true",
+			});
+			await expect(booting).rejects.toMatchObject({ reason: "environment-variable-renamed" });
+			await expect(booting).rejects.toThrow(/oauth\.authorize\.allowUnmarkedClients/);
 		});
 
 		it("refuses an access-token default above the max, naming both keys", async () => {
@@ -1193,7 +1203,9 @@ describe("the shipped config boots with every documented override supplied as a 
 			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
 		]) {
 			it(`refuses an empty ${name} rather than minting already-expired tokens`, async () => {
-				await expect(bootParsed({ ...DOCUMENTED_ENV, [name]: "" })).rejects.toThrow();
+				await expect(bootParsed({ ...DOCUMENTED_ENV, [name]: "" })).rejects.toMatchObject({
+					reason: "config-validation-failed",
+				});
 			});
 		}
 

@@ -46,17 +46,11 @@ export { oauthSectionSchema };
  * token lacking `jti` or `family_id` while family rotation is wired is always
  * refused), `oauth.refreshToken.legacyTokenCompat` (no v0.4.x refresh-token
  * shape is accepted) and `oauth.authorize.allowUnmarkedClients` (`/authorize`
- * refuses every client not marked `firstParty: true`); and
+ * refuses every client not marked `firstParty: true`), whose variable,
+ * `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, refuses boot exported at all; and
  * `ENDPOINTS_CONSENT_URL` and the Client ID Metadata Documents' `OAUTH_CIMD_*`
  * variables renamed after their paths (`OAUTH_CONSENT_PAGE_URL`,
  * `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`).
- *
- * `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` is not declared renamed here while
- * core's own `reference.conf` binds it at `oauth.authorize.allowUnmarkedClients`:
- * a variable declared renamed may be bound nowhere but its capture. Core's
- * binding writes an exported value at that removed path, which this section's
- * relocation refuses. The declaration replaces that binding when core's
- * `reference.conf` stops setting `oauth {}`.
  */
 const SECTION = {
 	schema: oauthSectionSchema,
@@ -81,6 +75,7 @@ const SECTION = {
 		OAUTH_CIMD_STALE_IF_ERROR_MS: "oauth.clientIdMetadataDocuments.staleIfErrorMs",
 		OAUTH_CIMD_NEGATIVE_CACHE_MS: "oauth.clientIdMetadataDocuments.negativeCacheMs",
 		OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "oauth.clientIdMetadataDocuments.maxConcurrentFetches",
+		OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "oauth.authorize.allowUnmarkedClients",
 	},
 } as const;
 

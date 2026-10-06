@@ -17,39 +17,33 @@
 /**
  * The one way a removed or relocated config key fails boot.
  *
- * Zod strips unknown keys before `superRefine` sees them, so a stale config
- * line would be ignored silently while looking load-bearing. A removed key is
- * therefore detected on the raw input (`z.preprocess`) and fails boot naming the
- * key, the release that removed it, and what to do. `docs/release-policy.md`
- * §"Retiring a config key" decides between this and warn-and-ignore
- * (`INERT_PKCE_KEYS` in `@o3co/auth-provider-oauth`, for keys whose ignored
- * value leaves behavior strictly stronger).
- *
- * A relocated path fails the same way, in the same words: a module declares
- * where its section moved from (`section.relocatedFrom`), and boot refuses a
- * configuration still setting a key there (`config-path-relocated`), naming the
- * new path and its environment variable. Boot reads the rows off the loaded
- * modules' manifests, since an old path may sit in no section any of them
- * parses. A variable renamed with the move is declared beside them
+ * Zod strips unknown keys before `superRefine` sees them, and a strict
+ * section refuses one only as a key it does not declare, so a stale config
+ * line needs a refusal that says what became of it. The module that owns the
+ * path declares it (`section.relocatedFrom`): a map entry to a new path for a
+ * key that moved, to `null` for a key removed. Boot refuses a configuration
+ * still setting a key there (`config-path-relocated`), before any section is
+ * parsed, naming the new path and its environment variable, or that the key
+ * was removed. Boot reads the rows off the loaded modules' manifests, since an
+ * old path may sit in no section any of them parses. A variable renamed with
+ * the move, or bound to a removed key, is declared beside them
  * (`section.renamedVariables`) and captured by the declaring package's
  * `reference.conf` (`RENAMED_VARIABLES_SECTION`): while the resolution saw its
- * old name set, boot refuses unless it saw the new name set to the same string
- * (`environment-variable-renamed`). Both refusals are removed at the first
- * major release; `relocatedPaths.drift.test.mts` fails the cut that forgets.
+ * old name set, boot refuses unless it saw the new name set to the same
+ * string, and always for a removed key's (`environment-variable-renamed`).
+ * Both refusals are removed at the first major release;
+ * `relocatedPaths.drift.test.mts` fails the cut that forgets.
+ * `docs/release-policy.md` §"Retiring a config key" decides between a removal
+ * and warn-and-ignore (`INERT_PKCE_KEYS` in `@o3co/auth-provider-oauth`, for
+ * keys whose ignored value leaves behavior strictly stronger).
  *
  * A top-level section core reads none of is refused in the same words
  * (`unreadSectionMessage`), by whoever owns what the section used to set.
  *
- * `z.preprocess` compiles to a pipe the `@o3co/ts.hocon` zod bridge does not
- * descend into, so every field under a wrapped section must coerce on its own
- * (`coerceBooleanFromEnv`, `wholeNumberFromEnv`).
- *
  * Not for a value removed from a live enum (Zod's error names the accepted
- * values) or a key reshaped in place (`LEGACY_JWT_FIELDS`, whose message is a
- * migration pointer).
+ * values).
  */
 
-import { z } from "zod";
 import { environmentVariableFor } from "./environment-variable.mjs";
 
 /**
@@ -59,55 +53,6 @@ import { environmentVariableFor } from "./environment-variable.mjs";
  */
 function goneKeyMessage(path: string, whatBecameOfIt: string, remedy: string): string {
 	return `${path} ${whatBecameOfIt}; see CHANGELOG. ${remedy}`;
-}
-
-/** One removed key: what to tell the operator still setting it. */
-export interface RemovedKey {
-	/** The key as it appeared under the section (`legacyTokenCompat`). */
-	readonly name: string;
-	/**
-	 * The release that removed it, with a phase or PR marker
-	 * (`v0.6.0 (Phase G / M4)`). Per docs/release-policy.md R5, the tag is
-	 * filled in at release-cut time.
-	 */
-	readonly removedIn: string;
-	/** What replaced it / what the operator does instead. Full sentences. */
-	readonly note: string;
-}
-
-/**
- * Wraps `schema` so that any key in `removed` still present on the RAW
- * input fails parse with a targeted, operator-facing message — instead of
- * being stripped silently by Zod's unknown-key handling.
- *
- * `sectionPath` is the config path the operator writes (`oauth.refreshToken`);
- * it prefixes the key in the message so the boot error names the exact line
- * to delete. Every removed key present is reported, not just the first.
- */
-export function withRemovedKeys<S extends z.ZodTypeAny>(
-	sectionPath: string,
-	removed: readonly RemovedKey[],
-	schema: S,
-) {
-	return z.preprocess((raw, ctx) => {
-		if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-			const rawObj = raw as Record<string, unknown>;
-			for (const entry of removed) {
-				if (entry.name in rawObj) {
-					ctx.addIssue({
-						code: z.ZodIssueCode.custom,
-						message: goneKeyMessage(
-							`${sectionPath}.${entry.name}`,
-							`was removed in ${entry.removedIn}`,
-							`${entry.note} Remove this field from your config.`,
-						),
-						path: [entry.name],
-					});
-				}
-			}
-		}
-		return raw;
-	}, schema);
 }
 
 /**

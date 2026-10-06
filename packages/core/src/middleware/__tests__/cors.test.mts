@@ -58,7 +58,11 @@ function buildApp(
 	const app = express();
 	const mw = corsMw({
 		allowedOrigins,
-		routes: browserFacingCorsRoutes({}, jwksPath === null ? {} : { jwksPath }),
+		// On a root issuer, so the discovery documents are among the guarded paths.
+		routes: browserFacingCorsRoutes(
+			{ oauth: { jwt: { issuer: "https://auth.test" } } },
+			jwksPath === null ? {} : { jwksPath },
+		),
 		...(logger ? { logger: logger as never } : {}),
 	});
 	if (mw !== null) app.use(mw);
@@ -428,8 +432,13 @@ describe("browserFacingCorsRoutes — discovery paths follow the issuer", () => 
 			.map((r) => r.path)
 			.filter((path) => path.includes("/.well-known/"));
 
+	it("guards no discovery path without an issuer: no discovery document is served then", () => {
+		expect(wellKnown({})).toEqual(["/.well-known/jwks.json"]);
+		expect(wellKnown({ oauth: { jwt: { issuer: 42 } } })).toEqual(["/.well-known/jwks.json"]);
+	});
+
 	it("guards the RFC 8414 form beside the OIDC one, and for a path-bearing issuer the inserted and appended forms", () => {
-		expect(wellKnown({})).toEqual(
+		expect(wellKnown({ oauth: { jwt: { issuer: "https://auth.test" } } })).toEqual(
 			expect.arrayContaining([
 				"/.well-known/openid-configuration",
 				"/.well-known/oauth-authorization-server",

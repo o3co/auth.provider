@@ -336,7 +336,7 @@ describe("cors, which core does not read", () => {
 		expect(err.message).not.toContain("https://app.example");
 	});
 
-	it("refuses a cors section whose read throws, in the same words, as a refusal rather than the throw", async () => {
+	it("refuses a cors section whose read throws, as a refusal rather than the throw", async () => {
 		const cors = {};
 		Object.defineProperty(cors, "allowedOrigins", {
 			enumerable: true,
@@ -347,8 +347,10 @@ describe("cors, which core does not read", () => {
 		const config = { ...resolved({}), cors };
 		const err = await refusal(createApp({ modules: [], bootstrapComponents: bootstrap(config) }));
 
+		// Refused where stage 1 copies the configuration, before any check
+		// reads it, naming where.
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toContain("cors is no longer read by core");
+		expect(err.message).toContain("the configuration at .cors.allowedOrigins is not plain data");
 		expect(err.message).not.toContain("cors-getter-7f1a");
 	});
 

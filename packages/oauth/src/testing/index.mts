@@ -52,11 +52,11 @@ const copyAcrValues = (
 
 /**
  * The `oauth` section, as a configuration fragment to lay over a
- * configuration: the keys core's schema still declares (`jwt`, `accessToken`,
- * `refreshToken` and the rest) from core's testing builder, and this
- * package's own keys (`consentPage`, `clientIdMetadataDocuments`) at
- * `config/reference.conf`'s defaults, with `options` laid over them. A fresh
- * object each call.
+ * configuration: the keys core's testing builder carries (`jwt`,
+ * `accessToken`, `refreshToken`, `revocation`: the ones core reads), and this
+ * package's own required and page keys (`oidcMode`, `consentPage`,
+ * `clientIdMetadataDocuments`) at `config/reference.conf`'s defaults, with
+ * `options` laid over them. A fresh object each call.
  */
 export function oauthConfigForTests(options: OAuthConfigForTestsOptions = {}) {
 	const { oauth } = makeValidCoreConfig();
@@ -82,6 +82,7 @@ export function oauthConfigForTests(options: OAuthConfigForTestsOptions = {}) {
 			...(options.acrValues === undefined
 				? {}
 				: { authorize: { acrValues: copyAcrValues(options.acrValues) } }),
+			oidcMode: "oidc-required",
 			consentPage: { url: "/consent" },
 			clientIdMetadataDocuments: { enabled: false },
 		},

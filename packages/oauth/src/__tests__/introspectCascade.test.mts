@@ -26,12 +26,7 @@ import {
 	memoryAccessTokenDenylistModule,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
-import {
-	createTestApp,
-	GrantRegistry,
-	makeValidAppConfig,
-	resolverForTests,
-} from "@o3co/auth-provider-core/testing";
+import { createTestApp, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -39,6 +34,7 @@ import { describe, expect, it, vi } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { appConfigWithOAuthModule } from "./_helpers/oauthModuleConfig.mjs";
 import { routerInputsOf, withOauthCaptures } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -438,7 +434,7 @@ describe("oauthEndpointsModule — refreshTokenFamilyRevocation composition via 
 			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
 
-		const base = makeValidAppConfig();
+		const base = appConfigWithOAuthModule();
 		const config = {
 			...base,
 			oauth: {

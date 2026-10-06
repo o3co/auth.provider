@@ -16,13 +16,11 @@
 
 /**
  * The defaults of `oauth {}` and the environment variables bound to its keys
- * live in this package's `config/reference.conf`, read by the module's schema.
- * Core's `reference.conf` still sets most of the same paths, to the same values
- * and with the same variables, until core stops declaring `oauth {}`: every
- * path it sets is held equal here, so the order a composition layers them in
- * decides nothing. Core's alone keeps the tombstone of a key it retired.
- * Neither sets a refresh-token family policy key under `oauth {}`: the
- * unknown-family policy is the oauth-authorization module's.
+ * live in this package's `config/reference.conf` alone, read by the module's
+ * schema: core's `reference.conf` sets no `oauth {}`. The variable of a key the
+ * module removed is bound nowhere but its capture in `renamed-variables`. No
+ * refresh-token family policy key is set under `oauth {}`: the unknown-family
+ * policy is the oauth-authorization module's.
  */
 
 import { readFileSync } from "node:fs";
@@ -77,14 +75,6 @@ const isSection = (value: unknown): value is Record<string, unknown> =>
 	!Array.isArray(value) &&
 	Object.keys(value).length > 0;
 
-/** Every leaf of `tree` as `[path, value]`; an empty table is a leaf. */
-function leavesOf(tree: Record<string, unknown>, prefix = ""): [string, unknown][] {
-	return Object.entries(tree).flatMap(([key, value]): [string, unknown][] => {
-		const path = prefix === "" ? key : `${prefix}.${key}`;
-		return isSection(value) ? leavesOf(value, path) : [[path, value]];
-	});
-}
-
 /** The value at a dotted `path` of `tree`, or `undefined`. */
 const valueAt = (tree: unknown, path: string): unknown =>
 	path.split(".").reduce<unknown>((node, key) => (isSection(node) ? node[key] : undefined), tree);
@@ -116,38 +106,47 @@ describe("the package's reference binds every variable of oauth {} at its path",
 		).toEqual(["OAUTH_REFRESH_TOKEN_EXPIRES_IN at oauth.refreshToken.expiresIn"]);
 	});
 
-	it("binds every variable core's reference binds under oauth {}, at the same path, but core's tombstone", () => {
-		// Core keeps the substitution that writes a still-exported variable of a
-		// retired key at its removed path, which the module refuses.
-		const tombstone =
-			"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS at oauth.authorize.allowUnmarkedClients";
-		const core = oauthBindings(CORE_REFERENCE);
-		expect(core).toContain(tombstone);
-		expect(core.length).toBeGreaterThanOrEqual(14);
-		expect(oauthBindings(REFERENCE)).toEqual(
-			expect.arrayContaining(core.filter((binding) => binding !== tombstone)),
+	it("is the one reference that sets oauth {}: core's sets and binds nothing there", () => {
+		const env = {
+			OAUTH_JWT_ISSUER: "https://auth.test",
+			OAUTH_REVOCATION_SUBJECT: "unsupported",
+			OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
+		};
+		expect((parseFile(CORE_REFERENCE, { env }).toObject() as { oauth?: unknown }).oauth).toBe(
+			undefined,
 		);
-		expect(oauthBindings(REFERENCE)).not.toContain(tombstone);
+		expect(oauthBindings(CORE_REFERENCE)).toEqual([]);
 	});
 
-	it("sets every default core's reference sets under oauth {}, leaf by leaf, to the same value", () => {
-		for (const env of [{}, { OAUTH_JWT_ISSUER: "https://auth.test" }] as Record<string, string>[]) {
-			const core = leavesOf(oauthOf(CORE_REFERENCE, env));
-			const own = oauthOf(REFERENCE, env);
-			expect(core.length).toBeGreaterThan(0);
-			expect(Object.fromEntries(core.map(([path]) => [path, valueAt(own, path)]))).toEqual(
-				Object.fromEntries(core),
-			);
-		}
-	});
-
-	it("sets nothing under oauth {} core's does not, but the consent page and the Client ID Metadata Documents", () => {
-		const core = Object.keys(oauthOf(CORE_REFERENCE));
+	it("binds OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS at no path under oauth {}: the key is removed", () => {
 		expect(
-			Object.keys(oauthOf(REFERENCE))
-				.filter((key) => !core.includes(key))
-				.sort(),
-		).toEqual(["clientIdMetadataDocuments", "consentPage"]);
+			oauthBindings(REFERENCE).filter((binding) =>
+				binding.startsWith("OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS "),
+			),
+		).toEqual([]);
+		expect(
+			valueAt(
+				oauthOf(REFERENCE, { OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "true" }),
+				"authorize.allowUnmarkedClients",
+			),
+		).toBeUndefined();
+	});
+
+	it("sets a default for each key of oauth {} the module reads", () => {
+		expect(Object.keys(oauthOf(REFERENCE)).sort()).toEqual([
+			"accessToken",
+			"authorize",
+			"clientIdMetadataDocuments",
+			"consentPage",
+			"jwt",
+			"nonce",
+			"oidcMode",
+			"refreshToken",
+			"requireEmailVerified",
+			"requireGrantTypeAllowlist",
+			"resourceIndicator",
+			"revocation",
+		]);
 	});
 });
 

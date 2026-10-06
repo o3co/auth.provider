@@ -23,23 +23,16 @@
  * package's `config/reference.conf`, not here, and each leaf reads the string
  * an environment variable carries.
  *
- * Core's schema declares the same keys, with the same rules and messages,
- * until it stops declaring `oauth {}`, and two more it keeps optional:
- * `oauth.refreshToken.unknownFamilyPolicy`, which moved to the
- * oauth-authorization module's section, and `oauth.refreshToken.legacyRtPolicy`,
- * which this module refuses as removed. Boot parses the section with core's
- * first. The module refuses its removed keys (`legacyRtPolicy`,
+ * Core declares none of these keys: its schema declares `core` alone, and the
+ * section's defaults and variables are this package's alone. The module
+ * refuses its removed keys (`oauth.refreshToken.legacyRtPolicy`,
  * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`)
- * before either schema parses, from its manifest's `relocatedFrom`. Core alone
- * holds the rest of what it retired from the section: `oauth.jwt`'s flat key
- * fields, which it refuses naming what became of them, and the paths other
- * modules' sections moved from (`oauth.grants`,
- * `oauth.dpop`, `oauth.jwt.signingKey`, …). A key set under one of those
- * paths refuses boot naming its new path, before any section is parsed, while
- * a loaded module declares that it moved there; otherwise this section refuses
- * it as a key it does not declare. Here a moved path may only be an empty
- * object or null, which set nothing, and a retired key is a key this section
- * does not declare.
+ * before the schema parses, from its manifest's `relocatedFrom`, and so do the
+ * modules other sections moved to for the paths they moved from
+ * (`oauth.grants`, `oauth.dpop`, `oauth.jwt.signingKey`, …), while loaded.
+ * Here a moved path may only be an empty object or null, which set nothing,
+ * and a retired key — `oauth.jwt`'s flat key fields among them — is a key
+ * this section does not declare.
  */
 
 import {

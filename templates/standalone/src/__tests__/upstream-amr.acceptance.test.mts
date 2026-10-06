@@ -42,6 +42,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { federationTypeForTests } from "@o3co/auth-provider-core/testing";
+import type { OAuthSection } from "@o3co/auth-provider-oauth";
 import { parseFile } from "@o3co/ts.hocon";
 import express from "express";
 import request from "supertest";
@@ -114,9 +115,9 @@ function resolveConfig(trustUpstreamAmr: boolean | undefined): BothPhases {
 			},
 		},
 		oauth: {
-			...shipped.oauth,
+			...(shipped.oauth as OAuthSection),
 			authorize: {
-				...shipped.oauth.authorize,
+				...(shipped.oauth as OAuthSection).authorize,
 				acrValues: { [MFA_ACR]: ["mfa"], [FED_ACR]: ["fed"] },
 			},
 		},

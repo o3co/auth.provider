@@ -15,71 +15,14 @@
  */
 
 /**
- * `withRemovedKeys`: the one way a removed config key dies loudly.
- *
- * Zod's default object behavior strips unknown keys before refinement sees
- * them, so an operator's stale config line would be silently ignored on
- * upgrade. This suite is the helper's contract.
+ * The relocated-path refusals: what a configuration value sets
+ * (`pathsSetBy`), the keys a configuration still sets at a path a module
+ * moved or removed (`findRelocatedKeys`), the words a moved or removed key is
+ * refused in, and the variable a path is bound to.
  */
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import { environmentVariableFor } from "#/config/environment-variable.mjs";
-import {
-	findRelocatedKeys,
-	pathsSetBy,
-	type RemovedKey,
-	relocatedKeyMessage,
-	withRemovedKeys,
-} from "#/config/removed-keys.mjs";
-
-const REMOVED: readonly RemovedKey[] = [
-	{
-		name: "oldFlag",
-		removedIn: "v9.9.9 (test)",
-		note: "It stopped meaning anything.",
-	},
-	{
-		name: "otherFlag",
-		removedIn: "v9.9.8 (test)",
-		note: "Superseded by newFlag.",
-	},
-];
-
-const schema = withRemovedKeys("test.section", REMOVED, z.object({ kept: z.string() }));
-
-describe("withRemovedKeys", () => {
-	it("passes a config that no longer sets any removed key", () => {
-		expect(schema.parse({ kept: "value" })).toEqual({ kept: "value" });
-	});
-
-	it("refuses a config still setting a removed key, naming key, release, and note", () => {
-		const result = schema.safeParse({ kept: "value", oldFlag: true });
-		expect(result.success).toBe(false);
-		const issue = result.success ? undefined : result.error.issues[0];
-		// The operator-facing shape: "<section>.<key> was removed in
-		// <release>; see CHANGELOG. <note> Remove this field from your config."
-		expect(issue?.message).toContain("test.section.oldFlag was removed in v9.9.9 (test)");
-		expect(issue?.message).toContain("see CHANGELOG");
-		expect(issue?.message).toContain("It stopped meaning anything.");
-		expect(issue?.message).toContain("Remove this field from your config.");
-		expect(issue?.path).toEqual(["oldFlag"]);
-	});
-
-	it("reports every removed key present, not just the first", () => {
-		const result = schema.safeParse({ kept: "value", oldFlag: 1, otherFlag: "x" });
-		expect(result.success).toBe(false);
-		const messages = result.success ? [] : result.error.issues.map((i) => i.message).join("\n");
-		expect(messages).toContain("oldFlag");
-		expect(messages).toContain("otherFlag");
-	});
-
-	it("leaves non-object input to the wrapped schema's own error", () => {
-		// The detection must not crash on scalars/arrays; the wrapped schema
-		// reports the type mismatch.
-		expect(schema.safeParse("nonsense").success).toBe(false);
-		expect(schema.safeParse([1, 2]).success).toBe(false);
-	});
-});
+import { findRelocatedKeys, pathsSetBy, relocatedKeyMessage } from "#/config/removed-keys.mjs";
 
 describe("pathsSetBy — what a configuration value sets", () => {
 	const set = (value: unknown) => pathsSetBy(value, ["at"]).map((path) => path.join("."));

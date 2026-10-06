@@ -4,19 +4,19 @@ import { describe, expect, it } from "vitest";
 import { CoreConfigSchema } from "#/config/application.schema.mjs";
 
 describe("provider config", () => {
-	it("loads and validates reference.conf with required env vars", () => {
+	it("loads and validates reference.conf with no variable set", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_ISSUER: "https://auth.test",
-			},
+			env: {},
 		});
-		const config = validate(raw, CoreConfigSchema);
+		validate(raw, CoreConfigSchema);
 
 		// The signing key, the log level, the HTTP settings, the Redis stores'
 		// settings and the session's are the sections of the modules that own
 		// them, with their defaults in those modules' package: core ships none.
+		// `oauth {}` is the oauth module's, its defaults in the oauth package's
+		// reference: core sets none of it.
 		const sections = raw.toObject() as Record<string, unknown>;
-		expect(config.oauth.jwt.signingKey).toBeUndefined();
+		expect(sections.oauth).toBeUndefined();
 		expect(sections["key-store"]).toBeUndefined();
 		expect(sections.logging).toBeUndefined();
 		expect(sections.http).toBeUndefined();
@@ -40,74 +40,44 @@ describe("provider config", () => {
 		]) {
 			expect(sections[section], section).toBeUndefined();
 		}
-		expect((sections.oauth as Record<string, unknown>).code).toBeUndefined();
 		expect(sections["redis-session-stores"]).toBeUndefined();
-		expect(config.oauth.oidcMode).toBe("oidc-required");
 		expect(sections.session).toBeUndefined();
 		expect(sections["session-store"]).toBeUndefined();
 	});
 
-	it("fails validation when required fields are missing", () => {
-		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {},
-		});
-		expect(() => validate(raw, CoreConfigSchema)).toThrow();
-	});
-
-	it("fails loudly when the removed OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS is still set", () => {
-		// The one-time migration flag for the /authorize first-party
-		// invariant is removed. reference.conf deliberately keeps the
-		// env-var substitution as a tombstone, so a deployment still exporting
-		// the variable fails at boot with migration instructions instead of
-		// having the value silently ignored. The value is irrelevant —
-		// presence is the failure (even "false", the strict setting, must be
-		// deleted).
+	it("binds none of the oauth module's variables", () => {
+		// An exported OAUTH_* variable reaches oauth {} only through the oauth
+		// package's reference, layered when one of its modules is loaded.
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
+				OAUTH_OIDC_MODE: "dual",
+				OAUTH_REVOCATION_SUBJECT: "unsupported",
 				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 			},
 		});
-		expect(() => validate(raw, CoreConfigSchema)).toThrow(/allowUnmarkedClients was removed/);
+		expect((raw.toObject() as Record<string, unknown>).oauth).toBeUndefined();
 	});
 
 	it("overrides defaults with env vars", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-				CLIENT_USER_BASE_URL: "http://localhost:8080",
-				CLIENT_APP_BASE_URL: "http://localhost:8080",
-				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
-				OAUTH_OIDC_MODE: "dual",
-			},
+			env: { CORE_TOKEN_BINDING_DISPATCH_POLICY: "strict-mutual-exclusion" },
 		});
 		const config = validate(raw, CoreConfigSchema);
 
-		expect(config.oauth.oidcMode).toBe("dual");
-		// core.federations.google.enabled env-var coercion is covered by the
-		// HOCON reference.conf wiring; schema-level boolean coercion for
-		// federation entries is tested in federations-schema.test.mts.
+		expect(config.core?.tokenBinding?.dispatchPolicy).toBe("strict-mutual-exclusion");
 	});
 
 	it("loads core-rate-limiter-memory.maxBuckets default and CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS", () => {
 		const path = new URL("../../config/reference.conf", import.meta.url).pathname;
 		// As written: the module's own section schema reads it.
 		const base = parseFile(path, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-			},
+			env: {},
 		}).toObject() as Record<string, unknown>;
 		expect(base["core-rate-limiter-memory"]).toMatchObject({ maxBuckets: 10_000 });
 
 		const overridden = parseFile(path, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-				CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "123",
-			},
+			env: { CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "123" },
 		}).toObject() as Record<string, unknown>;
 		expect(overridden["core-rate-limiter-memory"]).toMatchObject({ maxBuckets: "123" });
 	});

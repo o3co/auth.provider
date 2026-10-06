@@ -370,3 +370,75 @@ describe("core.sessionLifecycle", () => {
 		);
 	});
 });
+
+describe("sessionLifecycleModule over a configuration that resolves no refresh-token lifetime", () => {
+	// A composition loading no oauth-package module resolves no `oauth {}`:
+	// core's own reference sets none. The lifecycle then keeps a closing
+	// record for no time, which is sound only while nothing mints a refresh
+	// token the record would have to outlive. These pin that every
+	// composition that could mint one is refused first.
+
+	/** Core's valid configuration with no `oauth {}`. */
+	const withoutOAuth = () => {
+		const { oauth: _oauth, ...rest } = makeValidCoreConfig() as Record<string, unknown>;
+		return { ...rest, core: coreConfigForTests().core };
+	};
+
+	/** A family revocation of the host's own, which reads no configuration. */
+	const hostFamilyRevocation = defineModule({
+		name: "test-family-revocation",
+		provides: {
+			refreshTokenFamilyRevocation: () =>
+				({ revokeFamily: async () => undefined, isFamilyRevoked: async () => false }) as never,
+		},
+	});
+	const WITH_HOST_REVOCATION = [
+		...MODULES.filter((m) => m !== defaultRefreshTokenFamilyRevocationModule),
+		hostFamilyRevocation,
+	];
+
+	const bootOver = (modules: readonly Module[], components: Record<string, unknown> = {}) =>
+		createApp({
+			modules,
+			bootstrapComponents: {
+				config: withoutOAuth(),
+				pathResolver: (p: string) => p,
+				...components,
+			},
+		} as never);
+
+	it("refuses the default family revocation, which has no access-token lifetime to keep a revoked family for", async () => {
+		await expect(bootOver(MODULES)).rejects.toMatchObject({
+			reason: "provides-factory-failed",
+		});
+	});
+
+	it("refuses a host's oauthTokenSettings at stage 1, before the lifecycle reads the configuration", async () => {
+		await expect(
+			bootOver(WITH_HOST_REVOCATION, { oauthTokenSettings: createTestOAuthTokenSettings() }),
+		).rejects.toMatchObject({
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+		});
+	});
+
+	it("refuses a module's oauthTokenSettings as it is materialised", async () => {
+		const settingsProvider = defineModule({
+			name: "test-token-settings",
+			provides: { oauthTokenSettings: () => createTestOAuthTokenSettings() },
+			lifecycle: { oauthTokenSettings: { eager: true } },
+		});
+		await expect(bootOver([...WITH_HOST_REVOCATION, settingsProvider])).rejects.toMatchObject({
+			reason: "provides-factory-failed",
+			message: expect.stringContaining("oauth.accessToken"),
+		});
+	});
+
+	it("boots with no token settings at all: nothing in the composition mints a refresh token", async () => {
+		const handle = await bootOver(WITH_HOST_REVOCATION);
+		const lifecycle = (handle.components as Record<string, unknown>)
+			.sessionLifecycle as SessionLifecycle;
+		expect(await lifecycle.close("no-such-session", "expiry")).toMatchObject({ outcome: "done" });
+		await handle.dispose();
+	});
+});

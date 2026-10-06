@@ -179,20 +179,20 @@ describe("one composed parse over core's base", () => {
 	);
 
 	it("refuses a configuration a read of which throws, rather than letting the error escape", async () => {
-		// A hand-built configuration with a getter that throws: core's own parse
-		// reads it.
-		const nonce = {
-			get maxLength(): number {
-				throw new Error("the length getter broke");
+		// A hand-built configuration with a getter that throws: stage 1's copy of
+		// the configuration reads it, before any parse.
+		const deployment = {
+			get mode(): string {
+				throw new Error("the mode getter broke");
 			},
 		};
 		const err = await bootRefused(
 			[],
-			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce } }),
+			resolved({ core: { ...makeValidCoreConfig().core, deployment } }),
 		);
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/core's configuration schema threw instead of answering/);
-		expect(err.message).toMatch(/the length getter broke/);
+		expect(err.message).toContain("the configuration at .core.deployment.mode is not plain data");
+		expect(err.message).not.toMatch(/the mode getter broke/);
 	});
 
 	it("names the configuration itself when it is not an object, when core declares no renamed variable", () => {
@@ -220,34 +220,19 @@ describe("one composed parse over core's base", () => {
 		const err = await bootRefused(
 			[],
 			resolved({
-				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "not-a-number" } },
-				core: { ...makeValidCoreConfig().core, deployment: { mode: "loud" } },
+				core: {
+					...makeValidCoreConfig().core,
+					deployment: { mode: "loud" },
+					declaredAbsent: "auditSink",
+				},
 			}),
 		);
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/oauth\.nonce\.maxLength: /);
+		expect(err.message).toMatch(/core\.declaredAbsent: /);
 		expect(err.message).toMatch(/core\.deployment\.mode: /);
 	});
 
-	it("keeps a key no schema declares under a section core declares", async () => {
-		const config = await bootAndRead(
-			[],
-			resolved({ oauth: { ...makeValidCoreConfig().oauth, extra: "kept" } }),
-		);
-		expect((config.oauth as Record<string, unknown>).extra).toBe("kept");
-	});
-
-	it("hands a module's section the base's output where the base declares the section: an environment string arrives coerced", async () => {
-		const seen: Record<string, unknown> = {};
-		const config = await bootAndRead(
-			[sectioned("oauth", z.object({ nonce: z.object({ maxLength: z.number() }) }), seen)],
-			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } } }),
-		);
-		expect(seen.oauth).toEqual({ nonce: { maxLength: 128 } });
-		expect((config.oauth as { nonce?: unknown }).nonce).toEqual({ maxLength: 128 });
-	});
-
-	it("hands a module's section what was written where the base does not declare it: the module's own schema reads an environment string", async () => {
+	it("hands a module's section what was written, core's base declaring no module's section: the module's own schema reads an environment string", async () => {
 		const err = await bootRefused(
 			[sectioned("webauthn", z.object({ challengeTtlMs: z.number() }))],
 			resolved({ webauthn: { challengeTtlMs: "120000" } }),
@@ -264,9 +249,9 @@ describe("one composed parse over core's base", () => {
 		expect(config.webauthn).toEqual({ challengeTtlMs: 120000 });
 	});
 
-	it("reports only the base's refusals when the base refuses, not a module's section reading what the base would have coerced", async () => {
+	it("reports only the base's refusals when the base refuses: no module's section is parsed", async () => {
 		// Run over what was written, a section's schema would refuse the
-		// environment string the base reads as a number: an error nobody made.
+		// environment string: an error beside the one boot is refused for.
 		const err = await bootRefused(
 			[sectioned("oauth", z.object({ nonce: z.object({ maxLength: z.number() }) }))],
 			resolved({
@@ -353,6 +338,7 @@ describe("a module rewrites nothing outside its own section", () => {
 
 	it("writes a section naming the issuer, from a module not named oauth, under its own name", async () => {
 		const output = { oauth: { jwt: { issuer: "https://rewritten.example" } } };
+		const written = { jwt: { issuer: "https://auth.test" } };
 		const config = await bootAndRead(
 			[
 				sectioned(
@@ -360,10 +346,10 @@ describe("a module rewrites nothing outside its own section", () => {
 					z.unknown().transform(() => output),
 				),
 			],
-			multi(),
+			{ ...multi(), oauth: written },
 		);
 		expect(config["fixture-rewriting"]).toEqual(output);
-		expect((config.oauth as { jwt?: unknown }).jwt).toEqual(makeValidCoreConfig().oauth.jwt);
+		expect(config.oauth).toEqual(written);
 	});
 
 	it("still refuses a replica-unsafe module under multi when a section's output names single", async () => {
@@ -377,20 +363,6 @@ describe("a module rewrites nothing outside its own section", () => {
 });
 
 describe("a loaded module's section is never stripped", () => {
-	it("is written back at a section core's base also declares", async () => {
-		const seen: Record<string, unknown> = {};
-		const config = await bootAndRead(
-			[sectioned("oauth", z.object({ oidcMode: z.string() }), seen)],
-			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } } }),
-		);
-		expect(seen.oauth).toEqual({ oidcMode: makeValidCoreConfig().oauth.oidcMode });
-		expect(config.oauth).toMatchObject({
-			oidcMode: makeValidCoreConfig().oauth.oidcMode,
-			jwt: makeValidCoreConfig().oauth.jwt,
-			nonce: { maxLength: 128 },
-		});
-	});
-
 	it("is written back at a top-level path core does not declare", async () => {
 		const config = await bootAndRead(
 			[sectioned("fixture-section", RetrySection)],
@@ -527,11 +499,9 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 		).toEqual([[{ sections: ["listSection", "valueSection"] }, "config_sections_ignored"]]);
 	});
 
-	it("names the sections of a configuration handed as an object that is not plain data, by its own keys", async () => {
-		// Boot's parse takes an instance as the configuration; its own keys are
-		// the sections, and a key its prototype carries is not one.
-		// Validated without core's own renamed variables, whose captures an
-		// instance would carry as a section of its own.
+	it("refuses a configuration handed as an object that is not plain data, before any section is named", () => {
+		// Stage 1 copies the configuration as plain data before anything reads
+		// it: an instance, whose prototype could carry a section, is not.
 		const logger = recordingLogger();
 		const { "renamed-variables": _captures, ...plain } = resolved({
 			typoSection: { enabled: true },
@@ -540,18 +510,18 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 			Object.create({ inheritedSection: { enabled: true } }),
 			plain,
 		) as Record<string, unknown>;
-		validateManifests({
-			modules: [],
-			bootstrapComponents: {
-				config: instance,
-				pathResolver: (s: string) => s,
-				logger,
-			} as unknown as BootstrapMap,
-			core: {},
-		});
-		expect(
-			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
-		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);
+		expect(() =>
+			validateManifests({
+				modules: [],
+				bootstrapComponents: {
+					config: instance,
+					pathResolver: (s: string) => s,
+					logger,
+				} as unknown as BootstrapMap,
+				core: {},
+			}),
+		).toThrow(/the configuration is not plain data/);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("logs nothing when every section is owned", async () => {

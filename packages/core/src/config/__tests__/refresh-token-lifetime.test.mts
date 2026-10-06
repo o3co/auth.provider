@@ -16,16 +16,16 @@
 
 /**
  * `oauth.refreshToken.expiresIn` has one reader, `resolveRefreshTokenLifetime`,
- * and it holds the value to the rule the schema holds it to: a whole number of
- * seconds from 1 to a year. The schema only sees a loaded configuration; the
- * resolver is what a configuration built by hand meets, and every grant that
- * mints a refresh token reads through it when it is built.
+ * and it holds the value to the rule the oauth module's section schema holds it
+ * to (pinned beside each other in that package's section tests): a whole number
+ * of seconds from 1 to a year. The schema only sees a configuration that
+ * module's section parsed; the resolver is what any other configuration meets,
+ * and every grant that mints a refresh token reads through it when it is built.
  */
 
 import { describe, expect, it } from "vitest";
-import { CoreConfigSchema, resolveRefreshTokenLifetime } from "#/config/application.schema.mjs";
+import { resolveRefreshTokenLifetime } from "#/config/application.schema.mjs";
 import * as core from "#/index.mjs";
-import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 const withRefreshToken = (refreshToken: Record<string, unknown>) => ({ oauth: { refreshToken } });
 
@@ -58,20 +58,6 @@ describe("resolveRefreshTokenLifetime", () => {
 		for (const config of [withRefreshToken({}), { oauth: {} }]) {
 			expect(() => resolveRefreshTokenLifetime(config), JSON.stringify(config)).toThrow(
 				/oauth\.refreshToken\.expiresIn/,
-			);
-		}
-	});
-
-	it("refuses every number the schema refuses, so a hand-built configuration meets the same rule", () => {
-		for (const expiresIn of [0, -1, 1.5, Number.NaN, 31_536_001]) {
-			const base = makeValidCoreConfig();
-			const parsed = CoreConfigSchema.safeParse({
-				...base,
-				oauth: { ...base.oauth, refreshToken: { ...base.oauth.refreshToken, expiresIn } },
-			});
-			expect(parsed.success, String(expiresIn)).toBe(false);
-			expect(() => resolveRefreshTokenLifetime(withRefreshToken({ expiresIn }))).toThrow(
-				RangeError,
 			);
 		}
 	});

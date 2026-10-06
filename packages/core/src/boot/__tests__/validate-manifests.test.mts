@@ -834,16 +834,15 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 
 	it("CoreConfigSchema is enforced even when no module declares a section", () => {
 		// With no module declaring a section, CoreConfigSchema is still
-		// parsed: a config missing the required `oauth` object must throw
-		// `config-validation-failed`.
+		// parsed: a config writing a key core's strict section does not declare
+		// must throw `config-validation-failed`.
 		const noSchema = defineModule({ name: "no-schema" });
 		try {
 			validateManifests({
 				modules: [noSchema],
 				bootstrapComponents: {
-					// missing required `oauth`
 					config: {
-						http: {},
+						core: { unexpected: true },
 						"renamed-variables": minCoreConfig["renamed-variables"],
 					} as never,
 					pathResolver: minBootstrap.pathResolver,

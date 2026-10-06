@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+/**
+ * Core's application fixture for a composition that loads the oauth module:
+ * core's fixture carries only the keys of `oauth {}` core reads, and refuses
+ * any other where the module is not loaded, so the module's own required key,
+ * `oidcMode`, is added here, at `config/reference.conf`'s default.
+ */
 
-describe("library reference.conf subpath resolution", () => {
-	it("resolves @o3co/auth-provider-core/reference.conf to a readable file", () => {
-		const url = import.meta.resolve("@o3co/auth-provider-core/reference.conf");
-		const path = fileURLToPath(url);
-		expect(existsSync(path)).toBe(true);
-		const content = readFileSync(path, "utf-8");
-		expect(content).toMatch(/^core\s*\{/m); // sanity: HOCON content, core's own section
-	});
-});
+import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+
+export function appConfigWithOAuthModule() {
+	const config = makeValidAppConfig();
+	return { ...config, oauth: { ...config.oauth, oidcMode: "oidc-required" as const } };
+}

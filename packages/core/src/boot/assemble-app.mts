@@ -568,7 +568,7 @@ export function assembleApp(
 		// The oauth module's `oauthTokenSettings` when the composition holds it,
 		// otherwise the configuration's issuer. The planner validates what it
 		// is handed.
-		issuer: compositionIssuer(frozen.components as Record<string, unknown>) as string | undefined,
+		issuer: compositionIssuer(frozen.components as Record<string, unknown>),
 		// `KeyStore.algorithm` is typed, but a host may put an object of its own
 		// in the slot through `bootstrapComponents` / `overrideComponents`,
 		// unchecked at that boundary, so the read is guarded. A reader, so the
@@ -636,7 +636,6 @@ export function assembleApp(
 	// composition without the slot allows no origin.
 	{
 		const components = frozen.components as Record<string, unknown>;
-		const config = components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined;
 		const logger = components.logger as Logger | undefined;
 		const allowedOrigins = Object.hasOwn(components, "httpSettings")
 			? httpSettingsCorsOrigins(components.httpSettings)
@@ -644,10 +643,11 @@ export function assembleApp(
 		if (allowedOrigins.length > 0) {
 			const mw = corsMw({
 				allowedOrigins,
-				// On the issuer the discovery route is served on (the oauth
-				// module's `oauthTokenSettings` when the composition holds it),
-				// and the JWKS path the jwks module's route serves.
-				routes: browserFacingCorsRoutes(config ?? {}, corsTableOptions(components, allRoutes)),
+				// On the issuer the discovery route is served on
+				// (`compositionIssuer`, none when it answers none: the
+				// configuration is not read again here), and the JWKS path the
+				// jwks module's route serves.
+				routes: browserFacingCorsRoutes({}, corsTableOptions(components, allRoutes)),
 				...(logger ? { logger } : {}),
 			});
 			if (mw !== null) router.use(mw);

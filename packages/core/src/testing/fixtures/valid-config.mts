@@ -30,6 +30,8 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  * Deliberate divergences from the `reference.conf` files:
  * - `session-store.storage.type` is `"memory"` (`"redis"` there);
  * - `oauth.jwt.issuer` is a fixed test issuer (`${?OAUTH_JWT_ISSUER}` there);
+ * - `oauth {}` carries only the keys core reads (no `oidcMode` and none of the
+ *   oauth module's other keys), so it boots without that module;
  * - the grant switches, in the oauth package's modules' sections, turn on
  *   `oauth-session.enabled` and
  *   `oauth-authorization.grants.{authorizationCode,refreshToken}.enabled`
@@ -40,9 +42,10 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  * modules declare renamed, `null` (`renamed-variables`), which boot requires
  * of any configuration.
  *
- * `satisfies CoreConfig` type-checks core's sections while keeping literal
- * types; the other packages' sections are typed as written, since their
- * schemas are their own packages'. Each call returns a fresh, mutable object.
+ * Core's own section is type-checked against `CoreConfig` while keeping
+ * literal types (`coreConfigForTests`); the other packages' sections are
+ * typed as written, since their schemas are their own packages'. Each call
+ * returns a fresh, mutable object.
  */
 
 /** What {@link coreConfigForTests} states in core's own section. */
@@ -115,7 +118,7 @@ function grantSwitchesForTests() {
 }
 
 export function makeValidCoreConfig() {
-	const core = {
+	return {
 		...{
 			[RENAMED_VARIABLES_SECTION]: renamedVariableCaptures({
 				modules: [memoryRateLimiterModule],
@@ -123,6 +126,11 @@ export function makeValidCoreConfig() {
 				env: {},
 			}),
 		},
+		// The keys of the oauth module's section core reads by path — the
+		// issuer, the lifetimes, the revocation modes — typed as written: its
+		// schema is the oauth package's. Core refuses any other key of the
+		// section where the oauth module is not loaded; a test that loads it
+		// adds the module's own required key, `oidcMode`.
 		oauth: {
 			jwt: {
 				issuer: "https://auth.test",
@@ -132,7 +140,6 @@ export function makeValidCoreConfig() {
 			// `resolveAccessTokenLifetime` reads it as a 3600 s default and max.
 			accessToken: { expiresIn: 3600 },
 			refreshToken: { expiresIn: 86400 },
-			oidcMode: "oidc-required",
 			// Declares both subject-level revocation slots absent: this fixture
 			// has none, on purpose. A test of the declared-absence guard removes
 			// the key. `accessToken` is required once `revocation` exists, and
@@ -143,8 +150,8 @@ export function makeValidCoreConfig() {
 		// a createApp test that installs a consumer of admission must state its
 		// posture. A test of the declaration itself removes the key.
 		...coreConfigForTests(),
-	} satisfies CoreConfig;
-	return { ...core, ...grantSwitchesForTests() };
+		...grantSwitchesForTests(),
+	};
 }
 
 export function makeValidFullSections() {

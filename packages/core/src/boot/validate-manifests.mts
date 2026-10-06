@@ -21,7 +21,12 @@
  */
 
 import type { z } from "zod";
-import { type AppConfig, CoreConfigSchema } from "../config/application.schema.mjs";
+import { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } from "../access-token-denylist/types.mjs";
+import {
+	type AppConfig,
+	CoreConfigSchema,
+	OAUTH_LIFETIME_PATHS,
+} from "../config/application.schema.mjs";
 import {
 	defineConfigKey,
 	isPlainConfigObject,
@@ -34,6 +39,7 @@ import {
 	findRelocatedKeys,
 	findRenamedVariables,
 	type HandedConfiguration,
+	pathsSetBy,
 	RENAMED_VARIABLES_SECTION,
 	type RelocatedPath,
 	type RenamedVariable,
@@ -44,6 +50,7 @@ import {
 } from "../config/removed-keys.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
 import { enabledFederationsOf } from "../federations/configured.mjs";
+import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import {
 	type AbsencePolicy,
 	describeAbsenceDeclaration,
@@ -66,6 +73,7 @@ import {
 	lifetimeBeyondConfiguration,
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
+import { SUBJECT_REVOCATION_ABSENCE_POLICY } from "../user-sessions/types.mjs";
 import { contributesAuditHooks } from "./audit-fan-out.mjs";
 import { type ConfigDefaults, logConfigNotices, readConfigDefaults } from "./config-notices.mjs";
 import { failureSummary } from "./failure-summary.mjs";
@@ -76,6 +84,7 @@ import {
 	federationTypeSnapshot,
 	parseFederationEntries,
 } from "./federation-entries.mjs";
+import { snapshotHostMap } from "./host-maps.mjs";
 import { unreadCorsSection } from "./http-settings.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
 import {
@@ -1532,10 +1541,13 @@ function checkRouteCollisions(
 //
 // When `grantPolicy` is wired through any of the three component sources
 // (module `provides`, `bootstrapComponents`, `overrideComponents`), the
-// configured issuer must be a non-empty string: the policy hook signs
-// decisions against it, and an empty value silently disables fail-closed
-// enforcement at the JWT layer. Runs after step 13 (validateAndComposeConfig)
-// so the parsed config is available.
+// configured issuer must be a canonical issuer (`checkCanonicalIssuer`): the
+// policy hook signs decisions against it, and an empty value silently disables
+// fail-closed enforcement at the JWT layer. Core's schema does not declare
+// `oauth {}`, so the check holds the value to the rule itself: where the oauth
+// module is loaded its section schema has refused a bad issuer already, and
+// where it is not, nothing else has. Runs after step 13
+// (validateAndComposeConfig) so the parsed config is available.
 // ---------------------------------------------------------------------------
 
 function checkGrantPolicyIssuerInvariant(
@@ -1567,10 +1579,11 @@ function checkGrantPolicyIssuerInvariant(
 
 	const issuer = (parsedConfig as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth
 		?.jwt?.issuer;
-	if (typeof issuer === "string" && issuer.length > 0) return;
+	const rejection = checkCanonicalIssuer(issuer);
+	if (rejection === null) return;
 
 	throw new BootError({
-		message: `CP-20 invariant: config.oauth.jwt.issuer must be a non-empty string when grantPolicy is wired (provided by "${providedBy}"). Empty issuer turns CP-18 fail-closed enforcement into silent allow-all at the JWT layer.`,
+		message: `CP-20 invariant: config.oauth.jwt.issuer must be a canonical issuer when grantPolicy is wired (provided by "${providedBy}"), and it ${describeIssuerRejection(rejection)}. Empty issuer turns CP-18 fail-closed enforcement into silent allow-all at the JWT layer.`,
 		reason: "grant-policy-without-issuer",
 		stage: "validateManifests",
 		details: {
@@ -2119,6 +2132,103 @@ function reservedKeyIssues(
 }
 
 /**
+ * The sections of another owner core reads keys of by path, loaded or not:
+ * `oauth {}`, for the issuer the grant-policy check and the discovery document
+ * are built on, the token lifetimes revoking records and a host's token
+ * settings are bounded by, and the revocation modes two absence policies are
+ * keyed in. The oauth module owns the section; while those readers move to its
+ * `oauthTokenSettings` slot, core reads the section where it is written.
+ */
+const SECTIONS_CORE_READS = ["oauth"] as const;
+
+/**
+ * The keys of `oauth {}` core reads by path (`SECTIONS_CORE_READS`), each as
+ * its segments, and no other: the issuer the grant-policy check and
+ * `compositionIssuer` read, the token lifetimes core's resolvers read
+ * (`OAUTH_LIFETIME_PATHS`), and the revocation modes the subject-revocation
+ * and access-token denylist absence policies are keyed in.
+ */
+const OAUTH_ISSUER_PATH = ["oauth", "jwt", "issuer"] as const;
+const OAUTH_PATHS_CORE_READS: readonly (readonly string[])[] = [
+	OAUTH_ISSUER_PATH,
+	...OAUTH_LIFETIME_PATHS,
+	SUBJECT_REVOCATION_ABSENCE_POLICY.configKey,
+	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY.configKey,
+];
+
+/** Whether `path` starts with every segment of `prefix`. */
+const startsWith = (path: readonly string[], prefix: readonly string[]): boolean =>
+	prefix.length <= path.length && prefix.every((segment, index) => path[index] === segment);
+
+/** Whether `path` is one core reads, segment for segment. */
+const isPathCoreReads = (path: readonly string[]): boolean =>
+	OAUTH_PATHS_CORE_READS.some((read) => read.length === path.length && startsWith(path, read));
+
+/** The value at `path` of `node`, read as own properties; `undefined` where there is none. */
+function ownValueAt(node: unknown, path: readonly string[]): unknown {
+	let value: unknown = node;
+	for (const key of path) {
+		if (value === null || typeof value !== "object" || !Object.hasOwn(value, key)) return undefined;
+		value = (value as Record<string, unknown>)[key];
+	}
+	return value;
+}
+
+/** A custom issue at `path` with `message`. */
+const issueAt = (path: readonly string[], message: string): z.core.$ZodIssue =>
+	({ code: "custom", path: [...path], message, input: undefined }) as z.core.$ZodIssue;
+
+const UNREAD_OAUTH_KEY =
+	"is read only by oauthEndpointsModule, which owns oauth {} and is not loaded: load oauthEndpointsModule to use this key (the oauth grant modules need it too), or remove the key";
+
+/**
+ * Where no loaded module's section is `oauth` — the oauth endpoints module is
+ * not loaded — the issues of core's reading of `oauth {}` in `config`, the
+ * frozen plain-data copy stage 1 took of what was handed over
+ * (`snapshotHostMap`): a section that is not an object, every key set that
+ * core does not read (`OAUTH_PATHS_CORE_READS`, segment for segment, by the
+ * reading of what a configuration sets the relocation refusal uses:
+ * `pathsSetBy`), and an issuer present that is not a canonical issuer,
+ * whatever its shape. A key named after an `Object.prototype` member, or
+ * `prototype`, is left to `reservedKeyIssues`. Nothing else would read such a
+ * key, so it would be accepted unread: a retired key, a misspelt one, one only
+ * the module reads. Where the module is loaded, its own strict section
+ * refuses instead.
+ */
+function oauthIssuesWithoutItsModule(
+	config: unknown,
+	modules: readonly Module[],
+): z.core.$ZodIssue[] {
+	const [name] = SECTIONS_CORE_READS;
+	if (modules.some((m) => m.section !== undefined && m.name === name)) return [];
+	const section = ownValueAt(config, [name]);
+	if (section === undefined) return [];
+	if (!isPlainConfigObject(section)) {
+		return [issueAt([name], `must be a section: ${UNREAD_OAUTH_KEY}`)];
+	}
+	const issues: z.core.$ZodIssue[] = [];
+	const issuer = ownValueAt(section, OAUTH_ISSUER_PATH.slice(1));
+	if (issuer !== undefined) {
+		const rejection = checkCanonicalIssuer(issuer);
+		if (rejection !== null) {
+			issues.push(
+				issueAt(
+					OAUTH_ISSUER_PATH,
+					`${OAUTH_ISSUER_PATH.join(".")} ${describeIssuerRejection(rejection)}`,
+				),
+			);
+		}
+	}
+	for (const path of pathsSetBy(section, [name])) {
+		if (startsWith(path, OAUTH_ISSUER_PATH) && issuer !== undefined) continue;
+		if (path.some((segment) => reservedKeyReason(segment) !== undefined)) continue;
+		if (isPathCoreReads(path)) continue;
+		issues.push(issueAt(path, UNREAD_OAUTH_KEY));
+	}
+	return issues;
+}
+
+/**
  * Step 13: parses the configuration the composition root handed over
  * (`bootstrapComponents.config`) once, with every schema that reads it:
  *
@@ -2132,19 +2242,26 @@ function reservedKeyIssues(
  * `parseModuleSections` writes each section back. Refused values make one
  * `config-validation-failed` naming each operator path: every reserved key
  * (`reservedKeyIssues`: an `Object.prototype` member's name, or
- * `prototype`), a `cors` section that sets anything while no loaded module
- * owns `cors` (`owned`; `unreadCorsSection`: core reads its CORS origins from
- * the `httpSettings` slot alone), then the
- * base's issues. No module is named: a module's own
- * configuration is its section, parsed after this.
+ * `prototype`), every key of `oauth {}` nothing reads where its module is not
+ * loaded (`oauthIssuesWithoutItsModule`), a `cors` section that sets anything while
+ * no loaded module's section is `cors` (`unreadCorsSection`: core reads its CORS
+ * origins from the `httpSettings` slot alone), then the base's issues. No
+ * module is named: a module's own configuration is its section, parsed after
+ * this.
  * @internal
  */
-function validateAndComposeConfig(bootstrap: BootstrapMap, owned: ReadonlySet<string>): unknown {
+function validateAndComposeConfig(bootstrap: BootstrapMap, modules: readonly Module[]): unknown {
 	const issues: z.core.$ZodIssue[] = [];
 	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
 	issues.push(...reservedKeyIssues(raw));
-	const unreadCors = unreadCorsSection(raw, owned);
+	issues.push(...oauthIssuesWithoutItsModule(raw, modules));
+	// The sections a loaded module owns, at its name: an absence policy keyed
+	// in `cors` does not make the section read.
+	const unreadCors = unreadCorsSection(
+		raw,
+		new Set(modules.filter((m) => m.section !== undefined).map((m) => m.name)),
+	);
 	if (unreadCors !== undefined) {
 		issues.push({ code: "custom", path: ["cors"], message: unreadCors, input: undefined });
 	}
@@ -2166,15 +2283,24 @@ function validateAndComposeConfig(bootstrap: BootstrapMap, owned: ReadonlySet<st
 }
 
 /**
- * The top-level sections something loaded owns: every section core's base
- * declares and every loaded module's section, at its name. What the
- * configuration sets outside them is what stage 1's notices name
+ * The top-level sections something loaded reads: every section core's base
+ * declares, the sections core reads keys of by path (`SECTIONS_CORE_READS`),
+ * every loaded module's section, at its name, and the section each absence
+ * policy a loaded module attaches is keyed in, which the declared-absence
+ * guard reads as written whether or not the module owning it is loaded. What
+ * the configuration sets outside them is what stage 1's notices name
  * (`logConfigNotices`).
  * @internal
  */
 function ownedSections(modules: readonly Module[]): ReadonlySet<string> {
-	const owned = new Set<string>(Object.keys(CoreConfigSchema.shape));
-	for (const m of modules) if (m.section !== undefined) owned.add(m.name);
+	const owned = new Set<string>([...Object.keys(CoreConfigSchema.shape), ...SECTIONS_CORE_READS]);
+	for (const m of modules) {
+		if (m.section !== undefined) owned.add(m.name);
+		for (const policy of Object.values(m.absencePolicies ?? {})) {
+			const section = policy?.configKey[0];
+			if (section !== undefined) owned.add(section);
+		}
+	}
 	return owned;
 }
 
@@ -3252,7 +3378,11 @@ interface StageOneContext {
  * member and both values; a module-provided value is refused the same way
  * as stage 3 materialises it (`token-settings-slot.mts`), which also holds a
  * host's value to the contract and stores the frozen snapshot every reader
- * reads. A member that is not a number is left to that check.
+ * reads. A member that is not a number is left to that check. A
+ * configuration that resolves no lifetime to bound the slot by — no
+ * `oauth {}`, which only the oauth module's reference sets, or a value no
+ * section schema read — is refused as the configuration it is
+ * (`config-validation-failed`), naming the key.
  * @internal
  */
 function checkHostTokenSettingsLifetimes(
@@ -3269,7 +3399,33 @@ function checkHostTokenSettingsLifetimes(
 	] as const;
 	for (const [source, value] of sources) {
 		if (typeof value !== "object" || value === null) continue;
-		const found = lifetimeBeyondConfiguration(value, parsedConfig);
+		let found: ReturnType<typeof lifetimeBeyondConfiguration>;
+		try {
+			found = lifetimeBeyondConfiguration(value, parsedConfig);
+		} catch (err) {
+			// The resolvers' refusal of the configuration, the only throw here:
+			// the slot's members are read without throwing, and the configuration
+			// is stage 1's plain-data copy. A RangeError naming the key.
+			const issues = [
+				{
+					code: "custom",
+					path: [],
+					message: (err as RangeError).message,
+					input: undefined,
+				} as z.core.$ZodIssue,
+			];
+			throw new BootError({
+				message: `Config validation failed — 1 issue(s) found: ${namedIssues(issues)}. The oauthTokenSettings in ${source} is bounded by the token lifetimes the configuration resolves.`,
+				reason: "config-validation-failed",
+				stage: "validateManifests",
+				details: {
+					reason: "config-validation-failed",
+					issues: issues as z.ZodIssue[],
+					modules: [],
+				},
+				cause: err,
+			});
+		}
 		if (found === undefined) continue;
 		throw new BootError({
 			stage: "validateManifests",
@@ -3539,10 +3695,17 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * loaded reads (`logConfigNotices`) and the replica-safety warning.
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
-	const { modules, contributionKinds, overrideComponents } = input;
+	const { modules } = input;
+	// The host maps read once, at the one boundary (`host-maps.mts`), before
+	// anything else reads them: the configuration copied as frozen plain data,
+	// every slot a data property. A map createApp already read is taken as is.
+	const overrideComponents = snapshotHostMap(input.overrideComponents, "overrideComponents");
+	const contributionKinds = snapshotHostMap(input.contributionKinds, "contributionKinds");
 	// `configDefaults` is read here and is no component: no check and no later
 	// stage sees it.
-	const { bootstrapComponents, configDefaults } = takeConfigDefaults(input.bootstrapComponents);
+	const { bootstrapComponents, configDefaults } = takeConfigDefaults(
+		snapshotHostMap(input.bootstrapComponents, "bootstrapComponents"),
+	);
 
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);
@@ -3583,7 +3746,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		config === rawConfig
 			? bootstrapComponents
 			: { ...bootstrapComponents, config: config as BootstrapMap["config"] };
-	const composedConfig = validateAndComposeConfig(parseInput, ownedSections(modules));
+	const composedConfig = validateAndComposeConfig(parseInput, modules);
 	// Each module's own section, parsed out of that configuration by
 	// the module's schema and written back at its path — before any
 	// post-config row, which may assume the configuration is valid.

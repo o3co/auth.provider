@@ -27,8 +27,8 @@ optional peer dependency: `express@^5.0.0` — `createApp` を使う場合にの
 
 composition root は自分の設定を解決します — 自分のファイルを、読み込むすべてのパッケージの `reference.conf` の上に、`moduleReferences(modules)` が答える順に（core のものを最後に）重ねます — そして解決したものを、パースせずに `createApp` に渡します。boot はそれを一度だけパースします:
 
-1. core の base、[`CoreConfigSchema`](src/config/application.schema.mts) で: core 自身のセクション（`core` と、oauth モジュールと並んで core のスキーマがまだ宣言している `oauth`）を、その型変換と検査（環境変数の文字列を数値や真偽値として読む）で読みます。ほかのセクションは core のものではありません: それぞれ、読むモジュールが読み込まれていればそのモジュールのスキーマが検証し、読み込まれていなければ何も検証しません;
-2. 書かれたものの上に重ねるので、どのスキーマも宣言していないキーは残ります — トップレベルでも、core が宣言するセクションの下でも;
+1. core の base、[`CoreConfigSchema`](src/config/application.schema.mts) で: core 自身のセクション `core` を、その型変換と検査（環境変数の文字列を数値や真偽値として読む）で読みます。ほかのセクションは core のものではありません: それぞれ、読むモジュールが読み込まれていればそのモジュールのスキーマが検証し、読み込まれていなければ何も検証しません;
+2. 書かれたものの上に重ねるので、どのスキーマも宣言していないセクションは残ります;
 3. そのうえで、各モジュール自身のセクションをモジュール名の位置で base の出力からパースし、そこに書き戻します: 読み込まれたモジュールのセクションが取り除かれることはありません。
 
 どれかが拒否する値は、オペレーターが書いた各パスを示して boot を拒否します（`config-validation-failed`）。`Object.prototype` のメンバー（`__proto__`、`constructor`、`toString` など）または `prototype` と同じ名前のキーも、どの階層にあっても、スキーマの結果にかかわらず同じく拒否します: スキーマは `__proto__` を読まずに捨て、それ以外の名前では、名前による参照が継承されたメンバーを見つけることがあるためです。この検査が見るのは設定自身のデータプロパティで、パースされた HOCON ファイルが持つものはすべてこれに当たります。コードで組み立てた設定の getter は、この検査ではなくスキーマのパースが読みます。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、設定と並べて bootstrap したロガーに `warn` で一度だけ、名前だけが出ます（値は出しません）。パッケージの `reference.conf` はそのモジュールのどれかが読み込まれれば重ねられるので、読み込まれていない兄弟モジュールのセクションも設定します。composition root が設定の既定値 — `bootstrapComponents.configDefaults`、同じ reference を自分のファイルなし・環境変数なしで、設定と同じ方法でプレーンなデータにしたもの（セクションは既定値と丸ごと比べるため。[`ReservedBootstrapInputs`](src/boot/types.mts)）— も boot に渡すと、boot はそれらを区別します: 既定値が持ち、設定がそれと等しいままのセクションは名前が出ません。オペレーターのファイルか環境変数が変えたものは `config_sections_not_loaded` — 構成が読み込まないモジュールへの設定 — です。既定値が持たないものは `config_sections_ignored` で、セクション名の綴り間違いはここに現れます。既定値がなければ、そうしたセクションはすべて `config_sections_ignored` です。何も設定しないセクション — 空のもの、または空のセクションだけを持つもの — は名前が出ません。`JWKS_PATH` と `JWKS_CACHE_MAX_AGE` が未設定のとき core 自身の `reference.conf` が残す `jwks` がそれに当たります。同じように、パッケージの `reference.conf` が `renamed-variables` に捕捉する変数のうち、解決時に設定されていて、読み込まれたどのモジュールも — core も — 改名を宣言していないものは、`environment_variables_not_applied`（`warn`、名前つき）として一度だけ名前が出ます。たとえば Redis パッケージを読み込み、そのレートリミッターを読み込まずに設定した `RATE_LIMIT_FAIL_MODE` です。boot がパースしたものは `config` スロットにあります。ハンドルから読んでください。これはそれを要求するすべてのモジュールが共有する 1 つのオブジェクトで、そのプレーンなデータ（オブジェクトと配列）は末端まで凍結されたコピーです。strict mode のコードで書き込むと `TypeError` になります。プレーンなデータでない値 — `Map`、`Date`、開いたスキーマが素通しした、または transform が作ったクラスのインスタンス — はそのまま渡され、凍結されません。
@@ -67,16 +67,10 @@ core のスキーマが宣言しないセクション — モジュールのも�
 
 `config` スロットの型 `AppConfig` は `CoreConfig & Readonly<Record<string, unknown>>` です: core のセクションには型があり、ほかのセクションはすべて `unknown` です。モジュールは自分のセクションを、スキーマで型づけされた `deps.section` として読みます。
 
-デフォルトはスキーマではなく `reference.conf` にあります。core 自身のセクションは [`config/reference.conf`](config/reference.conf)、モジュールのセクションはそのマニフェストが宣言する `reference.conf`（standalone テンプレートの `http`、`logging`、鍵ストアの設定はテンプレートのもの）です。core のスキーマが宣言するトップレベルのフィールド（モジュールが所有するセクションは、所有するパッケージまたはテンプレートが記述します。必須なのは行にそう書いたものだけです）:
+デフォルトはスキーマではなく `reference.conf` にあります。core 自身のセクションは [`config/reference.conf`](config/reference.conf)、モジュールのセクションはそのマニフェストが宣言する `reference.conf`（standalone テンプレートの `http`、`logging`、鍵ストアの設定はテンプレートのもの）です。core のスキーマが宣言するフィールド（モジュールが所有するセクションは、所有するパッケージまたはテンプレートが記述します — `oauth {}` は `@o3co/auth-provider-oauth` が。必須なのは行にそう書いたものだけです）:
 
 | フィールド | 説明 |
 | --- | --- |
-| `oauth.jwt` | JWT 設定 — `issuer` と `legacyTypAccept`。`signingKey` は存在だけを宣言する: 署名鍵の移動元のパスで、`keyStore` を provide するモジュール（standalone テンプレートの `key-store`）のセクションに移った。移動の拒否のために書かれたまま残す |
-| `oauth.accessToken.defaultExpiresIn` | リクエストが有効期間を指定しないときに全グラントが発行するアクセストークンの有効期間（秒）。指定できるのは token exchange（`expires_in` パラメータ）だけで、他のグラントはそのパラメータを無視する。有効期間は `resolveAccessTokenLifetime(config)` で読む。スキーマが拒否する値にはキーを名指しした `RangeError` を投げ（規則は `isLifetimeSeconds` で、数値として渡される有効期間のために export されている）、同梱のグラントはすべて構築時に読むので、それが拒否する手組みの config はリクエストではなく構築（と起動）で失敗する |
-| `oauth.accessToken.maxExpiresIn` | token exchange の `expires_in` で得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、明示的に設定しない限り延長されない。デフォルトがこれを超えると両キーを名指しして起動失敗 |
-| `oauth.accessToken.expiresIn` | `defaultExpiresIn` の**非推奨（deprecated）**エイリアス。`defaultExpiresIn` 未設定の間だけ読まれる（`reference.conf` は出荷時の `3600` をこのキーに置いている）。パース後の config はこの名前にも解決済みのデフォルトを持つ |
-| `oauth.refreshToken.expiresIn` | リフレッシュトークンの有効期間（秒）。1 から 1 年までの整数。キーの唯一の読み手である `resolveRefreshTokenLifetime(config)` で読み、それ以外の値（未設定を含む）にはキーを名指しした `RangeError` を投げる。リフレッシュトークンを発行するグラントはすべて構築時に読むので、それが拒否する手組みの config は構築で失敗し、認可コードもチャレンジも消費しない |
-| `oauth.grants` | 存在のみ: グラントのスイッチの移動元のパスで、移動の拒否のために書かれたまま残す。スイッチはそれぞれモジュールのもの: session グラントは `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled`（`oauth` パッケージが文書化する）。他のグラントパッケージのスイッチはここに無い: token exchange と WebAuthn はモジュールが組み込まれればグラントを登録し、device grant は `device-grant.enabled` が true のときだけグラントを登録する — モジュール自身のスイッチ |
 | `core` | core 自身のセクションで、厳格: どの階層でも宣言されていないキーはブートを拒否し（`config-validation-failed`）、キーを示し、値は決して示さない |
 | `core.deployment.mode` | オペレーターが述べるレプリカ数: `single`、`multi`、または未設定（`CORE_DEPLOYMENT_MODE`）。既定値は無い: 未設定はそれ自体が一つの状態である。boot はこれから `deploymentMode` スロットを埋め、`multi` のもとではレプリカごとに分岐する状態を宣言するすべてのモジュールを拒否する。`deployment.mode` はこのパスを示して拒否される。`DEPLOYMENT_MODE` は `CORE_DEPLOYMENT_MODE` へ改名されたと宣言されており、単独で、または別の値で設定されているとブートを拒否する |
 | `core.sessionRequirements.expected` | この構成が期待するセッション要件 — 「ログイン済み」の意味を変える拡張で、MFA はその一つ — で、ブート時にインストールされたモジュールが登録したものと比較される（[セッション許可](#セッション許可) を参照）。書かれていれば、セッション許可に問い合わせるモジュールの有無にかかわらず両方向で比較する: インストールされたどのモジュールも登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件を書き漏らしても拒否する（`session-requirements-undeclared`）。セッション許可に問い合わせるモジュールがインストールされているときは必須（`oauthEndpointsModule` はその一つ）で、書かれていなければ拒否する（`session-requirements-undeclared`）。`[]` は「なし」。既定値は無く、構成は自らの姿勢を述べる。`sessionRequirements.expected` はこのパスを示して拒否される |
@@ -86,6 +80,13 @@ core のスキーマが宣言しないセクション — モジュールのも�
 | `core.outbound` | `createOutboundFetch` の宛先ポリシー: `allowedHosts`（`CORE_OUTBOUND_ALLOWED_HOSTS`）、`deniedHosts`（`CORE_OUTBOUND_DENIED_HOSTS`）、`internalHosts`（`CORE_OUTBOUND_INTERNAL_HOSTS`）はそれぞれホストまたは `.suffix` のリスト、またはカンマ区切りの文字列。`timeoutMs`（`CORE_OUTBOUND_TIMEOUT_MS`、5000）と `maxResponseBytes`（`CORE_OUTBOUND_MAX_RESPONSE_BYTES`、65536）。`egress`（`CORE_OUTBOUND_EGRESS`）は `"direct"` だけを取る。読むのは `outboundPolicyOf` だけで、boot はその結果で `outboundPolicy` スロットを埋める。解析できないセクションはキーを名指しして boot を拒否する。[外向きの fetch](#外向きの-fetch) を参照 |
 | `core.sessionLifecycle.sweepIntervalSeconds` | `sessionLifecycleModule` が保留中のセッション終了を再開する間隔。1 から 2147483 までの整数の秒、または巡回しない 0 で、core の数値と同じく読む（`configuredNumber`）。それ以外は boot を拒否し、キーを名指しする。core の `reference.conf` は 60 を同梱し、それがない設定でも 60 と読む。ユーザーセッションがすでにない保留中の終了は、後から終了を呼ぶものがなく、巡回だけが再開する。変数はない。[セッションのライフサイクル](#セッションのライフサイクル) を参照 |
 | `core.declaredAbsent` | この構成が意図して埋めないスロットを、そのキーで並べる（`["auditSink", "rateLimiter"]`）: そのようなスロットの absence policy — モジュールのもの、または core が `rateLimiter` に付けるもの — は、ここに挙げた名前で満たされる（`isAbsenceDeclared`、`describeAbsenceDeclaration`）。デフォルトも変数もない |
+
+core は自分のセクションのほかに、oauth モジュールのセクションのいくつかのキーをパスで読みます: ステージ 1 のグラントポリシーの検査と、ディスカバリー文書・CORS の表・セッション要件のページの基になる issuer（`oauth.jwt.issuer`）、失効の記録を保持する期間を決めるトークンの有効期間（`oauth.accessToken.*` は `resolveAccessTokenLifetime`、`oauth.refreshToken.expiresIn` は `resolveRefreshTokenLifetime` で読む）、二つの不在ポリシーのキーがある `oauth.revocation.*` です。oauth モジュールが読み込まれていれば、そのモジュールがパースしたセクションを読みます。oauth パッケージのモジュールが一つも読み込まれていなければ、そのパッケージの `reference.conf` を重ねるものは無く、どの `OAUTH_*` 変数もそこを束縛しないので、core は書かれたものを読み、安全側に倒します:
+
+- セクションが `oauth` であるモジュールが読み込まれていない（`oauthEndpointsModule` が無い）間、`oauth {}` の下に書かれたキーのうちそれら以外はすべてブートを拒否します（`config-validation-failed`。パスごとに 1 件で、モジュールを名指し、値は決して示さない）: 廃止されたキー、綴りを誤ったキー、そのモジュールだけが読むキー。正規の issuer（`checkCanonicalIssuer`）でない `oauth.jwt.issuer` も同じくキーの位置で拒否するので、どの読み手も正規の issuer を読むか、issuer を読まないかのどちらかです;
+- issuer が無いまま `grantPolicy` が配線されていればブートを拒否します（`grant-policy-without-issuer`）。issuer が無ければディスカバリー文書は無く、CORS の表はディスカバリーのパスを守らず、要件のページはどの issuer のオリジンにも縛られません;
+- `oauth.revocation.*` をキーとする不在ポリシーを満たすのは、そこに書かれた `"unsupported"` だけです: `OAUTH_REVOCATION_SUBJECT` と `OAUTH_REVOCATION_ACCESS_TOKEN` は何も宣言せず、埋まっていないスロットはブートを拒否します（`component-absence-undeclared`）;
+- 有効期間が無いか、どのセクションのスキーマも読まなかった環境変数の文字列であれば拒否します: ホストが埋める `oauthTokenSettings` はステージ 1 で `config-validation-failed` として、モジュールが provide するものと、既定のリフレッシュトークンファミリーのモジュールは `provides-factory-failed` として。トークン設定がまったく無ければ、コンポジションの中にリフレッシュトークンを発行するものは無く、セッションのライフサイクルは閉じるセッションの記録を保持しません。
 
 ### グラントシステム
 
@@ -483,7 +484,7 @@ const myGrantModule = defineModule({
 });
 ```
 
-`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。`GrantFactory` は `GrantDependencies` を受け取り、その必須スロットは `config` と `keyStore` なので、モジュールはその両方を requires します。返すのはハンドラー、またはモジュール自身の設定がグラントをオフにしているときは `null` で、Promise で返しても構いません。oauth モジュールの設定の issuer、有効期間、スイッチを読むグラントは `oauthTokenSettings` を optional に宣言し、`checkOAuthTokenSettings(deps.oauthTokenSettings)` で検査します。これは設定を必要としません: スロットの有効期間を設定の値に収めるのは boot 自身です。core のトークンバインディング設定 — 機密クライアントのリフレッシュトークンを束縛するかどうか — を読むグラントは `tokenBindingSettings` を requires します。boot はすべての組み立てでこれを埋めます。boot planner はグラントを `my_grant` で登録し、`/oauth/token` は `grantHandlerResolver` synthetic key を通じてそれにディスパッチします。
+`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。`GrantFactory` は `GrantDependencies` を受け取り、その必須スロットは `keyStore` なので、モジュールはそれを requires します。`config` を読むグラントはありません。返すのはハンドラー、またはモジュール自身の設定がグラントをオフにしているときは `null` で、Promise で返しても構いません。oauth モジュールの設定の issuer、有効期間、スイッチを読むグラントは `oauthTokenSettings` を optional に宣言し、`checkOAuthTokenSettings(deps.oauthTokenSettings)` で検査します。これは設定を必要としません: スロットの有効期間を設定の値に収めるのは boot 自身です。core のトークンバインディング設定 — 機密クライアントのリフレッシュトークンを束縛するかどうか — を読むグラントは `tokenBindingSettings` を requires します。boot はすべての組み立てでこれを埋めます。boot planner はグラントを `my_grant` で登録し、`/oauth/token` は `grantHandlerResolver` synthetic key を通じてそれにディスパッチします。
 
 ### YAML からクライアントとユーザーを読み込む
 

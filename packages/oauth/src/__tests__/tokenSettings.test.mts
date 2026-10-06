@@ -52,12 +52,13 @@ import {
 import { describe, expect, it } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthTokenSettingsFrom } from "#/tokenSettings.mjs";
+import { appConfigWithOAuthModule } from "./_helpers/oauthModuleConfig.mjs";
 import { withOauthCaptures } from "./_helpers/sections.mjs";
 
-const fixture = (): AppConfig => makeValidAppConfig() as AppConfig;
+const fixture = () => appConfigWithOAuthModule();
 
 /** The fixture with every switch on, the strict dispatch policy, and the lifetimes on their current keys. */
-const everySwitchOn = (): AppConfig => {
+const everySwitchOn = () => {
 	const base = fixture();
 	return {
 		...base,
@@ -76,7 +77,7 @@ const everySwitchOn = (): AppConfig => {
 				bindConfidentialClientRefreshTokens: true,
 			},
 		},
-	} as AppConfig;
+	};
 };
 
 describe.each([
@@ -134,12 +135,9 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 	it("never outlasts the lifetimes core resolves from the same configuration, so a reader's check answers it", () => {
 		// Every reader holds a slot to the configured lifetimes; this provider
 		// resolves its lifetimes with the resolvers that check compares with.
-		const alias = (): AppConfig => {
+		const alias = () => {
 			const base = fixture();
-			return {
-				...base,
-				oauth: { ...base.oauth, accessToken: { expiresIn: 7200 } },
-			} as AppConfig;
+			return { ...base, oauth: { ...base.oauth, accessToken: { expiresIn: 7200 } } };
 		};
 		for (const config of [fixture(), everySwitchOn(), alias()]) {
 			const settings = oauthTokenSettingsFrom(config.oauth);
@@ -154,7 +152,7 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 				...base,
 				oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer } },
 			} as unknown as AppConfig;
-			expect(() => oauthTokenSettingsFrom(config.oauth), String(issuer)).toThrow(
+			expect(() => oauthTokenSettingsFrom(config.oauth as never), String(issuer)).toThrow(
 				/oauth\.jwt\.issuer/,
 			);
 		}
@@ -200,7 +198,10 @@ describe("the oauth module provides oauthTokenSettings", () => {
 		const config = everySwitchOn();
 		const handle = await createTestApp({
 			modules: [oauthEndpointsModule, ...stubs],
-			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s: string) => s },
+			bootstrapComponents: {
+				config: withOauthCaptures(config) as unknown as AppConfig,
+				pathResolver: (s: string) => s,
+			},
 		});
 		try {
 			const provided = handle.components.oauthTokenSettings;
@@ -246,7 +247,10 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 		const config = fixture();
 		const caught = await createApp({
 			modules: [oauthEndpointsModule, ...stubs, reader({})],
-			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s: string) => s },
+			bootstrapComponents: {
+				config: withOauthCaptures(config) as unknown as AppConfig,
+				pathResolver: (s: string) => s,
+			},
 			overrideComponents: { oauthTokenSettings: SECOND },
 		}).then(
 			async (handle) => {
@@ -266,10 +270,15 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 
 	it("lets a composition without the module fill the slot itself", async () => {
 		const seen: { settings?: OAuthTokenSettings } = {};
-		const config = fixture();
+		// Without the module: core's fixture, carrying only the keys of oauth {}
+		// core reads.
+		const config = makeValidAppConfig();
 		const handle = await createApp({
 			modules: [...stubs, reader(seen)],
-			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s: string) => s },
+			bootstrapComponents: {
+				config: withOauthCaptures(config) as unknown as AppConfig,
+				pathResolver: (s: string) => s,
+			},
 			overrideComponents: { oauthTokenSettings: SECOND },
 		});
 		try {

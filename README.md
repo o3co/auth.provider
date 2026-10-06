@@ -180,7 +180,7 @@ grants); each package's README lists its routes.
 
 HOCON config file with environment variable overrides. The config schema depends on which modules are registered; `@o3co/auth-provider-core` and each package that ships defaults ship them in a `reference.conf` its modules declare; a composition root layers its own files over the references of the modules it loads (`moduleReferences(modules)`, core's last) and hands `createApp` the result, which boot parses once ([#728](https://github.com/o3co/auth.provider/issues/728)).
 
-**Always set** — the issuer, the signing key and the port. `oauth.jwt.issuer` is core's; the signing key and `http` belong to the modules that build the key store and host the server (in the standalone template, its `key-store` and `http` modules, whose defaults are in its `config/reference.conf`):
+**Always set** — the issuer, the signing key and the port. `oauth.jwt.issuer` is the oauth module's (`oauth {}` is its section, with its defaults in the oauth package's `reference.conf`: core's sets none of it); the signing key and `http` belong to the modules that build the key store and host the server (in the standalone template, its `key-store` and `http` modules, whose defaults are in its `config/reference.conf`):
 
 ```hocon
 http { port = 3000 }

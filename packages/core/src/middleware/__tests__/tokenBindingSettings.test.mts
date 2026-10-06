@@ -73,11 +73,11 @@ describe("the tokenBindingSettings slot", () => {
 		expect(true).toBe(true);
 	});
 
-	it("is a grant dependency, optional beside config", () => {
+	it("is a grant dependency, optional beside the required keyStore", () => {
 		expectTypeOf<GrantDependencies["tokenBindingSettings"]>().toEqualTypeOf<
 			TokenBindingSettings | undefined
 		>();
-		expectTypeOf<GrantDependencies["config"]>().not.toBeUndefined();
+		expectTypeOf<GrantDependencies["keyStore"]>().not.toBeUndefined();
 		expect(true).toBe(true);
 	});
 });

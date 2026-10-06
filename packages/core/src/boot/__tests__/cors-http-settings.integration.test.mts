@@ -31,6 +31,7 @@ import { createApp } from "../../index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createTestHttpSettings } from "../../testing/slots/httpSettings.mjs";
+import { createTestOAuthTokenSettings } from "../../testing/slots/oauthTokenSettings.mjs";
 
 const SLOT_ORIGIN = "https://slot.example";
 const CONFIG_ORIGIN = "https://config.example";
@@ -200,5 +201,97 @@ describe("the CORS mount reads the httpSettings slot when the composition holds 
 		await expect(boot([httpModule(Object.freeze(settings))])).rejects.toThrow(
 			/httpSettings\.cors\.allowedOrigins/,
 		);
+	});
+});
+
+describe("the CORS table's discovery paths follow the issuer boot resolved, and nothing else", () => {
+	/** A preflight for `path` from the slot's origin. */
+	const preflightOf = (app: express.Express, path: string) =>
+		request(app)
+			.options(path)
+			.set("Origin", SLOT_ORIGIN)
+			.set("Access-Control-Request-Method", "GET");
+
+	/** Boots the token route with an origin-listing slot over `config`, beside `components`. */
+	const bootOver = async (
+		config: Record<string, unknown>,
+		components: Record<string, unknown> = {},
+	) => {
+		const handle = await createApp({
+			modules: [tokenRoute, httpModule(createTestHttpSettings({ allowedOrigins: [SLOT_ORIGIN] }))],
+			bootstrapComponents: { config, pathResolver: (s: string) => s, ...components } as never,
+		});
+		const app = express();
+		app.use(handle.router);
+		return { app, handle };
+	};
+
+	it("guards no discovery path when no issuer is configured, as no document is served", async () => {
+		const { oauth, ...rest } = makeValidCoreConfig() as Record<string, unknown> & {
+			oauth: Record<string, unknown>;
+		};
+		const { jwt: _jwt, ...withoutIssuer } = oauth;
+		const { app, handle } = await bootOver({ ...rest, oauth: withoutIssuer });
+		try {
+			for (const path of [
+				"/.well-known/openid-configuration",
+				"/.well-known/oauth-authorization-server",
+			]) {
+				const res = await preflightOf(app, path);
+				expect(res.headers["access-control-allow-origin"], path).toBeUndefined();
+			}
+			expect((await preflight(app, SLOT_ORIGIN)).status).toBe(204);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("guards the slot's issuer's paths alone, never the configuration's beside it", async () => {
+		const { oauth, ...rest } = makeValidCoreConfig() as Record<string, unknown> & {
+			oauth: Record<string, unknown>;
+		};
+		const { app, handle } = await bootOver(
+			{ ...rest, oauth: { ...oauth, jwt: { issuer: "https://auth.test/tenant-b" } } },
+			{
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://auth.test/tenant-a" }),
+			},
+		);
+		try {
+			const ofSlot = await preflightOf(app, "/tenant-a/.well-known/openid-configuration");
+			expect(ofSlot.status).toBe(204);
+			const ofConfig = await preflightOf(app, "/tenant-b/.well-known/openid-configuration");
+			expect(ofConfig.headers["access-control-allow-origin"]).toBeUndefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
+describe("an absence policy keyed in cors {} does not make the section read", () => {
+	it("refuses cors written beside a sectionless module whose absence policy is keyed there", async () => {
+		const keyedInCors = defineModule({
+			name: "test:keyed-in-cors",
+			optional: ["auditSink"] as const,
+			absencePolicies: {
+				auditSink: { configKey: ["cors", "auditSink"], absentValue: "unsupported", hint: "h" },
+			},
+		});
+		const err = await createApp({
+			modules: [tokenRoute, keyedInCors],
+			bootstrapComponents: {
+				config: { ...makeValidCoreConfig(), cors: { allowedOrigins: [CONFIG_ORIGIN] } },
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(e: unknown) => e,
+		);
+		expect(err).toMatchObject({ reason: "config-validation-failed" });
+		expect(
+			(err as { details: { issues: { path: PropertyKey[] }[] } }).details.issues.map((i) => i.path),
+		).toEqual([["cors"]]);
 	});
 });

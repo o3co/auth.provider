@@ -18,7 +18,8 @@
  * The package's `reference.conf` (the MFA ADR's D19): the defaults of the
  * keys this package reads, layered as a composition root layers it — over
  * core's `reference.conf`, resolved and unparsed, as `createApp` is handed
- * it — and the variables that reach them: `MFA_ENCRYPTION_KEY` (the first key
+ * it, with the oauth section's issuer and lifetimes — and the variables that
+ * reach them: `MFA_ENCRYPTION_KEY` (the first key
  * of the ring, which has no default), `MFA_TOTP_FACTOR_ENABLED` and
  * `MFA_TOTP_FACTOR_ISSUER`; `mfa.mode`, `off` unless `MFA_MODE` says
  * otherwise; the transaction's life, its attempts and the
@@ -32,7 +33,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { BootError, createApp } from "@o3co/auth-provider-core";
-import { parseFile } from "@o3co/ts.hocon";
+import { parseFile, parseString } from "@o3co/ts.hocon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
@@ -72,9 +73,22 @@ interface Resolved {
 	readonly oauth: { readonly jwt: { readonly issuer: string } };
 }
 
+/**
+ * What the oauth package's `reference.conf` sets of `oauth {}` that these
+ * tests read: the issuer, and the lifetimes a token-settings slot is bounded
+ * by. Core's `reference.conf` sets no `oauth {}`, and this package does not
+ * depend on the oauth package.
+ */
+const OAUTH_SECTION = `oauth {
+  jwt.issuer = \${?OAUTH_JWT_ISSUER}
+  accessToken.expiresIn = 3600
+  refreshToken.expiresIn = 86400
+}`;
+
 const resolve = (env: Record<string, string> = {}): Resolved => {
 	const options = { env: { ...REQUIRED_ENV, ...env } };
 	return parseFile(MFA_REFERENCE, options)
+		.withFallback(parseString(OAUTH_SECTION, options))
 		.withFallback(parseFile(CORE_REFERENCE, options))
 		.toObject() as unknown as Resolved;
 };

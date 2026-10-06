@@ -154,3 +154,50 @@ describe("a host-filled oauthTokenSettings is held to the configuration's lifeti
 		);
 	});
 });
+
+describe("a host-filled oauthTokenSettings over a configuration that resolves no lifetime", () => {
+	/**
+	 * The fixture with `oauth {}` removed, or with `oauth` replaced: what a
+	 * composition loading no oauth-package module resolves, since core's own
+	 * `reference.conf` sets no `oauth {}` and no section schema parses it.
+	 */
+	const configWithOAuth = (oauth?: unknown): Record<string, unknown> => {
+		const { oauth: _oauth, ...rest } = makeValidCoreConfig() as Record<string, unknown>;
+		return oauth === undefined ? rest : { ...rest, oauth };
+	};
+
+	it.each([
+		["no oauth {} at all", undefined, /oauth\.accessToken\.defaultExpiresIn is required/],
+		[
+			"an environment string where no schema coerced it",
+			{ accessToken: { expiresIn: "3600" }, refreshToken: { expiresIn: 86_400 } },
+			/oauth\.accessToken\.expiresIn must be a whole number of seconds/,
+		],
+		[
+			"a refresh-token lifetime out of range",
+			{ accessToken: { expiresIn: 3600 }, refreshToken: { expiresIn: 0 } },
+			/oauth\.refreshToken\.expiresIn must be a whole number of seconds/,
+		],
+	])("refuses with a BootError at stage 1, naming the key, for %s", async (_, oauth, named) => {
+		for (const sources of [
+			{ bootstrap: { oauthTokenSettings: createTestOAuthTokenSettings() } },
+			{ override: { oauthTokenSettings: createTestOAuthTokenSettings() } },
+		]) {
+			const err = await refusal(
+				createApp({
+					modules: [],
+					bootstrapComponents: {
+						config: configWithOAuth(oauth),
+						pathResolver: (p: string) => p,
+						...("bootstrap" in sources ? sources.bootstrap : {}),
+					} as never,
+					...("override" in sources ? { overrideComponents: sources.override as never } : {}),
+				}),
+			);
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.message).toMatch(named);
+			expect(err.details).toMatchObject({ reason: "config-validation-failed", modules: [] });
+		}
+	});
+});

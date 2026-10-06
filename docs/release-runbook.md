@@ -58,22 +58,18 @@ placeholders in operator-facing strings that the cut is supposed to stamp. This
 is how `removedIn: "this release (#330)"` shipped in v0.10.0 *and* v0.11.0
 (#458): the grep below has to be read rather than merely run — it matches the
 doc comments that describe the convention as well as any real placeholder, and
-the block says how to tell them apart. Backing it up,
-`packages/core/src/config/__tests__/removedIn.drift.test.mts` fails the cut
-that lists a still-placeholdered PR under a version heading, so a miss there
-is a red CI run rather than a released error message naming no release.
+the block says how to tell them apart. No retired key's refusal carries a
+release any more — it points at the CHANGELOG — so the hits to stamp are the
+strings that still name one.
 
 ```bash
 # Every operator-facing string still saying "this release" — stamp each with
 # the tag being cut (docs/release-policy.md R5, R6 step 5).
 #
 # Read the hits, do not expect none. The pattern also matches doc comments that
-# describe the convention (`removedIn.drift.test.mts`, `application.schema.mts`
-# say what the placeholder is), and those are correct as they stand. A finding
-# is a hit where the string is a VALUE an operator can see — `removedIn: "this
-# release (#NNN)"`, a Zod message, a log field. Cross-check the hits against
-# `git grep -n 'removedIn:' -- ':(glob)packages/*/src/**'`: every value there
-# must already name a released tag.
+# describe the convention, and those are correct as they stand. A finding is a
+# hit where the string is a VALUE an operator can see — a Zod message, a log
+# field.
 #
 # The pathspec must be `:(glob)` with `/**`: git's default pathspec treats
 # `packages/*/src` as a literal path, which matches no file, so the plain form

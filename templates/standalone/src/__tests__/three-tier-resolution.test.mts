@@ -16,7 +16,7 @@
 
 import { fileURLToPath } from "node:url";
 import type { AppConfig } from "@o3co/auth-provider-core";
-import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
+import { type OAuthSection, oauthEndpointsModule } from "@o3co/auth-provider-oauth";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { readAdapters } from "../adapters.mjs";
@@ -79,6 +79,9 @@ const grants = (config: AppConfig) =>
 		| Record<string, GrantEntry | undefined>
 		| undefined) ?? {};
 
+/** `oauth {}` as the resolution leaves it, read as the shape the oauth module parses. */
+const oauthOf = (config: AppConfig): OAuthSection => config.oauth as OAuthSection;
+
 describe("three-tier HOCON resolution (env → application.conf → reference.conf)", () => {
 	it("template application.conf wins over reference.conf for grant.enabled", () => {
 		const config = buildResolvedConfig("development");
@@ -91,7 +94,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		const config = buildResolvedConfig("development");
 		// nonce.maxLength is library-owned in both layers (template doesn't
 		// override it). Verifies precedence falls through.
-		expect(config.oauth.nonce?.maxLength).toBe(256);
+		expect(oauthOf(config).nonce?.maxLength).toBe(256);
 	});
 
 	it("env var at template layer can disable a template-enabled grant (precedence: env-override line must be repeated)", () => {
@@ -140,7 +143,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		// schema coercion (coerceBooleanFromEnv) can produce a boolean value.
 		// Without the HOCON block the field resolves to undefined.
 		const config = buildResolvedConfig("development");
-		expect(config.oauth.resourceIndicator?.enabled).toBe(false);
+		expect(oauthOf(config).resourceIndicator?.enabled).toBe(false);
 		expect(parsedResourceIndicator(config)?.enabled).toBe(false);
 	});
 
@@ -152,7 +155,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		const config = buildResolvedConfig("development", {
 			OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 		});
-		expect(config.oauth.resourceIndicator?.enabled).toBe("true");
+		expect(oauthOf(config).resourceIndicator?.enabled).toBe("true");
 		expect(parsedResourceIndicator(config)?.enabled).toBe(true);
 	});
 
@@ -200,7 +203,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 		it("resolves oauth.revocation.accessToken to denylist with nothing set", () => {
 			const config = buildResolvedConfig("production");
-			expect(config.oauth.revocation?.accessToken).toBe("denylist");
+			expect(oauthOf(config).revocation?.accessToken).toBe("denylist");
 		});
 
 		it("picks the replica-safe denylist module for that resolved config", () => {
@@ -252,7 +255,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 			const config = buildResolvedConfig("production", {
 				OAUTH_REVOCATION_ACCESS_TOKEN: "unsupported",
 			});
-			expect(config.oauth.revocation?.accessToken).toBe("unsupported");
+			expect(oauthOf(config).revocation?.accessToken).toBe("unsupported");
 		});
 	});
 });

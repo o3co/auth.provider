@@ -126,6 +126,9 @@ const makeConfig = (deviceGrant: Record<string, unknown>): AppConfig => {
 	const base = makeValidAppConfig();
 	return {
 		...base,
+		// The oauth module is loaded: its own required key, beside the ones
+		// core's fixture carries.
+		oauth: { ...base.oauth, oidcMode: "oidc-required" },
 		// supertest speaks plain HTTP, and express-session sets no `Secure`
 		// cookie on it — which also rules out the fixture's `__Host-` name.
 		"session-store": { ...base["session-store"], name: "auth.session", secure: false },
@@ -1218,7 +1221,10 @@ describe("the device-grant module beside oauthEndpointsModule — an approval ne
 		// here too — otherwise a deployment requiring a verified email would
 		// find those two gated and this path open.
 		const base = makeConfig(ENABLED);
-		const config = { ...base, oauth: { ...base.oauth, requireEmailVerified: true } } as AppConfig;
+		const config = {
+			...base,
+			oauth: { ...(base.oauth as object), requireEmailVerified: true },
+		} as AppConfig;
 		const { handle, app } = await bootWith(config, modules);
 		try {
 			const unverified = await startWithCodes(app);

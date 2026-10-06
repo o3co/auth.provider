@@ -116,6 +116,8 @@ function makeConfig(): AppConfig {
 		oauth: {
 			...base.oauth,
 			jwt: { ...base.oauth.jwt, issuer: ISSUER },
+			// The oauth module is loaded: its own required key.
+			oidcMode: "oidc-required",
 			// This composition wires neither the access-token denylist nor the
 			// subject watermark, and says so (the boot refuses an undeclared
 			// absence).

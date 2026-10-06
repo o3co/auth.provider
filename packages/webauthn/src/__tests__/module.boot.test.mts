@@ -315,7 +315,7 @@ describe("webauthnModule boot integration", () => {
 			},
 		});
 
-		// Resource indicators on; a wired grantPolicy needs a non-empty oauth.jwt.issuer.
+		// Resource indicators on in the slot; a wired grantPolicy needs a canonical oauth.jwt.issuer.
 		const configWithRI = {
 			...coreConfig,
 			oauth: {
@@ -324,7 +324,6 @@ describe("webauthnModule boot integration", () => {
 					...((coreConfig as unknown as Record<string, Record<string, unknown>>).oauth?.jwt ?? {}),
 					issuer: "https://example.com",
 				},
-				resourceIndicator: { enabled: true },
 			},
 		} as unknown as typeof coreConfig;
 

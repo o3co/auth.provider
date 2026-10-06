@@ -1283,8 +1283,9 @@ export interface RouteOrderTargetMissingDetails {
 }
 
 /**
- * When any module provides `grantPolicy`, `config.oauth.jwt.issuer` must be a
- * non-empty string: the grant policy hook signs decisions against the
+ * When any module, or the host, provides `grantPolicy`,
+ * `config.oauth.jwt.issuer` must be a canonical issuer
+ * (`checkCanonicalIssuer`): the grant policy hook signs decisions against the
  * issuer, and an empty one turns its fail-closed enforcement into a silent
  * allow-all.
  */

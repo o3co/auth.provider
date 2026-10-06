@@ -87,7 +87,12 @@ export function readSessionLifecycleSweepIntervalMs(config: unknown): number | u
 /**
  * How long a closing record is kept from its closing commit: the
  * refresh-token lifetime plus the clock skew it is accepted with, within the
- * port's year; 0 where no refresh token is configured.
+ * port's year; 0 where no refresh token is configured. That is sound only
+ * where nothing bundled mints refresh tokens: an `oauthTokenSettings` slot over
+ * such a configuration is refused, and so are the default family modules. A
+ * host's own grant minting refresh tokens over a family revocation of its own,
+ * with no `oauthTokenSettings`, gets 0 too: such a host configures
+ * `oauth.refreshToken.expiresIn` itself.
  */
 const closingRetainMs = (config: unknown): number => {
 	const source = config as RefreshTokenLifetimeSource | undefined;
