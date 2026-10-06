@@ -81,9 +81,10 @@ describe("the MfaTransactionStore port", () => {
 		expect(true).toBe(true);
 	});
 
-	it("notes a subject's first binding with its time and end, and answers the time or null", () => {
+	it("notes a subject's first binding with its time and end, answering the mark that stood, and answers the time or null", () => {
 		expectTypeOf<MfaTransactionStore["noteFirstBinding"]>().toEqualTypeOf<
-			(subject: string, atMs: number, untilMs: number) => Promise<void>
+			// biome-ignore lint/suspicious/noConfusingVoidType: the form that answers nothing, until it is removed
+			(subject: string, atMs: number, untilMs: number) => Promise<number | null | void>
 		>();
 		expectTypeOf<MfaTransactionStore["firstBindingAt"]>().toEqualTypeOf<
 			(subject: string, nowMs: number) => Promise<number | null>

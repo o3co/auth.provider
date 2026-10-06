@@ -1534,11 +1534,19 @@ export interface MfaTransactionStore {
 	 * witness marked, at `atMs`, standing until `untilMs` on the store's clock.
 	 * The store keeps {@link laterFirstBindingMark} of the mark held and this
 	 * one: the later `atMs` and the later `untilMs`, so no note moves a mark
-	 * back or shortens it. An applied recovery leaves it. A `RangeError`,
-	 * nothing noted, for what {@link checkFirstBindingNote} refuses on the
-	 * store's clock.
+	 * back or shortens it. An applied recovery leaves it. Answers what
+	 * {@link firstBindingAnswer} answers of the mark that stood before this
+	 * note, on the same clock: its `atMs`, or `null` when none stood. The
+	 * read and the write are one atomic step, so of notes in flight each
+	 * answers the mark another left, and one at most answers `null`. A
+	 * `RangeError`, nothing noted, for what {@link checkFirstBindingNote}
+	 * refuses on the store's clock.
+	 *
+	 * An answer of `undefined` is the form that answers nothing; it is to be
+	 * removed.
 	 */
-	noteFirstBinding(subject: string, atMs: number, untilMs: number): Promise<void>;
+	// biome-ignore lint/suspicious/noConfusingVoidType: the form that answers nothing, until it is removed
+	noteFirstBinding(subject: string, atMs: number, untilMs: number): Promise<number | null | void>;
 	/**
 	 * What {@link firstBindingAnswer} answers of `subject`'s mark: `atMs`
 	 * while the mark stands on the store's clock, else `null`. One clock

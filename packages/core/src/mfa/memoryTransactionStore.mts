@@ -781,18 +781,20 @@ export function createMemoryMfaTransactionStore(
 			return sessionEmailProofAnswer(proof, nowMs, storeNowMs);
 		},
 
-		async noteFirstBinding(subject: string, atMs: number, untilMs: number): Promise<void> {
+		async noteFirstBinding(subject: string, atMs: number, untilMs: number): Promise<number | null> {
 			const nowMs = clock();
 			checkFirstBindingNote(subject, atMs, untilMs, nowMs);
 			const next = { atMs, untilMs };
 			const held = marks.get(subject);
-			if (held !== undefined && held.untilMs > nowMs) {
+			const earlier = held === undefined ? null : firstBindingAnswer(held, nowMs);
+			if (held !== undefined && earlier !== null) {
 				marks.set(subject, laterFirstBindingMark(held, next));
 			} else {
 				if (held === undefined) makeRoom(nowMs);
 				marks.set(subject, next);
 			}
 			if (schedule.wrote()) sweep(nowMs);
+			return earlier;
 		},
 
 		async firstBindingAt(subject: string, nowMs: number): Promise<number | null> {
