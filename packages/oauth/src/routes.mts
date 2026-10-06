@@ -458,7 +458,11 @@ export const createOAuthRouter = async (
 		 */
 		subjectRevocation?: SubjectRevocation;
 		userSessionStore?: UserSessionStore;
-		/** The session lifecycle's record, which admission reads after a live session. */
+		/**
+		 * The session lifecycle's record, which admission reads after a live
+		 * session. Required beside a `userSessionStore`: the router refuses one
+		 * without it.
+		 */
 		sessionLifecycleStore?: SessionLifecycleStore;
 		federationTokenStore?: FederationTokenStore;
 		/**
@@ -562,8 +566,9 @@ export const createOAuthRouter = async (
 	if (userSessionStore !== undefined && sessionLifecycleStore === undefined) {
 		throw new Error(
 			"createOAuthRouter: userSessionStore is wired, but sessionLifecycleStore is not. Where a " +
-				"user-session store is wired, core's session lifecycle is required: /authorize and the " +
-				"consent step admit the session through its lifecycle record. Wire core's session " +
+				"user-session store is wired, core's session lifecycle is required: where they are " +
+				"mounted, /authorize and the consent step admit the session through its lifecycle " +
+				"record. Wire core's session " +
 				"lifecycle: a session-store module that fills sessionLifecycleStore " +
 				"(memorySessionStoresModule or redisSessionStoresModule) and sessionLifecycleModule.",
 		);

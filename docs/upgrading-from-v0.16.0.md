@@ -1296,10 +1296,8 @@ modules fills them.
     `oauthEndpointsModule` (`/authorize` and the consent step) are refused
     the same way when `userSessionStore` and `sessionLifecycle` are wired
     without a `sessionLifecycleStore`: `contribute-factory-failed`, the
-    message naming `sessionLifecycleStore`, and `createAuthorizationGrant`
-    and `createOAuthRouter` throw the same refusal. Such a composition used
-    to build and then answer every live session as a `session_lifecycle`
-    outage.
+    message naming both slots, and `createAuthorizationGrant` and
+    `createOAuthRouter` throw the same refusal.
   - Introspection, `/oauth/userinfo` and `POST /oauth/federation/:name/token`
     read a session through the lifecycle alone. Their outage lines no longer
     carry `store: "user_session"`, nor (the federation-token route)
