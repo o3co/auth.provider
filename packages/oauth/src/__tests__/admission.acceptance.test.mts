@@ -155,6 +155,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);

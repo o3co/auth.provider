@@ -1098,6 +1098,14 @@ modules fills them.
   throws a `RangeError` naming it when it is missing or breaks the slot's
   contract; `SessionGrantDeps` no longer has `config` (in a test,
   `createTestOAuthTokenSettings()`). Disabled, the module requires nothing.
+- **BREAKING: an enabled session grant with a `userSessionStore` requires
+  core's session lifecycle (#1030).** Without a `sessionLifecycleStore` (the
+  port core's session-store modules fill, which `sessionLifecycleModule`
+  requires) `oauthSessionGrantModule` is refused at boot:
+  `contribute-factory-failed`, the message naming both slots, and
+  `createSessionGrant` throws the same refusal. The grant's admission reads
+  the session's lifecycle record, so a session closing or closed mints
+  nothing. A sessionless grant is unaffected.
 - **BREAKING: `subjectRevocationServiceModule` requires `oauthTokenSettings`,
   reads `federationGrantPolicy`, and no longer reads the configuration
   (#728).** It sizes the subject's revocation boundary from the token
