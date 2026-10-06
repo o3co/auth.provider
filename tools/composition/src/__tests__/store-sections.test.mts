@@ -447,8 +447,11 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 		CORE_DEPLOYMENT_MODE: "single",
 	};
 
-	/** What the template's reading refused the full set with, before boot. */
-	async function refusedBeforeBoot(options: FullSetOptions): Promise<RangeError> {
+	/**
+	 * What the template's own check refused the full set with, before boot: a
+	 * `BootError`, which each test pins to the template by its words.
+	 */
+	async function refusedBeforeBoot(options: FullSetOptions): Promise<BootError> {
 		const err = await composeFullSet(options).then(
 			async (composition) => {
 				await composition.handle.dispose();
@@ -456,33 +459,63 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 			},
 			(error: unknown) => error,
 		);
-		expect(err).toBeInstanceOf(RangeError);
-		return err as RangeError;
+		expect(err).toBeInstanceOf(BootError);
+		return err as BootError;
 	}
 
-	it("refuses boot, naming both keys and both variables and quoting no value", async () => {
-		const { message } = await refusedBeforeBoot(onRedis({ env: { [GRANT]: "t1:fg:" } }));
+	/** The template's own refusal of the intent store left at its default: one custom issue at its key. */
+	const LEFT_AT_DEFAULT = {
+		reason: "config-validation-failed",
+		message: expect.stringMatching(/is set off its default key prefix/),
+		details: {
+			issues: [{ code: "custom", path: ["redis-federation-grant-intent-store", "keyPrefix"] }],
+			modules: [{ module: "redis-federation-grant-intent-store" }],
+		},
+	};
+
+	it("refuses before boot, naming both keys and both variables and quoting no value", async () => {
+		const err = await refusedBeforeBoot(onRedis({ env: { [GRANT]: "t1:fg:" } }));
+		expect(err).toMatchObject(LEFT_AT_DEFAULT);
+		const { message } = err;
 		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");
 	});
 
-	it("grants kept in memory and intents on Redis: the grant store's variable refused the same", async () => {
-		const { message } = await refusedBeforeBoot(
+	it("grants kept in memory and intents on Redis: the grant store's variable refused the same, before boot", async () => {
+		const err = await refusedBeforeBoot(
 			onRedis({ env: { ...GRANTS_IN_MEMORY, [GRANT]: "t1:fg:" } }),
 		);
+		expect(err).toMatchObject(LEFT_AT_DEFAULT);
+		const { message } = err;
 		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");
 	});
 
-	it("grants kept in memory and intents on Redis: the grant store's key at its old path refused, naming the intent store's", async () => {
-		const { message } = await refusedBeforeBoot(
+	it("grants kept in memory and intents on Redis: the grant store's key at its old path refused before boot, naming the intent store's", async () => {
+		const { message, reason, details } = await refusedBeforeBoot(
 			onRedis({
 				env: GRANTS_IN_MEMORY,
 				operatorHocon: 'redisFederationGrantStore.keyPrefix = "t1:fg:"\n',
 			}),
 		);
+		// No loaded module relocates the old key: the refusal is the template's.
+		expect(reason).toBe("config-path-relocated");
+		expect(message).toMatch(
+			/^redisFederationGrantStore\.keyPrefix is set, and no installed module reads it/,
+		);
+		expect(details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "redis-federation-grant-intent-store",
+					from: "redisFederationGrantStore.keyPrefix",
+					to: "redis-federation-grant-intent-store.keyPrefix",
+					environmentVariable: INTENT,
+				},
+			],
+		});
 		expect(message).toContain("redisFederationGrantStore.keyPrefix");
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");

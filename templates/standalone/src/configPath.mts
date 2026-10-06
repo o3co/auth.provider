@@ -46,6 +46,13 @@ import {
 } from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 import { ADAPTERS_SECTION, readAdapters } from "./adapters.mjs";
+import {
+	configRefused,
+	issuesAt,
+	keyRefused,
+	pathsRelocated,
+	sectionPathRefused,
+} from "./bootRefusal.mjs";
 import { MFA_SWITCH, mfaSectionForBoot, oauthForBoot, readMfaSwitch } from "./mfaSwitch.mjs";
 import { loggingModule, templateReference } from "./modules.mjs";
 import { refuseRenamedVariables, SHIPPED_FEDERATION_RENAMES } from "./rootRenames.mjs";
@@ -219,18 +226,20 @@ function storeTransportOf(resolved: Readonly<Record<string, unknown>>): unknown 
 /**
  * The `logging` module's section, read before boot for the logger: the own
  * layers over the module's reference and core's, parsed with the module's
- * schema. A refused value is a `RangeError` naming its path under `logging`.
+ * schema. A refused value is a `config-validation-failed` `BootError` naming
+ * its path under `logging`.
  */
 export function readLogging(own: OwnLayers): LoggingSettings {
 	const resolved = resolveLayers(own, moduleReferences([loggingModule]));
 	const result = loggingSectionSchema.safeParse(resolved.logging);
 	if (!result.success) {
-		const issues = result.error.issues;
-		throw new RangeError(
+		const issues = issuesAt([loggingModule.name], result.error.issues);
+		throw configRefused(
 			`Config validation failed — ${issues.length} issue(s) found: ${issues
-				.map((issue) => `${["logging", ...issue.path.map(String)].join(".")}: ${issue.message}`)
+				.map((issue) => `${issue.path.map(String).join(".")}: ${issue.message}`)
 				.join("; ")}`,
-			{ cause: result.error },
+			issues,
+			[{ module: loggingModule.name, schemaPath: loggingModule.name }],
 		);
 	}
 	return result.data;
@@ -247,8 +256,9 @@ export function readLogging(own: OwnLayers): LoggingSettings {
  * (`session-requirement-missing`) and a declared authority the requirement of
  * that name does not declare. Every other key written there is kept, for
  * boot to refuse. With nothing written, `mfa` alone. With the switch on, a
- * written `secondFactorAuthority` other than `mfa` is a `RangeError` naming
- * the key, `mfaMode` and `MFA_MODE`, quoting nothing.
+ * written `secondFactorAuthority` other than `mfa` is a
+ * `config-validation-failed` `BootError` naming the key, `mfaMode` and
+ * `MFA_MODE`, quoting nothing.
  *
  * `undefined` hands the section on as written: with the switch `off`, and
  * where `written` is not a section or its `expected` is not a list of names,
@@ -264,8 +274,10 @@ export function expectedSessionRequirements(
 	if (!isPlainSection(written)) return undefined;
 	const authority = written.secondFactorAuthority;
 	if (authority !== undefined && authority !== "mfa") {
-		throw new RangeError(
+		throw keyRefused(
 			`core.sessionRequirements.secondFactorAuthority is written and names a requirement other than the one ${MFA_SWITCH} (MFA_MODE) installs as the second-factor authority: remove it, or write mfa`,
+			"core",
+			["core", "sessionRequirements", "secondFactorAuthority"],
 		);
 	}
 	const declared = written.expected;
@@ -310,7 +322,7 @@ function keyPrefixOf(
 }
 
 /**
- * Refuses, with a `RangeError`, a Redis intent store left on the default key
+ * Refuses, with a `BootError`, a Redis intent store left on the default key
  * prefix where the grant store's was moved, when `modules` load the Redis
  * intent store. The intent store's prefix is its own key, so a deployment
  * that moved only the grant store's would keep acquisition's records in the
@@ -325,8 +337,10 @@ function keyPrefixOf(
  *   written at all: the intent store read that key, and no loaded module
  *   relocates it.
  *
- * The defaults are what the package's `reference.conf` sets with no
- * environment. The message names the keys and variables, and quotes no value.
+ * The first is `config-validation-failed` at the intent store's key; the
+ * second `config-path-relocated`, from the old key to the intent store's. The
+ * defaults are what the package's `reference.conf` sets with no environment.
+ * The message names the keys and variables, and quotes no value.
  */
 function refuseIntentPrefixLeftAtDefault(
 	resolved: Readonly<Record<string, unknown>>,
@@ -337,14 +351,23 @@ function refuseIntentPrefixLeftAtDefault(
 	const loaded = (module: Module) => modules.some((m) => m.name === module.name);
 	const reference = intentStore.section?.reference;
 	if (!loaded(intentStore) || reference === undefined) return;
-	const intentKey =
-		"redis-federation-grant-intent-store.keyPrefix (REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX)";
+	const intentPath = `${intentStore.name}.keyPrefix`;
+	const intentVariable = "REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX";
+	const intentKey = `${intentPath} (${intentVariable})`;
 	const oldSection = resolved.redisFederationGrantStore;
 	if (!loaded(grantStore) && isPlainSection(oldSection) && Object.hasOwn(oldSection, "keyPrefix")) {
-		throw new RangeError(
+		throw pathsRelocated(
 			"redisFederationGrantStore.keyPrefix is set, and no installed module reads it: the Redis " +
 				`intent store's prefix is its own key, ${intentKey}. Set that instead, and delete ` +
 				"redisFederationGrantStore.keyPrefix",
+			[
+				{
+					module: intentStore.name,
+					from: "redisFederationGrantStore.keyPrefix",
+					to: intentPath,
+					environmentVariable: intentVariable,
+				},
+			],
 		);
 	}
 	const defaults = resolveLayers({ config: empty(), env: {} }, [reference]);
@@ -354,12 +377,14 @@ function refuseIntentPrefixLeftAtDefault(
 	if (intent === undefined || intent !== keyPrefixOf(defaults, intentStore)) return;
 	const grantKey =
 		"redis-federation-grant-store.keyPrefix (REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX)";
-	throw new RangeError(
+	throw keyRefused(
 		`${grantKey} is set off its default key prefix, and ${intentKey} is left at its ` +
 			"default. The Redis intent store's prefix is its own: acquisition's records would " +
 			"stay in the default namespace, shared with every deployment on the same Redis " +
 			`database that left it there. Set ${intentKey} as well — to the grant store's prefix ` +
 			"to keep the two together, or to one of its own",
+		intentStore.name,
+		[intentStore.name, "keyPrefix"],
 	);
 }
 
@@ -370,16 +395,20 @@ function refuseIntentPrefixLeftAtDefault(
 const ROOT_SECTIONS: readonly string[] = [ADAPTERS_SECTION, MFA_SWITCH];
 
 /**
- * Refuses, with a `RangeError` naming it, a module whose section — at the
- * module's name — is one of the composition root's own sections, which phase
- * one consumes and boot is never handed: the module would read nothing its
- * operator wrote.
+ * Refuses, with a `module-section-path-invalid` `BootError` naming it, a
+ * module whose section — at the module's name — is one of the composition
+ * root's own sections, which phase one consumes and boot is never handed:
+ * the module would read nothing its operator wrote.
  */
 function refuseModuleAtRootSections(modules: readonly Module[]): void {
 	for (const module of modules) {
 		if (module.section === undefined || !ROOT_SECTIONS.includes(module.name)) continue;
-		throw new RangeError(
+		const problem = "the composition root's own section, which boot is not handed, is read there";
+		throw sectionPathRefused(
 			`Module "${module.name}" has its section at ${module.name}: the composition root's own section, which boot is not handed. Give the module a section of another name.`,
+			module.name,
+			module.name,
+			problem,
 		);
 	}
 }
@@ -398,8 +427,9 @@ function refuseModuleAtRootSections(modules: readonly Module[]): void {
  * composition does not load is handed on as resolved: boot tells it apart by
  * the configuration's defaults (`configDefaultsFor`).
  *
- * Refuses, with a `RangeError`, a module whose section is a section of the
- * composition root's (`refuseModuleAtRootSections`), what
+ * Refuses, each with a `BootError` (`bootRefusal.mts`), a module whose
+ * section is a section of the composition root's
+ * (`refuseModuleAtRootSections`), what
  * `expectedSessionRequirements` refuses of `core.sessionRequirements`, what
  * `mfaSectionForBoot` refuses of the `mfa` section, and the Redis intent
  * store left on its default key prefix where the grant store's was moved

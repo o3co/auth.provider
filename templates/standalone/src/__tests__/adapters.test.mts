@@ -28,7 +28,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineModule } from "@o3co/auth-provider-core";
+import { BootError, defineModule } from "@o3co/auth-provider-core";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildModules } from "#/buildModules.mjs";
@@ -60,12 +60,13 @@ const MFA_OFF: Readonly<Record<string, string>> = { MFA_MODE: "off" };
 const adaptersFrom = (env: Record<string, string> = {}, hocon?: string) =>
 	readSwitches(readOwnLayers(ownFiles(hocon), { env })).adapters;
 
-/** What phase one refuses under `env` and an operator's `hocon`. */
-function refusal(env: Record<string, string> = {}, hocon?: string): Error {
+/** What phase one refuses under `env` and an operator's `hocon`: a `BootError`. */
+function refusal(env: Record<string, string> = {}, hocon?: string): BootError {
 	try {
 		adaptersFrom(env, hocon);
 	} catch (err) {
-		return err as Error;
+		expect(err).toBeInstanceOf(BootError);
+		return err as BootError;
 	}
 	throw new Error("phase one read the adapters");
 }
@@ -177,9 +178,13 @@ describe("the shipped selections", () => {
 	});
 
 	it("refuses a value its schema does not know, naming the key", () => {
-		expect(refusal({ ADAPTERS_RATE_LIMITER: "memcached" }).message).toMatch(
-			/adapters\.rateLimiter/,
-		);
+		const err = refusal({ ADAPTERS_RATE_LIMITER: "memcached" });
+		expect(err.message).toMatch(/adapters\.rateLimiter/);
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.details).toMatchObject({
+			issues: [{ path: ["adapters", "rateLimiter"] }],
+			modules: [{ module: "adapters", schemaPath: "adapters" }],
+		});
 	});
 
 	it("refuses the Store for the MFA transaction store, which holds verification state, and accepts it for the factor store", () => {
@@ -206,9 +211,20 @@ describe("a path a selection moved from, written in the operator's own layer", (
 		"adapters.%s: refused where it was, %s's old path, naming the new path and ADAPTERS_%s",
 		(key, name, oldPath, _oldName, value) => {
 			const err = refusal({}, `${oldPath} = "${value}"\n`);
-			expect(err).toBeInstanceOf(RangeError);
 			expect(err.message).toContain(`${oldPath} has moved to adapters.${key}`);
 			expect(err.message).toContain(`ADAPTERS_${name}`);
+			expect(err.reason).toBe("config-path-relocated");
+			expect(err.details).toEqual({
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "adapters",
+						from: oldPath,
+						to: `adapters.${key}`,
+						environmentVariable: `ADAPTERS_${name}`,
+					},
+				],
+			});
 		},
 	);
 
@@ -220,6 +236,13 @@ describe("a path a selection moved from, written in the operator's own layer", (
 		for (const path of ["rateLimiter.adapter", "consentStore.adapter", "audit.sink.type"]) {
 			expect(err.message).toContain(path);
 		}
+		expect(err.details).toMatchObject({
+			relocated: [
+				{ from: "rateLimiter.adapter" },
+				{ from: "consentStore.adapter" },
+				{ from: "audit.sink.type" },
+			],
+		});
 	});
 });
 
@@ -228,9 +251,21 @@ describe("a variable renamed with a selection", () => {
 		"adapters.%s: %s's old variable set alone is refused, naming ADAPTERS_%s",
 		(key, name, _oldPath, oldName, value) => {
 			const err = refusal({ [oldName]: value });
-			expect(err).toBeInstanceOf(RangeError);
 			expect(err.message).toContain(`${oldName} was renamed ADAPTERS_${name}`);
 			expect(err.message).toContain(`adapters.${key}`);
+			expect(err.reason).toBe("environment-variable-renamed");
+			expect(err.details).toEqual({
+				reason: "environment-variable-renamed",
+				renamed: [
+					{
+						module: "adapters",
+						from: oldName,
+						to: `ADAPTERS_${name}`,
+						path: `adapters.${key}`,
+						state: "unset",
+					},
+				],
+			});
 		},
 	);
 
@@ -241,6 +276,8 @@ describe("a variable renamed with a selection", () => {
 			expect(err.message).toContain(oldName);
 			expect(err.message).not.toContain("old-value-5e2d");
 			expect(err.message).not.toContain("new-value-c81a");
+			expect(err.details).toMatchObject({ renamed: [{ from: oldName, state: "different" }] });
+			expect(JSON.stringify(err.details)).not.toMatch(/old-value-5e2d|new-value-c81a/);
 		},
 	);
 
@@ -359,12 +396,24 @@ describe("boot and the section", () => {
 			name,
 			section: { schema: z.object({}).passthrough().optional() },
 		});
-		expect(() =>
+		const run = () =>
 			resolveForBoot(
 				own,
 				[...buildModules(switches, { environment: "production" }), mine],
 				switches,
-			),
-		).toThrow(new RegExp(`"${name}".*composition root's own section`));
+			);
+		expect(run).toThrow(new RegExp(`"${name}".*composition root's own section`));
+		const err = (() => {
+			try {
+				run();
+			} catch (thrown) {
+				return thrown;
+			}
+		})();
+		expect(err).toBeInstanceOf(BootError);
+		expect(err).toMatchObject({
+			reason: "module-section-path-invalid",
+			details: { module: name, at: name },
+		});
 	});
 });

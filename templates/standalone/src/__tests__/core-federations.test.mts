@@ -32,7 +32,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createApp } from "@o3co/auth-provider-core";
+import { BootError, createApp } from "@o3co/auth-provider-core";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "#/configPath.mjs";
@@ -170,9 +170,24 @@ describe("a variable the template bound before, FEDERATIONS_<NAME>_<KEY>", () =>
 		"core.federations.%s.%s: %s set alone is refused before any module is chosen, naming %s",
 		(name, key, old, variable, value) => {
 			const err = refusal({ [old]: value });
-			expect(err).toBeInstanceOf(RangeError);
+			expect(err).toBeInstanceOf(BootError);
 			expect(err.message).toContain(`${old} was renamed ${variable}`);
 			expect(err.message).toContain(`core.federations.${name}.${key}`);
+			expect(err).toMatchObject({
+				reason: "environment-variable-renamed",
+				details: {
+					reason: "environment-variable-renamed",
+					renamed: [
+						{
+							module: "core",
+							from: old,
+							to: variable,
+							path: `core.federations.${name}.${key}`,
+							state: "unset",
+						},
+					],
+				},
+			});
 		},
 	);
 
@@ -180,6 +195,10 @@ describe("a variable the template bound before, FEDERATIONS_<NAME>_<KEY>", () =>
 		"core.federations.%s.%s: %s beside its new name at a different value is refused, quoting neither",
 		(_name, _key, old, variable) => {
 			const err = refusal({ [old]: "old-value-5e2d", [variable]: "new-value-c81a" });
+			expect(err).toMatchObject({
+				reason: "environment-variable-renamed",
+				details: { renamed: [{ from: old, state: "different" }] },
+			});
 			expect(err.message).toContain(old);
 			expect(err.message).not.toContain("old-value-5e2d");
 			expect(err.message).not.toContain("new-value-c81a");

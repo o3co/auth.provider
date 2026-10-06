@@ -284,6 +284,20 @@ describe("logging", () => {
 	it("refuses a level it does not know before boot, naming logging.level", () => {
 		const own = readOwnLayers(ownFiles(), { env: { ...BASE_ENV, LOGGING_LEVEL: "verbose" } });
 		expect(() => readLogging(own)).toThrow(/logging\.level/);
+		expect(() => readLogging(own)).toThrow(BootError);
+		let err: unknown;
+		try {
+			readLogging(own);
+		} catch (caught) {
+			err = caught;
+		}
+		expect(err).toMatchObject({
+			reason: "config-validation-failed",
+			details: {
+				issues: [{ path: ["logging", "level"] }],
+				modules: [{ module: "logging", schemaPath: "logging" }],
+			},
+		});
 	});
 
 	it("has boot refuse LOG_LEVEL set alone, naming LOGGING_LEVEL and logging.level", async () => {

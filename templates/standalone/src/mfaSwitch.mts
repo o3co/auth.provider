@@ -22,8 +22,9 @@
  * it; on installs the MFA package's modules over the two MFA stores
  * `adapters` selects.
  *
- * Refuses, each with a `RangeError` before boot that names the keys and
- * variables and quotes no value of a mode, a timeout or a key:
+ * Refuses, each before boot with a `config-validation-failed` `BootError`
+ * (`bootRefusal.mts`) that names the keys and variables and quotes no value
+ * of a mode, a timeout or a key:
  * - a switch outside its three values, or a file's `mfaMode` that `MFA_MODE`
  *   contradicts (`readMfaSwitch`);
  * - an MFA store kept in memory with MFA on, unless every environment name
@@ -50,6 +51,8 @@ import {
 	redisMfaTransactionStoreModule,
 } from "@o3co/auth-provider-redis";
 import { loginCompletionModule } from "@o3co/auth-provider-session";
+import { ADAPTERS_SECTION } from "./adapters.mjs";
+import { configRefused, customIssue, issuesAt, keyRefused } from "./bootRefusal.mjs";
 import { type Adapters, isPlainSection, type MfaSwitch, mfaSwitchSchema } from "./sections.mjs";
 
 /** The composition root's MFA switch, a key of its own. No module may be named after it. */
@@ -66,7 +69,7 @@ const MFA_ACR = "urn:o3co:acr:mfa";
  * `config/reference.conf` — parsed with the template's schema, under `env`,
  * the environment the layers were substituted with. A value the schema
  * refuses, or `MFA_MODE` set to other than what a file writes over it, is a
- * `RangeError` naming `mfaMode` and `MFA_MODE`.
+ * `config-validation-failed` `BootError` naming `mfaMode` and `MFA_MODE`.
  */
 export function readMfaSwitch(
 	resolved: Readonly<Record<string, unknown>>,
@@ -74,17 +77,20 @@ export function readMfaSwitch(
 ): MfaSwitch {
 	const result = mfaSwitchSchema.safeParse(resolved[MFA_SWITCH]);
 	if (!result.success) {
-		throw new RangeError(
+		throw configRefused(
 			`Config validation failed — ${MFA_SWITCH} (MFA_MODE): ${result.error.issues
 				.map((issue) => issue.message)
 				.join("; ")}`,
-			{ cause: result.error },
+			issuesAt([MFA_SWITCH], result.error.issues),
+			[{ module: MFA_SWITCH, schemaPath: MFA_SWITCH }],
 		);
 	}
 	const variable = env.MFA_MODE;
 	if (variable !== undefined && variable !== result.data) {
-		throw new RangeError(
+		throw keyRefused(
 			`MFA_MODE is set and differs from ${MFA_SWITCH}, which a configuration file writes over it: the file, not the variable, would decide whether MFA is installed. Remove ${MFA_SWITCH} from the file, or set MFA_MODE to what it says`,
+			MFA_SWITCH,
+			[MFA_SWITCH],
 		);
 	}
 	return result.data;
@@ -134,18 +140,27 @@ export function mfaModulesFor(options: {
 }): Module[] {
 	if (options.mode === "off") return [];
 	const { adapters, environment } = options;
-	const inMemory = [
-		...(adapters.mfaFactorStore === "memory"
-			? ["adapters.mfaFactorStore (ADAPTERS_MFA_FACTOR_STORE)"]
-			: []),
-		...(adapters.mfaTransactionStore === "memory"
-			? ["adapters.mfaTransactionStore (ADAPTERS_MFA_TRANSACTION_STORE)"]
-			: []),
-	];
+	const inMemory = (
+		[
+			["mfaFactorStore", "ADAPTERS_MFA_FACTOR_STORE"],
+			["mfaTransactionStore", "ADAPTERS_MFA_TRANSACTION_STORE"],
+		] as const
+	).filter(([key]) => adapters[key] === "memory");
 	const reasons = inMemory.length === 0 ? [] : memoryRefusals(environment);
 	if (reasons.length > 0) {
-		throw new RangeError(
-			`MFA is on (${MFA_SWITCH}, MFA_MODE, which installs it unless set to off) and ${inMemory.join(" and ")} ${inMemory.length === 1 ? "is" : "are"} "memory", refused because ${reasons.join(" and ")}: a store in memory loses every factor, lock and recorded email proof at a restart, after which whoever holds a password can bind a factor of their own. Select "redis" (or, for the factors, "store"); memory is for development and test alone. Outside development MFA also needs MFA_ENCRYPTION_KEY, the SMTP relay (STANDARD_SMTP_MAIL_SENDER_HOST and STANDARD_SMTP_MAIL_SENDER_FROM) or your own mail sender, and an MFA page served at MFA_PAGE_URL. A deployment that wants no MFA sets MFA_MODE=off`,
+		const refused = `"memory", refused because ${reasons.join(" and ")}`;
+		const settings = inMemory
+			.map(([key, variable]) => `${ADAPTERS_SECTION}.${key} (${variable})`)
+			.join(" and ");
+		throw configRefused(
+			`MFA is on (${MFA_SWITCH}, MFA_MODE, which installs it unless set to off) and ${settings} ${inMemory.length === 1 ? "is" : "are"} ${refused}: a store in memory loses every factor, lock and recorded email proof at a restart, after which whoever holds a password can bind a factor of their own. Select "redis" (or, for the factors, "store"); memory is for development and test alone. Outside development MFA also needs MFA_ENCRYPTION_KEY, the SMTP relay (STANDARD_SMTP_MAIL_SENDER_HOST and STANDARD_SMTP_MAIL_SENDER_FROM) or your own mail sender, and an MFA page served at MFA_PAGE_URL. A deployment that wants no MFA sets MFA_MODE=off`,
+			inMemory.map(([key, variable]) =>
+				customIssue(
+					[ADAPTERS_SECTION, key],
+					`${variable} is ${refused}, with MFA on (${MFA_SWITCH}, MFA_MODE)`,
+				),
+			),
+			[{ module: ADAPTERS_SECTION, schemaPath: ADAPTERS_SECTION }],
 		);
 	}
 	return [
@@ -202,14 +217,18 @@ export function mfaSectionForBoot(options: {
 }): unknown {
 	const { mode, written, resolved } = options;
 	if (written !== undefined && !isPlainSection(written)) {
-		throw new RangeError(
+		throw keyRefused(
 			`mfa is written as a value in the configuration; it is the MFA package's section, and ${MFA_SWITCH} (MFA_MODE) decides whether the template installs MFA. Remove mfa, and set MFA_MODE or ${MFA_SWITCH}`,
+			MFA_SECTION,
+			[MFA_SECTION],
 		);
 	}
 	const writtenMode = written === undefined ? undefined : written.mode;
 	if (writtenMode !== undefined && writtenMode !== mode) {
-		throw new RangeError(
+		throw keyRefused(
 			`mfa.mode is written in the configuration and differs from ${MFA_SWITCH} (MFA_MODE), which decides whether the template installs MFA and writes mfa.mode from it. Set MFA_MODE or ${MFA_SWITCH}, and remove mfa.mode`,
+			MFA_SECTION,
+			[MFA_SECTION, "mode"],
 		);
 	}
 	if (!options.owned) return undefined;
@@ -223,8 +242,10 @@ export function mfaSectionForBoot(options: {
 		variableKey !== MFA_DEVELOPMENT_SAMPLE_KEY &&
 		ring.some((entry) => valueAt(entry, ["key"]) === MFA_DEVELOPMENT_SAMPLE_KEY)
 	) {
-		throw new RangeError(
+		throw keyRefused(
 			"MFA_ENCRYPTION_KEY is set, and mfa.encryptionKeys holds the development sample key in its place: a ring a configuration file writes (config/development.conf's) wins over the variable, so the key you set would seal nothing. Write your key in place of the sample key in that ring, or unset MFA_ENCRYPTION_KEY",
+			MFA_SECTION,
+			[MFA_SECTION, "encryptionKeys"],
 		);
 	}
 	const storeTimeout = wholeNumber(section.storeTimeoutMs);
@@ -235,8 +256,10 @@ export function mfaSectionForBoot(options: {
 		userTimeout !== undefined &&
 		storeTimeout < userTimeout
 	) {
-		throw new RangeError(
+		throw keyRefused(
 			"mfa.storeTimeoutMs (MFA_STORE_TIMEOUT_MS) is below repositories.user.http.timeout (REPOSITORIES_USER_HTTP_TIMEOUT): one MFA Store call's time must cover the Store's own per-call timeout, or a factor-set write's lease can lapse while a Store call is still running. Raise MFA_STORE_TIMEOUT_MS to at least the user directory's timeout",
+			MFA_SECTION,
+			[MFA_SECTION, "storeTimeoutMs"],
 		);
 	}
 	return { ...section, mode };
