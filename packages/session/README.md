@@ -232,8 +232,8 @@ paths these keys moved from — each key of the cookie and its store under
 (`config-path-relocated`), naming the new path and its variable. The variables
 renamed with them — `SESSION_<KEY>` to `SESSION_STORE_<KEY>`, and
 `ENDPOINTS_LOGIN_URL` to `SESSION_LOGIN_PAGE_URL` — refuse boot
-(`environment-variable-renamed`) when the old name is set alone, or to another
-value than the new one; set to the same value, both boot.
+(`environment-variable-renamed`) while the old name is set, alone or beside the
+new one at any value: set the new name and unset the old one.
 
 ## Browser session store
 
@@ -664,7 +664,8 @@ a copy of it, from before a step-up renewed the session — the record is the
 renewed session's, so only this cookie session is destroyed and the answer is
 the same `200`. The renewed session stays live. When the record cannot be
 read, that is logged as `logout_user_session_read_failed` and the logout
-closes the session as above.
+answers `503 temporarily_unavailable`: it closes nothing and keeps the express
+session for a retry.
 
 **The cookie session's destroy.** If destroying the express session fails —
 the cookie store's outage — the user is not logged out, so the response is
@@ -1423,7 +1424,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, the cookie policy refuses whatever would break the contract, over every combination of the cookie's attributes, and a name or domain it refuses is refused at validation with its message; an override of the policy beside the store's module refuses boot, and a composition without the module fills the slot |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
 | [`src/__tests__/renewSession.test.mts`](src/__tests__/renewSession.test.mts) | the session renewal over express-session's `MemoryStore`: the signed-in state and a fresh nonce alone on the new id, the old id destroyed, a failed `regenerate` or `save` answered as the cookie session's outage with nothing written; and the race — a request in flight on the old id puts it back after the renewal, and core's admission refuses it once the escalation carries the nonce |
-| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginAttempts.test.mts`](src/routes/__tests__/loginAttempts.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login's attempt limit |
+| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginAttempts.test.mts`](src/routes/__tests__/loginAttempts.test.mts) | login, what logout invalidates, the logout answering `503` and keeping the cookie session when the `UserSession` record cannot be read, the outage answers and their one log line, and the login's attempt limit |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | the link start and callback on session admission: each outcome's answer, the subject recorded beside the `sid`, what a requirement is asked, the pre-upgrade transaction |

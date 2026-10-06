@@ -114,8 +114,8 @@ const tokens: FederationTokens = {
 };
 
 describe("redis FederationTokenStore.removeBySid, and no deleteBySession", () => {
-	it("redis store exposes removeBySid", () => {
-		const store = createRedisFederationTokenStore({
+	it("redis store exposes removeBySid", async () => {
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: createFakeRedis(),
 			encryption: { mode: "required", key: encryptionKey },
@@ -123,8 +123,8 @@ describe("redis FederationTokenStore.removeBySid, and no deleteBySession", () =>
 		expect("removeBySid" in store).toBe(true);
 	});
 
-	it("redis store does not expose deleteBySession", () => {
-		const store = createRedisFederationTokenStore({
+	it("redis store does not expose deleteBySession", async () => {
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: createFakeRedis(),
 			encryption: { mode: "required", key: encryptionKey },
@@ -134,7 +134,7 @@ describe("redis FederationTokenStore.removeBySid, and no deleteBySession", () =>
 
 	it("removeBySid removes all federation entries for sid", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
@@ -149,7 +149,7 @@ describe("redis FederationTokenStore.removeBySid, and no deleteBySession", () =>
 	});
 
 	it("removeBySid is idempotent on absent sid (parity with in-memory adapter)", async () => {
-		const store = createRedisFederationTokenStore({
+		const store = await createRedisFederationTokenStore({
 			deploymentMode: "unset",
 			client: createFakeRedis(),
 			encryption: { mode: "required", key: encryptionKey },

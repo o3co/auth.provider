@@ -1099,6 +1099,18 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "continuationOf copies what a completed requirement added into the DTO, and checkPrimaryContinuation counts the completions that add a second factor — a continuation, never a session record",
 	},
 	{
+		file: "packages/core/src/session-admission/live-session.mts",
+		read: "{amr}=record",
+		count: 1,
+		why: "copyRecord copies the store's answer once by its declared fields, inside the guarded live read; every later step reads that copy through the D9 readers",
+	},
+	{
+		file: "packages/core/src/session-admission/live-session.mts",
+		read: "{authentication}=record",
+		count: 1,
+		why: "the same copy: copyRecord reads each declared field once, and interprets none",
+	},
+	{
 		file: "packages/core/src/session-admission/primary.mts",
 		read: "value.authentication",
 		count: 1,

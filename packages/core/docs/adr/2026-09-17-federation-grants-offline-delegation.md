@@ -1147,7 +1147,8 @@ The budget counts rotations that may have happened, and D12's backoff counts
 failures; neither counts the other. A rotation the upstream provably did not
 perform is given back (the store's `refundRotation`, optional as
 `takeRotation` is, and required with it later): an answer that proves the
-request was not acted on — a 4xx but 408 and 499, a 501 or a 503, or a code
+request was not acted on — a 4xx but 408 and 499, a 501 or a 503 (a 503
+withdrawn by the 503 amendment below), or a code
 this provider knows that is not an outage's — or a request that never left
 (refused, unresolvable, unreachable, a connect that timed out, a TLS handshake
 or certificate that failed). Anything else keeps its rotation: a request given
@@ -1165,7 +1166,8 @@ not an error status, a chain longer than the limit — keeps the rotation.
 A 503 is the known exception: a service mesh (Envoy, Istio) can answer it
 after forwarding the request, so it can undercount one rotation per such
 answer. The failure backoff still bounds the attempts, and doubting every 503
-would let an ordinary outage spend the budget. It is a version-bumping
+would let an ordinary outage spend the budget (superseded by the 503
+amendment below: a 503 keeps its rotation). It is a version-bumping
 write made under the lock after a failure, the same class as a credential
 write in flight: one that may still land keeps the lock, and it is spent of
 the one persist budget the lock is sized for. So an upstream that hangs, or
@@ -1220,6 +1222,15 @@ rotation at all, so in a fleet mixing it with 0.17 its refreshes are not
 counted against the budget (its writes keep the `rotations` others counted),
 and the bound holds only once every replica runs 0.17. A store that lacks
 either member is refused at boot by `federationGrantsModule`.
+
+**Amended 2026-10-06 (#1530): a 503 keeps its rotation.** The exception above for a
+503 is withdrawn. A proxy or mesh in front of the IdP can answer 503 after
+forwarding the refresh, so a 503 may follow a rotation, and the budget counts
+rotations that may have happened. A 503 is read like a 500, 502 or 504: its
+rotation stays spent. An outage answered 503 therefore spends the budget, one
+attempt per failure backoff, and once it is spent a grant with no stored token
+that serves the request answers `rate_limited` / `provider` until the window
+closes. A 501 still proves the request was not acted on.
 
 A refresh no longer has to take whatever it is answered with: a fresh token
 that carries less of the asked-for scope than a held token that is still good

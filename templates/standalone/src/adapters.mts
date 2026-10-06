@@ -21,7 +21,7 @@
  * moved from, and the variables renamed with them, are refused here, before
  * any module is chosen, in the words and under the reasons boot refuses a
  * module's with (`config-path-relocated`, `environment-variable-renamed`): a
- * renamed variable set alone, or beside its new name at a different value, is
+ * renamed variable set, alone or beside its new name at any value, is
  * refused, naming the variables and never a value.
  */
 
@@ -128,7 +128,7 @@ export function readAdapters(
 			`Configuration sets ${moved.length} path(s) that moved: ${moved
 				.map(
 					({ from, to, environmentVariable }) =>
-						`${from} has moved to ${to}; see CHANGELOG. Write it there (environment variable ${environmentVariable}) and remove this field from your config (or unset the environment variable that sets it).`,
+						`${from} has moved to ${to}; see the upgrade guide (docs/upgrading-from-v0.16.0.md). Write it there (environment variable ${environmentVariable}) and remove this field from your config (or unset the environment variable that sets it).`,
 				)
 				.join(" ")}`,
 			moved,

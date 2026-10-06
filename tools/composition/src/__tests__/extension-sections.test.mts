@@ -21,8 +21,8 @@
  * switches, then the layers over every loaded package's `reference.conf`
  * handed to boot. Each section is read at its new path and refuses a key it
  * does not declare; a path it moved from refuses boot naming the new one;
- * each DPoP nonce variable renamed with the move refuses boot unless its new
- * name carries the same value.
+ * each DPoP nonce variable renamed with the move refuses boot while its old
+ * name is set, whatever its new name holds.
  */
 
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
@@ -406,15 +406,23 @@ describe("a DPoP nonce variable renamed with the move, through the template's re
 	);
 
 	it.each(ROWS)(
-		"$from set beside $to at the same value: boots, the value at $path",
-		async ({ from, to, path, value, beside }) => {
-			const composition = await boot({
+		"$from set beside $to at the same value: refused all the same",
+		async ({ from, to, value, beside }) => {
+			const err = await refused({
 				env: { ...SINGLE_ENV, ...beside(), [from]: value, [to]: value },
 			});
 
-			const key = path.split(".").at(-1) as string;
-			const nonce = (sectionOf(composition, "dpop") as { nonce: Record<string, unknown> }).nonce;
-			expect(String(nonce[key])).toBe(value);
+			expect(err.details).toMatchObject({ renamed: [{ from, to, state: "different" }] });
 		},
 	);
+
+	it.each(ROWS)("$to set alone: boots, the value at $path", async ({ to, path, value, beside }) => {
+		const composition = await boot({
+			env: { ...SINGLE_ENV, ...beside(), [to]: value },
+		});
+
+		const key = path.split(".").at(-1) as string;
+		const nonce = (sectionOf(composition, "dpop") as { nonce: Record<string, unknown> }).nonce;
+		expect(String(nonce[key])).toBe(value);
+	});
 });

@@ -22,8 +22,8 @@
  * environment and HOCON overrides, through the template's real path:
  * `readOwnLayers`, then `resolveForBoot` over every loaded module's
  * reference, then `createApp`. A path a section moved from refuses boot
- * naming its new path, and a variable renamed with it refuses boot unless its
- * new name carries the same value.
+ * naming its new path, and a variable renamed with it refuses boot while its
+ * old name is set, whatever its new name holds.
  */
 
 import { generateKeyPairSync } from "node:crypto";
@@ -332,8 +332,19 @@ describe("logging", () => {
 		});
 	});
 
-	it("boots with LOG_LEVEL beside LOGGING_LEVEL at the same value", async () => {
-		const handle = await bootTemplate({ env: { LOG_LEVEL: "debug", LOGGING_LEVEL: "debug" } });
+	it("refuses LOG_LEVEL beside LOGGING_LEVEL at the same value", async () => {
+		await expect(
+			bootTemplate({ env: { LOG_LEVEL: "debug", LOGGING_LEVEL: "debug" } }),
+		).rejects.toMatchObject({
+			details: {
+				reason: "environment-variable-renamed",
+				renamed: [{ module: "logging", from: "LOG_LEVEL", state: "different" }],
+			},
+		});
+	});
+
+	it("boots with LOGGING_LEVEL alone", async () => {
+		const handle = await bootTemplate({ env: { LOGGING_LEVEL: "debug" } });
 		await handle.dispose();
 	});
 });
@@ -947,17 +958,32 @@ describe("key-store", () => {
 		});
 	});
 
-	it("boots with each old name beside its new one at the same value", async () => {
-		const handle = await bootTemplate({
-			env: {
-				OAUTH_JWT_PRIVATE_KEY: signingKey.privateKey,
-				OAUTH_JWT_PUBLIC_KEY: signingKey.publicKey,
-				OAUTH_JWT_KID: "k-both",
-				KEY_STORE_LOCAL_KID: "k-both",
+	it("refuses each old name beside its new one at the same value", async () => {
+		await expect(
+			bootTemplate({
+				env: {
+					OAUTH_JWT_PRIVATE_KEY: signingKey.privateKey,
+					OAUTH_JWT_PUBLIC_KEY: signingKey.publicKey,
+					OAUTH_JWT_KID: "k-both",
+					KEY_STORE_LOCAL_KID: "k-both",
+				},
+			}),
+		).rejects.toMatchObject({
+			details: {
+				reason: "environment-variable-renamed",
+				renamed: expect.arrayContaining([
+					expect.objectContaining({ from: "OAUTH_JWT_PRIVATE_KEY", state: "different" }),
+					expect.objectContaining({ from: "OAUTH_JWT_PUBLIC_KEY", state: "different" }),
+					expect.objectContaining({ from: "OAUTH_JWT_KID", state: "different" }),
+				]),
 			},
 		});
+	});
+
+	it("boots with each new name alone", async () => {
+		const handle = await bootTemplate({ env: { KEY_STORE_LOCAL_KID: "k-new" } });
 		try {
-			expect(handle.components.keyStore?.getSigningKidFallback()).toBe("k-both");
+			expect(handle.components.keyStore?.getSigningKidFallback()).toBe("k-new");
 		} finally {
 			await handle.dispose();
 		}

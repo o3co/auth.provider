@@ -73,10 +73,11 @@
  *   the witness cleared.
  * - `bind`, an enrollment's completion or a regeneration of recovery codes:
  *   the set read, then the caller's writes run whole under the lease, through
- *   the fenced writer over that read, the witness and the subject's
- *   recovery-set floor this file hands it, each held to the lease's time as
- *   above; the floor is raised with the lease this file holds, never handed
- *   out. A set that cannot be read is an outage, nothing written.
+ *   the fenced writer over that read, the witness, the subject's
+ *   recovery-set floor and D25's email-proof requirement this file hands it,
+ *   each held to the lease's time as above; the floor is raised and the
+ *   requirement consumed with the lease this file holds, never handed out.
+ *   A set that cannot be read is an outage, nothing written.
  * - `recoverySetFloor`, a read of the subject's recovery-set floor outside
  *   any lease — a verification's — and `readSubject`, the subject's records
  *   read for a judgment over them (`factorState.mts`'s `readSubjectRecords`,
@@ -98,11 +99,10 @@
  * The lease is logical: it cannot fence a write the directory applies after
  * the deadline check, nor a transaction-store write that was not answered
  * within its bound and lands later. The factor store fences its own
- * membership writes, as above; the rest is not fenced. A binding's consume of
- * D25's flag that timed out may so land after the lease is released and
- * clear the flag a later reset set: the reset sets the flag again as its last
- * write under its lease, which narrows this to a consume landing after the
- * reset's own release. The reset's removal is unconditional — it always wins
+ * membership writes, as above, and the transaction store checks the lease
+ * where a write names it — the floor's raise, the consume of D25's flag — so
+ * a consume that lands after the lease ended clears nothing a later reset
+ * set; the rest is not fenced. The reset's removal is unconditional — it always wins
  * — so one that stalls past the reset's lease still removes what a binding
  * made after it. A conditional write that timed out is unknown: it lands if
  * the set is still as it was read when it arrives. Never throws for a
@@ -122,6 +122,7 @@ import {
 	type MfaTransactionStore,
 	readConditionalCreateAnswer,
 	readConditionalSetRemoveAnswer,
+	readMfaEmailProofRequirementConsumeAnswer,
 	readMfaFactorSet,
 	readMfaRecoverySetFloorAnswer,
 	readMfaSubjectCount,
@@ -143,16 +144,17 @@ const LEASE_WAITS_MS = [25, 50, 100, 200, 400] as const;
  * the lease is sized from, and `factorSetBudget.test.mts` holds every writer
  * to. A first binding by the account-email proof in a session over two
  * standing recovery-code sets (a binding by password keeps the one that
- * stood) makes twelve: the set read, the first-binding note, the consume, the
- * factor, D25's flag, the recovery-set floor read, the new set, the floor
- * raised, each old set's removal, the set marked shown, the witness. A
- * login's makes eleven, its set marked shown by its answer, past the lease; a
- * regeneration of recovery codes six and one per standing set (the set read,
+ * stood) makes thirteen: the set read, the first-binding mark read, the
+ * first-binding note, the consume, the factor, D25's flag, the recovery-set
+ * floor read, the new set, the floor raised, each old set's removal, the set
+ * marked shown, the witness. A login's makes twelve, its set marked shown by
+ * its answer, past the lease; a regeneration of recovery codes six and one
+ * per standing set (the set read,
  * the first-binding mark read, the floor read, the new set, the floor raised,
  * the removals, the set marked shown); the operator reset eight (the read,
  * D25's flag, its authorization, the lock state's reset, the removal, the
  * read again, the witness, D25's flag again); a removal five; a mark four; a
- * release two. More standing sets — past four at a binding, past eight at a
+ * release two. More standing sets — past three at a binding, past eight at a
  * regeneration — each add a removal, which the lease's time cuts off when it
  * runs short: every set that stood is already retired by the raised floor,
  * the new set is left unshown, and the writer answers an outage, to be run
@@ -296,6 +298,18 @@ export interface MfaRecoverySetFloor {
 }
 
 /**
+ * The operator reset's email-proof requirement (D25) as a bind consumes it
+ * under the lease (`MfaTransactionStore.consumeEmailProofRequirement`), the
+ * store checking the lease in the same step: bounded by one Store timeout,
+ * and throwing for a store that cannot answer, answers outside its port, or
+ * does not find the lease held.
+ */
+export interface MfaEmailProofRequirement {
+	/** The subject's requirement consumed, whether or not one stood. */
+	consume(subject: string): Promise<void>;
+}
+
+/**
  * The subject's factor set as a bind's writes change it: the records read
  * under the lease when the bind began, and the writes of the set, each held
  * to the lease's time and applied only while the set stands as this writer
@@ -333,7 +347,8 @@ export interface MfaFactorSetWriter {
 
 /**
  * What a bind's writes go through, each held to the lease's time: the
- * subject's factor set, the witness, the subject's recovery-set floor, `read`
+ * subject's factor set, the witness, the subject's recovery-set floor, D25's
+ * email-proof requirement, `read`
  * for any other read and `run` for any other write it makes (the transaction
  * store's). Every write a bind makes goes through one of them, so a bind
  * answered `busy` wrote nothing.
@@ -342,6 +357,7 @@ export interface MfaFactorSetWrites {
 	readonly factors: MfaFactorSetWriter;
 	readonly witness: MfaEnrollmentWitness;
 	readonly recoverySetFloor: MfaRecoverySetFloor;
+	readonly emailProofRequirement: MfaEmailProofRequirement;
 	/** `call`, a transaction-store read, bounded by one Store timeout and the lease's time; throws as the store would. */
 	read<T>(call: () => Promise<T>): Promise<T>;
 	/**
@@ -486,6 +502,7 @@ type Leases = Pick<
 	| "applySubjectRecovery"
 	| "recoverySetFloor"
 	| "raiseRecoverySetFloor"
+	| "consumeEmailProofRequirement"
 >;
 
 /** A transaction-store outage at `step`. */
@@ -943,6 +960,24 @@ export function createMfaFactorSet(options: {
 						}
 						// A floor the store answers below the raise is outside its port.
 						if (answer.floor < setGeneration) throw OUTSIDE_CONTRACT;
+					}),
+			},
+			emailProofRequirement: {
+				consume: (subject) =>
+					write(async () => {
+						const answer = readMfaEmailProofRequirementConsumeAnswer(
+							await within(
+								() => leases.consumeEmailProofRequirement(subject, { leaseToken: token }),
+								storeTimeoutMs,
+								"consumeEmailProofRequirement",
+							),
+						);
+						if (answer === undefined) throw OUTSIDE_CONTRACT;
+						if (answer.outcome === "refused") {
+							throw new Error(
+								"the subject's lease was not held: the email-proof requirement was not consumed",
+							);
+						}
 					}),
 			},
 			read: (call) =>

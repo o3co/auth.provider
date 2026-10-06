@@ -46,6 +46,7 @@ import {
 	readGrantPolicyDecision,
 } from "@o3co/auth-provider-core";
 import { invalidRequest, isRefusal, tokenAnswer } from "./answers.mjs";
+import { callerBindingRefusal } from "./callerBinding.mjs";
 import { authenticateClient } from "./clientAuthentication.mjs";
 import { delegationRefusal } from "./delegation.mjs";
 import { GRANT_TYPE } from "./grantType.mjs";
@@ -131,6 +132,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const subject = await validateSubject(deps, ctx, request, validators.subjectValidator);
 			if (isRefusal(subject)) return subject;
 			const { subjectValidated, subjectBindings, issuedConfirmation } = subject;
+
+			// The subject token must name the caller, unless its registration says
+			// otherwise; a check of the claims alone, ahead of the store reads.
+			const notForClient = callerBindingRefusal(deps, client, subjectValidated);
+			if (notForClient) return notForClient;
 
 			// After the sender-constraint matrices, so a cheap refusal still
 			// short-circuits ahead of the store reads.

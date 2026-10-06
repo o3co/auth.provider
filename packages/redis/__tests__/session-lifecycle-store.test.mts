@@ -19,12 +19,11 @@
 // port's retention; each shard's closing index, written in the step that
 // writes the record and merged across shards by the listing; a write's replay
 // key answering a copy the driver sends again; what it cannot read refused as
-// an outage; reads on the primary; and the boot check of the server's
-// eviction policy.
+// an outage; and reads on the primary. The eviction gate its factory passes
+// is in eviction-gate.test.mts.
 
 import {
 	DEFAULT_CLOCK_SKEW_MS,
-	type Logger,
 	readVersionedSessionLifecycle,
 	type SessionCloseRequest,
 	type SessionLifecycleStore,
@@ -32,9 +31,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { RedisDurability, SessionLifecycleStoreClient } from "#/clients.mjs";
-import { RedisStoreEvictableError } from "#/internal/eviction-policy.mjs";
-import { checkSessionLifecycleEviction } from "#/internal/session-lifecycle-eviction.mjs";
+import type { SessionLifecycleStoreClient } from "#/clients.mjs";
 import { makeIoredisSessionLifecycleStoreClient } from "#/ioredis/clients/session-lifecycle.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import {
@@ -59,11 +56,11 @@ afterAll(() => {
 let prefixes = 0;
 
 /** A store on a key prefix of its own, its client, and its keys. */
-const fresh = (options: { maxParticipants?: number } = {}) => {
+const fresh = async (options: { maxParticipants?: number } = {}) => {
 	prefixes += 1;
 	const keyPrefix = `lct:${prefixes}:`;
 	const client = makeIoredisClients(io).sessionLifecycleStoreClient;
-	const store = createRedisSessionLifecycleStore({ client, keyPrefix, ...options });
+	const store = await createRedisSessionLifecycleStore({ client, keyPrefix, ...options });
 	const part = (sid: string) => Buffer.from(JSON.stringify(sid), "utf8").toString("base64url");
 	const tag = (sid: string) => `{lc:${sessionLifecycleShardOf(sid)}}`;
 	const record = (sid: string) => `${keyPrefix}${tag(sid)}:s:${part(sid)}`;
@@ -116,7 +113,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 	});
 
 	it("keeps a session's whole record in one hash, on its shard's hash tag that its replay keys and closing index share, expiring at expiresAt plus the clock skew", async () => {
-		const { store, record, index, keyPrefix } = fresh();
+		const { store, record, index, keyPrefix } = await fresh();
 		for (const sid of ["sid-1", "{brace}d}", "a}b{c", "セッション"]) {
 			const expiresAt = await later();
 			expect((await store.open(sid, "user-1", expiresAt)).outcome).toBe("opened");
@@ -142,7 +139,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 	});
 
 	it("a close raises that one expiry to the later of it and the closing commit plus retainMs, and keeps it through closed", async () => {
-		const { store, record } = fresh();
+		const { store, record } = await fresh();
 		const sid = "retain-long";
 		const expiresAt = await later();
 		await store.open(sid, "user-1", expiresAt);
@@ -168,7 +165,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 	});
 
 	it("past that expiry the whole record is gone at once: read, join, close, completion and listing all find nothing, and the listing drops its index entry", async () => {
-		const { store, record, index } = fresh();
+		const { store, record, index } = await fresh();
 		const sid = "lapse";
 		await store.open(sid, "user-1", await later());
 		await store.join(sid, { kind: "rp", id: "client-1", data: "" });
@@ -194,7 +191,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 	});
 
 	it("keeps a participant's data as written, whatever string it is", async () => {
-		const { store } = fresh();
+		const { store } = await fresh();
 		const sid = "data";
 		await store.open(sid, "user-1", await later());
 		const data = ["\ud800", '{"x":1}', "", "a\u0000b", "x".repeat(8192)];
@@ -206,7 +203,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 	});
 
 	it("keeps each participant's join ordinal beside it, written when it first joins and kept by a repeat join", async () => {
-		const { store, record } = fresh();
+		const { store, record } = await fresh();
 		const sid = "ordinals";
 		await store.open(sid, "u", await later());
 		await store.join(sid, { kind: "federation", id: "oidc", data: "" });
@@ -217,7 +214,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 	});
 
 	it("answers a participant written with no ordinal after those with one, by its item's bytes, and refuses an ordinal it cannot read", async () => {
-		const { store, record } = fresh();
+		const { store, record } = await fresh();
 		const sid = "no-ordinal";
 		await store.open(sid, "u", await later());
 		for (const id of ["zeta", "beta", "alpha"]) await store.join(sid, { kind: "rp", id, data: "" });
@@ -229,7 +226,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 	});
 
 	it("refuses an ordinal not written as a decimal integer of at least 1, though it reads as a number", async () => {
-		const { store, record } = fresh();
+		const { store, record } = await fresh();
 		const sid = "ordinal-form";
 		await store.open(sid, "u", await later());
 		await store.join(sid, { kind: "rp", id: "a", data: "" });
@@ -244,7 +241,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 	});
 
 	it("a join past maxParticipants rejects and writes nothing; a participant joined again is not counted twice", async () => {
-		const { store } = fresh({ maxParticipants: 2 });
+		const { store } = await fresh({ maxParticipants: 2 });
 		const sid = "full";
 		await store.open(sid, "user-1", await later());
 		await store.join(sid, { kind: "rp", id: "a", data: "" });
@@ -257,20 +254,22 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 		expect(await read(store, sid)).toEqual(before);
 	});
 
-	it("refuses a key prefix holding a brace, and a maxParticipants that is no whole number from 1", () => {
+	it("refuses a key prefix holding a brace, and a maxParticipants that is no whole number from 1", async () => {
 		const client = makeIoredisClients(io).sessionLifecycleStoreClient;
 		for (const keyPrefix of ["a{b:", "a}b:"]) {
-			expect(() => createRedisSessionLifecycleStore({ client, keyPrefix })).toThrow(RangeError);
+			await expect(createRedisSessionLifecycleStore({ client, keyPrefix })).rejects.toThrow(
+				RangeError,
+			);
 		}
 		for (const maxParticipants of [0, 1.5, -1, Number.NaN]) {
-			expect(() => createRedisSessionLifecycleStore({ client, maxParticipants })).toThrow(
+			await expect(createRedisSessionLifecycleStore({ client, maxParticipants })).rejects.toThrow(
 				RangeError,
 			);
 		}
 	});
 
 	it("refuses a caller's input outside the port's rules as a RangeError, writing nothing", async () => {
-		const { store, keyPrefix } = fresh();
+		const { store, keyPrefix } = await fresh();
 		const expiresAt = await later();
 		await expect(store.open("", "user-1", expiresAt)).rejects.toThrow(RangeError);
 		await expect(store.open("s", "", expiresAt)).rejects.toThrow(RangeError);
@@ -292,7 +291,7 @@ describe("createRedisSessionLifecycleStore: the shard layout", () => {
 
 describe("createRedisSessionLifecycleStore: the closing indexes", () => {
 	it("the closing commit adds the sid to its shard's index in the same step: when the index cannot be written, nothing is", async () => {
-		const { store, index } = fresh();
+		const { store, index } = await fresh();
 		const sid = "unindexed";
 		await store.open(sid, "user-1", await later());
 		await store.join(sid, { kind: "rp", id: "client-1", data: "" });
@@ -301,7 +300,7 @@ describe("createRedisSessionLifecycleStore: the closing indexes", () => {
 		await expect(store.beginClose(sid, CLOSE)).rejects.toThrow();
 		expect(await read(store, sid)).toEqual(before);
 
-		const { store: other, index: otherIndex } = fresh();
+		const { store: other, index: otherIndex } = await fresh();
 		await other.open(sid, "user-1", await later());
 		const closing = await other.beginClose(sid, CLOSE);
 		expect(closing.outcome).toBe("closing");
@@ -309,7 +308,7 @@ describe("createRedisSessionLifecycleStore: the closing indexes", () => {
 	});
 
 	it("the completion that closes a record removes its sid in the same step, and a close closed at once adds none; when the index cannot be written, the completion writes nothing", async () => {
-		const { store, index } = fresh();
+		const { store, index } = await fresh();
 		await store.open("done", "user-1", await later());
 		const closing = await store.beginClose("done", CLOSE);
 		if (closing.outcome !== "closing") throw new Error(closing.outcome);
@@ -328,7 +327,7 @@ describe("createRedisSessionLifecycleStore: the closing indexes", () => {
 	});
 
 	it("listClosing names only records still closing, and drops from the index an entry whose record is active, closed or gone", async () => {
-		const { store, index } = fresh();
+		const { store, index } = await fresh();
 		await store.open("active", "user-1", await later());
 		await store.open("closed", "user-1", await later());
 		await store.beginClose("closed", { ...CLOSE, steps: [], perParticipant: [] });
@@ -343,7 +342,7 @@ describe("createRedisSessionLifecycleStore: the closing indexes", () => {
 	});
 
 	it("reaches a closing record past any number of stale entries ahead of it in its shard", async () => {
-		const { store, index } = fresh();
+		const { store, index } = await fresh();
 		const target = "b-closing";
 		for (let i = 0; i < 250; i += 1) {
 			await io.zadd(index(target), "0", `a-${String(i).padStart(3, "0")}`);
@@ -356,7 +355,7 @@ describe("createRedisSessionLifecycleStore: the closing indexes", () => {
 	});
 
 	it("merges every shard's index in byte order: paging from the last sid reaches every closing record exactly once, and a cursor starts after itself", async () => {
-		const { store } = fresh();
+		const { store } = await fresh();
 		const closing: string[] = [];
 		for (let i = 0; i < 48; i += 1) {
 			const sid = `m-${i}-${"é".repeat(i % 3)}`;
@@ -391,7 +390,7 @@ describe("createRedisSessionLifecycleStore: a write sent again", () => {
 	});
 
 	it("a completion sent again answers what the first copy did and writes nothing, even after a later write", async () => {
-		const { store, client, keys, keyPrefix } = fresh();
+		const { store, client, keys, keyPrefix } = await fresh();
 		const sid = "complete-resend";
 		await store.open(sid, "user-1", await later());
 		const closing = await store.beginClose(sid, {
@@ -419,7 +418,7 @@ describe("createRedisSessionLifecycleStore: a write sent again", () => {
 	});
 
 	it("a join whose reply was lost, sent again after the close committed, answers joined, and its participant is in the snapshot", async () => {
-		const { store, client, record, keyPrefix } = fresh();
+		const { store, client, record, keyPrefix } = await fresh();
 		const sid = "join-resend";
 		await store.open(sid, "user-1", await later());
 		const input = {
@@ -439,7 +438,7 @@ describe("createRedisSessionLifecycleStore: a write sent again", () => {
 	});
 
 	it("a write that reaches the server at or after its deadline writes nothing, and the store rejects it as an unknown outcome", async () => {
-		const { store, client, record, keyPrefix } = fresh();
+		const { store, client, record, keyPrefix } = await fresh();
 		const sid = "late";
 		await store.open(sid, "user-1", await later());
 		const before = await read(store, sid);
@@ -462,7 +461,7 @@ describe("createRedisSessionLifecycleStore: a write sent again", () => {
 			beginCloseRecord: async () => "late",
 			completeRecordItem: async () => "late",
 		};
-		const lateStore = createRedisSessionLifecycleStore({ client: lateClient, keyPrefix });
+		const lateStore = await createRedisSessionLifecycleStore({ client: lateClient, keyPrefix });
 		await expect(lateStore.open("x", "user-1", await later())).rejects.toThrow(
 			/outcome is unknown/,
 		);
@@ -478,7 +477,7 @@ describe("createRedisSessionLifecycleStore: a write sent again", () => {
 
 describe("createRedisSessionLifecycleStore: what it cannot read is an outage", () => {
 	it("a session key of another type rejects every member, never answering an outcome, and is left as it was", async () => {
-		const { store, record } = fresh();
+		const { store, record } = await fresh();
 		const sid = "wrong-type";
 		await io.set(record(sid), "a string");
 		const generation = "44444444-4444-4444-8444-444444444444" as StoreGeneration;
@@ -501,13 +500,13 @@ describe("createRedisSessionLifecycleStore: what it cannot read is an outage", (
 	});
 
 	it("a closing index of another type rejects listClosing", async () => {
-		const { store, index } = fresh();
+		const { store, index } = await fresh();
 		await io.set(index("any"), "not a sorted set");
 		await expect(store.listClosing(10)).rejects.toThrow();
 	});
 
 	it("a record this store did not write is refused, never read as absent: by read, by a join, and by the listing that finds it indexed", async () => {
-		const { store, record, index } = fresh();
+		const { store, record, index } = await fresh();
 		await io.hset(record("bad-state"), {
 			sub: "u",
 			state: "open",
@@ -547,7 +546,7 @@ describe("createRedisSessionLifecycleStore: what it cannot read is an outage", (
 	});
 
 	it("a pending count that disagrees with the pending items is refused when it would close the record, writing nothing", async () => {
-		const { store, record } = fresh();
+		const { store, record } = await fresh();
 		const sid = "miscounted";
 		await store.open(sid, "user-1", await later());
 		const closing = await store.beginClose(sid, { ...CLOSE, steps: ["one", "two"] });
@@ -581,59 +580,5 @@ describe("makeIoredisSessionLifecycleStoreClient reads on the primary", () => {
 		expect(await client.confirmClosing("i", [{ sid: "s", record: "k" }])).toEqual([]);
 		expect(script).toHaveBeenCalledTimes(3);
 		expect(plain).not.toHaveBeenCalled();
-	});
-});
-
-describe("checkSessionLifecycleEviction", () => {
-	const report = (maxmemoryPolicy: string | undefined, refusal?: unknown): RedisDurability => ({
-		maxmemoryPolicy,
-		appendOnly: undefined,
-		snapshots: undefined,
-		refusal,
-	});
-	const logger = () =>
-		({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) as unknown as Logger & {
-			warn: ReturnType<typeof vi.fn>;
-		};
-
-	it("passes noeviction silently", async () => {
-		const log = logger();
-		await checkSessionLifecycleEviction(async () => report("noeviction"), log);
-		expect(log.warn).not.toHaveBeenCalled();
-	});
-
-	it.each([
-		"volatile-lru",
-		"volatile-lfu",
-		"volatile-random",
-		"volatile-ttl",
-		"allkeys-lru",
-		"allkeys-lfu",
-		"allkeys-random",
-	])("refuses %s, naming it", async (policy) => {
-		const err = await checkSessionLifecycleEviction(async () => report(policy), logger()).then(
-			() => undefined,
-			(e: unknown) => e,
-		);
-		expect(err).toBeInstanceOf(RedisStoreEvictableError);
-		expect(err).toMatchObject({
-			reason: "session-lifecycle-store-evictable",
-			maxmemoryPolicy: policy,
-		});
-	});
-
-	it("warns once and boots when the policy cannot be read, is unknown, or the server cannot answer", async () => {
-		for (const durability of [
-			async () => report(undefined, new Error("NOPERM")),
-			async () => report("some-future-policy"),
-			async () => {
-				throw new Error("down");
-			},
-		]) {
-			const log = logger();
-			await checkSessionLifecycleEviction(durability, log);
-			expect(log.warn).toHaveBeenCalledTimes(1);
-			expect(log.warn.mock.calls[0]?.[1]).toBe("session_lifecycle_store_eviction_unchecked");
-		}
 	});
 });

@@ -34,8 +34,8 @@
  * Reads its own section, `mfa` — the mode, its settings and the step-up
  * page, `mfa.page.url` — and the deployment mode from the `deploymentMode`
  * slot. The page's old path, `endpoints.mfa.url`, refuses the boot naming
- * the new one, and so does `ENDPOINTS_MFA_URL` unless `MFA_PAGE_URL` carries
- * the same value. `mfa.rateLimit` is removed: setting it refuses the boot.
+ * the new one, and so does `ENDPOINTS_MFA_URL` set, whether or not
+ * `MFA_PAGE_URL` is. `mfa.rateLimit` is removed: setting it refuses the boot.
  *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
  * `mfa.mode` is `off` or unset, when no `sessionLifecycleStore` is wired beside
@@ -145,7 +145,8 @@ export interface MfaModuleOptions {
 	/**
 	 * The name the deployment selected its configuration by — the standalone
 	 * passes `CONFIG_ENV || NODE_ENV` — read beside `NODE_ENV` by the
-	 * development sample key's refusal.
+	 * development sample key's refusal, which accepts the key only where each
+	 * name set says development or test, with at least one set.
 	 */
 	readonly environment?: string;
 }

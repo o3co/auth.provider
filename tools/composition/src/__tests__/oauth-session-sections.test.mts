@@ -26,8 +26,8 @@
  * in the session store's `session-store {}`, whose storage phase one reads;
  * the login page and the login's budget in the session module's `session {}`.
  * A path they moved from refuses boot naming the new one, a key a section does
- * not declare is refused, and a variable renamed with them refuses boot unless
- * its new name carries the same value.
+ * not declare is refused, and a variable renamed with them refuses boot while
+ * its old name is set, whatever its new name holds.
  */
 
 import { BootError, resolveTokenBindingSettings } from "@o3co/auth-provider-core";
@@ -559,9 +559,18 @@ describe("a variable renamed with the move, through the template's reading", () 
 	);
 
 	it.each(ROWS)(
-		"$from set beside $to at the same value: boots, $path parsed from it",
-		async ({ from, to, path, value, parsed }) => {
-			const composition = await boot({ env: { ...SINGLE_ENV, [from]: value, [to]: value } });
+		"$from set beside $to at the same value: refused all the same",
+		async ({ from, to, value }) => {
+			const err = await refused({ env: { ...SINGLE_ENV, [from]: value, [to]: value } });
+
+			expect(err.details).toMatchObject({ renamed: [{ from, to, state: "different" }] });
+		},
+	);
+
+	it.each(ROWS)(
+		"$to set alone: boots, $path parsed from it",
+		async ({ to, path, value, parsed }) => {
+			const composition = await boot({ env: { ...SINGLE_ENV, [to]: value } });
 
 			expect(parsedAt(composition, path)).toEqual(parsed);
 		},

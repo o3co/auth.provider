@@ -26,7 +26,8 @@ describes.
 
 1. Fix the configuration. Every moved or removed key, and every value now
    read strictly, refuses to start and names itself, so a start against a
-   staging copy lists what is left.
+   staging copy lists what is left. A refusal of a moved, removed or renamed
+   key or variable points at this guide.
 2. Check the data the provider reads from you: client records, redirect URIs,
    the users your Store answers.
 3. Update code that implements a port or calls an API that changed, and run
@@ -221,11 +222,10 @@ rather than `workspace:*`, and refresh the lockfile. Then:
 Every setting now lives under the name of the module that owns it (#728).
 An old path refuses the boot, naming the new one and the variable bound to
 it, while the module that owns it is loaded. A renamed variable refuses the
-boot when it is set alone or beside its new name at a different value; set
-to the same value as its new name, it boots, so an environment can carry
-both while it moves. Sections are strict: a key a module's section
-does not declare refuses the boot, naming its path, where it used to be
-dropped — [Values read more strictly](#values-read-more-strictly) lists the
+boot while its old name is set, alone or beside its new name, even at the
+same value: set the new name and unset the old one. Sections are strict: a
+key a module's section does not declare refuses the boot, naming its path,
+where it used to be dropped — [Values read more strictly](#values-read-more-strictly) lists the
 sections that still accept one.
 
 | What moved | Where it is listed |
@@ -325,7 +325,8 @@ step 2, lists every retired key and what you see. New since v0.16.0:
 - `oauth.refreshToken.legacyTokenCompat` and
   `oauth.authorize.allowUnmarkedClients` still refuse the boot, now wherever
   `oauthEndpointsModule` is installed, as `config-path-relocated`
-  (`<key> was removed; see CHANGELOG. Remove this field …`) instead of
+  (`<key> was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md).
+  Remove this field …`) instead of
   `config-validation-failed` naming the release that removed the key. An
   exported `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` — any value, the empty
   string included — refuses it as `environment-variable-renamed`
@@ -562,10 +563,36 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   a composition of your own installs `redisAttemptCounterModule` from
   `@o3co/auth-provider-redis`, whose client the template's `redis-clients`
   module provides as `attemptCounterClient`. Its Redis must run
-  `maxmemory-policy noeviction` (the default). The module refuses the boot on
-  any other policy it reads; a server that will not say boots with the
-  warning `attempt_counter_durability_unchecked`, and the policy is then
-  yours to confirm.
+  `maxmemory-policy noeviction` (the default), which the module holds it to
+  as the next entry says.
+- **BREAKING: the Redis stores that keep durable keys refuse to boot unless
+  the server's `maxmemory-policy` is `noeviction` (#1541).** The attempt counter,
+  the session lifecycle store, the federation token store and the two MFA
+  stores are built only once the server reports `noeviction` (`INFO memory`,
+  then `CONFIG GET maxmemory-policy`). Any other policy refuses the boot —
+  `volatile-*` included, which the MFA stores used to accept with a warning,
+  and a policy the check does not know, which the session lifecycle,
+  federation token and MFA stores used to accept with a log line. So does a
+  policy the server will not report (`INFO` and `CONFIG` refused or renamed
+  for the connection's user), which every one of them used to accept with a
+  log line, and a server that cannot answer at boot, which the session
+  lifecycle and federation token stores used to accept. The refusal is a
+  `provides-factory-failed` whose `cause` is a `RedisStoreEvictableError`
+  (`reason` `<store>-evictable`, `maxmemoryPolicy`, `undefined` when unread).
+  Set `maxmemory-policy noeviction`, or give these stores a Redis of their
+  own. Where the server runs `noeviction` but will not say, assert it:
+  `makeIoredisClients(io, { assumeNoEviction: true })` (or the same option
+  on `makeIoredisMfaFactorStoreClient` / `makeIoredisMfaTransactionStoreClient`;
+  in the standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
+  `redis-clients.assumeNoEviction`). A policy the
+  server does report always overrides the assertion. The log lines
+  `attempt_counter_durability_unchecked`,
+  `session_lifecycle_store_eviction_unchecked`,
+  `federation_token_store_eviction_unchecked`,
+  `mfa_factor_store_tombstone_evictable` and
+  `mfa_transaction_store_lock_evictable` are gone; the MFA stores'
+  `…_durability_unchecked` now names only the persistence it could not read
+  (`appendonly`, `save`).
 - **BREAKING: the Redis federation stores read the environment's name
   trimmed and in lower case (#826).** The plaintext guard of
   `redis-federation-token-store` and `redis-federation-grant-store` matched
@@ -672,6 +699,24 @@ The boot refusals you can meet, with their messages, are in
   `403` (#859). `token.issued.failure`'s `details.reason` is the refusal's
   description, or its error code: a dashboard keyed on `denied by policy` or
   `grant policy evaluation failed` stops matching (#889).
+- **BREAKING: token exchange requires the caller to be an audience of the
+  subject token by default.** A `subject_token` is accepted only when its
+  `azp` is the calling client's id or its `aud` (a string or an array)
+  contains it; otherwise the exchange is `400 invalid_request` /
+  `subject_token azp and aud do not name this client`, logged at warn as
+  `token_exchange_subject_not_for_client`. A resource server exchanging a
+  token it received, and the client the token was issued to, keep working.
+  **What to do:** grep for `token_exchange_subject_not_for_client` against a
+  staging copy, and for each client that exchanges tokens issued to other
+  clients — a gateway, an on-behalf-of service — add
+  `allowExchangeOfTokensIssuedToOthers: true` to its client registration.
+  Only a strict `true` counts. `may_act`, the scope and audience ceilings and
+  the grant allowlist still apply to it. A subject-token validator you
+  contribute (`tokenExchangeValidators`) must return the token's `aud` (as
+  `ValidatedToken.aud`) and/or its `azp` (in `claims`) as the token carries
+  them; an answer with neither is refused the same way. See the
+  [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
+  note 18.
 - **Federation grants.** `/reauthorize` answers a removed connection, or a
   client that may no longer use it, `403 access_denied/connection_not_permitted`
   (#883), and a revoked or pending grant whose boundary cannot be read `410` /
@@ -889,6 +934,13 @@ modules fills them.
   `contribute-factory-failed`); in sloppy-mode code the write is silently
   ignored. Either way the value does not change. Copy what the module needs,
   or set the value in the configuration (#1492).
+- **A write to the audit fan-out throws.** When a module contributes
+  `auditHooks`, the `auditSink` slot holds core's fan-out, and it is now
+  frozen: assigning to it (`deps.auditSink.record = ...`) throws a
+  `TypeError` in strict-mode code, which refuses boot when a factory does it.
+  The sink the fan-out wraps — the host's or a provider's — is not frozen,
+  and without a hook the slot holds that sink as it was given. Wrap the sink
+  in a module of your own, or contribute a hook, instead (#1532).
 - **Core checks the `csrfGuard` slot where boot fills it, and every reader
   receives a frozen copy of the guard.** Whatever fills the slot — a module's
   `provides`, or a `bootstrapComponents` or `overrideComponents` entry — boot
@@ -1814,6 +1866,17 @@ modules fills them.
   `RedirectUriRejection` `query-name-invalid` and `reserved-parameter` (#1044);
   `FederationGrantReauthorizationResult` loses `connection_not_configured`
   (#963). An exhaustive `switch` over one needs the change.
+- **BREAKING: the Redis factories of the stores that keep durable keys are
+  async (#1541).** `createRedisAttemptCounter`, `createRedisSessionLifecycleStore`,
+  `createRedisFederationTokenStore`, `createRedisMfaFactorStore` and
+  `createRedisMfaTransactionStore` return a `Promise` of the store, and so
+  does `redisFederationTokenStoreBuilder`: each resolves once the server
+  passes the eviction gate (the entry under
+  [Values read more strictly](#values-read-more-strictly)), and an option it
+  refuses rejects rather than throws. `await` them. A client of your own
+  that implements `durability()` may report the operator's assertion as
+  `RedisDurability.assumeNoEviction`. `redisAttemptCounterModule` no longer
+  reads the `logger` slot.
 
 ## Stores and records you implement
 
@@ -1921,9 +1984,27 @@ with what a store of yours records and refuses. Per port:
   writes are `createIf`, `removeIf` and the reset `removeAllForSubject`, at
   the generation `listVersioned` answered; it has no unconditional `create`
   or `remove` (#1121, #1179, #1236). An `MfaTransactionStore` answers
-  `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
+  `rebindAfterMs` on every subject-recovery answer (#1238). One written
+  against a 0.17 release candidate implements
+  `consumeEmailProofRequirement(subject, { leaseToken })` in place of
+  `consumeEmailProofRequirement(subject)`: consuming the email-proof
+  requirement is checked against the subject's lease, atomically, the lease
+  checked and the requirement cleared in one step. It answers
+  `{ outcome: "consumed" }`, `{ outcome: "absent" }` or
+  `{ outcome: "refused", reason: "lease_not_held" }`, and refuses a call
+  without a lease token with a `RangeError`
+  (`checkEmailProofRequirementConsume`). Run
+  `runMfaEmailProofRequirementContract` beside the store's suite: copy
+  `packages/redis/__tests__/adapters.mfa-email-proof-requirement.contract.mts`,
+  which imports only `@o3co/auth-provider-core`. The contracts and
   their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
-  and the [test kit](../packages/test-kit/README.md).
+  and the [test kit](../packages/test-kit/README.md). An
+  `MfaTransactionStoreClient` of your own, written against a 0.17 release
+  candidate, implements `consumeEmailProof(keys, leaseToken)` in place of
+  `consumeEmailProof(key)`: it removes the email-proof requirement at
+  `keys.proof` only while the lease at `keys.lease` holds `leaseToken`, in one
+  atomic step, and answers `{ held: false }` or `{ held: true, removed }`.
+  `makeIoredisMfaTransactionStoreClient` provides it.
 - **A second factor of your own (`MfaFactor`)** answers each challenge's and
   enrollment start's `response` as a plain JSON-shaped object — no class
   instance, list or `-0`, every own key an enumerable string, at any depth —
@@ -2073,6 +2154,13 @@ Turning it on — or leaving the default on — needs:
 - **`MFA_ENCRYPTION_KEY`**, canonical base64 of 32 bytes
   (`openssl rand -base64 32`). In development, write your own key in
   `config/development.conf` rather than exporting it beside the sample key.
+  The sample key is accepted only in an explicit development or test
+  environment: the name the configuration was selected by and `NODE_ENV`,
+  each where set, must say `development` or `test`, and at least one must be
+  set. A composition that uses the sample key outside an explicit development
+  or test environment — under another name such as `prod` or `local`, or
+  under no name at all — refuses to boot. Some pre-release builds accepted
+  it there.
 - **`MFA_PAGE_URL`** (default `/mfa`): your MFA page, on the issuer's origin.
   The template ships none; what it keeps is
   [The MFA page's contract](../packages/mfa/README.md#the-mfa-pages-contract).
@@ -2111,11 +2199,18 @@ are the template README's
    table. The page is `mfa.page.url` (`MFA_PAGE_URL`): `endpoints.mfa.url` and
    `ENDPOINTS_MFA_URL`, which some pre-release builds read, refuse the boot.
 3. Set `MFA_ENCRYPTION_KEY`, and `STANDARD_SMTP_MAIL_SENDER_*` where mail is
-   sent. There is no `MFA_NOTICES`: notices to the account holder are yours,
+   sent. The development sample key boots only where `mfaModule({ environment })`
+   and `NODE_ENV`, each where set, say `development` or `test`, with at least
+   one set. There is no `MFA_NOTICES`: notices to the account holder are yours,
    built from the audit events
    ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
 4. Make the Redis the factor store uses durable; give the Store `mfaEnrolled`
    and `markMfaEnrolledUrl` ([the checklist](#store-implementer-checklist-before-switching-to-required)).
+   With the factors in the Store, keep the Store transport's `timeout`
+   (`repositories.user.http.timeout`, which the user repository shares) at
+   most 85 500 000 ms: `HttpMfaFactorStore` refuses a larger one at
+   construction with a `RangeError`, and `foundationMfaFactorStoreModule`
+   refuses the boot ([foundation's README](../packages/foundation/README.md#constructor-validation)).
 5. Teach the login page `403 mfa_required` / `mfa_enrollment_required`; build
    the MFA page and the account page.
 6. Teach BFFs using the `session` grant its `step_up` member, and the
@@ -2175,7 +2270,7 @@ What carries across the step:
   first, so on v0.16.0: write the value at the new key, export the new
   variable at the value the old one carries, then delete the old key and
   unset the old variable. This release refuses the old key at any value, and
-  the old variable unless the new one carries the same value. Move the value
+  the old variable while it is set, beside the new one or not. Move the value
   rather than deleting it: without it, the default is `3600`.
 - **The federation-grant rotation budget counts from the upgrade** (#1032).
   v0.16.0 took no rotation, so the refreshes it made are not counted against

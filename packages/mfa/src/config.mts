@@ -39,9 +39,11 @@ import {
 	type DeploymentMode,
 	decodeSealingKey,
 	hasControlCharacter,
+	isDevelopmentEnvironment,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	type MfaLockoutPolicy,
 	productionEnvironmentIn,
+	readEnvironmentName,
 	SEALING_KEY_BYTES,
 	type SealingKeyRing,
 } from "@o3co/auth-provider-core";
@@ -57,8 +59,9 @@ import { MFA_TRANSACTION_TTL_SECONDS } from "./transactions.mjs";
  * ASCII text `o3co:mfa:development-sample-key!` — which a development
  * configuration may carry in place of `MFA_ENCRYPTION_KEY`. Everyone
  * holds it, so data sealed under it is sealed from nobody: the settings
- * refuse it wherever the configuration was selected as production or
- * staging, `NODE_ENV` is either, or the deployment mode is `"multi"`.
+ * accept it only where the name the configuration was selected by and
+ * `NODE_ENV`, each where set, say development or test, with at least one
+ * set, and refuse it under the deployment mode `"multi"`.
  */
 export const MFA_DEVELOPMENT_SAMPLE_KEY = "bzNjbzptZmE6ZGV2ZWxvcG1lbnQtc2FtcGxlLWtleSE=";
 
@@ -367,7 +370,8 @@ export interface MfaSettingsOptions {
 	/**
 	 * The name the deployment selected its configuration by — the standalone
 	 * passes `CONFIG_ENV || NODE_ENV`. Read beside `NODE_ENV`, which is always
-	 * consulted, by the sample-key refusal.
+	 * consulted, by the sample-key refusal: each that is set must say
+	 * development or test, and one must be set.
 	 */
 	readonly environment?: string;
 	/**
@@ -449,27 +453,17 @@ export function readMfaTotpSettings(
 }
 
 /**
- * The sample key's refusal: the environment the configuration
- * was selected by, or `NODE_ENV`, is production or staging, or
- * `options.deploymentMode` is `"multi"`. Every key opens, so it is refused
- * wherever it sits in the ring. Answers whether the ring carries it —
- * accepted, when this did not refuse it.
+ * The sample key's refusal: unless the environment the configuration was
+ * selected by and `NODE_ENV`, each where set, say development or test, with
+ * at least one set; and under `options.deploymentMode` `"multi"`. Every key
+ * opens, so it is refused wherever it sits in the ring. Answers whether the
+ * ring carries it — accepted, when this did not refuse it.
  */
 function refuseSampleKey(ring: SealingKeyRing, options: MfaSettingsOptions): boolean {
 	const sample = decodeSealingKey(MFA_DEVELOPMENT_SAMPLE_KEY);
 	const index = ring.findIndex((entry) => sample !== undefined && entry.key.equals(sample));
 	if (index === -1) return false;
-	// Both names are consulted, as core reads them — "Production" or
-	// "production\n" names production as surely — and the one that matched
-	// is the one reported, as read.
-	const productionEnvironment = productionEnvironmentIn([
-		options.environment,
-		process.env.NODE_ENV,
-	]);
-	const reasons: string[] = [];
-	if (productionEnvironment !== undefined) {
-		reasons.push(`the environment is "${productionEnvironment}"`);
-	}
+	const reasons = environmentRefusals([options.environment, process.env.NODE_ENV]);
 	if (options.deploymentMode === "multi") {
 		reasons.push(
 			'core.deployment.mode is "multi" (a multi-replica deployment is never a development box)',
@@ -479,6 +473,24 @@ function refuseSampleKey(ring: SealingKeyRing, options: MfaSettingsOptions): boo
 	throw new RangeError(
 		`${RING}[${index}].key is the development sample key (MFA_DEVELOPMENT_SAMPLE_KEY), refused because ${reasons.join(" and ")}: set MFA_ENCRYPTION_KEY to a key of your own (openssl rand -base64 32)`,
 	);
+}
+
+/**
+ * Why `names` do not let the sample key in, as core reads them: each name set
+ * that says production or staging, or else neither development nor test, as
+ * read; or that none is set.
+ */
+function environmentRefusals(names: readonly unknown[]): string[] {
+	if (isDevelopmentEnvironment(names)) return [];
+	const read = [...new Set(names.map(readEnvironmentName).filter((name) => name !== undefined))];
+	if (read.length === 0) return ["no environment is named"];
+	return read
+		.filter((name) => !isDevelopmentEnvironment([name]))
+		.map((name) =>
+			productionEnvironmentIn([name]) === undefined
+				? `the environment "${name}" is not development or test`
+				: `the environment is "${name}"`,
+		);
 }
 
 /** What an entry's fingerprint is derived under. */

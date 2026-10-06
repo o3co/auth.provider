@@ -76,6 +76,10 @@ vi.mock("ioredis", () => {
 		quit: async () => "OK",
 		disconnect: () => undefined,
 		ping: async () => "PONG",
+		// The Redis stores' eviction gate reads the policy from INFO memory: a
+		// default server's.
+		info: async (section: string) =>
+			section === "memory" ? "# Memory\r\nmaxmemory_policy:noeviction\r\n" : null,
 	};
 	const makeMockRedis = (): object =>
 		new Proxy(
@@ -292,19 +296,27 @@ describe("the process each development run describes", () => {
 		expect(existsSync(resolveConfigPaths(configDir, configEnv as string).envConfPath)).toBe(true);
 	});
 
-	it("boots with the SMTP sender relaying to Mailpit, in the mailSender slot while MFA is on (the configuration's switch), which nothing reads while it is off", async () => {
-		const env = containerEnv();
+	/** The key the operator writes into `.env` for the Mailpit run (`openssl rand -base64 32`). */
+	const OWN_MFA_KEY = Buffer.alloc(32, 7).toString("base64");
+
+	/** The Mailpit run's modules and the configuration boot is handed, under `env`. */
+	function mailpitRun(env: Record<string, string>) {
 		const configEnv = env.CONFIG_ENV as string;
 		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
 		const own = readOwnLayers([envConfPath, applicationConfPath], { env });
 		const switches = readSwitches(own);
-		const mode = configuredMfaMode(configEnv);
-		expect(switches.mfaMode).toBe(mode);
-
 		const modules = buildModules(switches, {
 			environment: configEnv,
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		});
+		return { switches, modules, config: () => resolveForBoot(own, modules, switches) };
+	}
+
+	it("boots with the SMTP sender relaying to Mailpit: in the mailSender slot, with the operator's MFA key, while MFA is on (the configuration's switch); unread, with no mfa section, while it is off", async () => {
+		const env: Record<string, string> = { ...containerEnv(), MFA_ENCRYPTION_KEY: OWN_MFA_KEY };
+		const { switches, modules, config } = mailpitRun(env);
+		const mode = configuredMfaMode(env.CONFIG_ENV as string);
+		expect(switches.mfaMode).toBe(mode);
 		const names = modules.map((module) => module.name);
 		expect(names).toContain(standardSmtpMailSenderModule.name);
 		expect(names).not.toContain(
@@ -314,7 +326,7 @@ describe("the process each development run describes", () => {
 		const handle = await createApp({
 			modules,
 			bootstrapComponents: {
-				config: resolveForBoot(own, modules, switches),
+				config: config(),
 				pathResolver: (s: string) => s,
 				logger: createRecordingLogger(),
 			},
@@ -323,13 +335,59 @@ describe("the process each development run describes", () => {
 		expect((handle.components.mailSender as MailSender | undefined)?.kind).toBe(
 			mode === "off" ? undefined : "standard-smtp",
 		);
-		expect((handle.components.config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode).toBe(
-			mode === "off" ? undefined : mode,
-		);
+		const mfa = (
+			handle.components.config as {
+				mfa?: { mode?: unknown; encryptionKeys?: { key?: unknown }[] };
+			}
+		).mfa;
+		if (mode === "off") {
+			expect(mfa).toBeUndefined();
+		} else {
+			expect(mfa?.mode).toBe(mode);
+			expect(mfa?.encryptionKeys?.map((entry) => entry.key)).toEqual([OWN_MFA_KEY]);
+		}
 		expect(
 			(handle.components.config as Record<string, unknown> | undefined)?.[
 				"standard-smtp-mail-sender"
 			],
 		).toMatchObject({ host: "localhost", port: 1025, secure: "none" });
+	});
+
+	it("does not carry the development sample key: with MFA on, without MFA_ENCRYPTION_KEY the run is refused; with it off, nothing reads a key", async () => {
+		const env = containerEnv();
+		expect(env.MFA_ENCRYPTION_KEY).toBeUndefined();
+		const { modules, config } = mailpitRun(env);
+		if (configuredMfaMode(env.CONFIG_ENV as string) === "off") {
+			const handle = await createApp({
+				modules,
+				bootstrapComponents: {
+					config: config(),
+					pathResolver: (s: string) => s,
+					logger: createRecordingLogger(),
+				},
+			});
+			handles.push(handle);
+			expect(handle.components.config).not.toHaveProperty("mfa");
+			return;
+		}
+		const refused = await (async () => {
+			try {
+				handles.push(
+					await createApp({
+						modules,
+						bootstrapComponents: {
+							config: config(),
+							pathResolver: (s: string) => s,
+							logger: createRecordingLogger(),
+						},
+					}),
+				);
+			} catch (error) {
+				return error;
+			}
+			return undefined;
+		})();
+		expect(refused).toBeInstanceOf(Error);
+		expect(String((refused as Error).message)).toMatch(/mfa\.encryptionKeys/);
 	});
 });

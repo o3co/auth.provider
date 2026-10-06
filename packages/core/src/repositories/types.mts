@@ -192,6 +192,21 @@ export interface Client {
 	 * `AuthenticatedClient` so `/authorize` and `/token` read the same value.
 	 */
 	readonly allowPlainPkce?: boolean;
+	/**
+	 * Whether this client may present, to the token-exchange grant (RFC 8693),
+	 * a `subject_token` issued to another client.
+	 *
+	 * By default the grant accepts a subject token only when it names the
+	 * calling client: its `azp` is the client's id, or its `aud` contains it.
+	 * A gateway or an on-behalf-of service that exchanges tokens issued to
+	 * other clients sets this to `true`; `may_act`, the scope and audience
+	 * ceilings and the grant-type allowlist still apply to it.
+	 *
+	 * Absent and `false` both keep the default. Like `allowPlainPkce`, the
+	 * check is a strict `=== true`. It is read from the registration only,
+	 * never from a request.
+	 */
+	readonly allowExchangeOfTokensIssuedToOthers?: boolean;
 }
 
 /**

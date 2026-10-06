@@ -112,6 +112,8 @@ The [operator runbook](../../docs/operator-runbook.md) covers the operational si
 
 When running multiple instances of the standalone server behind a load balancer, point `REDIS_CLIENTS_URL` at a **shared** Redis 7.2+ instance. Without a shared Redis URL, every replica holds refresh-token families in its own connection (and any local-only Redis), so a refresh request that lands on a replica that did not issue the token returns `invalid_grant` on every other request in a round-robin LB.
 
+**That Redis must run `maxmemory-policy noeviction`** (Redis's default). The Redis stores whose keys must stay until they expire — the attempt counter, the user-session stores' lifecycle store, the federation token store and the MFA stores — read the policy at boot (`INFO memory`, then `CONFIG GET maxmemory-policy`), and refuse to boot on any other policy or on one the server will not report. If the connection's user may not run `INFO` or `CONFIG` (an ACL-restricted user, or a managed service that renames them) and you know the server runs `noeviction`, set `REDIS_CLIENTS_ASSUME_NO_EVICTION=true` (`redis-clients.assumeNoEviction`, default `false`). It is read only while the policy cannot be read: a policy the server reports always takes precedence, so it never lets an `allkeys-*` or `volatile-*` server through.
+
 **Set `HTTP_TRUST_PROXY` to your proxy's address behind a load balancer.** It defaults to `false`, which makes `req.ip` the *load balancer's* address rather than the client's. Every rate limit keyed by IP — the OAuth endpoint limiters and the `POST /session/login` brute-force guard — then shares **one bucket across all users**: the first 20 login attempts from anyone exhaust the window and every subsequent user gets `429`. The failure reads like an attack rather than a misconfiguration, which is what makes it expensive to diagnose at 3am. Set it whenever anything terminates TLS or proxies in front of this service, and make sure that hop is the one setting `X-Forwarded-For`. An audit event with no `ip` means the request's address was not an address — `req.ip` came from an `X-Forwarded-For` that held something else — so check that `HTTP_TRUST_PROXY` trusts only the hop that sets the header.
 
 It takes four shapes, all of them Express's own:
@@ -131,7 +133,7 @@ An allowlist is a network control, not a cryptographic one. The edge must also *
 
 **The MFA routes' budget is the limiter's.** The MFA package ships no budget for its routes: every `/session/mfa` POST is limited per client address under the prefix `mfa` by the wired limiter alone. `config/reference.conf` gives both limiters `limits.mfa { limit = 60, windowSeconds = 300 }` (`core-rate-limiter-memory.limits.mfa`, `redis-rate-limiter.limits.mfa`), so switching `adapters.rateLimiter` keeps it. It is a default there, so the limiter the composition does not wire carries it without boot naming its section; change it for the wired limiter in `config/application.conf` or a layer of your own. Without an entry the limiter's `defaultLimit`, 60 per 60 s, applies. The MFA lock — attempts per transaction, the backoff, the weekly failures — is the MFA package's own and no limiter setting changes it.
 
-**Point `adapters.attemptCounter` at Redis.** It defaults to `"memory"`, which wires no counter: the login — and device verification, when you add the device grant — counts its attempts per process, so with N replicas `session.rateLimit.login` (and `device-grant.rateLimit`) allows N times its limit and resets on every deploy, and `CORE_DEPLOYMENT_MODE=multi` refuses the boot. `"redis"` (`ADAPTERS_ATTEMPT_COUNTER=redis`) installs `redisAttemptCounterModule` on the shared Redis socket. Its Redis must run `maxmemory-policy noeviction` (Redis's default): an evicted window would start the count over. The module refuses to boot on any other policy it reads; when the server will not tell it (`INFO` and `CONFIG` refused or renamed) it boots and warns `attempt_counter_durability_unchecked`, so confirm the policy where the server is configured. Both fail closed: while the counter cannot answer, `/session/login` and `POST /oauth/device/verification` answer `503`, whatever `redis-rate-limiter.failMode` says.
+**Point `adapters.attemptCounter` at Redis.** It defaults to `"memory"`, which wires no counter: the login — and device verification, when you add the device grant — counts its attempts per process, so with N replicas `session.rateLimit.login` (and `device-grant.rateLimit`) allows N times its limit and resets on every deploy, and `CORE_DEPLOYMENT_MODE=multi` refuses the boot. `"redis"` (`ADAPTERS_ATTEMPT_COUNTER=redis`) installs `redisAttemptCounterModule` on the shared Redis socket. Its Redis must run `maxmemory-policy noeviction` (Redis's default): an evicted window would start the count over. The module refuses to boot on any other policy. It also refuses on a policy the server will not report, unless `REDIS_CLIENTS_ASSUME_NO_EVICTION=true` (above). Both fail closed: while the counter cannot answer, `/session/login` and `POST /oauth/device/verification` answer `503`, whatever `redis-rate-limiter.failMode` says.
 
 **Behind a BFF, raise `limits.token` before you need to.** The OAuth-endpoint
 rate limits key on `req.ip` (`packages/core/src/ratelimit/guard.mts` builds the
@@ -179,7 +181,7 @@ where per-user identity still exists.
 
 **Set `CORE_DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, a single-use client assertion or WebAuthn challenge replayable once per replica. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`ADAPTERS_USER_SESSION_STORES=memory`), the authorization-code repository (`ADAPTERS_CODE_REPOSITORY=memory`) and the federation token store (`ADAPTERS_FEDERATION_TOKEN_STORE=memory`, the default) — are refused by name too. So are express-session's own store under `SESSION_STORE_STORAGE_TYPE=memory` (#474) and the default memory rate limiter (`core-rate-limiter-memory`, `ADAPTERS_RATE_LIMITER=memory`). With the mode unset nothing is refused: every one of them is listed in a single `replica_unsafe_adapters` warning at boot. (The WebAuthn-options route carries a per-process fallback limiter that warns on its own, but only in a composition that wires no `rateLimiter` at all, which this template never does. The login counts per process under `ADAPTERS_ATTEMPT_COUNTER=memory`: `multi` refuses the boot, naming the login, and an unset mode warns `attempt_counter_not_shared`; see the operator runbook.) With `CORE_DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica. This template does not install DPoP; a composition that adds it records every accepted proof in the same replay seen-set as `private_key_jwt` (`ADAPTERS_REPLAY_SEEN_SET`), so it gets the same answer — `memory` is refused under `CORE_DEPLOYMENT_MODE=multi` and listed in the unset-mode warning, and the shipped `redis` shares DPoP's records across replicas — see the dpop package's [operator requirements](../../packages/dpop/README.md#operator-requirements).
 
-The variable sets `core.deployment.mode`. `DEPLOYMENT_MODE`, its old name, refuses boot set alone or beside `CORE_DEPLOYMENT_MODE` at a different value; beside it at the same value, it boots.
+The variable sets `core.deployment.mode`. `DEPLOYMENT_MODE`, its old name, refuses boot while it is set, alone or beside `CORE_DEPLOYMENT_MODE` at any value: unset it.
 
 Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `CORE_DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
 
@@ -410,9 +412,8 @@ fails before boot, naming it.
 A selection still written where it was — `rateLimiter.adapter`,
 `oauth.code.adapter`, `audit.sink.type`, `repositories.user.type` and the
 like — or a variable renamed with it (`RATE_LIMITER_ADAPTER`, `CLIENT_TYPE`,
-…) set alone or to a different value, fails before boot, naming the new path
-and variable; the old variable beside the new one at the same value is
-accepted.
+…) set, alone or beside the new one at any value, fails before boot, naming
+the new path and variable: unset the old variable.
 
 ### HTTP
 
@@ -491,9 +492,8 @@ Only token exchange (RFC 8693) reads an `expires_in` request parameter; every
 other grant ignores it and mints the default.
 
 The default's old name, `OAUTH_ACCESS_TOKEN_EXPIRES_IN` (config key
-`oauth.accessToken.expiresIn`), refuses boot set alone or beside
-`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` at a different value; beside it at the
-same value, it boots. The old key refuses boot at any value. Move the value to
+`oauth.accessToken.expiresIn`), refuses boot while it is set, alone or beside
+`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` at any value. The old key refuses boot at any value. Move the value to
 the new name rather than deleting it: without it, the default is `3600`.
 
 ### Grant Types
@@ -510,8 +510,8 @@ Each switch is its module's key — `oauth-session.enabled`, and
 `oauth-authorization.grants.<grant>.enabled` for the others. Both modules are
 always loaded and read their switches at boot, from the configuration boot
 parses; the template reads none of them before boot. `OAUTH_GRANTS_<GRANT>_ENABLED`,
-the old names, refuse boot set alone or beside the new name at a different
-value; beside it at the same value, they boot.
+the old names, refuse boot while they are set, alone or beside the new name at
+any value.
 
 ### Session
 
@@ -531,8 +531,8 @@ value; beside it at the same value, they boot.
 The cookie and its store are the session store's section, `session-store`; the
 CSRF token's lifetime, the login page and the login's budget are the session
 module's, `session`. `SESSION_<KEY>`, the old names of the `SESSION_STORE_*`
-variables, refuse boot set alone or beside the new name at a different value;
-beside it at the same value, they boot.
+variables, refuse boot while they are set, alone or beside the new name at any
+value.
 
 If you set `SESSION_STORE_SECURE=false` for local HTTP development or set `SESSION_STORE_DOMAIN`
 for shared-domain cookies, also set `SESSION_STORE_NAME` to a non-`__Host-` value such as
@@ -637,8 +637,8 @@ each is reached at (`/session/oauth/federation/<name>`). A key of one is bound
 to the variable named after its path, `CORE_FEDERATIONS_<NAME>_<KEY>`. The map
 written at the top level (`federations { ... }`) refuses boot, naming each
 key's path under `core.federations`; a `FEDERATIONS_GOOGLE_*` or
-`FEDERATIONS_OIDC_*` variable set alone, or beside its new name at a different
-value, is refused before any module is chosen.
+`FEDERATIONS_OIDC_*` variable set, alone or beside its new name at any value,
+is refused before any module is chosen.
 
 Every entry names its `type`, and boot hands each enabled entry to the module
 that handles that type, under the entry's name. The template always loads the
@@ -806,8 +806,8 @@ its own.
 
 `CLIENT_CODE_DEFAULT_EXPIRES_IN` and `CLIENT_CODE_KEY_PREFIX` were renamed
 with them, and `CLIENT_CODE_ENDPOINT_URI` and `CLIENT_CODE_PASSWORD` removed. A
-renamed one set alone, or beside its new name at a different value, and a
-removed one set at all, fails boot naming what to set instead.
+renamed one set, alone or beside its new name at any value, and a removed one
+set at all, fails boot naming what to set instead.
 
 ### Federation Token Store
 
@@ -874,7 +874,7 @@ in development too, or every password login stops there.
 | Variable | Default | Description |
 |---|---|---|
 | `MFA_MODE` | `required` | `mfaMode`: `required`, `optional` or `off` |
-| `MFA_ENCRYPTION_KEY` | — | The MFA key ring's first key, which seals every factor's data: canonical base64 of 32 bytes (`openssl rand -base64 32`). Required with MFA on. Under `CONFIG_ENV=development`, `config/development.conf` puts the MFA package's published sample key in its place: write your own key there instead, since this variable set beside that ring refuses the boot. The sample key is refused under `CONFIG_ENV` or `NODE_ENV` `production` or `staging` and under `CORE_DEPLOYMENT_MODE=multi` |
+| `MFA_ENCRYPTION_KEY` | — | The MFA key ring's first key, which seals every factor's data: canonical base64 of 32 bytes (`openssl rand -base64 32`). Required with MFA on. Under `CONFIG_ENV=development`, `config/development.conf` puts the MFA package's published sample key in its place: write your own key there instead, since this variable set beside that ring refuses the boot. The sample key is accepted only where `CONFIG_ENV` and `NODE_ENV`, each where set, say `development` or `test`, and is refused under `CORE_DEPLOYMENT_MODE=multi` |
 | `MFA_PAGE_URL` | `/mfa` | The deployment's MFA page, where a login's second factor and a step-up start. The template ships no page: the page contract is the [MFA package's](../../packages/mfa/README.md#the-routes) |
 | `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`, one Store call's time: at least every store's own per-call timeout. Below `REPOSITORIES_USER_HTTP_TIMEOUT` where the Store is called (`ADAPTERS_USER_REPOSITORY=http`, or the factors in the Store) the boot is refused, so raise the two together; above 37500 ms it is refused too |
 | `STANDARD_SMTP_MAIL_SENDER_HOST` | — | The SMTP relay outside development, where MFA mails the account-email proof and the email factor's codes. With MFA on, the boot needs it and `STANDARD_SMTP_MAIL_SENDER_FROM` |
@@ -1214,6 +1214,10 @@ development sender, which only logs each code:
 docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
 ```
 
+Before the first run, write a key of your own into `.env` as
+`MFA_ENCRYPTION_KEY` (`openssl rand -base64 32`): this run does not use the
+development sample key, and without a key the boot is refused.
+
 Read the mail at <http://localhost:8025>. Mailpit keeps it and delivers
 nothing onward. A plain `docker compose up` (`make dev`) starts no Mailpit, and
 the production file names none. It is for development only: a deployment
@@ -1224,9 +1228,11 @@ What the overlay sets on the app service:
 
 - `CONFIG_ENV=mailpit`. Under `development` the template installs the sender
   that logs each code ([Module Composition Order](#module-composition-order),
-  rule 7). [`config/mailpit.conf`](config/mailpit.conf) includes
-  `development.conf`, so the run is otherwise the development one, the MFA
-  sample key included.
+  rule 7). [`config/mailpit.conf`](config/mailpit.conf) does not include
+  `development.conf`, whose one setting is the MFA sample key: the MFA
+  package accepts that key only where every environment name set says
+  `development` or `test`. The key ring's first key is `MFA_ENCRYPTION_KEY`,
+  as the MFA package's `reference.conf` binds it.
 - Nothing of `MFA_MODE`: MFA is on as the template ships it, or as your
   `.env` sets it. With MFA off nothing sends mail.
 - `ADAPTERS_MFA_FACTOR_STORE=redis` and `ADAPTERS_MFA_TRANSACTION_STORE=redis`,

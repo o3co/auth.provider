@@ -566,10 +566,6 @@ export interface MfaCeremonyKit {
 	) => Promise<boolean>;
 	/** D25's flag for `subject`; an outage — an answer that is not a boolean among it — otherwise. */
 	readonly emailProofRequired: (subject: string) => Promise<boolean | MfaStoreOutage>;
-	/** D25's flag cleared for `subject`; `failed` with why when it could not be. */
-	readonly consumeEmailProofRequirement: (
-		subject: string,
-	) => Promise<{ readonly failed: unknown } | undefined>;
 	/** A copy of `factor.amrFor(data)`, taken once, when it names at least one value and only values the factor declares; else `undefined`. */
 	readonly declaredAmr: (factor: MfaFactor, data: MfaFactorData) => readonly string[] | undefined;
 	/**

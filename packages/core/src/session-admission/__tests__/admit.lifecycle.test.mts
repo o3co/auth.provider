@@ -345,3 +345,106 @@ describe("admission's read of the session lifecycle", () => {
 		);
 	});
 });
+
+describe("admission judges expiry on a clock reading taken after its reads", () => {
+	/** A clock at NOW until `advance` moves it to `to`. */
+	const movableClock = () => {
+		let current = NOW;
+		return {
+			now: () => current,
+			advance: (to: Date) => {
+				current = to;
+			},
+		};
+	};
+
+	it("is not_live (gone) when the clock passes expiresAt while the lifecycle is read", async () => {
+		const clock = movableClock();
+		const store = await lifecycle();
+		const advancing: SessionLifecycleStore = {
+			...store,
+			read: async (sid) => {
+				const held = await store.read(sid);
+				clock.advance(new Date(EXPIRES_AT.getTime() + 1));
+				return held;
+			},
+		};
+		expect(
+			await admitSession(deps({ sessionLifecycleStore: advancing, now: clock.now }), cookie()),
+		).toEqual({ outcome: "not_live", reason: "gone" });
+	});
+
+	it("is not_live (gone) for a token carrier when the clock passes expiresAt while the lifecycle is read", async () => {
+		const clock = movableClock();
+		const store = await lifecycle();
+		const advancing: SessionLifecycleStore = {
+			...store,
+			read: async (sid) => {
+				const held = await store.read(sid);
+				clock.advance(new Date(EXPIRES_AT.getTime() + 1));
+				return held;
+			},
+		};
+		expect(
+			await admitSession(deps({ sessionLifecycleStore: advancing, now: clock.now }), {
+				claim: tokenClaim({ sid: SID, sub: SUB, amr: ["pwd"] }),
+				action: "test.use",
+			}),
+		).toEqual({ outcome: "not_live", reason: "gone" });
+	});
+
+	it("is not_live (gone) when the clock reaches expiresAt while the revocation boundary is read", async () => {
+		const clock = movableClock();
+		const store = await lifecycle();
+		expect(
+			await admitSession(
+				deps({
+					sessionLifecycleStore: store,
+					subjectRevocation: {
+						kind: "test",
+						revokeBefore: async () => {},
+						revokedBefore: async () => {
+							clock.advance(EXPIRES_AT);
+							return null;
+						},
+					},
+					now: clock.now,
+				}),
+				cookie(),
+			),
+		).toEqual({ outcome: "not_live", reason: "gone" });
+	});
+
+	it("answers the last reading's not_live (gone) when the clock passes expiresAt while that reading's lifecycle is read", async () => {
+		const clock = movableClock();
+		let reads = 0;
+		const store = await lifecycle();
+		const advancing: SessionLifecycleStore = {
+			...store,
+			read: async (sid) => {
+				reads += 1;
+				const held = await store.read(sid);
+				if (reads === 2) clock.advance(new Date(EXPIRES_AT.getTime() + 1));
+				return held;
+			},
+		};
+		const met: SessionRequirement = {
+			name: "pending",
+			reach: new Set(),
+			stepUpPage: undefined,
+			remediations: [],
+			hintKeys: [],
+			admit: async () => ({ outcome: "met" }),
+		};
+		const answer = await admitSession(
+			deps({
+				sessionLifecycleStore: advancing,
+				requirements: resolverForTests([met], { actions: TEST_ACTIONS, allowAnyReach: true }),
+				now: clock.now,
+			}),
+			cookie(),
+		);
+		expect(answer).toEqual({ outcome: "not_live", reason: "gone" });
+		expect(reads).toBe(2);
+	});
+});

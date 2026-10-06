@@ -540,11 +540,14 @@ describe("a setting still written where its section moved from, read as the temp
 		});
 	});
 
-	it("boots with a renamed TOTP variable and its new name set to the same value, and the factor reads it", async () => {
-		const { handle } = await boot({
+	it("refuses the boot when a renamed TOTP variable and its new name are set to the same value", async () => {
+		const err = await refused({
 			env: { ...SINGLE_ENV, MFA_TOTP_ENABLED: "false", MFA_TOTP_FACTOR_ENABLED: "false" },
 		});
-		expect(handle.components.mfaFactorResolver?.get("totp")).toBeUndefined();
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toMatchObject({
+			renamed: [{ from: "MFA_TOTP_ENABLED", to: "MFA_TOTP_FACTOR_ENABLED", state: "different" }],
+		});
 	});
 
 	it("boots with the setting at the new path, through its variable, and the factor reads it", async () => {
@@ -601,16 +604,19 @@ describe("a setting still written where its section moved from, read as the temp
 		expect(err.message).not.toContain("/new-2a9f");
 	});
 
-	it("boots with ENDPOINTS_MFA_URL and MFA_PAGE_URL set to the same value, and the requirement registers that page", async () => {
-		const set = await boot({
+	it("refuses the boot when ENDPOINTS_MFA_URL and MFA_PAGE_URL are set to the same value", async () => {
+		const err = await refused({
 			env: { ...SINGLE_ENV, ENDPOINTS_MFA_URL: "/account/mfa", MFA_PAGE_URL: "/account/mfa" },
 		});
-		expect(mfaOf(set.config)?.page).toEqual({ url: "/account/mfa" });
-		expect(stepUpPageOf(set)).toBe("/account/mfa");
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toMatchObject({
+			renamed: [{ from: "ENDPOINTS_MFA_URL", to: "MFA_PAGE_URL", state: "different" }],
+		});
 	});
 
 	it("boots with MFA_PAGE_URL alone, and the requirement registers that page", async () => {
 		const set = await boot({ env: { ...SINGLE_ENV, MFA_PAGE_URL: "/account/mfa" } });
+		expect(mfaOf(set.config)?.page).toEqual({ url: "/account/mfa" });
 		expect(stepUpPageOf(set)).toBe("/account/mfa");
 	});
 });
@@ -1339,6 +1345,35 @@ describe("every added module's primary route answers in the one app", () => {
 		expect(tokenPayload(res.body.access_token as string)).toMatchObject({
 			sub: ALICE.sub,
 			azp: GATEWAY.id,
+		});
+	});
+
+	it("token exchange: a client registered without allowExchangeOfTokensIssuedToOthers cannot exchange the web client's access token", async () => {
+		const exchanger = { id: "exchanger", secret: "exchanger-secret" } as const;
+		const { app } = await boot({
+			extraClients: {
+				[exchanger.id]: {
+					tokenEndpointAuthMethod: "client_secret_basic",
+					clientSecret: exchanger.secret,
+					allowedScopes: ["openid", "profile"],
+					allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
+				},
+			},
+		});
+		const { access_token } = await webTokens(app);
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", basic(exchanger))
+			.type("form")
+			.send({
+				grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+				subject_token: access_token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({
+			error: "invalid_request",
+			error_description: "subject_token azp and aud do not name this client",
 		});
 	});
 

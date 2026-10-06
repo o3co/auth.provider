@@ -78,6 +78,10 @@ vi.mock("ioredis", () => {
 		quit: async () => "OK",
 		disconnect: () => undefined,
 		ping: async () => "PONG",
+		// The Redis stores' eviction gate reads the policy from INFO memory: a
+		// default server's.
+		info: async (section: string) =>
+			section === "memory" ? "# Memory\r\nmaxmemory_policy:noeviction\r\n" : null,
 	};
 	const makeMockRedis = (): object =>
 		new Proxy(
@@ -182,12 +186,16 @@ describe('every module on, every shared store on Redis, core.deployment.mode = "
 		expect(current.handle.components.deploymentMode).toBe("multi");
 	});
 
-	it("boots as multi on DEPLOYMENT_MODE=multi beside CORE_DEPLOYMENT_MODE=multi, as the umbrella sets them", async () => {
-		current = await compose({
-			...MULTI,
-			env: { ...MULTI_ENV, DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: "multi" },
+	it("refuses DEPLOYMENT_MODE=multi beside CORE_DEPLOYMENT_MODE=multi: the old name must be unset", async () => {
+		await expect(
+			compose({
+				...MULTI,
+				env: { ...MULTI_ENV, DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: "multi" },
+			}),
+		).rejects.toMatchObject({
+			reason: "environment-variable-renamed",
+			details: { renamed: [{ from: "DEPLOYMENT_MODE", state: "different" }] },
 		});
-		expect(current.handle.components.deploymentMode).toBe("multi");
 	});
 
 	/**

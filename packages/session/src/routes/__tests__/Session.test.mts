@@ -1234,7 +1234,7 @@ describe("Session routes — POST /session/logout from a cookie session the reco
 		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith("sid-1", "session_logout");
 	});
 
-	it("a record that cannot be read is logged, and the logout closes the session as before", async () => {
+	it("a record that cannot be read is an outage: 503, nothing closed, and the cookie session kept for a retry", async () => {
 		const live = makeLiveUserSessionStore(["sid-1"]);
 		const store = {
 			...live,
@@ -1252,14 +1252,20 @@ describe("Session routes — POST /session/logout from a cookie session the reco
 			child: vi.fn(),
 		} as unknown as Logger & { error: ReturnType<typeof vi.fn> };
 		const sessionLifecycle = fakeSessionLifecycle();
-		const { app } = buildApp({
+		const { app, capturedSession } = buildApp({
 			userSessionStore: store,
 			sessionLifecycle,
 			initialSession: signedIn(),
 			logger,
 		});
-		expect((await logoutRequest(app)).status).toBe(200);
-		expect(sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith("sid-1", "session_logout");
+		const res = await logoutRequest(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: expect.any(String),
+		});
+		expect(sessionLifecycle.close).not.toHaveBeenCalled();
+		expect(capturedSession.current).toMatchObject({ isAuthenticated: true, sid: "sid-1" });
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({ sid: "sid-1" }),
 			"logout_user_session_read_failed",

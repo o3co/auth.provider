@@ -50,6 +50,7 @@ import type {
 } from "#/session-admission/requirement.mjs";
 import { issuedRemediationActions } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
+import { newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
 import { openedLifecycleStore } from "./lifecycle.fixture.mjs";
@@ -1883,6 +1884,75 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 				request(),
 			),
 		).toMatchObject({ outcome: "unmet", requirement: "c" });
+	});
+
+	const DECLARED = [
+		"sid",
+		"sub",
+		"authTime",
+		"createdAt",
+		"expiresAt",
+		"claims",
+		"amr",
+		"authentication",
+		"enrollmentFacts",
+		"renewalNonce",
+	] as const;
+
+	it.each(DECLARED)(
+		"a session record: a getter on %s that throws is the store's unavailable (user_session), never a rejection",
+		async (field) => {
+			const { logger, lines } = recordingLogger();
+			const record = session();
+			Object.defineProperty(record, field, {
+				enumerable: true,
+				get() {
+					throw new Error("lazy load failed");
+				},
+			});
+			await expect(
+				admitSession(deps({ userSessionStore: storeOf(async () => record), logger }), request()),
+			).resolves.toEqual({ outcome: "unavailable", store: "user_session" });
+			expect(lines).toEqual([
+				expect.objectContaining({
+					level: "error",
+					message: "session_admission_unavailable",
+					fields: expect.objectContaining({ store: "user_session" }),
+				}),
+			]);
+		},
+	);
+
+	it("a session record: each declared field is read once, and the admitted session is that copy, with nothing else of the record", async () => {
+		const reads = new Map<string, number>();
+		const nonce = newRenewalNonce();
+		const base = session({
+			claims: { email: "user-1@example.test" },
+			enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
+			renewalNonce: nonce,
+		});
+		expect(Object.keys(base).sort()).toEqual([...DECLARED].sort());
+		const record = new Proxy(
+			{ ...base, ormState: "loaded" },
+			{
+				get(target, key, receiver) {
+					if (typeof key === "string") reads.set(key, (reads.get(key) ?? 0) + 1);
+					return Reflect.get(target, key, receiver);
+				},
+			},
+		);
+		const admitted = await admitSession(
+			deps({ userSessionStore: storeOf(async () => record) }),
+			request({ claim: cookie({ renewalNonce: nonce }) }),
+		);
+		const counted = Object.fromEntries(DECLARED.map((field) => [field, reads.get(field)]));
+		expect(admitted).toMatchObject({ outcome: "admitted" });
+		const copy = (admitted as { readonly session: UserSession }).session;
+		expect(copy === record).toBe(false);
+		expect(copy).toEqual(base);
+		expect(copy).not.toHaveProperty("ormState");
+		expect(counted).toEqual(Object.fromEntries(DECLARED.map((field) => [field, 1])));
+		expect(reads.has("ormState")).toBe(false);
 	});
 });
 

@@ -55,6 +55,7 @@ import {
 	resolveConfigPaths,
 	resolveForBoot,
 } from "#/configPath.mjs";
+import { mfaModulesFor } from "#/mfaSwitch.mjs";
 import { templateReference } from "#/modules.mjs";
 import {
 	ALICE,
@@ -426,6 +427,24 @@ describe("the MFA stores in memory: development and test alone", () => {
 		const err = await refusal(compose({ env: on("required"), environment: "staging-eu" }));
 		expect(err).toBeInstanceOf(BootError);
 		expect((err as BootError).reason).toBe("config-validation-failed");
+	});
+
+	it("names each reason it read: no name at all, a name neither development nor test, production", () => {
+		const memory = (environment: string | undefined) => () =>
+			mfaModulesFor({
+				mode: "required",
+				adapters: { mfaFactorStore: "memory", mfaTransactionStore: "memory" },
+				storeTransport: undefined,
+				environment,
+			});
+		vi.stubEnv("CONFIG_ENV", "");
+		vi.stubEnv("NODE_ENV", "");
+		expect(memory(undefined)).toThrow(/refused because no environment is named/);
+		expect(memory(" Prod ")).toThrow(/the environment "prod" is not development or test/);
+		vi.stubEnv("NODE_ENV", "Production");
+		expect(memory("test")).toThrow(/NODE_ENV is "production"/);
+		vi.stubEnv("NODE_ENV", " Test\n");
+		expect(memory("development")().map((m) => m.name)).toContain(memoryMfaFactorStoreModule.name);
 	});
 
 	it.each(["development", "test"])("lets them in under %s", async (environment) => {

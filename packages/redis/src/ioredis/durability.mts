@@ -15,9 +15,9 @@
  */
 
 /**
- * What a Redis server says about keeping what it is written, for the store modules' durability
- * and eviction boot checks. A reply that refuses a question leaves that part unread; any other
- * failure rejects.
+ * What a Redis server says about keeping what it is written, for the stores' eviction gate and
+ * the MFA modules' persistence notices, with the operator's `assumeNoEviction` assertion beside
+ * it. A reply that refuses a question leaves that part unread; any other failure rejects.
  */
 
 import type { Redis } from "ioredis";
@@ -50,13 +50,86 @@ const infoValue = (section: unknown, name: string): string | undefined =>
 		: undefined;
 
 /**
+ * A reply about the eviction policy that is neither a policy nor a refusal. The boot fails on
+ * it: read as unread, it would let `assumeNoEviction` stand in for a policy the server may have
+ * reported.
+ */
+const undocumentedPolicyReply = (question: string): Error =>
+	new Error(
+		`redisDurability: ${question} answered a reply it does not document; the eviction policy is neither read nor unread`,
+	);
+
+/** `CONFIG GET`'s entries: a flat `[name, value, …]` array (RESP2) or a map (RESP3); `undefined` for another shape. */
+const configEntries = (reply: unknown): (readonly [unknown, unknown])[] | undefined => {
+	if (Array.isArray(reply)) {
+		if (reply.length % 2 !== 0) return undefined;
+		const entries: (readonly [unknown, unknown])[] = [];
+		for (let i = 0; i < reply.length; i += 2) entries.push([reply[i], reply[i + 1]]);
+		return entries;
+	}
+	if (reply instanceof Map) return [...reply.entries()];
+	if (typeof reply === "object" && reply !== null) {
+		const proto: unknown = Object.getPrototypeOf(reply);
+		if (proto === Object.prototype || proto === null) return Object.entries(reply);
+	}
+	return undefined;
+};
+
+/**
+ * `CONFIG GET maxmemory-policy`'s value, in either reply shape: `undefined` when the question
+ * was refused or the server knows no such parameter (an empty reply); any other reply throws.
+ */
+const configPolicy = (reply: unknown): string | undefined => {
+	if (reply === undefined) return undefined;
+	const entries = configEntries(reply);
+	if (entries === undefined) throw undocumentedPolicyReply("CONFIG GET maxmemory-policy");
+	if (entries.length === 0) return undefined;
+	const [entry] = entries;
+	if (entries.length !== 1 || entry?.[0] !== "maxmemory-policy" || typeof entry[1] !== "string") {
+		throw undocumentedPolicyReply("CONFIG GET maxmemory-policy");
+	}
+	return entry[1];
+};
+
+/**
+ * `INFO memory`'s `maxmemory_policy`, judged on every line that names it: `undefined` when the
+ * question was refused or no line names it; a reply that is no text, or names it with
+ * different values, throws.
+ */
+const infoPolicy = (section: unknown): string | undefined => {
+	if (section === undefined) return undefined;
+	if (typeof section !== "string") throw undocumentedPolicyReply("INFO memory");
+	const values = new Set(
+		Array.from(section.matchAll(/^maxmemory_policy:([^\r\n]*)/gm), (match) => match[1] ?? ""),
+	);
+	if (values.size > 1) throw undocumentedPolicyReply("INFO memory");
+	return values.values().next().value;
+};
+
+/** What a client's durability report carries beside what the server says. */
+export interface IoredisDurabilityOptions {
+	/**
+	 * The operator's assertion that the server runs `maxmemory-policy noeviction`, reported as
+	 * `RedisDurability.assumeNoEviction`. Set it only for a server that will not say (`INFO` and
+	 * `CONFIG` refused or renamed) and is known to run `noeviction`: a policy the server reports
+	 * always decides. Default `false`.
+	 */
+	readonly assumeNoEviction?: boolean;
+}
+
+/**
  * What `io`'s server says about keeping what it is written. The policy from `INFO memory`
  * (`CONFIG GET maxmemory-policy` only where INFO does not say, so a managed server that blocks
  * `CONFIG` still reports it); AOF from `INFO persistence`; `CONFIG GET save` only when AOF is
- * off, to tell RDB snapshots from none. A refused question leaves its part unread; any other
- * failure is the caller's.
+ * off, to tell RDB snapshots from none. A refused question leaves its part unread; a policy
+ * reply it cannot read either way (another shape, or INFO naming the policy twice, differently)
+ * throws, as any other failure does, and is the caller's. `assumeNoEviction` is reported only
+ * when set.
  */
-export async function redisDurability(io: Redis): Promise<RedisDurability> {
+export async function redisDurability(
+	io: Redis,
+	options: IoredisDurabilityOptions = {},
+): Promise<RedisDurability> {
 	let refusal: unknown;
 	const ask = async (question: () => Promise<unknown>): Promise<unknown> => {
 		try {
@@ -68,8 +141,8 @@ export async function redisDurability(io: Redis): Promise<RedisDurability> {
 		}
 	};
 	const maxmemoryPolicy =
-		infoValue(await ask(() => io.info("memory")), "maxmemory_policy") ??
-		configValue(await ask(() => io.config("GET", "maxmemory-policy")), "maxmemory-policy");
+		infoPolicy(await ask(() => io.info("memory"))) ??
+		configPolicy(await ask(() => io.config("GET", "maxmemory-policy")));
 	const aof = infoValue(await ask(() => io.info("persistence")), "aof_enabled");
 	const appendOnly = aof === "1" ? true : aof === "0" ? false : undefined;
 	let snapshots: boolean | undefined;
@@ -77,5 +150,11 @@ export async function redisDurability(io: Redis): Promise<RedisDurability> {
 		const save = configValue(await ask(() => io.config("GET", "save")), "save");
 		snapshots = save === undefined ? undefined : save.trim() !== "";
 	}
-	return { maxmemoryPolicy, appendOnly, snapshots, refusal };
+	return {
+		maxmemoryPolicy,
+		appendOnly,
+		snapshots,
+		refusal,
+		...(options.assumeNoEviction === true ? { assumeNoEviction: true } : {}),
+	};
 }

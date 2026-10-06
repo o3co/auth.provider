@@ -383,8 +383,8 @@ describe("readFederationUpstreamDelivery — whether the request is known not to
 	const statusError = (status: number, over: object = {}) =>
 		Object.assign(new Error("e"), { status }, over);
 
-	it("is `unprocessed` for an answer the upstream gives without acting: a 4xx but 408 and 499, a 501 and a 503", () => {
-		for (const status of [400, 401, 403, 404, 429, 501, 503]) {
+	it("is `unprocessed` for an answer the upstream gives without acting: a 4xx but 408 and 499, and a 501", () => {
+		for (const status of [400, 401, 403, 404, 429, 501]) {
 			expect(delivery(statusError(status)), String(status)).toBe("unprocessed");
 			expect(
 				delivery(new Error("e", { cause: new ForeignResponse(status) })),
@@ -393,8 +393,8 @@ describe("readFederationUpstreamDelivery — whether the request is known not to
 		}
 	});
 
-	it("is `unknown` for a status that may follow a forwarded request: 408, 499, 500, 502, 504 and any other 5xx", () => {
-		for (const status of [408, 499, 500, 502, 504, 520, 522, 524, 599]) {
+	it("is `unknown` for a status that may follow a forwarded request: 408, 499, 500, 502, 503, 504 and any other 5xx", () => {
+		for (const status of [408, 499, 500, 502, 503, 504, 520, 522, 524, 599]) {
 			expect(delivery(statusError(status)), String(status)).toBe("unknown");
 			expect(
 				delivery(new Error("e", { cause: new ForeignResponse(status) })),

@@ -26,8 +26,9 @@
  * (`internal/mfa-keys.mts`); `~` is not base64url, so no factor's field is
  * `~g`. Every operation touches the subject's one key, so a Cluster spreads
  * subjects across its slots. A hash holding a factor carries no TTL: an
- * enrolled factor does not expire, and a `volatile-*` eviction policy may
- * drop a key with a TTL.
+ * enrolled factor does not expire. An emptied set's tombstone and a write's
+ * replay key do carry one, so the factory holds the server to `noeviction`
+ * (`internal/eviction-policy.mts`).
  *
  * A record is `<version>\n<fixed>\n<mutable>`: the version as decimal text,
  * one JSON line for what never changes after `createIf` (id, subject, kind,
@@ -103,7 +104,8 @@ import {
 	type StoreGeneration,
 } from "@o3co/auth-provider-core";
 import type { MfaFactorStoreClient } from "./clients.mjs";
-import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
+import { requireNoEviction } from "./internal/eviction-policy.mjs";
+import { checkRedisMfaStorePersistence, MFA_STORE_EVICTABLE } from "./internal/mfa-durability.mjs";
 import { checkMfaKeyPrefix, mfaKeyPart } from "./internal/mfa-keys.mjs";
 import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
@@ -333,7 +335,24 @@ function checkExpected(expected: unknown, operation: string): StoreGeneration {
 	return expected;
 }
 
-export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): MfaFactorStore {
+/**
+ * The Redis {@link MfaFactorStore}. It resolves once the server's eviction
+ * policy passes the gate (`internal/eviction-policy.mts`); an option it
+ * cannot use rejects before the server is asked.
+ */
+export async function createRedisMfaFactorStore(
+	options: RedisMfaFactorStoreOptions,
+): Promise<MfaFactorStore> {
+	const store = buildRedisMfaFactorStore(options);
+	await requireNoEviction(
+		"mfaFactorStore",
+		() => options.client.durability(),
+		MFA_STORE_EVICTABLE.mfaFactorStore,
+	);
+	return store;
+}
+
+function buildRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): MfaFactorStore {
 	const { client } = options;
 	const keyPrefix = checkMfaKeyPrefix(
 		options.keyPrefix ?? DEFAULT_REDIS_MFA_FACTOR_STORE_KEY_PREFIX,
@@ -454,10 +473,10 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
  * its own section (strict).
  *
  * Declares no `replicaSafety`: every replica reads the one store, so a
- * composition with it may declare `core.deployment.mode = "multi"`. Before it
- * provides the store it runs the durability check
- * (`internal/mfa-durability.mts`): an `allkeys-*` eviction policy refuses the
- * boot (`mfa-factor-store-evictable`), and each warning goes to the `logger`
+ * composition with it may declare `core.deployment.mode = "multi"`. The store
+ * is built by {@link createRedisMfaFactorStore}, so a server that fails the
+ * eviction gate refuses the boot (`mfa-factor-store-evictable`); the
+ * persistence notices (`internal/mfa-durability.mts`) then go to the `logger`
  * slot, or to `consoleLogger`.
  */
 export const redisMfaFactorStoreModule = defineModule({
@@ -474,12 +493,11 @@ export const redisMfaFactorStoreModule = defineModule({
 	optional: ["logger"] as const,
 	provides: {
 		mfaFactorStore: async (deps) => {
-			// Built first, so a prefix it refuses is refused before the server is asked.
-			const store = createRedisMfaFactorStore({
+			const store = await createRedisMfaFactorStore({
 				client: deps.mfaFactorStoreClient,
 				keyPrefix: deps.section.keyPrefix,
 			});
-			await checkRedisMfaStoreDurability(
+			await checkRedisMfaStorePersistence(
 				"mfaFactorStore",
 				() => deps.mfaFactorStoreClient.durability(),
 				deps.logger ?? consoleLogger,

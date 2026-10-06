@@ -792,7 +792,9 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 	// `email` and the federation-token allowlist are there so what an
 	// exchanged token must NOT reach — the session's claims at /userinfo, the
 	// upstream token — is within the client's registration: only the missing
-	// session capability stands in the way.
+	// session capability stands in the way. The web client's tokens name
+	// neither the gateway nor its audience, so the registration lets it
+	// exchange tokens issued to others.
 	[GATEWAY.id]: {
 		tokenEndpointAuthMethod: "client_secret_basic",
 		clientSecret: GATEWAY.secret,
@@ -800,6 +802,7 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 		allowedAudiences: [ISSUER],
 		allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
 		allowedAzpForFederationToken: true,
+		allowExchangeOfTokensIssuedToOthers: true,
 	},
 	// A machine client whose tokens are sender-constrained by DPoP or mTLS.
 	[BINDER.id]: {

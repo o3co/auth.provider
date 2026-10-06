@@ -59,6 +59,7 @@ const validRecord = (): Record<string, unknown> => ({
 	clientName: "Relying Party",
 	clientUri: "https://rp.example",
 	allowPlainPkce: false,
+	allowExchangeOfTokensIssuedToOthers: false,
 });
 
 /** The fields `validRecord` sets: `PublicClient`'s but the two key sources, never `clientSecret`. */
@@ -211,7 +212,7 @@ describe("validatedClientRepository — a valid record", () => {
 		expect(client).not.toHaveProperty("clientSecret");
 	});
 
-	it("reads each of the 22 declared fields of a Proxy-backed record once, and nothing else of it", async () => {
+	it("reads each of the 23 declared fields of a Proxy-backed record once, and nothing else of it", async () => {
 		const reads = new Map<PropertyKey, number>();
 		const otherTraps: string[] = [];
 		const target = {
@@ -246,7 +247,7 @@ describe("validatedClientRepository — a valid record", () => {
 			clientId: CLIENT_ID,
 			tokenEndpointAuthMethod: "private_key_jwt",
 		});
-		expect(DECLARED_FIELDS).toHaveLength(22);
+		expect(DECLARED_FIELDS).toHaveLength(23);
 		// `then` is read once by the promise the repository answers with, as any
 		// async answer is, before the boundary sees the record.
 		expect(reads.get("then")).toBe(1);
@@ -338,6 +339,11 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		["a grant type that is not a string", { allowedGrantTypes: [1] }, "allowedGrantTypes"],
 		["firstParty as the string true", { firstParty: "true" }, "firstParty"],
 		["allowPlainPkce as a number", { allowPlainPkce: 1 }, "allowPlainPkce"],
+		[
+			"allowExchangeOfTokensIssuedToOthers as the string true",
+			{ allowExchangeOfTokensIssuedToOthers: "true" },
+			"allowExchangeOfTokensIssuedToOthers",
+		],
 		[
 			"a logout session flag that is not a boolean",
 			{ backchannelLogoutSessionRequired: "yes" },
