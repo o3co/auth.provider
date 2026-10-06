@@ -22,7 +22,7 @@
  * behind the admission do not read it twice. Internal to the package.
  */
 
-import express, { type RequestHandler, type Response } from "express";
+import express, { type Request, type RequestHandler, type Response } from "express";
 
 /** The one content type the parser reads. */
 const JSON_TYPE = "application/json";
@@ -41,27 +41,28 @@ const refuseNotJson = (res: Response): void => {
 };
 
 /**
- * Whether a body a parser produced carries nothing: no value, an empty string
- * or buffer, or an object with no fields (what a form parser makes of an
- * empty body). Judged on the parsed value, since the bytes are gone.
+ * Whether the request's framing shows no body: no `Transfer-Encoding`, and a
+ * `Content-Length` absent or numerically 0 (`00` included).
  */
-const parsedEmpty = (body: unknown): boolean =>
-	body === undefined ||
-	body === null ||
-	body === "" ||
-	(typeof body === "object" && Object.keys(body).length === 0);
+const framedWithoutBody = (req: Request): boolean => {
+	if (req.headers["transfer-encoding"] !== undefined) return false;
+	const length = req.headers["content-length"];
+	return length === undefined || (/^\d+$/.test(length) && Number(length) === 0);
+};
 
 /**
  * A body something in front of the provider's routes already read — a body
  * parser the host installs (which marks it `_body`), or any reader that took
- * the stream to its end — is judged by the content type it was sent with: a
- * JSON body passes as JSON, and any other body passes only when what was made
- * of it carries nothing; otherwise `400 invalid_request`. A body nothing has
- * read goes on to the package's own readers.
+ * the stream to its end — is judged by the content type it was sent with and
+ * by its framing, never by what was made of it: a JSON body passes as JSON,
+ * and any other passes only when the framing shows no body; otherwise
+ * `400 invalid_request`. So an empty chunked body that a parser of another
+ * type read is refused too. A body nothing has read goes on to the package's
+ * own readers.
  */
 const judgeBodyReadUpstream: RequestHandler = (req, res, next) => {
 	const readUpstream = (req as { _body?: unknown })._body === true || req.readableEnded;
-	if (readUpstream && !req.is(JSON_TYPE) && !parsedEmpty(req.body)) {
+	if (readUpstream && !req.is(JSON_TYPE) && !framedWithoutBody(req)) {
 		refuseNotJson(res);
 		return;
 	}

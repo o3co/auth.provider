@@ -762,15 +762,58 @@ describe("webauthnSessionSubjectModule — the body's framing", () => {
 	});
 });
 
+/**
+ * A reader the host installs that takes the body to its end, then sets
+ * `req.body` to what `parsed` answers, if anything, and marks it read when
+ * `mark` is set.
+ */
+const drainingParser =
+	(parsed?: () => unknown, mark = false): RequestHandler =>
+	(req, _res, next) => {
+		req.on("data", () => {});
+		req.on("end", () => {
+			if (parsed !== undefined) req.body = parsed();
+			if (mark) (req as { _body?: boolean })._body = true;
+			next();
+		});
+	};
+
+const FORM = "application/x-www-form-urlencoded";
+
 describe("webauthnSessionSubjectModule — a body the host's own parser read first", () => {
 	it.each([
 		[
 			"a form body an upstream form parser read",
 			express.urlencoded({ extended: true }),
-			"application/x-www-form-urlencoded",
+			FORM,
 			"a=1&b[c]=2",
 		],
+		["a form body of separators alone", express.urlencoded({ extended: true }), FORM, "&&&"],
+		[
+			"a form body of a prototype key",
+			express.urlencoded({ extended: true }),
+			FORM,
+			"__proto__[x]=1",
+		],
 		["a text body an upstream text parser read", express.text(), "text/plain", "hello"],
+		[
+			"a multipart body a file-upload parser consumed, leaving an empty object",
+			drainingParser(() => ({}), true),
+			"multipart/form-data; boundary=x",
+			'--x\r\nContent-Disposition: form-data; name="f"; filename="a.txt"\r\n\r\nhello\r\n--x--\r\n',
+		],
+		[
+			"a body a reader drained without setting a body or marking it read",
+			drainingParser(),
+			"application/octet-stream",
+			"hello",
+		],
+		[
+			"a body parsed into an object that inherits a response",
+			drainingParser(() => Object.create({ response: { id: "x" } }), true),
+			"application/x-custom",
+			"hello",
+		],
 	] as const)(
 		"refuses %s with 400 invalid_request, with no session read",
 		async (_what, upstream, type, body) => {
@@ -792,6 +835,33 @@ describe("webauthnSessionSubjectModule — a body the host's own parser read fir
 			"Content-Type: application/x-www-form-urlencoded",
 			"Content-Length: 0",
 		]);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+	});
+
+	it("refuses an empty chunked body a parser marked read without taking the stream to its end: the framing shows a body", async () => {
+		const marksRead: RequestHandler = (req, _res, next) => {
+			(req as { _body?: boolean })._body = true;
+			req.body = {};
+			next();
+		};
+		const { app, get } = setup({ upstream: marksRead });
+		const res = await rawPost(app, [OPTIONS_LINE, `Content-Type: ${FORM}`, CHUNKED], "0\r\n\r\n");
+		expect(res.status).toBe(400);
+		expect(res.body).toMatchObject({ error: "invalid_request" });
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("refuses an empty chunked form body an upstream form parser read: only framing that shows no body passes", async () => {
+		const { app, get } = setup({ upstream: express.urlencoded({ extended: true }) });
+		const res = await rawPost(app, [OPTIONS_LINE, `Content-Type: ${FORM}`, CHUNKED], "0\r\n\r\n");
+		expect(res.status).toBe(400);
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("admits a form body an upstream form parser read under Content-Length: 00", async () => {
+		const { app } = setup({ upstream: express.urlencoded({ extended: true }) });
+		const res = await rawPost(app, [OPTIONS_LINE, `Content-Type: ${FORM}`, "Content-Length: 00"]);
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(res.body.subject).toEqual({ userId: SUBJECT });
 	});
