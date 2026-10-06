@@ -325,7 +325,9 @@ const copyView = (view: SessionView): SessionView =>
  *    record that carries a renewal nonce the cookie session does not hold →
  *    `not_live` (`renewed`).
  * 4. revocation boundary, for a live record; skipped for a token carrier,
- *    whose boundary `verifyJwt` reads.
+ *    whose boundary `verifyJwt` reads. Then the record's expiry again, on a
+ *    clock reading taken after the lifecycle and the boundary were read:
+ *    expired → `not_live` (`gone`).
  * 5. requirements, for `use` and `credential_change`: each `admit` in
  *    registration order, the first verdict that is not `met` taken (see
  *    `stepUpVerdict` for `step_up`). A token carrier is judged on the
