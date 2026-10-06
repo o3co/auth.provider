@@ -51,11 +51,19 @@ const RP_URI = "https://rp.example/cb";
 const CODE_VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(CODE_VERIFIER).digest("base64url");
 
+/**
+ * What `/authorize` records of how the session had authenticated over a
+ * record whose primary cannot be told. The exchange reads such a code over
+ * any record as it was minted: nothing told.
+ */
+const UNTOLD = { primary: undefined, mfaAt: undefined };
+
 const validCode = {
 	client_id: "client1",
 	redirect_uri: RP_URI,
 	code_challenge: S256_CHALLENGE,
 	code_challenge_method: "S256",
+	authentication: UNTOLD,
 };
 
 // The authorization grant requires `ctx.authenticatedClient` to be present and
@@ -133,6 +141,7 @@ describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 					sid: undefined,
 					acr: undefined,
 					amr: undefined,
+					authentication: undefined,
 				});
 				const deps = {
 					...makeDeps(vi.fn()),
@@ -524,6 +533,7 @@ describe("createAuthorizationGrant", () => {
 					code_challenge: S256_CHALLENGE,
 					code_challenge_method: "S256",
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					grantedScope: ["read"] as readonly string[],
 				}),
 			);
@@ -554,6 +564,7 @@ describe("createAuthorizationGrant", () => {
 					code_challenge: S256_CHALLENGE,
 					code_challenge_method: "S256",
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					grantedScope: [] as readonly string[],
 				}),
 			);
@@ -699,6 +710,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: challenge,
 					code_challenge_method: "S256",
 				}),
@@ -728,6 +740,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: verifier,
 					code_challenge_method: "plain",
 				}),
@@ -754,6 +767,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: verifier,
 					code_challenge_method: "plain",
 				}),
@@ -942,6 +956,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
 						code_challenge: S256_CHALLENGE,
@@ -981,6 +996,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						redirect_uri: "http://127.0.0.1:49152/cb",
 						code_challenge: S256_CHALLENGE,
@@ -1014,6 +1030,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						// redirect_uri intentionally omitted to model legacy/corrupt records.
 					}),
@@ -1301,6 +1318,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication: UNTOLD,
 							nonce: "client-nonce",
 							grantedScope: ["openid", "email"],
 						}),
@@ -1357,6 +1375,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication: UNTOLD,
 							grantedScope: ["openid"],
 							acr: "urn:example:mfa",
 							amr: ["pwd", "otp", "mfa"],
@@ -1418,6 +1437,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication: UNTOLD,
 							grantedScope: ["openid"],
 							amr,
 						}),
@@ -1456,6 +1476,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication: UNTOLD,
 							grantedScope: ["openid"],
 						}),
 					),
@@ -1562,6 +1583,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-noiss",
+							authentication: UNTOLD,
 							grantedScope: ["openid", "email"],
 							nonce: "client-nonce",
 						}),
@@ -1608,6 +1630,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-2",
+							authentication: UNTOLD,
 							grantedScope: ["profile", "email"],
 						}),
 					),
@@ -1644,6 +1667,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "sid-3",
+						authentication: UNTOLD,
 						grantedScope: ["openid"],
 					}),
 				);
@@ -1690,6 +1714,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1720,6 +1745,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1749,6 +1775,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "real-client",
 						redirect_uri: "https://rp.example/cb",
 						code_challenge: S256_CHALLENGE,
