@@ -42,8 +42,9 @@ export const loginCompletionModule = defineModule<
 	// module owns.
 	requires: ["sessionCookiePolicy", "userSessionStore", "csrfGuard"],
 	// A composition without subject-level revocation has no index to record
-	// the session in, as for the session routes; without core's session
-	// lifecycle module, a login opens no lifecycle record.
+	// the session in, as for the session routes. `sessionLifecycle` is
+	// required beside `userSessionStore`: the provider refuses a composition
+	// without it, naming both.
 	optional: ["subjectSessionIndex", "sessionLifecycle"],
 	provides: {
 		loginCompletion: (deps) =>

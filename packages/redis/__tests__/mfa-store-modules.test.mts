@@ -195,7 +195,7 @@ describe.each(CASES)("$module.name", (c) => {
 	});
 
 	it(`reads ${c.configKey}.keyPrefix, its own section's, "${c.defaultPrefix}" when it is not set`, () => {
-		expect(c.module.configSchema).toBeUndefined();
+		expect(c.module).not.toHaveProperty("configSchema");
 		expect(c.module.section?.schema.parse(undefined)).toStrictEqual({ keyPrefix: c.defaultPrefix });
 		expect(c.module.section?.schema.parse({ keyPrefix: "tenant-a:" })).toStrictEqual({
 			keyPrefix: "tenant-a:",

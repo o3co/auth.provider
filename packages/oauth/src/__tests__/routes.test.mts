@@ -27,9 +27,7 @@ import {
 	type GrantHandler,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
-	type SessionRPRegistry,
+	type SessionLifecycle,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -248,15 +246,29 @@ describe("createOAuthRouter", () => {
 			codeRepository: {} as CodeRepository,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			userSessionStore: {} as UserSessionStore,
-			sessionRPRegistry: {} as SessionRPRegistry,
-			sessionFamilyIndex: {} as SessionFamilyIndex,
-			sessionFederationIndex: {} as SessionFederationIndex,
+			sessionLifecycle: {} as SessionLifecycle,
 			federationTokenStore: {} as FederationTokenStore,
 			refreshTokenFamilyRevocation: {} as RefreshTokenFamilyRevocation,
 		});
 
 		expect(calls.get.some((args) => args[0] === "/logout")).toBe(true);
 		expect(calls.post.some((args) => args[0] === "/logout")).toBe(true);
+	});
+
+	it("refuses a userSessionStore wired without core's session lifecycle, naming both slots", async () => {
+		const { expressLike } = createTrackingExpress();
+
+		await expect(
+			createOAuthRouter(expressLike, {
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+				registry: new GrantRegistry(),
+				...routerInputsOf(fullConfig),
+				clientRepository: {} as ClientRepository,
+				codeRepository: {} as CodeRepository,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				userSessionStore: {} as UserSessionStore,
+			}),
+		).rejects.toThrow(/userSessionStore is wired, but sessionLifecycle is not/);
 	});
 
 	// Integration coverage: exercise the full /oauth/token pipeline

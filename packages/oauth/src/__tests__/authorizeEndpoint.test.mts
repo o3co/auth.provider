@@ -65,6 +65,7 @@ import { authorizationServerRegistry } from "./_helpers/authorizationServerRegis
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -179,7 +180,12 @@ const makeApp = async (opts: {
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
-		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		...(opts.userSessionStore
+			? {
+					userSessionStore: opts.userSessionStore,
+					sessionLifecycle: livenessOver(opts.userSessionStore),
+				}
+			: {}),
 		// The session module's entry for the page, unless the test hands one.
 		loginEntry: opts.loginEntry ?? createTestLoginEntry(opts.loginUrl ?? "/login"),
 		...(opts.logger ? { logger: opts.logger } : {}),

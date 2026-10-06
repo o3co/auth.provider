@@ -15,6 +15,8 @@
  */
 import { createSecretKey } from "node:crypto";
 import {
+	createInMemorySessionLifecycleStore,
+	createInMemoryUserSessionStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRevocation,
 	createRefreshTokenFamilyRotation,
@@ -101,6 +103,27 @@ const DEFAULT_AUTH_CLIENT = {
 	clientId: DEFAULT_CLIENT_ID,
 	tokenEndpointAuthMethod: "client_secret_basic" as const,
 };
+
+describe("createRefreshTokenGrant — where a user-session store is wired, core's session lifecycle is required", () => {
+	it("refuses to build with userSessionStore wired and no sessionLifecycleStore, naming both slots", () => {
+		expect(() =>
+			createRefreshTokenGrant({ ...mockDeps, userSessionStore: createInMemoryUserSessionStore() }),
+		).toThrow(
+			/^The refresh_token grant: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*sessionLifecycleModule\.$/,
+		);
+	});
+
+	it("builds sessionless, with neither wired, and with both wired", () => {
+		expect(() => createRefreshTokenGrant(mockDeps)).not.toThrow();
+		expect(() =>
+			createRefreshTokenGrant({
+				...mockDeps,
+				userSessionStore: createInMemoryUserSessionStore(),
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			}),
+		).not.toThrow();
+	});
+});
 
 describe("createRefreshTokenGrant", () => {
 	describe("handle", () => {
@@ -1799,7 +1822,11 @@ describe("createRefreshTokenGrant", () => {
 				amr: undefined,
 				authentication: undefined,
 			}));
-			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = {
+				...mockDeps,
+				userSessionStore: store,
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			};
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -1825,7 +1852,11 @@ describe("createRefreshTokenGrant", () => {
 		it("returns 400 invalid_grant when userSessionStore.get returns null", async () => {
 			const token = await makeRefreshToken({ sid: "sid-dead" });
 			const store = createStubUserSessionStore(async (_sid) => null);
-			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = {
+				...mockDeps,
+				userSessionStore: store,
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			};
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -1847,7 +1878,11 @@ describe("createRefreshTokenGrant", () => {
 			const store = createStubUserSessionStore(async (_sid) => {
 				throw new Error("redis down");
 			});
-			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = {
+				...mockDeps,
+				userSessionStore: store,
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+			};
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -2584,6 +2619,7 @@ describe("refresh carries how the user authenticated", () => {
 		};
 		const { at, rt } = await refresh(await presentedWith({ sid: "sid-1", amr: ["pwd"] }), {
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 		});
 		expect(at.sub).toBe("u1");
 		expect(at).not.toHaveProperty("auth_time");

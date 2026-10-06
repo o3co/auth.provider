@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 const REFERENCE_CONF = fileURLToPath(new URL("../../../config/reference.conf", import.meta.url));
@@ -44,7 +44,7 @@ const issuesAt = (result: { success: boolean; error?: { issues: { path: Property
 
 describe("core.sessionRequirements.expected", () => {
 	it("has no default: reference.conf carries none, and a configuration without the section parses to none", () => {
-		const fromReference = validate(parseFile(REFERENCE_CONF, { env: ENV }), AppConfigSchema);
+		const fromReference = validate(parseFile(REFERENCE_CONF, { env: ENV }), CoreConfigSchema);
 		expect(fromReference.core?.sessionRequirements).toBeUndefined();
 		const { core: _none, ...without } = makeValidCoreConfig() as Record<string, unknown>;
 		expect(CoreConfigSchema.parse(without).core?.sessionRequirements).toBeUndefined();
@@ -75,14 +75,6 @@ describe("core.sessionRequirements.expected", () => {
 		}
 	});
 
-	it("survives AppConfigSchema, which the standalone parses through", () => {
-		const parsed = AppConfigSchema.parse({
-			...makeValidAppConfig(),
-			core: { sessionRequirements: { expected: ["mfa"] } },
-		});
-		expect(parsed.core?.sessionRequirements?.expected).toEqual(["mfa"]);
-	});
-
 	it("is declared by the test fixtures as expecting nothing: every createApp test that installs a consumer states its posture", () => {
 		expect(makeValidCoreConfig().core.sessionRequirements).toEqual({ expected: [] });
 		expect(makeValidAppConfig().core.sessionRequirements).toEqual({ expected: [] });
@@ -91,7 +83,7 @@ describe("core.sessionRequirements.expected", () => {
 
 describe("core.sessionRequirements.secondFactorAuthority", () => {
 	it("is optional, with no default: reference.conf carries none", () => {
-		const fromReference = validate(parseFile(REFERENCE_CONF, { env: ENV }), AppConfigSchema);
+		const fromReference = validate(parseFile(REFERENCE_CONF, { env: ENV }), CoreConfigSchema);
 		expect(fromReference.core?.sessionRequirements?.secondFactorAuthority).toBeUndefined();
 		expect(
 			CoreConfigSchema.parse(makeValidCoreConfig()).core?.sessionRequirements,

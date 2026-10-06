@@ -29,6 +29,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	type AuditEvent,
+	createInMemorySessionLifecycleStore,
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
@@ -172,6 +173,7 @@ function world(options: WorldOptions = {}) {
 				options.withoutUserSessionStore === true
 					? (undefined as never)
 					: ({ get: async (sid: string) => durable.get(sid) ?? null } as never),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			subjectRevocation: {
 				kind: "test",
 				revokeBefore: async () => undefined,

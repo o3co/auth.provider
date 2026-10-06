@@ -27,10 +27,16 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionLifecycleStore,
 	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryAccessTokenDenylist,
+	createMemoryRefreshTokenFamilyStore,
+	createRefreshTokenFamilyRevocation,
+	createSessionLifecycle,
 	createSymmetricKeyStore,
+	type FederationTokenStore,
 	InMemoryCodeRepository,
 	passwordSessionAuthentication,
 } from "@o3co/auth-provider-core";
@@ -113,6 +119,25 @@ const world = async (
 	};
 	const sessionFamilyIndex = createInMemorySessionFamilyIndex();
 	const sessionRPRegistry = createInMemorySessionRPRegistry();
+	// Core's own lifecycle over the same stores: the grant joins the session
+	// through it, and the router reads and ends sessions through it.
+	const sessionLifecycle = createSessionLifecycle({
+		store: createInMemorySessionLifecycleStore(),
+		userSessionStore,
+		refreshTokenFamilyRevocation: createRefreshTokenFamilyRevocation({
+			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
+			accessTokenHorizonMs: 3_600_000,
+		}),
+		federationTokenStore: {
+			removeBySid: vi.fn(),
+			delete: vi.fn(),
+		} as unknown as FederationTokenStore,
+		sessionRPRegistry,
+		sessionFamilyIndex,
+		sessionFederationIndex: createInMemorySessionFederationIndex(),
+		retainMs: 0,
+		logger: { warn: () => undefined, error: () => undefined },
+	});
 	const registry = new GrantRegistry();
 	registry.register(
 		"authorization_code",
@@ -123,8 +148,7 @@ const world = async (
 			clientRepository,
 			codeRepository,
 			userSessionStore,
-			sessionFamilyIndex,
-			sessionRPRegistry,
+			sessionLifecycle,
 		}),
 	);
 	registry.register(
@@ -133,6 +157,7 @@ const world = async (
 			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);
@@ -144,8 +169,7 @@ const world = async (
 		codeRepository,
 		keyStore,
 		userSessionStore,
-		sessionFamilyIndex,
-		sessionRPRegistry,
+		sessionLifecycle,
 		accessTokenDenylist: createMemoryAccessTokenDenylist(),
 		requirements,
 	});

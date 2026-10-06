@@ -36,6 +36,21 @@ import {
 } from "./federationTokenRecord.mjs";
 
 /**
+ * Stamps the refresh of `current` as answered `500 refresh_failed`, so the
+ * router's back-off holds it.
+ */
+export const stampRefreshFailed = (
+	ctx: FederationTokenContext,
+	caller: FederationTokenCaller,
+	current: StoredRecord,
+): void => {
+	ctx.refreshBackoff.stamp(
+		{ sid: caller.sid, federationName: ctx.name, accessToken: current.value.accessToken },
+		Date.now(),
+	);
+};
+
+/**
  * The answer when the provider's refresh of `current` threw. On
  * `invalid_grant` under the refresh lock (`holdsLock`), that record is
  * removed, best effort, before the `410`; the session's index is left as it
@@ -130,6 +145,7 @@ export const answerRefreshFailure = async (
 	}
 
 	// reason === "unknown" — generic 500 + audit with classifier reason for SIEM.
+	stampRefreshFailed(ctx, caller, current);
 	emitAuditEvent(opts.auditSink, {
 		timestamp: new Date(),
 		type: "federation.token.refresh_failed",

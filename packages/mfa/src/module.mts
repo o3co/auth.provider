@@ -38,7 +38,9 @@
  * the same value. `mfa.rateLimit` is removed: setting it refuses the boot.
  *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
- * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
+ * `mfa.mode` is `off` or unset, when no `sessionLifecycleStore` is wired beside
+ * the user-session store (core's session lifecycle is required where one is
+ * wired), when the package's settings are unusable (naming
  * the key), when `mfa.page.url` is unset, or when
  * `mfa.enrollment.requireEmailProof` is `always` and no `mailSender` is wired —
  * nobody could give the proof, so nobody could bind (the MFA ADR's D20). It
@@ -113,7 +115,7 @@ import { createMfaLockRecovery } from "./lockRecovery.mjs";
 import { mailFailureOf } from "./mail.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
-import { createMfaRouter } from "./routes.mjs";
+import { createMfaRouter, requireSessionLifecycleStore } from "./routes.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
 import { createLoginTransactions } from "./transactions.mjs";
@@ -380,6 +382,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							'mfa.mode is "off" (or unset) while the MFA module is installed: remove the MFA module, or set mfa.mode to "required" or "optional"',
 						);
 					}
+					requireSessionLifecycleStore(deps);
 					const settings = readMfaSettings(deps.section, {
 						...options,
 						deploymentMode: deps.deploymentMode,

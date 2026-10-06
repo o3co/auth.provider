@@ -72,6 +72,8 @@ const REQUIRES = [
 const OPTIONAL = [
 	"userSessionStore",
 	// The session lifecycle's record, read by admission after a live session.
+	// Required beside `userSessionStore`: the grant refuses to build with the
+	// store and not the port.
 	"sessionLifecycleStore",
 	"subjectRevocation",
 	"auditSink",

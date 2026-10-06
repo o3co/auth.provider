@@ -23,25 +23,16 @@ import type { SessionLifecycle } from "@o3co/auth-provider-core";
 
 /**
  * The live session `sid` names, as its subject; `not_live` when it is not
- * live (a session closing or closed, or gone); `unavailable` when the
- * lifecycle could not answer. A `liveness` that throws is not caught here.
+ * live (a session closing or closed, or gone); `no_answer` for any other
+ * answer, which the caller treats as an outage. A `liveness` that rejects is
+ * not caught here.
  */
 export async function liveSessionSubject(
 	lifecycle: Pick<SessionLifecycle, "liveness">,
 	sid: string,
-): Promise<{ readonly subject: string } | "not_live" | "unavailable"> {
+): Promise<{ readonly subject: string } | "not_live" | "no_answer"> {
 	const answer = await lifecycle.liveness(sid);
-	switch (answer.outcome) {
-		case "live":
-			return { subject: answer.session.sub };
-		case "not_live":
-			return "not_live";
-		case "unavailable":
-			return "unavailable";
-		default: {
-			// Every answer the port names is handled above.
-			const unhandled: never = answer;
-			return unhandled;
-		}
-	}
+	if (answer.outcome === "live") return { subject: answer.session.sub };
+	if (answer.outcome === "not_live") return "not_live";
+	return "no_answer";
 }

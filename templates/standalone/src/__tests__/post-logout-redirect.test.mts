@@ -149,15 +149,15 @@ describe("a logout's post_logout_redirect_uri reaches the upstream only once it 
 
 	describe("POST /oauth/federation/google/logout", () => {
 		it("does not send the browser to an unregistered post_logout_redirect_uri", async () => {
-			const { app, sid, accessToken, sessionFederationIndex } = await signedInWithGoogle("shipped");
+			const { app, sid, accessToken, federationTokenStore } = await signedInWithGoogle("shipped");
 
 			const res = await federationLogout(app, accessToken, UNREGISTERED);
 
 			expect(res.status).toBe(303);
 			expect(new URL(res.headers.location as string).origin).not.toBe("https://evil.example");
 			expect(res.headers.location).toBe(`${GOOGLE_LOGOUT}?state=s-1`);
-			// The federation was disconnected all the same.
-			expect(await sessionFederationIndex.listFederations(sid)).not.toContain("google");
+			// The federation was disconnected all the same: its tokens are gone.
+			expect(await federationTokenStore.get(sid, "google")).toBeNull();
 		});
 
 		it("still returns the browser to one registered for the token's client", async () => {

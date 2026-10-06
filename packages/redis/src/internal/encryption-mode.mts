@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { consoleLogger, type Logger } from "@o3co/auth-provider-core";
+import { consoleLogger, type Logger, productionEnvironmentIn } from "@o3co/auth-provider-core";
 
 /**
  * The production guard on storing upstream refresh tokens unencrypted,
@@ -30,8 +30,11 @@ import { consoleLogger, type Logger } from "@o3co/auth-provider-core";
  * (warn) where plaintext is allowed, `federation_store_plaintext_override`
  * (error) where only the escape hatch let it through — on the logger the
  * composition handed the store, or `consoleLogger` when it handed none.
+ *
+ * Whether the environment is production or staging is core's reading
+ * (`productionEnvironmentIn`): each name trimmed and in lower case, so
+ * "Production" or "production\n" names production as surely.
  */
-const PRODUCTION_ENVS = new Set(["production", "staging"]);
 
 /**
  * Where the guard looks beside the mode itself. A deployment that has
@@ -59,9 +62,9 @@ export interface EncryptionGuardContext {
  * warn.
  *
  * Plaintext is refused when any of these holds:
- *   - the explicit `environment` is `production` or `staging`;
- *   - `NODE_ENV` is `production` or `staging` (always consulted; the sole
- *     signal when no environment is passed);
+ *   - the explicit `environment` reads as `production` or `staging`;
+ *   - `NODE_ENV` reads as `production` or `staging` (always consulted; the
+ *     sole signal when no environment is passed);
  *   - `deploymentMode` is `"multi"`.
  */
 export function validateEncryptionMode(
@@ -78,12 +81,10 @@ export function validateEncryptionMode(
 	}
 	const allowInsecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE === "1";
 
-	// Both names are checked, and the one that matched is the one reported:
-	// an operator whose CONFIG_ENV says production should not be told about
-	// NODE_ENV, and vice versa.
-	const productionEnvironment = [environment, process.env.NODE_ENV].find(
-		(name): name is string => name !== undefined && PRODUCTION_ENVS.has(name),
-	);
+	// Both names are checked, and the one that matched is the one reported,
+	// as core reads it: an operator whose CONFIG_ENV says production should
+	// not be told about NODE_ENV, and vice versa.
+	const productionEnvironment = productionEnvironmentIn([environment, process.env.NODE_ENV]);
 	const reasons: string[] = [];
 	if (productionEnvironment !== undefined) {
 		reasons.push(`the environment is "${productionEnvironment}"`);

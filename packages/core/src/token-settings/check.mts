@@ -80,10 +80,12 @@ const readMember = (read: () => unknown): unknown => {
  * The first token lifetime `settings` names beyond the one core resolves
  * from `config` (access-token max, then refresh-token), or `undefined`. A
  * non-number member is not compared; one whose read throws counts as none.
- * The configured lifetimes size the retention of revoked refresh-token
- * families, and the refresh-token family modules do not read the slot, so a
- * longer slot lifetime would mint a token that outlives the record revoking
- * it.
+ * Each configured lifetime sizes a revoking record kept by a reader that
+ * cannot read the slot: the access-token maximum, how long the refresh-token
+ * family modules remember a revoked family (a family's own expiry follows the
+ * slot); the refresh-token lifetime, how long the session lifecycle keeps a
+ * closing session's record. A longer slot lifetime would mint a token that
+ * outlives that record.
  * The resolver refuses a configuration that resolves no lifetime, naming
  * the key. Internal to core.
  */
@@ -121,6 +123,22 @@ export function lifetimeBeyondConfiguration(
 }
 
 /**
+ * Why each member is bounded by the configuration: the reader that sizes a
+ * revoking record from the configured lifetime, and reads it from the
+ * configuration because it cannot read the slot.
+ */
+const WHY_BOUNDED: Readonly<Record<LifetimeBeyondConfiguration["member"], string>> = {
+	"accessTokenLifetime.maxExpiresIn":
+		"The refresh-token family modules remember a revoked family for at least the configured " +
+		"access-token maximum, read from the configuration, not the slot, so an access token minted " +
+		"on the slot's maximum would outlive the record that revokes its family.",
+	refreshTokenExpiresIn:
+		"The session lifecycle keeps a closing session's record for the configured refresh-token " +
+		"lifetime, read from the configuration, not the slot, so a refresh token minted on the " +
+		"slot's lifetime would outlive the closing record that revokes it.",
+};
+
+/**
  * The refusal of a lifetime beyond the configuration's: the member, both
  * values, the configuration key, and why. `from` names where the slot came
  * from, when the caller knows.
@@ -133,10 +151,8 @@ export function lifetimeBeyondConfigurationMessage(
 		`oauthTokenSettings.${found.member} is ${found.slotSeconds} s` +
 		`${from === undefined ? "" : ` in the slot from ${from}`}, longer than the ` +
 		`${found.configurationSeconds} s core resolves from the configuration (${found.configKey}). ` +
-		"That configured lifetime sizes retention — the refresh-token family modules keep a revoked " +
-		"family, and the subject revocation boundary lasts, only that long — so a token minted on " +
-		"the slot's lifetime would outlive the record that revokes it. Lower the slot's lifetime to " +
-		"the configuration's or below, or raise the configuration's."
+		`${WHY_BOUNDED[found.member]} Lower the slot's lifetime to the configuration's or below, ` +
+		"or raise the configuration's."
 	);
 }
 

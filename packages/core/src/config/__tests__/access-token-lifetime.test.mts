@@ -32,12 +32,8 @@ import { fileURLToPath } from "node:url";
 import { parseFile, parseString } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import {
-	AppConfigSchema,
-	CoreConfigSchema,
-	resolveAccessTokenLifetime,
-} from "#/config/application.schema.mjs";
-import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
+import { CoreConfigSchema, resolveAccessTokenLifetime } from "#/config/application.schema.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 const withAccessToken = (accessToken: Record<string, unknown>) => ({ oauth: { accessToken } });
 
@@ -123,9 +119,9 @@ describe("oauth.accessToken schema", () => {
 	const accessTokenSchema = CoreConfigSchema.shape.oauth.shape.accessToken;
 
 	function issues(input: unknown): { path: string; message: string }[] {
-		const result = AppConfigSchema.safeParse({
-			...makeValidAppConfig(),
-			oauth: { ...makeValidAppConfig().oauth, accessToken: input },
+		const result = CoreConfigSchema.safeParse({
+			...makeValidCoreConfig(),
+			oauth: { ...makeValidCoreConfig().oauth, accessToken: input },
 		});
 		return result.success
 			? []
@@ -223,7 +219,7 @@ describe("reference.conf and the lifetime environment variables", () => {
 				: parseString(applicationConf, { env: { ...REQUIRED_ENV, ...env } }).withFallback(
 						reference,
 					);
-		return validate(layered, AppConfigSchema);
+		return validate(layered, CoreConfigSchema);
 	}
 
 	it("ships a one-hour default and no extension past it", () => {

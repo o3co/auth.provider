@@ -36,10 +36,10 @@ import {
 	makeFederationTokenStore,
 	makePermissivePolicy,
 	makeSessionApp,
-	makeSessionFederationIndex,
 	makeUserRepository,
 	makeUserSessionStore,
 } from "../routes/__tests__/federation-harness.mjs";
+import { fakeSessionLifecycle } from "./_helpers/sessionLifecycle.mjs";
 
 /** A provider named `name` whose authorization URL carries the `redirectUri` the start handed it. */
 const echoingProvider = (name: string): FederationProvider => ({
@@ -96,7 +96,7 @@ function federationRoutes(deps: {
 		]),
 		userRepository: makeUserRepository(),
 		userSessionStore: makeUserSessionStore(),
-		sessionFederationIndex: makeSessionFederationIndex(),
+		sessionLifecycle: fakeSessionLifecycle(),
 		federationTokenStore: makeFederationTokenStore(),
 		sessionCookiePolicy: createTestSessionCookiePolicy(
 			deps.sessionCookieName === undefined ? {} : { name: deps.sessionCookieName },

@@ -59,6 +59,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SID = "sid-1";
 const SUBJECT = "user-1";
@@ -149,7 +150,13 @@ const grant = (opts: {
 		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
-		...(opts.sessionLifecycleStore ? { sessionLifecycleStore: opts.sessionLifecycleStore } : {}),
+		// Core's session lifecycle port, required beside a user-session store.
+		...(opts.userSessionStore || opts.sessionLifecycleStore
+			? {
+					sessionLifecycleStore:
+						opts.sessionLifecycleStore ?? createInMemorySessionLifecycleStore(),
+				}
+			: {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 	});
@@ -618,6 +625,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 					oauthTokenSettings: createTestOAuthTokenSettings(),
 					keyStore,
 					userSessionStore: store,
+					sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 					sessionRequirementResolver: resolverForTests(requirements, {
 						issuer: "https://issuer.test",
 						actions: OAUTH_ADMISSION_ACTIONS,
@@ -631,6 +639,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 			codeRepository,
 			clientRepository,
 			userSessionStore: store,
+			sessionLifecycle: livenessOver(store),
 			requirements: resolverForTests(requirements, {
 				issuer: "https://issuer.test",
 				actions: OAUTH_ADMISSION_ACTIONS,

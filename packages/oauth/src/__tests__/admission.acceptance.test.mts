@@ -27,6 +27,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createSymmetricKeyStore,
 	type SessionRequirement,
 	type UserSession,
@@ -48,6 +49,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const ISSUER = "https://issuer.test";
 const SECRET = "acceptance-test-secret-32-bytes-long!";
@@ -153,6 +155,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);
@@ -162,6 +165,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 			...grantSettingsFrom(config),
 			keyStore,
 			userSessionStore,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			sessionRequirementResolver: requirements,
 		}),
 	);
@@ -173,6 +177,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 		codeRepository,
 		keyStore,
 		userSessionStore,
+		sessionLifecycle: livenessOver(userSessionStore),
 		requirements,
 	});
 	const records = new Map<string, unknown>();

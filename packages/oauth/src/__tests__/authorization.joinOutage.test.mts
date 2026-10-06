@@ -14,17 +14,15 @@
  * limitations under the License.
  */
 
-// A code exchange that throws after its refresh-token family is registered
-// revokes that family before the throw leaves the grant, so no family whose
-// tokens were never served is left live outside the session's index. The
-// throw reaches the terminal handler, which answers without its message.
+// A code exchange whose join rejects after its refresh-token family is
+// registered revokes that family before it answers, so no family whose
+// tokens were never served is left live outside the session; the answer is
+// the outage's, without the rejection's message.
 
 import crypto from "node:crypto";
 import {
 	type AppConfig,
 	type CodeRepository,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRotation,
@@ -39,18 +37,13 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
-import { joinSession } from "#/logout/sessionEnd.mjs";
 import { createTokenHandler } from "#/routes/token.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-
-vi.mock("#/logout/sessionEnd.mjs", async (importOriginal) => {
-	const original = await importOriginal<typeof import("#/logout/sessionEnd.mjs")>();
-	return { ...original, joinSession: vi.fn(original.joinSession) };
-});
+import { joiningLifecycle } from "./_helpers/sessionLifecycle.mjs";
 
 const CLIENT_ID = "client1";
 const REDIRECT_URI = "https://rp.example/cb";
@@ -70,9 +63,13 @@ const client: PublicClient = {
 	allowedGrantTypes: ["authorization_code"],
 };
 
-describe("createAuthorizationGrant — a throw after the family is registered", () => {
-	it("revokes the registered family, and the token endpoint answers 500 without the throw's message", async () => {
-		vi.mocked(joinSession).mockRejectedValueOnce(new Error(INTERNAL));
+describe("createAuthorizationGrant — a join that rejects after the family is registered", () => {
+	it("revokes the registered family, and the token endpoint answers 503 without the rejection's message", async () => {
+		// Every rejection of the join is the outage it may be, a RangeError
+		// included: a store's own error can be one.
+		const { lifecycle } = joiningLifecycle(async () => {
+			throw new RangeError(INTERNAL);
+		});
 		const logger = createMockLogger();
 		const userSessionStore = createInMemoryUserSessionStore();
 		await userSessionStore.create({
@@ -110,8 +107,7 @@ describe("createAuthorizationGrant — a throw after the family is registered", 
 			} as unknown as CodeRepository,
 			clientRepository: { findById: async () => client, authenticate: async () => null },
 			userSessionStore,
-			sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-			sessionRPRegistry: createInMemorySessionRPRegistry(),
+			sessionLifecycle: lifecycle,
 			refreshTokenFamilyRotation: { ...rotation, register },
 			refreshTokenFamilyRevocation: { revokeFamily } as unknown as RefreshTokenFamilyRevocation,
 			logger,
@@ -143,8 +139,11 @@ describe("createAuthorizationGrant — a throw after the family is registered", 
 			code_verifier: VERIFIER,
 		});
 
-		expect(res.status).toBe(500);
-		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session linking unavailable",
+		});
 		expect(res.text).not.toContain("secret");
 		expect(register).toHaveBeenCalledTimes(1);
 		const familyId = register.mock.calls[0]?.[1];

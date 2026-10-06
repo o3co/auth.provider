@@ -33,8 +33,9 @@ describe("memoryRateLimiterModule", () => {
 	});
 
 	it("is read at its own section, core-rate-limiter-memory", () => {
-		expect(memoryRateLimiterModule.section?.at).toBeUndefined();
-		expect(memoryRateLimiterModule.configSchema).toBeUndefined();
+		expect(memoryRateLimiterModule.name).toBe("core-rate-limiter-memory");
+		expect(memoryRateLimiterModule.section).not.toHaveProperty("at");
+		expect(memoryRateLimiterModule).not.toHaveProperty("configSchema");
 	});
 
 	it("defaults maxBuckets in its section's schema", () => {

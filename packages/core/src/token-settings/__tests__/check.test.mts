@@ -117,6 +117,40 @@ describe("checkOAuthTokenSettings", () => {
 		);
 	});
 
+	it("names, for each member, the reader that sizes a record from the configured lifetime and cannot read the slot", () => {
+		const refusal = (settings: unknown): string => {
+			try {
+				checkOAuthTokenSettings(settings, CONFIG);
+			} catch (err) {
+				return (err as Error).message;
+			}
+			throw new Error("expected a refusal");
+		};
+		// The access-token maximum sizes how long the refresh-token family
+		// modules remember a revoked family; the family's own expiry follows the
+		// slot's refresh-token lifetime, so the refresh member is not theirs.
+		const access = refusal(
+			createTestOAuthTokenSettings({
+				accessTokenLifetime: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+			}),
+		);
+		expect(access).toMatch(/refresh-token family modules/);
+		expect(access).toMatch(/revoked family/);
+		expect(access).not.toMatch(/session lifecycle/);
+		// The refresh-token lifetime sizes how long the session lifecycle keeps a
+		// closing session's record.
+		const refresh = refusal(createTestOAuthTokenSettings({ refreshTokenExpiresIn: 86_401 }));
+		expect(refresh).toMatch(/session lifecycle/);
+		expect(refresh).toMatch(/closing session's record/);
+		expect(refresh).not.toMatch(/refresh-token family modules/);
+		for (const message of [access, refresh]) {
+			expect(message).toMatch(/not the slot/);
+			// The subject revocation boundary is sized from the slot where one is
+			// held, so no refusal claims the configuration bounds it.
+			expect(message).not.toMatch(/subject revocation/);
+		}
+	});
+
 	it("answers lifetimes at or under the configuration's", () => {
 		for (const settings of [
 			createTestOAuthTokenSettings(),

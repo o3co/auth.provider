@@ -58,9 +58,6 @@ const OPTIONAL = [
 	"userRepository",
 	"grantPolicy",
 	"userSessionStore",
-	"sessionRPRegistry",
-	"sessionFamilyIndex",
-	"sessionFederationIndex",
 	"sessionLifecycle",
 	"sessionLifecycleStore",
 	"logger",
@@ -135,6 +132,9 @@ describe("the grant factories declare the slots they read", () => {
 		// could read a slot no module had declared for it.
 		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("grantPolicy");
 		expectTypeOf<RefreshDeps>().not.toHaveProperty("sessionRPRegistry");
+		// The authorization_code grant joins the session through the lifecycle alone.
+		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("sessionFamilyIndex");
+		expectTypeOf<AuthorizationDeps>().not.toHaveProperty("sessionRPRegistry");
 		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<SessionDeps>().not.toHaveProperty("codeRepository");

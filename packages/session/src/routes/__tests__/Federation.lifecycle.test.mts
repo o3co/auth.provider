@@ -35,6 +35,7 @@ import {
 	type FederationProvider,
 	type FederationTokenStore,
 	type Logger,
+	loggableError,
 	readVersionedSessionLifecycle,
 	registerBuiltinFederationTokenStores,
 	type SessionLifecycle,
@@ -91,6 +92,12 @@ interface WorldOptions {
 	readonly beforeJoin?: (lifecycle: SessionLifecycle, sid: string) => Promise<void>;
 	/** Runs inside the token store's `attach`, before it. */
 	readonly beforeAttach?: (lifecycle: SessionLifecycle, sid: string) => Promise<void>;
+	/** The cookie session's save fails, once it has been regenerated. */
+	readonly saveFails?: boolean;
+	/** The router's logger: silent by default. */
+	readonly logger?: Logger;
+	/** Answers the lifecycle's `federations` in place of the service. */
+	readonly federations?: SessionLifecycle["federations"];
 }
 
 async function world(options: WorldOptions = {}) {
@@ -124,10 +131,30 @@ async function world(options: WorldOptions = {}) {
 		await options.beforeJoin?.(service, sid);
 		return service.join(sid, joining);
 	});
-	const sessionLifecycle: SessionLifecycle = { ...service, join };
+	const federations = vi.fn<SessionLifecycle["federations"]>(
+		options.federations ?? ((sid) => service.federations(sid)),
+	);
+	const sessionLifecycle: SessionLifecycle = { ...service, join, federations };
 
 	const store: HarnessSessionStore = new Map();
 	const app = makeSessionApp(store);
+	if (options.saveFails) {
+		// The regenerated session's save fails, as a cookie store gone down
+		// between the regeneration and the save does.
+		app.use((req, _res, next) => {
+			const held = req.session as unknown as {
+				regenerate(cb: (err: unknown) => void): unknown;
+			};
+			const regenerate = held.regenerate.bind(held);
+			held.regenerate = (cb) =>
+				regenerate((err) => {
+					const fresh = req.session as unknown as { save(cb: (err: unknown) => void): unknown };
+					fresh.save = (done) => done(new Error("cookie store down"));
+					cb(err);
+				});
+			next();
+		});
+	}
 	const userRepository = {
 		authenticate: vi.fn(async () => null),
 		authenticateByToken: vi.fn(async () => ({ id: SUBJECT, username: "alice" })),
@@ -141,7 +168,6 @@ async function world(options: WorldOptions = {}) {
 			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
 			userRepository,
 			userSessionStore,
-			sessionFederationIndex,
 			federationTokenStore,
 			sessionLifecycleStore: lifecycleStore,
 			sessionLifecycle,
@@ -150,7 +176,7 @@ async function world(options: WorldOptions = {}) {
 				issuer: HARNESS_ISSUER,
 				actions: SESSION_ADMISSION_ACTIONS,
 			}),
-			logger: silentLogger,
+			logger: options.logger ?? silentLogger,
 		}),
 	);
 	return {
@@ -162,6 +188,7 @@ async function world(options: WorldOptions = {}) {
 		lifecycleStore,
 		service,
 		join,
+		federations,
 	};
 }
 
@@ -251,6 +278,19 @@ const participantsOf = async (w: World, sid: string) =>
 /** The sid of the one user session a login created. */
 const loginSid = (w: World): string => String(w.join.mock.calls[0]?.[0]);
 
+/** A join answering an outcome the lifecycle's types do not declare: anything but a success is acted on as an outage. */
+const UNDECLARED_JOIN = (async () => ({
+	outcome: "undeclared",
+})) as unknown as SessionLifecycle["join"];
+
+/** A logger whose `error` and `warn` are spies; `child` answers the same logger. */
+function spiedLogger() {
+	const error = vi.fn();
+	const warn = vi.fn();
+	const logger: Logger = { ...silentLogger, error, warn, child: () => logger };
+	return { logger, error, warn };
+}
+
 describe("a federated login over the session lifecycle", () => {
 	it("attaches the federation's tokens, then joins the federation to the session", async () => {
 		const w = await world();
@@ -295,9 +335,68 @@ describe("a federated login over the session lifecycle", () => {
 		expect(await w.federationTokenStore.get(loginSid(w), "test")).toBeNull();
 	});
 
-	it("answers 503 when the lifecycle cannot answer the join, undoing the tokens it attached", async () => {
+	it("logs nothing for a refused join: the session's close, not an outage", async () => {
+		const error = vi.fn();
+		const logger: Logger = { ...silentLogger, error, child: () => logger };
+		const w = await world({
+			logger,
+			beforeJoin: async (lifecycle, sid) => {
+				expect((await lifecycle.close(sid, "subject_revocation")).outcome).toBe("done");
+			},
+		});
+
+		const res = await login(w);
+
+		expect(res.status).toBe(401);
+		expect(error).not.toHaveBeenCalled();
+	});
+
+	it("closes the record it opened when the cookie session cannot be saved after the join", async () => {
+		const w = await world({ saveFails: true });
+
+		const res = await login(w);
+
+		expect(res.status).toBe(503);
+		const sid = loginSid(w);
+		expect(w.join).toHaveBeenCalledOnce();
+		expect(readVersionedSessionLifecycle(await w.lifecycleStore.read(sid))?.value.state).toBe(
+			"closed",
+		);
+		expect(await w.service.join(sid, { federation: "test" })).toEqual({ outcome: "refused" });
+		expect(await w.federationTokenStore.get(sid, "test")).toBeNull();
+		expect(await w.userSessionStore.get(sid)).toBeNull();
+		expect(w.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
+	});
+
+	it("answers 503 when the lifecycle rejects the join, logged once at error with the rejection's projection, undoing the tokens it attached", async () => {
+		const thrown = new Error("lifecycle store down");
+		const { logger, error, warn } = spiedLogger();
+		const w = await world({ logger });
+		w.join.mockImplementationOnce(async () => {
+			throw thrown;
+		});
+
+		const res = await login(w);
+
+		expect(res.status).toBe(503);
+		expect(error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				store: "session_lifecycle",
+				step: "join",
+				err: loggableError(thrown),
+			}),
+			"federation_callback_store_unavailable",
+		);
+		expect(warn).not.toHaveBeenCalled();
+		const sid = loginSid(w);
+		expect(await w.federationTokenStore.get(sid, "test")).toBeNull();
+		expect(await w.userSessionStore.get(sid)).toBeNull();
+		expect(w.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
+	});
+
+	it("answers 503 when the lifecycle answers an outcome it does not declare to the join, undoing the tokens it attached", async () => {
 		const w = await world();
-		w.join.mockImplementationOnce(async () => ({ outcome: "unavailable" }));
+		w.join.mockImplementationOnce(UNDECLARED_JOIN);
 
 		const res = await login(w);
 
@@ -306,6 +405,28 @@ describe("a federated login over the session lifecycle", () => {
 		expect(await w.federationTokenStore.get(sid, "test")).toBeNull();
 		expect(await w.userSessionStore.get(sid)).toBeNull();
 		expect(w.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
+	});
+});
+
+describe("the federation routes require core's session lifecycle beside the user-session store", () => {
+	it("refuses to build the router without a sessionLifecycle, naming both slots", () => {
+		expect(() =>
+			createRouter(express, {
+				federationSettings: createTestFederationSettings(),
+				federationProviders: new Map([["test", provider]]),
+				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]) as never,
+				providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
+				userRepository: { authenticate: vi.fn(), authenticateByToken: vi.fn() } as never,
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: {} as FederationTokenStore,
+				federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+				requirements: resolverForTests([], {
+					issuer: HARNESS_ISSUER,
+					actions: SESSION_ADMISSION_ACTIONS,
+				}),
+				logger: silentLogger,
+			}),
+		).toThrow(/userSessionStore is wired, but sessionLifecycle is not/);
 	});
 });
 
@@ -369,14 +490,101 @@ describe("a link callback over the session lifecycle", () => {
 		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
 	});
 
-	it("answers 503 when the lifecycle cannot answer the join, undoing the tokens it attached", async () => {
+	it("answers 503 when the lifecycle rejects the join, logged once at error with the rejection's projection, undoing the tokens it attached", async () => {
+		const thrown = new Error("lifecycle store down");
+		const { logger, error, warn } = spiedLogger();
+		const w = await world({ logger });
+		w.join.mockImplementationOnce(async () => {
+			throw thrown;
+		});
+
+		const res = await link(w);
+
+		expect(res.status).toBe(503);
+		expect(error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				store: "session_lifecycle",
+				step: "join",
+				err: loggableError(thrown),
+			}),
+			"federation_link_store_unavailable",
+		);
+		expect(warn).not.toHaveBeenCalled();
+		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
+		expect(await participantsOf(w, LINKED_SID)).toEqual([]);
+	});
+
+	it("answers 503 when the lifecycle answers an outcome it does not declare to the join, undoing the tokens it attached", async () => {
 		const w = await world();
-		w.join.mockImplementationOnce(async () => ({ outcome: "unavailable" }));
+		w.join.mockImplementationOnce(UNDECLARED_JOIN);
 
 		const res = await link(w);
 
 		expect(res.status).toBe(503);
 		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
 		expect(await participantsOf(w, LINKED_SID)).toEqual([]);
+	});
+
+	it("reads whether the session carries the federation from the lifecycle, with no per-session index wired", async () => {
+		const w = await world();
+
+		const res = await link(w);
+
+		expect(res.status).toBe(302);
+		expect(w.federations).toHaveBeenCalledExactlyOnceWith(LINKED_SID);
+	});
+
+	it("keeps the re-link's newly attached tokens on a federation the lifecycle lists when the join rejects", async () => {
+		// The session joined `test` earlier through the lifecycle, which lists it.
+		const w = await world();
+		w.join.mockImplementationOnce(async () => {
+			throw new Error("lifecycle store down");
+		});
+
+		const res = await link(w, { carrying: true });
+
+		expect(res.status).toBe(503);
+		expect((await w.federationTokenStore.get(LINKED_SID, "test"))?.accessToken).toBe("upstream-at");
+	});
+
+	it("answers 503 when the lifecycle rejects the federations read, logged once at error with its projection, nothing attached", async () => {
+		const thrown = new Error("lifecycle store down");
+		const { logger, error, warn } = spiedLogger();
+		const w = await world({
+			logger,
+			federations: async () => {
+				throw thrown;
+			},
+		});
+
+		const res = await link(w);
+
+		expect(res.status).toBe(503);
+		expect(error).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({
+				store: "session_lifecycle",
+				step: "federations",
+				err: loggableError(thrown),
+			}),
+			"federation_link_store_unavailable",
+		);
+		expect(warn).not.toHaveBeenCalled();
+		expect(w.join).not.toHaveBeenCalled();
+		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
+	});
+
+	it("answers 503 when the lifecycle answers the federations read outside its outcomes, nothing attached", async () => {
+		const w = await world({
+			federations: (async () => ({
+				outcome: "undeclared",
+				federations: [],
+			})) as unknown as SessionLifecycle["federations"],
+		});
+
+		const res = await link(w);
+
+		expect(res.status).toBe(503);
+		expect(w.join).not.toHaveBeenCalled();
+		expect(await w.federationTokenStore.get(LINKED_SID, "test")).toBeNull();
 	});
 });

@@ -117,8 +117,8 @@ describe("the package's reference binds every variable of oauth {} at its path",
 	});
 
 	it("binds every variable core's reference binds under oauth {}, at the same path, but core's tombstone", () => {
-		// Core keeps the substitution that routes a still-exported variable of a
-		// key it retired into its removed-key refusal.
+		// Core keeps the substitution that writes a still-exported variable of a
+		// retired key at its removed path, which the module refuses.
 		const tombstone =
 			"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS at oauth.authorize.allowUnmarkedClients";
 		const core = oauthBindings(CORE_REFERENCE);

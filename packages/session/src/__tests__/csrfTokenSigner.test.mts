@@ -55,6 +55,7 @@ import { sessionModule } from "#/module.mjs";
 import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { createRouter as createSessionRouter } from "#/routes/Session.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
+import { fakeSessionLifecycle, sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 /**
  * A token's payload (`<expiry-seconds>.<nonce>`) and its signature under
@@ -281,6 +282,7 @@ const cookiePolicy = () => providing("test:session-cookie-policy", "sessionCooki
 /** What the session module requires beside the signer and the session cookie. */
 const stores = () => [
 	providing("test:user-repository", "userRepository", fakeUserRepository),
+	sessionLifecycleTestModule(),
 	providing("test:user-session-store", "userSessionStore", fakeUserSessionStore()),
 	providing("test:federation-token-store", "federationTokenStore", fakeFederationTokenStore()),
 	providing(
@@ -511,6 +513,7 @@ describe("the session module reads no session-store.secret", () => {
 				authenticateByToken: async () => null,
 			},
 			userSessionStore: fakeUserSessionStore(),
+			sessionLifecycle: fakeSessionLifecycle(),
 			federationTokenStore: fakeFederationTokenStore(),
 			sessionFederationIndex: fakeSessionFederationIndex(),
 			federationProviders: new Map([["stub", stub]]),

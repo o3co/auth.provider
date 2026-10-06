@@ -1,8 +1,8 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-10-05
+最終更新: 2026-10-06
 
-[auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
+[auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウト。
 
 ## 責務と役割
 
@@ -14,7 +14,7 @@
 - クライアント認証が要るすべてのエンドポイントでのクライアント認証 — `client_secret_basic`、`client_secret_post`、`private_key_jwt`、ルートが許す場合の public クライアント — を 1 つのミドルウェア `createClientAuthMiddleware` として。[`@o3co/auth-provider-device-grant`](../device-grant/README.md) と [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md) もこれを再利用する;
 - 組み込みのグラント: `authorization_code`、`refresh_token`、`client_credentials`、`session`、RFC 7523 jwt-bearer;
 - セッションを使う各コンシューマーが、アドミッションの結果それぞれに何を返すか — リダイレクト、RFC 6749 のエラー、`401` — と、`/authorize` がブラウザーを送り出すステップアップの往復（[セッションアドミッション](#セッションアドミッション) を参照）;
-- ログアウトカスケード（`cascadeLogout`）、OIDC のバックチャネル / フロントチャネルログアウト、そのカスケードの上に core の subject revocation service を配線するモジュール;
+- core のセッションライフサイクルを通した OIDC の RP-Initiated / バックチャネル / フロントチャネルログアウト、ライフサイクルに寄与するセッション終了の通知器、ライフサイクルの上に core の subject revocation service を配線するモジュール;
 - Client ID Metadata Documents の解決: 取得、その SSRF ガード、キャッシュ;
 - このサーバーのエンドポイントと機能が提供するディスカバリーの一部。
 
@@ -22,13 +22,13 @@
 
 - ポートとレコード（`ClientRepository`、`CodeRepository`、`KeyStore`、`UserSessionStore`、`Client` レコード …）、トークンの発行と検証（`generateToken`、`verifyJwt`）、グラントの契約と `/oauth/token` が振り分けに使うレジストリ、ディスカバリードキュメント本体と `jwks_uri` — core;
 - セッションが先へ進んでよいかどうか — 生存確認の読み取り、サブジェクト、サブジェクト失効の境界、登録済みのセッション要件、`acr` の選択 — core のセッションアドミッション（`admitSession`、[`session-admission/`](../core/src/session-admission/README.md)）。このパッケージはアクションを名指し、結果を対応付ける;
-- ログイン、ブラウザーセッション、フェデレーションのログインルート — `@o3co/auth-provider-session`（`POST /session/logout` もそちらにあり、このパッケージのカスケードは走らせない: [ログアウト](#ログアウト)を参照。core のセッションライフサイクルが入っているときは、`/oauth/logout` と同じくライフサイクルを通してセッションを終了し、このパッケージの通知器が relying party に知らせる）;
+- ログイン、ブラウザーセッション、フェデレーションのログインルート — `@o3co/auth-provider-session`（`POST /session/logout` もそちらにある: [ログアウト](#ログアウト)を参照。core のセッションライフサイクルが入っているときは、`/oauth/logout` と同じくライフサイクルを通してセッションを終了し、このパッケージの通知器が relying party に知らせる）;
 - その他のグラントタイプ — token exchange、device code、WebAuthn — それぞれのパッケージが同じ `/oauth/token` に提供する;
 - 上流トークンのオフライン委譲（`/oauth/federation-grants`） — `@o3co/auth-provider-federation-grants`;
 - DPoP 鍵やクライアント証明書の証明 — `@o3co/auth-provider-dpop` / `@o3co/auth-provider-mtls`。このパッケージはそれらが確立したバインディングを読み、`cnf` として刻む;
 - ストアアダプター（Redis など）とユーザーの Store。
 
-**なぜ別パッケージか。** core はすべてのパッケージが共有する契約を持ち、アダプターやグラントのパッケージ — Redis、token exchange、WebAuthn — は core に依存し、このパッケージには依存しない。Express と express-session を peer とする HTTP 面をここに置くことで、それらのどれもそれを引き込まない。ログインとブラウザーセッションがさらに別パッケージなのは、API 専用のデプロイはそれ無しでトークンを発行するからで、このパッケージはトークンを発行するすべてのデプロイがインストールするものである。両者は core の上の兄弟でどちらも相手を import しない。`POST /session/logout` がこのパッケージのカスケードを走らせられないのはそのためである。core のセッションライフサイクルが入っているときは、両方ともそれを通してセッションを終了する。
+**なぜ別パッケージか。** core はすべてのパッケージが共有する契約を持ち、アダプターやグラントのパッケージ — Redis、token exchange、WebAuthn — は core に依存し、このパッケージには依存しない。Express と express-session を peer とする HTTP 面をここに置くことで、それらのどれもそれを引き込まない。ログインとブラウザーセッションがさらに別パッケージなのは、API 専用のデプロイはそれ無しでトークンを発行するからで、このパッケージはトークンを発行するすべてのデプロイがインストールするものである。両者は core の上の兄弟でどちらも相手を import せず、どちらも core のセッションライフサイクルを通してセッションを終了する。
 
 **なぜ 4 つのモジュールか。** このパッケージは 4 つの別々のモジュールとしてインストールされ、それぞれ自分のコードが読むものだけを要求する。必要になる構成が異なるからである:
 
@@ -37,7 +37,7 @@
 | [`oauthEndpointsModule`](./src/module.mts) | `/oauth` のルートとディスカバリーの一部。グラントは 1 つも登録しない: `/oauth/token` は core の `grantHandlerResolver` を引いて振り分け、それはインストールされた各モジュールの `grants` 提供で埋まる。 | トークンエンドポイントはどのグラントがインストールされていても同じで、セッションストアが 1 つも無くても動く。 |
 | [`oauthAuthorizationGrantsModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれモジュールのセクションのスイッチが有効にしたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` と `auditSink` の absence policy を宣言する。セッションを読む 2 つのグラントがそれを通してセッションを読む `sessionRequirementResolver` と、グラントが設定を読む `oauthTokenSettings` および core の `tokenBindingSettings` を要求する。`refresh_token` が有効なときは、トークンファミリーの 2 つのスロットが両方配線されていなければ起動を拒否する（[`refresh_token`](#refresh_token) を参照）。 |
 | [`oauthSessionGrantModule`](./src/oauthSession.mts) | `session` グラント。セクションが有効にしたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `keyStore`、`sessionRequirementResolver`、`oauthTokenSettings` と、任意でアドミッションがその横で読むもの — `userSessionStore`、`subjectRevocation`、`auditSink`、障害の行を書き出す `logger` — と、参照する `grantPolicy` だけで、`subjectRevocation` と `auditSink` の absence policy を付ける。 |
-| [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に、core のセッションのライフサイクルがあればその上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthEndpointsModule` のルートはそれを要求しない。設定は読まない。サブジェクトの失効境界は、要求する `oauthTokenSettings` と `sessionCookiePolicy` のスロットから寸法を決め、grants が有効か、保持してよいかは、federation-grants モジュールが有効な間に提供する `federationGrantPolicy` スロットから読む。grants が有効なときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。`federationGrantPolicy` なしに `federationGrantStore` を配線した構成も拒否する。grants を無効と読めば、そのストアの grants が残るからである。`sessionLifecycle` スロットが埋まっていれば（`sessionLifecycleModule`）、境界を書いたあと、サブジェクトの各セッションをそれで `subject_revocation` として終了する: 終了はセッションのファミリーを失効させ — 終了のコミット後に交換されたコードのものも含む — セッション終了の通知器で relying party に伝える。終了が `pending` か `unavailable` を返せば、報告は `complete: false` となり、終了はサブジェクトの索引の項目を最後に消すので sid は索引に残る: 再試行はその sid を見つけ、終了を再開するかやり直す。ライフサイクルのレコードもユーザーセッションも見つけない終了は、作業をせずに `done` を返す。その sid のトークンはサブジェクトの境界が覆い、セッションごとの項目は期限で消える。ライフサイクルを通すと、失効は各セッションのバックチャネル通知を待つ — POST ごとに最大で通知器のタイムアウトまで、セッションは順に — ので、到達できない relying party があると遅くなり、再試行まで `complete: false` のままになる。そうでなければ、そのカスケードはセッションを読まず `expiresAt` を渡さないので、ファミリーを列挙するだけで終了の印は書かない。そのため `subjectRevocation` を配線しない構成では、失効と同時に交換されたコードがそのファミリーを失効させないまま残しうる。`subjectRevocation` を配線すれば、サブジェクトのウォーターマークがそれを覆う（#894）。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
+| [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | core のセッションライフサイクルの上に組んだ core の `subjectRevocationService` コンポーネント。 | core のセッションライフサイクル（`sessionLifecycle`。`sessionLifecycleModule` が埋める）を要求するが、`oauthEndpointsModule` のルートはそれを要求しない。設定は読まない。サブジェクトの失効境界は、要求する `oauthTokenSettings` と `sessionCookiePolicy` のスロットから寸法を決め、grants が有効か、保持してよいかは、federation-grants モジュールが有効な間に提供する `federationGrantPolicy` スロットから読む。grants が有効なときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。`federationGrantPolicy` なしに `federationGrantStore` を配線した構成も拒否する。grants を無効と読めば、そのストアの grants が残るからである。境界を書いたあと、サブジェクトの各セッションをライフサイクルで `subject_revocation` として終了する: 終了はセッションのファミリーを失効させ — 終了のコミット後に交換されたコードのものも含む — セッション終了の通知器で relying party に伝える。終了が `pending` か `unavailable` を返せば、報告は `complete: false` となり、終了はサブジェクトの索引の項目を最後に消すので sid は索引に残る: 再試行はその sid を見つけ、終了を再開するかやり直す。ライフサイクルのレコードもユーザーセッションも見つけない終了は、作業をせずに `done` を返す。その sid のトークンはサブジェクトの境界が覆い、セッションごとの項目は期限で消える。ライフサイクルを通すと、失効は各セッションのバックチャネル通知を待つ — POST ごとに最大で通知器のタイムアウトまで、セッションは順に — ので、到達できない relying party があると遅くなり、再試行まで `complete: false` のままになる。 |
 
 どれも明示的にインストールする: どのモジュールも他のモジュールを登録しない。
 
@@ -93,7 +93,10 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 - `oauthEndpointsModule` は `federationSettings`、`clientRepository`、`keyStore` を要求する。自分のセクション以外の設定は読まない: フェデレーションについて読むもの — インストールされたどれが上流 IdP の `amr` を信頼するか — は core の `federationSettings` スロットから来る。boot がどの構成でも `core.federations` から埋めるものである。`/authorize` は未認証のブラウザーを `loginEntry` スロットが示すログインページへ送る。これは `@o3co/auth-provider-session` の session モジュールが `session.loginPage.url` から provide する: パスでも絶対 URL でもよく、自身のクエリを持ってよい（`/login?tenant=x`）が、`redirect_to` は持てない — `/authorize` が戻り先のリクエストを示す `redirect_to` を付け加えるので、既にあれば 2 つ目としてページに届いてしまう（そのようなページは session モジュールが boot で拒否する。`config-validation-failed`、キーを名指しする）。フラグメント内の `redirect_to` はクエリのものではないので受け入れる。フラグメントは `redirect_to` を加えたクエリの後ろに保たれる（`/login#x` → `/login?redirect_to=…#x`）。スロットはマニフェストでは任意で、`/authorize` を組み立てるところでは必須: provide するモジュールが無いか、そのエントリがページを示さなければ、ルーターは組み立てを拒否する（`contribute-factory-failed`、スロットを名指しする）。
 - `/authorize` は、ルーターを組み立てる時点でグラントレジストリが `authorization_code` グラントを持つときだけ存在し、そのときはコードを発行する先の `codeRepository` が要る: 無ければルーターは組み立てを拒否する。同意ステップと Client ID Metadata Document もそれと並んでだけ存在する。このグラントの無い構成 — マシン向けのトークンだけ — はそのどれもマウントせず、discovery で authorization endpoint を示さず、コードリポジトリも要らない。
-- `authorization_code` グラントを有効にした `oauthAuthorizationGrantsModule` は、グラントがコードを引き換える `codeRepository` を要求し、無ければスイッチを名指しして boot を拒否する（`contribute-factory-failed`）。ほかのグラントはこれを読まない。`subjectRevocation` を配線したときは、このグラントは `userSessionStore` も要求し、無ければ両方のスロットを名指しして boot を拒否する（`contribute-factory-failed`）: `userSessionStore` を配線する（1 レプリカなら core の `memorySessionStoresModule`、または `redisSessionStoresModule`）か、`subjectRevocation` を外す。ほかのグラントには影響しない。
+- `authorization_code` グラントを有効にした `oauthAuthorizationGrantsModule` は、グラントがコードを引き換える `codeRepository` を要求し、無ければスイッチを名指しして boot を拒否する（`contribute-factory-failed`）。ほかのグラントはこれを読まない。`subjectRevocation` を配線したときは、このグラントは `userSessionStore` も要求し、無ければ両方のスロットを名指しして boot を拒否する（`contribute-factory-failed`）: `userSessionStore` を配線する（1 レプリカなら core の `memorySessionStoresModule`、または `redisSessionStoresModule`）か、`subjectRevocation` を外す。`userSessionStore` を配線したときは、このグラントはコードのセッションに参加するのに使う `sessionLifecycle`（core の `sessionLifecycleModule`）も要求し、無ければ両方のスロットを名指しして boot を拒否する（`contribute-factory-failed`）。ほかのグラントには影響しない。
+- `refresh_token` グラントを有効にした `oauthAuthorizationGrantsModule` は、`sessionLifecycleStore`（core のセッションストアのモジュールが埋め、`sessionLifecycleModule` が要求するポート）なしに配線された `userSessionStore` を同じように拒否し（`contribute-factory-failed`、両方のスロットを名指す）、`createRefreshTokenGrant` も同じく拒否する: グラントのアドミッションはトークンのセッションのライフサイクルのレコードを読むので、終了中・終了済みのセッションは何もリフレッシュしない。両方を埋めるセッションストアのモジュール（`memorySessionStoresModule` か `redisSessionStoresModule`）と `sessionLifecycleModule` を配線する。
+- `oauthEndpointsModule` も、`sessionLifecycle` なしに配線された `userSessionStore` を同じように拒否する（`contribute-factory-failed`、両方のスロットを名指す）: イントロスペクション、`/oauth/userinfo`、フェデレーショントークンのルート、ログアウトはライフサイクルを通してセッションを読み、終わらせる。セッションを持たない構成（client_credentials、jwt-bearer）はどちらも配線せず、影響を受けない。
+- グラントを有効にした `oauthSessionGrantModule` も、`sessionLifecycleStore`（core のセッションストアのモジュールが埋め、`sessionLifecycleModule` が要求するポート）なしに配線された `userSessionStore` を同じように拒否し（`contribute-factory-failed`、両方のスロットを名指す）、`createSessionGrant` も同じく拒否する。それを埋めるセッションストアのモジュール（`memorySessionStoresModule` か `redisSessionStoresModule`）と `sessionLifecycleModule` を配線する: グラントのアドミッションはセッションのライフサイクルのレコードを読むので、終了中・終了済みのセッションは何も発行しない。
 - `subjectRevocation`、`auditSink`、`accessTokenDenylist` は配線は任意だが決定は任意ではない: 埋めないスロットは不在を宣言すること — `oauth.revocation.subject = "unsupported"`、`core.declaredAbsent = ["auditSink"]`、`oauth.revocation.accessToken = "unsupported"` — さもなければ boot が拒否する。
 - `oauthEndpointsModule`、およびセクションがグラントを有効にしている間の `oauthAuthorizationGrantsModule` と `oauthSessionGrantModule` は `sessionRequirementResolver` — boot プランナーが埋める core の合成キー — を要求する。したがってそのどれかをインストールする構成は、インストールするセッション要件を `core.sessionRequirements.expected` で宣言しなければならず（無ければ `[]`）、さもなければ boot が拒否する（core の session-admission ADR、D7）。
 - `oauth.jwt.issuer` が正規の issuer URL でなければルーターの構築が失敗する: `iss` はデプロイの属性であり、リクエストから読むものではない。
@@ -105,7 +108,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 `oauthEndpointsModule` は `oauth {}` を所有する（[#728](https://github.com/o3co/auth.provider/issues/728)）: そのスキーマ [`section.mts`](./src/section.mts) がセクションのすべてのキーを宣言し、パッケージの [`config/reference.conf`](./config/reference.conf) がすべての既定値を持ち、すべての変数を束縛する — issuer（`OAUTH_JWT_ISSUER`。必須で既定値は無い）、アクセストークンとリフレッシュトークンの寿命（`OAUTH_ACCESS_TOKEN_*`、`OAUTH_REFRESH_TOKEN_*`）、`oidcMode`、`requireEmailVerified`、`requireGrantTypeAllowlist`、`authorize.acrValues` の acr の表、`nonce.maxLength`、`resourceIndicator.enabled`、リボケーションが約束すること（`revocation.accessToken`、`revocation.subject`）、同意ページ、Client ID Metadata Documents。boot はセクションをこのスキーマでパースし、パースしたものをモジュールに渡す（`deps.section`）。モジュールが読む `oauth.*` の設定 — provide するトークン設定、ルーター、ディスカバリーの一部 — はすべてそこから来る。
 
 - **どの階層も strict。** セクションが宣言しないキーは、どの階層でも boot を拒否する（`config-validation-failed`）。そのパスを名指す — たとえば `oauth.nonce.maxLenght`。以前は読まれずに捨てられていた。
-- **廃止したものは core が持ち続ける。** core のスキーマは、セクションの宣言をやめるまで、同じキー・規則・メッセージで `oauth {}` を宣言し続け、core の `reference.conf` も同じ既定値を同じ変数で設定し続ける。boot は core のスキーマで先にパースするので、両方が拒否する値は core の言葉で拒否され、それは同じ言葉である。廃止したキーをその行き先を名指して拒否するのは core だけで（`oauth.jwt` のフラットな鍵のフィールド、`oauth.refreshToken.legacyTokenCompat`、`oauth.authorize.allowUnmarkedClients`）、ほかのセクションの移動元のパス（`oauth.grants`、`oauth.dpop`、`oauth.mtls`、`oauth.deviceAuthorization`、`oauth.tokenExchange`、`oauth.code`、`oauth.tokenBinding`、`oauth.jwt.signingKey`）の下に置いたキーを、移動先のモジュールが読み込まれている間、新しいパスを名指して拒否するのも core である。ここではそうしたパスは空のオブジェクトか `null` — どちらも何も設定しない — であることしか許されない。
+- **廃止したものは core が持ち続ける。** core のスキーマは、セクションの宣言をやめるまで、同じキー・規則・メッセージで `oauth {}` を宣言し続け、core の `reference.conf` も同じ既定値を同じ変数で設定し続ける。boot は core のスキーマで先にパースするので、両方が拒否する値は core の言葉で拒否され、それは同じ言葉である。`oauth.jwt` のフラットな鍵のフィールドをその行き先を名指して拒否するのは core だけで、ほかのセクションの移動元のパス（`oauth.grants`、`oauth.dpop`、`oauth.mtls`、`oauth.deviceAuthorization`、`oauth.tokenExchange`、`oauth.code`、`oauth.tokenBinding`、`oauth.jwt.signingKey`）の下に置いたキーを、移動先のモジュールが読み込まれている間、新しいパスを名指して拒否するのも core である。ここではそうしたパスは空のオブジェクトか `null` — どちらも何も設定しない — であることしか許されない。
+- **モジュールは自分が削除したキーを拒否する。** `oauth.refreshToken.legacyRtPolicy`、`oauth.refreshToken.legacyTokenCompat`、`oauth.authorize.allowUnmarkedClients` は、値が設定されていれば、どのスキーマがパースするよりも前に boot を拒否する（`config-path-relocated`）。どれも削除されたキーとして名指され、消すよう指示される: モジュールのマニフェストがこれらを削除済み（`relocatedFrom` で `null`）と宣言している。export されたままの `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` も同じように拒否される。core の `reference.conf` がそれを `oauth.authorize.allowUnmarkedClients` に書くからである。
 - core は宣言による不在のガードのために、パース済みのセクションから `oauth.revocation.*` を読む。グラントは設定を `config` からは読まず `oauthTokenSettings` スロットから読み、`refresh_token` グラントは未知のファミリーへのポリシーを `oauthAuthorizationGrantsModule` 自身のセクション（`oauth-authorization.grants.refreshToken.unknownFamilyPolicy`）から受け取る。したがってこのモジュールはセクションのほかに設定を何も読まない。`oauth {}` はリフレッシュトークンのファミリーのポリシーのキーを宣言しない: `oauth.refreshToken.unknownFamilyPolicy` は新しいパスと変数を名指して boot を拒否し、`oauth.refreshToken.legacyRtPolicy` は削除されたキーとして boot を拒否する。
 
 ## エンドポイント
@@ -120,11 +124,11 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 | `GET`、`POST /oauth/userinfo` | 常に | [Userinfo](#userinfo) |
 | `POST /oauth/revoke` | 常に。何を失効できるかは配線次第 | [リボケーション](#リボケーション) |
 | `GET`、`POST /oauth/consent` | `consentStore` と `pendingConsentStore` の両方が配線され、`/authorize` があるとき | [同意](#サードパーティクライアントの同意-527) |
-| `GET`、`POST /oauth/logout` | セッションカスケードの 6 スロットがすべて配線されたとき | [ログアウト](#ログアウト) |
-| `POST /oauth/federation/:name/logout` | 同じ 6 スロット | [ログアウト](#ログアウト) |
-| `POST /oauth/federation/:name/token` | 同じ 6 スロット | [フェデレーショントークンエンドポイント](#フェデレーショントークンエンドポイント) |
+| `GET`、`POST /oauth/logout` | `userSessionStore`、`sessionLifecycle`、`federationTokenStore`、`refreshTokenFamilyRevocation` が配線されたとき | [ログアウト](#ログアウト) |
+| `POST /oauth/federation/:name/logout` | 同じ 4 スロット | [ログアウト](#ログアウト) |
+| `POST /oauth/federation/:name/token` | `userSessionStore`、`sessionLifecycle`、`federationTokenStore`、`refreshTokenFamilyRevocation` が配線されているとき | [フェデレーショントークンエンドポイント](#フェデレーショントークンエンドポイント) |
 
-6 スロットとは `userSessionStore`、`sessionRPRegistry`、`sessionFamilyIndex`、`sessionFederationIndex`、`federationTokenStore`、`refreshTokenFamilyRevocation`。ディスカバリーが `end_session_endpoint` とログアウト関連の機能を広告するかどうかも同じチェックで決まるので、ドキュメントがマウントされていないエンドポイントを名指すことはない。
+`sessionLifecycle` は core のセッションライフサイクルで、`userSessionStore` と並べて必須である。ディスカバリーが `end_session_endpoint` とログアウト関連の機能を広告するかどうかも同じチェックで決まるので、ドキュメントがマウントされていないエンドポイントを名指すことはない。
 
 **エラー説明とエラーコード。** RFC 6749 がエラーのテキストに許すのは、`"` と `\` を除く印字可能な ASCII だけである（§5.2、§4.1.2.1）。このパッケージはその範囲に次をすべて収める: `/oauth/token` が書く `error_description`（どのグラントが作ったものでも）、`/oauth/authorize` がエラーリダイレクトに載せる `error_description`、クライアント認証が `/oauth/token`、`/oauth/introspect`、`/oauth/revoke`（後の 2 つもエラーは同じ形式。RFC 7662 §2.3、RFC 7009 §2.2.1）で書く `error_description`。それ以外の文字は `?` に置き換える（core の `sanitizeErrorText`、[`errors/envelope.mts`](../core/src/errors/envelope.mts)）。説明が引用するクライアント送信の値（グラントタイプ、スコープ、audience、トークンタイプ、`response_type` など）や設定値（クライアントの `tokenEndpointAuthMethod`、トークンバインディングの kind など）に含まれる文字も同じである。説明は値を `'` で引用する。`error` コード自体は `1*NQSCHAR`（同じ文字で、空でないこと）でなければならない。グラントが返す範囲外のコードは、`/oauth/token` では `invalid_request` として返し、サニタイズしてログに残す（`token_error_code_malformed`）。`/oauth/token` でのグラントポリシーの deny には core の `policyDenied` が答える: トークンエンドポイントのコード（RFC 6749 §5.2 のもののうち `invalid_client` 以外 — §5.2 は `invalid_client` を challenge 付きの `401` で答える — と `invalid_target`）だけをポリシーが返したまま送り、それ以外（`access_denied` や RFC 8628 のポーリングのコードを含む）は `invalid_request`（デバイスコードのポーリングでは `access_denied` と `expired_token` を通し、それ以外は `invalid_grant`）とし、説明はほかの説明と同じく直し、200 文字で切って送る。書き換えたときは、`grant_policy_refusal_rewritten`（warn）をログに残す。構成のロガーにはポリシー、コード、グラントタイプ、返したコードの組ごとに 1 回、ロガーがなく core のコンソールロガーに書くときは拒否のたびに残す。ポリシーの deny は、理由 `policy_denied` とポリシー自身のコード（サニタイズしたもの）`policy_error` を付けた `token.issued.failure` として監査する（core の [README](../core/README.ja.md)）。`/oauth/authorize` のリダイレクトでは、deny の範囲外のコードを `access_denied` として返し、サニタイズしてログに残す（`authorize_policy_deny_error_malformed`）。空の説明や文字列でない説明（JavaScript のポリシーは何でも返せる）は送らない。`/oauth/token` は省き、`/oauth/authorize` のリダイレクトは `policy denied` を載せる。`outcome` がちょうど `allow` でもちょうど `deny` でもない決定は、deny でも allow でもない: core の `readGrantPolicyDecision` がそれを不正な決定として読み、`/oauth/token` は `500 server_error` / `policy_decision_invalid` と答え、`/oauth/authorize` は `error=server_error` でリダイレクトしてコードを発行せず、どちらも `grant_policy_decision_invalid`（error。グラントタイプ、ポリシーの `kind`、`/oauth/authorize` では `site` を付け、決定の中身は何も付けない）をログに残し、理由 `policy_decision_invalid` の `token.issued.failure` / `authorize.rejected` として監査する。`/oauth/authorize` では、deny を理由 `policy_denied` の `authorize.rejected` として、リダイレクトが運ぶコードを `details.error` に付けて監査する。クライアントの上限を超えた決定（配列でない、またはクライアントに許されないスコープを含む `grantedScope`、配列でない、または上限を超えた `grantedAudience`）は `server_error` でリダイレクトし、理由 `policy_out_of_bounds` で監査する。例外を投げたポリシーには core の `policyUnavailable()`（`temporarily_unavailable` / `policy evaluation unavailable`）でリダイレクトする。クライアントの `state` は送られたとおりに返す。ほかのルートも同じ範囲に収める: `/oauth/federation/:name/token` と `/oauth/federation/:name/logout` はパスのフェデレーション名を `'` で引用し、そこに含まれる範囲外の文字を `?` として送る（`federation '<name>' is not linked to this session`）。`/oauth/consent` は `decision must be 'accept' or 'deny'` と答える。これらのエンドポイントで応答する core のミドルウェア（トークンバインディングのミドルウェア、レートリミッター、保護リソースのバインディング）は core の `errorEnvelope` を通して書き、そこが規則を自身で適用する（core の [README](../core/README.ja.md#エラーのテキストrfc-6749)）。
 
@@ -134,7 +138,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `consentStore` が `pendingConsentStore` 無しで配線されたとき（またはその逆）、および `oauth.revocation.accessToken = "denylist"` を宣言して `accessTokenDenylist` が無いとき、ルーターは構築を拒否する — `createApp` 経由では boot の失敗になる。
 
-**ディスカバリー。** `oauthEndpointsModule` は自分のエンドポイントとメタデータを core の `/.well-known/openid-configuration` に提供し、core は issuer が設定されているときだけそれを提供する。各機能は守れる場合にだけ広告される: `revocation_endpoint` はエンドポイントが何かを失効できるとき、`private_key_jwt` は `replaySeenSet` が配線されているとき、`client_id_metadata_document_supported` は機能が有効で同意ストアが配線され、`authorization_code` グラントが登録されているとき、ログアウトのフィールドは上の 6 スロットのチェックに従う。`grant_types_supported` は `/oauth/token` が振り分けに使う resolver から読み、authorization endpoint の有無も同じ resolver から読む: `authorization_code` グラントがあれば、ドキュメントはそれを示し、`response_types_supported: ["code"]`、`response_modes_supported: ["query"]`、`code_challenge_methods_supported: ["S256"]`、`request_uri_parameter_supported`、`authorization_response_iss_parameter_supported: true` と acr の表を広告する。無ければ `response_types_supported: []` で、残りはどれも出さない。規則はそれを計算している [`module.mts`](./src/module.mts) に書かれており、[`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts) で固定されている。
+**ディスカバリー。** `oauthEndpointsModule` は自分のエンドポイントとメタデータを core の `/.well-known/openid-configuration` に提供し、core は issuer が設定されているときだけそれを提供する。各機能は守れる場合にだけ広告される: `revocation_endpoint` はエンドポイントが何かを失効できるとき、`private_key_jwt` は `replaySeenSet` が配線されているとき、`client_id_metadata_document_supported` は機能が有効で同意ストアが配線され、`authorization_code` グラントが登録されているとき、ログアウトのフィールドはログアウトのルートをマウントするのと同じチェックに従う（[エンドポイント](#エンドポイント)を参照）。`grant_types_supported` は `/oauth/token` が振り分けに使う resolver から読み、authorization endpoint の有無も同じ resolver から読む: `authorization_code` グラントがあれば、ドキュメントはそれを示し、`response_types_supported: ["code"]`、`response_modes_supported: ["query"]`、`code_challenge_methods_supported: ["S256"]`、`request_uri_parameter_supported`、`authorization_response_iss_parameter_supported: true` と acr の表を広告する。無ければ `response_types_supported: []` で、残りはどれも出さない。規則はそれを計算している [`module.mts`](./src/module.mts) に書かれており、[`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts) で固定されている。
 
 ## パブリック API
 
@@ -158,7 +162,6 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **ログアウトの部品**（自前のログアウトを組み立てる構成向け）:
 
-- `cascadeLogout`、`CascadeLogoutOptions`、`CascadeLogoutResult` — [`logout/cascadeLogout.mts`](./src/logout/cascadeLogout.mts)
 - `broadcastBackchannelLogout`、`BroadcastBackchannelLogoutOptions`、`BroadcastRP` — [`logout/broadcastBackchannel.mts`](./src/logout/broadcastBackchannel.mts)
 - `renderFrontchannelLogoutHtml`、`RenderFrontchannelLogoutHtmlOptions`、`FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)
 
@@ -172,11 +175,11 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 | ディレクトリ | 責務 |
 |---|---|
-| `src/`（ルート） | 組み立て: `oauthEndpointsModule`、`oauthAuthorizationGrantsModule`、`oauthSessionGrantModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（`routes.mts`。下のすべてのルートを組み合わせる）、オプションの解決（`oauth.*` のオプションを解決する `resolveOAuthOptions.mts` と、ルーターが組み立て時にそこから 1 度だけ解決するもの — acr の表、正規の issuer、クライアントリポジトリ — を持つ `routerSettings.mts`）、core のアクセストークンヘッダーパーサーの再 export、そして依存先が落ちていて検証できなかったトークンに全ルートが返す 1 つの答え（`verificationUnavailable.mts`）。 |
-| [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー（`/authorize` はハンドラーと、それが順に呼ぶ段階ごとのファイル） — authorize、consent、logout、federation token（ハンドラーと、それが順に呼ぶ段階ごとのファイル。呼び出し元がまだ有効かの確認は `routes/federationToken.mts` に残る。そのセッションの読み取りを core のドリフトガードがそのファイルに固定しているため）、revoke、token（`/oauth/token` のディスパッチ）、introspect（誰が問い合わせてよいかと、必要なストアが落ちているときの答え。トークンそのものへの答えは `routes.mts` に残る。そのセッションと `amr` の読み取りを core のドリフトガードがそのファイルに固定しているため）、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorizeRequest.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
+| `src/`（ルート） | 組み立て: `oauthEndpointsModule`、`oauthAuthorizationGrantsModule`、`oauthSessionGrantModule`（4 つ目の `subjectRevocationServiceModule` は `logout/` にあり、各セッションを core のセッションライフサイクルで終了する）、`createOAuthRouter`（`routes.mts`。下のすべてのルートを組み合わせる）、オプションの解決（`oauth.*` のオプションを解決する `resolveOAuthOptions.mts` と、ルーターが組み立て時にそこから 1 度だけ解決するもの — acr の表、正規の issuer、クライアントリポジトリ — を持つ `routerSettings.mts`）、core のアクセストークンヘッダーパーサーの再 export、そして依存先が落ちていて検証できなかったトークンに全ルートが返す 1 つの答え（`verificationUnavailable.mts`）。 |
+| [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー（`/authorize` はハンドラーと、それが順に呼ぶ段階ごとのファイル） — authorize、consent、logout、federation token（ハンドラーと、それが順に呼ぶ段階ごとのファイル。呼び出し元がまだ有効かの確認は `routes/federationToken.mts` に残り、セッションが live かと参加したフェデレーションは core のセッションライフサイクルから読む）、revoke、token（`/oauth/token` のディスパッチ）、introspect（誰が問い合わせてよいかと、必要なストアが落ちているときの答え。トークンそのものへの答えは `routes.mts` に残る。セッションが live かは core のセッションライフサイクルから読み、`amr` の読み取りは core のドリフトガードがそのファイルに固定している）、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorizeRequest.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
 | [`grants/`](./src/grants) | グラントハンドラー: core のグラント契約の上での、リクエストからトークンへの純粋な判断。HTTP を持たない。 |
 | [`middleware/`](./src/middleware) | クライアント認証。兄弟パッケージが再利用する。 |
-| [`logout/`](./src/logout) | 順序の決まったセッションカスケード（`cascadeLogout`）、RP へのバックチャネル POST、モジュールが core のセッションライフサイクルに寄与するセッション終了の通知器、フロントチャネルのページ、subject revocation service を配線するモジュール。 |
+| [`logout/`](./src/logout) | RP へのバックチャネル POST、モジュールが core のセッションライフサイクルに寄与するセッション終了の通知器、フロントチャネルのページ、subject revocation service を配線するモジュール。 |
 | [`clients/`](./src/clients) | Client ID Metadata Documents の解決: クライアントが名指す URL からその登録を SSRF ガード越しに取得し、キャッシュする。 |
 | [`types/`](./src/types) | イントロスペクション応答の契約。 |
 | [`testing/`](./src/testing) | テスト用エントリー `@o3co/auth-provider-oauth/testing`: テストがこのパッケージの設定を組み立てるもの。 |
@@ -218,11 +221,9 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `sid` の無いコードは `400 invalid_grant` — ログインの配線が記録しなかった;
 - 1 度目で、ストアが解決できない `sid`、`expiresAt` を過ぎたセッション、サブジェクトを持たないセッション、あるいは（`subjectRevocation` が配線されていれば）サブジェクトのセッションが失効される前に確立されたセッションは `400 invalid_grant` / `session_invalid`;
 - 2 度目で、トークンの発行中に消えた・期限切れになった・失効した・別のサブジェクトを答えるセッションは `400 invalid_grant` / `session_invalidated` で、warn レベルで `authorization_grant_rejected_session_invalidated_during_token_issuance`、別のサブジェクトなら `…_session_subject_changed_during_token_issuance` としてログに出す（アドミッションはこれを `session.admission.subject_mismatch` としても監査する）;
-- 2 度目の読み取りの後、ファミリーを結び付けている間にログアウトがセッションを終わらせたときも、ファミリーインデックスが core のセッション終了ケイパビリティ（`SupportsSessionEnd`。同梱の 2 つのインデックスはどちらも持つ）を持てば同じ答え `400 invalid_grant` / `session_invalidated` で、同じ warn の行としてログに出す。ログアウトはファミリーを列挙する前にセッションに終了の印を書き、グラントは印を読む前にファミリーを追加するので、ログアウトがファミリーを失効させるか、グラントがトークンを出さないかのどちらかになる。グラントはそのとき自分が登録したファミリーを失効させる。ただし `refreshTokenFamilyRotation` が `refreshTokenFamilyRevocation` 無しで配線された構成（authorization_code だけの構成）ではレコードは有効なまま残る。そのファミリーのトークンは出していない。boot は warn レベルで 1 度 `refresh_token_family_rotation_without_revocation` としてそう告げる。失効に失敗すれば error レベルで 1 度 `authorization_grant_refused_family_revocation_failed`（`sid`、`clientId`、`familyId`、エラーの射影）としてログに出し、答えは変えない。この保証は core が述べるとおりストアを信頼する（読み書きが線形化可能で、読み取りはプライマリーが答える）。ケイパビリティの無いインデックスではファミリーは守られずに追加され、コード交換と競合するログアウトはそれを取りこぼしうる。boot は warn レベルで 1 度 `session_family_index_without_session_end`（`slot`、インデックスの `kind`）としてそう告げる;
+- グラントはファミリーとクライアントを core のセッションライフサイクルの `sessionLifecycle.join` でセッションに結び付ける。それまでにログアウトがセッションを終了していれば — ライフサイクルは終了をコミットしたセッションと、ユーザーセッションが消えたセッションを拒否する — 同じ答え `400 invalid_grant` / `session_invalidated` で、同じ warn の行としてログに出す。終了がファミリーを失効させるか、グラントがトークンを出さないかのどちらかになる。拒否のとき、ファミリーはライフサイクルが失効させ済みか、その失敗が `session_join_withdraw_failed` としてログに出ている;
 - セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant`。ステップアップで満たせるなら `step_up: "<要件>"` を添える;
-- 答えられないストアは `503 temporarily_unavailable`: セッションの読み取りはアドミッションが `session_admission_unavailable` として 1 度だけ、結び付けの書き込みは `authorization_grant_store_unavailable` としてログに出す。
-
-**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、グラントはファミリーとクライアントを上のセッションごとのストアではなく `sessionLifecycle.join` で結び付ける。ライフサイクルは自分のレコードと並べてそれらのストアにも書くので、それらを通したログアウトは今までどおりファミリーを列挙するか追加を拒否する。加えて、終了をコミットしたセッションと、ユーザーセッションが消えたセッションも拒否する。拒否は同じ `400 invalid_grant` / `session_invalidated` と warn の行で、ファミリーはライフサイクルが失効させ済みか、その失敗が `session_join_withdraw_failed` としてログに出ている。障害は `503 temporarily_unavailable` で、ライフサイクルが `session_lifecycle_unavailable` として、グラントが `authorization_grant_store_unavailable`（`store: "session_lifecycle"`、`step: "join"`）としてログに出し、グラントは自分が登録したファミリーを失効させる。セッションごとのストアの場合も、結び付けの書き込みの障害では `503` の前にそのファミリーを失効させるようになった。
+- 答えられないストアは `503 temporarily_unavailable`: セッションの読み取りはアドミッションが `session_admission_unavailable` として 1 度だけログに出す。参加できないライフサイクルは reject し（ストアのエラーでも、`RangeError` を含むほかのエラーでも）、グラントだけが `authorization_grant_store_unavailable`（`store: "session_lifecycle"`、`step: "join"`）としてエラーの射影付きでログに出す。`joined` と `refused` 以外の答えも、防御として同じ経路をたどる。どちらの場合もグラントは自分が登録したファミリーを失効させる — 失効に失敗すれば error レベルで 1 度 `authorization_grant_refused_family_revocation_failed`（`sid`、`clientId`、`familyId`、エラーの射影）としてログに出し、答えは変えない。
 
 `userSessionStore` が無ければ、サブジェクトはトークンリクエストに伴うブラウザーセッションのユーザーであり、id_token は発行されない。
 
@@ -340,7 +341,7 @@ oauth.authorize.acrValues {
 | `authorization_code` グラント | `oauth.code_exchange`、コード、2 度 | `session_invalid`、次に `session_invalidated` | `400 invalid_grant` | `step_up` 付きの `400 invalid_grant` | `503` |
 | `refresh_token` グラント | `oauth.refresh`、検証済みのトークン | `session_invalid` | `400 invalid_grant` | `step_up` 付きの `400 invalid_grant` | `503` |
 
-`/authorize` はまず Cookie のフラグを、クライアントを引く前に、ストアを読まずに確かめるので、認証されていないブラウザーはこれまでどおりログインページへ行く。セッションを読むのは 1 度だけ、クライアントの参照と `redirect_uri` の確認、リクエストオブジェクトの拒否、`prompt`・単一値パラメーター・`claims`・`max_age`・`acr_values` の解析のあとで、`response_type`・グラントタイプ・ファーストパーティ・メール確認・PKCE・nonce・スコープの確認の前である — したがって、未知のクライアントとともに送られた死んだセッションは、そのクライアントの `400` になる — 判定を実行する前に、判定が運ぶセッションで鮮度（`max_age`、`prompt=login`）を判断するので、`max_age` が古い `prompt=none` は要件が何と言おうと `login_required` である。死んだ・失効したセッションをログインへ送る前には Cookie セッションを再生成するので、サインイン済みのユーザーを転送するログインページが、拒否されたセッションに残ったフラグでループすることは無い。再生成に失敗すれば `temporarily_unavailable` で、`authorize_cookie_session_unavailable` としてログに出す。
+`/authorize` はまず Cookie のフラグを、クライアントを引く前に、ストアを読まずに確かめるので、認証されていないブラウザーはこれまでどおりログインページへ行く。セッションを読むのは 1 度だけ、クライアントの参照と `redirect_uri` の確認、リクエストオブジェクトの拒否、`prompt`・単一値パラメーター・`claims`・`max_age`・`acr_values` の解析のあとで、`response_type`・グラントタイプ・ファーストパーティ・メール確認・PKCE・nonce・スコープの確認の前である — したがって、未知のクライアントとともに送られた死んだセッションは、そのクライアントの `400` になる — 判定を実行する前に、判定が運ぶセッションで鮮度（`max_age`、`prompt=login`）を判断するので、`max_age` が古い `prompt=none` は要件が何と言おうと `login_required` である。`max_age` も `prompt=login` も無いとき（あればそれがすでにログインへ送る）、受け入れたセッションの `authTime` を時計に対して読めない（core の `authTimeAt`: 時計より `DEFAULT_CLOCK_SKEW_MS` を超えて先にある）なら、`auth_time_ahead_of_clock` として warn に出し、`reauthenticate` の判定と同じく、要求を記録して生きたセッションを保ったまま 1 度だけログインへ送る。そのコードの交換はどれも拒否されるので、コードは発行しない。`prompt=none` の下では `login_required` であり、そのログインから戻ってもなお読めないときも `login_required` である。死んだ・失効したセッションをログインへ送る前には Cookie セッションを再生成するので、サインイン済みのユーザーを転送するログインページが、拒否されたセッションに残ったフラグでループすることは無い。再生成に失敗すれば `temporarily_unavailable` で、`authorize_cookie_session_unavailable` としてログに出す。
 
 **新しいログインの求め**（`reauthenticate`）— 要件によるもの、あるいは、このセッションには第 2 要素の権限によるステップアップを記録できない（`recordSecondFactor` を持たないセッションストア、または一次認証を見分けられないセッション）ときの `acr_values` で、新しいログインなら要素を運べるのでアドミッションが `reauthenticate`（`acr`）と答えるもの — は **1 度のログインの往復**である: [要求](#ステップアップと再認証-481) を記録して（すでに求めたステップアップの往復はそこに引き継ぐ）ログインページへ送り、生きているセッションは `prompt=login` の往復と同じく残す — クロスサイトのページが送れるリクエストでユーザーをサインアウトさせない。その往復から戻ったセッションがなお `reauthenticate` なら、要求のあとにログインしたのでも、ログインページがそのまま転送して戻したのでも、もう 1 度送るのではなく拒否する: `acr` なら `unmet_authentication_requirements`（ログインが要素を運ばなかった: 要素を持たないサブジェクト、フェデレーションのセッション）、要件なら `login_required`。`prompt=none` なら要求を書かず、セッションを残したまま `login_required`。要求を記録するセッションストアが無い構成は `invalid_request` を返す。`/oauth/token` は、グラントの `step_up` メンバーをエラー本文の `error` と `error_description` の横に載せる。
 
@@ -476,8 +477,8 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 ### 失効したファミリーと終了したセッション
 
 - **リフレッシュトークンファミリー。** `family_id` を持つトークンは、`refreshTokenFamilyRevocation` が配線されていれば `isFamilyRevoked` で確認される: 失効済みのファミリーは `active: false` を返して `introspect.family_revoked` を出す。答えられないストアは `503 temporarily_unavailable`（"refresh token store unavailable"）で、`introspect.store_unavailable` として監査し `introspect_store_unavailable` としてログに出す — 上と同じ理由で障害である。`family_id` の無いトークンは署名と失効ストアだけで検証される。失効したファミリーは、それが発行し得た最後のアクセストークンが受け入れられなくなるまで記憶されるので、ファミリー自身のリフレッシュトークンが期限切れになっても答えは戻らない（core の `refresh-token-family/retention.mts`）。
-- **セッションの生存。** `sid` クレーム — またはトークン交換の結果が subject トークンのセッションへの生存確認専用のつながりとして持つ `liveness_sid`（core の `grants/sessionClaims.mts`） — を持つトークンは `UserSessionStore` で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `503 temporarily_unavailable`（"session store unavailable"）で、ファミリーストアと同じく監査しログに出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、`userSessionStore` を配線しない構成も払わない。
-- **core のセッションライフサイクルを通して。** `sessionLifecycleModule` が `sessionLifecycle` スロットを埋めるとき、イントロスペクション、`/oauth/userinfo`、`POST /oauth/federation/:name/token` は `UserSessionStore` を読む代わりにそれに尋ねる（`sessionLifecycle.liveness`）。終了がコミットされたセッションは、そのコミットから live ではない — ユーザーセッションがまだ残っていても（たとえば relying party への通知が失敗した終了）。終了したセッションと同じく答える（`active: false` / `introspect.session_invalid`、`401 invalid_token` `session_invalid`、`401 invalid_token` "session not found"）。subject がトークンの `sub` と異なる live なセッションも同じく答える。障害は同じ `503`（"session store unavailable"）で、ライフサイクルが `session_lifecycle_unavailable` として、ルートが `introspect_store_unavailable` / `userinfo_store_unavailable`（`store: "session_lifecycle"`）または `federation_token_store_unavailable`（`store: "session_lifecycle"`、`step: "liveness"`）としてログに出し、どれもエラーを持たない。イントロスペクションは `introspect.store_unavailable`（`sid`、`cause` なし）も監査する。例外を投げるライフサイクル（ホストがスロットに入れたもの）も同じ障害で、その行とイベントはエラーの射影を持つ。
+- **セッションの生存。** `sid` クレーム — またはトークン交換の結果が subject トークンのセッションへの生存確認専用のつながりとして持つ `liveness_sid`（core の `grants/sessionClaims.mts`） — を持つトークンは core のセッションライフサイクル（`sessionLifecycle.liveness`）で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `503 temporarily_unavailable`（"session store unavailable"）で、ファミリーストアと同じく監査しログに出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、セッションを持たない構成も払わない。
+- **core のセッションライフサイクルを通して。** イントロスペクション、`/oauth/userinfo`、`POST /oauth/federation/:name/token` は `UserSessionStore` を読まず、ライフサイクルに尋ねる（`sessionLifecycle.liveness`）。終了がコミットされたセッションは、そのコミットから live ではない — ユーザーセッションがまだ残っていても（たとえば relying party への通知が失敗した終了）。終了したセッションと同じく答える（`active: false` / `introspect.session_invalid`、`401 invalid_token` `session_invalid`、`401 invalid_token` "session not found"）。subject がトークンの `sub` と異なる live なセッションも同じく答える。障害 — ライフサイクルがストアのエラーで reject する — は同じ `503`（"session store unavailable"）で、ルートだけが `introspect_store_unavailable` / `userinfo_store_unavailable`（`store: "session_lifecycle"`）または `federation_token_store_unavailable`（`store: "session_lifecycle"`、`step: "liveness"`）として 1 回、エラーの射影付きでログに出す。イントロスペクションは `introspect.store_unavailable`（`sid`、`cause`）も監査する。`live` と `not_live` 以外の答えも、防御として同じ経路をたどり、その行はエラーを持たない。
 
 これらは問い合わせる呼び出し元にしか効かない: JWT を署名と `exp` だけでオフライン検証するリソースサーバーは失効を見ず、期限まで受け入れ続ける。
 
@@ -510,7 +511,7 @@ OIDC Core §5.3。`GET` と `POST` で受け付ける。永続化された `User
 | セッション未発見 | `401 invalid_token` |
 | キーストア、jti の denylist、サブジェクトのウォーターマークが答えない | `503 temporarily_unavailable`（"verification key unavailable" / "revocation store unavailable"）、チャレンジなし。`token_verification_unavailable` としてログ出力 |
 | リフレッシュトークンファミリーストアかセッションストアが答えない | `503 temporarily_unavailable`（"refresh token store unavailable" / "session store unavailable"）、チャレンジなし。`userinfo_store_unavailable` としてログ出力 |
-| `userSessionStore` 未配線、または `sid` も `liveness_sid` もなし | `200 { sub }`（sub のみ、永続クレームなし） |
+| `sessionLifecycle` 未配線（セッションを持たない構成）、または `sid` も `liveness_sid` もなし | `200 { sub }`（sub のみ、永続クレームなし） |
 | `liveness_sid` があり `sid` がない（トークン交換の結果）、セッションがアクティブ | `200 { sub }` — セッションは確認するが、そのどれも渡さない: 交換されたトークンの保持者はセッションのクライアントではない。スコープが何を言っていても同じ |
 | セッションがアクティブ | `200 { sub, ...スコープで絞ったクレーム }` |
 
@@ -556,26 +557,20 @@ refresh グラントは仕組みごと（DPoP の `cnf.jkt`、mTLS の `cnf.x5t#
 
 ## ログアウト
 
-OIDC のログアウトエンドポイントは、セッションカスケードの 6 スロットがすべて配線されたときにマウントされる（[エンドポイント](#エンドポイント)を参照）。
+OIDC のログアウトエンドポイントは、セッションのストアと core のセッションライフサイクルが配線されたときにマウントされる（[エンドポイント](#エンドポイント)を参照）。RP-Initiated Logout（`/oauth/logout`）はライフサイクルを通してセッションを終了し、フェデレーションのログアウトはそれを読んで 1 つのフェデレーションのトークンを消す。
 
 > **3 つ目のログアウトエンドポイントがあり、それはこのパッケージには無い。**
 > `POST /session/logout`（`@o3co/auth-provider-session`）はブラウザー自身の
-> ログアウトで、BFF / `auth.proxy` 構成が呼ぶものである。`UserSession` レコード、
-> サブジェクトのインデックスエントリー、フェデレーションの組を削除する — したがって
-> この README の他の箇所にある生存確認は効く — が、`cascadeLogout` にはパッケージの
-> 境界を越えて届かないので、**リフレッシュトークンファミリーは 1 つも失効させない**。
-> 完全なカスケードを走らせるのは `POST /oauth/logout` だけである。セッションが
-> リフレッシュトークンを持つなら、呼ぶべきはこちらである。以上は core の
-> セッションライフサイクルがないときの話で、それが入っているときは
-> `POST /session/logout` も `/oauth/logout` と同じくそれを通してセッションを
-> 終了し、ファミリーを失効させ relying party に知らせる。
+> ログアウトで、BFF / `auth.proxy` 構成が呼ぶものである。core のセッション
+> ライフサイクルが入っているときは、`/oauth/logout` と同じくそれを通して
+> セッションを終了し、ファミリーを失効させ relying party に知らせる。
 > [session パッケージの README](../session/README.md#what-post-sessionlogout-invalidates) を参照。
 
 ### セッション終了の通知器
 
-`oauthEndpointsModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。ライフサイクルが入っているとき、`/oauth/logout` はそれを通してセッションを終了し（下記）、その relying party へのバックチャネルの通知はこの通知器が行う。`POST /oauth/federation/:name/logout` は今も自分の手順を走らせる。
+`oauthEndpointsModule` は core のセッション終了の通知器（`sessionCloseNotifiers`、名前は `oauth`）を寄与する。core のセッションライフサイクルが、終了するセッションの relying party ごとに 1 回、通知する原因（`expiry` 以外のすべて）で呼ぶ — [`logout/sessionCloseNotifier.mts`](./src/logout/sessionCloseNotifier.mts)。`/oauth/logout` はライフサイクルを通してセッションを終了し（下記）、その relying party へのバックチャネルの通知はこの通知器が行う。`POST /oauth/federation/:name/logout` はセッションを終了せず、誰にも知らせない。
 
-- 通知を送る時点の登録で読んだ relying party の `backchannelLogoutUri` へ、OIDC Back-Channel Logout 1.0 の `logout_token` を 1 つ POST する。送り手と外向きの経路はログアウトルートのブロードキャストと同じである。トークンはキーストアが署名し、`iss` はモジュールの issuer（`oauth.jwt.issuer`）である。
+- 通知を送る時点の登録で読んだ relying party の `backchannelLogoutUri` へ、OIDC Back-Channel Logout 1.0 の `logout_token` を 1 つ POST する。送り手と外向きの経路は `broadcastBackchannelLogout` と同じである。トークンはキーストアが署名し、`iss` はモジュールの issuer（`oauth.jwt.issuer`）である。
 - トークンは、relying party が断っていない限り（`backchannelLogoutSessionRequired: false`）、何がセッションを終了させたかにかかわらず、そのセッションの `sid` を含む。
 - 通知は、届いたとき、送り先がないとき（URI がない、またはクライアントがもう登録されていない）、relying party が恒久的に断ったとき（それ以外の 4xx。warn で `logout_backchannel_rejected` と記録する）に片付き、resolve する。送り直す価値があるとき — クライアントの登録簿かキーストアが答えられない、期限内にリクエストが終わらない、応答が 408・429・5xx — だけ reject し、ライフサイクルはその relying party の作業を後の終了か巡回のために保留のまま残す。
 
@@ -593,37 +588,32 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 検証できない `id_token_hint` は `400 invalid_token`、キーストアが答えず検証できなかったものは `GET` でも `POST` でも `503 temporarily_unavailable`。セッションを名指さない（`sid` の無い）ものは、`GET` でも `POST` でも、確認ページより先に `400 invalid_request` になる。それでは何もログアウトできないからである。
 
-フロー: `id_token_hint` を検証 → `post_logout_redirect_uri` をクライアントのリストと照合 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
+フロー: `id_token_hint` を検証 → `post_logout_redirect_uri` をクライアントのリストと照合 → セッションを読む（既に消えていれば下の `200` の no-op で、何も終了しない） → セッションが参加したフェデレーションを読み（`sessionLifecycle.federations`）、その最初のもののプロバイダーが `SupportsLogout` を実装していれば、保存済みの id_token をベストエフォートで読む — 終了がそれを運ぶフェデレーショントークンを削除するので、終了より前に読む → `sessionLifecycle.close(sid, "rp_logout")` でセッションを終了 → 次のいずれかで応答:
 
-- `http`/`https` の `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（[クライアントレコードのログアウトメタデータ](#クライアントレコードのログアウトメタデータ)を参照。q 値付きネゴシエーションで `Accept: text/html` が勝った場合）。`post_logout_redirect_uri` が一致したときは、続いてブラウザーを `state` 付きでそこへ送るスクリプトを含む（下の `303` と同じ）。`renderFrontchannelLogoutHtml` はこのリダイレクトを部品 `postLogoutRedirect: { uri, state }` として受け取り、呼び出し元を問わず `uri` を書かれたとおりに core の `checkRedirectUri` で確かめ、`state` は自分で付け加える。チェックが拒む `uri`（すでに `state` を含むものも含む）、文字列でない値、読み取りが失敗する値ならスクリプトを出さず、`logout_frontchannel_redirect_refused` として warn で 1 回、`reason` とともに記録する（URI は記録しない）
-- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
+- 終了が答えた relying party のうち、登録が `http`/`https` の `frontchannelLogoutUri` を持つものごとの `<iframe>` を含む `text/html` ページ（[クライアントレコードのログアウトメタデータ](#クライアントレコードのログアウトメタデータ)を参照。q 値付きネゴシエーションで `Accept: text/html` が勝った場合）。`post_logout_redirect_uri` が一致したときは、続いてブラウザーを `state` 付きでそこへ送るスクリプトを含む（下の `303` と同じ）。`renderFrontchannelLogoutHtml` はこのリダイレクトを部品 `postLogoutRedirect: { uri, state }` として受け取り、呼び出し元を問わず `uri` を書かれたとおりに core の `checkRedirectUri` で確かめ、`state` は自分で付け加える。チェックが拒む `uri`（すでに `state` を含むものも含む）、文字列でない値、読み取りが失敗する値ならスクリプトを出さず、`logout_frontchannel_redirect_refused` として warn で 1 回、`reason` とともに記録する（URI は記録しない）
+- 終了が答えた最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
 
-**core のセッションライフサイクルが入っているとき**（`sessionLifecycleModule` が `sessionLifecycle` スロットを埋める）、セッションは上の開始・ブロードキャスト・カスケードではなく `sessionLifecycle.close(sid, "rp_logout")` で終了する。セッションを読んだ後のフロー: セッションが参加したフェデレーションを読み（`sessionLifecycle.federations`）、その最初のもののプロバイダーが `SupportsLogout` を実装していれば、保存済みの id_token をベストエフォートで読む — 終了がそれを運ぶフェデレーショントークンを削除するので、終了より前に読む → 終了 → 上と同じく応答する。残りは終了の答えで決まる:
+残りは終了の答えで決まる:
 
 - `done` — 終了の作業がすべて済んだ。ファミリーの失効、フェデレーショントークンとセッションのインデックスの削除、relying party への通知、`UserSession` の削除。
 - `pending` — 終了はコミットされ、作業の一部が残っている。セッションは終了している — 何も参加できず、どの liveness の読み取りも live と答えない — ので、ログアウトは成功として答え、`logout.success` と並べて `logout.close_pending`（`sid`）を監査する。そのセッションの後の終了か、ライフサイクルの巡回が作業を再開する。
-- `unavailable` — 終了がコミットされなかったか、されたかを読めなかった: `503 temporarily_unavailable`（"session store unavailable"）。ライフサイクルが `session_lifecycle_unavailable` として、ルートが `logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`）としてログに出し、`logout.cascade_failed`（`sid`、`store: "session_lifecycle"`）を監査する。この経路でのこのイベントは「終了をコミットできなかった（状態は変わっていないことがある）」という意味で、状態が残されたという意味ではない。ブラウザーのセッションは再試行のために残り、上流では何も終了しない。半分終了した状態になる場合が 1 つある: ライフサイクルは終了のコミットの前にセッションごとのストアの終了の印を書くので、印を書いた後にコミットが失敗すると、ログアウトの再試行が終了を完了するか印が失効するまで、そのセッションのコード交換は拒否される。
+- reject — 終了がコミットされなかったか、されたかを読めなかった。ライフサイクルはストアのエラーか、`RangeError` を含むほかのエラーで reject する: `503 temporarily_unavailable`（"session store unavailable"）。ルートだけが `logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`）としてエラーの射影付きで 1 回ログに出し、`logout.cascade_failed`（`sid`、`store: "session_lifecycle"`）を監査する。`done` と `pending` 以外の答えも、防御として同じ経路をたどる。フェデレーションの一覧の読み取りが reject したときは、上流へのヒントなしで進むだけである。この経路でのこのイベントは「終了をコミットできなかった（状態は変わっていないことがある）」という意味で、状態が残されたという意味ではない。ブラウザーのセッションは再試行のために残り、上流では何も終了しない。半分終了した状態になる場合が 1 つある: ライフサイクルは終了のコミットの前にセッションごとのストアの終了の印を書くので、印を書いた後にコミットが失敗すると、ログアウトの再試行が終了を完了するか印が失効するまで、そのセッションのコード交換は拒否される。
 
 ルートは自分ではバックチャネルの `logout_token` を送らない。ライフサイクルが [セッション終了の通知器](#セッション終了の通知器) を通して各 relying party に通知 1 件につき 1 回知らせる。フロントチャネルのページは、終了が答えた relying party ごとに、そのクライアント登録（`clientRepository.findById`）から読んだ iframe を持ち、HTML で答えるときだけ読む。登録が読めなければその relying party の iframe だけを落とし、`client_repository_unavailable`（`site: "logout"`）として 1 回ログに出す。上流の end-session 呼び出しは終了が答えた最初のフェデレーションに送り、終了の前に読んだ id_token は同じフェデレーションのために読んだときだけ添える。読み取りの後に参加したフェデレーションは、ヒントなしで上流で終了する。フェデレーションの一覧が読めなければ、ヒントなしで進む。既に消えたセッションは下と同じ `200` の no-op で、何も終了しない。
 
-**カスケード**は [`cascadeLogout`](./src/logout/cascadeLogout.mts) で、決まった順序の 4 ステップからなる。その doc コメントが完全な契約で、[`cascadeLogout.test.mts`](./src/logout/__tests__/cascadeLogout.test.mts) がそれを固定している:
+**ログアウトの間に参加した relying party も知らせる先に入る。** コード交換は relying party とファミリーをライフサイクル（`sessionLifecycle.join`）でセッションに参加させ、終了はセッションの参加者を 1 つのコミットでスナップショットとして確定する: 終了のコミットより前に参加した relying party には知らせ、その後のコード交換は拒否されてトークンを出さず、そのファミリーはライフサイクルが失効させる。これは知らせる先に入るということで、届くことの保証ではない: 失敗した通知は後の終了か巡回のために保留のまま残る。契約は core のもの（[セッションライフサイクルの ADR](../core/docs/adr/2026-10-05-session-lifecycle.md)）。
 
-1. セッションに終了の印を書き、そのリフレッシュトークンファミリーを読む（ファミリーインデックスがセッション終了ケイパビリティを持ち、呼び出し元が `expiresAt` を渡せば `endSession`、そうでなければ — `expiresAt` を省いたときも — `listFamilyIds`）。この後にファミリーを結び付けるコード交換は拒否される（[`authorization_code`](#authorization_code-セッションsidfamily_id-と-id_token) を参照）。失敗したらカスケードはそこで止まる。印は既に書かれていることがあり、再試行は安全である。
-2. すべてのファミリーを失効させ、セッションのフェデレーショントークンを削除する。すべての操作を試み、**どれか 1 つでも**失敗すれば、再試行に必要な記録が消される前にカスケードはここで止まる。
-3. セッションの逆引きインデックスのエントリー（RP、ファミリー、フェデレーション）を削除する — ベストエフォートで、ログに出し、TTL で上限がある。
-4. 最後に `UserSession` を削除する。失敗したらカスケードはそこで止まる。
-
-止まったカスケードは `503 {"error": "temporarily_unavailable"}` を返し、同じログアウトの再試行は安全である。ステップ 1 が印を書いた後に止まったカスケードは、セッションを半ば終わった状態で残す: セッションはまだ存在し、再試行がログアウトを終えるか印が失効するまで、そのコード交換は拒否される。error レベルで 1 回、`store: "logout_cascade"`、`cascadeStep`、失敗した数 `failures` 付きの `logout_store_unavailable` としてログに出し、失敗した各操作は `logout_cascade_operation_failed`（warn）としても出す。カスケード前にセッションストアを読めなかったときも同じイベントで、`store` がそのストア（`user_session`、`session_rp_registry`、`session_federation_index`）を名指す。
-
-成功時のどの形でも — そして既に無くなっているセッションへの何もしない応答でも — エンドポイントは**ブラウザー自身の express-session も終わらせる**。ただしそのセッションの `sid` がログアウト対象のものであるときだけである。RP-Initiated Logout は誰でもどのセッションについても行えるリクエストなので、別の `sid` を名指す Cookie や何も名指さない Cookie は、無関係なユーザーをサインアウトさせないよう手を付けない。これが無いと、ストアが空になった後も Cookie が `/authorize` で `req.session.isAuthenticated` を満たし続ける。セッションストアが完了できない破棄はログに出し、成功したカスケードを `503` にはしない。`/authorize` はいずれにせよ自分の判断で死んだ `sid` を拒否する（[OIDC の対応範囲](#oidc-の対応範囲-284)を参照）。`503` は意図して Cookie を残すので、再試行は引き続きそのセッションを名指せる。
+成功時のどの形でも — そして既に無くなっているセッションへの何もしない応答でも — エンドポイントは**ブラウザー自身の express-session も終わらせる**。ただしそのセッションの `sid` がログアウト対象のものであるときだけである。RP-Initiated Logout は誰でもどのセッションについても行えるリクエストなので、別の `sid` を名指す Cookie や何も名指さない Cookie は、無関係なユーザーをサインアウトさせないよう手を付けない。これが無いと、セッションが終了した後も Cookie が `/authorize` で `req.session.isAuthenticated` を満たし続ける。セッションストアが完了できない破棄はログに出し、成功した終了を `503` にはしない。`/authorize` はいずれにせよ自分の判断で死んだ `sid` を拒否する（[OIDC の対応範囲](#oidc-の対応範囲-284)を参照）。`503` は意図して Cookie を残すので、再試行は引き続きそのセッションを名指せる。
 
 ### `POST /oauth/federation/:name/logout`
 
 プロバイダー単位のフェデレーション切断。Authorization に `typ: at+jwt` の `Bearer <access_token>`。ボディ（任意）: `post_logout_redirect_uri`、`state`。
 
-フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → `post_logout_redirect_uri` をクライアントのリストと照合 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → core のセッションライフサイクルから、セッションが live か（`sessionLifecycle.liveness`。live でない、または別のサブジェクトのセッションなら `401 invalid_token`）と、どのフェデレーションが参加したか（`sessionLifecycle.federations`）を読む → フェデレーションが参加していることを確認 → `post_logout_redirect_uri` をクライアントのリストと照合 → フェデレーショントークンを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+
+フェデレーションは、セッションに参加したものとして一覧に残る: ライフサイクルはセッションが終了するまで誰が参加したかを保つ。そのトークンに基づいて動く読み手はトークンの無いフェデレーションを飛ばし — フェデレーショントークンのルートは `404 federation_not_linked` と答える — セッションの終了がそれを上流でもう一度終了させることがあるが、それは冪等である。
 
 `post_logout_redirect_uri` を IdP の end-session 呼び出しに渡すのは、アクセストークンの発行先クライアント（その `azp`）の `postLogoutRedirectUris` のいずれかと完全一致したときだけである — このルートも呼び出し側が選んだ先へのリダイレクトで終わるので、`/oauth/logout` と同じ規則を適用する。一致しなければ捨て、アダプターは指定が無いときと同じように答える: Google と GitHub はブラウザーを自身のログアウトページへ送り、end-session エンドポイントが設定されていない Apple は拒否する。このルートはそれを失敗した end-session 呼び出しと同じく `200 {"disconnected": true}` で答える。`azp` の無いトークンには照合するリストが無く、一致したものは `/oauth/logout` と同じく `checkRedirectUri` を満たさなければならない。答えられないクライアントリポジトリは切断を止めない: URI を捨て、それが無いときと同じように答え、`site: "federation_logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。ボディの無い `POST` は URI を指定しない切断である。
 
@@ -631,11 +621,11 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 
 答えられないキーストアやストア — ファミリーの確認を含む — は `401 invalid_token` ではなく `503 temporarily_unavailable` になる。
 
-指定のフェデレーションがセッションに無ければ `404 {"error": "federation_not_linked"}` を返す。答えられないストアは `503 temporarily_unavailable` で、`store` と `step` 付きの `federation_logout_store_unavailable` として error レベルで 1 回だけログに出す。
+指定のフェデレーションがセッションに無ければ `404 {"error": "federation_not_linked"}` を返す。答えられないストアは `503 temporarily_unavailable` で、`store` と `step` 付きの `federation_logout_store_unavailable` として error レベルで 1 回だけログに出す。ライフサイクルのものは `store: "session_lifecycle"`、`step: "liveness"` または `"federations"` で、reject したとき（ストアのエラーでもそれ以外でも。`RangeError` を含む）はエラーの射影を持つ。`live` / `not_live` や `listed` 以外の答えも防御的なフォールバックとして同じ経路をたどり、`err` を持たない。
 
 ### ディスカバリーメタデータ
 
-同じ 6 スロットのチェックのもとで、`GET /.well-known/openid-configuration` は次を広告する:
+同じチェックのもとで、`GET /.well-known/openid-configuration` は次を広告する:
 
 - `end_session_endpoint`
 - `backchannel_logout_supported: true`
@@ -656,7 +646,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 
 ## フェデレーショントークンエンドポイント
 
-`POST /oauth/federation/:name/token` は呼び出し元のセッションに紐付いた上流 IdP のアクセストークンを取り出す。これにより利用者は、ユーザーの代わりに Google Calendar / GitHub API などへサーバーサイドの API 呼び出しを行える。6 スロットのチェックのもとでマウントされる（[エンドポイント](#エンドポイント)を参照）。オフライン委譲 — ユーザーのセッション無しのトークン — は別の機能で、`@o3co/auth-provider-federation-grants` である。
+`POST /oauth/federation/:name/token` は呼び出し元のセッションに紐付いた上流 IdP のアクセストークンを取り出す。これにより利用者は、ユーザーの代わりに Google Calendar / GitHub API などへサーバーサイドの API 呼び出しを行える。`userSessionStore`、core のセッションライフサイクル、`federationTokenStore`、ファミリーの失効が配線されているときにマウントされる（[エンドポイント](#エンドポイント)を参照）。呼び出し元のセッションが live か、セッションがどのフェデレーションに参加したかはライフサイクルから読む（`sessionLifecycle.liveness`、`sessionLifecycle.federations`）。フェデレーションのログアウトはフェデレーションのトークンとインデックスのエントリーを消すが、ライフサイクルのレコードは一覧に残す。ルートはそのようなフェデレーションを飛ばし、トークンの無いものとして `404 federation_not_linked` と答える。オフライン委譲 — ユーザーのセッション無しのトークン — は別の機能で、`@o3co/auth-provider-federation-grants` である。
 
 ### 認証
 
@@ -936,7 +926,7 @@ const assertionVerifier = createRegistryAssertionVerifier({
 - モジュールの配線と各モジュールの宣言 — [`module.test.mts`](./src/__tests__/module.test.mts)、[`oauthAuthorization.test.mts`](./src/__tests__/oauthAuthorization.test.mts)、[`oauthSession.test.mts`](./src/__tests__/oauthSession.test.mts)、[`subjectRevocationService.module.test.mts`](./src/logout/__tests__/subjectRevocationService.module.test.mts)、そして手で組み立てるすべてのコンシューマーが要求する要件リゾルバー — [`admissionWiring.test.mts`](./src/__tests__/admissionWiring.test.mts);
 - 各コンシューマーのアドミッションを通したセッションの読み取り、それがもたらした変更、ステップアップの往復 — [`authorize.admission.test.mts`](./src/__tests__/authorize.admission.test.mts)、[`consent.admission.test.mts`](./src/__tests__/consent.admission.test.mts)、[`sessionGrant.admission.test.mts`](./src/__tests__/sessionGrant.admission.test.mts)、[`authorizationGrant.admission.test.mts`](./src/__tests__/authorizationGrant.admission.test.mts)、[`refreshToken.admission.test.mts`](./src/__tests__/refreshToken.admission.test.mts)、そして要求のレコード — [`reauthAsk.test.mts`](./src/__tests__/reauthAsk.test.mts);
 - ディスカバリーのゲート — [`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts);
-- ログアウトカスケードの順序と失敗の扱い — [`cascadeLogout.test.mts`](./src/logout/__tests__/cascadeLogout.test.mts)、エンドポイント — [`logout.test.mts`](./src/__tests__/logout.test.mts);
+- ログアウトのエンドポイント — [`logout.test.mts`](./src/__tests__/logout.test.mts)、core のセッションライフサイクルを通した終了 — [`logout.lifecycle.test.mts`](./src/__tests__/logout.lifecycle.test.mts);
 - イントロスペクションの audience 固定、セッション生存、障害時の答え — [`introspect.audience.test.mts`](./src/__tests__/introspect.audience.test.mts)、[`introspect.sessionLiveness.test.mts`](./src/__tests__/introspect.sessionLiveness.test.mts)、[`introspect.revocationOutage.test.mts`](./src/__tests__/introspect.revocationOutage.test.mts);
 - クライアント認証 — [`clientAuth.test.mts`](./src/middleware/__tests__/clientAuth.test.mts)、[`clientAssertion.test.mts`](./src/middleware/__tests__/clientAssertion.test.mts);
 - federation token ルート — [`federationToken.test.mts`](./src/__tests__/federationToken.test.mts)。

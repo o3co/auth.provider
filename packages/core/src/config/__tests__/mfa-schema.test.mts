@@ -30,12 +30,10 @@
 
 import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
 import { createApp } from "#/index.mjs";
-import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 const REFERENCE_CONF = fileURLToPath(new URL("../../../config/reference.conf", import.meta.url));
 
@@ -44,31 +42,42 @@ const ENV = {
 	OAUTH_JWT_ISSUER: "https://auth.test",
 };
 
-const fromReference = (env: Record<string, string> = {}) =>
-	validate(parseFile(REFERENCE_CONF, { env: { ...ENV, ...env } }), AppConfigSchema);
+/** What core's reference.conf resolves to under `env`, as written. */
+const fromReference = (env: Record<string, string> = {}): Record<string, unknown> =>
+	parseFile(REFERENCE_CONF, { env: { ...ENV, ...env } }).toObject() as Record<string, unknown>;
 
-const issuesAt = (result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) =>
-	result.success ? [] : (result.error?.issues ?? []).map((issue) => issue.path.join("."));
+/** The config slot of a boot with no module, handed `extra` beside core's sections. */
+async function bootedConfig(extra: Record<string, unknown>): Promise<Record<string, unknown>> {
+	const handle = await createApp({
+		modules: [],
+		bootstrapComponents: {
+			config: { ...makeValidCoreConfig(), ...extra },
+			pathResolver: (p: string) => p,
+		} as never,
+	});
+	const config = handle.components.config as unknown as Record<string, unknown>;
+	await handle.dispose();
+	return config;
+}
 
 describe("the MFA configuration core owns", () => {
 	it("ships no store selection: its reference.conf binds neither old variable", () => {
 		const config = fromReference({
 			MFA_FACTOR_STORE_ADAPTER: "store",
 			MFA_TRANSACTION_STORE_ADAPTER: "redis",
-		}) as Record<string, unknown>;
+		});
 		expect(config).not.toHaveProperty("mfaFactorStore");
 		expect(config).not.toHaveProperty("mfaTransactionStore");
 	});
 
 	it("names no mfa section: neither core's schema nor its reference.conf, which binds no MFA_MODE", () => {
 		expect(Object.keys(CoreConfigSchema.shape)).not.toContain("mfa");
-		expect(Object.keys(AppConfigSchema.shape)).not.toContain("mfa");
 		const raw = parseFile(REFERENCE_CONF, { env: { ...ENV, MFA_MODE: "required" } }).toObject();
 		expect(raw).not.toHaveProperty("mfa");
 	});
 
-	it("names no step-up page: core's schema declares nothing under endpoints, and its reference.conf, which binds no ENDPOINTS_MFA_URL, has no endpoints", () => {
-		expect(AppConfigSchema.shape.endpoints.unwrap()).toBeInstanceOf(z.ZodUnknown);
+	it("names no step-up page: core's schema declares no endpoints, and its reference.conf, which binds no ENDPOINTS_MFA_URL, has no endpoints", () => {
+		expect(Object.keys(CoreConfigSchema.shape)).not.toContain("endpoints");
 		const raw = parseFile(REFERENCE_CONF, {
 			env: { ...ENV, ENDPOINTS_MFA_URL: "/account/mfa" },
 		}).toObject();
@@ -76,22 +85,12 @@ describe("the MFA configuration core owns", () => {
 	});
 
 	it("boots a configuration whatever its mfa section holds, handing the section on as written", async () => {
-		const handle = await createApp({
-			modules: [],
-			bootstrapComponents: {
-				config: { ...makeValidCoreConfig(), mfa: { mode: "sometimes", lockout: {} } },
-				pathResolver: (p: string) => p,
-			} as never,
-		});
-		expect((handle.components.config as { mfa?: unknown } | undefined)?.mfa).toEqual({
-			mode: "sometimes",
-			lockout: {},
-		});
-		await handle.dispose();
+		const config = await bootedConfig({ mfa: { mode: "sometimes", lockout: {} } });
+		expect(config.mfa).toEqual({ mode: "sometimes", lockout: {} });
 	});
 
 	it("ships no Redis store's key prefix: each is the Redis package's", () => {
-		const defaults = fromReference() as Record<string, unknown>;
+		const defaults = fromReference();
 		for (const section of [
 			"redisMfaFactorStore",
 			"redisMfaTransactionStore",
@@ -102,25 +101,21 @@ describe("the MFA configuration core owns", () => {
 		}
 	});
 
-	it("keeps the Redis stores' sections, and the paths they moved from, through the strip-mode schema as written", () => {
+	it("boots with the Redis stores' sections, and the paths they moved from, handing them on as written", async () => {
 		const written = {
 			"redis-mfa-factor-store": { keyPrefix: "t:mfaf:" },
 			"redis-mfa-transaction-store": { keyPrefix: "t:mfat:" },
 			redisMfaFactorStore: { keyPrefix: "t:old-mfaf:" },
 			redisMfaTransactionStore: { keyPrefix: "t:old-mfat:" },
 		};
-		const parsed = AppConfigSchema.parse({ ...makeValidAppConfig(), ...written });
-		expect(parsed).toMatchObject(written);
+		expect(await bootedConfig(written)).toMatchObject(written);
 	});
 
-	it("keeps where the selections were as written, whatever they hold: core reads nothing of them", () => {
+	it("boots with where the selections were, whatever they hold, handing them on as written: core reads nothing of them", async () => {
 		const written = {
 			mfaFactorStore: { adapter: "sql" },
 			mfaTransactionStore: { adapter: "store" },
 		};
-		expect(issuesAt(AppConfigSchema.safeParse({ ...makeValidAppConfig(), ...written }))).toEqual(
-			[],
-		);
-		expect(AppConfigSchema.parse({ ...makeValidAppConfig(), ...written })).toMatchObject(written);
+		expect(await bootedConfig(written)).toMatchObject(written);
 	});
 });

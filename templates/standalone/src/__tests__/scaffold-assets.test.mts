@@ -24,6 +24,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { BootError } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { readAdapters } from "../adapters.mjs";
@@ -372,8 +373,9 @@ describe("the production compose leaves MFA on, for the deployment to decide", (
 		} catch (caught) {
 			err = caught;
 		}
-		expect(err).toBeInstanceOf(RangeError);
-		expect((err as RangeError).message).toContain("MFA_MODE=off");
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toContain("MFA_MODE=off");
 	});
 });
 

@@ -43,6 +43,7 @@ import session, { MemoryStore } from "express-session";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createLoginCompletion } from "#/login-completion.mjs";
+import { fakeSessionLifecycle } from "./_helpers/sessionLifecycle.mjs";
 
 const COOKIE = "renewal.session";
 const SUBJECT = "user-1";
@@ -100,6 +101,7 @@ function setup() {
 	const userSessionStore = createInMemoryUserSessionStore();
 	const completion = createLoginCompletion({
 		userSessionStore,
+		sessionLifecycle: fakeSessionLifecycle(),
 		sessionTtlMs: 3_600_000,
 		csrf: createTestCsrfGuard(),
 	});

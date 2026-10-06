@@ -7,7 +7,7 @@
 // factory and forwards `BuilderContext.lifecycle` so the underlying session
 // store registers its disposal callback. Tests exercise the route-contribution
 // factory directly with mock deps, and boot the module through createApp for
-// what its configSchema refuses and what it mounts.
+// what its section schema refuses and what it mounts.
 
 import {
 	type AppConfig,
@@ -96,7 +96,7 @@ describe("sessionStoreModule", () => {
 		const m = sessionStoreModule as unknown as Module;
 		expect(m.name).toBe("session-store");
 		expect(m.requires ?? []).not.toContain("config");
-		expect(m.section?.at).toBeUndefined();
+		expect(m.section).not.toHaveProperty("at");
 		expect(m.optional).toContain("lifecycleRegistrar");
 		expect(m.optional).toContain("readinessRegistrar");
 	});
@@ -415,7 +415,7 @@ describe("sessionStoreModule — the storage under core.deployment.mode", () => 
 
 // ---------------------------------------------------------------------------
 // The cookie the store mounts is the one its `sessionCookiePolicy` describes:
-// the module's configSchema refuses at validation every section the policy
+// the module's section schema refuses at validation every section the policy
 // refuses, and the route reuses the provider's policy.
 // ---------------------------------------------------------------------------
 
@@ -458,7 +458,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			(err: unknown) => err,
 		);
 
-	/** A refusal the module's configSchema makes: [what, key, change, message]. */
+	/** A refusal the module's section schema makes: [what, key, change, message]. */
 	const REFUSED_BY_THE_STORE = [
 		["a name that is not an RFC 6265 token", "name", { name: "auth session" }, NOT_A_TOKEN],
 		[
@@ -610,9 +610,11 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		expect(createClient).toHaveBeenCalledTimes(1);
 	});
 
-	it("mounts the cookie its provider built, though config's session-store changed after", async () => {
+	it("mounts the cookie its provider built, a later module's write to config's session-store refused", async () => {
+		// The mounted cookie comes from the policy the provider built, never from a
+		// later read of config; the frozen config slot now guarantees it as well.
 		const config = configWith({ name: "auth.session", secure: false }) as AppConfig;
-		const seen: { policy?: SessionCookiePolicy } = {};
+		const seen: { policy?: SessionCookiePolicy; write?: string } = {};
 		const handle = await createApp({
 			modules: [
 				// Listed first, so its route factory runs after the providers and
@@ -623,9 +625,15 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 					contributes: {
 						routes: [
 							(deps) => {
-								(deps.config as unknown as { "session-store": { name: string } })[
-									"session-store"
-								].name = "auth.other";
+								// The config slot is frozen: the write throws in strict-mode code.
+								try {
+									(deps.config as unknown as { "session-store": { name: string } })[
+										"session-store"
+									].name = "auth.other";
+									seen.write = "allowed";
+								} catch (err) {
+									seen.write = (err as Error).constructor.name;
+								}
 								return { id: "test:mutator", mountPath: "/mutator", handler: express.Router() };
 							},
 						],
@@ -655,6 +663,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		try {
 			const res = await request(express().use(handle.router)).post("/touch");
 			expect(res.status).toBe(200);
+			expect(seen.write).toBe("TypeError");
 			expect(seen.policy?.name).toBe("auth.session");
 			expect(res.headers["set-cookie"]?.[0] ?? "").toMatch(/^auth\.session=/);
 		} finally {

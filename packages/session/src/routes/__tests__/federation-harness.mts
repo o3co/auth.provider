@@ -28,7 +28,6 @@ import type {
 	FederationProvider,
 	FederationTokenStore,
 	Logger,
-	SessionFederationIndex,
 	SessionLifecycle,
 	SessionLifecycleStore,
 	SessionRequirementResolver,
@@ -40,6 +39,7 @@ import type {
 import { createTestFederationSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { vi } from "vitest";
+import { fakeSessionLifecycle } from "#/__tests__/_helpers/sessionLifecycle.mjs";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
@@ -220,16 +220,6 @@ export function makeUserSessionStore(): UserSessionStore & {
 	};
 }
 
-export function makeSessionFederationIndex(): SessionFederationIndex {
-	return {
-		kind: "memory",
-		addFederation: vi.fn(async () => {}),
-		listFederations: vi.fn(async () => []),
-		removeFederation: vi.fn(async () => {}),
-		removeBySid: vi.fn(async () => {}),
-	} as SessionFederationIndex;
-}
-
 export function makeFederationTokenStore(): FederationTokenStore & {
 	attach: ReturnType<typeof vi.fn>;
 	delete: ReturnType<typeof vi.fn>;
@@ -263,7 +253,8 @@ export type HarnessApp = {
 	records: HarnessRecordStore;
 	userSessionStore: ReturnType<typeof makeUserSessionStore>;
 	federationTokenStore: ReturnType<typeof makeFederationTokenStore>;
-	sessionFederationIndex: SessionFederationIndex;
+	/** The session lifecycle the router was handed: a fake whose members are spies, by default. */
+	sessionLifecycle: SessionLifecycle;
 };
 
 /**
@@ -301,7 +292,7 @@ export function buildFederationApp({
 	const app = makeSessionApp(store, records);
 	const userSessionStore = makeUserSessionStore();
 	const federationTokenStore = makeFederationTokenStore();
-	const sessionFederationIndex = makeSessionFederationIndex();
+	const lifecycle = sessionLifecycle ?? fakeSessionLifecycle();
 
 	app.use(
 		createRouter(express, {
@@ -313,11 +304,10 @@ export function buildFederationApp({
 			providerCallbackUrls,
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore,
-			sessionFederationIndex,
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			...(subjectRevocation ? { subjectRevocation } : {}),
 			...(sessionLifecycleStore ? { sessionLifecycleStore } : {}),
-			...(sessionLifecycle ? { sessionLifecycle } : {}),
+			sessionLifecycle: lifecycle,
 			federationTokenStore,
 			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
 			requirements: requirements ?? resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
@@ -326,5 +316,12 @@ export function buildFederationApp({
 		}),
 	);
 
-	return { app, store, records, userSessionStore, federationTokenStore, sessionFederationIndex };
+	return {
+		app,
+		store,
+		records,
+		userSessionStore,
+		federationTokenStore,
+		sessionLifecycle: lifecycle,
+	};
 }

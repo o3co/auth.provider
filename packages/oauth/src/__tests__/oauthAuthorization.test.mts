@@ -18,6 +18,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemoryUserSessionStore,
 	createSymmetricKeyStore,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
@@ -28,8 +29,6 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 	type RefreshTokenFamilyRotation,
-	type SessionFamilyIndex,
-	type SessionRPRegistry,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -55,6 +54,7 @@ import { authorizationServerRegistry } from "./_helpers/authorizationServerRegis
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { capturing, routerInputsOf, withGrants } from "./_helpers/sections.mjs";
+import { joiningLifecycle, sessionLifecycleModules } from "./_helpers/sessionLifecycle.mjs";
 
 /** `config` with the captures of the renames the module declares, as a resolution under an empty environment makes them. */
 const captured = <C extends object>(config: C): C =>
@@ -474,6 +474,121 @@ describe("oauthAuthorizationGrantsModule — the authorization_code grant needs 
 });
 
 /**
+ * Where a user-session store is wired, the authorization_code grant joins the
+ * code's session through core's session lifecycle, which it then requires: a
+ * composition with the store and no lifecycle is refused at boot, and a
+ * sessionless one is not.
+ */
+describe("oauthAuthorizationGrantsModule — the authorization_code grant with a user-session store needs the session lifecycle", () => {
+	const boot = (modules: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthAuthorizationGrantsModule,
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+				...familyStoreModules,
+				...modules,
+			],
+			bootstrapComponents: {
+				config: captured(withGrants(makeValidAppConfig(), { authorizationCode: true })),
+				pathResolver: (s: string) => s,
+				oauthTokenSettings,
+			},
+		});
+
+	it("refuses to boot with userSessionStore wired and no sessionLifecycle, naming both slots", async () => {
+		const refusal = await boot([memorySessionStoresModule]).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "authorization_code" },
+		});
+		const message = String(refusal?.cause?.message);
+		expect(message).toMatch(/userSessionStore is wired, but sessionLifecycle is not/);
+		expect(message).toMatch(/sessionLifecycleModule/);
+	});
+
+	it("boots with userSessionStore and sessionLifecycle both wired", async () => {
+		const handle = await boot([memorySessionStoresModule, ...sessionLifecycleModules()]);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("boots sessionless, with neither wired", async () => {
+		const handle = await boot([]);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
+		await handle.dispose();
+	});
+});
+
+/**
+ * Where a user-session store is wired, the refresh_token grant admits the
+ * token's session through core's session lifecycle port, which it then
+ * requires: a composition with the store and no port is refused at boot, and
+ * a sessionless one is not.
+ */
+describe("oauthAuthorizationGrantsModule — the refresh_token grant with a user-session store needs the session lifecycle port", () => {
+	const userSessionStoreOnly = defineModule({
+		name: "test:user-session-store",
+		provides: { userSessionStore: () => createInMemoryUserSessionStore() },
+	});
+	const boot = (modules: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthAuthorizationGrantsModule,
+				clientRepositoryModule,
+				keyStoreModule,
+				...familyStoreModules,
+				...modules,
+			],
+			bootstrapComponents: {
+				config: captured(
+					withGrants(makeValidAppConfig(), { authorizationCode: false, refreshToken: true }),
+				),
+				pathResolver: (s: string) => s,
+				oauthTokenSettings,
+			},
+		});
+
+	it("refuses to boot with userSessionStore wired and no sessionLifecycleStore, naming both slots", async () => {
+		const refusal = await boot([userSessionStoreOnly]).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "refresh_token" },
+		});
+		const message = String(refusal?.cause?.message);
+		expect(message).toMatch(/userSessionStore is wired, but sessionLifecycleStore is not/);
+		expect(message).toMatch(/memorySessionStoresModule or redisSessionStoresModule/);
+	});
+
+	it("boots with a session-store module that fills both", async () => {
+		const handle = await boot([memorySessionStoresModule]);
+		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("boots sessionless, with neither wired", async () => {
+		const handle = await boot([]);
+		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
+		await handle.dispose();
+	});
+});
+
+/**
  * The authorization_code grant binds each family it opens to the code's
  * session, and the subject watermark is read against that session. With a
  * watermark wired and no session store, the grant would open families no
@@ -530,7 +645,10 @@ describe("oauthAuthorizationGrantsModule — the authorization_code grant with s
 	});
 
 	it("boots with subjectRevocation and userSessionStore both wired", async () => {
-		const handle = await boot(authorizationCodeOn(), [memorySessionStoresModule]);
+		const handle = await boot(authorizationCodeOn(), [
+			memorySessionStoresModule,
+			...sessionLifecycleModules(),
+		]);
 		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
 		await handle.dispose();
 	});
@@ -765,18 +883,6 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			create: vi.fn(),
 			delete: vi.fn(),
 		};
-		const sessionRPRegistry: SessionRPRegistry = {
-			kind: "spy",
-			registerRP: vi.fn(async () => {}),
-			listRPs: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		};
-		const sessionFamilyIndex: SessionFamilyIndex = {
-			kind: "spy",
-			addFamilyId: vi.fn(async () => {}),
-			listFamilyIds: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		};
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 		const consumeByCode = vi.fn().mockResolvedValue({
 			code: "auth-code",
@@ -794,8 +900,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			tokenBindingSettings: createTestTokenBindingSettings(),
 			keyStore,
 			userSessionStore,
-			sessionRPRegistry,
-			sessionFamilyIndex,
+			sessionLifecycle: joiningLifecycle().lifecycle,
 			codeRepository: {
 				consumeByCode,
 				createCode: vi.fn(),

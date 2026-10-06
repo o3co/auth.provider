@@ -34,6 +34,7 @@ import {
 	createSessionLifecycle,
 	type FederationTokenStore,
 	type Logger,
+	loggableError,
 	newRenewalNonce,
 	readVersionedSessionLifecycle,
 	type SessionCloseNotice,
@@ -47,7 +48,6 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createCsrfProtection } from "#/csrf.mjs";
-import { sessionModule } from "#/module.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
 const SID = "sid-1";
@@ -130,7 +130,8 @@ interface Bag extends Record<string, unknown> {
 }
 
 function buildApp(opts: {
-	readonly sessionLifecycle: SessionLifecycle;
+	/** Absent: none is handed to the router. */
+	readonly sessionLifecycle?: SessionLifecycle;
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
 	readonly federationTokenStore?: FederationTokenStore;
@@ -176,7 +177,7 @@ function buildApp(opts: {
 			...(opts.federationTokenStore ? { federationTokenStore: opts.federationTokenStore } : {}),
 			...(opts.subjectSessionIndex ? { subjectSessionIndex: opts.subjectSessionIndex } : {}),
 			...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
-			sessionLifecycle: opts.sessionLifecycle,
+			...(opts.sessionLifecycle ? { sessionLifecycle: opts.sessionLifecycle } : {}),
 			logger: opts.logger ?? mockLogger(),
 			csrfTokenSigner: SIGNER,
 			requirements: resolverForTests([]),
@@ -241,10 +242,12 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		});
 	});
 
-	it("unavailable: 503, one error line, and the cookie kept for a retry", async () => {
+	it("an outcome the lifecycle does not declare: the outage, 503, one error line, and the cookie kept for a retry", async () => {
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
-			sessionLifecycle: fakeLifecycle({ close: async () => ({ outcome: "unavailable" }) }),
+			sessionLifecycle: fakeLifecycle({
+				close: (async () => ({ outcome: "undeclared" })) as unknown as SessionLifecycle["close"],
+			}),
 			logger,
 		});
 
@@ -259,12 +262,13 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		expect(bag.destroyed).toBe(false);
 	});
 
-	it("a lifecycle that throws: the same 503, logged with the error's projection, the cookie kept", async () => {
+	it("a lifecycle that rejects: the same 503, logged once at error with the rejection's projection, the cookie kept", async () => {
+		const thrown = new Error("lifecycle exploded");
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
 			sessionLifecycle: fakeLifecycle({
 				close: async () => {
-					throw new Error("lifecycle exploded");
+					throw thrown;
 				},
 			}),
 			logger,
@@ -278,19 +282,21 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 				sid: SID,
 				store: "session_lifecycle",
 				step: "close",
-				err: expect.any(Object),
+				err: loggableError(thrown),
 			}),
 			"session_logout_store_unavailable",
 		);
+		expect(logger.warn).not.toHaveBeenCalled();
 		expect(bag.destroyed).toBe(false);
 	});
 
-	it("a sid the lifecycle cannot hold: nothing to close, said once at warn; the logout ends the cookie", async () => {
+	it("a close that rejects with a RangeError is the same outage: 503, logged once at error with its projection, the cookie kept", async () => {
+		const thrown = new RangeError("Invalid array length");
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
 			sessionLifecycle: fakeLifecycle({
 				close: async () => {
-					throw new RangeError("session lifecycle: sid must be 1 to 512 characters");
+					throw thrown;
 				},
 			}),
 			logger,
@@ -298,12 +304,14 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 
 		const res = await logout(app);
 
-		expect(res.status).toBe(200);
-		expect(bag.destroyed).toBe(true);
-		expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
-			{ sid: SID, store: "session_lifecycle" },
-			"session_logout_sid_not_closable",
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			{ sid: SID, store: "session_lifecycle", step: "close", err: loggableError(thrown) },
+			"session_logout_store_unavailable",
 		);
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(bag.destroyed).toBe(false);
 	});
 
 	it("a cookie store that cannot destroy after a committed close: 503, the close not run again", async () => {
@@ -435,9 +443,20 @@ describe("POST /session/logout through the session lifecycle: what the close run
 	});
 });
 
-describe("sessionModule", () => {
-	it("takes the session lifecycle as optional", () => {
-		expect(sessionModule.optional).toContain("sessionLifecycle");
-		expect(sessionModule.requires).not.toContain("sessionLifecycle");
+describe("where a user-session store is wired, core's session lifecycle is required", () => {
+	it("refuses to build the router with a userSessionStore and no sessionLifecycle, naming both", async () => {
+		const userSessionStore = await liveSessionStore();
+		expect(() => buildApp({ userSessionStore })).toThrow(
+			/userSessionStore is wired, but sessionLifecycle is not/,
+		);
+	});
+
+	it("builds a sessionless router, with neither: its logout ends the cookie session alone", async () => {
+		const { app, bag } = buildApp({});
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(200);
+		expect(bag.destroyed).toBe(true);
 	});
 });

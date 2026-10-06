@@ -104,7 +104,7 @@ Nothing secret lives in `clients.yaml` for such a client.
 
 **What this does not do.** It does not make `/authorize` safe against forced navigation for a client that *is* first-party — that remains the accepted model here. What it prevents is a client that should never have been trusted with a silent code being registered into that position by accident.
 
-**Unmarked registrations.** A registration without the field is not first-party: on the defaults it is refused at `/authorize` until you mark it, with no admit-with-warning window. Mark every client you operate before pointing it at `/authorize`. `oauth.authorize.allowUnmarkedClients` is not a setting: a config or environment that sets it (`OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) fails at boot with migration instructions rather than being silently ignored.
+**Unmarked registrations.** A registration without the field is not first-party: on the defaults it is refused at `/authorize` until you mark it, with no admit-with-warning window. Mark every client you operate before pointing it at `/authorize`. `oauth.authorize.allowUnmarkedClients` is not a setting: a config or environment that sets it (`OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) fails at boot rather than being silently ignored: the oauth module refuses it as a removed key (`config-path-relocated`). Mark your clients, then delete the key and unset the variable.
 
 ## Multi-replica deployments
 
@@ -129,7 +129,7 @@ An allowlist is a network control, not a cryptographic one. The edge must also *
 
 **Point `adapters.rateLimiter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. The memory adapter is also **evadable under bucket exhaustion**: it caps itself at 10,000 buckets and, at the cap, admitting a new key evicts the bucket closest to reset — so an attacker who can present many source IPs (and `req.ip` is client-influenced whenever `HTTP_TRUST_PROXY` is broader than your actual hops) can churn the table until a target's counter is evicted and starts over. That is acceptable for one dev process; it is not a production rate limit. `/session/login` does not run on this component, nor does `POST /oauth/device/verification` once you add the device grant: each one's own attempt limit (`session.rateLimit.login`, `device-grant.rateLimit`) is counted on the attempt counter, and no limiter setting changes it.
 
-**The MFA routes' budget is the limiter's.** The MFA package ships no budget for its routes: every `/session/mfa` POST is limited per client address under the prefix `mfa` by the wired limiter alone. `config/application.conf` gives both limiters `limits.mfa { limit = 60, windowSeconds = 300 }` (`core-rate-limiter-memory.limits.mfa`, `redis-rate-limiter.limits.mfa`), so switching `adapters.rateLimiter` keeps it; change it there. Without an entry the limiter's `defaultLimit`, 60 per 60 s, applies. The MFA lock — attempts per transaction, the backoff, the weekly failures — is the MFA package's own and no limiter setting changes it.
+**The MFA routes' budget is the limiter's.** The MFA package ships no budget for its routes: every `/session/mfa` POST is limited per client address under the prefix `mfa` by the wired limiter alone. `config/reference.conf` gives both limiters `limits.mfa { limit = 60, windowSeconds = 300 }` (`core-rate-limiter-memory.limits.mfa`, `redis-rate-limiter.limits.mfa`), so switching `adapters.rateLimiter` keeps it. It is a default there, so the limiter the composition does not wire carries it without boot naming its section; change it for the wired limiter in `config/application.conf` or a layer of your own. Without an entry the limiter's `defaultLimit`, 60 per 60 s, applies. The MFA lock — attempts per transaction, the backoff, the weekly failures — is the MFA package's own and no limiter setting changes it.
 
 **Point `adapters.attemptCounter` at Redis.** It defaults to `"memory"`, which wires no counter: the login — and device verification, when you add the device grant — counts its attempts per process, so with N replicas `session.rateLimit.login` (and `device-grant.rateLimit`) allows N times its limit and resets on every deploy, and `CORE_DEPLOYMENT_MODE=multi` refuses the boot. `"redis"` (`ADAPTERS_ATTEMPT_COUNTER=redis`) installs `redisAttemptCounterModule` on the shared Redis socket. Its Redis must run `maxmemory-policy noeviction` (Redis's default): an evicted window would start the count over. The module refuses to boot on any other policy it reads; when the server will not tell it (`INFO` and `CONFIG` refused or renamed) it boots and warns `attempt_counter_durability_unchecked`, so confirm the policy where the server is configured. Both fail closed: while the counter cannot answer, `/session/login` and `POST /oauth/device/verification` answer `503`, whatever `redis-rate-limiter.failMode` says.
 
@@ -300,7 +300,10 @@ Configuration is loaded from `config/application.conf` (HOCON format), over the 
    `http.cors`), `key-store`, the shared Redis connection's `redis-clients`,
    `repositories`, the in-process code repository's
    `standalone-in-memory-code-repository` and `audit-sink` — and of the
-   composition root's own `adapters` and `mfaMode` (below). Set a deployment's own value in
+   composition root's own `adapters` and `mfaMode` (below), and the MFA
+   routes' budget in both rate limiters' sections
+   (`core-rate-limiter-memory.limits.mfa`, `redis-rate-limiter.limits.mfa`;
+   see [Multi-replica deployments](#multi-replica-deployments)). Set a deployment's own value in
    the two files above, not there. `config/reference.conf` binds each of these
    keys' variables beside its default, so a value either file above sets wins
    over the variable, except for `HTTP_PORT`, `HTTP_TRUST_PROXY`,
@@ -338,7 +341,17 @@ layered yet. A module you add to `buildModules` reads its own section at
 boot (`deps.section`), never when it is built. The log level is read before boot too, as
 the `logging` module's section, with that module's schema, over the template's
 `reference.conf` (`readLogging`): the logger exists before boot, since the
-template logs while it reads its configuration and chooses its modules. Then it hands `createApp` the configuration as resolved over every
+template logs while it reads its configuration and chooses its modules.
+What the template refuses of the configuration before boot — `adapters`,
+`mfaMode` and `logging` in phase one, and what it builds for boot below
+(`resolveForBoot`) — is a `BootError` under the reason boot raises for the
+same case (`config-path-relocated`, `environment-variable-renamed`,
+`config-validation-failed`, `module-section-path-invalid`;
+[`src/bootRefusal.mts`](src/bootRefusal.mts)), so an alert on a boot error's
+reason sees it too. Not every failure to start carries a reason: a
+`CONFIG_ENV` naming a file outside `config/` is a plain `Error`, a missing
+`{ENV}.conf` or a file HOCON cannot parse is the HOCON library's error, and
+a failure after boot, such as a port the listener cannot bind, is its own. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed, with
 `core.sessionRequirements` as the MFA switch expects it written in — the
 configuration's list with `mfa` added when the switch installs MFA; a value

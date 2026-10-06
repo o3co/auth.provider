@@ -17,7 +17,8 @@
 /**
  * The origins core's CORS middleware lets read are the `httpSettings` slot's,
  * and nothing else's: a composition without the slot allows no origin, and a
- * `cors` section in the configuration refuses the boot, since core reads none.
+ * `cors` section in the configuration that sets anything refuses the boot,
+ * since core reads none.
  * A slot whose origins break the slot's contract refuses the boot, naming the
  * member.
  */
@@ -129,19 +130,26 @@ describe("the CORS mount reads the httpSettings slot when the composition holds 
 		await expect(boot([httpModule(undefined)])).rejects.toThrow(/httpSettings/);
 	});
 
-	it("refuses a configuration that still writes cors, beside the slot too, naming httpSettings", async () => {
-		await expect(
-			createApp({
-				modules: [
-					tokenRoute,
-					httpModule(createTestHttpSettings({ allowedOrigins: [SLOT_ORIGIN] })),
-				],
-				bootstrapComponents: {
-					config: { ...makeValidCoreConfig(), cors: { allowedOrigins: [CONFIG_ORIGIN] } },
-					pathResolver: (s: string) => s,
-				} as never,
-			}),
-		).rejects.toThrow(/cors is no longer read by core[\s\S]*httpSettings/);
+	it("refuses a configuration that still writes cors, beside the slot too, naming httpSettings and no origin", async () => {
+		const err: unknown = await createApp({
+			modules: [tokenRoute, httpModule(createTestHttpSettings({ allowedOrigins: [SLOT_ORIGIN] }))],
+			bootstrapComponents: {
+				config: { ...makeValidCoreConfig(), cors: { allowedOrigins: [CONFIG_ORIGIN] } },
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return expect.fail("boot should have been refused");
+			},
+			(thrown: unknown) => thrown,
+		);
+
+		expect(err).toMatchObject({ reason: "config-validation-failed" });
+		expect(String((err as Error).message)).toMatch(
+			/cors is no longer read by core[\s\S]*httpSettings/,
+		);
+		expect(String((err as Error).message)).not.toContain(CONFIG_ORIGIN);
 	});
 
 	it("reads a slot the host fills through overrideComponents", async () => {

@@ -123,9 +123,7 @@ const harness = async (options: HarnessOptions = {}) => {
 			...(options.subjectRevocation === undefined
 				? {}
 				: { subjectRevocation: options.subjectRevocation }),
-			...(options.sessionLifecycleStore === undefined
-				? {}
-				: { sessionLifecycleStore: options.sessionLifecycleStore }),
+			sessionLifecycleStore: options.sessionLifecycleStore ?? createInMemorySessionLifecycleStore(),
 			requirements: resolverForTests(options.requirements ?? [], {
 				issuer: ISSUER,
 				actions: DEVICE_GRANT_ADMISSION_ACTIONS,
@@ -453,6 +451,7 @@ describe("device verification on session admission", () => {
 				attemptLimit: { limit: 5, windowSeconds: 300 },
 				deploymentMode: "single",
 				userSessionStore: liveSessionStore(),
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 				requirements: forged,
 				requireEmailVerified: false,
 			} as never),
@@ -469,6 +468,7 @@ describe("device verification on session admission", () => {
 				attemptLimit: { limit: 5, windowSeconds: 300 },
 				deploymentMode: "single",
 				userSessionStore: liveSessionStore(),
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 				requirements: resolverForTests([], {
 					actions: { "device.lookup": { grade: "grants_nothing" } },
 				}),
@@ -486,6 +486,7 @@ describe("device verification on session admission", () => {
 			attemptLimit: { limit: 5, windowSeconds: 300 },
 			deploymentMode: "single",
 			userSessionStore: liveSessionStore(),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			requirements: resolverForTests(
 				[fixture(() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }))],
 				{ issuer: "https://pages.example.test", actions: DEVICE_GRANT_ADMISSION_ACTIONS },
@@ -515,6 +516,7 @@ describe("device verification on session admission", () => {
 				attemptLimit: { limit: 5, windowSeconds: 300 },
 				deploymentMode: "single",
 				userSessionStore: liveSessionStore(),
+				sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 				requireEmailVerified: false,
 			} as never),
 		).toThrow(/^createDeviceVerificationHandler: requirements is required/);
@@ -605,6 +607,7 @@ describe("an approval records the session's authentication", () => {
 		const { verify } = await harness({
 			requireEmailVerified: true,
 			userSessionStore: aheadOfClock(),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 		});
 		const res = await verify({ action: "approve", user_code: USER_CODE });
 		expect(res.status).toBe(401);

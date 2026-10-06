@@ -125,7 +125,8 @@ interface Setup {
 	readonly record?: UserSession | null | Error;
 	readonly requirement?: SessionRequirement;
 	readonly subjectRevocation?: SubjectRevocation;
-	readonly sessionLifecycleStore?: SessionLifecycleStore;
+	/** Core's session lifecycle port beside the store; an in-memory one by default, none when `null`. */
+	readonly sessionLifecycleStore?: SessionLifecycleStore | null;
 	readonly logger?: ReturnType<typeof spyLogger>;
 	/** Leave the store out of the deps, as no composition can (the module requires it). */
 	readonly noStore?: boolean;
@@ -175,9 +176,12 @@ function setup(options: Setup = {}) {
 		}),
 		...(options.noStore ? {} : { userSessionStore }),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
-		...(options.sessionLifecycleStore
-			? { sessionLifecycleStore: options.sessionLifecycleStore }
-			: {}),
+		...(options.sessionLifecycleStore === null
+			? {}
+			: {
+					sessionLifecycleStore:
+						options.sessionLifecycleStore ?? createInMemorySessionLifecycleStore(),
+				}),
 		...(options.logger ? { logger: options.logger as unknown as Logger } : {}),
 	});
 	const app = express();
@@ -233,6 +237,7 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 				actions: SESSION_SUBJECT_ADMISSION_ACTIONS,
 			}),
 			userSessionStore: {} as never,
+			sessionLifecycleStore: {} as never,
 		});
 		expect(contribution.id).toBe("webauthn-session-subject");
 		expect(contribution.mountPath).toBe("/oauth/webauthn/registration");
@@ -263,6 +268,12 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 			}),
 		).toThrow(
 			/^webauthnSessionSubjectModule: admits "webauthn\.register", which no module registers/,
+		);
+	});
+
+	it("refuses, when its route is built, a user-session store without core's session lifecycle port, naming both slots", () => {
+		expect(() => setup({ sessionLifecycleStore: null })).toThrow(
+			/^webauthn-session-subject: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*Wire core's session lifecycle: a session-store module that fills sessionLifecycleStore/,
 		);
 	});
 

@@ -5,6 +5,7 @@ import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createSymmetricKeyStore,
 	type TokenBinding,
@@ -24,6 +25,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
 	COMPOUND_MTLS_BINDING,
@@ -94,6 +96,7 @@ async function buildApp(
 			oauthTokenSettings: createTestOAuthTokenSettings(),
 			keyStore,
 			userSessionStore: store,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 		} as SessionGrantDeps),
 	);
 	const { router } = await createOAuthRouter(express, {
@@ -103,7 +106,9 @@ async function buildApp(
 		keyStore,
 		codeRepository,
 		clientRepository,
-		userSessionStore: store,
+		...(store === undefined
+			? {}
+			: { userSessionStore: store, sessionLifecycle: livenessOver(store) }),
 	});
 	const app = express();
 	app.use((req, _res, next) => {

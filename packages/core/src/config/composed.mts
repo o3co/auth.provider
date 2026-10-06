@@ -15,39 +15,15 @@
  */
 
 /**
- * The configuration as boot's one composed parse reads it, while core's
- * schema still mirrors sections other packages own. A composition root hands
- * `createApp` the configuration it resolved (the HOCON it layered, never
- * parsed first), and boot parses it once:
- *
- * 1. with the transitional base, {@link TransitionalConfigSchema}: core's own
- *    sections, and every section core's schema mirrors for a package, each
- *    optional;
- * 2. laid over what was written ({@link overlayConfig}), so a key no schema
- *    declares is kept, not stripped;
- * 3. then by the modules' own `configSchema`s, and by each module's section
- *    schema at its path, which boot writes back there.
- *
- * {@link readTransitionalConfig} is steps 1 and 2 alone, over the paths a
- * composition root reads before it knows its modules. Both are transitional:
- * they go once core mirrors no section and the composition root reads only
- * its own section first.
+ * The pieces of boot's one composed parse of the configuration a composition
+ * root hands `createApp` (the HOCON it resolved, never parsed first): how a
+ * schema's parse is laid over what was written ({@link overlayConfig}), so a
+ * key no schema declares is kept, not stripped; how a key is written; how a
+ * Zod issue path is named to the operator; and how a refused parse becomes
+ * one `RangeError` ({@link parsedOrRefused}).
  */
 
 import type { z } from "zod";
-import { type AppConfig, CoreConfigSchema, fullSectionsSchema } from "./application.schema.mjs";
-import { withoutRenamedVariables } from "./removed-keys.mjs";
-import { pickConfigSchema } from "./schema-path.mjs";
-
-/**
- * The transitional base of boot's one composed parse: core's own sections,
- * required, and every section `fullSectionsSchema` mirrors for another
- * package's module, made optional. Each keeps its coercions and checks (a
- * `${?VAR}` string read as a number or a boolean, a value outside its
- * vocabulary refused), so a mirrored section is validated whenever a
- * configuration carries it, loaded module or not.
- */
-export const TransitionalConfigSchema = CoreConfigSchema.extend(fullSectionsSchema.partial().shape);
 
 /**
  * An object literal's kind of object: its prototype is `Object.prototype`, or
@@ -114,40 +90,6 @@ export function defineConfigKey(
 /** A Zod issue path as the operator writes it: its keys joined with dots. */
 export function operatorPath(path: readonly PropertyKey[]): string {
 	return path.map(String).join(".");
-}
-
-/**
- * What a composition root reads before it knows its modules (transitional):
- * the values at `reads` (the switches it chooses its modules by), each parsed
- * with the schema the transitional base declares at that path
- * (`pickConfigSchema`) and laid over `raw`, so every key it does not read
- * stays as written.
- *
- * Only `reads` is parsed. Before the modules are known, `raw` is resolved
- * over core's `reference.conf` alone, so a default only a package's
- * reference sets is missing, and a section it completes (an operator's
- * `rateLimit.limit` whose `windowSeconds` the package ships) would be refused
- * here though boot accepts it. Read no such section here. Use the answer to
- * choose the modules and for what the root needs before boot; hand
- * `createApp` the resolved configuration itself.
- *
- * An absent ancestor of a read path reads as the base's default, if any, as
- * boot's parse does. A refused value is
- * a `RangeError` naming each operator path, with the Zod error as its
- * `cause`; so is a path the base does not declare as one schema, or one
- * beneath a value the base transforms whole (read the shorter path).
- *
- * The captures of renamed variables (`renamed-variables`) are left out, as
- * boot leaves them out of its parse: they are no setting.
- *
- * Typed `AppConfig`, the type the module factories take, though only `reads`
- * is parsed: the base's own output type, every mirrored section optional, is
- * not one they accept.
- */
-export function readTransitionalConfig(raw: unknown, reads: readonly string[]): AppConfig {
-	const written = withoutRenamedVariables(raw);
-	const parsed = parsedOrRefused(pickConfigSchema(TransitionalConfigSchema, reads), written);
-	return overlayConfig(written, parsed) as AppConfig;
 }
 
 /**

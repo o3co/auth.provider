@@ -160,8 +160,8 @@ interface WorldOptions {
 	readonly login?: LoginEntry;
 	/** The `csrfGuard` slot: core's double, trusting {@link TRUSTED_SIBLING}, by default. */
 	readonly csrfGuard?: CsrfGuard;
-	/** The session lifecycle port admission reads after a live record; none by default. */
-	readonly sessionLifecycleStore?: SessionLifecycleStore;
+	/** The session lifecycle port admission reads after a live record; an in-memory one by default, none when `null`. */
+	readonly sessionLifecycleStore?: SessionLifecycleStore | null;
 }
 
 function world(options: WorldOptions = {}) {
@@ -308,7 +308,12 @@ function world(options: WorldOptions = {}) {
 					return state.sessionsBoundary;
 				},
 			},
-			sessionLifecycleStore: options.sessionLifecycleStore,
+			...(options.sessionLifecycleStore === null
+				? {}
+				: {
+						sessionLifecycleStore:
+							options.sessionLifecycleStore ?? createInMemorySessionLifecycleStore(),
+					}),
 			requirements: resolverForTests(options.requirements ?? [], {
 				issuer: ISSUER,
 				actions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
@@ -4331,6 +4336,12 @@ describe("the browser half on session admission", () => {
 				"createFederationGrantBrowserRouter: subjectRevocation is required — the sessions " +
 					"boundary a session must have authenticated after is read through it",
 			),
+		);
+	});
+
+	it("refuses to be built with a userSessionStore and no sessionLifecycleStore, naming both slots", () => {
+		expect(() => world({ sessionLifecycleStore: null })).toThrow(
+			/userSessionStore is wired, but sessionLifecycleStore is not/,
 		);
 	});
 

@@ -28,7 +28,10 @@
  */
 
 import type { ClientRepository, Logger, UserSessionStore } from "@o3co/auth-provider-core";
-import { createMemoryDeviceCodeStore } from "@o3co/auth-provider-core";
+import {
+	createInMemorySessionLifecycleStore,
+	createMemoryDeviceCodeStore,
+} from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import {
 	createCsrfProtectionFromConfig,
@@ -111,6 +114,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 		clientRepository,
 		deviceCodeStore: store,
 		userSessionStore: sessionsAuthenticatedBeforeNow(),
+		sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 		deploymentMode: "single",
 		logger,

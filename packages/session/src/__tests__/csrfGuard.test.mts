@@ -53,6 +53,7 @@ import {
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
+import { sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 const TRUSTED = "https://app.contract.test";
 
@@ -200,6 +201,7 @@ const stores = [
 		authenticate: async () => null,
 		authenticateByToken: async () => null,
 	} as unknown as UserRepository),
+	sessionLifecycleTestModule(),
 	providing("test:user-session-store", "userSessionStore", {
 		kind: "memory",
 		async create() {},

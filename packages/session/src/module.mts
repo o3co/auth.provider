@@ -176,8 +176,8 @@ const csrfGuardOf = (
  *
  * `requires`: `userRepository`; core's `federationSettings`, the federations
  * `core.federations` declares (each enabled one's callback URL, and whether
- * an installed one's upstream `amr` counts); the three stores these routes
- * use (`userSessionStore`, `federationTokenStore`, `sessionFederationIndex`);
+ * an installed one's upstream `amr` counts); the two stores these routes
+ * use (`userSessionStore`, `federationTokenStore`);
  * `csrfTokenSigner`, what the CSRF token is signed and checked with (the
  * session store's module provides it from `session-store.secret`, which this
  * module never reads); `sessionCookiePolicy`, the session cookie's name,
@@ -199,7 +199,6 @@ export const sessionModule = defineModule<
 	| "userRepository"
 	| "userSessionStore"
 	| "federationTokenStore"
-	| "sessionFederationIndex"
 	| "csrfTokenSigner"
 	| "sessionCookiePolicy"
 	| "federationProviders"
@@ -222,7 +221,6 @@ export const sessionModule = defineModule<
 		"userRepository",
 		"userSessionStore",
 		"federationTokenStore",
-		"sessionFederationIndex",
 		"csrfTokenSigner",
 		"sessionCookiePolicy",
 		"federationProviders",
@@ -236,9 +234,11 @@ export const sessionModule = defineModule<
 	// `subjectSessionIndex`, `revokeAllForSubject` reports the capability as
 	// unavailable; `subjectRevocation` is the boundary, and
 	// `sessionLifecycleStore` the lifecycle port, the link routes' admission
-	// reads when wired; `sessionLifecycle`, core's session lifecycle, where its
-	// module is installed, opens each login's session record and is what
-	// `POST /session/logout` closes the session through.
+	// reads when wired. `sessionLifecycle`, core's session lifecycle, opens
+	// each login's session record, joins its federations and is what
+	// `POST /session/logout` closes the session through: required beside
+	// `userSessionStore`, the route factories refuse a composition without it,
+	// naming both.
 	optional: [
 		"logger",
 		"attemptCounter",
@@ -301,13 +301,6 @@ export const sessionModule = defineModule<
 						sessionCookie: deps.sessionCookiePolicy,
 						deploymentMode: deps.deploymentMode,
 						userSessionStore: deps.userSessionStore,
-						// `POST /session/logout` invalidates the records the session
-						// owns, not just the cookie, without core's session lifecycle;
-						// with it, the lifecycle's close does. Both stores are already in
-						// this module's `requires` for the federation routes, so handing
-						// them to the session routes adds no manifest surface.
-						federationTokenStore: deps.federationTokenStore,
-						sessionFederationIndex: deps.sessionFederationIndex,
 						// The CSRF token's signer, the one `csrfGuard` signs with.
 						csrfTokenSigner: deps.csrfTokenSigner,
 						...(deps.attemptCounter ? { attemptCounter: deps.attemptCounter } : {}),
@@ -336,7 +329,6 @@ export const sessionModule = defineModule<
 						providerCallbackUrls: providerCallbackUrlsOf(deps.federationSettings),
 						userRepository: deps.userRepository,
 						userSessionStore: deps.userSessionStore,
-						sessionFederationIndex: deps.sessionFederationIndex,
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						// The link flow admits its session with these: the resolver,
 						// read per request, and the boundary when it is wired.

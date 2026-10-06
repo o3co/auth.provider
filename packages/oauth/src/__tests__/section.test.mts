@@ -151,13 +151,13 @@ describe("every level refuses a key it does not declare, at its path", () => {
 		},
 	);
 
+	it("does not declare oauth.jwt's flat key fields, which core retired and refuses naming what became of them", () => {
+		expect(issuesOf(withValue("jwt", { issuer: "https://auth.test", algorithm: "HS256" }))).toEqual(
+			[{ path: "jwt", message: 'Unrecognized key: "algorithm"', code: "unrecognized_keys" }],
+		);
+	});
+
 	it.each([
-		[
-			"oauth.jwt's flat key fields",
-			"jwt",
-			{ issuer: "https://auth.test", algorithm: "HS256" },
-			"algorithm",
-		],
 		[
 			"oauth.refreshToken.legacyTokenCompat",
 			"refreshToken.legacyTokenCompat",
@@ -183,12 +183,12 @@ describe("every level refuses a key it does not declare, at its path", () => {
 			"allowUnmarkedClients",
 		],
 	])(
-		"does not declare %s, which core retired and refuses naming what became of it",
+		"does not declare %s, which the module's section declares removed (relocatedFrom) and boot refuses before parsing",
 		(_what, path, value, key) => {
 			const found = issuesOf(withValue(path, value));
 			expect(found).toEqual([
 				{
-					path: path === "jwt" ? "jwt" : path.slice(0, path.lastIndexOf(".")),
+					path: path.slice(0, path.lastIndexOf(".")),
 					message: `Unrecognized key: "${key}"`,
 					code: "unrecognized_keys",
 				},

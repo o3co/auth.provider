@@ -28,6 +28,7 @@
 import { createSecretKey } from "node:crypto";
 import {
 	type AppConfig,
+	createInMemorySessionLifecycleStore,
 	createInMemorySubjectRevocation,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRevocation,
@@ -167,7 +168,13 @@ const makeGrant = (opts: {
 			issuer: "https://issuer.test",
 			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
-		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		// Core's session lifecycle port, required beside a user-session store.
+		...(opts.userSessionStore
+			? {
+					userSessionStore: opts.userSessionStore,
+					sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+				}
+			: {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 	});

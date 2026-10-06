@@ -6,12 +6,11 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
 import { replicaUnsafeReason } from "#/boot/replica-safety.mjs";
 import { BootError, type BootstrapMap } from "#/boot/types.mjs";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { defineModule, type Module } from "#/modules/manifest/index.mjs";
 import type { MemoryReplaySeenSet } from "#/replay-seen-set/adapters/memory.mjs";
 import { DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES } from "#/replay-seen-set/adapters/memory.mjs";
 import { memoryReplaySeenSetModule } from "#/replay-seen-set/module.mjs";
-import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * Boots `module` over the core fixture with `extra` merged in at the top,
@@ -77,17 +76,6 @@ describe("memoryReplaySeenSetModule", () => {
 			await handle.dispose();
 			return set;
 		};
-
-		it("keeps the path the cap moved from through the schema a composition root parses with, for the refusal", () => {
-			// `AppConfigSchema` strips what it does not declare, before any module runs.
-			const parsed = AppConfigSchema.parse({
-				...makeValidAppConfig(),
-				replaySeenSet: { memory: { maxEntries: "5000" } },
-			});
-			expect((parsed.replaySeenSet as { memory?: unknown } | undefined)?.memory).toEqual({
-				maxEntries: "5000",
-			});
-		});
 
 		it("refuses replaySeenSet.memory.maxEntries at boot, naming core-replay-seen-set-memory.maxEntries", async () => {
 			const err = await refusalOf(

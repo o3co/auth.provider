@@ -72,8 +72,12 @@ const resolvedAt = (path: string, env: Readonly<Record<string, string>> = {}): u
 describe("the package's config/reference.conf", () => {
 	it("is read at the section named after each store module that reads configuration", () => {
 		expect(
-			MODULES.map((module) => [module.name, module.section !== undefined, module.section?.at]),
-		).toEqual(MODULES.map((module) => [module.name, true, undefined]));
+			MODULES.map((module) => [
+				module.name,
+				module.section !== undefined,
+				Object.hasOwn(module.section ?? {}, "at"),
+			]),
+		).toEqual(MODULES.map((module) => [module.name, true, false]));
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {

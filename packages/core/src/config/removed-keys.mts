@@ -37,6 +37,9 @@
  * (`environment-variable-renamed`). Both refusals are removed at the first
  * major release; `relocatedPaths.drift.test.mts` fails the cut that forgets.
  *
+ * A top-level section core reads none of is refused in the same words
+ * (`unreadSectionMessage`), by whoever owns what the section used to set.
+ *
  * `z.preprocess` compiles to a pipe the `@o3co/ts.hocon` zod bridge does not
  * descend into, so every field under a wrapped section must coerce on its own
  * (`coerceBooleanFromEnv`, `wholeNumberFromEnv`).
@@ -56,27 +59,6 @@ import { environmentVariableFor } from "./environment-variable.mjs";
  */
 function goneKeyMessage(path: string, whatBecameOfIt: string, remedy: string): string {
 	return `${path} ${whatBecameOfIt}; see CHANGELOG. ${remedy}`;
-}
-
-/**
- * A top-level section core no longer reads, as a schema: absent, it is
- * nothing; present, whatever it holds, it is refused, naming the section and
- * what to do instead, and quoting nothing of its value. For a section whose
- * reader moved into a module core cannot name: a loaded module that relocates
- * the section refuses it first, before parse, in its own words.
- */
-export function unreadSection(name: string, remedy: string) {
-	const message = goneKeyMessage(
-		name,
-		"is no longer read by core",
-		`${remedy} Remove this section from your config.`,
-	);
-	return z
-		.unknown()
-		.superRefine((_value, ctx) => {
-			ctx.addIssue({ code: "custom", message });
-		})
-		.optional();
 }
 
 /** One removed key: what to tell the operator still setting it. */
@@ -262,6 +244,20 @@ export function findRelocatedKeys<R extends RelocatedPath>(
 
 /** What every relocated key's message ends with: remove it, from the file or the environment. */
 const THIS_FIELD = "this field from your config (or unset the environment variable that sets it).";
+
+/**
+ * What to tell the operator still writing a top-level section core reads
+ * none of, in the words a removed key is refused in: the section, what to do
+ * instead (`remedy`, full sentences), and to remove it. Quotes nothing of
+ * its value.
+ */
+export function unreadSectionMessage(section: string, remedy: string): string {
+	return goneKeyMessage(
+		section,
+		"is no longer read by core",
+		`${remedy} Remove this section from your config (or unset the environment variable that sets it).`,
+	);
+}
 
 /** What to tell the operator still setting a relocated key, in the words a removed key is refused in. */
 export function relocatedKeyMessage(key: RelocatedKey): string {

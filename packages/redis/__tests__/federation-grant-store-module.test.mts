@@ -405,6 +405,12 @@ describe("the Redis federation grant store module", () => {
 			expect(() =>
 				build({ encryptionMode: "allow-plaintext" }, { environment: "production" }),
 			).toThrow(/\[federation-grants\] mode "allow-plaintext" is refused/);
+			// The environment's name is read whatever its case and the whitespace around it.
+			expect(() =>
+				build({ encryptionMode: "allow-plaintext" }, { environment: "Staging\n" }),
+			).toThrow(
+				/\[federation-grants\] mode "allow-plaintext" is refused because the environment is "staging"/,
+			);
 			expect(() => build({ encryptionMode: "allow-plaintext" }, {}, "multi")).toThrow(
 				/\[federation-grants\]/,
 			);

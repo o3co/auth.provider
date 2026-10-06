@@ -731,6 +731,17 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+(?:readEnvironmentName|productionEnvironmentIn)\b/,
 	},
 	{
+		// A private copy of the guard under another name still lists the two
+		// names: an array of them, in either order and either quote, is the
+		// rule restated, wherever it is spread, wrapped in a Set or tested.
+		concept:
+			"the environment names a development-only guard refuses — production and staging, as one list",
+		home: "packages/core/src/deployment/environment.mts",
+		definition:
+			/\[\s*(["'`])production\1\s*,\s*(["'`])staging\2\s*,?\s*\]|\[\s*(["'`])staging\3\s*,\s*(["'`])production\4\s*,?\s*\]/,
+		homeMatches: 1,
+	},
+	{
 		concept: "an email address as the provider digests and compares it",
 		home: "packages/core/src/mail/address.mts",
 		definition: /(?:function|const)\s+normaliseMailAddress\b/,
@@ -1888,8 +1899,8 @@ function sessionRecordReadSites(): Map<string, SessionRecordRead[]> {
 }
 
 /**
- * Core's configuration schema: the one schema that declares `deployment` —
- * under core's own section, and presence-only at the path it moved from.
+ * Core's configuration schema: the one schema that declares `deployment`,
+ * under core's own section.
  */
 const DEPLOYMENT_SCHEMA_HOME = "packages/core/src/config/application.schema.mts";
 
@@ -2532,7 +2543,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			Object.entries(deploymentTouchSites("schema")).map(([file, found]) => [file, found.length]),
 		);
 		expect(counts, "the section is core's: a module requires the deploymentMode slot").toEqual({
-			[DEPLOYMENT_SCHEMA_HOME]: 2,
+			[DEPLOYMENT_SCHEMA_HOME]: 1,
 		});
 	});
 
@@ -2547,6 +2558,31 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		for (const row of VOCABULARY) {
 			// The doc names the home path, so map and guard cannot drift apart.
 			expect(doc, `docs/design-vocabulary.md must name ${row.home}`).toContain(row.home);
+		}
+	});
+
+	it("flags a private list of the production environment names under any name, and not the names alone", () => {
+		const row = VOCABULARY.find(
+			({ concept }) =>
+				concept ===
+				"the environment names a development-only guard refuses — production and staging, as one list",
+		);
+		expect(row?.home).toBe("packages/core/src/deployment/environment.mts");
+		const definition = row?.definition ?? /$^/;
+		for (const copy of [
+			'const PROD = new Set(["production", "staging"]);',
+			"const blocked = ['staging', 'production'];",
+			"if ([`production`,\n  `staging`,\n].includes(env)) {}",
+		]) {
+			expect(definition.test(copy), copy).toBe(true);
+		}
+		for (const other of [
+			'type Name = "production" | "staging";',
+			'const only = ["production"];',
+			'const modes = ["production", "development"];',
+			'if (env === "production") {}',
+		]) {
+			expect(definition.test(other), other).toBe(false);
 		}
 	});
 

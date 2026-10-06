@@ -30,6 +30,8 @@ import {
 	passwordPrimary,
 	passwordSessionAuthentication,
 	resumePrimary,
+	type SessionCloseCause,
+	type SessionCloseOutcome,
 	type SessionLifecycle,
 	type SessionOpenOutcome,
 	type SessionRequirement,
@@ -71,6 +73,9 @@ async function passwordEstablishment(redirectTo?: string): Promise<Establishment
 	return admission.establishment;
 }
 
+/** An outcome the lifecycle's types do not declare: anything but a success is acted on as an outage. */
+const UNDECLARED = "undeclared";
+
 type Failures = {
 	readonly create?: Error;
 	readonly addSid?: Error;
@@ -86,6 +91,8 @@ type Failures = {
 	readonly beforeUndo?: Error;
 	readonly after?: Error;
 	readonly afterUndo?: Error;
+	/** The lifecycle's `close` rejects with it, or answers an outcome it does not declare. */
+	readonly close?: Error | typeof UNDECLARED;
 };
 
 type FakeSession = Record<string, unknown> & {
@@ -107,8 +114,11 @@ function harness(
 		readonly redirectTo?: string;
 		/** The reporter's calls join the trace where they happen. */
 		readonly traceReporter?: boolean;
-		/** A session lifecycle whose `open` answers this, or rejects with it. Absent: none is wired. */
-		readonly lifecycle?: SessionOpenOutcome["outcome"] | Error;
+		/**
+		 * A session lifecycle whose `open` answers this (`opened` when absent), or
+		 * rejects with it; `false`: none is wired.
+		 */
+		readonly lifecycle?: "opened" | "refused" | typeof UNDECLARED | Error | false;
 	} = {},
 ) {
 	const trace: string[] = [];
@@ -149,9 +159,17 @@ function harness(
 		open: vi.fn(async (_sid: string, _request: { sub: string; expiresAt: Date }) => {
 			trace.push("open");
 			if (shape.lifecycle instanceof Error) throw shape.lifecycle;
-			return { outcome: shape.lifecycle ?? "opened" } as SessionOpenOutcome;
+			return { outcome: shape.lifecycle || "opened" } as unknown as SessionOpenOutcome;
 		}),
-	} satisfies Pick<SessionLifecycle, "open">;
+		close: vi.fn(async (_sid: string, _cause: SessionCloseCause): Promise<SessionCloseOutcome> => {
+			trace.push("close");
+			if (fail.close instanceof Error) throw fail.close;
+			if (fail.close === UNDECLARED) {
+				return { outcome: UNDECLARED } as unknown as SessionCloseOutcome;
+			}
+			return { outcome: "done", rps: [], federations: [] };
+		}),
+	} satisfies Pick<SessionLifecycle, "open" | "close">;
 
 	// The express session: `regenerate` swaps in a fresh bag, as express-session
 	// does, so a test can tell the flags landed on the new one and not the old.
@@ -199,7 +217,7 @@ function harness(
 			req: req as unknown as Request,
 			...(shape.userSessionStore === false ? {} : { userSessionStore }),
 			...(shape.subjectSessionIndex === false ? {} : { subjectSessionIndex }),
-			...(shape.lifecycle === undefined ? {} : { sessionLifecycle }),
+			...(shape.lifecycle === false ? {} : { sessionLifecycle }),
 			sessionTtlMs: TTL_MS,
 			...(shape.steps === false ? {} : { beforeRegenerate: [before], afterRegenerate: [after] }),
 			reporter: reporterFactory,
@@ -260,6 +278,7 @@ describe("establishSession", () => {
 				req: h.req as unknown as Request,
 				userSessionStore: h.userSessionStore,
 				subjectSessionIndex: h.subjectSessionIndex,
+				sessionLifecycle: h.sessionLifecycle,
 				sessionTtlMs: TTL_MS,
 				reporter: h.reporterFactory,
 			} as never);
@@ -433,6 +452,7 @@ describe("establishSession", () => {
 
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
@@ -516,10 +536,12 @@ describe("establishSession", () => {
 
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"before",
 				"regenerate",
 				"before-undo",
+				"close",
 				"delete",
 			]);
 		});
@@ -535,6 +557,7 @@ describe("establishSession", () => {
 			expect(h.reporter.storeUnavailable).not.toHaveBeenCalled();
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
@@ -569,7 +592,7 @@ describe("establishSession", () => {
 			});
 		});
 
-		it.each(["unavailable", "refused"] as const)(
+		it.each(["refused", UNDECLARED] as const)(
 			"an open answered %s is the record's outage at create: nothing else written, nothing undone, the cookie session kept",
 			async (outcome) => {
 				const h = harness({}, { lifecycle: outcome });
@@ -590,23 +613,124 @@ describe("establishSession", () => {
 			},
 		);
 
-		it("an open that throws is the record's outage at create, named as the lifecycle's, its error the cause", async () => {
-			const thrown = new RangeError("session lifecycle: sub must be 1 to 512 characters");
-			const h = harness({}, { lifecycle: thrown });
+		it.each([
+			["the lifecycle store's error", new Error("lifecycle store down")],
+			[
+				"the lifecycle's refusal",
+				new RangeError("session lifecycle: sub must be 1 to 512 characters"),
+			],
+		])(
+			"an open that rejects with %s is the record's outage at create, reported with that error itself",
+			async (_label, thrown) => {
+				const h = harness({}, { lifecycle: thrown });
+
+				const result = await h.run();
+
+				expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
+				expect(h.trace).toEqual(["reporter", "open"]);
+				expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+					"user_session",
+					"create",
+					thrown,
+				);
+				expect(h.reporter.cleanupFailed).not.toHaveBeenCalled();
+				expect(h.req.session).toMatchObject({ id: "stale" });
+			},
+		);
+
+		it("refuses a UserSessionStore without a session lifecycle, naming both, before anything is written", async () => {
+			const h = harness({}, { lifecycle: false });
+
+			await expect(h.run()).rejects.toThrow(
+				/userSessionStore is wired, but sessionLifecycle is not/,
+			);
+			expect(h.trace).toEqual([]);
+			expect(h.req.session).toMatchObject({ id: "stale" });
+		});
+
+		it("needs no session lifecycle without a UserSessionStore: a sessionless login is the express session alone", async () => {
+			const h = harness({}, { userSessionStore: false, lifecycle: false });
 
 			const result = await h.run();
 
-			expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
-			expect(h.trace).toEqual(["reporter", "open"]);
-			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
-				"user_session",
-				"create",
-				expect.objectContaining({
-					message: "the session lifecycle could not open the session",
-					cause: thrown,
-				}),
+			expect(result).toEqual({ outcome: "established", sid: undefined });
+			expect(h.trace).toEqual(["reporter", "regenerate", "save"]);
+		});
+
+		it("the rollback closes the record it opened, for the record's sid, after the caller's steps are undone and before the record is deleted", async () => {
+			const h = harness({ save: new Error("cookie store down") });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "cookie_session", step: "save" });
+			expect(h.sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith(
+				createdSid(h),
+				"session_logout",
 			);
-			expect(h.req.session).toMatchObject({ id: "stale" });
+			expect(h.trace.slice(-5)).toEqual([
+				"after-undo",
+				"before-undo",
+				"close",
+				"delete",
+				"removeSid",
+			]);
+			expect(h.reporter.cleanupFailed).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			["rejects", new Error("lifecycle store down")],
+			["answers an outcome it does not declare", UNDECLARED] as const,
+		])(
+			"a close that %s is the record's failed rollback step, reported with the lifecycle's rejection itself or named as the lifecycle's answer; the rest still run",
+			async (_label, close) => {
+				const h = harness({ save: new Error("cookie store down"), close });
+
+				await h.run();
+
+				expect(h.trace.slice(-3)).toEqual(["close", "delete", "removeSid"]);
+				expect(h.reporter.cleanupFailed).toHaveBeenCalledExactlyOnceWith(
+					"user_session",
+					"delete",
+					close instanceof Error
+						? close
+						: expect.objectContaining({
+								message: `the session lifecycle answered ${UNDECLARED} to the close`,
+							}),
+				);
+			},
+		);
+
+		it("closes the record it opened when the record's create failed, after the outage is reported", async () => {
+			const h = harness({ create: new Error("session store down") }, { traceReporter: true });
+
+			await h.run();
+
+			expect(h.sessionLifecycle.close).toHaveBeenCalledExactlyOnceWith(
+				createdSid(h),
+				"session_logout",
+			);
+			expect(h.trace).toEqual(["reporter", "open", "create", "outage", "close"]);
+		});
+
+		it("a close that rejects after the record's create failed is reported with the lifecycle's rejection itself", async () => {
+			const close = new Error("lifecycle store down");
+			const h = harness({ create: new Error("session store down"), close });
+
+			await h.run();
+
+			expect(h.reporter.cleanupFailed).toHaveBeenCalledExactlyOnceWith(
+				"user_session",
+				"delete",
+				close,
+			);
+		});
+
+		it("closes nothing when the open itself failed: no record was opened", async () => {
+			const h = harness({}, { lifecycle: "refused" });
+
+			await h.run();
+
+			expect(h.sessionLifecycle.close).not.toHaveBeenCalled();
 		});
 
 		it("opens nothing without a UserSessionStore: there is no record", async () => {
@@ -627,7 +751,7 @@ describe("establishSession", () => {
 			const result = await h.run();
 
 			expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
-			expect(h.trace).toEqual(["reporter", "create"]);
+			expect(h.trace).toEqual(["reporter", "open", "create", "close"]);
 			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
 				"user_session",
 				"create",
@@ -648,7 +772,16 @@ describe("establishSession", () => {
 				store: "session_federation_index",
 				step: "add",
 			});
-			expect(h.trace).toEqual(["reporter", "create", "addSid", "before", "delete", "removeSid"]);
+			expect(h.trace).toEqual([
+				"reporter",
+				"open",
+				"create",
+				"addSid",
+				"before",
+				"close",
+				"delete",
+				"removeSid",
+			]);
 			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
 				"session_federation_index",
 				"add",
@@ -670,11 +803,13 @@ describe("establishSession", () => {
 			});
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
 				"regenerate",
 				"before-undo",
+				"close",
 				"delete",
 				"removeSid",
 			]);
@@ -695,12 +830,14 @@ describe("establishSession", () => {
 			expect(result).toEqual({ outcome: "unavailable", store: "federation_token", step: "attach" });
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
 				"regenerate",
 				"after",
 				"before-undo",
+				"close",
 				"delete",
 				"removeSid",
 			]);
@@ -721,6 +858,7 @@ describe("establishSession", () => {
 			expect(result).toEqual({ outcome: "unavailable", store: "cookie_session", step: "save" });
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
@@ -729,6 +867,7 @@ describe("establishSession", () => {
 				"save",
 				"after-undo",
 				"before-undo",
+				"close",
 				"delete",
 				"removeSid",
 			]);
@@ -749,6 +888,7 @@ describe("establishSession", () => {
 			expect(result).toEqual({ outcome: "unavailable", store: "cookie_session", step: "save" });
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
@@ -757,6 +897,7 @@ describe("establishSession", () => {
 				"save",
 				"after-undo",
 				"before-undo",
+				"close",
 				"delete",
 				"removeSid",
 			]);
@@ -781,11 +922,13 @@ describe("establishSession", () => {
 			});
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
 				"regenerate",
 				"before-undo",
+				"close",
 				"delete",
 				"removeSid",
 			]);
@@ -811,7 +954,13 @@ describe("establishSession", () => {
 			const result = await h.run();
 
 			expect(result).toEqual({ outcome: "unavailable", store: "cookie_session", step: "save" });
-			expect(h.trace.slice(-4)).toEqual(["after-undo", "before-undo", "delete", "removeSid"]);
+			expect(h.trace.slice(-5)).toEqual([
+				"after-undo",
+				"before-undo",
+				"close",
+				"delete",
+				"removeSid",
+			]);
 			expect(h.reporter.cleanupFailed.mock.calls).toEqual([
 				["federation_token", "delete", tokenDown],
 				["user_session", "delete", sessionDown],
@@ -826,10 +975,12 @@ describe("establishSession", () => {
 
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
 				"outage",
+				"close",
 				"delete",
 				"removeSid",
 			]);
@@ -850,6 +1001,7 @@ describe("establishSession", () => {
 
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"before",
@@ -860,6 +1012,7 @@ describe("establishSession", () => {
 				"after-undo",
 				"cleanup-failed",
 				"before-undo",
+				"close",
 				"delete",
 				"cleanup-failed",
 				"removeSid",
@@ -881,6 +1034,7 @@ describe("establishSession", () => {
 				req: h.req as unknown as Request,
 				userSessionStore: h.userSessionStore,
 				subjectSessionIndex: h.subjectSessionIndex,
+				sessionLifecycle: h.sessionLifecycle,
 				sessionTtlMs: TTL_MS,
 				beforeRegenerate: [stepWithoutUndo],
 				reporter: h.reporterFactory,
@@ -893,10 +1047,12 @@ describe("establishSession", () => {
 			});
 			expect(h.trace).toEqual([
 				"reporter",
+				"open",
 				"create",
 				"addSid",
 				"plain",
 				"regenerate",
+				"close",
 				"delete",
 				"removeSid",
 			]);

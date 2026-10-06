@@ -214,19 +214,26 @@ const REFERENCED_MODULES = [
 	auditSinkModuleFor("logger"),
 ];
 
+/** The rate limiters' sections, in which the template's reference gives the MFA routes' budget. */
+const LIMITER_SECTIONS = ["core-rate-limiter-memory", "redis-rate-limiter"] as const;
+
 describe("the template's config/reference.conf", () => {
-	it("holds only its own modules' sections and the composition root's adapters and mfaMode, each module's parsing its part without losing a path", () => {
+	it("holds only its own modules' sections, the composition root's adapters and mfaMode, and the limiters' MFA budget, each module's parsing its part without losing a path", () => {
 		expect(
 			packageReferenceProblems({
 				reference: TEMPLATE_REFERENCE,
 				modules: REFERENCED_MODULES,
 				// `adapters` and `mfaMode` are the composition root's own,
 				// which phase one reads with its own schema
-				// (`adapters.test.mts`, `mfa-switch.test.mts`).
+				// (`adapters.test.mts`, `mfa-switch.test.mts`); the limiters'
+				// sections hold the MFA budget alone (below), each parsed by its
+				// own module where it is loaded (`mfa-routes-budget.test.mts`).
 				read: (path, env) => {
 					const {
 						[ADAPTERS_SECTION]: _adapters,
 						[MFA_SWITCH]: _mfaMode,
+						[LIMITER_SECTIONS[0]]: _memoryLimiter,
+						[LIMITER_SECTIONS[1]]: _redisLimiter,
 						...tree
 					} = parseFile(path, {
 						env: { ...env },
@@ -237,6 +244,14 @@ describe("the template's config/reference.conf", () => {
 		).toEqual([]);
 	});
 
+	it.each(LIMITER_SECTIONS)("gives %s the MFA routes' budget, and nothing else", (section) => {
+		const tree = parseFile(fileURLToPath(TEMPLATE_REFERENCE), { env: {} }).toObject() as Record<
+			string,
+			unknown
+		>;
+		expect(tree[section]).toEqual({ limits: { mfa: { limit: 60, windowSeconds: 300 } } });
+	});
+
 	it.each(REFERENCED_MODULES)("is among the references $name alone brings", (module) => {
 		expect(moduleReferences([module]).map((url) => url.href)).toContain(TEMPLATE_REFERENCE.href);
 	});
@@ -245,7 +260,7 @@ describe("the template's config/reference.conf", () => {
 describe("logging", () => {
 	it("owns logging, and requires nothing", () => {
 		expect(loggingModule.name).toBe("logging");
-		expect(loggingModule.section?.at).toBeUndefined();
+		expect(loggingModule.section).not.toHaveProperty("at");
 		expect(loggingModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(loggingModule.requires ?? []).toEqual([]);
 		expect(loggingModule.optional ?? []).toEqual([]);
@@ -284,6 +299,20 @@ describe("logging", () => {
 	it("refuses a level it does not know before boot, naming logging.level", () => {
 		const own = readOwnLayers(ownFiles(), { env: { ...BASE_ENV, LOGGING_LEVEL: "verbose" } });
 		expect(() => readLogging(own)).toThrow(/logging\.level/);
+		expect(() => readLogging(own)).toThrow(BootError);
+		let err: unknown;
+		try {
+			readLogging(own);
+		} catch (caught) {
+			err = caught;
+		}
+		expect(err).toMatchObject({
+			reason: "config-validation-failed",
+			details: {
+				issues: [{ path: ["logging", "level"] }],
+				modules: [{ module: "logging", schemaPath: "logging" }],
+			},
+		});
 	});
 
 	it("has boot refuse LOG_LEVEL set alone, naming LOGGING_LEVEL and logging.level", async () => {
@@ -338,7 +367,7 @@ const preflight = (app: express.Express, origin: string) =>
 describe("http", () => {
 	it("owns http, the CORS list included, and requires nothing", () => {
 		expect(httpModule.name).toBe("http");
-		expect(httpModule.section?.at).toBeUndefined();
+		expect(httpModule.section).not.toHaveProperty("at");
 		expect(httpModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(httpModule.requires ?? []).toEqual([]);
 		expect(httpModule.optional ?? []).toEqual([]);
@@ -753,7 +782,7 @@ describe("an environment variable takes effect though application.conf does not 
 describe("key-store", () => {
 	it("owns key-store, and reads it as its section rather than the configuration", () => {
 		expect(keyStoreModule.name).toBe("key-store");
-		expect(keyStoreModule.section?.at).toBeUndefined();
+		expect(keyStoreModule.section).not.toHaveProperty("at");
 		expect(keyStoreModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(keyStoreModule.requires ?? []).not.toContain("config");
 		expect(keyStoreModule.optional ?? []).not.toContain("config");
@@ -970,7 +999,7 @@ async function listeningRedis(): Promise<{
 describe("redis-clients", () => {
 	it("owns redis-clients, and reads it as its section rather than the configuration", () => {
 		expect(standaloneRedisClientsModule.name).toBe("redis-clients");
-		expect(standaloneRedisClientsModule.section?.at).toBeUndefined();
+		expect(standaloneRedisClientsModule.section).not.toHaveProperty("at");
 		expect(standaloneRedisClientsModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(standaloneRedisClientsModule.requires ?? []).not.toContain("config");
 		expect(standaloneRedisClientsModule.optional ?? []).not.toContain("config");
@@ -1141,7 +1170,7 @@ describe("repositories", () => {
 		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
 		const modules = buildModules(readSwitches(own), { environment: "development" });
 		const repositories = named(modules, "repositories");
-		expect(repositories.section?.at).toBeUndefined();
+		expect(repositories.section).not.toHaveProperty("at");
 		expect(repositories.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(repositories.requires ?? []).not.toContain("config");
 		expect(repositories.optional ?? []).not.toContain("config");
@@ -1434,7 +1463,7 @@ describe("audit-sink", () => {
 			buildModules(readSwitches(own), { environment: "development" }),
 			"audit-sink",
 		);
-		expect(sink.section?.at).toBeUndefined();
+		expect(sink.section).not.toHaveProperty("at");
 		expect(sink.requires ?? []).not.toContain("config");
 	});
 

@@ -93,7 +93,7 @@ describe("a section the template's reference.conf sets for a module the composit
 	});
 });
 
-describe("the limiter sections the template's application.conf writes for both limiters", () => {
+describe("the limiter sections the template's reference.conf writes for both limiters", () => {
 	it.each(["memory", "redis"] as const)(
 		"are named by nothing with the %s limiter wired",
 		async (rateLimiter) => {

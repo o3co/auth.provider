@@ -23,8 +23,7 @@ import {
 	InMemoryCodeRepository,
 	type RefreshTokenFamilyRotation,
 	type SessionAuthentication,
-	type SessionFamilyIndex,
-	type SessionRPRegistry,
+	type SessionJoinOutcome,
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -36,6 +35,7 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
+import { joiningLifecycle, outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -100,26 +100,6 @@ function makeDeps(
 		} as unknown as CodeRepository,
 		clientRepository: clientRepository ?? mockClientRepository,
 	};
-}
-
-function makeSessionFamilyIndex(override?: Partial<SessionFamilyIndex>): SessionFamilyIndex {
-	return {
-		kind: "memory",
-		addFamilyId: vi.fn(async () => {}),
-		listFamilyIds: vi.fn(async () => []),
-		removeBySid: vi.fn(async () => {}),
-		...override,
-	} as SessionFamilyIndex;
-}
-
-function makeSessionRPRegistry(override?: Partial<SessionRPRegistry>): SessionRPRegistry {
-	return {
-		kind: "memory",
-		registerRP: vi.fn(async () => {}),
-		listRPs: vi.fn(async () => []),
-		removeBySid: vi.fn(async () => {}),
-		...override,
-	} as SessionRPRegistry;
 }
 
 describe("createAuthorizationGrant — the lifetimes it mints with", () => {
@@ -1326,8 +1306,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
-					sessionFamilyIndex: makeSessionFamilyIndex(),
-					sessionRPRegistry: makeSessionRPRegistry(),
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1384,8 +1363,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
-					sessionFamilyIndex: makeSessionFamilyIndex(),
-					sessionRPRegistry: makeSessionRPRegistry(),
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1445,8 +1423,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
-					sessionFamilyIndex: makeSessionFamilyIndex(),
-					sessionRPRegistry: makeSessionRPRegistry(),
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const { result } = await createAuthorizationGrant(deps).handle({
 					body: {
@@ -1485,8 +1462,7 @@ describe("createAuthorizationGrant", () => {
 					...(userSessionStore
 						? {
 								userSessionStore,
-								sessionFamilyIndex: makeSessionFamilyIndex(),
-								sessionRPRegistry: makeSessionRPRegistry(),
+								sessionLifecycle: joiningLifecycle().lifecycle,
 							}
 						: {}),
 				};
@@ -1591,8 +1567,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
-					sessionFamilyIndex: makeSessionFamilyIndex(),
-					sessionRPRegistry: makeSessionRPRegistry(),
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1637,8 +1612,7 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
-					sessionFamilyIndex: makeSessionFamilyIndex(),
-					sessionRPRegistry: makeSessionRPRegistry(),
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1859,6 +1833,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode } /* no sid */)),
 					userSessionStore,
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1914,22 +1889,19 @@ describe("createAuthorizationGrant", () => {
 				expect(Object.hasOwn(decoded, "sid")).toBe(false);
 			});
 
-			it("calls addFamilyId and registerRP on sibling stores when userSessionStore is wired", async () => {
-				const sessionExpiresAt = new Date(Date.now() + 3600_000);
-				const addFamilyIdSpy = vi.fn(async (_sid: string, _fam: string, _exp: Date) => {});
-				const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
+			it("joins the family and the RP to the session through the lifecycle when userSessionStore is wired", async () => {
+				const { lifecycle, join } = joiningLifecycle();
 				const userSessionStore = {
 					kind: "spy",
 					async create() {},
 					async get() {
 						// Return a minimal session so the existence check passes.
-						// expiresAt is captured as sessionExpiresAt for assertion below.
 						return {
 							sid: "session-xyz",
 							sub: "u1",
 							authTime: new Date(),
 							createdAt: new Date(),
-							expiresAt: sessionExpiresAt,
+							expiresAt: new Date(Date.now() + 3600_000),
 							claims: {},
 							amr: undefined,
 							authentication: undefined,
@@ -1937,13 +1909,10 @@ describe("createAuthorizationGrant", () => {
 					},
 					async delete() {},
 				};
-				const sessionFamilyIndex = makeSessionFamilyIndex({ addFamilyId: addFamilyIdSpy });
-				const sessionRPRegistry = makeSessionRPRegistry({ registerRP: registerRPSpy });
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz", ...validCode })),
 					userSessionStore,
-					sessionFamilyIndex,
-					sessionRPRegistry,
+					sessionLifecycle: lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1963,29 +1932,18 @@ describe("createAuthorizationGrant", () => {
 				});
 
 				expect(result.status).toBe(200);
-				expect(addFamilyIdSpy).toHaveBeenCalledTimes(1);
-				const [sidArg, familyIdArg, expiresAtArg] = addFamilyIdSpy.mock.calls[0] as [
-					string,
-					string,
-					Date,
-				];
-				expect(sidArg).toBe("session-xyz");
-				expect(familyIdArg).toMatch(
-					/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+				expect(join).toHaveBeenCalledTimes(1);
+				expect(join).toHaveBeenCalledWith("session-xyz", {
+					rp: expect.objectContaining({ clientId: "client1", registeredAt: expect.any(Date) }),
+					familyId: expect.stringMatching(
+						/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+					),
+				});
+				// The family joined is the one the tokens carry.
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				expect(join.mock.calls[0]?.[1].familyId).toBe(
+					decodeJwt(result.tokens.access_token).family_id,
 				);
-				// TTL contract: expiresAt MUST be passed from session.expiresAt
-				expect(expiresAtArg).toBe(sessionExpiresAt);
-				expect(registerRPSpy).toHaveBeenCalledTimes(1);
-				const [rpSid, rpData, rpExpiresAt] = registerRPSpy.mock.calls[0] as [
-					string,
-					Record<string, unknown>,
-					Date,
-				];
-				expect(rpSid).toBe("session-xyz");
-				expect(rpData.clientId).toBe("client1");
-				expect(rpData.registeredAt).toBeInstanceOf(Date);
-				// TTL contract: expiresAt MUST match session.expiresAt
-				expect(rpExpiresAt).toBe(sessionExpiresAt);
 			});
 
 			it.each([
@@ -1993,11 +1951,11 @@ describe("createAuthorizationGrant", () => {
 				["sid wanted on the back-channel only", true, false],
 				["sid wanted on the front-channel only", false, true],
 			])(
-				"registers the RP with every logout field the client record carries — %s",
+				"joins the RP with every logout field the client record carries — %s",
 				async (_label, backchannelSessionRequired, frontchannelSessionRequired) => {
 					// Each of the four fields is asserted with its own value: the types catch
 					// a field forgotten, not two same-typed fields swapped.
-					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
+					const { lifecycle, join } = joiningLifecycle();
 					const clientRepository: ClientRepository = {
 						...mockClientRepository,
 						findById: vi.fn().mockResolvedValue({
@@ -2033,8 +1991,7 @@ describe("createAuthorizationGrant", () => {
 							},
 							async delete() {},
 						},
-						sessionFamilyIndex: makeSessionFamilyIndex({ addFamilyId: vi.fn(async () => {}) }),
-						sessionRPRegistry: makeSessionRPRegistry({ registerRP: registerRPSpy }),
+						sessionLifecycle: lifecycle,
 					};
 					const handler = createAuthorizationGrant(deps);
 					const { result } = await handler.handle({
@@ -2054,29 +2011,33 @@ describe("createAuthorizationGrant", () => {
 					});
 
 					expect(result.status).toBe(200);
-					const [, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>, Date];
-					expect(rpData).toMatchObject({
-						clientId: "client1",
-						backchannelLogoutUri: "https://rp.example/back",
-						backchannelLogoutSessionRequired: backchannelSessionRequired,
-						frontchannelLogoutUri: "https://rp.example/front",
-						frontchannelLogoutSessionRequired: frontchannelSessionRequired,
+					expect(join).toHaveBeenCalledTimes(1);
+					expect(join).toHaveBeenCalledWith("session-xyz", {
+						rp: expect.objectContaining({
+							clientId: "client1",
+							backchannelLogoutUri: "https://rp.example/back",
+							backchannelLogoutSessionRequired: backchannelSessionRequired,
+							frontchannelLogoutUri: "https://rp.example/front",
+							frontchannelLogoutSessionRequired: frontchannelSessionRequired,
+						}),
+						familyId: expect.any(String),
 					});
 				},
 			);
 
 			describe("a frontchannelLogoutUri must be http(s)", () => {
-				/** One code exchange against `record`; the RP registration it made and the logger. */
+				/** One code exchange against `record`; the RP it joined to the session and the logger. */
 				const exchangeWith = async (record: object, warn?: () => void, wired = true) => {
-					const { result, registerRPSpy, logger } = await attempt(record, warn, wired);
-					expect(registerRPSpy).toHaveBeenCalledTimes(1);
-					const [, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>, Date];
+					const { result, join, logger } = await attempt(record, warn, wired);
+					expect(join).toHaveBeenCalledTimes(1);
+					const rpData = join.mock.calls[0]?.[1].rp;
+					if (rpData === undefined) throw new Error("expected the exchange to join an RP");
 					return { result, rpData, logger };
 				};
 
-				/** One code exchange against `record`: its result, the RP registry's spy and the logger. */
+				/** One code exchange against `record`: its result, the lifecycle's `join` spy and the logger. */
 				const attempt = async (record: object, warn?: () => void, wired = true) => {
-					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
+					const { lifecycle, join } = joiningLifecycle();
 					const logger = createMockLogger();
 					if (warn !== undefined) logger.warn.mockImplementation(warn);
 					const clientRepository: ClientRepository = {
@@ -2105,8 +2066,7 @@ describe("createAuthorizationGrant", () => {
 							},
 							async delete() {},
 						},
-						sessionFamilyIndex: makeSessionFamilyIndex({ addFamilyId: vi.fn(async () => {}) }),
-						sessionRPRegistry: makeSessionRPRegistry({ registerRP: registerRPSpy }),
+						sessionLifecycle: lifecycle,
 						...(wired ? { logger } : {}),
 					});
 					const { result } = await handler.handle({
@@ -2121,7 +2081,7 @@ describe("createAuthorizationGrant", () => {
 						metadata: { ip: "127.0.0.1" },
 						authenticatedClient: DEFAULT_AUTH_CLIENT,
 					});
-					return { result, registerRPSpy, logger };
+					return { result, join, logger };
 				};
 
 				/**
@@ -2174,15 +2134,15 @@ describe("createAuthorizationGrant", () => {
 					["a value that is not a URL", "not-a-url"],
 					["a value that is not a string", 42],
 				])(
-					"refuses a record with %s from a custom repository whole: 503, no RP registered, and neither the warn nor the outage line names the URI",
+					"refuses a record with %s from a custom repository whole: 503, no RP joined, and neither the warn nor the outage line names the URI",
 					async (_label, uri) => {
-						const { result, registerRPSpy, logger } = await attempt({
+						const { result, join, logger } = await attempt({
 							...baseRecord,
 							frontchannelLogoutUri: uri,
 						});
 
 						expect(result).toMatchObject(SESSION_LINKING_UNAVAILABLE);
-						expect(registerRPSpy).not.toHaveBeenCalled();
+						expect(join).not.toHaveBeenCalled();
 						expect(logger.warn).toHaveBeenCalledTimes(1);
 						expectRecordRefused(logger);
 						expectUriNotLogged(logger, String(uri));
@@ -2193,15 +2153,15 @@ describe("createAuthorizationGrant", () => {
 					["null", null],
 					["an empty string", ""],
 				])(
-					"refuses a record whose frontchannelLogoutUri is %s whole: 503, and no RP registered",
+					"refuses a record whose frontchannelLogoutUri is %s whole: 503, and no RP joined",
 					async (_label, uri) => {
-						const { result, registerRPSpy, logger } = await attempt({
+						const { result, join, logger } = await attempt({
 							...baseRecord,
 							frontchannelLogoutUri: uri,
 						});
 
 						expect(result).toMatchObject(SESSION_LINKING_UNAVAILABLE);
-						expect(registerRPSpy).not.toHaveBeenCalled();
+						expect(join).not.toHaveBeenCalled();
 						expectRecordRefused(logger);
 					},
 				);
@@ -2209,13 +2169,13 @@ describe("createAuthorizationGrant", () => {
 				it("warns through the console fallback when the grant has no logger", async () => {
 					const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 					try {
-						const { result, registerRPSpy } = await attempt(
+						const { result, join } = await attempt(
 							{ ...baseRecord, frontchannelLogoutUri: "ftp://rp.example/front" },
 							undefined,
 							false,
 						);
 						expect(result).toMatchObject(SESSION_LINKING_UNAVAILABLE);
-						expect(registerRPSpy).not.toHaveBeenCalled();
+						expect(join).not.toHaveBeenCalled();
 						const refused = warn.mock.calls.filter(([, name]) => name === "client_record_refused");
 						expect(refused).toHaveLength(1);
 						expect(refused[0]?.[0]).toMatchObject({ step: "find", clientId: "client1" });
@@ -2235,8 +2195,8 @@ describe("createAuthorizationGrant", () => {
 					expectRecordRefused(logger);
 				});
 
-				it("answers 503 and registers no RP when the refusal's warn throws", async () => {
-					const { result, registerRPSpy, logger } = await attempt(
+				it("answers 503 and joins no RP when the refusal's warn throws", async () => {
+					const { result, join, logger } = await attempt(
 						{ ...baseRecord, frontchannelLogoutUri: "ftp://rp.example/front" },
 						() => {
 							throw new Error("logger unavailable");
@@ -2244,31 +2204,31 @@ describe("createAuthorizationGrant", () => {
 					);
 
 					expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
-					expect(registerRPSpy).not.toHaveBeenCalled();
+					expect(join).not.toHaveBeenCalled();
 					expect(logger.warn).toHaveBeenCalledTimes(1);
 				});
 
-				it("answers a frontchannelLogoutUri whose read throws as a client repository outage: 503, no RP registered", async () => {
+				it("answers a frontchannelLogoutUri whose read throws as a client repository outage: 503, no RP joined", async () => {
 					const record = {
 						...baseRecord,
 						get frontchannelLogoutUri(): string {
 							throw new Error("field unavailable");
 						},
 					};
-					const { result, registerRPSpy, logger } = await attempt(record);
+					const { result, join, logger } = await attempt(record);
 
 					expect(result).toMatchObject({
 						status: 503,
 						error: "temporarily_unavailable",
 						errorDescription: "session linking unavailable",
 					});
-					expect(registerRPSpy).not.toHaveBeenCalled();
+					expect(join).not.toHaveBeenCalled();
 					expect(logger.error.mock.calls.map(([, event]) => event)).toEqual([
 						"client_repository_unavailable",
 					]);
 				});
 
-				it("registers an http(s) frontchannelLogoutUri on any host, with a query or a fragment, without a warn", async () => {
+				it("joins an http(s) frontchannelLogoutUri on any host, with a query or a fragment, without a warn", async () => {
 					for (const uri of [
 						"https://rp.example/front?state=a",
 						"https://rp.example/front#section",
@@ -2284,7 +2244,7 @@ describe("createAuthorizationGrant", () => {
 					}
 				});
 
-				it("registers no front-channel entry, silently, for a record without one", async () => {
+				it("joins no front-channel entry, silently, for a record without one", async () => {
 					const { rpData, logger } = await exchangeWith({
 						...baseRecord,
 						frontchannelLogoutUri: undefined,
@@ -2296,7 +2256,7 @@ describe("createAuthorizationGrant", () => {
 			});
 
 			it("issues tokens carrying family_id and sid without userSessionStore", async () => {
-				// No userSessionStore in deps — grant must succeed without linkFamily/registerRP.
+				// No userSessionStore in deps — grant must succeed without joining a session.
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode }),
 				);
@@ -2340,6 +2300,7 @@ describe("createAuthorizationGrant", () => {
 						vi.fn().mockResolvedValue({ code: "abc", sid: "session-gone", ...validCode }),
 					),
 					userSessionStore,
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -2377,6 +2338,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode })),
 					userSessionStore,
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -2429,8 +2391,7 @@ describe("createAuthorizationGrant", () => {
 						throwingClientRepo,
 					),
 					userSessionStore,
-					sessionFamilyIndex: makeSessionFamilyIndex(),
-					sessionRPRegistry: makeSessionRPRegistry(),
+					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -2461,7 +2422,7 @@ describe("createAuthorizationGrant", () => {
 // TOCTOU: re-validate the session before returning tokens
 //
 // Between the first `userSessionStore.get(sid)` and the family's add the
-// handler awaits `clientRepository.findById`; a `cascadeLogout` in that
+// handler awaits `clientRepository.findById`; a logout in that
 // window would orphan the just-issued tokens from logout orchestration. A
 // second `userSessionStore.get(sid)` immediately before the add refuses a
 // session a logout has already deleted. A logout between that read and the
@@ -2469,9 +2430,9 @@ describe("createAuthorizationGrant", () => {
 // ---------------------------------------------------------------------------
 
 describe("TOCTOU re-check of the session before returning tokens", () => {
-	it("returns 400 invalid_grant / session_invalidated when session is deleted between findById and addFamilyId", async () => {
+	it("returns 400 invalid_grant / session_invalidated when session is deleted between findById and the lifecycle join", async () => {
 		// First get returns the session (the initial check), second returns null
-		// (the re-check immediately before addFamilyId).
+		// (the re-check immediately before the join).
 		let getCallCount = 0;
 		const userSessionStore = {
 			kind: "spy",
@@ -2494,15 +2455,13 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 			},
 			async delete() {},
 		};
-		const sessionFamilyIndex = makeSessionFamilyIndex();
-		const sessionRPRegistry = makeSessionRPRegistry();
+		const { lifecycle, join } = joiningLifecycle();
 		const logger = createMockLogger();
 
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-toctou", ...validCode })),
 			userSessionStore,
-			sessionFamilyIndex,
-			sessionRPRegistry,
+			sessionLifecycle: lifecycle,
 			logger,
 		};
 
@@ -2533,9 +2492,8 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 		// Proof of re-check: get was called twice (first + re-check).
 		expect(getCallCount).toBe(2);
 
-		// Negative invariants: token-linking ops MUST NOT run when second check fails.
-		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
-		expect(sessionRPRegistry.registerRP).not.toHaveBeenCalled();
+		// Negative invariant: nothing joins the session when the second check fails.
+		expect(join).not.toHaveBeenCalled();
 
 		// The audit log MUST fire on the session_invalidated rejection.
 		expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -2551,9 +2509,8 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 		// First get succeeds; second get throws (e.g. Redis blip mid-grant).
 		// The second `get` has its own dedicated try/catch: store-availability
 		// failures here surface as `503 / "session store unavailable"`, matching the
-		// first-get path and not the broader outer catch that wraps findById /
-		// addFamilyId / registerRP (which surfaces as `503 / "session linking
-		// unavailable"`).
+		// first-get path and not the lifecycle join's outage (which surfaces as
+		// `503 / "session linking unavailable"`).
 		let getCallCount = 0;
 		const userSessionStore = {
 			kind: "spy",
@@ -2576,12 +2533,11 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 			},
 			async delete() {},
 		};
-		const sessionFamilyIndex = makeSessionFamilyIndex();
+		const { lifecycle, join } = joiningLifecycle();
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-blip", ...validCode })),
 			userSessionStore,
-			sessionFamilyIndex,
-			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionLifecycle: lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
 		const { result } = await handler.handle({
@@ -2604,13 +2560,13 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 		if (!("error" in result)) throw new Error("expected error");
 		expect(result.error).toBe("temporarily_unavailable");
 		// errorDescription matches the first-get's wording — the second `get` has its
-		// own try/catch (not the outer findById/addFamilyId catch) so operators see a
+		// own try/catch (not the lifecycle join's outage) so operators see a
 		// store-availability error description, not a misleading "session linking" one.
 		expect((result as { errorDescription?: string }).errorDescription).toBe(
 			"session store unavailable",
 		);
 		expect(getCallCount).toBe(2);
-		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
+		expect(join).not.toHaveBeenCalled();
 	});
 });
 
@@ -2665,8 +2621,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: makeStore("sid-259", "u-259"),
-			sessionFamilyIndex: makeSessionFamilyIndex(),
-			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
 
@@ -2702,8 +2657,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: makeStore("sid-259", "u-259"),
-			sessionFamilyIndex: makeSessionFamilyIndex(),
-			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
 
@@ -2757,13 +2711,12 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			},
 			async delete() {},
 		};
-		const sessionFamilyIndex = makeSessionFamilyIndex();
+		const { lifecycle, join } = joiningLifecycle();
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: store,
-			sessionFamilyIndex,
-			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionLifecycle: lifecycle,
 		};
 
 		const { result } = await createAuthorizationGrant(deps).handle({
@@ -2783,7 +2736,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 		if (!("error" in result)) throw new Error("expected error");
 		expect(result.error).toBe("invalid_grant");
 		// Nothing is linked to a session whose identity we could not agree on.
-		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
+		expect(join).not.toHaveBeenCalled();
 	});
 
 	it("refuses when a wired store returns a record with no usable sub", async () => {
@@ -2811,8 +2764,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: store,
-			sessionFamilyIndex: makeSessionFamilyIndex(),
-			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 
 		const { result } = await createAuthorizationGrant(deps).handle({
@@ -3095,6 +3047,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 			userSessionStore: sessionStore(async () => {
 				throw outage();
 			}),
+			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
 		const { result } = await exchange(handler);
@@ -3161,8 +3114,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 				if (reads === 1) return liveSession("sid-1");
 				throw outage();
 			}),
-			sessionFamilyIndex: makeSessionFamilyIndex(),
-			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
 		const { result } = await exchange(handler);
@@ -3181,8 +3133,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 				authenticate: vi.fn(),
 			}),
 			userSessionStore: sessionStore(async () => liveSession("sid-1")),
-			sessionFamilyIndex: makeSessionFamilyIndex(),
-			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
 		const { result } = await exchange(handler);
@@ -3194,39 +3145,37 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		});
 	});
 
-	for (const [store, step, stores] of [
-		[
-			"session_family_index",
-			"add",
-			{
-				sessionFamilyIndex: makeSessionFamilyIndex({
-					addFamilyId: vi.fn().mockRejectedValue(outage()),
-				}),
-				sessionRPRegistry: makeSessionRPRegistry(),
+	it("joining the session: the lifecycle's outage, on the grant's line without an error projection", async () => {
+		const logger = createMockLogger();
+		const revokeFamily = vi.fn(async () => {});
+		const register = vi.fn(async () => {});
+		const handler = createAuthorizationGrant({
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
+			userSessionStore: sessionStore(async () => liveSession("sid-1")),
+			sessionLifecycle: joiningLifecycle(outsideAnswer<SessionJoinOutcome>()).lifecycle,
+			refreshTokenFamilyRotation: {
+				register,
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
 			},
-		],
-		[
-			"session_rp_registry",
-			"register",
-			{
-				sessionFamilyIndex: makeSessionFamilyIndex(),
-				sessionRPRegistry: makeSessionRPRegistry({
-					registerRP: vi.fn().mockRejectedValue(outage()),
-				}),
-			},
-		],
-	] as const) {
-		it(`linking the family to the session: ${store}`, async () => {
-			const logger = createMockLogger();
-			const handler = createAuthorizationGrant({
-				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
-				userSessionStore: sessionStore(async () => liveSession("sid-1")),
-				...stores,
-				logger,
-			} as Parameters<typeof createAuthorizationGrant>[0]);
-			const { result } = await exchange(handler);
-			expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
-			expectOutageLine(logger, "authorization_grant_store_unavailable", { store, step });
+			refreshTokenFamilyRevocation: { revokeFamily, isFamilyRevoked: vi.fn(async () => false) },
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await exchange(handler);
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session linking unavailable",
 		});
-	}
+		expect(logger.warn).not.toHaveBeenCalled();
+		// The defensive fallback has no error to project: the grant's line names the step only.
+		expect(logger.error.mock.calls).toEqual([
+			[
+				{ store: "session_lifecycle", step: "join", clientId: "client1" },
+				"authorization_grant_store_unavailable",
+			],
+		]);
+		// The family registered for tokens never served is revoked by the grant.
+		expect(revokeFamily).toHaveBeenCalledTimes(1);
+		expect(revokeFamily).toHaveBeenCalledWith((register.mock.calls[0] as unknown[])[1]);
+	});
 });

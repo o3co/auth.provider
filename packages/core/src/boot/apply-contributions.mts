@@ -28,12 +28,13 @@ import type { Logger } from "../logging/Logger.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import type { GrantHandler, MfaFactor } from "../modules/manifest/contributes-map.mjs";
-import type {
-	GrantHandlerResolver,
-	MfaFactorResolver,
-	RateLimitBudgetResolver,
-	SessionCloseNotifierResolver,
-	TokenExchangeValidatorResolver,
+import {
+	type GrantHandlerResolver,
+	type MfaFactorResolver,
+	type RateLimitBudgetResolver,
+	type SessionCloseNotifierResolver,
+	SYNTHETIC_COMPONENT_KEYS,
+	type TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
 import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
@@ -56,8 +57,8 @@ import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { buildDispatchedFederation } from "./federation-entries.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
+import { runCleanupsReverse } from "./run-cleanups.mjs";
 import type {
-	CleanupRecord,
 	CollectedRouteContribution,
 	ComponentWorld,
 	ContributionCollectorMap,
@@ -109,31 +110,6 @@ function buildDeps(
 		deps.section = section.value;
 	}
 	return deps;
-}
-
-/**
- * Run cleanup records in REVERSE order (best-effort), the partial rollback
- * after a factory failure. Returns the errors for `details.cleanupErrors`.
- * @internal
- */
-async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Promise<
-	readonly {
-		readonly module: string;
-		readonly componentKey: ComponentKey;
-		readonly error: unknown;
-	}[]
-> {
-	const errors: { module: string; componentKey: ComponentKey; error: unknown }[] = [];
-	for (let i = cleanupRecords.length - 1; i >= 0; i--) {
-		// biome-ignore lint/style/noNonNullAssertion: index is bounded
-		const record = cleanupRecords[i]!;
-		try {
-			await record.cleanup(record.value);
-		} catch (err) {
-			errors.push({ module: record.module, componentKey: record.componentKey, error: err });
-		}
-	}
-	return errors;
 }
 
 /**
@@ -332,7 +308,8 @@ function closedWhile(gate: ProjectionGate, from: ReadableFrom): string | undefin
  * `entries`, a map view's `size` and iterator) are guarded. `then` answers
  * `undefined`, so the view is not thenable, and `Symbol.toStringTag`,
  * `Symbol.toPrimitive` and `Object.prototype` members pass, so a factory may
- * hold, await, return or print it.
+ * hold, await, return or print it. A write passes through to the view,
+ * which boot freezes before any module is handed it (`freezeSyntheticSlots`).
  */
 function readableFromStage4<T extends object>(
 	view: T,
@@ -461,6 +438,44 @@ export function prepareSyntheticProjections(
 			},
 			(view) => readableFromStage4(view, "sessionRequirementResolver", readGate),
 		);
+	}
+}
+
+/**
+ * Freezes `value` in place when it is plain data — an array, or an object
+ * whose prototype is `Object.prototype` or `null` — and, the same way, every
+ * value its own data properties hold. Anything else (a `Map`, a class
+ * instance, a function) is left as it was built, and so is what it holds. An
+ * accessor is not read: its getter answers at call time, and a projection's
+ * members may not be read while the `provides` factories run.
+ */
+function freezePlainData(value: unknown, seen = new Set<object>()): void {
+	if (typeof value !== "object" || value === null || seen.has(value)) return;
+	const prototype: unknown = Object.getPrototypeOf(value);
+	if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) return;
+	seen.add(value);
+	Object.freeze(value);
+	for (const key of Reflect.ownKeys(value)) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (descriptor !== undefined && "value" in descriptor) freezePlainData(descriptor.value, seen);
+	}
+}
+
+/**
+ * Freezes the value under each synthetic key `components` holds
+ * (`SYNTHETIC_COMPONENT_KEYS`), all the way down through plain data
+ * (`freezePlainData`), so no module can change what another reads. Boot
+ * builds every one of those values itself; a value a module or the host
+ * provides sits under another key and is left as its provider made it. Each
+ * stage that injects synthetic values runs it once it has: stage 3 before
+ * any provider runs, and stage 4's step 0 for a projection stage 3 did not
+ * inject. A gated projection is frozen through its read gate, which reads
+ * none of its members.
+ * @internal
+ */
+export function freezeSyntheticSlots(components: Readonly<Record<string, unknown>>): void {
+	for (const key of SYNTHETIC_COMPONENT_KEYS) {
+		if (Object.hasOwn(components, key)) freezePlainData(components[key]);
 	}
 }
 
@@ -1200,7 +1215,8 @@ function warnOnTokenBindingSurfaceOverlap(
  * (built-in defaults + consumer overrides) from the stage-3 `ComponentWorld`.
  *
  *   0. `prepareSyntheticProjections`: stable read-side resolvers over the
- *      name-keyed collectors, fully populated by request time.
+ *      name-keyed collectors, fully populated by request time, frozen
+ *      (`freezeSyntheticSlots`).
  *   2. Name-keyed pass, in `BootPlan.initOrder`: a pre-scan refuses a
  *      duplicate or a missing override target before any of the module's
  *      factories runs, so a failing module leaves no side effect; factories
@@ -1223,8 +1239,11 @@ function warnOnTokenBindingSurfaceOverlap(
  *      `CollectedRouteContribution` with a `declarationIndex`.
  *
  * A throwing factory becomes `BootError` `contribute-factory-failed` (`cause`
- * the thrown value, message via `failureSummary`, never `String(thrown)`),
- * after the stage-3 cleanups in `material.cleanups` run in reverse.
+ * the thrown value, message via `failureSummary`, never `String(thrown)`).
+ * Every refusal this stage raises, the pre-scan's included, runs the stage-3
+ * cleanups in `material.cleanups` once, in reverse, before it is thrown
+ * (`runCleanupsReverse`); a refusal stage 5 or 6 raises leaves them to
+ * `createApp`.
  */
 export async function applyContributions(
 	material: ComponentWorld,
@@ -1241,6 +1260,7 @@ export async function applyContributions(
 	// Step 0: prepareSyntheticProjections.
 	// ---------------------------------------------------------------------------
 	prepareSyntheticProjections(components, contributionKinds);
+	freezeSyntheticSlots(components);
 	openSyntheticProjections(components);
 
 	// Modules that mounted a `tokenBindingMw` through the `grantMiddleware`
@@ -1281,7 +1301,10 @@ export async function applyContributions(
 		// ------------------------------------------------------------------
 		// Pre-scan phase: validate ALL collector invariants for this module
 		// BEFORE invoking any factory. If any check fails, no factory for this
-		// module runs, so none leaves a side effect behind.
+		// module runs, so none leaves a side effect behind; the stage-3
+		// cleanups run before the refusal, as after a failed factory. Neither
+		// refusal's details carry `cleanupErrors`, so a cleanup that throws
+		// here is not reported, as at stage 3's refusals of the same kind.
 		// ------------------------------------------------------------------
 
 		for (const entry of nameKeyedContributes) {
@@ -1291,6 +1314,7 @@ export async function applyContributions(
 			if (collector === undefined) continue;
 			const name = entry.key as string;
 			if (collector.get(name) !== undefined) {
+				await runCleanupsReverse(material.cleanups);
 				throw new BootError({
 					message: `Pre-scan: duplicate contribution "${name}" for kind "${entry.kind}" in module "${moduleName}".`,
 					reason: "duplicate-contribute",
@@ -1318,6 +1342,7 @@ export async function applyContributions(
 			const switchedOff =
 				target === null ? SWITCHED_OFF_OVERRIDE_TARGETS.get(entry.kind) : undefined;
 			if (target === undefined || switchedOff !== undefined) {
+				await runCleanupsReverse(material.cleanups);
 				throw new BootError({
 					message:
 						`Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".` +

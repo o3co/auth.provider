@@ -19,10 +19,10 @@
  * the one section it owns, and every factory of the module receives that
  * section parsed, as `deps.section`, instead of reading the whole config.
  *
- * Target shape: a top-level kebab-case section named after exactly one module
- * (`device-grant {}`), camelCase keys, defaults only in the owning package's
- * `config/reference.conf`, and no module reading another's section. `at` and
- * `relocatedFrom` bridge sections that have not moved there yet.
+ * A section is the top-level key named exactly as its module
+ * (`device-grant {}`), with camelCase keys, defaults only in the owning
+ * package's `config/reference.conf`, and no module reading another's section.
+ * `relocatedFrom` bridges the paths a section moved from.
  */
 
 import type { z } from "zod";
@@ -47,14 +47,22 @@ export interface RelocationWithoutVariable {
 /**
  * The `section` field of a manifest: the module's own configuration section.
  *
- * At stage 1, before any factory runs, boot reads the value at {@link at},
- * parses it synchronously with {@link schema}, and hands the result to every
- * factory of the module as `deps.section`: one deeply frozen object (plain
- * data copied; other values as the schema made them). Parsed for every module
- * in `modules`, even one whose provider is overridden. A refused value, or a
- * schema that cannot answer synchronously, refuses boot with
- * `config-validation-failed`: all sections reported together, each issue's
- * path prefixed with the section's.
+ * At stage 1, before any factory runs, boot reads the value at the top-level
+ * key named exactly as the module (not split on dots, read as an own property
+ * only), parses it synchronously with {@link schema}, and hands the result to
+ * every factory of the module as `deps.section`: one deeply frozen object
+ * (plain data copied; other values as the schema made them). The parsed value
+ * is written back at the module's name, so the `config` slot holds what the
+ * module is handed. Parsed for every module in `modules`, even one whose
+ * provider is overridden. A refused value, or a schema that cannot answer
+ * synchronously, refuses boot with `config-validation-failed`: all sections
+ * reported together, each issue's path prefixed with the section's.
+ *
+ * A section is always at its module's name: a manifest whose `section` still
+ * carries an `at`, or that carries a `configSchema`, is refused
+ * (`module-section-path-invalid`), whatever the value, and so is a module
+ * named after a key configuration cannot carry (an `Object.prototype`
+ * member, `prototype`) or named `core`.
  *
  * `section` is not a slot: a module declaring a section may not also require
  * or optionally read a component named `section` (`reserved-component-key`).
@@ -78,20 +86,6 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 */
 	readonly reference?: URL;
 	/**
-	 * Where the section sits today, as a dot-separated path of non-empty keys
-	 * (`"parent.child"`), for a section not yet moved under the module's name.
-	 * Unset, it is the top-level key named exactly as the module (not split on
-	 * dots). Keys are read as own properties only; an invalid path refuses boot
-	 * (`module-section-path-invalid`). Transitional.
-	 *
-	 * Read from boot's composed configuration, so under a parent core's schema
-	 * declares, values may arrive coerced and a `configSchema` may still inject
-	 * defaults. The parsed value is written back at this path, so the `config`
-	 * slot holds what the module is handed; no two modules may declare the same
-	 * path.
-	 */
-	readonly at?: string;
-	/**
 	 * The paths this section moved from, so a setting still written at an old
 	 * path refuses boot (`config-path-relocated`) naming its new path, rather
 	 * than being ignored. Either:
@@ -105,10 +99,10 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 *   ({@link RelocationWithoutVariable}): the refusal names none, and no
 	 *   variable may be declared renamed onto it.
 	 *
-	 * An old path may not be or hold a loaded module's section, overlap a new
-	 * path, or overlap another loaded module's old path
-	 * (`module-section-path-invalid`). A module configured only through
-	 * `configSchema` declares no section path, so its old paths are not caught.
+	 * An old path may not be a loaded module's section, be or lie under
+	 * `core` (core's own section, whose keys no module relocates), overlap a
+	 * new path, or overlap another loaded module's old path
+	 * (`module-section-path-invalid`).
 	 *
 	 * A switch that decides whether a module loads (an adapter selection,
 	 * `core.federations.<name>.enabled`) is relocated by a module that is always
@@ -151,9 +145,9 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 *
 	 * Each old name is a variable name, differs from its new one, and is
 	 * declared by one loaded module and is no rename's new name; a new path
-	 * lies in a section read at its module's name, and is not the section
-	 * itself (`module-section-path-invalid`). Removed with `relocatedFrom` at
-	 * the first major release.
+	 * is not one a `relocatedFrom` entry declares bound to no variable, and is
+	 * not the section itself (`module-section-path-invalid`). Removed with
+	 * `relocatedFrom` at the first major release.
 	 */
 	readonly renamedVariables?: Readonly<Record<string, string>>;
 	/**

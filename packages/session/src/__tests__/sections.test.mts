@@ -43,6 +43,7 @@ import { describe, expect, it } from "vitest";
 import { sessionModule, sessionSectionSchema } from "#/module.mjs";
 import { sessionStoreConfigSchema, sessionStoreModule } from "#/modules/sessionStoreModule.mjs";
 import { withSession, withSessionCaptures, withStore } from "./_helpers/sections.mjs";
+import { sessionLifecycleTestModule } from "./_helpers/sessionLifecycle.mjs";
 
 /** The package's defaults, as a composition root finds them. */
 const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
@@ -113,7 +114,10 @@ describe("the package's config/reference.conf", () => {
 	it("is read at each module's name: session and session-store", () => {
 		const modules = [sessionModule, sessionStoreModule];
 		expect(modules.map((module) => module.name)).toEqual(["session", "session-store"]);
-		expect(modules.map((module) => module.section?.at)).toEqual([undefined, undefined]);
+		expect(modules.map((module) => Object.hasOwn(module.section ?? {}, "at"))).toEqual([
+			false,
+			false,
+		]);
 		expect(modules.map((module) => module.section?.reference?.href)).toEqual([
 			REFERENCE.href,
 			REFERENCE.href,
@@ -430,6 +434,7 @@ const STORES = [
 		authenticate: async () => null,
 		authenticateByToken: async () => null,
 	} as unknown as UserRepository),
+	sessionLifecycleTestModule(),
 	providing("test:user-session-store", "userSessionStore", {
 		kind: "memory",
 		async create() {},

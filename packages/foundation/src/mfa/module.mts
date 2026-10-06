@@ -40,7 +40,8 @@ import {
 export interface FoundationMfaFactorStoreModuleOptions {
 	/**
 	 * The Store transport settings: the user repository's HTTP settings as the
-	 * configuration holds them (`repositories.user.http`), whose `bearerToken`,
+	 * configuration holds them (`repositories.user.http` in the standalone
+	 * template, which hands them here), whose `bearerToken`,
 	 * `timeout` and `maxResponseBytes` are the Store's, text read as numbers.
 	 * `{}` states none: no credential is sent, and the defaults apply.
 	 */

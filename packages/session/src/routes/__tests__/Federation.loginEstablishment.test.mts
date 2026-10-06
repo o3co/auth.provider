@@ -140,8 +140,11 @@ describe("the federation callback's login establishes without asking", () => {
 });
 
 describe("the federation callback's login — the session lifecycle, where it is installed", () => {
-	const callback = async (outcome: "opened" | "unavailable") => {
-		const open = vi.fn(async () => ({ outcome }));
+	const callback = async (outcome: "opened" | Error) => {
+		const open = vi.fn(async () => {
+			if (outcome instanceof Error) throw outcome;
+			return { outcome };
+		});
 		const harness = buildFederationApp({
 			providers: new Map([["test", provider]]),
 			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
@@ -175,11 +178,10 @@ describe("the federation callback's login — the session lifecycle, where it is
 	});
 
 	it("answers 503 when the record cannot be opened, with nothing written", async () => {
-		const { res, harness } = await callback("unavailable");
+		const { res, harness } = await callback(new Error("lifecycle store down"));
 
 		expect(res.status).toBe(503);
 		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
-		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
 		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
 		expect(harness.store.get("browser")?.data ?? {}).not.toHaveProperty("isAuthenticated");
 	});
@@ -210,7 +212,6 @@ describe("the federation callback's login — a user whose field the login needs
 
 		expect(res.status).toBe(500);
 		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
-		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
 		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
 		const session = harness.store.get("browser")?.data ?? {};
 		for (const field of ["isAuthenticated", "user", "sid"]) {
@@ -423,7 +424,6 @@ describe("the federation callback's login — a User the snapshot refuses", () =
 			expect(reads.get(field), field).toBe(1);
 		}
 		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
-		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
 		expect(subjectSessionIndex.addSid).not.toHaveBeenCalled();
 		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
 		const session = harness.store.get("browser")?.data ?? {};

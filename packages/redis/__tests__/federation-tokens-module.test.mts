@@ -79,7 +79,7 @@ describe("the module hands the guard the selected environment and the deployment
 		warnSpy.mockRestore();
 	});
 
-	it("keeps the manifest of the default module: same name, requires and configSchema", () => {
+	it("keeps the manifest of the default module: same name, requires and section schema", () => {
 		const m = redisFederationTokenStoreModuleFor({ environment: "production" });
 		expect(m.name).toBe(redisFederationTokenStoreModule.name);
 		expect(m.requires).toEqual(redisFederationTokenStoreModule.requires);
@@ -134,7 +134,7 @@ describe("redisFederationTokenStoreModule", () => {
 	});
 
 	it("reads its own section, redis-federation-token-store, with its defaults", () => {
-		expect(redisFederationTokenStoreModule.configSchema).toBeUndefined();
+		expect(redisFederationTokenStoreModule).not.toHaveProperty("configSchema");
 		expect(redisFederationTokenStoreModule.section?.schema.parse(undefined)).toEqual({
 			keyPrefix: "ft:",
 			ttl: 86400,

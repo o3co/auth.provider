@@ -750,21 +750,6 @@ describe("a renamed variable — a manifest that declares one boot cannot hold",
 		});
 	});
 
-	it.each([
-		["moved", { LEGACY_RETRIES: "legacy.retries" }],
-		["in place", { FIXTURE_RETRY_COUNT: "current.fixture.retries" }],
-	])(
-		"refuses a rename %s under a transitional section path, which no variable binds yet",
-		async (_label, renamedVariables) => {
-			const err = await refusedAtStageOne([declaring(renamedVariables, { at: "current.fixture" })]);
-
-			expect(err.details).toMatchObject({
-				module: "fixture-renaming",
-				problem: expect.stringContaining("transitional"),
-			});
-		},
-	);
-
 	it("refuses a rename whose old path moved whole as the section: no variable binds a section", async () => {
 		const err = await refusedAtStageOne([
 			declaring({ LEGACY_FIXTURE: "legacy.fixture" }, { relocatedFrom: { "legacy.fixture": "" } }),
@@ -822,12 +807,8 @@ describe("a renamed variable — a manifest that declares one boot cannot hold",
 	it.each([
 		["named core", defineModule({ name: "core" })],
 		[
-			"whose section is read at core",
-			defineModule({ name: "fixture-core", section: { schema: RetrySection, at: "core" } }),
-		],
-		[
-			"whose section is read under core",
-			defineModule({ name: "fixture-core", section: { schema: RetrySection, at: "core.fixture" } }),
+			"named core, whose section is read at core",
+			defineModule({ name: "core", section: { schema: RetrySection } }),
 		],
 	])(
 		"refuses a module %s: core's own section, and its name in boot's messages",

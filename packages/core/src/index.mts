@@ -232,14 +232,11 @@ export {
 	type AccessTokenLifetimeSource,
 	type AccessTokenRevocationMode,
 	type AppConfig,
-	AppConfigSchema,
 	type CoreConfig,
 	CoreConfigSchema,
 	// The four spellings an environment variable may say a boolean in,
 	// for the packages outside core that read a section this file declares.
 	coerceBooleanFromEnv,
-	composeConfigSchema,
-	fullSectionsSchema,
 	isLifetimeSeconds,
 	// The hop ceiling `http.trustProxy` is held to, which the
 	// `httpSettings` contract suite holds the slot's value to as well.
@@ -256,10 +253,6 @@ export {
 	// the range and the form.
 	wholeNumberInRangeFromEnv,
 } from "./config/application.schema.mjs";
-// Transitional: the switches that choose a composition root's modules, read
-// before it knows them. `createApp` takes the resolved configuration itself,
-// and parses it once.
-export { readTransitionalConfig } from "./config/composed.mjs";
 // How a configured value is read where its owning schema did not run, and how
 // a refusal quotes it.
 export { configuredNumber, shownConfigValue } from "./config/configuredValue.mjs";
@@ -803,7 +796,6 @@ export type {
 	AuditHookFactory,
 	ComponentKey,
 	ComponentMap,
-	ConfigSchema,
 	Contributed,
 	ContributesMap,
 	ExchangeTokenValidator,

@@ -45,6 +45,7 @@ import {
 	expectOutageLine,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -171,8 +172,7 @@ const route = async (opts: {
 		"/oauth",
 		createRouter(express, {
 			keyStore,
-			userSessionStore: sessionStore,
-			sessionFederationIndex: index,
+			sessionLifecycle: livenessOver(sessionStore, (sid) => index.listFederations(sid)),
 			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(false),
 				revokeFamily: vi.fn(),

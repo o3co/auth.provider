@@ -29,7 +29,6 @@
 . AdmissionRequest type
 . Algorithm type
 . AppConfig type
-. AppConfigSchema value
 . AppHandle type
 . ApproveDeviceAuthorizationInput type
 . AssertionClaimReaders type
@@ -109,7 +108,6 @@
 . ConditionalSetRemoveAnswer type
 . ConfigDefaultsInvalidDetails type
 . ConfigPathRelocatedDetails type
-. ConfigSchema type
 . ConfigValidationFailedDetails type
 . ConfiguredFederation type
 . Confirmation type
@@ -801,7 +799,6 @@
 . codeClaimRevalidation value
 . coerceBooleanFromEnv value
 . composeAmr value
-. composeConfigSchema value
 . configuredNumber value
 . consentCovers value
 . consoleLogger value
@@ -929,7 +926,6 @@
 . formatObject value
 . formatUserCode value
 . fromMfaStoreFactor value
-. fullSectionsSchema value
 . generateDeviceCode value
 . generateIdToken value
 . generateLogoutToken value
@@ -1079,7 +1075,6 @@
 . readSessionOpenAnswer value
 . readSpaceDelimitedParameter value
 . readTargetParameter value
-. readTransitionalConfig value
 . readUpstreamAuthTime value
 . readUpstreamTokenLifetime value
 . readUserSnapshot value
@@ -1179,7 +1174,6 @@
 ./modules/manifest ComponentKey type
 ./modules/manifest ComponentLifecycle type
 ./modules/manifest ComponentMap type
-./modules/manifest ConfigSchema type
 ./modules/manifest Contributed type
 ./modules/manifest ContributesMap type
 ./modules/manifest ExchangeTokenValidator type

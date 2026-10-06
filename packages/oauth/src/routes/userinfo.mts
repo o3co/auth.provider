@@ -28,7 +28,6 @@ import {
 	type SessionLiveness,
 	type SubjectRevocation,
 	type UserSession,
-	type UserSessionStore,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
@@ -43,11 +42,11 @@ type ExpressLike = {
 
 export interface UserinfoRouterOptions {
 	keyStore: KeyStore;
-	userSessionStore?: UserSessionStore;
 	/**
-	 * Core's session lifecycle. Where installed, it answers whether the
-	 * token's session is live, and with its user session, in place of
-	 * `userSessionStore`: a session whose close has committed is not live.
+	 * Core's session lifecycle, wherever sessions are kept: it answers whether
+	 * the token's session is live, and with its user session; a session whose
+	 * close has committed is not live. Absent, the route keeps no sessions and
+	 * answers `sub` alone.
 	 */
 	sessionLifecycle?: SessionLifecycle;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
@@ -168,7 +167,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		}
 
 		// sub is required; sid is optional (needed for session-backed claims —
-		// when absent or no userSessionStore wired, we return {sub} only).
+		// when absent or no session lifecycle wired, we return {sub} only).
 		//
 		// Two session links (core's `grants/sessionClaims.mts`): the token's own
 		// `sid`, on which the session's claims are released, and a derived
@@ -185,9 +184,9 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 				.json({ error: "invalid_token", error_description: "missing sub claim" });
 		}
 
-		const { sessionLifecycle, userSessionStore } = opts;
-		// Without a session store, return only sub (no durable claim source)
-		if ((!sessionLifecycle && !userSessionStore) || livenessSid === null) {
+		const { sessionLifecycle } = opts;
+		// Without sessions, return only sub (no durable claim source)
+		if (!sessionLifecycle || livenessSid === null) {
 			return res.status(200).json({ sub });
 		}
 
@@ -195,7 +194,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		// the family check above): a backend outage must not leak claims, and it
 		// is answered as the outage it is, not as an invalid token.
 		let session: UserSession | null = null;
-		if (sessionLifecycle) {
+		{
 			let liveness: SessionLiveness;
 			try {
 				liveness = await sessionLifecycle.liveness(livenessSid);
@@ -210,8 +209,9 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 					error_description: "session store unavailable",
 				});
 			}
-			if (liveness.outcome === "unavailable") {
-				// The lifecycle logs its own error; this line carries none.
+			// Any answer other than `live` or `not_live` (core's lifecycle gives
+			// none, as it rejects on an outage) is answered as the outage.
+			if (liveness.outcome !== "live" && liveness.outcome !== "not_live") {
 				opts.logger?.error({ store: "session_lifecycle" }, "userinfo_store_unavailable");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
@@ -221,19 +221,6 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			// A live session of another subject is not this token's session.
 			session =
 				liveness.outcome === "live" && liveness.session.sub === sub ? liveness.session : null;
-		} else if (userSessionStore) {
-			try {
-				session = await userSessionStore.get(livenessSid);
-			} catch (err) {
-				opts.logger?.error(
-					{ store: "user_session", err: loggableError(err) },
-					"userinfo_store_unavailable",
-				);
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "session store unavailable",
-				});
-			}
 		}
 		if (!session) {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');

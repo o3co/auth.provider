@@ -31,6 +31,7 @@ import {
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
+	sessionLifecycleModule,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import {
@@ -88,6 +89,7 @@ async function boot(federations: Readonly<Record<string, object>>): Promise<expr
 			sessionStoreModule,
 			sessionModule,
 			memorySessionStoresModule,
+			sessionLifecycleModule,
 			memoryFederationTokenStoreModule,
 			memoryRefreshTokenFamilyStoreModule,
 			defaultRefreshTokenFamilyRevocationModule,

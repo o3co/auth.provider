@@ -1,6 +1,6 @@
 # auth.provider
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -167,7 +167,7 @@ grants); each package's README lists its routes.
 | `POST /oauth/introspect` | oauth | Token introspection (RFC 7662) |
 | `POST /oauth/revoke` | oauth | Token revocation (RFC 7009) |
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect userinfo |
-| `GET`, `POST /oauth/logout` | oauth | RP-initiated logout, with the back-channel logout cascade |
+| `GET`, `POST /oauth/logout` | oauth | RP-initiated logout, closing the session through core's session lifecycle, which tells the relying parties back-channel |
 | `GET /.well-known/openid-configuration` | core | Discovery, served when `oauthEndpointsModule` is installed |
 | `GET /.well-known/jwks.json` | core | Verification keys (`jwks.path` moves it); under HS256 it answers `404 jwks_not_published` |
 | `GET /session/csrf` | session | Issue a double-submit CSRF token |

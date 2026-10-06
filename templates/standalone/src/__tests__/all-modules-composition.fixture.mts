@@ -170,19 +170,19 @@ export const CONNECTION = "calendar";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
+const quoted = (value: string) => JSON.stringify(value);
+
 /**
- * What has no environment form — the federations' landing page, the grant
- * key ring and one grant connection — as an operator writes it: a HOCON
- * file of their own, the highest layer. Written once per process.
+ * What has no environment form — the federations' landing page and one grant
+ * connection — as an operator writes it: a HOCON file of their own, the
+ * highest layer. Written once per process.
  */
 const OPERATOR_LAYER: string = (() => {
 	const file = join(mkdtempSync(join(tmpdir(), "all-modules-composition-")), "operator.conf");
-	const quoted = (value: string) => JSON.stringify(value);
 	writeFileSync(
 		file,
 		`core.federations.google.clientUrl = ${quoted(FEDERATION_LANDING)}
 core.federations.oidc.clientUrl = ${quoted(FEDERATION_LANDING)}
-redis-federation-grant-store.encryptionKeys = [{ id = "k-test", key = ${quoted(ENCRYPTION_KEY)} }]
 federation-grants {
   connections {
     ${CONNECTION} {
@@ -206,10 +206,32 @@ function hoconFile(text: string): string {
 	return file;
 }
 
-/** The composition's own files, highest first: the operator's layer, then the shipped production ones. */
-export function ownFiles(): string[] {
+/**
+ * The Redis grant store's key ring, which has no environment form either, in
+ * a layer of its own: an operator writes it where that store is installed,
+ * since written for a store the composition does not load it reaches nothing
+ * and boot may name its section. Written once per process.
+ */
+const GRANT_KEY_RING_LAYER: string = (() => {
+	const file = join(mkdtempSync(join(tmpdir(), "all-modules-composition-")), "grant-keys.conf");
+	writeFileSync(
+		file,
+		`redis-federation-grant-store.encryptionKeys = [{ id = "k-test", key = ${quoted(ENCRYPTION_KEY)} }]\n`,
+	);
+	return file;
+})();
+
+/**
+ * The composition's own files under `env`, highest first: the operator's
+ * layers — the grant key ring among them where `env` turns federation grants
+ * on and puts their store on Redis — then the shipped production ones.
+ */
+export function ownFiles(env: Readonly<Record<string, string>> = SINGLE_ENV): string[] {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	return [OPERATOR_LAYER, envConfPath, applicationConfPath];
+	const grantStoreOnRedis =
+		env.FEDERATION_GRANTS_ENABLED === "true" && env.ADAPTERS_FEDERATION_GRANT_STORE === "redis";
+	const keyRing = grantStoreOnRedis ? [GRANT_KEY_RING_LAYER] : [];
+	return [OPERATOR_LAYER, ...keyRing, envConfPath, applicationConfPath];
 }
 
 /**
@@ -219,7 +241,7 @@ export function ownFiles(): string[] {
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
-	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
+	own: OwnLayers = readOwnLayers(ownFiles(env), { env }),
 ): Switches {
 	return readSwitches(own);
 }
@@ -646,8 +668,8 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	// reads them. Phase one: the switches the modules are chosen by.
 	const own = readOwnLayers(
 		options.operatorHocon === undefined
-			? ownFiles()
-			: [hoconFile(options.operatorHocon), ...ownFiles()],
+			? ownFiles(env)
+			: [hoconFile(options.operatorHocon), ...ownFiles(env)],
 		{ env },
 	);
 	const switches = resolveConfig(env, own);
@@ -1028,6 +1050,11 @@ export interface OutageCase<C extends Composition = Composition> {
 	readonly storeFieldNotRequired?: string;
 	/** The predicates the composition breaks today, each naming its defect. */
 	readonly defects?: Partial<Record<OutagePredicate, string>>;
+	/**
+	 * The warn lines a `no-warn` defect writes, pinned exactly while it stands,
+	 * so the defect covers those lines and no other.
+	 */
+	readonly defectWarns?: readonly string[];
 }
 
 /** The same defect text for every predicate that depends on the one missing line. */
@@ -1058,6 +1085,14 @@ export function describeOutages<C extends Composition>(
 ): void {
 	describe(title, () => {
 		for (const c of cases) {
+			if (
+				c.defectWarns !== undefined &&
+				(c.defects?.["no-warn"] === undefined || c.defectWarns.length === 0)
+			) {
+				throw new Error(
+					`${c.module}: ${c.slot} down at ${c.surface}: defectWarns pins the lines of a no-warn defect, so it needs defects["no-warn"] and at least one line`,
+				);
+			}
 			describe(`${c.module}: ${c.slot} down at ${c.surface}`, () => {
 				let res: request.Response;
 				let lines: LogLine[] = [];
@@ -1137,13 +1172,20 @@ export function describeOutages<C extends Composition>(
 					expect(err).toMatchObject({ name: expect.any(String) });
 					expect(err).not.toBeInstanceOf(Error);
 				});
-				check("no-warn", "writes no warn line for it", () => {
-					const warns = lines
+				const outageWarns = () =>
+					lines
 						.filter((line) => line.level === "warn")
 						.map((line) => (typeof line.args[1] === "string" ? line.args[1] : String(line.args[0])))
 						.filter((event) => !(c.unrelatedWarns ?? []).includes(event));
-					expect(warns).toEqual([]);
+				check("no-warn", "writes no warn line for it", () => {
+					expect(outageWarns()).toEqual([]);
 				});
+				if (c.defectWarns !== undefined) {
+					const pinned = c.defectWarns;
+					it(`writes exactly the warn lines its no-warn defect names: ${pinned.join(", ")}`, () => {
+						expect(outageWarns()).toEqual(pinned);
+					});
+				}
 			});
 		}
 	});

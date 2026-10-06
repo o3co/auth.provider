@@ -1,7 +1,7 @@
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
+import { CoreConfigSchema } from "#/config/application.schema.mjs";
 
 describe("provider config", () => {
 	it("loads and validates reference.conf with required env vars", () => {
@@ -10,12 +10,12 @@ describe("provider config", () => {
 				OAUTH_JWT_ISSUER: "https://auth.test",
 			},
 		});
-		const config = validate(raw, AppConfigSchema);
+		const config = validate(raw, CoreConfigSchema);
 
 		// The signing key, the log level, the HTTP settings, the Redis stores'
 		// settings and the session's are the sections of the modules that own
 		// them, with their defaults in those modules' package: core ships none.
-		const sections = config as unknown as Record<string, unknown>;
+		const sections = raw.toObject() as Record<string, unknown>;
 		expect(config.oauth.jwt.signingKey).toBeUndefined();
 		expect(sections["key-store"]).toBeUndefined();
 		expect(sections.logging).toBeUndefined();
@@ -40,18 +40,18 @@ describe("provider config", () => {
 		]) {
 			expect(sections[section], section).toBeUndefined();
 		}
-		expect((config.oauth as Record<string, unknown>).code).toBeUndefined();
-		expect(config["redis-session-stores"]).toBeUndefined();
+		expect((sections.oauth as Record<string, unknown>).code).toBeUndefined();
+		expect(sections["redis-session-stores"]).toBeUndefined();
 		expect(config.oauth.oidcMode).toBe("oidc-required");
-		expect(config.session).toBeUndefined();
-		expect(config["session-store"]).toBeUndefined();
+		expect(sections.session).toBeUndefined();
+		expect(sections["session-store"]).toBeUndefined();
 	});
 
 	it("fails validation when required fields are missing", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {},
 		});
-		expect(() => validate(raw, AppConfigSchema)).toThrow();
+		expect(() => validate(raw, CoreConfigSchema)).toThrow();
 	});
 
 	it("fails loudly when the removed OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS is still set", () => {
@@ -69,7 +69,7 @@ describe("provider config", () => {
 				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 			},
 		});
-		expect(() => validate(raw, AppConfigSchema)).toThrow(/allowUnmarkedClients was removed/);
+		expect(() => validate(raw, CoreConfigSchema)).toThrow(/allowUnmarkedClients was removed/);
 	});
 
 	it("overrides defaults with env vars", () => {
@@ -83,7 +83,7 @@ describe("provider config", () => {
 				OAUTH_OIDC_MODE: "dual",
 			},
 		});
-		const config = validate(raw, AppConfigSchema);
+		const config = validate(raw, CoreConfigSchema);
 
 		expect(config.oauth.oidcMode).toBe("dual");
 		// core.federations.google.enabled env-var coercion is covered by the
@@ -93,28 +93,22 @@ describe("provider config", () => {
 
 	it("loads core-rate-limiter-memory.maxBuckets default and CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS", () => {
 		const path = new URL("../../config/reference.conf", import.meta.url).pathname;
-		const base = validate(
-			parseFile(path, {
-				env: {
-					OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-					OAUTH_JWT_ISSUER: "https://auth.test",
-				},
-			}),
-			AppConfigSchema,
-		);
-		// Presence-only in core's schema: the module's own section schema reads it.
+		// As written: the module's own section schema reads it.
+		const base = parseFile(path, {
+			env: {
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
+				OAUTH_JWT_ISSUER: "https://auth.test",
+			},
+		}).toObject() as Record<string, unknown>;
 		expect(base["core-rate-limiter-memory"]).toMatchObject({ maxBuckets: 10_000 });
 
-		const overridden = validate(
-			parseFile(path, {
-				env: {
-					OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-					OAUTH_JWT_ISSUER: "https://auth.test",
-					CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "123",
-				},
-			}),
-			AppConfigSchema,
-		);
+		const overridden = parseFile(path, {
+			env: {
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
+				OAUTH_JWT_ISSUER: "https://auth.test",
+				CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "123",
+			},
+		}).toObject() as Record<string, unknown>;
 		expect(overridden["core-rate-limiter-memory"]).toMatchObject({ maxBuckets: "123" });
 	});
 });

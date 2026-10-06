@@ -55,6 +55,7 @@ import {
 	memoryRateLimiterModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
+	sessionLifecycleModule,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { oauthEndpointsModule, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
@@ -164,6 +165,11 @@ const bootWith = async (
 		swap.deviceCodeStore ?? memoryDeviceCodeStoreModule,
 		memoryRateLimiterModule,
 		memorySessionStoresModule,
+		// Core's session lifecycle, required where a user-session store is
+		// wired, and the family revocation it requires.
+		sessionLifecycleModule,
+		memoryRefreshTokenFamilyStoreModule,
+		defaultRefreshTokenFamilyRevocationModule,
 		memoryFederationTokenStoreModule,
 		memoryAccessTokenDenylistModule,
 		deploymentProviders,
@@ -1044,12 +1050,7 @@ describe("the device-grant module beside oauthEndpointsModule — an approval ne
 		// it — and a device token minted from an approval AFTER it would carry
 		// a later `iat`, so the watermark cannot reach it. Only the approval can.
 		const config = makeConfig(ENABLED);
-		const { handle, app } = await bootWith(config, [
-			...modules,
-			subjectRevocationServiceModule,
-			memoryRefreshTokenFamilyStoreModule,
-			defaultRefreshTokenFamilyRevocationModule,
-		]);
+		const { handle, app } = await bootWith(config, [...modules, subjectRevocationServiceModule]);
 		try {
 			const { userCode, deviceCode } = await startWithCodes(app);
 			const agent = request.agent(app);
@@ -1115,12 +1116,7 @@ describe("the device-grant module beside oauthEndpointsModule — an approval ne
 		// ahead and redeem them after the victim's credential change. See the
 		// package README, "Polling".
 		const config = makeConfig(ENABLED);
-		const { handle, app } = await bootWith(config, [
-			...modules,
-			subjectRevocationServiceModule,
-			memoryRefreshTokenFamilyStoreModule,
-			defaultRefreshTokenFamilyRevocationModule,
-		]);
+		const { handle, app } = await bootWith(config, [...modules, subjectRevocationServiceModule]);
 		try {
 			const { userCode, deviceCode } = await startWithCodes(app);
 			const agent = request.agent(app);

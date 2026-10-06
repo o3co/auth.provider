@@ -34,8 +34,9 @@ every replica shares, and the manifest that puts it in the port's slot.
   conformance suites hold these adapters to them ([Contract tests](#contract-tests));
 - the flows built on the stores: refresh-token rotation and revocation
   (`RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation`) are core's,
-  over whichever `RefreshTokenFamilyStore` is wired; the logout cascade and
-  subject-wide revocation belong to core and the route packages;
+  over whichever `RefreshTokenFamilyStore` is wired; a session's close (core's
+  session lifecycle) and subject-wide revocation belong to core and the route
+  packages;
 - the connection: the composition root opens the ioredis `Redis` instance,
   chooses its options and attaches its `error` listener;
 - the `express-session` store behind the browser cookie. That is
@@ -432,7 +433,9 @@ Each adapter ships in up to two forms:
   form, `redisFederationTokenStoreModuleFor` and
   `redisFederationGrantStoreModuleFor`, for a composition root that selects its
   config by a name other than `NODE_ENV` (the standalone's `CONFIG_ENV`): the
-  plaintext guard reads that name in addition to `NODE_ENV`, and the
+  plaintext guard reads that name in addition to `NODE_ENV`, each trimmed
+  and in lower case as core's `productionEnvironmentIn` reads it (so
+  `Production` or `"staging\n"` refuses plaintext as surely), and the
   replica count from core's `deploymentMode` slot, which both modules require
   and core fills from `core.deployment.mode` — `"multi"` refuses plaintext in every
   environment. A composition root that builds either store itself passes

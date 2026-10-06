@@ -273,7 +273,7 @@ describe("RedisCodeRepository", () => {
 			expect(r[Symbol.asyncDispose as unknown as string]).toBeUndefined();
 		});
 
-		// Defense-in-depth: the module configSchema rejects non-positive
+		// Defense-in-depth: the module's section schema rejects non-positive
 		// integers at boot, but direct constructor callers must also fail
 		// loudly so the failure mode is identical regardless of wiring path.
 		it.each([
