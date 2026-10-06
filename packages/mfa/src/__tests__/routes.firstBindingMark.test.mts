@@ -227,6 +227,74 @@ describe("a first binding in a session after the subject's first binding elsewhe
 		expect(await factorStore.list(ALICE.id)).toEqual([]);
 	});
 
+	it("reads the mark again under the subject's lease: a completion that reaches its lease after a first binding elsewhere was noted, its factor since removed, is refused: 401, nothing bound, the transaction kept", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, logger } =
+			await composed("optional");
+		const stale = await signIn(app, userSessionStore);
+		const pending = await enrollFromAccount(stale.agent, "totp");
+		expect(pending.status, JSON.stringify(pending.body)).toBe(200);
+		freezeClock(T0 + 30_000);
+		const acquire = transactionStore.acquireSubjectLease.bind(transactionStore);
+		vi.spyOn(transactionStore, "acquireSubjectLease").mockImplementationOnce(
+			async (subject, asked) => {
+				// Between the completion's read before the lease and its lease: another session
+				// binds the subject's first factor, noting the mark, and the factor is removed.
+				await transactionStore.noteFirstBinding(subject, Date.now(), Date.now() + LIFETIME_MS);
+				return acquire(subject, asked);
+			},
+		);
+
+		const res = await completeEnrollment(
+			stale.agent,
+			pending.body.transaction as string,
+			totpProofOf(pending.body.secret),
+		);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
+		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(await transactionStore.get(pending.body.transaction as string)).toMatchObject({
+			attempts: 1,
+		});
+		expect(events(logger, "info")).toContain("mfa_first_binding_distrusted");
+	});
+
+	it("answers 503 when the mark cannot be read under the subject's lease, binding nothing and keeping the transaction", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, logger } =
+			await composed("optional");
+		const { agent } = await signIn(app, userSessionStore);
+		const pending = await enrollFromAccount(agent, "totp");
+		expect(pending.status, JSON.stringify(pending.body)).toBe(200);
+		const acquire = transactionStore.acquireSubjectLease.bind(transactionStore);
+		vi.spyOn(transactionStore, "acquireSubjectLease").mockImplementationOnce(
+			async (subject, asked) => {
+				// The read before the lease answered; the one under it does not.
+				vi.spyOn(transactionStore, "firstBindingAt").mockRejectedValue(
+					new Error("transaction store unreachable"),
+				);
+				return acquire(subject, asked);
+			},
+		);
+
+		const res = await completeEnrollment(
+			agent,
+			pending.body.transaction as string,
+			totpProofOf(pending.body.secret),
+		);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(res.body).toEqual(MFA_UNAVAILABLE);
+		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(await transactionStore.get(pending.body.transaction as string)).toMatchObject({
+			attempts: 1,
+		});
+		expect(logger.error.mock.calls).toContainEqual([
+			expect.objectContaining({ store: "mfa_transaction", step: "firstBindingAt" }),
+			"mfa_store_unavailable",
+		]);
+	});
+
 	it("is refused to a session signed in after the mark and the clock skew, but within a factor-set lease of them: the owner's factor may still have been landing", async () => {
 		const { app, factorStore, userSessionStore, users, logger } = await composed("optional");
 		const first = await signIn(app, userSessionStore);
