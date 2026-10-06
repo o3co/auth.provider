@@ -288,12 +288,13 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		expect(bag.destroyed).toBe(false);
 	});
 
-	it("a sid the lifecycle cannot hold: nothing to close, said once at warn; the logout ends the cookie", async () => {
+	it("a close that rejects with a RangeError is the same outage: 503, logged once at error with its projection, the cookie kept", async () => {
+		const thrown = new RangeError("Invalid array length");
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
 			sessionLifecycle: fakeLifecycle({
 				close: async () => {
-					throw new RangeError("session lifecycle: sid must be 1 to 512 characters");
+					throw thrown;
 				},
 			}),
 			logger,
@@ -301,12 +302,14 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 
 		const res = await logout(app);
 
-		expect(res.status).toBe(200);
-		expect(bag.destroyed).toBe(true);
-		expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
-			{ sid: SID, store: "session_lifecycle" },
-			"session_logout_sid_not_closable",
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			{ sid: SID, store: "session_lifecycle", step: "close", err: loggableError(thrown) },
+			"session_logout_store_unavailable",
 		);
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(bag.destroyed).toBe(false);
 	});
 
 	it("a cookie store that cannot destroy after a committed close: 503, the close not run again", async () => {

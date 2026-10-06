@@ -51,8 +51,9 @@
  * deleted — then its index entry. A close that fails is reported as the
  * record's `delete`, with the lifecycle's own error when it rejects. From
  * step 4 on, a failure also drops the request's cookie session, which must be
- * neither saved against the failed store nor named by a cookie. Without a `UserSessionStore` only
- * steps 4, 6 and 7 run. The CSRF token and the response stay with the routes.
+ * neither saved against the failed store nor named by a cookie. Without a
+ * `UserSessionStore` only steps 4, 6 and 7 run. The CSRF token and the
+ * response stay with the routes.
  *
  * `renewSession` moves a signed-in session to a new id: the signed-in state
  * this file writes — `isAuthenticated`, `user`, `sid` — carried over, a fresh

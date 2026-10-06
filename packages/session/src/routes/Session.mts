@@ -237,10 +237,9 @@ export const createRouter = (
 	/**
 	 * Closes `sid` through core's session lifecycle for a session logout:
 	 * `closed` once the closing commit has landed — a commit with work still
-	 * pending audited as `logout.close_pending` — or when the lifecycle refuses
-	 * the sid as one it cannot hold (no session of its own carries it);
-	 * `unavailable` when the close did not complete its commit, or the
-	 * lifecycle threw, logged once as `session_logout_store_unavailable`.
+	 * pending audited as `logout.close_pending`; `unavailable` when the close
+	 * did not complete its commit, or the lifecycle rejected, whatever the
+	 * error, logged once as `session_logout_store_unavailable`.
 	 */
 	const closeSession = async (
 		lifecycle: SessionLifecycle,
@@ -267,12 +266,6 @@ export const createRouter = (
 				"session_logout_store_unavailable",
 			);
 		} catch (err) {
-			// The lifecycle refuses a sid it cannot hold as a key with a
-			// RangeError, before it writes; nothing else it throws is one.
-			if (err instanceof RangeError) {
-				logger.warn({ sid, store: "session_lifecycle" }, "session_logout_sid_not_closable");
-				return "closed";
-			}
 			logger.error(
 				{ sid, store: "session_lifecycle", step: "close", err: loggableError(err) },
 				"session_logout_store_unavailable",
