@@ -64,18 +64,25 @@ rather than `workspace:*`, and refresh the lockfile. Then:
 - A mail sender of your own goes through `buildModules`'
   `overrides.mailSenderModules`, never into the module list (#1241).
 - The new `application.conf` writes no section for a module a default boot
-  does not load. If you re-apply your edits to a copy taken before this
-  change, change three blocks in it. Replace `federation-grants { … }` with
-  `federation-grants.enabled = ${?FEDERATION_GRANTS_ENABLED}`; the feature
-  is still off while the variable is unset, and the federation-grants
-  package's `reference.conf` sets the rest of the section with the same
-  variables. Drop
-  `redis-federation-grant-store { encryptionMode … }`: the Redis package's
-  `reference.conf` sets the same `"required"` and binds the same variable.
-  Drop `core-rate-limiter-memory.limits.mfa` and `redis-rate-limiter.limits.mfa`:
-  the template's `reference.conf` now sets both. The values the loaded
-  modules read do not change. A section written for a module the composition
-  does not load reaches nothing.
+  does not load. If you keep an `application.conf` copied before this change,
+  edit it in three places:
+  - Replace the whole `federation-grants { … }` block with the single line
+    `federation-grants.enabled = ${?FEDERATION_GRANTS_ENABLED}`. The feature
+    stays off while the variable is unset, and the federation-grants
+    package's `reference.conf` sets the rest of the section, bound to the
+    same variables.
+  - Delete the `redis-federation-grant-store { encryptionMode … }` block. The
+    Redis package's `reference.conf` sets the same `"required"`, bound to the
+    same variable.
+  - Delete the two `limits.mfa` lines (`core-rate-limiter-memory.limits.mfa`,
+    `redis-rate-limiter.limits.mfa`), and take the new `config/reference.conf`
+    with them: it is the file that now sets both. Deleting the lines while
+    keeping an older `reference.conf` loses the budget: the MFA routes fall
+    back to the limiter's `defaultLimit`, 60 per 60 s, five times looser than
+    the 60 per 300 s they had.
+
+  Done this way, the values the loaded modules read do not change. A section
+  written for a module the composition does not load reaches nothing.
 - **BREAKING: federations are handled by their `type`** (#1291). The
   template's federation config bridges (`googleFederationConfigModule`,
   `oidcFederationConfigModule`) and its reading of the federation map before

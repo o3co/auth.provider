@@ -300,7 +300,10 @@ Configuration is loaded from `config/application.conf` (HOCON format), over the 
    `http.cors`), `key-store`, the shared Redis connection's `redis-clients`,
    `repositories`, the in-process code repository's
    `standalone-in-memory-code-repository` and `audit-sink` — and of the
-   composition root's own `adapters` and `mfaMode` (below). Set a deployment's own value in
+   composition root's own `adapters` and `mfaMode` (below), and the MFA
+   routes' budget in both rate limiters' sections
+   (`core-rate-limiter-memory.limits.mfa`, `redis-rate-limiter.limits.mfa`;
+   see [Multi-replica deployments](#multi-replica-deployments)). Set a deployment's own value in
    the two files above, not there. `config/reference.conf` binds each of these
    keys' variables beside its default, so a value either file above sets wins
    over the variable, except for `HTTP_PORT`, `HTTP_TRUST_PROXY`,

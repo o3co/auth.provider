@@ -223,12 +223,14 @@ const GRANT_KEY_RING_LAYER: string = (() => {
 
 /**
  * The composition's own files under `env`, highest first: the operator's
- * layers — the grant key ring among them where `env` puts the grant store on
- * Redis — then the shipped production ones.
+ * layers — the grant key ring among them where `env` turns federation grants
+ * on and puts their store on Redis — then the shipped production ones.
  */
 export function ownFiles(env: Readonly<Record<string, string>> = SINGLE_ENV): string[] {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const keyRing = env.ADAPTERS_FEDERATION_GRANT_STORE === "redis" ? [GRANT_KEY_RING_LAYER] : [];
+	const grantStoreOnRedis =
+		env.FEDERATION_GRANTS_ENABLED === "true" && env.ADAPTERS_FEDERATION_GRANT_STORE === "redis";
+	const keyRing = grantStoreOnRedis ? [GRANT_KEY_RING_LAYER] : [];
 	return [OPERATOR_LAYER, ...keyRing, envConfPath, applicationConfPath];
 }
 

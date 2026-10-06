@@ -15,13 +15,14 @@
  */
 
 /**
- * The template's shipped files, booted as `app.mts` boots them in each mode
- * the README documents, leave core nothing to name: every section they write
- * is one a loaded module reads, or one the configuration's defaults hold
- * (`configDefaultsFor`) and the boot leaves as they set it. A section the
- * shipped files write for a module the mode does not load would be named in
- * `config_sections_ignored` or `config_sections_not_loaded` on a boot the
- * operator changed nothing of.
+ * The template's shipped files, read as `app.mts` reads them in each mode the
+ * README documents, write no section for a module the mode does not load:
+ * every top-level section handed to boot is a loaded module's, core's own
+ * (`core`, `oauth`), one that sets nothing, or one equal to the
+ * configuration's defaults (`configDefaultsFor`). That is checked here
+ * directly, whatever core counts as read; booted, the same modes then have
+ * core name nothing in `config_sections_ignored` or
+ * `config_sections_not_loaded`.
  *
  * Redis is a stand-in: these boots read configuration, not stores.
  */
@@ -31,7 +32,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createApp } from "@o3co/auth-provider-core";
+import { isDeepStrictEqual } from "node:util";
+import { createApp, type Module } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import {
@@ -118,12 +120,12 @@ const REQUIRED: Readonly<Record<string, string>> = {
 	REPOSITORIES_CLIENT_YAML_PATH: clientsFile,
 	REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: "https://store.auth.test/authenticate",
 	REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL: "https://store.auth.test/by-token",
-	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
-	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 };
 
-/** What `docker-compose.yml` sets for the app beside the operator's `.env`. */
+/** What `docker-compose.yml` sets for the app beside the operator's `.env`, with `.env.example`'s Redis URLs. */
 const COMPOSE: Readonly<Record<string, string>> = {
+	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	ADAPTERS_USER_SESSION_STORES: "redis",
 	ADAPTERS_MFA_FACTOR_STORE: "redis",
 	ADAPTERS_MFA_TRANSACTION_STORE: "redis",
@@ -165,15 +167,21 @@ const IN_MEMORY: Readonly<Record<string, string>> = {
 	ADAPTERS_CODE_REPOSITORY: "memory",
 };
 
+/** The composition's own files for `configEnv`, read as `app.mts` reads them, and what they choose. */
+function readShipped(configEnv: string, env: Readonly<Record<string, string>>) {
+	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
+	const own = readOwnLayers([envConfPath, applicationConfPath], { env });
+	const switches = readSwitches(own);
+	const modules = buildModules(switches, { environment: configEnv });
+	return { own, switches, modules };
+}
+
 /** Boots the template's own files for `configEnv` under `env`, as `app.mts` does. */
 async function bootShipped(
 	configEnv: string,
 	env: Readonly<Record<string, string>>,
 ): Promise<{ readonly logger: RecordingLogger; readonly modules: readonly string[] }> {
-	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
-	const own = readOwnLayers([envConfPath, applicationConfPath], { env });
-	const switches = readSwitches(own);
-	const modules = buildModules(switches, { environment: configEnv });
+	const { own, switches, modules } = readShipped(configEnv, env);
 	const logger = createRecordingLogger();
 	const handle = await createApp({
 		modules,
@@ -188,25 +196,72 @@ async function bootShipped(
 	return { logger, modules: modules.map((module) => module.name) };
 }
 
+/** Core's own sections. */
+const CORE_SECTIONS: readonly string[] = ["core", "oauth"];
+
+/**
+ * Removed by boot before it parses the configuration: what the resolution saw
+ * of each renamed variable.
+ */
+const RENAMED_VARIABLES = "renamed-variables";
+
+/** Whether `value` sets anything: a value, or a section with one somewhere under it. */
+function setsAnything(value: unknown): boolean {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return true;
+	return Object.values(value).some(setsAnything);
+}
+
+/**
+ * The top-level sections of what `resolveForBoot` hands boot that are no
+ * loaded module's and not core's, set something, and differ from the
+ * configuration's defaults: settings for a module the composition does not
+ * load.
+ */
+function sectionsNothingLoadedReads(
+	configEnv: string,
+	env: Readonly<Record<string, string>>,
+): string[] {
+	const { own, switches, modules } = readShipped(configEnv, env);
+	const resolved = resolveForBoot(own, modules, switches) as unknown as Record<string, unknown>;
+	const defaults = configDefaultsFor(modules);
+	const sections = new Set(
+		modules.filter((module: Module) => module.section !== undefined).map((module) => module.name),
+	);
+	return Object.keys(resolved)
+		.filter((name) => !sections.has(name) && !CORE_SECTIONS.includes(name))
+		.filter((name) => name !== RENAMED_VARIABLES && setsAnything(resolved[name]))
+		.filter((name) => !isDeepStrictEqual(resolved[name], defaults[name]))
+		.sort();
+}
+
 /** What each warn line named `event` names. */
 const named = (logger: RecordingLogger, event: string): unknown[] =>
 	logger.lines
 		.filter((line) => line.level === "warn" && line.args[1] === event)
 		.map((line) => line.args[0]);
 
+/** Each mode the README documents: its name, the configuration it selects, its environment. */
+const MODES = [
+	["development, as docker-compose.yml runs it", "development", { ...REQUIRED, ...COMPOSE }],
+	["development, every store in memory", "development", IN_MEMORY],
+	["production, one replica", "production", PRODUCTION],
+	[
+		"production, one replica, the Redis rate limiter",
+		"production",
+		{ ...PRODUCTION, ADAPTERS_RATE_LIMITER: "redis" },
+	],
+	["production, every store in memory", "production", IN_MEMORY],
+	["production, more than one replica", "production", MULTI],
+] as const;
+
+describe("the shipped files write no section for a module the mode does not load", () => {
+	it.each(MODES)("%s", (_mode, configEnv, env) => {
+		expect(sectionsNothingLoadedReads(configEnv, env)).toEqual([]);
+	});
+});
+
 describe("a boot of the shipped files that changes nothing of them names no section", () => {
-	it.each([
-		["development, as docker-compose.yml runs it", "development", { ...REQUIRED, ...COMPOSE }],
-		["development, every store in memory", "development", IN_MEMORY],
-		["production, one replica", "production", PRODUCTION],
-		[
-			"production, one replica, the Redis rate limiter",
-			"production",
-			{ ...PRODUCTION, ADAPTERS_RATE_LIMITER: "redis" },
-		],
-		["production, every store in memory", "production", IN_MEMORY],
-		["production, more than one replica", "production", MULTI],
-	] as const)("%s", async (_mode, configEnv, env) => {
+	it.each(MODES)("%s", async (_mode, configEnv, env) => {
 		const { logger, modules } = await bootShipped(configEnv, env);
 		expect(modules).not.toContain("federation-grants");
 		expect(named(logger, "config_sections_ignored")).toEqual([]);
