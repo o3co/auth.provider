@@ -1541,12 +1541,8 @@ export interface MfaTransactionStore {
 	 * answers the mark another left, and one at most answers `null`. A
 	 * `RangeError`, nothing noted, for what {@link checkFirstBindingNote}
 	 * refuses on the store's clock.
-	 *
-	 * An answer of `undefined` is the form that answers nothing; it is to be
-	 * removed.
 	 */
-	// biome-ignore lint/suspicious/noConfusingVoidType: the form that answers nothing, until it is removed
-	noteFirstBinding(subject: string, atMs: number, untilMs: number): Promise<number | null | void>;
+	noteFirstBinding(subject: string, atMs: number, untilMs: number): Promise<number | null>;
 	/**
 	 * What {@link firstBindingAnswer} answers of `subject`'s mark: `atMs`
 	 * while the mark stands on the store's clock, else `null`. One clock
