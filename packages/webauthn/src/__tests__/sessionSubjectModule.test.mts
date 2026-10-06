@@ -522,6 +522,27 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 		expect(res.body.subject).toBeNull();
 		expect(get).not.toHaveBeenCalled();
 	});
+
+	it.each([
+		["options", "a body that is not JSON", "{not json", 400],
+		[
+			"verify",
+			"a body over the routes' 100kb limit",
+			JSON.stringify({ pad: "x".repeat(110_000) }),
+			413,
+		],
+	] as const)(
+		"reads the %s body before the session: %s is refused with no session read",
+		async (route, _what, body, status) => {
+			const { app, get } = setup();
+			const res = await supertest(app)
+				.post(`/oauth/webauthn/registration/${route}`)
+				.set("Content-Type", "application/json")
+				.send(body);
+			expect(res.status).toBe(status);
+			expect(get).not.toHaveBeenCalled();
+		},
+	);
 });
 
 // ---------------------------------------------------------------------------
