@@ -266,3 +266,32 @@ describe("the CORS table's discovery paths follow the issuer boot resolved, and 
 		}
 	});
 });
+
+describe("an absence policy keyed in cors {} does not make the section read", () => {
+	it("refuses cors written beside a sectionless module whose absence policy is keyed there", async () => {
+		const keyedInCors = defineModule({
+			name: "test:keyed-in-cors",
+			optional: ["auditSink"] as const,
+			absencePolicies: {
+				auditSink: { configKey: ["cors", "auditSink"], absentValue: "unsupported", hint: "h" },
+			},
+		});
+		const err = await createApp({
+			modules: [tokenRoute, keyedInCors],
+			bootstrapComponents: {
+				config: { ...makeValidCoreConfig(), cors: { allowedOrigins: [CONFIG_ORIGIN] } },
+				pathResolver: (s: string) => s,
+			} as never,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(e: unknown) => e,
+		);
+		expect(err).toMatchObject({ reason: "config-validation-failed" });
+		expect(
+			(err as { details: { issues: { path: PropertyKey[] }[] } }).details.issues.map((i) => i.path),
+		).toEqual([["cors"]]);
+	});
+});

@@ -151,3 +151,98 @@ describe("oauth {} with no loaded module whose section it is", () => {
 		},
 	);
 });
+
+describe("what core reads of oauth {} without its module is one reading, by its segments", () => {
+	const issuePathsOf = (err: BootError): PropertyKey[][] =>
+		(err.details as unknown as { issues: { path: PropertyKey[] }[] }).issues.map((issue) => [
+			...issue.path,
+		]);
+
+	it.each([
+		["an empty object", {}],
+		["a list holding an empty object", [{}]],
+		["an object whose only key is undefined", { nested: undefined }],
+	])("refuses an issuer that is %s, which sets no leaf, at the key", async (_, issuer) => {
+		const err = await refusal(withOAuth({ ...READ, jwt: { issuer } }));
+		expect(err.reason).toBe("config-validation-failed");
+		expect(issuePathsOf(err)).toEqual([["oauth", "jwt", "issuer"]]);
+	});
+
+	it.each([
+		["a list holding an empty object", [{}]],
+		["a list", ["x"]],
+		["null", null],
+		["a number", 1],
+	])("refuses an oauth that is %s, as no section", async (_, oauth) => {
+		const err = await refusal(withOAuth(oauth));
+		expect(issuePathsOf(err)).toEqual([["oauth"]]);
+	});
+
+	it.each([
+		["jwt.issuer", "https://auth.test"],
+		["accessToken.expiresIn", 3600],
+		["revocation.subject", "unsupported"],
+	])(
+		"refuses the literal key %j, which no dotted path it spells makes one core reads",
+		async (key, value) => {
+			const err = await refusal(withOAuth({ ...READ, [key]: value }));
+			expect(issuePathsOf(err)).toEqual([["oauth", key]]);
+		},
+	);
+
+	it("reads an issuer getter once: the value it checks is the one the config slot holds", async () => {
+		let reads = 0;
+		const jwt = {
+			get issuer(): string {
+				reads += 1;
+				return reads === 1 ? "https://auth.test" : "https://evil.test/";
+			},
+		};
+		const handle = await boot(withOAuth({ ...READ, jwt }));
+		try {
+			const config = handle.components.config as unknown as {
+				oauth: { jwt: { issuer: unknown } };
+			};
+			expect(config.oauth.jwt.issuer).toBe("https://auth.test");
+			expect(reads).toBe(1);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("reads an unread key's getter once: what it answered when checked is what the slot holds", async () => {
+		let reads = 0;
+		const oauth = {
+			...READ,
+			get oidcMode(): string | undefined {
+				reads += 1;
+				return reads === 1 ? undefined : "dual";
+			},
+		};
+		const handle = await boot(withOAuth(oauth));
+		try {
+			const config = handle.components.config as unknown as { oauth: Record<string, unknown> };
+			expect(config.oauth.oidcMode).toBeUndefined();
+			expect(reads).toBe(1);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses an issuer whose read throws at the key, never repeating what it threw", async () => {
+		const jwt = {
+			get issuer(): string {
+				throw new Error("leaked https://secret.example/token");
+			},
+		};
+		const err = await refusal(withOAuth({ ...READ, jwt }));
+		expect(err.reason).toBe("config-validation-failed");
+		expect(issuePathsOf(err)).toEqual([["oauth", "jwt", "issuer"]]);
+		expect(err.message).not.toContain("secret.example");
+	});
+
+	it("names a reserved key under oauth once", async () => {
+		const err = await refusal(withOAuth({ ...READ, prototype: 1 }));
+		expect(issuePathsOf(err)).toEqual([["oauth", "prototype"]]);
+	});
+});

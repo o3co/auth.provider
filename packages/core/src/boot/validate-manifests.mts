@@ -2142,72 +2142,167 @@ function reservedKeyIssues(
 const SECTIONS_CORE_READS = ["oauth"] as const;
 
 /**
- * The keys of `oauth {}` core reads by path (`SECTIONS_CORE_READS`), and no
- * other: the issuer the grant-policy check and `compositionIssuer` read, the
- * token lifetimes core's resolvers read (`OAUTH_LIFETIME_PATHS`), and the
- * revocation modes the subject-revocation and access-token denylist absence
- * policies are keyed in.
+ * The keys of `oauth {}` core reads by path (`SECTIONS_CORE_READS`), each as
+ * its segments, and no other: the issuer the grant-policy check and
+ * `compositionIssuer` read, the token lifetimes core's resolvers read
+ * (`OAUTH_LIFETIME_PATHS`), and the revocation modes the subject-revocation
+ * and access-token denylist absence policies are keyed in.
  */
-const OAUTH_ISSUER_PATH = "oauth.jwt.issuer";
-const OAUTH_PATHS_CORE_READS: ReadonlySet<string> = new Set([
+const OAUTH_ISSUER_PATH = ["oauth", "jwt", "issuer"] as const;
+const OAUTH_PATHS_CORE_READS: readonly (readonly string[])[] = [
 	OAUTH_ISSUER_PATH,
 	...OAUTH_LIFETIME_PATHS,
-	SUBJECT_REVOCATION_ABSENCE_POLICY.configKey.join("."),
-	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY.configKey.join("."),
-]);
+	SUBJECT_REVOCATION_ABSENCE_POLICY.configKey,
+	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY.configKey,
+];
 
-/** The value at `path` of `config`, read as own properties; `undefined` where there is none. */
-function ownValueAt(config: unknown, path: readonly string[]): unknown {
-	let value: unknown = config;
-	for (const key of path) {
-		if (value === null || typeof value !== "object" || !Object.hasOwn(value, key)) return undefined;
-		value = (value as Record<string, unknown>)[key];
-	}
-	return value;
+/** Whether `path` starts with every segment of `prefix`. */
+const startsWith = (path: readonly string[], prefix: readonly string[]): boolean =>
+	prefix.length <= path.length && prefix.every((segment, index) => path[index] === segment);
+
+/** Whether `path` is one core reads, segment for segment. */
+const isPathCoreReads = (path: readonly string[]): boolean =>
+	OAUTH_PATHS_CORE_READS.some((read) => read.length === path.length && startsWith(path, read));
+
+/** A copy of a configuration value as plain data, every property read once, and the paths whose read threw. */
+interface OAuthSnapshot {
+	readonly value: unknown;
+	readonly unreadable: readonly (readonly string[])[];
 }
 
 /**
- * Where no loaded module's section is `oauth` — the oauth endpoints module is
- * not loaded — one issue per key the configuration sets under `oauth` that
- * core does not read (`OAUTH_PATHS_CORE_READS`), by the reading of what a
- * configuration sets the relocation refusal uses (`pathsSetBy`, a key whose
- * value is `undefined` setting nothing), and one for a configured issuer that
- * is not canonical. Nothing else would read such a key, so it would be
- * accepted unread: a retired key, a misspelt one, one only the module reads.
- * Where the module is loaded, its own strict section refuses instead.
+ * `value` copied with each own enumerable property of every plain object and
+ * list read exactly once, so what is checked is what later stages hold; a
+ * getter that would answer differently on a second read is never read again.
+ * A property whose read throws, or that refers back to an object it lies
+ * under, is left out and its path listed. Anything else is kept as it is.
  */
-function oauthKeysNothingReads(raw: unknown, modules: readonly Module[]): z.core.$ZodIssue[] {
-	if (modules.some((m) => m.section !== undefined && m.name === SECTIONS_CORE_READS[0])) {
-		return [];
-	}
-	const section = ownValueAt(raw, [SECTIONS_CORE_READS[0]]);
-	if (section === undefined) return [];
-	const issues: z.core.$ZodIssue[] = [];
-	for (const path of pathsSetBy(section, [SECTIONS_CORE_READS[0]])) {
-		const value = ownValueAt(raw, path);
-		if (value === undefined) continue;
-		const dotted = path.join(".");
-		if (dotted === OAUTH_ISSUER_PATH) {
-			const rejection = checkCanonicalIssuer(value);
-			if (rejection === null) continue;
-			issues.push({
-				code: "custom",
-				path: [...path],
-				message: `${OAUTH_ISSUER_PATH} ${describeIssuerRejection(rejection)}`,
-				input: undefined,
-			} as z.core.$ZodIssue);
-			continue;
+function snapshotOf(value: unknown, path: readonly string[]): OAuthSnapshot {
+	const unreadable: (readonly string[])[] = [];
+	const ancestors = new Set<object>();
+	const copy = (node: unknown, at: readonly string[]): unknown => {
+		const list = Array.isArray(node);
+		if (!list && !isPlainConfigObject(node)) return node;
+		if (ancestors.has(node as object)) {
+			unreadable.push(at);
+			return undefined;
 		}
-		if (OAUTH_PATHS_CORE_READS.has(dotted)) continue;
-		issues.push({
-			code: "custom",
-			path: [...path],
-			message:
-				"is read only by oauthEndpointsModule, which owns oauth {} and is not loaded: load oauthEndpointsModule to use this key (the oauth grant modules need it too), or remove the key",
-			input: undefined,
-		} as z.core.$ZodIssue);
+		ancestors.add(node as object);
+		const out: Record<string, unknown> | unknown[] = list
+			? []
+			: Object.create(Object.getPrototypeOf(node) as object | null);
+		for (const key of Object.keys(node as object)) {
+			let read: unknown;
+			try {
+				read = (node as Record<string, unknown>)[key];
+			} catch {
+				unreadable.push([...at, key]);
+				continue;
+			}
+			defineConfigKey(out as Record<string, unknown>, key, copy(read, [...at, key]));
+		}
+		ancestors.delete(node as object);
+		return out;
+	};
+	return { value: copy(value, path), unreadable };
+}
+
+/** A custom issue at `path` with `message`. */
+const issueAt = (path: readonly string[], message: string): z.core.$ZodIssue =>
+	({ code: "custom", path: [...path], message, input: undefined }) as z.core.$ZodIssue;
+
+const UNREAD_OAUTH_KEY =
+	"is read only by oauthEndpointsModule, which owns oauth {} and is not loaded: load oauthEndpointsModule to use this key (the oauth grant modules need it too), or remove the key";
+
+/**
+ * Where no loaded module's section is `oauth` — the oauth endpoints module is
+ * not loaded — core's reading of `oauth {}`: the section copied once
+ * (`snapshotOf`), which is what the rest of boot holds, and its issues. A
+ * section that is not an object, a key whose read throws (named, never what
+ * it threw), every key set that core does not read (`OAUTH_PATHS_CORE_READS`,
+ * segment for segment, by the reading of what a configuration sets the
+ * relocation refusal uses: `pathsSetBy`, a key whose value is `undefined`
+ * setting nothing), and an issuer present (not `undefined`) that is not a
+ * canonical issuer, whatever its shape. A key named after an `Object.prototype`
+ * member, or `prototype`, is left to `reservedKeyIssues`. Nothing else would
+ * read such a key, so it would be accepted unread: a retired key, a misspelt
+ * one, one only the module reads. Where the module is loaded, its own strict
+ * section refuses instead, and the configuration is handed on as written.
+ */
+function readOAuthWithoutItsModule(
+	raw: unknown,
+	modules: readonly Module[],
+): { readonly config: unknown; readonly issues: z.core.$ZodIssue[] } {
+	const [name] = SECTIONS_CORE_READS;
+	if (
+		modules.some((m) => m.section !== undefined && m.name === name) ||
+		raw === null ||
+		typeof raw !== "object" ||
+		!Object.hasOwn(raw, name)
+	) {
+		return { config: raw, issues: [] };
 	}
-	return issues;
+	const issues: z.core.$ZodIssue[] = [];
+	let written: unknown;
+	try {
+		written = (raw as Record<string, unknown>)[name];
+	} catch {
+		return { config: raw, issues: [issueAt([name], "could not be read: reading it threw")] };
+	}
+	const snapshot = snapshotOf(written, [name]);
+	// The configuration with the section replaced by its copy, every other key
+	// carried over as it was defined, so nothing else is read here.
+	const config = Object.create(Object.getPrototypeOf(raw) as object | null) as Record<
+		string,
+		unknown
+	>;
+	for (const key of Object.keys(raw)) {
+		if (key === name) defineConfigKey(config, key, snapshot.value);
+		else {
+			const descriptor = Object.getOwnPropertyDescriptor(raw, key);
+			if (descriptor !== undefined) Object.defineProperty(config, key, descriptor);
+		}
+	}
+	const section = snapshot.value;
+	if (section === undefined) return { config, issues };
+	for (const path of snapshot.unreadable) {
+		issues.push(issueAt(path, "could not be read: reading it threw, or it contains itself"));
+	}
+	if (!isPlainConfigObject(section)) {
+		issues.push(issueAt([name], `must be a section: ${UNREAD_OAUTH_KEY}`));
+		return { config, issues };
+	}
+	const isReserved = (path: readonly string[]): boolean =>
+		path.some((segment) => reservedKeyReason(segment) !== undefined);
+	const unreadable = (path: readonly string[]): boolean =>
+		snapshot.unreadable.some((at) => startsWith(path, at) || startsWith(at, path));
+	const jwt = section.jwt;
+	const issuer = isPlainConfigObject(jwt) && Object.hasOwn(jwt, "issuer") ? jwt.issuer : undefined;
+	if (issuer !== undefined && !unreadable(OAUTH_ISSUER_PATH)) {
+		const rejection = checkCanonicalIssuer(issuer);
+		if (rejection !== null) {
+			issues.push(
+				issueAt(
+					OAUTH_ISSUER_PATH,
+					`${OAUTH_ISSUER_PATH.join(".")} ${describeIssuerRejection(rejection)}`,
+				),
+			);
+		}
+	}
+	for (const path of pathsSetBy(section, [name])) {
+		// A key whose value is `undefined` sets nothing.
+		if (
+			path
+				.slice(1)
+				.reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], section) ===
+			undefined
+		)
+			continue;
+		if (startsWith(path, OAUTH_ISSUER_PATH) && issuer !== undefined) continue;
+		if (isReserved(path) || isPathCoreReads(path)) continue;
+		issues.push(issueAt(path, UNREAD_OAUTH_KEY));
+	}
+	return { config, issues };
 }
 
 /**
@@ -2225,8 +2320,9 @@ function oauthKeysNothingReads(raw: unknown, modules: readonly Module[]): z.core
  * `config-validation-failed` naming each operator path: every reserved key
  * (`reservedKeyIssues`: an `Object.prototype` member's name, or
  * `prototype`), every key of `oauth {}` nothing reads where its module is not
- * loaded (`oauthKeysNothingReads`), a `cors` section that sets anything while
- * no loaded module owns `cors` (`unreadCorsSection`: core reads its CORS
+ * loaded (`readOAuthWithoutItsModule`, whose copy of the section is what the
+ * composed configuration carries), a `cors` section that sets anything while
+ * no loaded module's section is `cors` (`unreadCorsSection`: core reads its CORS
  * origins from the `httpSettings` slot alone), then the base's issues. No
  * module is named: a module's own configuration is its section, parsed after
  * this.
@@ -2237,8 +2333,14 @@ function validateAndComposeConfig(bootstrap: BootstrapMap, modules: readonly Mod
 	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
 	issues.push(...reservedKeyIssues(raw));
-	issues.push(...oauthKeysNothingReads(raw, modules));
-	const unreadCors = unreadCorsSection(raw, ownedSections(modules));
+	const oauth = readOAuthWithoutItsModule(raw, modules);
+	issues.push(...oauth.issues);
+	// The sections a loaded module owns, at its name: an absence policy keyed
+	// in `cors` does not make the section read.
+	const unreadCors = unreadCorsSection(
+		raw,
+		new Set(modules.filter((m) => m.section !== undefined).map((m) => m.name)),
+	);
 	if (unreadCors !== undefined) {
 		issues.push({ code: "custom", path: ["cors"], message: unreadCors, input: undefined });
 	}
@@ -2256,7 +2358,8 @@ function validateAndComposeConfig(bootstrap: BootstrapMap, modules: readonly Mod
 			details: { reason: "config-validation-failed", issues: issues as z.ZodIssue[], modules: [] },
 		});
 	}
-	return overlayConfig(raw, (base as { readonly data: unknown }).data);
+	// Over the configuration with `oauth {}` as core read it, once.
+	return overlayConfig(oauth.config, (base as { readonly data: unknown }).data);
 }
 
 /**
