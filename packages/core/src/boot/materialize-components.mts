@@ -27,7 +27,7 @@ import { deploymentModeOf } from "../deployment/mode.mjs";
 import { resolveTokenBindingSettings } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import { outboundPolicyOf } from "../net/outbound-fetch.mjs";
-import { prepareSyntheticProjections } from "./apply-contributions.mjs";
+import { freezeSyntheticSlots, prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { auditSlotFor } from "./audit-fan-out.mjs";
 import { clientRecordSlotFor } from "./client-record-slot.mjs";
 import { failureSummary } from "./failure-summary.mjs";
@@ -180,7 +180,8 @@ function unfilledSlotRefusal(
  * `outboundPolicy` from its `core.outbound`,
  * injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
- * lazily, filled once stage 4 registers the contributions), then runs each
+ * lazily, filled once stage 4 registers the contributions), freezes every
+ * synthetic value it holds (`freezeSyntheticSlots`), then runs each
  * provider factory in `plan.providerActivations` order. The `auditSink`
  * slot is `audit-fan-out.mts`'s to fill (`auditSlotFor`), and the
  * `clientRepository` slot `client-record-slot.mts`'s (`clientRecordSlotFor`,
@@ -258,6 +259,9 @@ export async function materializeComponents(
 	if (contributionKinds !== undefined) {
 		prepareSyntheticProjections(components, contributionKinds);
 	}
+	// Every synthetic value is boot's own and shared by every module that
+	// reads it: frozen before the first provider receives one.
+	freezeSyntheticSlots(components);
 
 	// The `auditSink` slot's handling, `audit-fan-out.mts`'s alone.
 	const auditSlot = auditSlotFor(plan, contributionKinds, components);
