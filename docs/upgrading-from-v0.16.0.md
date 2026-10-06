@@ -470,6 +470,23 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   any other policy it reads; a server that will not say boots with the
   warning `attempt_counter_durability_unchecked`, and the policy is then
   yours to confirm.
+- **BREAKING: the Redis federation stores read the environment's name
+  trimmed and in lower case (#826).** The plaintext guard of
+  `redis-federation-token-store` and `redis-federation-grant-store` matched
+  `production` and `staging` only as written, so `NODE_ENV=Production`, an
+  environment name passed as `"STAGING"`, or one carrying whitespace
+  (`"production\n"`) let `allow-plaintext` boot with a
+  `federation_store_plaintext` warning. Such a name now refuses the boot
+  (`[<store>] mode "allow-plaintext" is refused because the environment is
+  "production"`, as a `provides-factory-failed` cause), and with
+  `FEDERATION_TOKENS_ALLOW_INSECURE=1` logs
+  `federation_store_plaintext_override` at error. The refusal and the log
+  name the environment as read — `"production"` for `Production` — and the
+  passed environment is read before `NODE_ENV`, so a passed `" Production "`
+  is reported over a `NODE_ENV` of `staging`. This is the reading the MFA
+  sample key's refusal and the standard package's development mail sender
+  already used. Set `mode = "required"` with a key, or name the environment
+  what it is.
 
 The boot refusals you can meet, with their messages, are in
 [operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).

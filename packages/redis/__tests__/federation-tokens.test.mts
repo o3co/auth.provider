@@ -787,6 +787,94 @@ describe("the plaintext guard reads the selected environment and core.deployment
 		).toThrow(/the environment is "staging"/);
 	});
 
+	it("reads each name whatever its case and the whitespace around it, and reports it trimmed and in lower case", () => {
+		// "Production" or "production\n" names production as surely as
+		// "production" does, in the explicit environment and in NODE_ENV alike.
+		for (const environment of [
+			"Production",
+			" production",
+			"production\n",
+			"STAGING",
+			"\tStaging ",
+		]) {
+			expect(
+				() =>
+					createRedisFederationTokenStore({
+						deploymentMode: "unset",
+						client: createFakeRedis(),
+						encryption: plaintext,
+						environment,
+					}),
+				JSON.stringify(environment),
+			).toThrow(
+				/mode "allow-plaintext" is refused because the environment is "(production|staging)"/,
+			);
+		}
+		for (const nodeEnv of ["Production", " staging\n"]) {
+			process.env.NODE_ENV = nodeEnv;
+			expect(
+				() =>
+					createRedisFederationTokenStore({
+						deploymentMode: "unset",
+						client: createFakeRedis(),
+						encryption: plaintext,
+					}),
+				JSON.stringify(nodeEnv),
+			).toThrow(new RegExp(`because the environment is "${nodeEnv.trim().toLowerCase()}"\\. `));
+		}
+	});
+
+	it("reports the first name that reads as production or staging, the explicit environment before NODE_ENV", () => {
+		process.env.NODE_ENV = "staging";
+		expect(() =>
+			createRedisFederationTokenStore({
+				deploymentMode: "unset",
+				client: createFakeRedis(),
+				encryption: plaintext,
+				environment: " Production ",
+			}),
+		).toThrow(/because the environment is "production"\. /);
+	});
+
+	it("an empty or blank environment names none, and does not lift NODE_ENV", () => {
+		process.env.NODE_ENV = "production";
+		for (const environment of ["", "  "]) {
+			expect(
+				() =>
+					createRedisFederationTokenStore({
+						deploymentMode: "unset",
+						client: createFakeRedis(),
+						encryption: plaintext,
+						environment,
+					}),
+				JSON.stringify(environment),
+			).toThrow(/because the environment is "production"\. /);
+		}
+	});
+
+	it("the escape hatch's error names the environment trimmed and in lower case", () => {
+		process.env.NODE_ENV = "Production\n";
+		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
+		expect(() =>
+			createRedisFederationTokenStore({
+				deploymentMode: "unset",
+				client: createFakeRedis(),
+				encryption: plaintext,
+			}),
+		).not.toThrow();
+		expect(errorSpy.mock.calls).toEqual([
+			[
+				{
+					store: "federation-tokens",
+					mode: "allow-plaintext",
+					environment: "production",
+					override: "FEDERATION_TOKENS_ALLOW_INSECURE",
+				},
+				"federation_store_plaintext_override",
+			],
+		]);
+	});
+
 	it('refuses plaintext under core.deployment.mode = "multi" regardless of environment', () => {
 		expect(() =>
 			createRedisFederationTokenStore({

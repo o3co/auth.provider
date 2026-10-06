@@ -427,6 +427,16 @@ describe("the development sample key", () => {
 		}
 	});
 
+	it("reads an empty or blank environment as no name, which does not lift NODE_ENV", () => {
+		vi.stubEnv("NODE_ENV", "production");
+		for (const environment of ["", "  "]) {
+			expect(
+				refusal(() => readSettings(sample(), { environment })),
+				JSON.stringify(environment),
+			).toContain('the environment is "production"');
+		}
+	});
+
 	it("says it was accepted, wherever it sits in the ring, so the MFA module can say so at boot", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		expect(readSettings(sample()).developmentSampleKeyAccepted).toBe(true);

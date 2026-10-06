@@ -432,7 +432,9 @@ Each adapter ships in up to two forms:
   form, `redisFederationTokenStoreModuleFor` and
   `redisFederationGrantStoreModuleFor`, for a composition root that selects its
   config by a name other than `NODE_ENV` (the standalone's `CONFIG_ENV`): the
-  plaintext guard reads that name in addition to `NODE_ENV`, and the
+  plaintext guard reads that name in addition to `NODE_ENV`, each trimmed
+  and in lower case as core's `productionEnvironmentIn` reads it (so
+  `Production` or `"staging\n"` refuses plaintext as surely), and the
   replica count from core's `deploymentMode` slot, which both modules require
   and core fills from `core.deployment.mode` — `"multi"` refuses plaintext in every
   environment. A composition root that builds either store itself passes

@@ -41,6 +41,7 @@ import {
 	hasControlCharacter,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	type MfaLockoutPolicy,
+	productionEnvironmentIn,
 	SEALING_KEY_BYTES,
 	type SealingKeyRing,
 } from "@o3co/auth-provider-core";
@@ -382,7 +383,6 @@ export interface MfaSettingsOptions {
 const TOTP_SECTION = "mfa-totp-factor";
 
 const RING = "mfa.encryptionKeys";
-const PRODUCTION_ENVIRONMENTS: ReadonlySet<string> = new Set(["production", "staging"]);
 
 /** `path` under `prefix`, an array index in brackets. */
 const pathOf = (prefix: string, path: readonly PropertyKey[]): string =>
@@ -459,12 +459,13 @@ function refuseSampleKey(ring: SealingKeyRing, options: MfaSettingsOptions): boo
 	const sample = decodeSealingKey(MFA_DEVELOPMENT_SAMPLE_KEY);
 	const index = ring.findIndex((entry) => sample !== undefined && entry.key.equals(sample));
 	if (index === -1) return false;
-	// Both names are consulted, each whatever its case and the whitespace
-	// around it — "Production" or "production\n" names production as surely —
-	// and the one that matched is the one reported, normalised.
-	const productionEnvironment = [options.environment, process.env.NODE_ENV]
-		.map((name) => (typeof name === "string" ? name.trim().toLowerCase() : undefined))
-		.find((name): name is string => name !== undefined && PRODUCTION_ENVIRONMENTS.has(name));
+	// Both names are consulted, as core reads them — "Production" or
+	// "production\n" names production as surely — and the one that matched
+	// is the one reported, as read.
+	const productionEnvironment = productionEnvironmentIn([
+		options.environment,
+		process.env.NODE_ENV,
+	]);
 	const reasons: string[] = [];
 	if (productionEnvironment !== undefined) {
 		reasons.push(`the environment is "${productionEnvironment}"`);
