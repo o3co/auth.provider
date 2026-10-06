@@ -94,7 +94,7 @@ describe("POST /oauth/federation/google/token: an upstream outage never ends the
 	}
 
 	it("keeps them and answers 503 when Google answers 503 with a body naming invalid_grant", async () => {
-		const { res, sid, federationTokenStore, sessionFederationIndex } = await refreshAnswered(503, {
+		const { res, sid, federationTokenStore, sessionLifecycle } = await refreshAnswered(503, {
 			error: "invalid_grant",
 			error_description: "Backend unavailable",
 		});
@@ -107,7 +107,10 @@ describe("POST /oauth/federation/google/token: an upstream outage never ends the
 		expect((await federationTokenStore.get(sid, "google"))?.refreshToken).toBe(
 			STORED_REFRESH_TOKEN,
 		);
-		expect(await sessionFederationIndex.listFederations(sid)).toContain("google");
+		expect(await sessionLifecycle.federations(sid)).toEqual({
+			outcome: "listed",
+			federations: ["google"],
+		});
 	});
 
 	it("keeps them and answers 503 when Google answers 502 with no OAuth body at all", async () => {
@@ -120,7 +123,7 @@ describe("POST /oauth/federation/google/token: an upstream outage never ends the
 	});
 
 	it("ends them on Google's structured 400 invalid_grant", async () => {
-		const { res, sid, federationTokenStore, sessionFederationIndex } = await refreshAnswered(400, {
+		const { res, sid, federationTokenStore, sessionLifecycle } = await refreshAnswered(400, {
 			error: "invalid_grant",
 			error_description: "Token has been expired or revoked.",
 		});
@@ -130,6 +133,9 @@ describe("POST /oauth/federation/google/token: an upstream outage never ends the
 		expect(await federationTokenStore.get(sid, "google")).toBeNull();
 		// The route never writes the session's index: the link, now holding no
 		// credential, stays listed until federation logout or the session's end.
-		expect(await sessionFederationIndex.listFederations(sid)).toContain("google");
+		expect(await sessionLifecycle.federations(sid)).toEqual({
+			outcome: "listed",
+			federations: ["google"],
+		});
 	});
 });

@@ -33,6 +33,7 @@ import {
 	type MfaFactorRecord,
 	type MfaFactorStore,
 	type MfaTransactionStore,
+	type SessionLifecycleStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
@@ -282,7 +283,7 @@ describe("a login's first binding in a browser that also holds a federated sessi
 		const factorStore = createMemoryMfaFactorStore();
 		const audit = recordingAuditSink();
 		const tap = cookieSessionTap();
-		const { app, userSessionStore } = await boot({
+		const { app, userSessionStore, sessionLifecycleStore } = await boot({
 			config: configFor("required"),
 			factorStore,
 			auditSink: audit,
@@ -292,7 +293,13 @@ describe("a login's first binding in a browser that also holds a federated sessi
 		const begun = await beginEnrollment(agent, transaction, "totp");
 		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
 
-		// The same cookie session, the login's binding, now also signed in through a federation.
+		// The same cookie session, the login's binding, now also signed in through
+		// a federation, its record opened as that login opens it.
+		await (sessionLifecycleStore as SessionLifecycleStore).open(
+			"federated-sid",
+			ALICE.id,
+			new Date(T0 + 3_600_000),
+		);
 		await (userSessionStore as UserSessionStore).create({
 			sid: "federated-sid",
 			sub: ALICE.id,

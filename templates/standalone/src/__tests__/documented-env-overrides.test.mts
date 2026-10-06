@@ -550,9 +550,7 @@ function readShippedSwitches(env: Record<string, string>, configEnv = "productio
 const FEDERATION_STORES = Object.fromEntries(
 	[
 		"userSessionStore",
-		"sessionRPRegistry",
-		"sessionFamilyIndex",
-		"sessionFederationIndex",
+		"sessionLifecycle",
 		"federationTokenStore",
 		"refreshTokenFamilyRevocation",
 	].map((key) => [key, {}]),

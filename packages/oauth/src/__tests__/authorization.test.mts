@@ -35,7 +35,12 @@ import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
-import { joiningLifecycle, outsideAnswer } from "./_helpers/sessionLifecycle.mjs";
+import {
+	joiningLifecycle,
+	lifecycleStoreOver,
+	openingLifecycleStore,
+	outsideAnswer,
+} from "./_helpers/sessionLifecycle.mjs";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -51,11 +56,20 @@ const RP_URI = "https://rp.example/cb";
 const CODE_VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(CODE_VERIFIER).digest("base64url");
 
+/**
+ * What `/authorize` records of how the session had authenticated over a
+ * record whose primary cannot be told: one that carries no `authentication`
+ * and an `amr` that names no primary, as most records stubbed here do. A
+ * code over a record that names one carries it as `/authorize` records it.
+ */
+const UNTOLD = { primary: undefined, mfaAt: undefined };
+
 const validCode = {
 	client_id: "client1",
 	redirect_uri: RP_URI,
 	code_challenge: S256_CHALLENGE,
 	code_challenge_method: "S256",
+	authentication: UNTOLD,
 };
 
 // The authorization grant requires `ctx.authenticatedClient` to be present and
@@ -133,6 +147,7 @@ describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 					sid: undefined,
 					acr: undefined,
 					amr: undefined,
+					authentication: undefined,
 				});
 				const deps = {
 					...makeDeps(vi.fn()),
@@ -524,6 +539,7 @@ describe("createAuthorizationGrant", () => {
 					code_challenge: S256_CHALLENGE,
 					code_challenge_method: "S256",
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					grantedScope: ["read"] as readonly string[],
 				}),
 			);
@@ -554,6 +570,7 @@ describe("createAuthorizationGrant", () => {
 					code_challenge: S256_CHALLENGE,
 					code_challenge_method: "S256",
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					grantedScope: [] as readonly string[],
 				}),
 			);
@@ -699,6 +716,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: challenge,
 					code_challenge_method: "S256",
 				}),
@@ -728,6 +746,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: verifier,
 					code_challenge_method: "plain",
 				}),
@@ -754,6 +773,7 @@ describe("createAuthorizationGrant", () => {
 					client_id: "client1",
 					redirect_uri: RP_URI,
 					sid: "test-sid-1",
+					authentication: UNTOLD,
 					code_challenge: verifier,
 					code_challenge_method: "plain",
 				}),
@@ -942,6 +962,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
 						code_challenge: S256_CHALLENGE,
@@ -981,6 +1002,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						redirect_uri: "http://127.0.0.1:49152/cb",
 						code_challenge: S256_CHALLENGE,
@@ -1014,6 +1036,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "client1",
 						// redirect_uri intentionally omitted to model legacy/corrupt records.
 					}),
@@ -1301,11 +1324,13 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication: UNTOLD,
 							nonce: "client-nonce",
 							grantedScope: ["openid", "email"],
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1357,12 +1382,16 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							// What /authorize recorded of a password session it admitted
+							// with a second factor: more than the record holds now.
+							authentication: { primary: "pwd", mfaAt: new Date("2026-04-21T00:10:00Z") },
 							grantedScope: ["openid"],
 							acr: "urn:example:mfa",
 							amr: ["pwd", "otp", "mfa"],
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1418,11 +1447,13 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication: { primary: "pwd", mfaAt: undefined },
 							grantedScope: ["openid"],
 							amr,
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const { result } = await createAuthorizationGrant(deps).handle({
@@ -1443,9 +1474,14 @@ describe("createAuthorizationGrant", () => {
 				}
 			});
 
-			/** Redeems the code "c1" bound to "sid-1" against `userSessionStore`, when one is given. */
+			/**
+			 * Redeems the code "c1" bound to "sid-1" against `userSessionStore`, when
+			 * one is given, the code carrying `authentication` as `/authorize`
+			 * recorded it over that record.
+			 */
 			const redeemSessionCode = async (
 				userSessionStore?: ReturnType<typeof makeUserSessionStore>,
+				authentication: unknown = UNTOLD,
 			) => {
 				const deps = {
 					...makeDepsWithIssuer(
@@ -1456,12 +1492,14 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-1",
+							authentication,
 							grantedScope: ["openid"],
 						}),
 					),
 					...(userSessionStore
 						? {
 								userSessionStore,
+								sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 								sessionLifecycle: joiningLifecycle().lifecycle,
 							}
 						: {}),
@@ -1487,6 +1525,7 @@ describe("createAuthorizationGrant", () => {
 				const authTime = new Date("2026-04-21T00:00:00.750Z");
 				const tokens = await redeemSessionCode(
 					makeUserSessionStore({ sid: "sid-1", sub: "u-1", authTime, claims: {}, amr: ["pwd"] }),
+					{ primary: "pwd", mfaAt: undefined },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.id_token as string).auth_time).toBe(seconds);
@@ -1510,6 +1549,7 @@ describe("createAuthorizationGrant", () => {
 							mfaAt: new Date("2026-04-21T00:10:00Z"),
 						},
 					}),
+					{ primary: "pwd", mfaAt: new Date("2026-04-21T00:10:00Z") },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.access_token).auth_time).toBe(seconds);
@@ -1533,6 +1573,7 @@ describe("createAuthorizationGrant", () => {
 							upstreamAuthTime: new Date("2026-04-20T00:00:00Z"),
 						},
 					}),
+					{ primary: "fed", mfaAt: undefined },
 				);
 				const seconds = Math.floor(authTime.getTime() / 1000);
 				expect(decodeJwt(tokens.id_token as string).auth_time).toBe(seconds);
@@ -1562,11 +1603,13 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-noiss",
+							authentication: UNTOLD,
 							grantedScope: ["openid", "email"],
 							nonce: "client-nonce",
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1608,10 +1651,12 @@ describe("createAuthorizationGrant", () => {
 							code_challenge: S256_CHALLENGE,
 							code_challenge_method: "S256",
 							sid: "sid-2",
+							authentication: UNTOLD,
 							grantedScope: ["profile", "email"],
 						}),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1644,6 +1689,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "sid-3",
+						authentication: UNTOLD,
 						grantedScope: ["openid"],
 					}),
 				);
@@ -1690,6 +1736,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1720,6 +1767,7 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1749,6 +1797,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						authentication: UNTOLD,
 						client_id: "real-client",
 						redirect_uri: "https://rp.example/cb",
 						code_challenge: S256_CHALLENGE,
@@ -1833,6 +1882,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode } /* no sid */)),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1912,6 +1962,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz", ...validCode })),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -1991,6 +2042,7 @@ describe("createAuthorizationGrant", () => {
 							},
 							async delete() {},
 						},
+						sessionLifecycleStore: openingLifecycleStore("u1"),
 						sessionLifecycle: lifecycle,
 					};
 					const handler = createAuthorizationGrant(deps);
@@ -2066,6 +2118,7 @@ describe("createAuthorizationGrant", () => {
 							},
 							async delete() {},
 						},
+						sessionLifecycleStore: openingLifecycleStore("u1"),
 						sessionLifecycle: lifecycle,
 						...(wired ? { logger } : {}),
 					});
@@ -2300,6 +2353,7 @@ describe("createAuthorizationGrant", () => {
 						vi.fn().mockResolvedValue({ code: "abc", sid: "session-gone", ...validCode }),
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -2338,6 +2392,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode })),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -2391,6 +2446,7 @@ describe("createAuthorizationGrant", () => {
 						throwingClientRepo,
 					),
 					userSessionStore,
+					sessionLifecycleStore: lifecycleStoreOver(userSessionStore),
 					sessionLifecycle: joiningLifecycle().lifecycle,
 				};
 				const handler = createAuthorizationGrant(deps);
@@ -2461,6 +2517,7 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-toctou", ...validCode })),
 			userSessionStore,
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: lifecycle,
 			logger,
 		};
@@ -2537,6 +2594,7 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 		const deps = {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-blip", ...validCode })),
 			userSessionStore,
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
@@ -2621,6 +2679,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: makeStore("sid-259", "u-259"),
+			sessionLifecycleStore: openingLifecycleStore("u-259"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
@@ -2657,6 +2716,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: makeStore("sid-259", "u-259"),
+			sessionLifecycleStore: openingLifecycleStore("u-259"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 		const handler = createAuthorizationGrant(deps);
@@ -2716,6 +2776,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: store,
+			sessionLifecycleStore: openingLifecycleStore("u-259"),
 			sessionLifecycle: lifecycle,
 		};
 
@@ -2764,6 +2825,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
 			...grantSettingsFrom(configWithIssuer),
 			userSessionStore: store,
+			sessionLifecycleStore: openingLifecycleStore("u-259"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 		};
 
@@ -3047,6 +3109,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 			userSessionStore: sessionStore(async () => {
 				throw outage();
 			}),
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
@@ -3114,6 +3177,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 				if (reads === 1) return liveSession("sid-1");
 				throw outage();
 			}),
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
@@ -3133,6 +3197,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 				authenticate: vi.fn(),
 			}),
 			userSessionStore: sessionStore(async () => liveSession("sid-1")),
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle().lifecycle,
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
@@ -3152,6 +3217,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		const handler = createAuthorizationGrant({
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			userSessionStore: sessionStore(async () => liveSession("sid-1")),
+			sessionLifecycleStore: openingLifecycleStore("u1"),
 			sessionLifecycle: joiningLifecycle(outsideAnswer<SessionJoinOutcome>()).lifecycle,
 			refreshTokenFamilyRotation: {
 				register,

@@ -133,6 +133,23 @@ describe("sessionLifecycleModule", () => {
 		await handle.dispose();
 	});
 
+	it("boots with none of the per-session stores filled: it reads none of them", async () => {
+		expect(sessionLifecycleModule.requires).not.toEqual(
+			expect.arrayContaining(["sessionRPRegistry"]),
+		);
+		const handle = await boot({
+			overrides: {
+				sessionRPRegistry: undefined,
+				sessionFamilyIndex: undefined,
+				sessionFederationIndex: undefined,
+			},
+		});
+		const lifecycle = (handle.components as Record<string, unknown>)
+			.sessionLifecycle as SessionLifecycle;
+		expect(await lifecycle.liveness("no-such-session")).toEqual({ outcome: "not_live" });
+		await handle.dispose();
+	});
+
 	it("refuses to boot with relying parties (a client repository) and no notifier", async () => {
 		await expect(
 			boot({ components: { clientRepository: new InMemoryClientRepository(new Map()) } }),
@@ -249,6 +266,9 @@ describe("sessionLifecycleModule", () => {
 			claims: {},
 			amr: ["pwd"],
 			authentication: undefined,
+		});
+		expect(await lifecycle.open("sid-1", { sub: "user-1", expiresAt })).toEqual({
+			outcome: "opened",
 		});
 		const rp = {
 			clientId: "rp-a",

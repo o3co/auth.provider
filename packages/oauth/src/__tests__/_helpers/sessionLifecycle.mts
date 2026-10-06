@@ -23,15 +23,14 @@
  * - for a route or grant built by hand, focused doubles — one that only joins
  *   and records each join (`joiningLifecycle`), and one that answers liveness
  *   and federations from a user-session store (`livenessOver`);
- * - and core's real lifecycle over in-memory stores, for a router whose
- *   logout closes (`lifecycleOver`).
+ * - core's real lifecycle over in-memory stores, for a router whose logout
+ *   closes (`lifecycleOver`);
+ * - and core's in-memory lifecycle store holding the records the sessions'
+ *   logins opened, for admission to read (`openedLifecycleStore`).
  */
 
 import {
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createSessionLifecycle,
 	defineModule,
 	type FederationTokenStore,
@@ -43,6 +42,7 @@ import {
 	type SessionJoinOutcome,
 	type SessionJoinRequest,
 	type SessionLifecycle,
+	type SessionLifecycleStore,
 	type SessionLiveness,
 	sessionLifecycleModule,
 	type UserSession,
@@ -157,8 +157,9 @@ export function livenessOver(
 
 /**
  * Core's session lifecycle over the stores a test composition hands it, with
- * in-memory stores for its own record and the per-session indexes, and no
- * relying party to tell: for a router built by hand whose logout closes.
+ * an in-memory store for its own record, and no relying party to tell: for a
+ * router built by hand whose logout closes. A session it closes is one it
+ * opened: a sid with no record reads as closed.
  */
 export function lifecycleOver(stores: {
 	readonly userSessionStore: UserSessionStore;
@@ -168,10 +169,76 @@ export function lifecycleOver(stores: {
 	return createSessionLifecycle({
 		...stores,
 		store: createInMemorySessionLifecycleStore(),
-		sessionRPRegistry: createInMemorySessionRPRegistry(),
-		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-		sessionFederationIndex: createInMemorySessionFederationIndex(),
 		retainMs: 3_600_000,
 		logger: { warn: () => undefined, error: () => undefined },
 	});
+}
+
+/**
+ * Core's in-memory lifecycle store holding an active record for each
+ * `[sid, sub]` of `sessions`, ending an hour from now: what each session's
+ * login opened (a session with no record reads as closed). Opened before any
+ * member answers.
+ */
+export function openedLifecycleStore(
+	...sessions: readonly (readonly [sid: string, sub: string])[]
+): SessionLifecycleStore {
+	const store = createInMemorySessionLifecycleStore();
+	const opened = (async () => {
+		for (const [sid, sub] of sessions) {
+			await store.open(sid, sub, new Date(Date.now() + 3_600_000));
+		}
+	})();
+	const after =
+		<A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
+		async (...args: A): Promise<R> => {
+			await opened;
+			return call(...args);
+		};
+	return {
+		kind: store.kind,
+		open: after(store.open.bind(store)),
+		join: after(store.join.bind(store)),
+		beginClose: after(store.beginClose.bind(store)),
+		completeIf: after(store.completeIf.bind(store)),
+		read: after(store.read.bind(store)),
+		listClosing: after(store.listClosing.bind(store)),
+	};
+}
+
+/**
+ * Core's in-memory lifecycle store, holding an active record for every
+ * session of `sub` admission asks about, as the login that established it
+ * opened one (a session with no record reads as closed). A record a close
+ * moved on stays as it is.
+ */
+export function openingLifecycleStore(sub: string): SessionLifecycleStore {
+	const store = createInMemorySessionLifecycleStore();
+	const end = new Date(Date.now() + 86_400_000);
+	return {
+		...store,
+		read: async (sid) => {
+			await store.open(sid, sub, end);
+			return store.read(sid);
+		},
+	};
+}
+
+/**
+ * Core's in-memory lifecycle store, holding an active record for every
+ * session `sessions` holds when admission asks about it, as the login that
+ * established it opened one. It reads `sessions` once per lifecycle read: for
+ * a test that does not count the user-session store's reads.
+ */
+export function lifecycleStoreOver(sessions: Pick<UserSessionStore, "get">): SessionLifecycleStore {
+	const store = createInMemorySessionLifecycleStore();
+	const end = new Date(Date.now() + 86_400_000);
+	return {
+		...store,
+		read: async (sid) => {
+			const session = await sessions.get(sid);
+			if (session) await store.open(sid, session.sub, end);
+			return store.read(sid);
+		},
+	};
 }

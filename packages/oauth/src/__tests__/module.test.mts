@@ -38,9 +38,6 @@ import {
 	memorySessionStoresModule,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
-	type SessionFamilyIndex,
-	type SessionFederationIndex,
-	type SessionRPRegistry,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -825,25 +822,8 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			get: vi.fn().mockResolvedValue(session),
 			delete: vi.fn(),
 		};
-		const sessionRPRegistry: SessionRPRegistry = {
-			kind: "memory",
-			registerRP: vi.fn(async () => {}),
-			listRPs: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		};
-		const sessionFamilyIndex: SessionFamilyIndex = {
-			kind: "memory",
-			addFamilyId: vi.fn(async () => {}),
-			listFamilyIds: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		};
-		const sessionFederationIndex: SessionFederationIndex = {
-			kind: "memory",
-			addFederation: vi.fn(async () => {}),
-			listFederations: vi.fn(async () => ["google"]),
-			removeFederation: vi.fn(async () => {}),
-			removeBySid: vi.fn(async () => {}),
-		};
+		// The federations the session joined, as its lifecycle lists them.
+		const joinedFederations = vi.fn(async (_sid: string): Promise<readonly string[]> => ["google"]);
 		const fedTokenStore: FederationTokenStore = {
 			kind: "memory",
 			attach: vi.fn(),
@@ -872,18 +852,6 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			name: "test:user-session-store",
 			provides: { userSessionStore: () => sessionStore },
 		});
-		const sessionRPRegistryModule = defineModule({
-			name: "test:session-rp-registry",
-			provides: { sessionRPRegistry: () => sessionRPRegistry },
-		});
-		const sessionFamilyIndexModule = defineModule({
-			name: "test:session-family-index",
-			provides: { sessionFamilyIndex: () => sessionFamilyIndex },
-		});
-		const sessionFederationIndexModule = defineModule({
-			name: "test:session-federation-index",
-			provides: { sessionFederationIndex: () => sessionFederationIndex },
-		});
 		const federationTokenStoreModule = defineModule({
 			name: "test:federation-token-store",
 			provides: { federationTokenStore: () => fedTokenStore },
@@ -895,8 +863,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 		const sessionLifecycleOverStoreModule = defineModule({
 			name: "test:session-lifecycle",
 			provides: {
-				sessionLifecycle: () =>
-					livenessOver(sessionStore, (sid) => sessionFederationIndex.listFederations(sid)),
+				sessionLifecycle: () => livenessOver(sessionStore, (sid) => joinedFederations(sid)),
 			},
 		});
 		// federationProviders is SYNTHETIC: boot builds it from the enabled
@@ -943,9 +910,6 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 				codeRepositoryModule,
 				keyStoreWithSecret,
 				userSessionStoreModule,
-				sessionRPRegistryModule,
-				sessionFamilyIndexModule,
-				sessionFederationIndexModule,
 				federationTokenStoreModule,
 				refreshTokenFamilyRevocationModule,
 				sessionLifecycleOverStoreModule,
@@ -985,25 +949,8 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			get: vi.fn(),
 			delete: vi.fn(),
 		};
-		const sessionRPRegistry: SessionRPRegistry = {
-			kind: "memory",
-			registerRP: vi.fn(async () => {}),
-			listRPs: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		};
-		const sessionFamilyIndex: SessionFamilyIndex = {
-			kind: "memory",
-			addFamilyId: vi.fn(async () => {}),
-			listFamilyIds: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		};
-		const sessionFederationIndex: SessionFederationIndex = {
-			kind: "memory",
-			addFederation: vi.fn(async () => {}),
-			listFederations: vi.fn(async () => []),
-			removeFederation: vi.fn(async () => {}),
-			removeBySid: vi.fn(async () => {}),
-		};
+		// The federations the session joined, as its lifecycle lists them.
+		const joinedFederations = vi.fn(async (_sid: string): Promise<readonly string[]> => []);
 		const fedTokenStore: FederationTokenStore = {
 			kind: "memory",
 			attach: vi.fn(),
@@ -1023,18 +970,6 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			name: "test:user-session-store-noissuer",
 			provides: { userSessionStore: () => sessionStore },
 		});
-		const sessionRPRegistryModule = defineModule({
-			name: "test:session-rp-registry-noissuer",
-			provides: { sessionRPRegistry: () => sessionRPRegistry },
-		});
-		const sessionFamilyIndexModule = defineModule({
-			name: "test:session-family-index-noissuer",
-			provides: { sessionFamilyIndex: () => sessionFamilyIndex },
-		});
-		const sessionFederationIndexModule = defineModule({
-			name: "test:session-federation-index-noissuer",
-			provides: { sessionFederationIndex: () => sessionFederationIndex },
-		});
 		const federationTokenStoreModule = defineModule({
 			name: "test:federation-token-store-noissuer",
 			provides: { federationTokenStore: () => fedTokenStore },
@@ -1046,8 +981,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 		const sessionLifecycleOverStoreModule = defineModule({
 			name: "test:session-lifecycle-noissuer",
 			provides: {
-				sessionLifecycle: () =>
-					livenessOver(sessionStore, (sid) => sessionFederationIndex.listFederations(sid)),
+				sessionLifecycle: () => livenessOver(sessionStore, (sid) => joinedFederations(sid)),
 			},
 		});
 
@@ -1064,9 +998,6 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 				userSessionStoreModule,
-				sessionRPRegistryModule,
-				sessionFamilyIndexModule,
-				sessionFederationIndexModule,
 				federationTokenStoreModule,
 				refreshTokenFamilyRevocationModule,
 				sessionLifecycleOverStoreModule,

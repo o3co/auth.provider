@@ -246,6 +246,7 @@ describe("the sessionRequirements kind and sessionRequirementResolver", () => {
 			const admission = await admitSession(
 				{
 					userSessionStore: undefined,
+					sessionLifecycleStore: undefined,
 					subjectRevocation: undefined,
 					requirements: resolver,
 					acrTable: readAcrTable({}),
@@ -264,6 +265,7 @@ describe("the sessionRequirements kind and sessionRequirementResolver", () => {
 				session: null,
 				view: null,
 				acr: undefined,
+				codeFields: { amr: undefined, authentication: undefined },
 			});
 		} finally {
 			await handle.dispose();
@@ -433,6 +435,7 @@ describe("a requirement that reaches nothing completes an interruption with an e
 		try {
 			const deps = {
 				userSessionStore: undefined,
+				sessionLifecycleStore: undefined,
 				subjectRevocation: undefined,
 				requirements: seen.resolver as SessionRequirementResolver,
 				acrTable: readAcrTable({}),

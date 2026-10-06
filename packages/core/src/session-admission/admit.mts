@@ -32,12 +32,19 @@ import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
 import {
+	type AuthenticationReading,
 	canRecordSecondFactor,
+	codeFieldsOf,
+	codeReadingOver,
 	copySessionAuthentication,
 	federatedSessionAuthentication,
 	passwordSessionAuthentication,
+	readCodeAtExchange,
 	requirementSession,
 	requirementSessionFromAmr,
+	requirementSessionOf,
+	sessionReading,
+	tokenReading,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
 import type { UserSession, UserSessionClaims, UserSessionStore } from "../user-sessions/types.mjs";
@@ -153,24 +160,30 @@ export interface CodeCarrier {
 /**
  * A code record's claim on its first read: authenticated (a session minted
  * the code), with the code's `sid` and no subject, since `CodeData` carries
- * no `sub`; `admitSession`'s subject check has nothing to compare.
+ * no `sub`; `admitSession`'s subject check has nothing to compare. How the
+ * code's session had authenticated is read here, once, and held beside the
+ * claim: the requirements judge the code on it.
  */
 export function codeClaimFirstRead(code: CodeCarrier): SessionClaim {
 	if (!isObject(code)) {
 		throw new RangeError("codeClaimFirstRead: the code record must be an object");
 	}
-	return brandClaim({
-		authenticated: true,
-		sid: nonEmptyString(code.sid),
-		subject: undefined,
-		carrier: "code",
-	} as SessionClaim);
+	return brandClaim(
+		{
+			authenticated: true,
+			sid: nonEmptyString(code.sid),
+			subject: undefined,
+			carrier: "code",
+		} as SessionClaim,
+		readCodeAtExchange(code),
+	);
 }
 
 /**
  * A code record's claim on the `authorization_code` grant's second read:
  * the first read's `subject`, required, so the two reads are compared and
- * the comparison cannot be left out by omitting an option.
+ * the comparison cannot be left out by omitting an option. The code is read
+ * as the first read reads it.
  */
 export function codeClaimRevalidation(code: CodeCarrier, subject: string): SessionClaim {
 	if (!isObject(code)) {
@@ -181,12 +194,15 @@ export function codeClaimRevalidation(code: CodeCarrier, subject: string): Sessi
 			"codeClaimRevalidation: the first read's subject must be a non-empty string",
 		);
 	}
-	return brandClaim({
-		authenticated: true,
-		sid: nonEmptyString(code.sid),
-		subject,
-		carrier: "code",
-	} as SessionClaim);
+	return brandClaim(
+		{
+			authenticated: true,
+			sid: nonEmptyString(code.sid),
+			subject,
+			carrier: "code",
+		} as SessionClaim,
+		readCodeAtExchange(code),
+	);
 }
 
 /** What a link claim is built from: the link transaction's envelope, which records the session and its subject at the start. */
@@ -313,8 +329,12 @@ const copyView = (view: SessionView): SessionView =>
  * 5. requirements, for `use` and `credential_change`: each `admit` in
  *    registration order, the first verdict that is not `met` taken (see
  *    `stepUpVerdict` for `step_up`). A token carrier is judged on the
- *    token's own `amr`, record or not.
- * 6. `acr_values`: `selectAcr` over the vouched `amr`, with reach the union
+ *    token's own `amr`, record or not; a code carrier, over a record, on
+ *    how its session had authenticated at `/authorize` as the code carries
+ *    it (`codeReadingOver`). A code that carries no readable
+ *    `authentication`, or whose primary is not the record's, is
+ *    `unauthenticated`, nothing asked.
+ * 6. `acr_values`: `selectAcr` over the `amr` step 5 judged on, with reach the union
  *    of every requirement's when the session is live.
  * 7. `merge` of 5 and 6. In the met + step_up row, a step-up through the
  *    second-factor authority is never offered for `acr_values` onto a
@@ -327,7 +347,9 @@ const copyView = (view: SessionView): SessionView =>
  *    steps 1 to 4 again, on a fresh clock reading and with the claim's
  *    subject held to the first reading's, whatever step 7 answered. An
  *    answer they give is the admission's; else step 7's stands, carrying the
- *    first reading's session, view and renewal nonce. A requirement that
+ *    first reading's session, view and renewal nonce. A code whose primary
+ *    the record read last does not hold, or whose record can no longer be
+ *    read, is `unauthenticated`, as on the first reading. A requirement that
  *    throws has already answered `unavailable`.
  */
 export async function admitSession(
@@ -362,13 +384,26 @@ export async function admitSession(
 	const requirements = [...resolver.entries()];
 	const effective = effectiveAction(checked.action);
 	// A token carrier's authentication is the token's own, whether or not a
-	// record was read: the record is only the view. Each reading is a frozen
+	// record was read: the record is only the view. A code carrier's is what
+	// the code carries, over the record. Each requirement session is a frozen
 	// copy of its own: the merge's here, and each requirement's below, so what
 	// one does to its copy reaches no other.
-	const authentication =
-		presented.carrier === "token"
-			? requirementSessionFromAmr(presented.tokenAmr)
-			: requirementSession(session);
+	let reading: AuthenticationReading | null;
+	if (presented.carrier === "token") reading = tokenReading(presented.tokenAmr);
+	else if (session === null) reading = null;
+	else if (presented.carrier === "code") {
+		// A code that does not say how its session had authenticated, or whose
+		// primary is not the record's, says nothing of this session: nothing
+		// is asked of it.
+		const over =
+			checked.codeReading === undefined ? undefined : codeReadingOver(checked.codeReading, session);
+		if (over === undefined) return { outcome: "unauthenticated" };
+		reading = over;
+	} else reading = sessionReading(session);
+	const authentication = reading === null ? null : requirementSessionOf(reading);
+	// The amr every requirement is handed, held by the merge, and what a code
+	// carrier's acr is selected over.
+	const held = authentication?.amr ?? [];
 	let verdict: RequirementOutcome = { outcome: "met" };
 	let asked = false;
 	if (effective.grade !== "remediation") {
@@ -384,10 +419,7 @@ export async function admitSession(
 				...shared,
 				// Its own copy: a requirement that moves its clock moves no other's.
 				now: new Date(now.getTime()),
-				authentication:
-					presented.carrier === "token"
-						? requirementSessionFromAmr(presented.tokenAmr)
-						: requirementSession(session),
+				authentication: reading === null ? null : requirementSessionOf(reading),
 				session: live === null ? null : copyView(live.view),
 			});
 			let answer: unknown;
@@ -421,13 +453,15 @@ export async function admitSession(
 	const selection: AcrSelection | undefined =
 		requested.length === 0
 			? undefined
-			: // The amr step 5 judged on: a token's own, else the record's.
+			: // The amr step 5 judged on: a token's own, a code's, else the record's.
 				selectAcr(
 					requested,
-					(presented.carrier === "token"
-						? requirementSessionFromAmr(presented.tokenAmr)
-						: requirementSession(session)
-					)?.amr ?? [],
+					reading !== null && presented.carrier === "code"
+						? held
+						: ((presented.carrier === "token"
+								? requirementSessionFromAmr(presented.tokenAmr)
+								: requirementSession(session)
+							)?.amr ?? []),
 					checked.acrTable,
 					reach,
 				);
@@ -440,8 +474,9 @@ export async function admitSession(
 		noneConfigured,
 		requirements,
 		// What step 5 handed the requirements, from a reading no requirement was handed.
-		held: authentication?.amr ?? [],
+		held,
 		table: checked.acrTable,
+		codeFields: codeFieldsOf(reading),
 	});
 
 	// Step 8: the last reading. Nothing is awaited after it, so the record and
@@ -456,6 +491,15 @@ export async function admitSession(
 			unavailable,
 		);
 		if ("answer" in last) return last.answer;
+		// The code's primary is held to the record read last, as to the first.
+		if (
+			presented.carrier === "code" &&
+			(checked.codeReading === undefined ||
+				last.session === null ||
+				codeReadingOver(checked.codeReading, last.session) === undefined)
+		) {
+			return { outcome: "unauthenticated" };
+		}
 	}
 	return answer;
 }

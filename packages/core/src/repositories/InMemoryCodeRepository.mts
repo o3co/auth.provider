@@ -16,6 +16,7 @@
 
 import crypto from "node:crypto";
 import { isStorableLifetime } from "../adapters/expiry.mjs";
+import { readCodeAuthentication } from "../user-sessions/authentication.mjs";
 import type { CodeRepository, CreateCodeInput } from "./CodeRepository.mjs";
 import type { Code } from "./types.mjs";
 
@@ -85,6 +86,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			sid: params.sid,
 			acr: params.acr,
 			amr: copyAmr(params.amr),
+			authentication: readCodeAuthentication(params),
 		};
 		this.codes.set(code, stored);
 		return {
@@ -100,6 +102,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			sid: params.sid,
 			acr: params.acr,
 			amr: copyAmr(stored.amr),
+			authentication: readCodeAuthentication(stored),
 		};
 	}
 
@@ -123,6 +126,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			sid: stored.sid,
 			acr: stored.acr,
 			amr: copyAmr(stored.amr),
+			authentication: readCodeAuthentication(stored),
 		};
 	}
 
@@ -144,6 +148,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			sid: stored.sid,
 			acr: stored.acr,
 			amr: copyAmr(stored.amr),
+			authentication: readCodeAuthentication(stored),
 		};
 	}
 

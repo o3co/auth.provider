@@ -597,9 +597,7 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 const FEDERATION_STORES = Object.fromEntries(
 	[
 		"userSessionStore",
-		"sessionRPRegistry",
-		"sessionFamilyIndex",
-		"sessionFederationIndex",
+		"sessionLifecycle",
 		"federationTokenStore",
 		"refreshTokenFamilyRevocation",
 	].map((key) => [key, {}]),

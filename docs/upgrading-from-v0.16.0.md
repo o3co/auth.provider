@@ -31,7 +31,10 @@ describes.
    the users your Store answers.
 3. Update code that implements a port or calls an API that changed, and run
    the conformance suites.
-4. Roll the whole fleet onto the new release.
+4. Upgrade the whole fleet onto the new release in one coordinated step:
+   stop every v0.16.0 replica, then start the new one
+   ([Rolling out](#rolling-out-across-a-mixed-fleet)); a rolling upgrade from
+   v0.16.0 is not supported.
 5. Only then decide on MFA, with `optional` before `required`.
 
 ## Your scaffold
@@ -219,8 +222,8 @@ Every setting now lives under the name of the module that owns it (#728).
 An old path refuses the boot, naming the new one and the variable bound to
 it, while the module that owns it is loaded. A renamed variable refuses the
 boot when it is set alone or beside its new name at a different value; set
-to the same value as its new name, it boots, so a fleet can carry both
-through a rolling upgrade. Sections are strict: a key a module's section
+to the same value as its new name, it boots, so an environment can carry
+both while it moves. Sections are strict: a key a module's section
 does not declare refuses the boot, naming its path, where it used to be
 dropped — [Values read more strictly](#values-read-more-strictly) lists the
 sections that still accept one.
@@ -724,6 +727,16 @@ The boot refusals you can meet, with their messages, are in
   and audited `device.rate_limited`, now with `Retry-After` and
   `Cache-Control: no-store`.
 
+- **BREAKING: every user signs in again, and a refresh token bound to a
+  v0.16.0 session stops working** (#1030). A session's record in core's
+  session lifecycle is what makes it live, and a session established before
+  the upgrade has none: it reads as closed. Its cookie no longer admits it,
+  its access tokens no longer introspect active or reach `/userinfo`, nothing
+  joins it, and a refresh token that names its `sid` is refused
+  `400 invalid_grant` (`session_invalid`) before it rotates. Every refresh
+  token the authorization-code grant mints names its session, so each one
+  issued under v0.16.0 stops working at the upgrade; a refresh token without
+  a `sid` (a sessionless composition) is unaffected.
 - **WebAuthn.** An assertion whose user handle is not its credential owner's
   canonical handle is `400 invalid_grant` (`user_handle_mismatch`) (#863); one
   without a handle is refused too (#1153, #1217). Migrated passkeys and
@@ -875,6 +888,38 @@ modules fills them.
   `contribute-factory-failed`); in sloppy-mode code the write is silently
   ignored. Either way the value does not change. Copy what the module needs,
   or set the value in the configuration (#1492).
+- **Core checks the `csrfGuard` slot where boot fills it, and every reader
+  receives a frozen copy of the guard.** Whatever fills the slot — a module's
+  `provides`, or a `bootstrapComponents` or `overrideComponents` entry — boot
+  reads each member of the guard once and requires `middleware` to be a
+  function of at most three parameters (Express skips one of four or more as
+  an error handler) and `check` to be a function. A member whose read throws
+  refuses boot too, naming it. A module's guard that fails is refused as
+  `provides-factory-failed` at `materializeComponents`; a host's, before any
+  provider runs, with a `RangeError` naming the member (`csrfGuard.middleware
+  is not a request handler`, `csrfGuard.check is not a function`,
+  `csrfGuard.<member> could not be read`), as a host's `oauthTokenSettings` is.
+  Before, the device grant and federation grants checked the guard in their
+  own contributions (`contribute-factory-failed` at `applyContributions`,
+  with their own wording), and the MFA routes did not check it. The slot
+  then holds a frozen copy, not the object that filled it, so
+  `deps.csrfGuard !== providedGuard`: compare members, not identity. The
+  copy carries the guard's data members as read; its functions are core's
+  own and call the guard's on the guard itself, so a guard written as a
+  class, whose methods use `this`, works as before. `middleware` is core's
+  request handler of three parameters in front of the guard's, so
+  `deps.csrfGuard.middleware !== providedGuard.middleware` too, and the
+  guard's `middleware` now runs with the guard as `this`. A
+  `Symbol.asyncDispose` the guard carries still runs on dispose (#1090).
+- **`AppHandle.components`, and the `deps` a factory is handed, have no
+  prototype.** The component map boot builds is created with
+  `Object.create(null)`, and so is each provider's and contribution's `deps`,
+  every entry an own data property, so a component named after an
+  `Object.prototype` member, `__proto__` included, is a key like any other
+  and never a prototype. Read a component as a property or with
+  `Object.hasOwn(map, key)`; `hasOwnProperty` and the other
+  `Object.prototype` methods are no longer there. Spreading and destructuring
+  work as before (#1090).
 - **BREAKING: `sessionModule` reads the federations from the
   `federationSettings` slot, not `config` (#728).** It requires core's
   `federationSettings`, which core fills from `core.federations` in every
@@ -1234,8 +1279,7 @@ modules fills them.
   is required** (#1030). A composition that wires `userSessionStore`
   installs `sessionLifecycleModule` beside it (the standalone template does;
   see [Your scaffold](#your-scaffold)), with what that module requires:
-  `sessionLifecycleStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
-  `sessionFederationIndex`, `refreshTokenFamilyRevocation` and
+  `sessionLifecycleStore`, `refreshTokenFamilyRevocation` and
   `federationTokenStore`. Without it the boot is refused, each message
   naming `userSessionStore` and `sessionLifecycle`: in the session package,
   `sessionModule`'s route factories with `contribute-factory-failed` and
@@ -1317,9 +1361,6 @@ modules fills them.
   there is logged as `federation_link_store_unavailable` with
   `store: "session_lifecycle"`, `step: "federations"`, in place of
   `store: "session_federation_index"`, `step: "list"` and `"remove"`.
-  Keep its provider: `sessionLifecycleModule` and the
-  `federation-stores-incomplete` guard still require the slot; only
-  `sessionModule`'s own `requires` and the router option drop it.
 - **BREAKING: every failed close at `POST /session/logout` is an outage.** A
   logout whose `sid` the session lifecycle cannot hold now answers
   `503 temporarily_unavailable` and keeps the cookie, as any close the
@@ -1345,6 +1386,32 @@ modules fills them.
   close work's and the sweep's own lines (`session_close_item_failed`,
   `session_lifecycle_unavailable` for a close-work completion or re-read,
   or a resumed session, `session_lifecycle_sweep_*`) are unchanged.
+- **BREAKING: a session with no lifecycle record reads as closed**
+  (#1030). Core's session lifecycle reads and writes its own record alone:
+  `liveness` answers `not_live`, `join` answers `refused` (revoking the
+  family and removing the federation's tokens it was handed, and writing
+  nothing), and `close` answers `done` with no relying party or federation
+  and nothing to run. Session admission answers `not_live` (`closing`) for a
+  sid with no record wherever a `sessionLifecycleStore` is handed
+  (`AdmissionDeps.sessionLifecycleStore`). A record that lapsed at its end on
+  the store's clock, before the closing commit too, reads the same: such a
+  close no longer runs the close work itself. Sessions established before
+  the upgrade have no record, so they are refused for any join and by
+  admission ([every user signs in again](#passkeys-users-and-sessions)).
+  - The lifecycle no longer reads or writes the per-session stores
+    (`sessionRPRegistry`, `sessionFamilyIndex` and its end mark,
+    `sessionFederationIndex`), and adopts no session from them.
+    `SessionLifecycleOptions` loses `sessionRPRegistry`,
+    `sessionFamilyIndex` and `sessionFederationIndex`, and
+    `sessionLifecycleModule` no longer requires those slots.
+  - An enabled `core.federations.<name>` requires `sessionLifecycle` in place
+    of `sessionRPRegistry`, `sessionFamilyIndex` and `sessionFederationIndex`:
+    boot refuses one without `userSessionStore`, `sessionLifecycle`,
+    `federationTokenStore` and `refreshTokenFamilyRevocation`
+    (`federation-stores-incomplete`).
+  - A test or composition of your own that set a session up by writing the
+    user session alone opens it first, `sessionLifecycle.open(sid, { sub,
+    expiresAt })`, as a login through the session package does.
 - **The session lifecycle sweeps unless told not to.** Installing
   `sessionLifecycleModule` starts a sweep that resumes the closes left
   pending every 60 seconds; `core.sessionLifecycle.sweepIntervalSeconds`
@@ -1386,6 +1453,54 @@ modules fills them.
 - **`cascadeLogout`, `CascadeLogoutOptions` and `CascadeLogoutResult`** are
   removed from `@o3co/auth-provider-oauth` (#1030). A session is ended
   through core's session lifecycle: `sessionLifecycle.close(sid, cause)`.
+- **BREAKING: core no longer has the per-session store ports (#1030).**
+  Core's session lifecycle record holds what they held. Removed from
+  `@o3co/auth-provider-core`: the ports `SessionRPRegistry`,
+  `SessionFamilyIndex` and `SessionFederationIndex`, the session-end
+  capability `SupportsSessionEnd` and its guard `supportsSessionEnd`, the
+  in-process stores `createInMemorySessionRPRegistry`,
+  `createInMemorySessionFamilyIndex` and `createInMemorySessionFederationIndex`,
+  the factory builders `createSessionRPRegistryFactory`,
+  `createSessionFamilyIndexFactory` and `createSessionFederationIndexFactory`
+  with their aliases `SessionRPRegistryFactory`, `SessionFamilyIndexFactory`
+  and `SessionFederationIndexFactory`, and the `ComponentMap` slots
+  `sessionRPRegistry`, `sessionFamilyIndex` and `sessionFederationIndex`
+  (also gone from `GrantDependencies`). `memorySessionStoresModule` no longer
+  provides those slots. `RegisteredRP` stays: a join names one
+  (`SessionJoinRequest.rp`). A module of your own that provides or requires
+  one of the slots drops it.
+- **BREAKING: session admission requires the lifecycle store beside a
+  user-session store (#1030).** `admitSession` handed a `userSessionStore`
+  and no `sessionLifecycleStore` answers a live session
+  `unavailable` (`session_lifecycle`), logged once as
+  `session_admission_unavailable`, instead of reading it as before. Every
+  bundled consumer already refuses to build without it; a caller of your own
+  passes the `sessionLifecycleStore` slot in `AdmissionDeps`.
+- **BREAKING: `@o3co/auth-provider-redis` no longer has adapters for the
+  three per-session stores (#1030).** Core's session lifecycle holds what
+  the RP registry, the refresh-token family index and the federation index
+  held, so the package drops them:
+  - Removed exports: `createRedisSessionRPRegistry`,
+    `RedisSessionRPRegistryOptions`, `redisSessionRPRegistryBuilder`,
+    `createRedisSessionFamilyIndex`, `RedisSessionFamilyIndexOptions`,
+    `redisSessionFamilyIndexBuilder`, `createRedisSessionFederationIndex`,
+    `RedisSessionFederationIndexOptions`, `redisSessionFederationIndexBuilder`,
+    and the client interfaces `SessionRPRegistryClient`,
+    `SessionRPRegistryMultiClient`, `SessionSidSortedSetClient`,
+    `SessionSidSortedSetMultiClient` and `SessionFamilyIndexClient`.
+  - `makeIoredisClients` no longer returns `sessionRPRegistryClient`,
+    `sessionFamilyIndexClient` or `sessionFederationIndexClient`, and the
+    package no longer declares those three `ComponentMap` slots: a
+    composition that fills client slots by hand drops them.
+  - `redisSessionStoresModule` requires `userSessionStoreClient`,
+    `subjectSessionIndexClient`, `subjectRevocationClient` and
+    `sessionLifecycleStoreClient`, and provides `userSessionStore`,
+    `subjectSessionIndex`, `subjectRevocation` and `sessionLifecycleStore`;
+    it no longer provides `sessionRPRegistry`, `sessionFamilyIndex` or
+    `sessionFederationIndex`. The RP registry's warn
+    `session_rp_registry_corrupt_envelope` is gone with it.
+  - The keys those stores wrote are read by nothing; step 2 of
+    [Rolling out](#rolling-out-across-a-mixed-fleet) says what to delete.
 - **Core's public entries no longer export 42 undocumented names** (#1234):
   tuning defaults (most `DEFAULT_MEMORY_*` sweep and size defaults —
   `DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES` stays —
@@ -1687,7 +1802,12 @@ with what a store of yours records and refuses. Per port:
   `createCode` pass it, `undefined` without a user-session store. A repository
   that drops it yields tokens without `amr`, and their refresh family carries
   none forward; under `MFA_MODE` (template) / `mfa.mode` `required` such a
-  family is refused at its first refresh.
+  family is refused at its first refresh. Round-trip `authentication` as well
+  (#935): the primary and `mfaAt` `/authorize` read of the session, which the
+  exchange judges the code on with its `amr`, so a step-up recorded between
+  `/authorize` and `/token` does not reach the exchange. Where a user-session
+  store is wired, a code that carries none is refused at the exchange
+  (`400 invalid_grant` `session_invalid`).
 - **`UserSessionStore`.**
   - `authentication`, how the session was established
     (`UserSession.authentication`): round-trip it and
@@ -1713,8 +1833,9 @@ with what a store of yours records and refuses. Per port:
 - **A `loginCompletion` of your own** implements `renewSession` (#923), the
   renewal of a signed-in session's id a step-up finishes with: the
   [session README](../packages/session/README.md#renewing-a-signed-in-sessions-id).
-- **`SessionRPRegistry`.** A resolved `registerRP` is visible to every later
-  `listRPs` on that sid: no replica or eventually consistent reads (#1155).
+- **`SessionRPRegistry`, `SessionFamilyIndex`, `SessionFederationIndex`.**
+  The ports are removed (#1030, above): an adapter of your own for them has
+  nothing to implement and nothing reads it.
 - **`DeviceCodeStore`.** Record `approvedAtMs`, and what
   `recordableDeviceApproval({ amr, authTime }, nowMs)` answers (#1093).
 - **`FederationTokenStore`.** Implement the conditional members
@@ -1962,41 +2083,68 @@ are the template README's
 
 ## Rolling out across a mixed fleet
 
-[Operator runbook §7, Rolling out](operator-runbook.md#rolling-out) has the
-detail; what a mixed fleet of v0.16.0 and this release does:
+**A rolling upgrade from v0.16.0 is not supported: upgrade the fleet in one
+coordinated step, with no mixed fleet** (#1030). v0.16.0 records the relying
+parties and refresh-token families a session joins in the per-session stores
+(`sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`); this
+release records them in the session's lifecycle record and ends a session
+from that record alone. A v0.16.0 replica serving beside this release, for
+example redeeming a code a new replica issued, writes what it hands out where
+this release's logout does not look: that logout tells no relying party of it
+and leaves its family unrevoked. So:
+
+1. Stop every v0.16.0 replica, draining its traffic.
+2. With none running, you may delete the keys of the three per-session
+   stores v0.16.0 wrote; this release reads none of them, and each expires
+   with its session if left. Delete by prefix (`SCAN MATCH <prefix>*`, then
+   `UNLINK` what it returns), never with `FLUSHDB` or `FLUSHALL`: the same
+   database holds keys this release reads, the MFA factors among them, whose
+   loss cannot be undone. With the shipped prefix
+   (`redis-session-stores.keyPrefix` `ss:`;
+   [operator runbook, Key families](operator-runbook.md#key-families) lists
+   the keyspace):
+
+   | Keys | What they held |
+   | --- | --- |
+   | `ss:rp:*`, `ss:fi:*`, `ss:fi-ended:*`, `ss:fed:*` | v0.16.0's RP registry, refresh-token family index (and its "ended" marks) and federation index, whose adapters `@o3co/auth-provider-redis` no longer has |
+
+   **Never delete the refresh-token family records (`rtfam:*`).** A revoked
+   family's record is what keeps the access tokens issued under it refused:
+   a family with no record reads as not revoked, so deleting one would let
+   an unexpired access token it revoked pass introspection and token
+   exchange again. Leave them to expire on their own. The upgrade needs
+   nothing of them: every refresh token bound to a v0.16.0 session is
+   refused at admission anyway
+   ([every user signs in again](#passkeys-users-and-sessions)), and a
+   refresh token without a `sid` is not affected by the upgrade: no logout
+   ever reached it, and the subject's revocation boundary
+   (`revokeAllForSubject`, which a password reset calls) or its expiry ends
+   it, as before.
+3. Start this release on every replica, every package at the same release.
+
+What carries across the step:
 
 - **Upgrade every package together, onto the same release:** core and every
   adapter package at one release in each replica.
-- **The federation-grant rotation budget binds once no v0.16.0 replica
-  remains** (#1032). A v0.16.0 replica takes no rotation, so the refreshes it
-  makes are not counted against a grant's budget; its writes keep the
-  `rotations` a newer replica counted.
-
-- **Codes cross releases** for at most one code lifetime. A code a v0.16.0
-  replica issued, redeemed by this release, yields tokens without `amr`, and
-  its refresh family carries none until it ends or the user signs in again;
-  under `MFA_MODE` (template) / `mfa.mode` `required` it is refused at its
-  first refresh. A deployment for which that matters revokes the families
-  issued during the roll, or calls `revokeAllForSubject`, once the fleet is
-  upgraded. Under
-  `oauth-authorization.grants.refreshToken.unknownFamilyPolicy = "accept"` a
-  token with no family record has no such bound.
-- **Do not turn `MFA_MODE` (template) / `mfa.mode` on until no v0.16.0
-  replica remains** — with the template's default, keep `MFA_MODE=off` set
-  for the roll ([Your scaffold](#your-scaffold)): an older
-  replica redeeming a code stamps the record's `amr`, a step-up's included,
-  and one older than the renewal nonce admits an old cookie put back after a
-  step-up.
-- **The re-authentication ask.** A v0.16.0 replica spends the ask when it
-  reads it, so consent after a login trip can ask for a second login once
-  ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
-- **Fix the client records the boundary refuses before the roll.** During
-  it, such a client alternates between `200` from v0.16.0 replicas and `503`
-  from new ones ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
+- **The federation-grant rotation budget counts from the upgrade** (#1032).
+  v0.16.0 took no rotation, so the refreshes it made are not counted against
+  a grant's budget.
+- **Codes do not cross the step.** A code v0.16.0 issued and nobody redeemed
+  names a session with no lifecycle record and carries no `authentication`,
+  so its exchange is refused, and the relying party authorizes again.
+- **Keep `MFA_MODE` (template) / `mfa.mode` off for the first start**, as
+  [Your scaffold](#your-scaffold) says, and turn it on as
+  [Turning MFA on](#turning-mfa-on) says.
+- **Fix the client records the boundary refuses before the upgrade.** From
+  it, such a client is answered `503`
+  ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
 - **Federated sessions** live at the upgrade stamp `["fed"]` until the user
   logs in again ([operator runbook §7](operator-runbook.md#before-you-upgrade),
   step 3).
 - **Redis.** Records v0.16.0 wrote stay readable: a federation token record
   gets a generation at its first versioned read, and one without `obtainedAt`
   reads it as `undefined`, which is refreshed within the buffer. Scripts
-  whose text changed load by `EVAL` on `NOSCRIPT`.
+  whose text changed load by `EVAL` on `NOSCRIPT`. The per-session keys
+  v0.16.0 wrote beside its sessions are the exception: nothing reads them
+  (step 2 above).
+

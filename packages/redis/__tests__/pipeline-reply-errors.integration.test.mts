@@ -65,15 +65,17 @@ describe("a queued command Redis refused inside MULTI/EXEC", () => {
 	});
 
 	it("a purpose's multi().exec(): the same, named for that purpose", async () => {
-		const key = `pipeline-errors:hash:${randomUUID()}`;
-		await raw.set(key, "not-a-hash");
-		const pipeline = makeIoredisClients(raw).sessionRPRegistryClient.multi();
-		pipeline.hSet(key, "field", "value").pExpireGT(key, Date.now() + 60_000);
+		const key = `pipeline-errors:zset:${randomUUID()}`;
+		await raw.set(key, "not-a-sorted-set");
+		const pipeline = makeIoredisClients(raw).subjectSessionIndexClient.multi();
+		pipeline
+			.zAdd(key, { score: Date.now() + 60_000, value: "sid" })
+			.pExpireGT(key, Date.now() + 60_000);
 
 		const err = await failureOf(() => pipeline.exec());
 
 		expect(err.message).toBe(
-			"sessionRPRegistryClient.exec: a queued command failed inside MULTI/EXEC",
+			"subjectSessionIndexClient.exec: a queued command failed inside MULTI/EXEC",
 		);
 		expect(err.cause.message).toMatch(/^WRONGTYPE /);
 	});

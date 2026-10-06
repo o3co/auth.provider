@@ -18,15 +18,13 @@
  * The session lifecycle service over core's in-process stores: what a join
  * writes and refuses, what a close runs and in which order, what it answers
  * once its closing commit has landed, how a later close and the sweep resume
- * a close left pending, what each cause runs, and what liveness reads.
+ * a close left pending, what each cause runs, and what liveness reads. A sid
+ * with no lifecycle record reads as closed.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemorySubjectSessionIndex,
 	createInMemoryUserSessionStore,
 	createSessionLifecycle,
@@ -65,8 +63,6 @@ interface HarnessOptions {
 	readonly notifierOf?: (notifier: SessionCloseNotifier) => () => SessionCloseNotifier | undefined;
 	readonly subjectSessionIndex?: boolean;
 	readonly store?: (inner: SessionLifecycleStore) => SessionLifecycleStore;
-	/** A family index without the session-end capability: it keeps no end mark. */
-	readonly familyIndexWithoutEnd?: boolean;
 	/** The lifecycle store's options. */
 	readonly lifecycleStore?: { readonly maxParticipants?: number; readonly now?: () => number };
 	/** Awaited before a revocation or a notice does its work, by the name of the call. */
@@ -103,9 +99,6 @@ function harness(options: HarnessOptions = {}) {
 			await sessions.delete(sid);
 		},
 	};
-	const sessionRPRegistry = createInMemorySessionRPRegistry();
-	const sessionFamilyIndex = createInMemorySessionFamilyIndex();
-	const sessionFederationIndex = createInMemorySessionFederationIndex();
 	const subjects = createInMemorySubjectSessionIndex();
 	const revoked = new Set<string>();
 	const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
@@ -151,17 +144,6 @@ function harness(options: HarnessOptions = {}) {
 		...(options.notifier === false
 			? {}
 			: { notifier: options.notifierOf?.(notifier) ?? (() => notifier) }),
-		sessionRPRegistry,
-		sessionFamilyIndex: options.familyIndexWithoutEnd
-			? {
-					kind: sessionFamilyIndex.kind,
-					addFamilyId: (sid, familyId, expiresAt) =>
-						sessionFamilyIndex.addFamilyId(sid, familyId, expiresAt),
-					listFamilyIds: (sid) => sessionFamilyIndex.listFamilyIds(sid),
-					removeBySid: (sid) => sessionFamilyIndex.removeBySid(sid),
-				}
-			: sessionFamilyIndex,
-		sessionFederationIndex,
 		retainMs: DAY,
 		logger: {
 			warn: (fields: unknown, event: string) => {
@@ -202,9 +184,6 @@ function harness(options: HarnessOptions = {}) {
 		revoked,
 		sessions,
 		subjects,
-		sessionRPRegistry,
-		sessionFamilyIndex,
-		sessionFederationIndex,
 		establish,
 		read,
 	};
@@ -257,9 +236,6 @@ describe("createSessionLifecycle", () => {
 						isFamilyRevoked: async () => false,
 					},
 					federationTokenStore: {} as FederationTokenStore,
-					sessionRPRegistry: h.sessionRPRegistry,
-					sessionFamilyIndex: h.sessionFamilyIndex,
-					sessionFederationIndex: h.sessionFederationIndex,
 					retainMs,
 				}),
 			).toThrow(RangeError);
@@ -268,7 +244,7 @@ describe("createSessionLifecycle", () => {
 });
 
 describe("join", () => {
-	it("joins a relying party, its family and a federation, and writes the old stores beside them", async () => {
+	it("joins a relying party, its family and a federation to the session's record", async () => {
 		const h = harness();
 		await h.establish();
 		await joinAll(h);
@@ -279,9 +255,6 @@ describe("join", () => {
 			"family:f1",
 			"federation:google",
 		]);
-		expect((await h.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual(["a"]);
-		expect(await h.sessionFamilyIndex.listFamilyIds(SID)).toEqual(["f1"]);
-		expect(await h.sessionFederationIndex.listFederations(SID)).toEqual(["google"]);
 	});
 
 	it("refuses once the close has committed, and revokes the family and removes the federation tokens it was handed", async () => {
@@ -308,189 +281,47 @@ describe("join", () => {
 		expect(h.revoked.has("f1")).toBe(true);
 	});
 
-	it("adopts an absent record when a family joins and no old end mark is present", async () => {
+	it("refuses a session with no record, opening none, and revokes the family and removes the federation tokens it was handed", async () => {
 		const h = harness();
 		await h.establish(SID, { open: false });
-		expect(await h.lifecycle.join(SID, { rp: relyingParty("a"), familyId: "f1" })).toEqual({
-			outcome: "joined",
-		});
-		const record = await h.read();
-		expect(record?.value.state).toBe("active");
-		expect(record?.value.sub).toBe(SUB);
-		expect(record?.value.participants.map((p) => `${p.kind}:${p.id}`)).toEqual([
-			"rp:a",
-			"family:f1",
-		]);
-	});
-
-	it("adopts nothing once an old end mark is present", async () => {
-		const h = harness();
-		const expiresAt = await h.establish(SID, { open: false });
-		await h.sessionFamilyIndex.endSession(SID, expiresAt);
-		expect(await h.lifecycle.join(SID, { rp: relyingParty("a"), familyId: "f1" })).toEqual({
-			outcome: "refused",
-		});
+		expect(
+			await h.lifecycle.join(SID, { rp: relyingParty("a"), familyId: "f1", federation: "google" }),
+		).toEqual({ outcome: "refused" });
+		expect(h.calls).toEqual(["revoke_family:f1", "delete_federation_tokens:sid-1:google"]);
 		expect(await h.read()).toBeNull();
-		expect(h.revoked.has("f1")).toBe(true);
-	});
-
-	it("adopts nothing for a join with no family, which cannot read the old end mark", async () => {
-		const h = harness();
-		await h.establish(SID, { open: false });
-		expect(await h.lifecycle.join(SID, { federation: "google" })).toEqual({ outcome: "refused" });
-		expect(await h.read()).toBeNull();
-		expect(await h.sessionFederationIndex.listFederations(SID)).toEqual([]);
-	});
-
-	it("adopts an absent record for any join where the family index keeps no end mark", async () => {
-		const h = harness({ familyIndexWithoutEnd: true });
-		await h.establish(SID, { open: false });
-		expect(await h.lifecycle.join(SID, { federation: "google" })).toEqual({ outcome: "joined" });
-		expect((await h.read())?.value.participants.map((p) => p.id)).toEqual(["google"]);
-	});
-
-	it("lets two adopting joins at once both join, onto one record", async () => {
-		const h = harness({ familyIndexWithoutEnd: true });
-		await h.establish(SID, { open: false });
-		const answers = await Promise.all([
-			h.lifecycle.join(SID, { rp: relyingParty("a") }),
-			h.lifecycle.join(SID, { rp: relyingParty("b") }),
-		]);
-		expect(answers).toEqual([{ outcome: "joined" }, { outcome: "joined" }]);
-		const record = await h.read();
-		expect(record?.value.state).toBe("active");
-		expect(record?.value.participants.map((p) => p.id).sort()).toEqual(["a", "b"]);
-	});
-
-	it("refuses a join whose session a close ended, and whose closed record went, while it adopted the record", async () => {
-		// The race: the join reads no record and a live user session; before
-		// it opens the record, a close of the session completes and its closed
-		// record leaves the store. The open then finds no record to refuse it.
-		let current: SessionLifecycleStore | undefined;
-		let closeDuringOpen: (() => Promise<void>) | undefined;
-		const h = harness({
-			familyIndexWithoutEnd: true,
-			store: (inner) => {
-				current = inner;
-				const now = (): SessionLifecycleStore => current ?? inner;
-				return {
-					kind: inner.kind,
-					open: async (sid, sub, expiresAt) => {
-						const race = closeDuringOpen;
-						closeDuringOpen = undefined;
-						if (race !== undefined) await race();
-						return now().open(sid, sub, expiresAt);
-					},
-					join: (sid, participant) => now().join(sid, participant),
-					beginClose: (sid, request) => now().beginClose(sid, request),
-					completeIf: (sid, expected, item) => now().completeIf(sid, expected, item),
-					read: (sid) => now().read(sid),
-					listClosing: (limit, after) => now().listClosing(limit, after),
-				};
-			},
-		});
-		await h.establish(SID, { open: false });
-		closeDuringOpen = async () => {
-			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
-			current = createInMemorySessionLifecycleStore();
-		};
-		expect(await h.lifecycle.join(SID, { familyId: "f-late", federation: "google" })).toEqual({
-			outcome: "refused",
-		});
-		expect(h.revoked.has("f-late")).toBe(true);
-		// Once by the close, which lists it through the per-session index the
-		// join wrote first, and once by the refused join's withdraw.
-		expect(h.calls.filter((call) => call === "revoke_family:f-late")).toHaveLength(2);
-		expect(h.calls).toContain(`delete_federation_tokens:${SID}:google`);
 		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
 	});
 
-	describe("a join that adopts, when the sid is closed and its session replaced meanwhile", () => {
-		/** A harness whose store runs `race` once, inside the next `open`, then answers from `current`. */
-		const racing = () => {
-			const state: {
-				current?: SessionLifecycleStore;
-				race?: () => Promise<void>;
-			} = {};
-			const h = harness({
-				familyIndexWithoutEnd: true,
-				store: (inner) => {
-					state.current = inner;
-					const now = (): SessionLifecycleStore => state.current ?? inner;
-					return {
-						kind: inner.kind,
-						open: async (sid, sub, expiresAt) => {
-							const race = state.race;
-							state.race = undefined;
-							if (race !== undefined) await race();
-							return now().open(sid, sub, expiresAt);
-						},
-						join: (sid, participant) => now().join(sid, participant),
-						beginClose: (sid, request) => now().beginClose(sid, request),
-						completeIf: (sid, expected, item) => now().completeIf(sid, expected, item),
-						read: (sid) => now().read(sid),
-						listClosing: (limit, after) => now().listClosing(limit, after),
-					};
+	it("leaves what landed of a join refused part-way to the close that refused it", async () => {
+		// The race: the close commits between the join's participants. What
+		// landed before the commit is in the close's work; the rest is withdrawn.
+		let closeBeforeNextJoin = false;
+		let closed: Promise<unknown> | undefined;
+		const h = harness({
+			store: (inner) => ({
+				...inner,
+				join: async (sid, participant) => {
+					if (closeBeforeNextJoin) {
+						closeBeforeNextJoin = false;
+						closed = h.lifecycle.close(sid, "rp_logout");
+						await closed;
+					}
+					const answer = await inner.join(sid, participant);
+					if (participant.kind === "rp") closeBeforeNextJoin = true;
+					return answer;
 				},
-			});
-			return { h, state };
-		};
-
-		/** A new user session under `SID`, the closed one's record gone from the store. */
-		const replace = async (
-			h: Harness,
-			state: { current?: SessionLifecycleStore },
-			sub: string,
-			expiresAt: Date,
-			{ open }: { readonly open: boolean },
-		): Promise<SessionLifecycleStore> => {
-			expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
-			const fresh = createInMemorySessionLifecycleStore();
-			state.current = fresh;
-			await h.sessions.create({
-				sid: SID,
-				sub,
-				authTime: new Date(),
-				expiresAt,
-				claims: {},
-				amr: ["pwd"],
-				authentication: undefined,
-			});
-			if (open) expect((await fresh.open(SID, sub, expiresAt)).outcome).toBe("opened");
-			return fresh;
-		};
-
-		it("is refused and withdrawn when the replacement holds its record, which gets no participant", async () => {
-			const { h, state } = racing();
-			await h.establish(SID, { open: false });
-			let fresh: SessionLifecycleStore | undefined;
-			state.race = async () => {
-				fresh = await replace(h, state, "someone-else", new Date(Date.now() + DAY), { open: true });
-			};
-			expect(await h.lifecycle.join(SID, { familyId: "f-stale" })).toEqual({ outcome: "refused" });
-			expect(h.revoked.has("f-stale")).toBe(true);
-			// Once by the close, which lists it through the per-session index the
-			// join wrote first, and once by the refused join's withdraw.
-			expect(h.calls.filter((call) => call === "revoke_family:f-stale")).toHaveLength(2);
-			const record = readVersionedSessionLifecycle(
-				await (fresh as SessionLifecycleStore).read(SID),
-			);
-			expect(record?.value.sub).toBe("someone-else");
-			expect(record?.value.participants).toEqual([]);
+			}),
 		});
-
-		it("is refused and withdrawn when the replacement has the same subject but another end", async () => {
-			const { h, state } = racing();
-			await h.establish(SID, { open: false });
-			state.race = async () => {
-				await replace(h, state, SUB, new Date(Date.now() + 2 * DAY), { open: false });
-			};
-			expect(await h.lifecycle.join(SID, { familyId: "f-stale" })).toEqual({ outcome: "refused" });
-			expect(h.revoked.has("f-stale")).toBe(true);
-			// Once by the close, which lists it through the per-session index the
-			// join wrote first, and once by the refused join's withdraw.
-			expect(h.calls.filter((call) => call === "revoke_family:f-stale")).toHaveLength(2);
+		await h.establish();
+		expect(await h.lifecycle.join(SID, { rp: relyingParty("a"), familyId: "f2" })).toEqual({
+			outcome: "refused",
 		});
+		await closed;
+		expect(h.notices.map((n) => n.clientId)).toEqual(["a"]);
+		expect(h.revoked.has("f2")).toBe(true);
+		const record = await h.read();
+		expect(record?.value.state).toBe("closed");
+		expect(record?.value.participants.map((p) => `${p.kind}:${p.id}`)).toEqual(["rp:a"]);
 	});
 
 	it("rejects with the store's own error when the lifecycle store cannot answer, saying nothing", async () => {
@@ -504,19 +335,6 @@ describe("join", () => {
 			}),
 		});
 		await h.establish();
-		await expect(h.lifecycle.join(SID, { rp: relyingParty("a"), familyId: "f1" })).rejects.toBe(
-			down,
-		);
-		expectSilentOutage(h);
-	});
-
-	it("rejects with the per-session store's own error when the bridge cannot write the join, saying nothing", async () => {
-		const down = new Error("relying-party registry down");
-		const h = harness();
-		await h.establish();
-		h.sessionRPRegistry.registerRP = async () => {
-			throw down;
-		};
 		await expect(h.lifecycle.join(SID, { rp: relyingParty("a"), familyId: "f1" })).rejects.toBe(
 			down,
 		);
@@ -673,16 +491,6 @@ describe("close", () => {
 		expect((await h.read())?.value.state).toBe("closed");
 		expect(await h.sessions.get(SID)).toBeNull();
 		expect(await h.subjects.listSids(SUB)).toEqual([]);
-		expect(await h.sessionRPRegistry.listRPs(SID)).toEqual([]);
-		expect(await h.sessionFamilyIndex.listFamilyIds(SID)).toEqual([]);
-		expect(await h.sessionFederationIndex.listFederations(SID)).toEqual([]);
-	});
-
-	it("writes the old end mark before it commits, so a join through the old stores after it is refused", async () => {
-		const h = harness();
-		const expiresAt = await h.establish();
-		await h.lifecycle.close(SID, "session_logout");
-		expect(await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "late", expiresAt)).toBe("ended");
 	});
 
 	it("answers pending when an item fails after the closing commit, keeping the record closing and the user session", async () => {
@@ -701,14 +509,12 @@ describe("close", () => {
 			expect.arrayContaining([
 				"family:f1",
 				"rp:a",
-				"remove_session_indexes",
 				"delete_user_session",
 				"remove_subject_session",
 			]),
 		);
 		// Nothing of a later phase runs over a revocation not yet recorded.
 		expect(h.notices).toEqual([]);
-		expect(await h.sessionFamilyIndex.listFamilyIds(SID)).toEqual(["f1"]);
 		expect(await h.sessions.get(SID)).not.toBeNull();
 		expect(h.calls).not.toContain("delete_user_session");
 	});
@@ -773,11 +579,9 @@ describe("close", () => {
 		expect(await h.sessions.get(SID)).not.toBeNull();
 		expect([...((await h.read())?.value.close?.pending ?? [])].sort()).toEqual([
 			"delete_user_session",
-			"remove_session_indexes",
 			"remove_subject_session",
 			"rp:a",
 		]);
-		expect((await h.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual(["a"]);
 	});
 
 	it("rejects with the store's own error when the closing commit cannot land, having run nothing and said nothing", async () => {
@@ -823,91 +627,32 @@ describe("close", () => {
 		expect(h.calls).toEqual([]);
 	});
 
-	it("adopts an absent record and closes what the old stores hold", async () => {
+	it("answers done, running nothing and opening no record, for a session with no record: an absent record reads as closed", async () => {
 		const h = harness();
-		const expiresAt = await h.establish(SID, { open: false });
-		await h.sessionRPRegistry.registerRP(SID, relyingParty("old"), expiresAt);
-		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
-		await h.sessionFederationIndex.addFederation(SID, "github", expiresAt);
-		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
-			outcome: "done",
-			rps: ["old"],
-			federations: ["github"],
-		});
-		expect(h.revoked.has("f-old")).toBe(true);
-		expect(h.notices.map((n) => n.clientId)).toEqual(["old"]);
-		expect(await h.sessions.get(SID)).toBeNull();
-		expect((await h.read())?.value.state).toBe("closed");
-	});
-
-	it("closes a session whose last join the lifecycle store refused for capacity", async () => {
-		const h = harness({ lifecycleStore: { maxParticipants: 1 } });
-		await h.establish();
-		expect(await h.lifecycle.join(SID, { familyId: "f1" })).toEqual({ outcome: "joined" });
-		await expect(h.lifecycle.join(SID, { familyId: "f2" })).rejects.toThrow();
-		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
-		expect([...h.revoked].sort()).toEqual(["f1", "f2"]);
-		expect((await h.read())?.value.state).toBe("closed");
-	});
-
-	it("runs the close work of a session that ended on the store's clock before its record could be opened", async () => {
-		let now = Date.now();
-		const h = harness({ lifecycleStore: { now: () => now } });
-		const expiresAt = await h.establish(SID, { open: false });
-		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
-		await h.sessionRPRegistry.registerRP(SID, relyingParty("old-rp"), expiresAt);
-		now = expiresAt.getTime() + 1;
+		await h.establish(SID, { open: false });
 		h.calls.length = 0;
 		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
 			outcome: "done",
-			rps: ["old-rp"],
+			rps: [],
 			federations: [],
 		});
-		expect([...h.calls].sort()).toEqual([
-			"delete_user_session",
-			"notify:old-rp",
-			"remove_federation_tokens:sid-1",
-			"remove_subject_session:sid-1",
-			"revoke_family:f-old",
-		]);
-		expect(h.calls.at(-1)).toBe("remove_subject_session:sid-1");
-		expect(await h.sessions.get(SID)).toBeNull();
-		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+		expect(h.calls).toEqual([]);
 		expect(await h.read()).toBeNull();
-	});
-
-	it("answers done to two closes at once of a session that ended on the store's clock with no record", async () => {
-		let now = Date.now();
-		const h = harness({ lifecycleStore: { now: () => now } });
-		const expiresAt = await h.establish(SID, { open: false });
-		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
-		now = expiresAt.getTime() + 1;
-		const answers = await Promise.all([
-			h.lifecycle.close(SID, "rp_logout"),
-			h.lifecycle.close(SID, "session_logout"),
-		]);
-		expect(answers.map((a) => a.outcome)).toEqual(["done", "done"]);
-		expect(h.revoked.has("f-old")).toBe(true);
-		expect(await h.sessions.get(SID)).toBeNull();
-		expect(await h.read()).toBeNull();
-	});
-
-	it("refuses a join racing the close of a session that ended on the store's clock with no record, and withdraws its family", async () => {
-		let now = Date.now();
-		const h = harness({ lifecycleStore: { now: () => now } });
-		const expiresAt = await h.establish(SID, { open: false });
-		now = expiresAt.getTime() + 1;
-		const [closed, joined] = await Promise.all([
-			h.lifecycle.close(SID, "rp_logout"),
-			h.lifecycle.join(SID, { familyId: "f-late" }),
-		]);
-		expect(closed.outcome).toBe("done");
-		expect(joined).toEqual({ outcome: "refused" });
-		expect(h.revoked.has("f-late")).toBe(true);
 		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
 	});
 
-	it("runs the close work of a record that lapses between its read and the closing commit", async () => {
+	it("closes a session whose last join the lifecycle store refused for capacity, revoking what joined", async () => {
+		const h = harness({ lifecycleStore: { maxParticipants: 1 } });
+		await h.establish();
+		expect(await h.lifecycle.join(SID, { familyId: "f1" })).toEqual({ outcome: "joined" });
+		// A rejected join hands nothing out; revoking its family is its caller's.
+		await expect(h.lifecycle.join(SID, { familyId: "f2" })).rejects.toThrow();
+		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
+		expect([...h.revoked]).toEqual(["f1"]);
+		expect((await h.read())?.value.state).toBe("closed");
+	});
+
+	it("answers done, running nothing, for a record that lapses between its read and the closing commit", async () => {
 		let now = Date.now();
 		let expiresAtMs = 0;
 		const h = harness({
@@ -925,66 +670,11 @@ describe("close", () => {
 		h.calls.length = 0;
 		expect(await h.lifecycle.close(SID, "rp_logout")).toEqual({
 			outcome: "done",
-			rps: ["a"],
-			federations: ["google"],
+			rps: [],
+			federations: [],
 		});
-		expect([...h.calls].sort()).toEqual([
-			"delete_user_session",
-			"notify:a",
-			"remove_federation_tokens:sid-1",
-			"remove_subject_session:sid-1",
-			"revoke_family:f1",
-		]);
-		expect(await h.sessions.get(SID)).toBeNull();
+		expect(h.calls).toEqual([]);
 		expect(await h.read()).toBeNull();
-	});
-
-	it("rejects when the close work of a lapsed record fails, keeping the user session for a retry", async () => {
-		let now = Date.now();
-		const h = harness({ lifecycleStore: { now: () => now } });
-		const expiresAt = await h.establish(SID, { open: false });
-		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old", expiresAt);
-		now = expiresAt.getTime() + 1;
-		h.failing.set("revoke_family:f-old", 1);
-		// Each failed item has its own close-work line; the rejection names them.
-		await expect(h.lifecycle.close(SID, "rp_logout")).rejects.toThrow(
-			"the close work of a session with no lifecycle record failed at revoke_bridged_families",
-		);
-		expect(h.lines.warn).toEqual([
-			[
-				{
-					sid: SID,
-					item: "revoke_bridged_families",
-					err: expect.objectContaining({ name: "Error" }),
-				},
-				"session_close_item_failed",
-			],
-		]);
-		expect(h.lines.error).toEqual([]);
-		expect(h.calls).not.toContain("delete_user_session");
-		expect(await h.sessions.get(SID)).not.toBeNull();
-		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
-		expect(h.revoked.has("f-old")).toBe(true);
-		expect(await h.sessions.get(SID)).toBeNull();
-	});
-
-	it("revokes what joined through the old stores when the close comes after the session's end", async () => {
-		let now = Date.now();
-		const h = harness({ lifecycleStore: { now: () => now } });
-		const expiresAt = await h.establish();
-		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old-node", expiresAt);
-		now = expiresAt.getTime() + 1;
-		expect((await h.lifecycle.close(SID, "expiry")).outcome).toBe("done");
-		expect(h.revoked.has("f-old-node")).toBe(true);
-	});
-
-	it("closes what joined through the old stores beside an existing record", async () => {
-		const h = harness();
-		const expiresAt = await h.establish();
-		await joinAll(h);
-		await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, "f-old-node", expiresAt);
-		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
-		expect([...h.revoked].sort()).toEqual(["f-old-node", "f1"]);
 	});
 
 	describe("every item is safe to run more than once", () => {
@@ -1098,19 +788,6 @@ describe("a phase's items run together, at most eight at a time", () => {
 		expect((await h.read())?.value.state).toBe("closed");
 	});
 
-	it("tells eight slow relying parties of the old registry in one notice's time, not eight", async () => {
-		const { h } = slowNotices();
-		const expiresAt = await h.establish();
-		for (let i = 0; i < 8; i++) {
-			await h.sessionRPRegistry.registerRP(SID, relyingParty(`old${i}`), expiresAt);
-		}
-		const closing = h.lifecycle.close(SID, "rp_logout");
-		await vi.advanceTimersByTimeAsync(NOTICE_MS);
-		expect(vi.getTimerCount()).toBe(0);
-		expect((await closing).outcome).toBe("done");
-		expect(h.notices).toHaveLength(8);
-	});
-
 	it("never has more than eight notices in flight", async () => {
 		const { h, flight } = slowNotices();
 		await h.establish();
@@ -1122,27 +799,10 @@ describe("a phase's items run together, at most eight at a time", () => {
 		expect(h.notices).toHaveLength(20);
 	});
 
-	it("never has more than eight notices in flight across the record's relying parties and the old registry's", async () => {
-		const { h, flight } = slowNotices();
-		const expiresAt = await h.establish();
-		for (let i = 0; i < 10; i++) {
-			await h.lifecycle.join(SID, { rp: relyingParty(`c${i}`) });
-			await h.sessionRPRegistry.registerRP(SID, relyingParty(`old${i}`), expiresAt);
-		}
-		const closing = h.lifecycle.close(SID, "rp_logout");
-		await vi.advanceTimersByTimeAsync(3 * NOTICE_MS);
-		expect((await closing).outcome).toBe("done");
-		expect(flight.most).toBe(8);
-		expect(h.notices).toHaveLength(20);
-	});
-
-	it("never has more than eight revocations in flight across the record's families and the old index's", async () => {
+	it("never has more than eight revocations in flight", async () => {
 		const { h, flight } = slowNotices("revoke_family:");
-		const expiresAt = await h.establish();
-		for (let i = 0; i < 10; i++) {
-			await h.lifecycle.join(SID, { familyId: `f${i}` });
-			await h.sessionFamilyIndex.addFamilyIdUnlessEnded(SID, `old${i}`, expiresAt);
-		}
+		await h.establish();
+		for (let i = 0; i < 20; i++) await h.lifecycle.join(SID, { familyId: `f${i}` });
 		const closing = h.lifecycle.close(SID, "rp_logout");
 		await vi.advanceTimersByTimeAsync(3 * NOTICE_MS);
 		expect((await closing).outcome).toBe("done");
@@ -1163,7 +823,6 @@ describe("a phase's items run together, at most eight at a time", () => {
 		expect(record?.value.state).toBe("closing");
 		expect([...(record?.value.close?.pending ?? [])].sort()).toEqual([
 			"delete_user_session",
-			"remove_session_indexes",
 			"remove_subject_session",
 			"rp:c3",
 		]);
@@ -1172,21 +831,6 @@ describe("a phase's items run together, at most eight at a time", () => {
 		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
 		expect(h.notices.filter((n) => n.clientId === "c3")).toHaveLength(1);
 		expect(h.notices).toHaveLength(8);
-	});
-
-	it("tells the old registry's other relying parties when one fails, keeps the step pending, and tells all three again later", async () => {
-		const h = harness();
-		const expiresAt = await h.establish();
-		for (const clientId of ["old0", "old1", "old2"]) {
-			await h.sessionRPRegistry.registerRP(SID, relyingParty(clientId), expiresAt);
-		}
-		h.failing.set("notify:old1", 1);
-		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
-		expect(h.notices.map((n) => n.clientId).sort()).toEqual(["old0", "old2"]);
-		expect((await h.read())?.value.close?.pending).toContain("notify_bridged_rps");
-		h.notices.length = 0;
-		expect((await h.lifecycle.close(SID, "rp_logout")).outcome).toBe("done");
-		expect(h.notices.map((n) => n.clientId).sort()).toEqual(["old0", "old1", "old2"]);
 	});
 
 	it("hands a failed notice's place on: the ninth and tenth are told though the first eight fail", async () => {
@@ -1337,49 +981,26 @@ describe("the cause policy", () => {
 });
 
 describe("federations", () => {
-	it("lists the federations in the order they joined, the per-session index's first, once each", async () => {
+	it("lists the federations in the order they joined, once each", async () => {
 		const h = harness();
-		const expiresAt = await h.establish();
-		expect(await h.lifecycle.join(SID, { familyId: "f1", federation: "oidc" })).toEqual({
-			outcome: "joined",
-		});
-		expect(await h.lifecycle.join(SID, { familyId: "f2", federation: "apple" })).toEqual({
-			outcome: "joined",
-		});
-		await h.sessionFederationIndex.addFederation(SID, "github", expiresAt);
-		// Every join wrote the index before the record, so the index holds
-		// them all, in join order.
+		await h.establish();
+		for (const [familyId, federation] of [
+			["f1", "oidc"],
+			["f2", "apple"],
+			["f3", "oidc"],
+		]) {
+			expect(await h.lifecycle.join(SID, { familyId, federation })).toEqual({ outcome: "joined" });
+		}
 		expect(await h.lifecycle.federations(SID)).toEqual({
 			outcome: "listed",
-			federations: ["oidc", "apple", "github"],
+			federations: ["oidc", "apple"],
 		});
 	});
 
-	it("lists an older federation only the per-session index holds before the record's newer one", async () => {
+	it("lists none for a session with no record", async () => {
 		const h = harness();
-		const expiresAt = await h.establish(SID, { open: false });
-		// Joined through the per-session stores alone, before the lifecycle.
-		await h.sessionFederationIndex.addFederation(SID, "github", expiresAt);
-		// A later join through the service adopts the record with a newer one.
-		expect(await h.lifecycle.join(SID, { familyId: "f1", federation: "oidc" })).toEqual({
-			outcome: "joined",
-		});
-		expect(await h.lifecycle.federations(SID)).toEqual({
-			outcome: "listed",
-			federations: ["github", "oidc"],
-		});
-		const closed = await h.lifecycle.close(SID, "rp_logout");
-		expect(closed.federations).toEqual(["github", "oidc"]);
-	});
-
-	it("lists the per-session index's alone for a session with no record", async () => {
-		const h = harness();
-		const expiresAt = await h.establish(SID, { open: false });
-		await h.sessionFederationIndex.addFederation(SID, "google", expiresAt);
-		expect(await h.lifecycle.federations(SID)).toEqual({
-			outcome: "listed",
-			federations: ["google"],
-		});
+		await h.establish(SID, { open: false });
+		expect(await h.lifecycle.federations(SID)).toEqual({ outcome: "listed", federations: [] });
 	});
 
 	it("lists what the close answers for the same session", async () => {
@@ -1395,7 +1016,7 @@ describe("federations", () => {
 		expect(listed.outcome === "listed" ? listed.federations : []).toEqual(["google"]);
 	});
 
-	it("rejects with the store's own error when the lifecycle store or the index cannot answer, saying nothing", async () => {
+	it("rejects with the store's own error when the lifecycle store cannot answer, saying nothing", async () => {
 		const down = new Error("lifecycle store down");
 		const h = harness({
 			store: (inner) => ({
@@ -1408,14 +1029,6 @@ describe("federations", () => {
 		await h.establish();
 		await expect(h.lifecycle.federations(SID)).rejects.toBe(down);
 		expectSilentOutage(h);
-		const indexDown = new Error("index down");
-		const g = harness();
-		await g.establish();
-		g.sessionFederationIndex.listFederations = async () => {
-			throw indexDown;
-		};
-		await expect(g.lifecycle.federations(SID)).rejects.toBe(indexDown);
-		expectSilentOutage(g);
 	});
 
 	it.each(UNHOLDABLE_SIDS)(
@@ -1453,10 +1066,11 @@ describe("liveness", () => {
 		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
 	});
 
-	it("reads the user session alone for a session with no record", async () => {
+	it("is not_live for a session with no record, its user session still there", async () => {
 		const h = harness();
 		await h.establish(SID, { open: false });
-		expect((await h.lifecycle.liveness(SID)).outcome).toBe("live");
+		expect(await h.lifecycle.liveness(SID)).toEqual({ outcome: "not_live" });
+		expect(await h.sessions.get(SID)).not.toBeNull();
 		expect(await h.lifecycle.liveness("unknown")).toEqual({ outcome: "not_live" });
 	});
 

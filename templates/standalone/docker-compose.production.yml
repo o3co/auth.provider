@@ -142,8 +142,8 @@ services:
       SESSION_STORE_STORAGE_TYPE: redis
       SESSION_STORE_STORAGE_REDIS_URL: redis://redis:6379
       # The UserSession stores: the provider's own record of who is signed in,
-      # which RPs a session has touched, and the family / federation indexes
-      # hanging off it. They MUST be on Redis whenever the express-session
+      # the subject index and revocation boundaries beside it, and the session
+      # lifecycle records. They MUST be on Redis whenever the express-session
       # store above is, and this line is the fix for what happens when they
       # are not.
       #

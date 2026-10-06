@@ -28,10 +28,7 @@
 import crypto from "node:crypto";
 import {
 	type CodeRepository,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createMemoryRefreshTokenFamilyStore,
 	createRefreshTokenFamilyRevocation,
@@ -43,12 +40,9 @@ import {
 	type GrantResult,
 	type RefreshTokenFamilyRevocation,
 	readVersionedSessionLifecycle,
-	type SessionFamilyIndex,
 	type SessionJoinOutcome,
 	type SessionLifecycle,
 	type SessionLifecycleStore,
-	type SupportsSessionEnd,
-	supportsSessionEnd,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -127,24 +121,13 @@ function holding<T extends object, K extends keyof T>(
 	};
 }
 
-/** An index with only the port's three methods: no session-end capability. */
-function withoutSessionEnd(index: SessionFamilyIndex): SessionFamilyIndex {
-	return {
-		kind: index.kind,
-		addFamilyId: vi.fn(index.addFamilyId),
-		listFamilyIds: vi.fn(index.listFamilyIds),
-		removeBySid: vi.fn(index.removeBySid),
-	};
-}
-
 /**
- * One session and every store both sides use. The grant and the logout each
- * get their own view of the stores (`grantStores`, `logoutStores`), so a
- * checkpoint on one side does not hold the other.
+ * One session, opened in core's session lifecycle as a login opens it, and
+ * every store both sides use. The grant and the logout each get their own
+ * view of the stores (`grantStores`, `logoutStores`), so a checkpoint on one
+ * side does not hold the other.
  */
-async function world(
-	opts: { readonly index?: SessionFamilyIndex; readonly lifecycle?: boolean } = {},
-) {
+async function world() {
 	const userSessionStore = createInMemoryUserSessionStore();
 	const expiresAt = new Date(Date.now() + HOUR);
 	await userSessionStore.create({
@@ -156,8 +139,6 @@ async function world(
 		amr: undefined,
 		authentication: undefined,
 	});
-	const memoryIndex = createInMemorySessionFamilyIndex();
-	const index = opts.index ?? memoryIndex;
 	const familyStore = createMemoryRefreshTokenFamilyStore();
 	const rotation = createRefreshTokenFamilyRotation({
 		refreshTokenFamilyStore: familyStore,
@@ -168,19 +149,6 @@ async function world(
 		accessTokenHorizonMs: HOUR,
 	});
 	const register = vi.fn(rotation.register);
-	/** What each guarded add answered, in order. */
-	const answers: Array<"added" | "ended"> = [];
-	const recording = (
-		capable: SessionFamilyIndex & SupportsSessionEnd,
-	): SessionFamilyIndex & SupportsSessionEnd => ({
-		...capable,
-		addFamilyIdUnlessEnded: async (sid, familyId, until) => {
-			const answer = await capable.addFamilyIdUnlessEnded(sid, familyId, until);
-			answers.push(answer);
-			return answer;
-		},
-	});
-	const recordingIndex: SessionFamilyIndex = supportsSessionEnd(index) ? recording(index) : index;
 	const logoutRevocation: RefreshTokenFamilyRevocation = {
 		...revocation,
 		revokeFamily: vi.fn(revocation.revokeFamily),
@@ -189,39 +157,27 @@ async function world(
 		kind: "memory",
 		removeBySid: vi.fn(async () => undefined),
 	} as unknown as FederationTokenStore;
-	const sessionRPRegistry = createInMemorySessionRPRegistry();
-	const sessionFederationIndex = createInMemorySessionFederationIndex();
 
-	// Core's session lifecycle over the same stores, written beside the
-	// per-session ones (its bridge), when the composition installs it.
 	const lifecycleStore: SessionLifecycleStore = createInMemorySessionLifecycleStore();
-	const lifecycle: SessionLifecycle | undefined = opts.lifecycle
-		? createSessionLifecycle({
-				store: lifecycleStore,
-				userSessionStore,
-				refreshTokenFamilyRevocation: revocation,
-				federationTokenStore,
-				sessionRPRegistry,
-				sessionFamilyIndex: recordingIndex,
-				sessionFederationIndex,
-				retainMs: HOUR,
-				logger: { warn: () => undefined, error: () => undefined },
-			})
-		: undefined;
+	const lifecycle: SessionLifecycle = createSessionLifecycle({
+		store: lifecycleStore,
+		userSessionStore,
+		refreshTokenFamilyRevocation: revocation,
+		federationTokenStore,
+		retainMs: HOUR,
+		logger: { warn: () => undefined, error: () => undefined },
+	});
+	expect(await lifecycle.open(SID, { sub: SUBJECT, expiresAt })).toEqual({ outcome: "opened" });
 
 	const grantStores = {
 		userSessionStore: userSessionStore as UserSessionStore,
-		sessionFamilyIndex: recordingIndex,
-		sessionRPRegistry,
 		refreshTokenFamilyRotation: { ...rotation, register },
 		refreshTokenFamilyRevocation: revocation as RefreshTokenFamilyRevocation,
-		...(lifecycle === undefined ? {} : { sessionLifecycle: lifecycle }),
+		sessionLifecycle: lifecycle,
+		sessionLifecycleStore: lifecycleStore,
 	};
 	const logoutStores = {
 		userSessionStore: userSessionStore as UserSessionStore,
-		sessionFamilyIndex: index,
-		sessionRPRegistry,
-		sessionFederationIndex,
 		federationTokenStore,
 		refreshTokenFamilyRevocation: logoutRevocation,
 	};
@@ -245,6 +201,8 @@ async function world(
 						code_challenge_method: "S256",
 						grantedScope: ["read"],
 						sid: SID,
+						// What /authorize records over this record, whose primary cannot be told.
+						authentication: { primary: undefined, mfaAt: undefined },
 					}),
 				createCode: vi.fn(),
 				findByCode: vi.fn(),
@@ -280,10 +238,8 @@ async function world(
 		logoutStores,
 		exchange,
 		familyId,
-		answers,
 		revocation,
 		logoutRevocation,
-		index,
 		userSessionStore,
 		lifecycle,
 		lifecycleStore,
@@ -301,64 +257,44 @@ function expectSessionInvalidated(result: GrantResult): void {
 }
 
 describe("a code exchange that joins through the session lifecycle", () => {
-	it("joins the relying party and its family to the session's lifecycle record, and the per-session stores beside it", async () => {
-		const w = await world({ lifecycle: true });
+	it("joins the relying party and its family to the session's lifecycle record", async () => {
+		const w = await world();
 
 		const result = await w.exchange();
 
 		expect(result.status).toBe(200);
-		expect(w.answers).toEqual(["added"]);
 		const record = readVersionedSessionLifecycle(await w.lifecycleStore.read(SID));
 		expect(record?.value.participants.map((p) => `${p.kind}:${p.id}`)).toEqual([
 			`rp:${CLIENT_ID}`,
 			`family:${w.familyId()}`,
 		]);
-		expect((await w.grantStores.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual([
-			CLIENT_ID,
-		]);
 	});
 
-	it("a close through the lifecycle committed first: the join is refused, the exchange serves nothing, and the family is revoked", async () => {
-		const w = await world({ lifecycle: true });
-		const lifecycle = w.lifecycle as SessionLifecycle;
-		// The session joined once before, so it has a lifecycle record; its
-		// close commits and stays pending, the user session still there.
+	it("a close through the lifecycle committed first: admission refuses the exchange before any family is minted", async () => {
+		const w = await world();
+		const lifecycle = w.lifecycle;
+		// The session joined once before; its close commits and stays
+		// pending, the user session still there.
 		await lifecycle.join(SID, { familyId: "earlier-family" });
 		vi.mocked(w.logoutStores.federationTokenStore.removeBySid).mockRejectedValueOnce(
 			new Error("federation token store down"),
 		);
 		expect((await lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
 		expect(await w.userSessionStore.get(SID)).not.toBeNull();
-		w.answers.length = 0;
 
 		const result = await w.exchange();
 
-		expectSessionInvalidated(result);
-		// Refused by the record before the per-session stores are written.
-		expect(w.answers).toEqual([]);
-		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
-	});
-
-	it("a close through the lifecycle committed first, over an index that keeps no end mark: the record alone refuses the join", async () => {
-		const index = withoutSessionEnd(createInMemorySessionFamilyIndex());
-		const w = await world({ index, lifecycle: true });
-		const lifecycle = w.lifecycle as SessionLifecycle;
-		await lifecycle.join(SID, { familyId: "earlier-family" });
-		vi.mocked(w.logoutStores.federationTokenStore.removeBySid).mockRejectedValueOnce(
-			new Error("federation token store down"),
-		);
-		expect((await lifecycle.close(SID, "rp_logout")).outcome).toBe("pending");
-		vi.mocked(index.addFamilyId).mockClear();
-
-		const result = await w.exchange();
-
-		expectSessionInvalidated(result);
-		expect(index.addFamilyId).not.toHaveBeenCalled();
-		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(result).not.toHaveProperty("tokens");
+		expect(w.grantStores.refreshTokenFamilyRotation.register).not.toHaveBeenCalled();
 	});
 
 	it("a session gone before the join: the exchange serves nothing, and the family is revoked", async () => {
-		const w = await world({ lifecycle: true });
+		const w = await world();
 		const held = checkpoint();
 		const exchange = w.exchange({
 			...w.grantStores,
@@ -376,11 +312,11 @@ describe("a code exchange that joins through the session lifecycle", () => {
 	});
 
 	it("a lifecycle that cannot answer: 503, and no token", async () => {
-		const w = await world({ lifecycle: true });
+		const w = await world();
 		const result = await w.exchange({
 			...w.grantStores,
 			sessionLifecycle: {
-				...(w.lifecycle as SessionLifecycle),
+				...w.lifecycle,
 				join: async () => outsideAnswer<SessionJoinOutcome>(),
 			},
 		});
@@ -395,13 +331,13 @@ describe("a code exchange that joins through the session lifecycle", () => {
 	});
 
 	it("a lifecycle that cannot answer: one error line at the grant, beside the lifecycle's own", async () => {
-		const w = await world({ lifecycle: true });
+		const w = await world();
 		const logger = createMockLogger();
 		await w.exchange(
 			{
 				...w.grantStores,
 				sessionLifecycle: {
-					...(w.lifecycle as SessionLifecycle),
+					...w.lifecycle,
 					join: async () => outsideAnswer<SessionJoinOutcome>(),
 				},
 			},
@@ -415,11 +351,11 @@ describe("a code exchange that joins through the session lifecycle", () => {
 	});
 
 	it("a lifecycle join that rejects with its store's error: 503, no token, the family revoked", async () => {
-		const w = await world({ lifecycle: true });
+		const w = await world();
 		const result = await w.exchange({
 			...w.grantStores,
 			sessionLifecycle: {
-				...(w.lifecycle as SessionLifecycle),
+				...w.lifecycle,
 				join: async () => {
 					throw storeReplyError();
 				},
@@ -436,13 +372,13 @@ describe("a code exchange that joins through the session lifecycle", () => {
 	});
 
 	it("a lifecycle join that rejects with its store's error: one error line at the grant, carrying the error's projection", async () => {
-		const w = await world({ lifecycle: true });
+		const w = await world();
 		const logger = createMockLogger();
 		await w.exchange(
 			{
 				...w.grantStores,
 				sessionLifecycle: {
-					...(w.lifecycle as SessionLifecycle),
+					...w.lifecycle,
 					join: async () => {
 						throw storeReplyError();
 					},
@@ -459,7 +395,7 @@ describe("a code exchange that joins through the session lifecycle", () => {
 	});
 
 	it("a lifecycle join that rejects, and a revocation of its family that rejects too: 503, no token, the outage's line and then the revocation's", async () => {
-		const w = await world({ lifecycle: true });
+		const w = await world();
 		const logger = createMockLogger();
 		const result = await w.exchange(
 			{
@@ -471,7 +407,7 @@ describe("a code exchange that joins through the session lifecycle", () => {
 					},
 				},
 				sessionLifecycle: {
-					...(w.lifecycle as SessionLifecycle),
+					...w.lifecycle,
 					join: async () => {
 						throw storeReplyError();
 					},
@@ -503,13 +439,13 @@ describe("a code exchange that joins through the session lifecycle", () => {
 	});
 
 	it("a lifecycle join that rejects with a store-style RangeError: 503, no token, one error line with the projection, the family revoked", async () => {
-		const w = await world({ lifecycle: true });
+		const w = await world();
 		const logger = createMockLogger();
 		const result = await w.exchange(
 			{
 				...w.grantStores,
 				sessionLifecycle: {
-					...(w.lifecycle as SessionLifecycle),
+					...w.lifecycle,
 					join: async () => {
 						throw Object.assign(new RangeError("Invalid array length"), {
 							command: { name: "hset", args: [REFUSED_COMMAND_MARKER] },

@@ -47,6 +47,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
+import { openingLifecycleStore } from "../../__tests__/_helpers/sessionLifecycle.mjs";
 import {
 	buildFederationApp,
 	HARNESS_ISSUER,
@@ -202,9 +203,7 @@ function setup(options: Setup = {}): HarnessApp & { repo: LinkableRepo } {
 			actions: SESSION_ADMISSION_ACTIONS,
 		}),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
-		...(options.sessionLifecycleStore
-			? { sessionLifecycleStore: options.sessionLifecycleStore }
-			: {}),
+		sessionLifecycleStore: options.sessionLifecycleStore ?? openingLifecycleStore(SUBJECT),
 		...(options.logger ? { logger: options.logger } : {}),
 		...(options.auditSink ? { auditSink: options.auditSink } : {}),
 	});

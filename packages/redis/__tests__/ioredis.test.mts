@@ -291,7 +291,7 @@ describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
 		).resolves.toBeUndefined();
 	});
 
-	it("sessionRPRegistryClient.multi().exec() rejects on a failed queued command", async () => {
+	it("subjectSessionIndexClient.multi().exec() rejects on a failed queued command", async () => {
 		const io = makeFakeIoredis({
 			multi: vi.fn(() =>
 				makeFakePipeline([
@@ -300,22 +300,10 @@ describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
 				]),
 			) as never,
 		});
-		const p = makeIoredisClients(io).sessionRPRegistryClient.multi();
-		p.hSet("k", "f", "v").pExpireGT("k", Date.now() + 1000);
+		const p = makeIoredisClients(io).subjectSessionIndexClient.multi();
+		p.zAdd("k", { score: 1, value: "m" }).pExpireGT("k", Date.now() + 1000);
 		await expect(p.exec()).rejects.toMatchObject(
-			queuedFailure("sessionRPRegistryClient.exec", WRONGTYPE),
-		);
-	});
-
-	it("sessionFamilyIndexClient.multi().exec() rejects on a failed queued command", async () => {
-		const io = makeFakeIoredis({
-			multi: vi.fn(() => makeFakePipeline([[WRONGTYPE, null]])) as never,
-		});
-		const p = makeIoredisClients(io).sessionFamilyIndexClient.multi();
-		p.zAdd("k", { score: 1, value: "m" }, { NX: true });
-		await expect(p.exec()).rejects.toMatchObject(
-			// The family and federation indexes share one sorted-set client.
-			queuedFailure("sessionSidSortedSetClient.exec", WRONGTYPE),
+			queuedFailure("subjectSessionIndexClient.exec", WRONGTYPE),
 		);
 	});
 
@@ -390,8 +378,7 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 			pttl: vi.fn().mockResolvedValue(1),
 			exists: vi.fn().mockResolvedValue(0),
 			get: vi.fn().mockResolvedValue(null),
-			hset: vi.fn().mockResolvedValue(1),
-			zrange: vi.fn().mockResolvedValue([]),
+			zadd: vi.fn().mockResolvedValue(1),
 			zrem: vi.fn().mockResolvedValue(0),
 			getdel: vi.fn().mockResolvedValue(null),
 			// The increment script answers `{count, pttl}`.
@@ -404,9 +391,8 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 		await c.replaySeenSetClient.exists("jti");
 		await c.refreshTokenFamilyClient.get("fam");
 		await c.userSessionStoreClient.get("sid");
-		await c.sessionRPRegistryClient.hSet("rp", "f", "v");
-		await c.sessionFamilyIndexClient.zRange("fam-idx", 0, -1);
-		await c.sessionFederationIndexClient.zRem("fed-idx", "m");
+		await c.subjectSessionIndexClient.zAdd("subject-idx", { score: 1, value: "sid" });
+		await c.subjectSessionIndexClient.zRem("subject-idx", "sid");
 		await c.federationTokenStoreClient.get("ft");
 		await c.rateLimiterClient.incrementWithTtl("token:ip:1.2.3.4", 60);
 		await c.codeRepositoryClient.getDel("code");
@@ -422,17 +408,7 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 		);
 
 		const fake = io as unknown as Record<string, ReturnType<typeof vi.fn>>;
-		for (const method of [
-			"pttl",
-			"exists",
-			"get",
-			"hset",
-			"zrange",
-			"zrem",
-			"getdel",
-			"eval",
-			"del",
-		]) {
+		for (const method of ["pttl", "exists", "get", "zadd", "zrem", "getdel", "eval", "del"]) {
 			expect(
 				fake[method],
 				`${method} went somewhere other than the passed-in connection`,

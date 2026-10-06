@@ -23,7 +23,8 @@
  * the bundled repositories copy the record field by field, so a field a copy
  * forgets is dropped silently: `nonce` gone mints an id_token the RP cannot
  * bind to its request, `acr` gone one that no longer attests the step-up the
- * user performed, `amr` gone tokens that carry no `amr`, `sid` gone makes
+ * user performed, `amr` gone tokens that carry no `amr`, `authentication`
+ * gone a code the exchange refuses, `sid` gone makes
  * `/token` refuse the code where a session store is wired and otherwise
  * leaves the RP nothing to match a logout against, `grantedAudience` gone
  * falls back to the client as the audience.
@@ -39,7 +40,7 @@
 
 import { describe, expectTypeOf, it } from "vitest";
 import type { CodeRepository, CreateCodeInput } from "#/repositories/CodeRepository.mjs";
-import type { Code } from "#/repositories/types.mjs";
+import type { Code, CodeAuthentication } from "#/repositories/types.mjs";
 
 /** `true` when `K` must be present on `T` — not merely declared. */
 type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, K> ? false : true;
@@ -59,6 +60,7 @@ describe("Code — what a repository answers with", () => {
 		expectTypeOf<IsRequiredKey<Code, "sid">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "acr">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "amr">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<Code, "authentication">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "expiresIn">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "grantedScope">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<Code, "grantedAudience">>().toEqualTypeOf<true>();
@@ -68,6 +70,7 @@ describe("Code — what a repository answers with", () => {
 		expectTypeOf<Code["nonce"]>().toEqualTypeOf<string | undefined>();
 		expectTypeOf<Code["grantedAudience"]>().toEqualTypeOf<readonly string[] | undefined>();
 		expectTypeOf<Code["amr"]>().toEqualTypeOf<readonly string[] | undefined>();
+		expectTypeOf<Code["authentication"]>().toEqualTypeOf<CodeAuthentication | undefined>();
 	});
 });
 

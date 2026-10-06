@@ -34,7 +34,6 @@ import type {
 import {
 	BootError,
 	createApp,
-	createInMemorySessionLifecycleStore,
 	createInMemoryUserSessionStore,
 	createMemoryAttemptCounter,
 	createMemoryDeviceCodeStore,
@@ -58,7 +57,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
-import { LIVE_AUTH_TIME_MS, liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
+import {
+	LIVE_AUTH_TIME_MS,
+	liveCookieSession,
+	liveSessionLifecycleStore,
+	liveSessionStore,
+} from "./liveSessions.mjs";
 import { shippedDeviceGrantSection } from "./shippedSection.mjs";
 
 afterEach(() => {
@@ -175,7 +179,7 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			: { userSessionStore: createInMemoryUserSessionStore() }),
 		...(overrides.withSessionLifecycleStore === false || overrides.withUserSessionStore === false
 			? {}
-			: { sessionLifecycleStore: createInMemorySessionLifecycleStore() }),
+			: { sessionLifecycleStore: liveSessionLifecycleStore() }),
 		// The verification route's CSRF guard is the `csrfGuard` slot, which
 		// the session module provides: core's double stands in for it.
 		...(overrides.withCsrfGuard === false ? {} : { csrfGuard: createTestCsrfGuard() }),
@@ -357,51 +361,36 @@ describe("the device-grant module — boot", () => {
 		return createApp({ modules: [deviceAuthorizationGrantModule], bootstrapComponents });
 	};
 
-	it.each([
-		["absent", undefined],
-		["not a function", "middleware"],
+	// Core holds the `csrfGuard` slot to its contract where boot fills it
+	// (`boot/csrf-guard-slot.mts`, every case in core's
+	// `boot/__tests__/csrf-guard-slot.test.mts`), so the grant mounts a guard
+	// that was checked and checks nothing itself. These pin that a guard the
+	// verification route could not mount still refuses the enabled grant's boot.
+	it("refuses to boot enabled with a csrfGuard whose middleware is not a request handler, naming the slot", async () => {
 		// Express skips a four-parameter function on every request: it is an error handler.
-		["an error handler", (_err: unknown, _req: unknown, _res: unknown, next: () => void) => next()],
-	])(
-		"refuses to boot enabled with a csrfGuard whose middleware is %s, naming the slot",
-		async (_, middleware) => {
-			// The verification route mounts the guard's `middleware`; a guard filled
-			// by hand without a usable one is refused by name, before the route is built.
-			await expect(bootWithGuard({ ...createTestCsrfGuard(), middleware })).rejects.toThrow(
-				/csrfGuard\.middleware is not a request handler.*sessionModule/s,
-			);
-		},
-	);
+		const errorHandler = (_err: unknown, _req: unknown, _res: unknown, next: () => void) => next();
+		const caught = await bootWithGuard({ ...createTestCsrfGuard(), middleware: errorHandler }).then(
+			() => undefined,
+			(err: unknown) => err,
+		);
+		expect(caught).toBeInstanceOf(RangeError);
+		expect((caught as Error).message).toMatch(
+			/csrfGuard\.middleware is not a request handler.*sessionModule/s,
+		);
+	});
 
-	const throwing = {
-		get: () => {
-			throw new Error("adapter unavailable");
-		},
-	};
-	it.each([
-		[
-			"middleware",
-			() => Object.defineProperty({ ...createTestCsrfGuard() }, "middleware", throwing),
-		],
-		[
-			"middleware's arity",
-			() => ({
-				...createTestCsrfGuard(),
-				middleware: Object.defineProperty(() => undefined, "length", throwing),
-			}),
-		],
-	])(
-		"refuses to boot enabled with a csrfGuard whose %s cannot be read, naming the slot",
-		async (_, guard) => {
-			// The getter's own error stays reachable as the refusal's `cause`.
-			await expect(bootWithGuard(guard())).rejects.toMatchObject({
-				cause: {
-					message: expect.stringMatching(/csrfGuard\.middleware could not be read/),
-					cause: { message: "adapter unavailable" },
-				},
-			});
-		},
-	);
+	it("refuses to boot enabled with a csrfGuard whose middleware cannot be read, naming the slot", async () => {
+		const guard = Object.defineProperty({ ...createTestCsrfGuard() }, "middleware", {
+			get: () => {
+				throw new Error("adapter unavailable");
+			},
+		});
+		// The getter's own error stays reachable as the refusal's `cause`.
+		await expect(bootWithGuard(guard)).rejects.toMatchObject({
+			message: expect.stringMatching(/csrfGuard\.middleware could not be read/),
+			cause: { message: "adapter unavailable" },
+		});
+	});
 
 	it("boots disabled without a csrfGuard", async () => {
 		// The slot is optional in the manifest: a deployment that installs the
@@ -632,7 +621,7 @@ describe("the device-grant module — the route it actually contributes", () => 
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		userSessionStore: liveSessionStore(),
-		sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+		sessionLifecycleStore: liveSessionLifecycleStore(),
 		// The `csrfGuard` slot: core's double, which accepts this origin.
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).

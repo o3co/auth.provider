@@ -41,6 +41,7 @@ import {
 	type RefreshTokenFamilyRotation,
 	type RequirementInput,
 	type RequirementVerdict,
+	type SessionLifecycleStore,
 	type SessionRequirement,
 	type SubjectRevocation,
 	type UserSession,
@@ -135,8 +136,25 @@ const refreshToken = (claims: Record<string, unknown> = {}): Promise<string> =>
 		.setExpirationTime("24h")
 		.sign(createSecretKey(Buffer.from(SECRET)));
 
+/**
+ * A lifecycle store holding `SID`'s record, active for `SUBJECT` until an
+ * hour from now: the session a login opened. Seeded before its first read.
+ */
+const openedLifecycleStore = (): SessionLifecycleStore => {
+	const store = createInMemorySessionLifecycleStore();
+	const opened = store.open(SID, SUBJECT, new Date(Date.now() + 3_600_000));
+	return {
+		...store,
+		read: async (sid) => {
+			await opened;
+			return store.read(sid);
+		},
+	};
+};
+
 const makeGrant = (opts: {
 	userSessionStore?: UserSessionStore;
+	sessionLifecycleStore?: SessionLifecycleStore;
 	subjectRevocation?: SubjectRevocation;
 	requirements?: readonly SessionRequirement[];
 	logger?: MockLogger;
@@ -168,11 +186,12 @@ const makeGrant = (opts: {
 			issuer: "https://issuer.test",
 			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
-		// Core's session lifecycle port, required beside a user-session store.
+		// Core's session lifecycle port, required beside a user-session store:
+		// by default one holding the session's record, active.
 		...(opts.userSessionStore
 			? {
 					userSessionStore: opts.userSessionStore,
-					sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+					sessionLifecycleStore: opts.sessionLifecycleStore ?? openedLifecycleStore(),
 				}
 			: {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
@@ -217,6 +236,33 @@ describe("the refresh grant on admission — no requirement registered", () => {
 			errorDescription: "session_invalid",
 		});
 		expect(rotation.rotate).not.toHaveBeenCalled();
+	});
+
+	it("refuses a token whose session has no lifecycle record with 400 invalid_grant session_invalid, before the rotation", async () => {
+		// A session from before the lifecycle, or one whose record lapsed, reads
+		// as closed: a refresh token bound to it stops working.
+		const { handler, rotation } = makeGrant({
+			userSessionStore: storeWith(record()),
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+		});
+		expect(await refused(handler, await refreshToken())).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(rotation.rotate).not.toHaveBeenCalled();
+	});
+
+	it("refreshes a token whose session's lifecycle record is active", async () => {
+		const sessionLifecycleStore = createInMemorySessionLifecycleStore();
+		expect((await sessionLifecycleStore.open(SID, SUBJECT, record().expiresAt)).outcome).toBe(
+			"opened",
+		);
+		const { handler } = makeGrant({
+			userSessionStore: storeWith(record()),
+			sessionLifecycleStore,
+		});
+		expect((await handler.handle(ctx(await refreshToken()))).result.status).toBe(200);
 	});
 
 	it("skips the read for a token without sid, and for a composition without a store", async () => {

@@ -164,6 +164,7 @@ const codeInput = (expiresIn: number): CreateCodeInput => ({
 	sid: undefined,
 	acr: undefined,
 	amr: undefined,
+	authentication: undefined,
 	grantedScope: undefined,
 	grantedAudience: undefined,
 	expiresIn,

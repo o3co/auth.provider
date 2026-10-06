@@ -27,6 +27,7 @@
 
 import type { AuditSink } from "../audit/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import type { CodeReading } from "../user-sessions/authentication.mjs";
 import type { SessionLifecycleStore } from "../user-sessions/lifecycle/types.mjs";
 import type { SubjectRevocation, UserSessionStore } from "../user-sessions/types.mjs";
 import type { AcrTable } from "./acr.mjs";
@@ -47,12 +48,24 @@ import { checkResolver } from "./requirement-resolver.mjs";
 const knownClaims = new WeakSet<object>();
 
 /**
- * Freezes and brands a claim a builder made, so `checkRequest` accepts it.
- * Called only by `admit.mts`'s claim builders.
+ * What a code claim's builder read of the code: how its session had
+ * authenticated at `/authorize`. Held beside the claim rather than on it, so
+ * the claim's shape is the same for every carrier.
  */
-export const brandClaim = (fields: Omit<SessionClaim, never>): SessionClaim => {
+const codeReadings = new WeakMap<object, CodeReading>();
+
+/**
+ * Freezes and brands a claim a builder made, so `checkRequest` accepts it,
+ * with what a code claim's builder read of the code. Called only by
+ * `admit.mts`'s claim builders.
+ */
+export const brandClaim = (
+	fields: Omit<SessionClaim, never>,
+	codeReading?: CodeReading,
+): SessionClaim => {
 	const built = Object.freeze({ ...fields });
 	knownClaims.add(built);
+	if (codeReading !== undefined) codeReadings.set(built, codeReading);
 	return built;
 };
 
@@ -75,6 +88,8 @@ const isStringList = (value: unknown): value is readonly string[] =>
  */
 export interface CheckedRequest {
 	readonly claim: SessionClaim;
+	/** A code claim's: what its builder read of the code; `undefined` when the code carries no readable authentication — refused once its session is read — and for every other carrier. */
+	readonly codeReading: CodeReading | undefined;
 	readonly action: AdmissionAction;
 	readonly asks: AdmissionAsks | undefined;
 	readonly requirements: SessionRequirementResolver;
@@ -179,6 +194,7 @@ export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): Ch
 	}
 	return {
 		claim,
+		codeReading: codeReadings.get(presented),
 		action,
 		asks,
 		requirements,

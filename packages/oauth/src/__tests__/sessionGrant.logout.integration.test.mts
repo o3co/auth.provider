@@ -147,6 +147,18 @@ async function buildApp(userSessionStore: UserSessionStore) {
 		revokeFamily: vi.fn(async () => {}),
 	} as unknown as RefreshTokenFamilyRevocation;
 
+	// The browser's session, opened in the lifecycle as a login opens it.
+	const sessionLifecycle = lifecycleOver({
+		userSessionStore,
+		refreshTokenFamilyRevocation,
+		federationTokenStore,
+	});
+	const established = await userSessionStore.get(SID);
+	if (established !== null) {
+		expect(
+			await sessionLifecycle.open(SID, { sub: SUB, expiresAt: established.expiresAt }),
+		).toEqual({ outcome: "opened" });
+	}
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
@@ -155,11 +167,7 @@ async function buildApp(userSessionStore: UserSessionStore) {
 		codeRepository,
 		keyStore,
 		userSessionStore,
-		sessionLifecycle: lifecycleOver({
-			userSessionStore,
-			refreshTokenFamilyRevocation,
-			federationTokenStore,
-		}),
+		sessionLifecycle,
 		federationTokenStore,
 		refreshTokenFamilyRevocation,
 	});

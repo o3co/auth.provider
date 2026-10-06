@@ -15,9 +15,9 @@
  */
 
 /**
- * Clients for the session stores: the session record, the indexes keyed by sid, the subject's
- * session index and its revocation record. A pipeline's `exec` rejects when a queued command
- * failed, so a mutation whose paired expiry failed is never reported as written.
+ * Clients for the session stores: the session record, the subject's session index and its
+ * revocation record. A pipeline's `exec` rejects when a queued command failed, so a mutation
+ * whose paired expiry failed is never reported as written.
  */
 
 // --- UserSessionStoreClient ------------------------------------------------
@@ -53,154 +53,11 @@ export interface UserSessionStoreClient {
 	replaceIfUnchanged(key: string, expected: string, next: string): Promise<boolean>;
 }
 
-// --- SessionRPRegistryClient -----------------------------------------------
-
-/**
- * Chainable transaction pipeline returned by `SessionRPRegistryClient.multi()`.
- */
-export interface SessionRPRegistryMultiClient {
-	hSet(key: string, field: string, value: string): SessionRPRegistryMultiClient;
-	pExpireAt(key: string, msTimestamp: number): SessionRPRegistryMultiClient;
-	/**
-	 * Safely set the key's expiry under concurrent writes; see
-	 * {@link SessionSidSortedSetMultiClient.pExpireGT} for the NX+GT semantics.
-	 */
-	pExpireGT(key: string, msTimestamp: number): SessionRPRegistryMultiClient;
-	/**
-	 * Execute the queued commands. Same contract as
-	 * {@link SessionSidSortedSetMultiClient.exec}: MUST reject when any queued
-	 * command failed; `null` is the WATCH-abort signal, not a failure.
-	 */
-	exec(): Promise<unknown[] | null>;
-}
-
-/**
- * Backing client for SessionRPRegistry adapters. Declares the hash ops +
- * multi pipeline that `createRedisSidHash` consumes.
- */
-export interface SessionRPRegistryClient {
-	/**
-	 * Remove the key, reclaiming its memory on a background thread (Redis
-	 * `UNLINK`). This key holds every relying party registered against one
-	 * session and is deleted during logout; `DEL` would free all of them
-	 * inline on the connection every other adapter shares.
-	 */
-	unlink(key: string): Promise<number>;
-	hSet(key: string, field: string, value: string): Promise<number>;
-	/**
-	 * Cursor-based iteration over the hash's field/value pairs (Redis
-	 * `HSCAN`), yielding one pair at a time.
-	 *
-	 * Cursor-based because a whole-hash reply grows with however many relying
-	 * parties a session has accumulated. `HSCAN` guarantees that a field
-	 * present for the whole iteration is returned at least once, so a field
-	 * may be yielded more than once and consumers must de-duplicate.
-	 */
-	hScanIterator(
-		key: string,
-		opts?: { COUNT?: number },
-	): AsyncIterable<readonly [field: string, value: string]>;
-	multi(): SessionRPRegistryMultiClient;
-	pExpireAt(key: string, msTimestamp: number): Promise<number>;
-	/** Non-pipeline variant of `pExpireGT`. See multi-client for semantics. */
-	pExpireGT(key: string, msTimestamp: number): Promise<number>;
-}
-
-// --- SessionSidSortedSetClient ---------------------------------------------
-
-/**
- * Chainable transaction pipeline returned by `SessionSidSortedSetClient.multi()`.
- */
-export interface SessionSidSortedSetMultiClient {
-	pExpireAt(key: string, msTimestamp: number): SessionSidSortedSetMultiClient;
-	/**
-	 * Safely set the key's expiry under concurrent writes:
-	 *   - no TTL → set it to `msTimestamp` (first write);
-	 *   - TTL ≥ `msTimestamp` → leave it unchanged (no truncation under
-	 *     stale-`expiresAt` races);
-	 *   - TTL < `msTimestamp` → raise it to `msTimestamp`.
-	 *
-	 * Implemented as a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair. A bare
-	 * `PEXPIREAT … GT` is insufficient: Redis treats a non-volatile key as
-	 * having infinite TTL for `GT`, so it silently no-ops on first write; the
-	 * NX clause covers that gap. Requires Redis 7.0+ (the tested floor is
-	 * 7.2 LTS).
-	 */
-	pExpireGT(key: string, msTimestamp: number): SessionSidSortedSetMultiClient;
-	zAdd(
-		key: string,
-		entry: { score: number; value: string },
-		opts?: { NX: true },
-	): SessionSidSortedSetMultiClient;
-	/**
-	 * Execute the queued commands.
-	 *
-	 * **MUST reject when any queued command failed.** A driver that reports
-	 * per-command errors inside the reply — ioredis resolves with one
-	 * `[error, result]` tuple per command and does not reject, because `EXEC`
-	 * itself succeeded — has to be adapted here, or a refused write is handed
-	 * to the caller as a success. The pipelines in this package pair a mutation
-	 * with the expiry that bounds it, so a swallowed failure is a key stranded
-	 * with no TTL.
-	 *
-	 * Resolving with `null` is **not** a failure: it is the WATCH-abort signal,
-	 * which the refresh-token-family CAS loop reads as "conflict, retry".
-	 */
-	exec(): Promise<unknown[] | null>;
-}
-
-/**
- * Backing client for SessionFamilyIndex and SessionFederationIndex adapters.
- * Both adapters share this interface (same sorted-set operations, different
- * slot identities in ComponentMap).
- */
-export interface SessionSidSortedSetClient {
-	/**
-	 * Remove the key, reclaiming its memory on a background thread (Redis
-	 * `UNLINK`). This key holds every refresh-token family (or federation)
-	 * linked to one session and is deleted during logout; `DEL` would free all
-	 * of them inline on the connection every other adapter shares.
-	 */
-	unlink(key: string): Promise<number>;
-	multi(): SessionSidSortedSetMultiClient;
-	pExpireAt(key: string, msTimestamp: number): Promise<number>;
-	/** Non-pipeline variant of `pExpireGT`. See multi-client for semantics. */
-	pExpireGT(key: string, msTimestamp: number): Promise<number>;
-	zAdd(key: string, entry: { score: number; value: string }, opts?: { NX: true }): Promise<number>;
-	/**
-	 * Members between the two inclusive ranks, in ascending score order.
-	 *
-	 * Callers page by rank rather than passing `0, -1`: the reply size of a
-	 * whole-set read grows with how heavily linked the session is.
-	 */
-	zRange(key: string, start: number, stop: number): Promise<string[]>;
-	zRem(key: string, member: string): Promise<number>;
-}
-
-/**
- * Backing client for the SessionFamilyIndex adapter: the sorted set, and the
- * session's "ended" mark beside it. The mark's two methods are optional, and
- * the index has core's `SupportsSessionEnd` only over a client with both.
- *
- * What a client owes that capability: its writes (`writeEndedMark`,
- * `multi().exec()`) resolve only once the server has replied, and its reads
- * (`hasEndedMark`, `zRange`) are served by the primary. The index sends each
- * command only after the previous one has resolved.
- */
-export interface SessionFamilyIndexClient extends SessionSidSortedSetClient {
-	/** Write the mark at `key`, expiring at the epoch-ms `msTimestamp` (`SET key 1 PXAT msTimestamp`). */
-	writeEndedMark?(key: string, msTimestamp: number): Promise<void>;
-	/** Whether the mark at `key` is there (`EXISTS key`). */
-	hasEndedMark?(key: string): Promise<boolean>;
-}
-
 // --- Subject-keyed clients -------------------------------------------------
 
 /**
- * Backing client for the `SubjectSessionIndex` adapter. Unlike a sid-keyed
- * set ({@link SessionSidSortedSetClient}), whose members share one session's
- * expiry and one key-level TTL, one subject's sessions expire on their own
- * clocks, so "the live ones" and pruning are score ranges. The score is the
+ * Backing client for the `SubjectSessionIndex` adapter. One subject's sessions
+ * expire on their own clocks, so "the live ones" and pruning are score ranges. The score is the
  * member's **expiry in epoch milliseconds**: `zRangeByScore(key, now,
  * "+inf")` is "sessions still live" and `zRemRangeByScore(key, "-inf", now)`
  * is the GC sweep.
@@ -241,9 +98,29 @@ export interface SubjectSessionIndexClient {
  */
 export interface SubjectSessionIndexMultiClient {
 	zAdd(key: string, entry: { score: number; value: string }): SubjectSessionIndexMultiClient;
-	/** See {@link SessionSidSortedSetMultiClient.pExpireGT} for the NX+GT semantics. */
+	/**
+	 * Safely set the key's expiry under concurrent writes:
+	 *   - no TTL → set it to `msTimestamp` (first write);
+	 *   - TTL ≥ `msTimestamp` → leave it unchanged (no truncation under
+	 *     stale-`expiresAt` races);
+	 *   - TTL < `msTimestamp` → raise it to `msTimestamp`.
+	 *
+	 * Implemented as a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair. A bare
+	 * `PEXPIREAT … GT` is insufficient: Redis treats a non-volatile key as
+	 * having infinite TTL for `GT`, so it silently no-ops on first write; the
+	 * NX clause covers that gap. Requires Redis 7.0+ (the tested floor is
+	 * 7.2 LTS).
+	 */
 	pExpireGT(key: string, msTimestamp: number): SubjectSessionIndexMultiClient;
-	/** See {@link SessionSidSortedSetMultiClient.exec} — MUST reject on a queued failure. */
+	/**
+	 * Execute the queued commands.
+	 *
+	 * **MUST reject when any queued command failed.** A driver that reports
+	 * per-command errors inside the reply — ioredis resolves with one
+	 * `[error, result]` tuple per command and does not reject, because `EXEC`
+	 * itself succeeded — has to be adapted here, or a refused write is handed
+	 * to the caller as a success, and a member stranded with no TTL.
+	 */
 	exec(): Promise<unknown[] | null>;
 }
 

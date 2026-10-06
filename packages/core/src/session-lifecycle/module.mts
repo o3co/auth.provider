@@ -120,9 +120,6 @@ export const sessionLifecycleModule = defineModule({
 	requires: [
 		"sessionLifecycleStore",
 		"userSessionStore",
-		"sessionRPRegistry",
-		"sessionFamilyIndex",
-		"sessionFederationIndex",
 		"refreshTokenFamilyRevocation",
 		"federationTokenStore",
 		"config",
@@ -146,9 +143,6 @@ export const sessionLifecycleModule = defineModule({
 					? {}
 					: { subjectSessionIndex: deps.subjectSessionIndex }),
 				notifier: () => deps.sessionCloseNotifierResolver.get(),
-				sessionRPRegistry: deps.sessionRPRegistry,
-				sessionFamilyIndex: deps.sessionFamilyIndex,
-				sessionFederationIndex: deps.sessionFederationIndex,
 				retainMs: closingRetainMs(deps.config),
 				logger,
 			});

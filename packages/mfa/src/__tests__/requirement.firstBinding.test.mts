@@ -53,6 +53,7 @@ import { describe, expect, it, type Mock, vi } from "vitest";
 import type { RequireEmailProof } from "#/firstBinding.mjs";
 import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
+import { openingLifecycleStore } from "./lifecycleRecords.mjs";
 import {
 	FACTORS,
 	FIRST_BINDING_LEASE_MS,
@@ -242,6 +243,7 @@ const admit = (requirement: SessionRequirement, session: UserSession, action: Fi
 	admitSession(
 		{
 			userSessionStore: storeHolding(session),
+			sessionLifecycleStore: openingLifecycleStore(session.sub),
 			subjectRevocation: undefined,
 			requirements: resolverForTests([requirement], { issuer: ISSUER, actions: FIRST_BINDINGS }),
 			acrTable: readAcrTable({}),

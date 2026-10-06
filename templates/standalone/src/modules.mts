@@ -18,10 +18,7 @@ import {
 	consoleLogger,
 	createAuditSinkFactory,
 	createFederationTokenStoreFactory,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
 	createInMemoryUserSessionStore,
@@ -303,9 +300,8 @@ export const inMemoryCodeRepositoryModule: Module = defineModule({
 });
 
 /**
- * In-memory user-session stores module: the four-store user-session split
- * (userSessionStore, sessionRPRegistry, sessionFamilyIndex,
- * sessionFederationIndex) and the subject-level revocation pair. Wired by
+ * In-memory user-session stores module: the user-session store, the session
+ * lifecycle store and the subject-level revocation pair. Wired by
  * `buildModules` only when `adapters.userSessionStores = "memory"`; the Redis
  * branch swaps in `redisSessionStoresModule` from `@o3co/auth-provider-redis`.
  */
@@ -314,13 +310,10 @@ export const inMemorySessionStoresModule: Module = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"user sessions, RP registrations, family indexes, the session lifecycle record and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, a close begun on one replica fences nothing on another, and a credential change enumerates and watermarks only the replica that handled it",
+			"user sessions, the session lifecycle record and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, a close begun on one replica fences nothing on another, and a credential change enumerates and watermarks only the replica that handled it",
 	},
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
-		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
-		sessionFamilyIndex: () => createInMemorySessionFamilyIndex(),
-		sessionFederationIndex: () => createInMemorySessionFederationIndex(),
 		// The subject-level revocation slots. Without them `subjectRevocation`
 		// is undefined: `verifyJwt` skips the watermark, the refresh gate is
 		// inert and `revokeAllForSubject` reports `unavailable`, all silently.
@@ -447,33 +440,6 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		userSessionStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.userSessionStoreClient;
-		},
-		sessionRPRegistryClient: async ({
-			section,
-			lifecycleRegistrar,
-			readinessRegistrar,
-			logger,
-		}) => {
-			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
-				.sessionRPRegistryClient;
-		},
-		sessionFamilyIndexClient: async ({
-			section,
-			lifecycleRegistrar,
-			readinessRegistrar,
-			logger,
-		}) => {
-			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
-				.sessionFamilyIndexClient;
-		},
-		sessionFederationIndexClient: async ({
-			section,
-			lifecycleRegistrar,
-			readinessRegistrar,
-			logger,
-		}) => {
-			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
-				.sessionFederationIndexClient;
 		},
 		// The grant store and the intent store, consumed by the Redis grant
 		// modules when their switches say "redis". Provided whenever this module

@@ -218,9 +218,7 @@ describe("an override given as undefined over a module providing the slot", () =
 
 const FEDERATION_STORES = [
 	"userSessionStore",
-	"sessionRPRegistry",
-	"sessionFamilyIndex",
-	"sessionFederationIndex",
+	"sessionLifecycle",
 	"federationTokenStore",
 	"refreshTokenFamilyRevocation",
 ] as const;

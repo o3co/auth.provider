@@ -30,7 +30,6 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	type Logger,
-	type SessionFederationIndex,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -219,15 +218,6 @@ const stores = [
 		async removeBySid() {},
 		async delete() {},
 	} as unknown as FederationTokenStore),
-	providing("test:session-federation-index", "sessionFederationIndex", {
-		kind: "memory",
-		async addFederation() {},
-		async listFederations() {
-			return [];
-		},
-		async removeFederation() {},
-		async removeBySid() {},
-	} as unknown as SessionFederationIndex),
 ];
 
 /** A module that requires the guard and mounts it in front of `POST /probe`, which answers with a token the guard issued. */

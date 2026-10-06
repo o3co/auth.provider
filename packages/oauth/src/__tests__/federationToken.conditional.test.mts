@@ -30,7 +30,6 @@ import {
 	type FederationTokenStore,
 	type FederationTokens,
 	memoryFederationTokenStoreModule,
-	type SessionFederationIndex,
 	type SupportsLock,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -45,6 +44,16 @@ import {
 	expectOutageLine,
 	storeReplyError,
 } from "./_helpers/projectedLog.mjs";
+
+/** The federations a session joined, as the fixture lists them for its lifecycle double. */
+interface SessionFederationIndex {
+	readonly kind: string;
+	addFederation(sid: string, federationName: string, expiresAt: Date): Promise<void>;
+	listFederations(sid: string): Promise<ReadonlyArray<string>>;
+	removeFederation(sid: string, federationName: string): Promise<void>;
+	removeBySid(sid: string): Promise<void>;
+}
+
 import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";

@@ -25,10 +25,7 @@
 import {
 	type ClientRepository,
 	type CodeRepository,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
 	createInMemorySessionLifecycleStore,
-	createInMemorySessionRPRegistry,
 	createSessionLifecycle,
 	createSymmetricKeyStore,
 	type FederationTokenStore,
@@ -96,20 +93,19 @@ const refreshTokenFamilyRevocation = {
 } as unknown as RefreshTokenFamilyRevocation;
 
 /**
- * Core's own lifecycle over the session store: the grant joins the code's
+ * Core's own lifecycle over the session store, the session opened in it
+ * before each exchange as a login opens it: the grant joins the code's
  * session through it, and userinfo reads the session's liveness through it.
  */
+const sessionLifecycleStore = createInMemorySessionLifecycleStore();
 const sessionLifecycle = createSessionLifecycle({
-	store: createInMemorySessionLifecycleStore(),
+	store: sessionLifecycleStore,
 	userSessionStore,
 	refreshTokenFamilyRevocation,
 	federationTokenStore: {
 		removeBySid: vi.fn(),
 		delete: vi.fn(),
 	} as unknown as FederationTokenStore,
-	sessionRPRegistry: createInMemorySessionRPRegistry(),
-	sessionFamilyIndex: createInMemorySessionFamilyIndex(),
-	sessionFederationIndex: createInMemorySessionFederationIndex(),
 	retainMs: 0,
 	logger: { warn: () => undefined, error: () => undefined },
 });
@@ -127,6 +123,8 @@ async function exchangeCodeWithoutCookie() {
 				client_id: CLIENT_ID,
 				redirect_uri: RP_URI,
 				sid: SID,
+				// What /authorize records over this record, whose primary cannot be told.
+				authentication: { primary: undefined, mfaAt: undefined },
 				// A redeemable code always carries an S256 challenge.
 				code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 				code_challenge_method: "S256",
@@ -138,6 +136,7 @@ async function exchangeCodeWithoutCookie() {
 		} as unknown as CodeRepository,
 		userSessionStore,
 		sessionLifecycle,
+		sessionLifecycleStore,
 	} as unknown as Parameters<typeof createAuthorizationGrant>[0]);
 
 	// The session object a back-channel /token call sees: the code correlation
@@ -176,6 +175,9 @@ function buildUserinfoApp() {
 
 describe("authorization_code → userinfo over a back channel", () => {
 	it("serves claims for an access token minted without a token-request cookie", async () => {
+		expect(
+			await sessionLifecycle.open(SID, { sub: SUB, expiresAt: userSession.expiresAt }),
+		).toEqual({ outcome: "opened" });
 		const { result } = await exchangeCodeWithoutCookie();
 
 		expect(result.status).toBe(200);

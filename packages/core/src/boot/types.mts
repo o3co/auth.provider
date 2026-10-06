@@ -739,7 +739,8 @@ export interface AppHandle {
 	readonly cleanupAllowanceMs: number | undefined;
 
 	/**
-	 * Read-only typed view of the materialised component map, Object.frozen.
+	 * Read-only typed view of the materialised component map, Object.frozen,
+	 * with no prototype: a key is a component, never an inherited member.
 	 * Typed as Partial because keys are only present when a module produced them
 	 * (or they were provided via bootstrapComponents / overrideComponents).
 	 */
@@ -1294,10 +1295,9 @@ export interface GrantPolicyWithoutIssuerDetails {
 }
 
 /**
- * When `core.federations.<name>.enabled` is true, all six federation slots
- * must be wired: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
- * sessionFederationIndex, federationTokenStore and
- * refreshTokenFamilyRevocation (matching the route-level gating in
+ * When `core.federations.<name>.enabled` is true, all four federation slots
+ * must be wired: userSessionStore, sessionLifecycle, federationTokenStore
+ * and refreshTokenFamilyRevocation (matching the route-level gating in
  * `packages/oauth/src/routes.mts`).
  */
 export interface FederationStoresIncompleteDetails {

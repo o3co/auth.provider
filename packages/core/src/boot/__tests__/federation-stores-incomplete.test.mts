@@ -18,10 +18,11 @@
  * Integration tests for the federation-stores-incomplete boot validator.
  *
  * When `core.federations.<name>.enabled === true` for any federation, all
- * six session/federation/refresh-family slots MUST be wired in the planned
- * component set: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
- * sessionFederationIndex, federationTokenStore and
- * refreshTokenFamilyRevocation. Without one of the first five, federation
+ * four session/federation/refresh-family slots MUST be wired in the planned
+ * component set: userSessionStore, sessionLifecycle, federationTokenStore and
+ * refreshTokenFamilyRevocation. The per-session stores (sessionRPRegistry,
+ * sessionFamilyIndex, sessionFederationIndex) are not among them. Without one
+ * of the first three, federation
  * routes answer 503 at runtime with an opaque error; without
  * refreshTokenFamilyRevocation they never mount (see the logoutSupported /
  * federationTokenSupported gates in packages/oauth/src/routes.mts). The
@@ -64,14 +65,12 @@ function makeBootWithNoFederations() {
 /** The module that handles the enabled federation: it registers its type, `google`. */
 const googleFederationModule = federationTypeForTests("google");
 
-/** A module that provides all 6 required session/federation/refresh-family stores. */
+/** A module that provides all 4 required session/federation/refresh-family stores. */
 const allStoresModule = defineModule({
 	name: "test:all-federation-stores",
 	provides: {
 		userSessionStore: () => ({ kind: "stub" }),
-		sessionRPRegistry: () => ({ kind: "stub" }),
-		sessionFamilyIndex: () => ({ kind: "stub" }),
-		sessionFederationIndex: () => ({ kind: "stub" }),
+		sessionLifecycle: () => ({ kind: "stub" }),
 		federationTokenStore: () => ({ kind: "stub" }),
 		refreshTokenFamilyRevocation: () => ({ kind: "stub" }),
 	} as never,
@@ -95,14 +94,12 @@ describe("checkFederationStoresWiring", () => {
 			details: {
 				reason: "federation-stores-incomplete",
 				federationName: "google",
-				missing: expect.arrayContaining([
+				missing: [
 					"userSessionStore",
-					"sessionRPRegistry",
-					"sessionFamilyIndex",
-					"sessionFederationIndex",
+					"sessionLifecycle",
 					"federationTokenStore",
 					"refreshTokenFamilyRevocation",
-				]),
+				],
 			},
 		});
 	});
@@ -116,7 +113,7 @@ describe("checkFederationStoresWiring", () => {
 		).resolves.toBeDefined();
 	});
 
-	it("does not throw when federation is enabled and all 6 stores are wired", async () => {
+	it("does not throw when federation is enabled and all 4 stores are wired", async () => {
 		await expect(
 			createApp({
 				modules: [allStoresModule, googleFederationModule],
@@ -129,13 +126,11 @@ describe("checkFederationStoresWiring", () => {
 	// well as module `provides`, so a composition root that wires stores
 	// through bootstrap/override is not falsely rejected.
 
-	it("does not throw when all 6 stores are supplied via bootstrapComponents", async () => {
+	it("does not throw when all 4 stores are supplied via bootstrapComponents", async () => {
 		const bootstrapWithStores = {
 			...(makeBootWithFederationEnabled() as Record<string, unknown>),
 			userSessionStore: { kind: "stub" },
-			sessionRPRegistry: { kind: "stub" },
-			sessionFamilyIndex: { kind: "stub" },
-			sessionFederationIndex: { kind: "stub" },
+			sessionLifecycle: { kind: "stub" },
 			federationTokenStore: { kind: "stub" },
 			refreshTokenFamilyRevocation: { kind: "stub" },
 		} as never;
@@ -154,9 +149,7 @@ describe("checkFederationStoresWiring", () => {
 				bootstrapComponents: makeBootWithFederationEnabled(),
 				overrideComponents: {
 					userSessionStore: { kind: "stub" },
-					sessionRPRegistry: { kind: "stub" },
-					sessionFamilyIndex: { kind: "stub" },
-					sessionFederationIndex: { kind: "stub" },
+					sessionLifecycle: { kind: "stub" },
 					federationTokenStore: { kind: "stub" },
 					refreshTokenFamilyRevocation: { kind: "stub" },
 				} as never,
@@ -167,15 +160,13 @@ describe("checkFederationStoresWiring", () => {
 
 const STORE_KEYS = [
 	"userSessionStore",
-	"sessionRPRegistry",
-	"sessionFamilyIndex",
-	"sessionFederationIndex",
+	"sessionLifecycle",
 	"federationTokenStore",
 	"refreshTokenFamilyRevocation",
 ] as const;
 
 /**
- * A module providing the six stores, no module reading them: each factory a
+ * A module providing the four stores, no module reading them: each factory a
  * spy answering a stub, or what `answers` gives for its key.
  */
 function storesModule(answers: Partial<Record<(typeof STORE_KEYS)[number], () => unknown>> = {}) {
@@ -189,7 +180,7 @@ function storesModule(answers: Partial<Record<(typeof STORE_KEYS)[number], () =>
 }
 
 describe("an enabled federation's stores are built at boot", () => {
-	it("builds each of the six once, though no module reads them", async () => {
+	it("builds each of the four once, though no module reads them", async () => {
 		const { factories, module } = storesModule();
 
 		await expect(
@@ -203,7 +194,7 @@ describe("an enabled federation's stores are built at boot", () => {
 	});
 
 	it("refuses one whose provider yields nothing", async () => {
-		const { factories, module } = storesModule({ sessionFederationIndex: () => undefined });
+		const { factories, module } = storesModule({ sessionLifecycle: () => undefined });
 
 		await expect(
 			createApp({
@@ -214,10 +205,10 @@ describe("an enabled federation's stores are built at boot", () => {
 			details: {
 				reason: "federation-stores-incomplete",
 				federationName: "google",
-				missing: ["sessionFederationIndex"],
+				missing: ["sessionLifecycle"],
 			},
 		});
-		expect(factories.sessionFederationIndex).toHaveBeenCalledTimes(1);
+		expect(factories.sessionLifecycle).toHaveBeenCalledTimes(1);
 	});
 
 	it("fails boot when a store's provider throws", async () => {
@@ -279,11 +270,11 @@ describe("an enabled federation's stores are built at boot", () => {
 			createApp({
 				modules: [module, googleFederationModule],
 				bootstrapComponents: makeBootWithFederationEnabled(),
-				overrideComponents: { sessionFederationIndex: { kind: "host" } } as never,
+				overrideComponents: { sessionLifecycle: { kind: "host" } } as never,
 			}),
 		).resolves.toBeDefined();
 
-		expect(factories.sessionFederationIndex).not.toHaveBeenCalled();
+		expect(factories.sessionLifecycle).not.toHaveBeenCalled();
 		expect(factories.userSessionStore).toHaveBeenCalledTimes(1);
 	});
 });

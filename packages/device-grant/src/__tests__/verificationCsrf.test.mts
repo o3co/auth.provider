@@ -28,10 +28,7 @@
  */
 
 import type { ClientRepository, Logger, UserSessionStore } from "@o3co/auth-provider-core";
-import {
-	createInMemorySessionLifecycleStore,
-	createMemoryDeviceCodeStore,
-} from "@o3co/auth-provider-core";
+import { createMemoryDeviceCodeStore } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import {
 	createCsrfProtectionFromConfig,
@@ -43,7 +40,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deviceAuthorizationGrantModule, deviceGrantConfigSchema } from "#/module.mjs";
-import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
+import { liveCookieSession, liveSessionLifecycleStore, liveSessionStore } from "./liveSessions.mjs";
 
 const CLIENT_ID = "tv-app";
 const USER_CODE = "BCDFGHJK";
@@ -114,7 +111,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 		clientRepository,
 		deviceCodeStore: store,
 		userSessionStore: sessionsAuthenticatedBeforeNow(),
-		sessionLifecycleStore: createInMemorySessionLifecycleStore(),
+		sessionLifecycleStore: liveSessionLifecycleStore(),
 		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 		deploymentMode: "single",
 		logger,

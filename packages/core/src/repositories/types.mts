@@ -295,6 +295,27 @@ export interface CodeData {
 	 * the code's tokens carry. A step-up recorded later does not reach them.
 	 */
 	readonly amr: readonly string[] | undefined;
+	/**
+	 * How the session had authenticated when `/authorize` admitted it; with
+	 * `amr`, what the exchange judges the code on, since a step-up recorded
+	 * on the session later moves the session and not the code. `undefined`
+	 * when `/authorize` admitted no session record (no user-session store).
+	 * A code whose session the exchange reads, and which carries none — one
+	 * an earlier release issued, or one a repository dropped it from — is
+	 * refused.
+	 */
+	readonly authentication: CodeAuthentication | undefined;
+}
+
+/**
+ * How the session a code names had authenticated when `/authorize` admitted
+ * it: the primary authentication (`"pwd"`, `"fed"`; `undefined` when the
+ * session's could not be told) and when a second factor was last verified
+ * in it.
+ */
+export interface CodeAuthentication {
+	readonly primary: string | undefined;
+	readonly mfaAt: Date | undefined;
 }
 
 export interface Code extends CodeData {

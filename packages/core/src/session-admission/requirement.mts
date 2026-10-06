@@ -30,6 +30,7 @@ import type { AuditSink } from "../audit/types.mjs";
 import { isWellFormedErrorCode } from "../errors/envelope.mjs";
 import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import type { CodeAuthentication, CodeData } from "../repositories/types.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
 import type { SessionLifecycleStore } from "../user-sessions/lifecycle/types.mjs";
 import type {
@@ -142,8 +143,10 @@ export interface AdmissionDeps {
 	readonly subjectRevocation: SubjectRevocation | undefined;
 	/**
 	 * The consumer's `sessionLifecycleStore` slot, read after a live record:
-	 * its record closing or closed is `not_live` (`closing`). Absent, or no
-	 * record for the sid, the session is read as it was without one.
+	 * its record closing or closed, or no record for the sid (an absent record
+	 * reads as closed), is `not_live` (`closing`). Required where
+	 * `userSessionStore` is handed: without it a live record is `unavailable`
+	 * (`session_lifecycle`).
 	 */
 	readonly sessionLifecycleStore?: SessionLifecycleStore | undefined;
 	/** The synthetic key `sessionRequirementResolver`; only the boot planner and `resolverForTests` build one. */
@@ -854,6 +857,18 @@ export type Admission =
 			readonly view: SessionView | null;
 			readonly acr: string | undefined;
 			/**
+			 * What a code minted on this admission records of how its session had
+			 * authenticated — `CodeData`'s `amr` and `authentication` — from the
+			 * reading the requirements judged: a frozen copy. Over a record, what
+			 * it vouches for and its primary with `mfaAt`, the primary `undefined`
+			 * when it cannot be told; over a token or a code, what each carries;
+			 * without a record for a cookie or a code, nothing.
+			 */
+			readonly codeFields: {
+				readonly amr: CodeData["amr"];
+				readonly authentication: CodeAuthentication | undefined;
+			};
+			/**
 			 * The record's renewal nonce as admission read it, absent when the record
 			 * holds none or a value that is not a nonce: what a consumer writing the
 			 * record next expects of it
@@ -868,7 +883,8 @@ export type Admission =
 			readonly outcome: "not_live";
 			/**
 			 * `renewed`: the record is bound to another cookie session, one a renewal moved it to.
-			 * `closing`: the session's lifecycle record is closing or closed.
+			 * `closing`: the session's lifecycle record is closing or closed, or
+			 * absent (an absent record reads as closed).
 			 */
 			readonly reason:
 				| "no_subject"
