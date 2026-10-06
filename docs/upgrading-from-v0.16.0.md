@@ -1254,7 +1254,11 @@ modules fills them.
   and `liveness` reject where they answered `{ outcome: "unavailable" }`,
   and the warn `session_lifecycle_unavailable` is no longer logged for them;
   each consumer logs its own event once, at error, with the error's
-  projection. A caller of your own catches the rejection as an outage. The
+  projection. A caller of your own catches the rejection as an outage.
+  `{ outcome: "unavailable" }` is removed from `SessionOpenOutcome`,
+  `SessionJoinOutcome`, `SessionCloseOutcome`, `SessionFederations` and
+  `SessionLiveness`: a comparison against it no longer compiles, and a
+  lifecycle of your own rejects instead of answering it. The
   close work's and the sweep's own lines (`session_close_item_failed`,
   `session_lifecycle_unavailable` for a close-work completion or re-read,
   or a resumed session, `session_lifecycle_sweep_*`) are unchanged.
