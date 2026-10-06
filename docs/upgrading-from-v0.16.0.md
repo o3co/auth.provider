@@ -1292,6 +1292,12 @@ modules fills them.
     refusal. The grant's admission reads the token's session lifecycle
     record, so a session closing or closed refreshes nothing. A composition
     whose session-store module fills both is unaffected.
+  - The `authorization_code` grant (`oauthAuthorizationGrantsModule`) and
+    `oauthEndpointsModule` (`/authorize` and the consent step) are refused
+    the same way when `userSessionStore` and `sessionLifecycle` are wired
+    without a `sessionLifecycleStore`: `contribute-factory-failed`, the
+    message naming both slots, and `createAuthorizationGrant` and
+    `createOAuthRouter` throw the same refusal.
   - Introspection, `/oauth/userinfo` and `POST /oauth/federation/:name/token`
     read a session through the lifecycle alone. Their outage lines no longer
     carry `store: "user_session"`, nor (the federation-token route)

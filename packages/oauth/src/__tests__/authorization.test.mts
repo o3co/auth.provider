@@ -24,7 +24,10 @@ import {
 	type RefreshTokenFamilyRotation,
 	type SessionAuthentication,
 	type SessionJoinOutcome,
+	type SessionLifecycle,
+	type SessionLifecycleStore,
 	type UserSession,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
@@ -115,6 +118,26 @@ function makeDeps(
 		clientRepository: clientRepository ?? mockClientRepository,
 	};
 }
+
+describe("createAuthorizationGrant — where a user-session store is wired, core's session lifecycle is required", () => {
+	const withSessions = (sessionLifecycleStore?: SessionLifecycleStore) =>
+		({
+			...makeDeps(vi.fn()),
+			userSessionStore: {} as UserSessionStore,
+			sessionLifecycle: {} as SessionLifecycle,
+			...(sessionLifecycleStore === undefined ? {} : { sessionLifecycleStore }),
+		}) as Parameters<typeof createAuthorizationGrant>[0];
+
+	it("refuses to build with userSessionStore and sessionLifecycle wired and no sessionLifecycleStore, naming the slot", () => {
+		expect(() => createAuthorizationGrant(withSessions())).toThrow(
+			/^The authorization_code grant: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*sessionLifecycleModule\.$/,
+		);
+	});
+
+	it("builds with all three wired", () => {
+		expect(() => createAuthorizationGrant(withSessions({} as SessionLifecycleStore))).not.toThrow();
+	});
+});
 
 describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 	// A slot filled by hand never met boot's check. Read when the grant is

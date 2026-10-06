@@ -157,7 +157,7 @@ export const oauthEndpointsModule: Module = defineModule<
 		"accessTokenDenylist", // RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
 		"subjectRevocation", // per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
 		"userSessionStore", // the user session store; with it the router requires sessionLifecycle
-		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step
+		"sessionLifecycleStore", // the session lifecycle's record, which admission reads at /authorize and the consent step; required with a userSessionStore (the router refuses one without it)
 		"federationTokenStore", // federation-token routes
 		"sessionLifecycle", // core's session lifecycle, required with a userSessionStore (the router refuses one without it): /oauth/logout closes the session through it, and introspection, userinfo and the federation-token route ask it whether a session is live
 		"consentStore", // the consent step for clients that are not first-party; such clients are refused without it

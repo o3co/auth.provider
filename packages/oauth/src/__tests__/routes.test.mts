@@ -28,6 +28,7 @@ import {
 	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SessionLifecycle,
+	type SessionLifecycleStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -247,6 +248,7 @@ describe("createOAuthRouter", () => {
 			keyStore: createSymmetricKeyStore("test-secret"),
 			userSessionStore: {} as UserSessionStore,
 			sessionLifecycle: {} as SessionLifecycle,
+			sessionLifecycleStore: {} as SessionLifecycleStore,
 			federationTokenStore: {} as FederationTokenStore,
 			refreshTokenFamilyRevocation: {} as RefreshTokenFamilyRevocation,
 		});
@@ -269,6 +271,25 @@ describe("createOAuthRouter", () => {
 				userSessionStore: {} as UserSessionStore,
 			}),
 		).rejects.toThrow(/userSessionStore is wired, but sessionLifecycle is not/);
+	});
+
+	it("refuses a userSessionStore and core's session lifecycle wired without its store, naming the slot", async () => {
+		const { expressLike } = createTrackingExpress();
+
+		await expect(
+			createOAuthRouter(expressLike, {
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+				registry: new GrantRegistry(),
+				...routerInputsOf(fullConfig),
+				clientRepository: {} as ClientRepository,
+				codeRepository: {} as CodeRepository,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				userSessionStore: {} as UserSessionStore,
+				sessionLifecycle: {} as SessionLifecycle,
+			}),
+		).rejects.toThrow(
+			/^createOAuthRouter: userSessionStore is wired, but sessionLifecycleStore is not\.[\s\S]*sessionLifecycleModule\.$/,
+		);
 	});
 
 	// Integration coverage: exercise the full /oauth/token pipeline

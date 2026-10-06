@@ -61,7 +61,11 @@ import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
-import { livenessOver, sessionLifecycleModules } from "./_helpers/sessionLifecycle.mjs";
+import {
+	lifecycleStoreOver,
+	livenessOver,
+	sessionLifecycleModules,
+} from "./_helpers/sessionLifecycle.mjs";
 
 /**
  * A federation that satisfies the `FederationProvider` contract, with whatever
@@ -863,6 +867,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			name: "test:session-lifecycle",
 			provides: {
 				sessionLifecycle: () => livenessOver(sessionStore, (sid) => joinedFederations(sid)),
+				sessionLifecycleStore: () => lifecycleStoreOver(sessionStore),
 			},
 		});
 		// federationProviders is SYNTHETIC: boot builds it from the enabled
@@ -981,6 +986,7 @@ describe("oauthEndpointsModule — federation logout via typed deps", () => {
 			name: "test:session-lifecycle-noissuer",
 			provides: {
 				sessionLifecycle: () => livenessOver(sessionStore, (sid) => joinedFederations(sid)),
+				sessionLifecycleStore: () => lifecycleStoreOver(sessionStore),
 			},
 		});
 

@@ -41,7 +41,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
-import { livenessOver } from "./_helpers/sessionLifecycle.mjs";
+import { lifecycleStoreOver, livenessOver } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -108,6 +108,7 @@ async function buildApp(opts: { userSessionStore?: UserSessionStore; auditSink?:
 					userSessionStore: opts.userSessionStore,
 					// A lifecycle the host fills, whose read rejects when the store throws.
 					sessionLifecycle: livenessOver(opts.userSessionStore),
+					sessionLifecycleStore: lifecycleStoreOver(opts.userSessionStore),
 				}
 			: {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),

@@ -208,7 +208,7 @@ const OPTIONAL = [
 	"sessionLifecycle",
 	// The session lifecycle's record, which admission reads for the
 	// authorization_code and refresh_token grants: a closing session is not live.
-	// The refresh_token grant requires it with a userSessionStore, and refuses a
+	// Both grants require it beside a userSessionStore, and refuse a
 	// composition without it.
 	"sessionLifecycleStore",
 	"logger", // structured logger; security audit logs

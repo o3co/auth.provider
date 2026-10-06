@@ -159,16 +159,19 @@ export function livenessOver(
  * Core's session lifecycle over the stores a test composition hands it, with
  * an in-memory store for its own record, and no relying party to tell: for a
  * router built by hand whose logout closes. A session it closes is one it
- * opened: a sid with no record reads as closed.
+ * opened: a sid with no record reads as closed. `store` is the record's store,
+ * for a router that hands it to admission too.
  */
 export function lifecycleOver(stores: {
 	readonly userSessionStore: UserSessionStore;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	readonly federationTokenStore: FederationTokenStore;
+	readonly store?: SessionLifecycleStore;
 }): SessionLifecycle {
+	const { store = createInMemorySessionLifecycleStore(), ...rest } = stores;
 	return createSessionLifecycle({
-		...stores,
-		store: createInMemorySessionLifecycleStore(),
+		...rest,
+		store,
 		retainMs: 3_600_000,
 		logger: { warn: () => undefined, error: () => undefined },
 	});

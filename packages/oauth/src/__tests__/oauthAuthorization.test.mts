@@ -29,6 +29,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 	type RefreshTokenFamilyRotation,
+	type SessionLifecycle,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -523,6 +524,31 @@ describe("oauthAuthorizationGrantsModule — the authorization_code grant with a
 		const handle = await boot([memorySessionStoresModule, ...sessionLifecycleModules()]);
 		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
 		await handle.dispose();
+	});
+
+	it("refuses to boot with userSessionStore and sessionLifecycle wired and no sessionLifecycleStore, naming both slots", async () => {
+		const withoutLifecycleStore = defineModule({
+			name: "test:user-session-store-and-lifecycle",
+			provides: {
+				userSessionStore: () => createInMemoryUserSessionStore(),
+				sessionLifecycle: () => ({}) as SessionLifecycle,
+			},
+		});
+		const refusal = await boot([withoutLifecycleStore]).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "authorization_code" },
+		});
+		const message = String(refusal?.cause?.message);
+		expect(message).toMatch(/userSessionStore is wired, but sessionLifecycleStore is not/);
+		expect(message).toMatch(/memorySessionStoresModule or redisSessionStoresModule/);
 	});
 
 	it("boots sessionless, with neither wired", async () => {

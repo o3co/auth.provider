@@ -191,6 +191,7 @@ describe("/oauth/introspect through the session lifecycle", () => {
 			keyStore,
 			userSessionStore: opts.userSessionStore,
 			sessionLifecycle: opts.lifecycle,
+			sessionLifecycleStore: createInMemorySessionLifecycleStore(),
 			...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 			...(opts.logger ? { logger: opts.logger } : {}),
 		});
