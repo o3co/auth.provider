@@ -240,7 +240,10 @@ export function repositoriesModuleFor(selection: RepositorySelection): Module {
 		// Forwarded into the repository factories so client/user adapters can
 		// register disposal callbacks (file-watch closers, say). Without it, a
 		// builder's `ctx.lifecycle?.register` is a no-op and those resources leak.
-		optional: ["lifecycleRegistrar"] as const,
+		// The logger is the composition's, so what a builder logs (the yaml user
+		// repository's `user_repository_in_memory`) goes where the template's
+		// logging goes, at its level, rather than to the console.
+		optional: ["lifecycleRegistrar", "logger"] as const,
 		provides: {
 			clientRepository: async ({ section, lifecycleRegistrar }) => {
 				const { clientFactory } = createRepositoryFactories({ lifecycle: lifecycleRegistrar });
@@ -250,8 +253,11 @@ export function repositoriesModuleFor(selection: RepositorySelection): Module {
 					path: path.resolve(process.cwd(), file.path),
 				});
 			},
-			userRepository: async ({ section, lifecycleRegistrar }) => {
-				const { userFactory } = createRepositoryFactories({ lifecycle: lifecycleRegistrar });
+			userRepository: async ({ section, lifecycleRegistrar, logger }) => {
+				const { userFactory } = createRepositoryFactories({
+					lifecycle: lifecycleRegistrar,
+					logger,
+				});
 				registerBuiltinAdapters({ userFactory });
 				return userFactory.create(
 					flattenAdapterConfig({

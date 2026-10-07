@@ -16,8 +16,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdapterFactoryError } from "#/adapters/AdapterFactory.mjs";
+import type { Logger } from "#/logging/Logger.mjs";
 import { createRepositoryFactories } from "#/repositories/RepositoryFactory.mjs";
 
 describe("createRepositoryFactories", () => {
@@ -130,6 +131,160 @@ describe("createRepositoryFactories", () => {
 
 			expect(user).not.toBeNull();
 			expect(user?.username).toBe("alice");
+		});
+
+		it("warns user_repository_in_memory once for each repository it builds, under either name, wherever it runs", async () => {
+			const yamlPath = writeYaml(
+				"users-warned.yaml",
+				`alice:
+  password: "plainpass"
+`,
+			);
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			};
+			const { userFactory } = createRepositoryFactories({ logger: logger as unknown as Logger });
+
+			await userFactory.create({ type: "yaml", path: yamlPath });
+			await userFactory.create({ type: "yaml", path: yamlPath });
+			await userFactory.create({ type: "static", path: yamlPath });
+
+			expect(logger.warn.mock.calls).toEqual([
+				[{ store: "userRepository", adapter: "yaml" }, "user_repository_in_memory"],
+				[{ store: "userRepository", adapter: "yaml" }, "user_repository_in_memory"],
+				[{ store: "userRepository", adapter: "static" }, "user_repository_in_memory"],
+			]);
+			expect(logger.error).not.toHaveBeenCalled();
+		});
+
+		it("refuses a config without a path, under either name, before it warns", async () => {
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			};
+			const { userFactory } = createRepositoryFactories({ logger: logger as unknown as Logger });
+
+			for (const type of ["yaml", "static"]) {
+				await expect(userFactory.create({ type })).rejects.toThrow(
+					'YAML user repository requires "path" in config',
+				);
+			}
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("refuses a users file entry the schema refuses, naming the file, the user and the field and never the value", async () => {
+			const body = "39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
+			const yamlPath = writeYaml(
+				"users-invalid.yaml",
+				`alice:
+  password: "plainpass"
+bob:
+  password: "$2b$16$${body}"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+			const refusal = await userFactory.create({ type: "yaml", path: yamlPath }).then(
+				() => undefined,
+				(err: unknown) => (err as Error).message,
+			);
+
+			expect(refusal).toBe(
+				`Invalid entry "bob" in ${yamlPath}: password: the bcrypt cost must be from 04 to 15`,
+			);
+		});
+
+		it("refuses a users file with an empty username, under either name", async () => {
+			const yamlPath = writeYaml(
+				"users-empty-name.yaml",
+				`"":
+  password: "plainpass"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+
+			for (const type of ["yaml", "static"]) {
+				await expect(userFactory.create({ type, path: yamlPath }), type).rejects.toThrow(
+					/username/,
+				);
+			}
+		});
+
+		it("refuses a users file whose bcrypt entries use more than one cost, under either name", async () => {
+			const body = "39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
+			const yamlPath = writeYaml(
+				"users-two-costs.yaml",
+				`alice:
+  password: "$2b$10$${body}"
+bob:
+  password: "$2b$12$${body}"
+carol:
+  password: "plainpass"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+
+			for (const type of ["yaml", "static"]) {
+				const refusal = await userFactory.create({ type, path: yamlPath }).then(
+					() => undefined,
+					(err: unknown) => (err as Error).message,
+				);
+				expect(refusal, type).toMatch(
+					/password: bcrypt entries use costs 10 and 12; every bcrypt entry must use one cost/,
+				);
+				expect(refusal, type).not.toContain(body);
+			}
+		});
+
+		it("builds a users file whose bcrypt entries share one cost", async () => {
+			const body = "39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
+			const yamlPath = writeYaml(
+				"users-one-cost.yaml",
+				`alice:
+  password: "$2b$12$${body}"
+bob:
+  password: "$2y$12$${body}"
+carol:
+  password: "plainpass"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+			const repo = await userFactory.create({ type: "yaml", path: yamlPath });
+
+			expect((await repo.authenticate("carol", "plainpass"))?.username).toBe("carol");
+		});
+
+		it("refuses a users file in which two users have the same id, naming both users", async () => {
+			const yamlPath = writeYaml(
+				"users-same-id.yaml",
+				`alice:
+  password: "a"
+  id: "u1"
+bob:
+  password: "b"
+  id: "u1"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+
+			await expect(userFactory.create({ type: "yaml", path: yamlPath })).rejects.toThrow(
+				/"alice" and "bob"/,
+			);
 		});
 
 		it("throws AdapterFactoryError for unregistered type", async () => {

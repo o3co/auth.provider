@@ -15,11 +15,13 @@
  */
 
 import {
+	type AdapterBuilder,
 	type AdapterFactory,
 	type BuilderContext,
 	createAdapterFactory,
 } from "../adapters/AdapterFactory.mjs";
 import { wholeNumberInRangeFromEnv } from "../config/application.schema.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { ClientRepository } from "./ClientRepository.mjs";
 import type { CodeRepository } from "./CodeRepository.mjs";
 import { ClientEntrySchema, InMemoryClientRepository } from "./InMemoryClientRepository.mjs";
@@ -59,14 +61,28 @@ export const createRepositoryFactories = (
 	clientFactory.register("static", yamlClientBuilder); // alias
 
 	const userFactory = createAdapterFactory<UserRepository>("UserRepository", ctx ?? {});
-	const yamlUserBuilder = (config: Record<string, unknown>): UserRepository => {
-		if (typeof config.path !== "string") {
-			throw new Error('YAML user repository requires "path" in config');
-		}
-		return new InMemoryUserRepository(loadYamlMap(config.path, UserEntrySchema));
-	};
-	userFactory.register("yaml", yamlUserBuilder);
-	userFactory.register("static", yamlUserBuilder); // alias
+	/**
+	 * The users file is meant for development and tests: a deployment's users
+	 * are its Store's. Each repository built says so once, object-first, at
+	 * warn, as `user_repository_in_memory` with the name it was built under.
+	 * It warns wherever it runs, whatever the environment, as the in-memory
+	 * MFA factor store does.
+	 */
+	const yamlUserBuilder =
+		(adapter: "yaml" | "static"): AdapterBuilder<UserRepository> =>
+		(config, builderCtx) => {
+			if (typeof config.path !== "string") {
+				throw new Error('YAML user repository requires "path" in config');
+			}
+			const repository = new InMemoryUserRepository(loadYamlMap(config.path, UserEntrySchema));
+			(builderCtx.logger ?? consoleLogger).warn(
+				{ store: "userRepository", adapter },
+				"user_repository_in_memory",
+			);
+			return repository;
+		};
+	userFactory.register("yaml", yamlUserBuilder("yaml"));
+	userFactory.register("static", yamlUserBuilder("static")); // alias
 
 	const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository", ctx ?? {});
 	codeFactory.register("memory", (config, builderCtx) => {

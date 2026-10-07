@@ -818,6 +818,60 @@ The boot refusals you can meet, with their messages, are in
   federated login again. A login page that links to the federation start
   should forward the `prompt` and `max_age` it finds in `redirect_to`.
 
+### The users file (the `yaml` / `static` user repository)
+
+Core's YAML user repository, the development and test adapter, now refuses at
+boot an entry it could never sign in as written (#1560). An entry that breaks
+the entry rules is refused as
+`Invalid entry "<username>" in <file>: <field>: <reason>`, or, for a map
+handed to `InMemoryUserRepository` directly,
+`InMemoryUserRepository: invalid entry "<username>": <field>: <reason>`. The
+refusals that look across entries (an empty username, a shared id, more than
+one cost) come from `InMemoryUserRepository` and name the field, with the
+users that share an id or, for costs, only the costs. None quotes a password
+or a hash. Start against a copy of the file to list what is left.
+
+- **BREAKING: a password starting with `$2` is read as a bcrypt hash, and one
+  that is not well formed refuses the boot.** A well-formed hash is `$2a$`,
+  `$2b$` or `$2y$`, a two-digit cost, a `$`, then 53 characters of bcrypt's
+  alphabet (`./A-Za-z0-9`) — what `bcrypt.hash`, `htpasswd -B` or PHP's
+  `password_hash` write. A truncated or edited hash, or a single-digit cost,
+  used to boot and then fail every login for that user. Generate the hash
+  again. A plain-text password starting with `$2` is refused too: change it.
+- **BREAKING: `$2$` and `$2x$` hashes refuse the boot.** They used to be read
+  as plain-text passwords. Hash the password again with `bcrypt` (`$2b$`).
+- **BREAKING: a bcrypt cost outside 04 to 15 refuses the boot.** Below 04 and
+  above 31 bcrypt computes nothing, so every login for that user failed.
+  Above 15 a compare takes seconds (cost 15 is about 2 s, cost 10 about 60 ms)
+  and holds a thread of Node's libuv pool for that long. Hash the password
+  again at a cost from 04 to 15; 10 to 12 is usual.
+- **BREAKING: an empty `id` refuses the boot.** The user signed in with the
+  right password and was then refused with a `500`. Set a non-empty `id`, or
+  remove the key to make the username the id. An entry keyed by an empty
+  username (`"":`) is refused the same way, since its username would be its
+  id: give it a username.
+- **BREAKING: two users with the same id refuse the boot**, naming both
+  usernames. The id is the entry's `id`, or its username when it sets none,
+  so `alice: { id: bob }` beside a `bob` entry without an `id` is refused
+  too. Give each user its own id.
+- **BREAKING: bcrypt entries at more than one cost refuse the boot**, naming
+  the field and the costs found (`password: bcrypt entries use costs 10 and
+  12; every bcrypt entry must use one cost`). Hash the passwords again so
+  every bcrypt entry uses one cost. Plain-text entries are unaffected.
+- **BREAKING: a `username` key inside an entry refuses the boot.** The entry's
+  key is its username; the key inside used to replace it. Remove the key, or
+  rename the entry.
+- **`$2y$` hashes now sign in.** `$2y$` is the same algorithm as `$2b$` under
+  PHP's name, and is compared as `$2b$`. Such a user used to fail every login,
+  so a users file migrated from `htpasswd -B` or PHP now works as it is.
+- An unknown username, and a user with a plain-text password, pay a bcrypt
+  compare at the cost the file's hashes share (cost 10 when it holds none),
+  where it was cost 10 whatever the file held.
+- Each start that builds this repository logs `user_repository_in_memory`
+  at warn (`{ store: "userRepository", adapter: "yaml" }`, or `"static"`),
+  whatever the environment: the users file is meant for development and
+  tests.
+
 ### Redirect and logout URIs
 
 Check every `allowedRedirectUris`, `postLogoutRedirectUris`,

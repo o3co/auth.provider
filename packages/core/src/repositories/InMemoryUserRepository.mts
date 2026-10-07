@@ -27,20 +27,160 @@ import type {
 	UserRepository,
 } from "./UserRepository.mjs";
 
-const DUMMY_BCRYPT_PASSWORD_HASH = "$2b$10$39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
-const BCRYPT_HASH_RE = /^\$2[aby]\$/;
+/**
+ * The highest bcrypt cost an entry may hold. A compare at cost 15 takes about
+ * 32 times one at cost 10 (about 2 s against 60 ms on a current laptop core),
+ * and holds one thread of Node's libuv pool for that long: four threads
+ * unless `UV_THREADPOOL_SIZE` says otherwise, shared with file system, DNS
+ * lookup, crypto and zlib work. Above it, each login would hold a thread for
+ * several seconds.
+ */
+const MAX_BCRYPT_COST = 15;
+/** bcrypt's own least cost. */
+const MIN_BCRYPT_COST = 4;
 
+/** A value starting with this is read as a bcrypt hash, never as plain text. */
+const BCRYPT_MARK = "$2";
+/** The bcrypt forms held: `$2a$` and `$2b$`, and `$2y$`, the same algorithm under PHP's name. */
+const BCRYPT_FORM_RE = /^\$2[aby]\$/;
+/** A well-formed hash of a held form: a two-digit cost, then a 22-character salt and 31-character hash. */
+const BCRYPT_HASH_RE = /^\$2[aby]\$(\d{2})\$[./A-Za-z0-9]{53}$/;
+
+/**
+ * A hash of no known password, compared when there is no entry's hash to
+ * compare, so an unknown user and a plain-text one pay a bcrypt compare too.
+ * Its cost is replaced by the one {@link dummyHashFor} picks.
+ */
+const DUMMY_BCRYPT_PASSWORD_HASH = "$2b$10$39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
+
+/** A cost as a bcrypt hash writes it. */
+const twoDigits = (cost: number): string => String(cost).padStart(2, "0");
+
+/** Why `password` cannot be held, or `undefined`: plain text, or a well-formed hash at a cost held. */
+function passwordRefusalOf(password: string): string | undefined {
+	if (!password.startsWith(BCRYPT_MARK)) return undefined;
+	if (!BCRYPT_FORM_RE.test(password)) {
+		return 'a value starting with "$2" is read as a bcrypt hash, and only $2a$, $2b$ and $2y$ are supported';
+	}
+	const cost = bcryptCostOf(password);
+	if (cost === undefined) {
+		return "not a well-formed bcrypt hash: the prefix, a two-digit cost, a $, then 53 characters of bcrypt's alphabet (./A-Za-z0-9)";
+	}
+	if (cost < MIN_BCRYPT_COST || cost > MAX_BCRYPT_COST) {
+		return `the bcrypt cost must be from ${twoDigits(MIN_BCRYPT_COST)} to ${twoDigits(MAX_BCRYPT_COST)}`;
+	}
+	return undefined;
+}
+
+/** The cost of a well-formed bcrypt hash, or `undefined` for anything else. */
+function bcryptCostOf(password: string): number | undefined {
+	const cost = BCRYPT_HASH_RE.exec(password)?.[1];
+	return cost === undefined ? undefined : Number(cost);
+}
+
+/**
+ * The dummy at the entries' cost (every bcrypt entry has one, which
+ * {@link assertHoldable} holds them to; the highest, read here), or at cost
+ * 10 when none holds a hash. An unknown user's compare then takes as long as
+ * a known user's. Only the cost field changes: bcrypt pays the whole cost
+ * whatever the hash it compares against.
+ */
+function dummyHashFor(entries: Iterable<UserEntry>): string {
+	let highest: number | undefined;
+	for (const { password } of entries) {
+		const cost = bcryptCostOf(password);
+		if (cost !== undefined) highest = Math.max(highest ?? cost, cost);
+	}
+	if (highest === undefined) return DUMMY_BCRYPT_PASSWORD_HASH;
+	return `$2b$${twoDigits(highest)}$${DUMMY_BCRYPT_PASSWORD_HASH.slice(7)}`;
+}
+
+/** `hash` as the native compare takes it: `$2y$` is `$2b$` under another name. */
+const comparable = (hash: string): string =>
+	hash.startsWith("$2y$") ? `$2b$${hash.slice(4)}` : hash;
+
+/**
+ * One user's entry in a users file. Its key is its username, so the entry
+ * carries none. `password` is plain text, or a bcrypt hash (any value starting
+ * with `$2`): `$2a$`, `$2b$` or `$2y$`, well formed, at a cost from 04 to 15.
+ * `id`, when set, is not empty; without it the username is the id. No message
+ * quotes a value.
+ */
 export const UserEntrySchema = z
 	.object({
-		password: z.string().min(1),
-		id: z.string().optional(),
+		password: z
+			.string()
+			.min(1)
+			.superRefine((password, ctx) => {
+				const refusal = passwordRefusalOf(password);
+				if (refusal !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: refusal });
+			}),
+		id: z
+			.string()
+			.min(1, "must not be empty: set a non-empty id, or none to make the username the id")
+			.optional(),
 	})
-	.catchall(z.unknown());
+	.catchall(z.unknown())
+	.superRefine((entry, ctx) => {
+		if (Object.hasOwn(entry, "username")) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: "must not be set: an entry's key is its username",
+				path: ["username"],
+			});
+		}
+	});
 
 export type UserEntry = z.infer<typeof UserEntrySchema>;
 
+/**
+ * Refuse a user map that could not be served as written: an empty username
+ * (the entry's key, and its id where it sets none), an entry the schema
+ * refuses, two users with the same id (the `id`, or the username where none
+ * is set), or bcrypt entries at more than one cost. Each refusal names the
+ * users and the field, never a value; the costs one refusal names are the
+ * cost fields, never a hash.
+ */
+function assertHoldable(users: ReadonlyMap<string, UserEntry>): void {
+	const byId = new Map<string, string>();
+	const costs = new Set<number>();
+	for (const [username, entry] of users) {
+		if (username === "") {
+			throw new Error(
+				"InMemoryUserRepository: an entry's username (its key) is empty; a username must not be empty",
+			);
+		}
+		const parsed = UserEntrySchema.safeParse(entry);
+		if (!parsed.success) {
+			throw new Error(
+				`InMemoryUserRepository: invalid entry "${username}": ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`,
+			);
+		}
+		const id = entry.id ?? username;
+		const holder = byId.get(id);
+		if (holder !== undefined) {
+			throw new Error(
+				`InMemoryUserRepository: users "${holder}" and "${username}" have the same id; each user's id (its "id", or its username when it sets none) must be unique`,
+			);
+		}
+		byId.set(id, username);
+		const cost = bcryptCostOf(entry.password);
+		if (cost !== undefined) costs.add(cost);
+	}
+	// One cost for every bcrypt entry: the compare for an unknown or a
+	// plain-text user then runs at the cost every other compare runs at.
+	if (costs.size > 1) {
+		const named = [...costs].sort((a, b) => a - b).map(twoDigits);
+		throw new Error(
+			`InMemoryUserRepository: password: bcrypt entries use costs ${named.slice(0, -1).join(", ")} and ${named.at(-1)}; every bcrypt entry must use one cost`,
+		);
+	}
+}
+
 export class InMemoryUserRepository implements UserRepository {
 	private users: Map<string, UserEntry>;
+	/** What an unknown user's and a plain-text user's compare runs against ({@link dummyHashFor}). */
+	private readonly dummyHash: string;
 	/**
 	 * Identities linked at runtime, token → username. In memory only —
 	 * a restart forgets them. This repository is the development and test
@@ -49,32 +189,34 @@ export class InMemoryUserRepository implements UserRepository {
 	private readonly linkedTokens = new Map<string, string>();
 
 	constructor(users: Map<string, UserEntry>) {
+		assertHoldable(users);
 		this.users = users;
+		this.dummyHash = dummyHashFor(users.values());
 	}
 
 	private toUser(username: string, entry: UserEntry): User {
 		const { password: _, ...rest } = entry;
 		return {
+			...rest,
 			id: entry.id ?? username,
 			username,
-			...rest,
 		};
 	}
 
 	async authenticate(username: string, password: string): Promise<User | null> {
 		const entry = this.users.get(username);
 
-		const stored = entry?.password ?? DUMMY_BCRYPT_PASSWORD_HASH;
-		const isBcrypt = BCRYPT_HASH_RE.test(stored);
+		const stored = entry?.password ?? this.dummyHash;
+		const isBcrypt = stored.startsWith(BCRYPT_MARK);
 
 		let match: boolean;
 		if (isBcrypt) {
-			match = await bcrypt.compare(password, stored);
+			match = await bcrypt.compare(password, comparable(stored));
 		} else {
 			// Pay the bcrypt cost on the plain-text path too, so that timing
 			// converges across unknown-user / known-bcrypt / known-plain. The
 			// result is discarded — correctness comes from timingSafeEqual.
-			await bcrypt.compare(password, DUMMY_BCRYPT_PASSWORD_HASH);
+			await bcrypt.compare(password, this.dummyHash);
 			const a = Buffer.from(password);
 			const b = Buffer.from(stored);
 			match = a.length === b.length && crypto.timingSafeEqual(a, b);
