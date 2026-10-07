@@ -23,13 +23,16 @@
 
 import { describe, expect, it } from "vitest";
 import {
-	MAX_PENDING_LOOKUPS as OUTBOUND_MAX_PENDING_LOOKUPS,
+	lookupCeilingOf,
 	MAX_WAITING_LOOKUPS as OUTBOUND_MAX_WAITING_LOOKUPS,
 } from "#/net/outbound-fetch.mjs";
 import type { OutboundTransport } from "#/net/outbound-transport.mjs";
 import { createOutboundFetchForTesting, OutboundFetchError } from "#/testing/outboundFetch.mjs";
 
 const PUBLIC_V4 = "93.184.216.34";
+
+/** The places a testing fetch's own pool has: as many as the process's. */
+const OUTBOUND_MAX_PENDING_LOOKUPS = lookupCeilingOf(process.env.UV_THREADPOOL_SIZE);
 
 /** A resolver whose every lookup stays outstanding until the test releases (or fails) it. */
 const heldResolver = () => {
@@ -123,8 +126,19 @@ const reasonOf = async (promise: Promise<unknown>): Promise<string> => {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("outstanding host-name resolutions", () => {
-	it("is bounded at a fixed ceiling", () => {
-		expect(OUTBOUND_MAX_PENDING_LOOKUPS).toBe(16);
+	it("is bounded two below the threadpool size UV_THREADPOOL_SIZE states, and at least one", () => {
+		expect(lookupCeilingOf(undefined)).toBe(2);
+		expect(lookupCeilingOf("")).toBe(2);
+		expect(lookupCeilingOf("4")).toBe(2);
+		expect(lookupCeilingOf("16")).toBe(14);
+		expect(lookupCeilingOf(" 8 ")).toBe(6);
+		expect(lookupCeilingOf("3")).toBe(1);
+		expect(lookupCeilingOf("2")).toBe(1);
+		expect(lookupCeilingOf("1")).toBe(1);
+		expect(lookupCeilingOf("1024")).toBe(1022);
+		for (const unread of ["0", "1025", "-4", "4.5", "1e2", "four", "0x10"]) {
+			expect(lookupCeilingOf(unread)).toBe(2);
+		}
 	});
 
 	it("keeps a resolution the deadline gave up on counted, so the next call starts none and times out", async () => {

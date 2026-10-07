@@ -74,9 +74,13 @@ export type OutboundFetchOptions = OutboundFetchUse &
 		| { readonly policy: OutboundPolicy; readonly config?: undefined }
 	);
 
-/** The seams below the policy: name resolution and the exchange. */
+/**
+ * The seams below the policy: name resolution, the places it is run under
+ * (`lookups`, the process-wide pool for the public factory), and the exchange.
+ */
 export interface OutboundFetchSeams {
 	readonly lookup: (hostname: string) => Promise<readonly string[]>;
+	readonly lookups: LookupPermits;
 	readonly transport: OutboundTransport;
 }
 
@@ -84,26 +88,32 @@ export interface OutboundFetchSeams {
 export const systemLookup = async (hostname: string): Promise<readonly string[]> =>
 	(await dnsLookup(hostname, { all: true, order: "verbatim" })).map((entry) => entry.address);
 
-/**
- * How many host-name resolutions one built fetch may have outstanding. The
- * system resolver runs on the shared libuv threadpool and cannot be
- * cancelled: a lookup the deadline gave up on keeps running, so it keeps
- * counting until it really settles. A call that needs a lookup while this
- * many are outstanding waits for one to settle, within its own deadline, and
- * fails with `timeout` without starting one. Fixed, not configured: above the
- * concurrency the bundled callers run a fetch at, so calls whose lookups
- * settle in time do not wait, and a few times the threadpool's default size
- * (4), so lookups nobody waits for any more cannot pile onto it unbounded.
- */
-export const MAX_PENDING_LOOKUPS = 16;
+/** libuv's own threadpool size when `UV_THREADPOOL_SIZE` does not set one. */
+const DEFAULT_THREADPOOL_SIZE = 4;
 
 /**
- * How many calls one built fetch lets wait for a place among its
- * {@link MAX_PENDING_LOOKUPS}. A call that finds this many already waiting
- * fails with `timeout` at once, without waiting and without starting a
- * lookup: each waiter holds a listener and its call's deadline, so the queue
- * is bounded as the lookups are. Fixed, not configured: four times the
- * places, so a burst a few times the bound still queues.
+ * How many host-name resolutions the process may have outstanding, for a
+ * threadpool size as `UV_THREADPOOL_SIZE` gives it (an integer from 1 to
+ * 1024; anything else reads as libuv's default, 4): two fewer than the
+ * threadpool, and at least one. The system resolver runs on that threadpool,
+ * which bcrypt and the file system share, and it cannot be cancelled: a
+ * lookup the deadline gave up on keeps a thread until it settles. Keeping
+ * the bound below the threadpool leaves threads for the rest however slow
+ * name resolution gets.
+ */
+export function lookupCeilingOf(threadpoolSize: string | undefined): number {
+	const raw = (threadpoolSize ?? "").trim();
+	const size = /^\d{1,4}$/.test(raw) ? Number(raw) : Number.NaN;
+	const threads = size >= 1 && size <= 1024 ? size : DEFAULT_THREADPOOL_SIZE;
+	return Math.max(1, threads - 2);
+}
+
+/**
+ * How many calls may wait for a place among the outstanding lookups. A call
+ * that finds this many already waiting fails with `timeout` at once, without
+ * waiting and without starting a lookup: each waiter holds a listener and its
+ * call's deadline, so the queue is bounded as the lookups are. Fixed, not
+ * configured.
  */
 export const MAX_WAITING_LOOKUPS = 64;
 
@@ -272,15 +282,22 @@ const untilAborted = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 		else signal.addEventListener("abort", onAbort, { once: true });
 	});
 
+/** Lookups run under a bounded number of places; see {@link createLookupPermits}. */
+export type LookupPermits = (
+	lookup: OutboundFetchSeams["lookup"],
+	hostname: string,
+	signal: AbortSignal,
+) => Promise<readonly string[]>;
+
 /**
- * The count of outstanding lookups for one built fetch, bounded at `max`,
+ * A pool of places for outstanding lookups, bounded at `max`,
  * with at most `maxWaiting` calls waiting for a place. A permit is taken
  * before a lookup starts and given back only when the lookup settles; a
  * waiter is handed the permit directly, in arrival order. The waiters are a
  * `Set`, which iterates in insertion order and drops a cancelled one in
  * constant time.
  */
-function lookupPermits(max: number, maxWaiting: number) {
+export function createLookupPermits(max: number, maxWaiting: number): LookupPermits {
 	let outstanding = 0;
 	const waiters = new Set<() => void>();
 	const release = (): void => {
@@ -342,6 +359,16 @@ function lookupPermits(max: number, maxWaiting: number) {
 		return looking;
 	};
 }
+
+/**
+ * The places every fetch `createOutboundFetch` builds resolves under, one
+ * pool for the process: `UV_THREADPOOL_SIZE` is read once, here, as libuv
+ * reads it once at its first use of the threadpool.
+ */
+const processLookups = createLookupPermits(
+	lookupCeilingOf(process.env.UV_THREADPOOL_SIZE),
+	MAX_WAITING_LOOKUPS,
+);
 
 /** The answer's body, read whole under `cap`; a refusal past it. */
 async function readBody(
@@ -506,8 +533,6 @@ export function buildOutboundFetch(
 		policy.maxResponseBytes,
 	);
 
-	const lookUp = lookupPermits(MAX_PENDING_LOOKUPS, MAX_WAITING_LOOKUPS);
-
 	const outboundFetch = async (input: unknown, init?: RequestInit): Promise<Response> => {
 		const request = readRequest(input, init);
 		const callerSignal = init?.signal ?? undefined;
@@ -527,14 +552,14 @@ export function buildOutboundFetch(
 			if (destination.literal !== undefined) {
 				addresses = [destination.literal];
 			} else {
-				const resolving = lookUp(seams.lookup, destination.url.hostname, signal).catch(
-					(err: unknown) => {
+				const resolving = seams
+					.lookups(seams.lookup, destination.url.hostname, signal)
+					.catch((err: unknown) => {
 						if (err instanceof LookupsSaturated) {
 							throw new OutboundFetchError("timeout", destination.host);
 						}
 						throw new OutboundFetchError("resolution_failed", destination.host, errorCode(err));
-					},
-				);
+					});
 				addresses = await untilAborted(resolving, signal);
 				admitAddresses(destination, addresses);
 			}
@@ -583,7 +608,11 @@ export function buildOutboundFetch(
  * own reason; the deadline is the shorter of the caller's and this one's.
  */
 export function createOutboundFetch(options: OutboundFetchOptions): typeof fetch {
-	return buildOutboundFetch(options, { lookup: systemLookup, transport: nodeTransport });
+	return buildOutboundFetch(options, {
+		lookup: systemLookup,
+		lookups: processLookups,
+		transport: nodeTransport,
+	});
 }
 
 /** Whether `err` is the outbound fetch refusing a destination or an answer, as against the exchange failing. */

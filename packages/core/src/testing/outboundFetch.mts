@@ -24,6 +24,9 @@
 import type { z } from "zod";
 import {
 	buildOutboundFetch,
+	createLookupPermits,
+	lookupCeilingOf,
+	MAX_WAITING_LOOKUPS,
 	type OutboundFetchOptions,
 	systemLookup,
 } from "../net/outbound-fetch.mjs";
@@ -44,13 +47,22 @@ export type OutboundFetchForTestingOptions = OutboundFetchOptions & {
 	readonly transport?: OutboundTransport;
 };
 
-/** `createOutboundFetch`, with the resolver and the transport replaced where given. */
+/**
+ * `createOutboundFetch`, with the resolver and the transport replaced where
+ * given. Its lookups run under a pool of its own, bounded as the process's
+ * is, so a lookup one test leaves outstanding never holds a place another
+ * test's fetch needs.
+ */
 export function createOutboundFetchForTesting(
 	options: OutboundFetchForTestingOptions,
 ): typeof fetch {
 	const { lookup, transport, ...rest } = options;
 	return buildOutboundFetch(rest, {
 		lookup: lookup ?? systemLookup,
+		lookups: createLookupPermits(
+			lookupCeilingOf(process.env.UV_THREADPOOL_SIZE),
+			MAX_WAITING_LOOKUPS,
+		),
 		transport: transport ?? nodeTransport,
 	});
 }
