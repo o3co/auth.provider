@@ -278,12 +278,12 @@ const KEYED = [
 
 describe("a prefix is its owner's", () => {
 	it.each(KEYED)(
-		"refuses at boot a module that contributes a budget for %s, which %s claims",
+		"refuses at boot a second module claiming %s, which %s claims",
 		async (prefix, owner) => {
 			const squatter = defineModule({
 				name: "test:budget-squatter",
 				contributes: {
-					rateLimitBudgets: { [prefix]: () => ({ limit: 1_000_000, windowSeconds: 1 }) },
+					rateLimitBudgets: { [prefix]: () => null },
 				},
 			});
 			const options = await fullSetOptions();

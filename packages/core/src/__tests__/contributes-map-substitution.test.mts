@@ -36,7 +36,6 @@ import type {
 import { defineFederationType } from "../modules/manifest/define-federation-type.mjs";
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import type { GrantPolicyHook } from "../policy/types.mjs";
-import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../token-exchange/validator.mjs";
 
 // Every contribution kind carries its concrete type from registration to
@@ -130,33 +129,30 @@ describe("rate-limit budgets and declared federation contributions", () => {
 		exchangeCode: async () => ({ issuer: "https://idp.example", sub: "1", expiresAt: null }),
 	};
 
-	it("a rateLimitBudgets factory answers the limiter's spec, or null when its setting is off", () => {
-		expectTypeOf<ReturnType<RateLimitBudgetFactory<unknown>>>().toEqualTypeOf<
-			Contributed<RateLimitSpec | null>
-		>();
+	it("a rateLimitBudgets factory claims its prefix, answering null", () => {
+		expectTypeOf<ReturnType<RateLimitBudgetFactory<unknown>>>().toEqualTypeOf<Contributed<null>>();
 		defineModule({
-			name: "acme-budgets",
+			name: "acme-claims",
 			requires: ["config"],
 			contributes: {
 				rateLimitBudgets: {
 					"acme-login": (deps) => {
 						expectTypeOf(deps.config).not.toBeUnknown();
-						return { limit: 5, windowSeconds: 60 };
+						return null;
 					},
-					"acme-off": () => null,
 				},
 			},
 		});
 		expect(true).toBe(true);
 	});
 
-	it("refuses a budget that is not a spec", () => {
+	it("refuses a budget in place of the claim", () => {
 		defineModule({
-			name: "acme-half-budget",
+			name: "acme-budget",
 			contributes: {
 				rateLimitBudgets: {
-					// @ts-expect-error — no `windowSeconds`
-					"acme-login": () => ({ limit: 5 }),
+					// @ts-expect-error — a claim answers null, never a budget
+					"acme-login": () => ({ limit: 5, windowSeconds: 60 }),
 				},
 			},
 		});

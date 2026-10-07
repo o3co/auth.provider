@@ -24,8 +24,8 @@ describe("memoryRateLimiterModule", () => {
 		expect(memoryRateLimiterModule.name).toBe("core-rate-limiter-memory");
 	});
 
-	it("requires the contributed budgets alone", () => {
-		expect(memoryRateLimiterModule.requires).toEqual(["rateLimitBudgetResolver"]);
+	it("requires nothing: no contributed budget is read", () => {
+		expect(memoryRateLimiterModule.requires ?? []).toEqual([]);
 	});
 
 	it("provides rateLimiter", () => {
@@ -149,35 +149,31 @@ describe("memoryRateLimiterModule", () => {
 		},
 	);
 
-	it("limits a prefix by the budget its owner contributed, read at each check, under its own limits entry", async () => {
-		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
-		const cfg = {
-			limits: { token: { limit: 4, windowSeconds: 45 } },
-			defaultLimit: { limit: 60, windowSeconds: 60 },
-			maxBuckets: 10_000,
-		};
+	it("limits a prefix by its own limits entry, else its defaultLimit, whatever a resolver answers", async () => {
+		const asked: string[] = [];
 		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({
-			section: cfg,
+			section: {
+				limits: { token: { limit: 4, windowSeconds: 45 } },
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				maxBuckets: 10_000,
+			},
 			rateLimitBudgetResolver: {
-				get: (prefix: string) => budgets.get(prefix),
-				entries: () => budgets.entries(),
+				get: (prefix: string) => {
+					asked.push(prefix);
+					return { limit: 2, windowSeconds: 300 };
+				},
+				entries: () => new Map().entries(),
 			},
 		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
-		budgets.set("mfa", { limit: 2, windowSeconds: 300 });
-		budgets.set("login", { limit: 20, windowSeconds: 900 });
 
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(2);
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(true);
-		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
-		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(20);
 		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
-		expect((await limiter.check("authorize:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
+		expect(asked).toEqual([]);
 	});
 
-	it("reads no owner's key: a prefix nothing contributes a budget for falls to its defaultLimit", async () => {
-		// The owners' keys are their modules' to read, and to refuse; the
-		// limiter reads their budgets through rateLimitBudgetResolver alone.
+	it("reads no owner's key: a prefix its own limits do not name falls to its defaultLimit", async () => {
+		// The owners' keys are their modules' to read, and to refuse.
 		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({
 			section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, maxBuckets: 10_000 },
 			config: {
@@ -189,7 +185,6 @@ describe("memoryRateLimiterModule", () => {
 					factors: { email: { sendLimit: { limit: 1, windowSeconds: 3600 } } },
 				},
 			},
-			rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
 		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		for (const key of [

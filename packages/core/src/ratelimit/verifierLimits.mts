@@ -90,9 +90,9 @@ export function refuseVerifierLimitEntries(
 }
 
 /**
- * A `rateLimitBudgets` claim of a prefix a verifier limits itself: no budget
- * of its own (it answers `null`), and the declaration of the setting the
- * limit is made at. Frozen.
+ * A `rateLimitBudgets` claim of a prefix a verifier limits itself: it
+ * answers `null`, as every claim does, and declares the setting the limit is
+ * made at. Frozen.
  */
 export function verifierLimitClaim(
 	declaration: VerifierLimitDeclaration,

@@ -42,10 +42,9 @@ export const memoryRateLimiterSectionSchema = z
 	}));
 
 /**
- * In-memory RateLimiter module: its own section's limits, default and bucket
- * bound, and the budgets the prefixes' owners contribute
- * (`rateLimitBudgetResolver`), which the memory branch of
- * `registerBuiltinRateLimiters` does not read. `memoryRateLimiter`, the
+ * In-memory RateLimiter module: a key's budget is its own section's `limits`
+ * entry for the key's prefix, else its `defaultLimit`, with `maxBuckets`
+ * bounding the counters it holds. `memoryRateLimiter`, the
  * section's old path, and `MEMORY_RATE_LIMITER_MAX_BUCKETS`, its variable's
  * old name, refuse boot naming the new ones. For production multi-instance
  * deployments, use `redisRateLimiterModule` from `@o3co/auth-provider-redis`.
@@ -69,12 +68,10 @@ export const memoryRateLimiterModule = defineModule({
 		reason:
 			"rate-limit counters fork per replica — every configured limit is effectively multiplied by the replica count, and resets on each deploy",
 	},
-	requires: ["rateLimitBudgetResolver"] as const,
 	provides: {
-		rateLimiter: ({ section, rateLimitBudgetResolver }) =>
+		rateLimiter: ({ section }) =>
 			createMemoryRateLimiter({
 				limits: section.limits,
-				budgets: rateLimitBudgetResolver,
 				defaultLimit: section.defaultLimit,
 				maxBuckets: section.maxBuckets,
 			}),
