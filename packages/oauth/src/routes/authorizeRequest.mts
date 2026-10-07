@@ -249,6 +249,11 @@ export const checkNonce = (ctx: AuthorizeContext): boolean => {
  * the declared `defaultScopes`, never the whole allowlist; with none declared
  * it is `invalid_scope`, except that a client with an empty allowlist keeps
  * the empty grant.
+ *
+ * Under `oidcMode = "oidc-required"`, the default, the request itself must
+ * name `openid`, so an omitted scope is `invalid_scope` there even when the
+ * client's `defaultScopes` contain `openid`. The defaults decide an omitted
+ * scope only under `dual`.
  */
 export const resolveScopes = async (
 	ctx: AuthorizeContext,

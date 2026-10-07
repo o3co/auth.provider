@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-10-06
+最終更新: 2026-10-07
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウト。
 
@@ -230,6 +230,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **id_token** は、付与スコープに `openid` が含まれ、`userSessionStore` が配線されているときに、`oauthTokenSettings` スロットの issuer（リクエストのものではない）を `iss` として発行される。そうでなければ省かれ、アクセストークンとリフレッシュトークンは通常どおり返る。id_token は `iss`、`sub`、`aud`、`exp`、`iat`、`jti`、`auth_time`、`sid`、`azp` を持ち、認可リクエストに `nonce` があればそれ（OIDC Core §3.1.3.7）、[ステップアップ](#ステップアップと再認証-481)で説明する `amr` / `acr`、スコープで絞ったユーザークレーム（[userinfo と同じ表](#userinfo)）を持つ。
 
+**コードの引き換えは 1 回だけ。** グラントは何かを発行する前に `codeRepository` からコードを消費し、もう一度提示されたコードは `400 invalid_grant`（`invalid code`）になる — 期限切れや未知のコードと同じ答えである。コードがもう一度提示されても、そのコードから発行済みのトークンは失効しない。引き換えでは、コードが認証されたクライアントに発行されたものであること、`redirect_uri` が `/oauth/authorize` がコードに記録したものであることが求められる。PKCE は必須（クライアントの登録が `allowPlainPkce: true` を持たない限り `S256`）で、コードの有効期間は短い — 同梱のリポジトリのデフォルトは 600 秒。
+
 ### `refresh_token`
 
 - **どのレコードもファミリーを持たないトークンは拒否する。** それを決めるのは `oauth-authorization.grants.refreshToken.unknownFamilyPolicy`（`OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY`）である: 出荷時の既定 `"reject"` は `400 invalid_grant` / `unknown_family` を返して `unknown_family_rejected` をログに出し、期間を区切った移行の間だけ使う `"accept"` は発行して `unknown_family_accepted_legacy_mode` をログに出す。グラントが発行するのは `"accept"` のときだけである: セクションが値を持たない構成 — このパッケージの `reference.conf` を重ねないもの — は拒否する。キーは `oauth.refreshToken.unknownFamilyPolicy` から移り、`OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY` もそれとともに改名された: どちらも、まだ設定されていれば boot を拒否する。変数は、新しい名前が設定されていても拒否する。
@@ -269,6 +271,8 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 - 比較は `matchesRegisteredRedirectUri`（`@o3co/auth-provider-core`）にあり、独自の認可エンドポイントがこれと同じやり方で照合できるよう export されている。
 
 **PKCE は必須で、方式は `S256`。** `plain` は登録に `allowPlainPkce: true` を持つクライアントにだけ許されるので、ディスカバリーは `S256` だけを載せる。PKCE は設定を取らない: `oauth.grants.authorization_code.pkce` と、設定されていれば値にかかわらず `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` は、削除されたものとして boot を拒否する。
+
+**デフォルトの `oidcMode = "oidc-required"` では、認可リクエスト自身が `openid` を名指す。** `/oauth/authorize` は、`scope` が `openid` を名指さないリクエストと、その `openid` をクライアントの `allowedScopes` が落とすリクエストを、`redirect_uri` への `invalid_scope` で拒否する。`scope` を省いたリクエストも、クライアントの `defaultScopes` が `openid` を含んでいても同じく拒否される: OIDC Core §3.1.2.1 はリクエスト自身の `scope` に `openid` を求めており、サーバーはそれを補わない。`oidcMode = "dual"` では、`scope` を省いたリクエストにはクライアントの `defaultScopes` が付与される。それを宣言しないクライアントは `invalid_scope` で拒否される — ただし `allowedScopes` が空のクライアントは空の付与のままとなる。このパッケージのトークンエンドポイントのグラント（`client_credentials`、jwt-bearer）とデバイスグラントの認可エンドポイントは、どちらのモードでも省かれた `scope` に `defaultScopes` を使う。`oidcMode` を読むのは `/oauth/authorize` だけである。
 
 **どの認可レスポンスも自分の issuer を名乗る**（[RFC 9207](https://datatracker.ietf.org/doc/html/rfc9207)）。クライアントの `redirect_uri` へのリダイレクト — コード、`/oauth/authorize` のすべてのエラーリダイレクト、同意ステップの deny — はどれも `iss` を運ぶ。値はディスカバリードキュメントの `issuer` そのもの（core の `advertisedIssuer`: 設定された `oauth.jwt.issuer` から末尾のスラッシュを除いたもの）で、ディスカバリーは `authorization_response_iss_parameter_supported: true` でそれを示す。クライアントはそれを、リクエストを送った issuer と照合し、認可サーバーの取り違え（mix-up）を防ぐ。`redirect_uri` を信頼する前に返す `400` の JSON（未知のクライアント、登録されていない `redirect_uri`）はクライアントに届かないので運ばない。切り替えは無い: こうしたレスポンスはすべて 1 つの関数 [`routes/authorizationResponse.mts`](./src/routes/authorizationResponse.mts) が組み立てる。この関数は登録済みの `redirect_uri` が持つクエリの後ろに追加し、そのクエリから何も取り除かず、何も置き換えない: 登録されたパラメーターは、名前と順序はそのまま、値は WHATWG の URL 解析がデコードしたとおりにクライアントに届く。クエリはフォームとして直列化し直されるので、バイト列は変わりうる（`%20` は `+` に、`~` は `%7E` になる）。値が変わるのは 2 つ: UTF-8 でないパーセントシーケンスは U+FFFD になり（`%FF` は `%EF%BF%BD` になる）、値の無い名前には `=` が付く（`?foo` は `?foo=` になる）。クエリがレスポンスのパラメーター名 — `code`、`state`、`iss`、`error`、`error_description`。大文字小文字と `_`・`-` を無視して比べる — を使うと、その名前が 2 つになり、`searchParams.get` で読むクライアントは登録された値を読むことになる。そのため、そうした URI は拒否する: core の `checkRedirectUri` が登録時に拒否し（YAML や static のクライアントは boot で、Client ID Metadata Document は解決時に）、カスタム `ClientRepository` のものは `/oauth/authorize` と同意の deny が拒否する（上述）。同じ規則は、`[A-Za-z0-9_-]` 以外の文字を使うクエリ名、名前の無いパラメーター、`;` も拒否する。クライアントのフレームワークがそれらを別の名前として読みうるからである（[core の redirect-URI の規則](../core/src/net/redirect-uri.mts)）。
 
