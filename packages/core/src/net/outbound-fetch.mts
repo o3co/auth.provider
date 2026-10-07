@@ -84,6 +84,19 @@ export interface OutboundFetchSeams {
 export const systemLookup = async (hostname: string): Promise<readonly string[]> =>
 	(await dnsLookup(hostname, { all: true, order: "verbatim" })).map((entry) => entry.address);
 
+/**
+ * How many host-name resolutions one built fetch may have outstanding. The
+ * system resolver runs on the shared libuv threadpool and cannot be
+ * cancelled: a lookup the deadline gave up on keeps running, so it keeps
+ * counting until it really settles. A call that needs a lookup while this
+ * many are outstanding waits for one to settle, within its own deadline, and
+ * fails with `timeout` without starting one. Fixed, not configured: above the
+ * concurrency the bundled callers run a fetch at, so calls whose lookups
+ * settle in time do not wait, and a few times the threadpool's default size
+ * (4), so lookups nobody waits for any more cannot pile onto it unbounded.
+ */
+export const MAX_PENDING_LOOKUPS = 16;
+
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
 
@@ -245,6 +258,67 @@ const untilAborted = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 		if (signal.aborted) onAbort();
 		else signal.addEventListener("abort", onAbort, { once: true });
 	});
+
+/**
+ * The count of outstanding lookups for one built fetch, bounded at `max`. A
+ * permit is taken before a lookup starts and given back only when the lookup
+ * settles; a waiter is handed the permit directly, in arrival order.
+ */
+function lookupPermits(max: number) {
+	let outstanding = 0;
+	const waiters: Array<() => void> = [];
+	const release = (): void => {
+		const next = waiters.shift();
+		if (next !== undefined) next();
+		else outstanding -= 1;
+	};
+	/** A permit, or `signal`'s reason once it aborts first; no permit is held then. */
+	const acquire = (signal: AbortSignal): Promise<void> => {
+		signal.throwIfAborted();
+		if (outstanding < max) {
+			outstanding += 1;
+			return Promise.resolve();
+		}
+		return new Promise<void>((resolve, reject) => {
+			const onAbort = () => {
+				const index = waiters.indexOf(granted);
+				if (index !== -1) waiters.splice(index, 1);
+				reject(signal.reason);
+			};
+			const granted = () => {
+				signal.removeEventListener("abort", onAbort);
+				resolve();
+			};
+			waiters.push(granted);
+			signal.addEventListener("abort", onAbort, { once: true });
+		});
+	};
+	/**
+	 * `lookup(hostname)` under a permit, or `signal`'s reason with no lookup
+	 * started. The permit is given back when the lookup settles, however long
+	 * after the call stopped waiting for it.
+	 */
+	return async (
+		lookup: OutboundFetchSeams["lookup"],
+		hostname: string,
+		signal: AbortSignal,
+	): Promise<readonly string[]> => {
+		await acquire(signal);
+		if (signal.aborted) {
+			// Handed a permit after the deadline: no lookup is started on it.
+			release();
+			throw signal.reason;
+		}
+		let looking: Promise<readonly string[]>;
+		try {
+			looking = lookup(hostname);
+		} catch (err) {
+			looking = Promise.reject(err);
+		}
+		looking.then(release, release);
+		return looking;
+	};
+}
 
 /** The answer's body, read whole under `cap`; a refusal past it. */
 async function readBody(
@@ -409,6 +483,8 @@ export function buildOutboundFetch(
 		policy.maxResponseBytes,
 	);
 
+	const lookUp = lookupPermits(MAX_PENDING_LOOKUPS);
+
 	const outboundFetch = async (input: unknown, init?: RequestInit): Promise<Response> => {
 		const request = readRequest(input, init);
 		const callerSignal = init?.signal ?? undefined;
@@ -428,9 +504,11 @@ export function buildOutboundFetch(
 			if (destination.literal !== undefined) {
 				addresses = [destination.literal];
 			} else {
-				const resolving = seams.lookup(destination.url.hostname).catch((err: unknown) => {
-					throw new OutboundFetchError("resolution_failed", destination.host, errorCode(err));
-				});
+				const resolving = lookUp(seams.lookup, destination.url.hostname, signal).catch(
+					(err: unknown) => {
+						throw new OutboundFetchError("resolution_failed", destination.host, errorCode(err));
+					},
+				);
 				addresses = await untilAborted(resolving, signal);
 				admitAddresses(destination, addresses);
 			}

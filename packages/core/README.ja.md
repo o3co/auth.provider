@@ -119,6 +119,7 @@ core は自分のセクションのほかに、oauth モジュールのセクシ
 - 接続は確認したアドレスにだけ行い、TLS のサーバー名と証明書の識別は URL のホストのままにする。
 - リダイレクトは追わない: `304` 以外の `3xx` は拒否する。`2xx` 以外のステータスと `204`・`205`・`304` は null の body で返す。`2xx` の body は全体を読む: identity エンコーディングのみ（リクエストでそれを求める）、`maxResponseBytes` まで。
 - 1 つの期限 `timeoutMs` が解決・接続・TLS・ヘッダー・body をまとめて覆う。`core.outbound` の `timeoutMs` と `maxResponseBytes` は上限で、呼び出し側の値（`createOutboundFetch` のオプション）はそれより小さいときだけ効く。呼び出し側の `signal` も効き、その中断は呼び出し側自身の理由で reject する。
+- 1 つの fetch が同時に抱えるホスト名解決は 16 件まで（ソースの `MAX_PENDING_LOOKUPS`。固定で、設定はない）。システムのリゾルバは取り消せないため、期限で見切った解決も、実際に終わるまで数に入る。16 件を抱えているときに解決が要る呼び出しは、自身の期限の内で 1 件が終わるのを待ち、期限を過ぎれば解決を始めずに `timeout` で失敗する。IP リテラルのホストと、解決の前に拒否された URL は数えない。
 - 文字列または `URL`、`GET` または `POST`、文字列・`URLSearchParams`・`Uint8Array` の body を取る。
 
 `outboundLimitsOf(config)` は、セクションが定める `timeoutMs` と `maxResponseBytes`（セクションが無ければ既定値）、つまり fetch が適用する上限を返す。呼び出し側が自分の値と比べるためのもので、解析できないセクションは fetch の構築と同じように拒否する。
