@@ -80,6 +80,34 @@ describe("createRateLimitBudgetLookup", () => {
 		expect(lookup("plain")).toEqual({ prefix: "plain", spec: { limit: 3, windowSeconds: 30 } });
 	});
 
+	it("matches a prefix exactly: a longer key shares its first segment's entry, and a longer name or a colon-holding entry matches nothing", () => {
+		const lookup = createRateLimitBudgetLookup("test", {
+			limits: {
+				mfa: { limit: 3, windowSeconds: 30 },
+				"mfa:enroll": { limit: 1, windowSeconds: 10 },
+			},
+			defaultLimit: DEFAULT,
+		});
+
+		expect(lookup("mfa:enroll:ip:192.0.2.1")).toEqual({
+			prefix: "mfa",
+			spec: { limit: 3, windowSeconds: 30 },
+		});
+		expect(lookup("mfa-email:user:u1")).toEqual({ prefix: "mfa-email", spec: DEFAULT });
+		expect(lookup("mf:ip:192.0.2.1").spec).toEqual(DEFAULT);
+	});
+
+	it("matches a prefix case-sensitively", () => {
+		const lookup = createRateLimitBudgetLookup("test", {
+			limits: { mfa: { limit: 3, windowSeconds: 30 } },
+			defaultLimit: DEFAULT,
+		});
+
+		expect(lookup("MFA:ip:192.0.2.1")).toEqual({ prefix: "MFA", spec: DEFAULT });
+		expect(lookup("Mfa:ip:192.0.2.1").spec).toEqual(DEFAULT);
+		expect(lookup("mfa:ip:192.0.2.1").spec).toEqual({ limit: 3, windowSeconds: 30 });
+	});
+
 	it("holds the limits and the default as they were checked: a later change to the caller's objects reaches no lookup", () => {
 		const limits: Record<string, { limit: number; windowSeconds: number }> = {
 			token: { limit: 5, windowSeconds: 60 },

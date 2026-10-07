@@ -867,3 +867,71 @@ describe("rateLimitBudgets — a verifier's claim", () => {
 		expect(Object.isFrozen(claim.verifier)).toBe(true);
 	});
 });
+
+describe("rateLimitBudgets — an async factory", () => {
+	it("is accepted when it resolves to null", async () => {
+		const handle = await createApp({
+			modules: [
+				defineModule({
+					name: "claim-async",
+					contributes: { rateLimitBudgets: { fixture: async () => null } },
+				}),
+			],
+			bootstrapComponents: bootWith(),
+		});
+		await handle.dispose();
+	});
+
+	it("is accepted as a verifier's claim when it resolves to null, and its declaration still refuses a limits entry", async () => {
+		const asyncClaim = Object.assign(async () => null, {
+			verifier: { setting: "fixture.attempts" },
+		});
+		const claimant = defineModule({
+			name: "verifier-async",
+			contributes: { rateLimitBudgets: { fixture_attempts: asyncClaim } },
+		});
+
+		const handle = await createApp({
+			modules: [memoryRateLimiterModule, claimant],
+			bootstrapComponents: withMemoryLimiter(),
+		});
+		await handle.dispose();
+
+		const err = await refusal(
+			createApp({
+				modules: [memoryRateLimiterModule, claimant],
+				bootstrapComponents: withMemoryLimiter({
+					"core-rate-limiter-memory": {
+						limits: { fixture_attempts: { limit: 5, windowSeconds: 60 } },
+						defaultLimit: { limit: 60, windowSeconds: 60 },
+						maxBuckets: 100,
+					},
+				}),
+			}),
+		);
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("set fixture.attempts instead");
+	});
+
+	it("refuses boot when it resolves to a budget, naming the module, the prefix and the limits entry", async () => {
+		const mod = defineModule({
+			name: "budget-async",
+			contributes: {
+				rateLimitBudgets: {
+					fixture: (async () => ({ limit: 5, windowSeconds: 60 })) as never,
+				},
+			},
+		});
+
+		const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			module: "budget-async",
+			kind: "rateLimitBudgets",
+			name: "fixture",
+		});
+		expect(err.message).toContain("contributes no budget");
+		expect(err.message).toContain("limits.fixture");
+	});
+});
