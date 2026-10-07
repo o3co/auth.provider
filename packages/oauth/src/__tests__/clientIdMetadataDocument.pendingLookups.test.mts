@@ -259,7 +259,7 @@ describe("the queue for a document fetch slot", () => {
 });
 
 describe("a request no document fetch slot was free for", () => {
-	const VICTIM = "https://victim.example/client.json";
+	const SLOTLESS = "https://slotless.example/client.json";
 
 	it("when the queue is full, is not remembered as a refusal: the id is fetched once a slot frees", async () => {
 		const seam = answeredByTest();
@@ -278,7 +278,7 @@ describe("a request no document fetch slot was free for", () => {
 			resolver.resolve(`https://fill${i}.example/client.json`),
 		);
 		await tick();
-		expect(await resolver.resolve(VICTIM)).toBeNull();
+		expect(await resolver.resolve(SLOTLESS)).toBeNull();
 		expect(warned).toEqual(["cimd_document_fetch_failed"]);
 		expect(String(fields[0]?.reason)).toMatch(/slot/);
 
@@ -287,11 +287,11 @@ describe("a request no document fetch slot was free for", () => {
 			await tick();
 		}
 		await Promise.all(filling);
-		const again = resolver.resolve(VICTIM);
+		const again = resolver.resolve(SLOTLESS);
 		await tick();
-		expect(seam.pending.at(-1)?.url).toBe(VICTIM);
-		seam.pending.at(-1)?.answer(documentFor(VICTIM));
-		expect(await again).toMatchObject({ clientId: VICTIM });
+		expect(seam.pending.at(-1)?.url).toBe(SLOTLESS);
+		seam.pending.at(-1)?.answer(documentFor(SLOTLESS));
+		expect(await again).toMatchObject({ clientId: SLOTLESS });
 	});
 
 	it("when the wait outlasts the fetch deadline, is not remembered as a refusal either", async () => {
@@ -306,15 +306,15 @@ describe("a request no document fetch slot was free for", () => {
 		});
 		const running = resolver.resolve("https://running.example/client.json");
 		await tick();
-		expect(await resolver.resolve(VICTIM)).toBeNull();
+		expect(await resolver.resolve(SLOTLESS)).toBeNull();
 		seam.pending[0]?.answer(new Response(null, { status: 404 }));
 		await running;
 
-		const again = resolver.resolve(VICTIM);
+		const again = resolver.resolve(SLOTLESS);
 		await tick();
-		expect(seam.pending.at(-1)?.url).toBe(VICTIM);
-		seam.pending.at(-1)?.answer(documentFor(VICTIM));
-		expect(await again).toMatchObject({ clientId: VICTIM });
+		expect(seam.pending.at(-1)?.url).toBe(SLOTLESS);
+		seam.pending.at(-1)?.answer(documentFor(SLOTLESS));
+		expect(await again).toMatchObject({ clientId: SLOTLESS });
 	});
 
 	it("is answered with a registration already validated, while its stale window lasts", async () => {
@@ -331,18 +331,18 @@ describe("a request no document fetch slot was free for", () => {
 			now: () => clock,
 			fetch: seam.fetch,
 		});
-		const first = resolver.resolve(VICTIM);
+		const first = resolver.resolve(SLOTLESS);
 		await tick();
-		seam.pending[0]?.answer(documentFor(VICTIM));
+		seam.pending[0]?.answer(documentFor(SLOTLESS));
 		const validated = await first;
-		expect(validated).toMatchObject({ clientId: VICTIM });
+		expect(validated).toMatchObject({ clientId: SLOTLESS });
 
 		clock += 2_000;
 		const filling = Array.from({ length: 1 + 4 }, (_, i) =>
 			resolver.resolve(`https://fill${i}.example/client.json`),
 		);
 		await tick();
-		expect(await resolver.resolve(VICTIM)).toBe(validated);
+		expect(await resolver.resolve(SLOTLESS)).toBe(validated);
 		for (const p of seam.pending.slice(1)) p.answer(new Response(null, { status: 404 }));
 		for (let i = 0; i < 5; i += 1) {
 			await tick();

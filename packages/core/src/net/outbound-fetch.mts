@@ -134,9 +134,9 @@ export function lookupCeilingOf(threadpoolSize: string | undefined): number {
  * How many lookups for URLs a request names (`source: "request"`) may be
  * outstanding at once, within the process's bound, each counted until it
  * really settles; the rest of the bound is left to URLs from client
- * registrations. A request's URL is anyone's to choose, a registration's an
- * operator's: a caller who aims requests at a resolver that never answers
- * holds this one place and no other. When the bound is a single place, the
+ * registrations. A request's URL comes from the request, a registration's
+ * from the operator: request URLs whose resolver never answers hold this one
+ * place and no other. When the bound is a single place, the
  * share is none, and a request's lookup fails with `timeout` at once.
  */
 export const REQUEST_LOOKUP_SHARE = 1;

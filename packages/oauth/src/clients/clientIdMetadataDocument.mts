@@ -660,8 +660,8 @@ export function createClientIdMetadataDocumentResolver(
 				cache.delete(clientId);
 			}
 			// This server's capacity, or a deadline that cannot be told from it,
-			// is no verdict on the id: remembering it would let a caller who
-			// fills the slots keep a client of their choosing refused.
+			// is no verdict on the id, so it is not remembered: the next
+			// request for the id fetches again.
 			const capacity = err instanceof FetchSlotUnavailable || isOutboundDeadline(projected);
 			if (negativeCacheMs > 0 && !capacity) rememberRefusal(clientId);
 			return null;
