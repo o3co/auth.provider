@@ -831,10 +831,13 @@ The boot refusals you can meet, with their messages, are in
   calling client's id whenever the subject token's audience was not a single
   value the client is registered for, also when that audience did not name
   the client (a subject token accepted by its `azp`). The default is now held
-  to the subject token's audience as a requested audience is: when the
-  subject token names audiences and the client's id is not among them, the
-  exchange is `400 invalid_target` / `audience_widening_not_allowed:
+  to the subject token's audience as a requested audience is. When the
+  request names no `audience`, the policy grants none, the default falls back
+  to the client's id, and the subject token's `aud` does not include that id,
+  the exchange is `400 invalid_target` / `audience_widening_not_allowed:
   <client_id>`, logged at warn as `token_exchange_audience_widening_rejected`.
+  A subject token's single audience that the client is registered for is
+  still inherited, as before.
   A `resource` equal to the client's id is held to the same rule and is
   `400 invalid_target` / `requested_resources_not_in_audience`. A subject
   token with no `aud` still defaults to the client's id, and a policy's
