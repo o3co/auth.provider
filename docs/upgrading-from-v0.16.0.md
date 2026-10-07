@@ -1026,16 +1026,21 @@ The boot refusals you can meet, with their messages, are in
   note 24.
 - **Token exchange reads a contributed validator's answer once.** The answer
   a `tokenExchangeValidators` entry returns is read once into a plain, frozen
-  copy, which every check, the grant policy and issuance read. Each member
-  is read once. The members the checks read by name — `azp`, `exp`, `iss`,
-  `cnf` and `may_act` of `claims`, `jkt` and `x5t#S256` of `cnf`, `sub` and
-  `iss` of a `may_act` entry, the nested `act` of `act` — are carried even
-  when inherited; any other member that is not an own enumerable property
-  is not, and class instances reach the policy flattened to their own
-  enumerable fields. An answer whose
-  `sub` is not a string, or whose `claims` are not an object, is a failed
-  validation (`400 invalid_request`, `subject_token validation failed`), at
-  the first validation and at the one before minting; a member whose read
+  copy, which every check and issuance read. Each member is read once. The
+  members the checks read by name — `azp`, `exp`, `iss`, `cnf` and `may_act`
+  of `claims`, `jkt` and `x5t#S256` of `cnf`, `sub` and `iss` of a `may_act`
+  entry, the nested `act` of `act` — are carried even when inherited; within
+  the copy, any other member that is not an own enumerable property is not,
+  and a class instance is copied as its own enumerable fields. The grant
+  policy is not handed the answer: its `GrantPolicyRequest` carries the
+  fields derived from it — `subject` from `sub`, `originalScope` from
+  `scope`, `originalAudience` from `aud` — now read from the copy, with the
+  values they had for an answer of plain data. An answer that is not a
+  record (an object that is not an array), whose `sub` is not a string, or
+  whose `claims` are not a record, is a failed validation
+  (`400 invalid_request`, `subject_token validation failed`), at the first
+  validation and at the one before minting, and so is an array where a
+  check reads a record (`cnf`, a `may_act` entry, `act`); a member whose read
   throws is `503 temporarily_unavailable`, as a validator that throws. See
   the oauth-token-exchange README, "External JWT subject_token".
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is

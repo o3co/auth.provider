@@ -492,3 +492,62 @@ describe("token exchange reads each validator answer once — members read by na
 		expect(reads).toBe(1);
 	});
 });
+
+describe("token exchange reads each validator answer once — records, never arrays", () => {
+	it("refuses claims that are an array carrying named members, as a failed validation", async () => {
+		const claims = Object.assign([], {
+			azp: client.clientId,
+			cnf: { jkt: "a-key" },
+			may_act: { sub: "svc-other" },
+			exp: 1,
+		});
+		const h = build(() => subjectAnswer({ claims }));
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+		expect(h.lookups()).toEqual([]);
+	});
+
+	it("refuses an answer that is an array carrying the members, as a failed validation", async () => {
+		const h = build(() =>
+			Object.assign([], { sub: "user-1", aud: "billing", claims: { azp: client.clientId } }),
+		);
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+	});
+
+	it("refuses an exchange whose second asking answers claims that are an array", async () => {
+		const h = build((_role, call) =>
+			call === 1
+				? subjectAnswer()
+				: { sub: "user-1", claims: Object.assign([], { azp: client.clientId }) },
+		);
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+	});
+
+	for (const [label, extra] of [
+		["a cnf", { claims: { azp: client.clientId, cnf: Object.assign([], { jkt: "a-key" }) } }],
+		["an act", { act: Object.assign([], { sub: "svc-0" }) }],
+		["a nested act", { act: { sub: "svc-0", act: Object.assign([], { sub: "svc-1" }) } }],
+		[
+			"a may_act entry",
+			{ claims: { azp: client.clientId, may_act: [Object.assign([], { sub: "svc-a" })] } },
+		],
+	] as const) {
+		it(`refuses ${label} that is an array, as a failed validation`, async () => {
+			const h = build(() => subjectAnswer(extra));
+
+			expect(await h.exchange()).toEqual(failedValidation("subject"));
+		});
+	}
+
+	it("refuses an actor answer whose claims are an array, as a failed validation", async () => {
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer()
+				: { sub: "svc-a", claims: Object.assign([], { iss: ISSUER }) },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("actor"));
+	});
+});
