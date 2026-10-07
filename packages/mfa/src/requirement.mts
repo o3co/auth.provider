@@ -321,13 +321,33 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return primary === PASSWORD_AMR ? UNMET : REAUTHENTICATE;
 	};
 
-	/** The subject's factor records; a store that cannot answer, or answers something other than a list, throws. */
+	/**
+	 * The subject's factor records, copied entry by entry; a store that cannot
+	 * answer, or answers something other than a list of records, throws. A hole
+	 * or an entry with no string `kind` is not a record: the judgments here
+	 * would skip it, or read it as a kind it is not, so the answer is the
+	 * store's outage, never fewer records. An empty list is a subject with none.
+	 */
 	const listRecords = async (subject: string): Promise<readonly MfaFactorRecord[]> => {
 		const records: unknown = await factorStore.list(subject);
 		if (!Array.isArray(records)) {
 			throw new TypeError("MfaFactorStore.list answered something that is not a list");
 		}
-		return records;
+		const copy: MfaFactorRecord[] = [];
+		for (let index = 0; index < records.length; index++) {
+			const record: unknown = Object.hasOwn(records, index) ? records[index] : undefined;
+			if (
+				typeof record !== "object" ||
+				record === null ||
+				typeof (record as MfaFactorRecord).kind !== "string"
+			) {
+				throw new TypeError(
+					"MfaFactorStore.list answered a list with an entry that is not a record",
+				);
+			}
+			copy.push(record as MfaFactorRecord);
+		}
+		return copy;
 	};
 
 	const mayHoldCountingFactor = async (subject: string): Promise<boolean> =>
