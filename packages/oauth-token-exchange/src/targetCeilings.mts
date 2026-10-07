@@ -17,8 +17,9 @@
 /**
  * The scope and the targets a token exchange may name: the scope within the subject
  * token's and the client's `allowedScopes`, the audience within the client's
- * registration and the subject token's audience, and every resource equal to the
- * audience the token is minted for. What the request asks past them is refused.
+ * registration and the subject token's audience — requested, granted or defaulted —
+ * and every resource equal to the audience the token is minted for. What the
+ * request asks past them, or a default that lies past them, is refused.
  */
 
 import {
@@ -112,7 +113,8 @@ export function requestTargets(
 	// The audience ceilings: the client's registration (`allowedAudiences` plus its
 	// own id) and the subject token's audience (its client id when it names none).
 	// The request is held to both before the policy runs, so its refusal is its own;
-	// a policy's `grantedAudience` is held to the same two in the policy hook.
+	// a policy's `grantedAudience` is held to the same two in the policy hook, and
+	// the default an omitted audience takes to the same two in `issuedTarget`.
 	const clientAudienceSet = new Set([...(client.allowedAudiences ?? []), client.clientId]);
 	const subjectAudienceSet = new Set(
 		subjectAudienceBoundary(subjectValidated.aud, client.clientId),
@@ -162,43 +164,30 @@ export function requestTargets(
 			...new Set(requestedAudience.filter((audience) => !subjectAudienceSet.has(audience))),
 		];
 		if (widenedAudiences.length > 0) {
-			deps.logger?.warn(
-				{
-					subject: subjectValidated.sub,
-					clientId: client.clientId,
-					widenedAudiences,
-				},
-				"token_exchange_audience_widening_rejected",
-			);
-			return {
-				result: {
-					status: 400,
-					error: "invalid_target",
-					errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
-				},
-			};
+			return audienceWideningRefused(deps, client, subjectValidated, widenedAudiences);
 		}
 	}
 	// A requested `resource` must equal the issued audience (RFC 8707, checked again
-	// after the policy), which is the client id or an audience both the registration
-	// and the subject token carry. A resource outside that set can never be
-	// represented, so it is the request's own `invalid_target`, answered before a
-	// policy could turn it into a policy-ceiling 500. Absent a policy, this names the
-	// same resources the later check would.
+	// after the policy), which is an audience both the registration and the subject
+	// token carry — the client id included, only when the subject token carries it. A
+	// resource outside that set can never be represented, so it is the request's own
+	// `invalid_target`, answered before a policy could turn it into a policy-ceiling
+	// 500. It names every requested resource the request's own audience would not
+	// equal or that lies outside the ceilings (the client id, when it is the default
+	// and the subject token does not carry it).
 	if (requestedResource) {
-		const unrepresentable = requestedResource.some(
-			(resource) =>
-				resource !== client.clientId &&
-				!(clientAudienceSet.has(resource) && subjectAudienceSet.has(resource)),
-		);
-		if (unrepresentable) {
+		const withinCeilings = (resource: string) =>
+			clientAudienceSet.has(resource) && subjectAudienceSet.has(resource);
+		if (!requestedResource.every(withinCeilings)) {
 			const requestAudience = issuedAudience(
 				requestedAudience ?? undefined,
 				subjectValidated.aud,
 				clientAudienceSet,
 				client.clientId,
 			);
-			const missingResources = requestedResource.filter((resource) => resource !== requestAudience);
+			const missingResources = requestedResource.filter(
+				(resource) => resource !== requestAudience || !withinCeilings(resource),
+			);
 			deps.logger?.warn(
 				{
 					subject: subjectValidated.sub,
@@ -229,15 +218,19 @@ export function requestTargets(
 	};
 }
 
-/** The audience the token is minted for, and every requested resource held equal to it. */
+/**
+ * The audience the token is minted for, within both audience ceilings whether it was
+ * requested, granted or defaulted, and every requested resource held equal to it.
+ */
 export function issuedTarget(
 	deps: Pick<GrantDependencies, "logger">,
 	client: PublicClient,
 	subjectValidated: ValidatedToken,
 	{
 		clientAudienceSet,
+		subjectAudienceSet,
 		requestedResource,
-	}: Pick<RequestTargets, "clientAudienceSet" | "requestedResource">,
+	}: Pick<RequestTargets, "clientAudienceSet" | "subjectAudienceSet" | "requestedResource">,
 	grantedAudience: readonly string[] | undefined,
 ): { readonly audienceForToken: string } | GrantHandlerResult {
 	const audienceForToken = issuedAudience(
@@ -268,7 +261,39 @@ export function issuedTarget(
 			};
 		}
 	}
+	// A requested or granted audience already met both ceilings; this holds the
+	// default an omitted audience takes to them too. The client's own id is the one
+	// default that can lie outside the subject token's audience, and it is refused
+	// as a requested one would be. A requested resource reaching here equals the
+	// audience and already met both, so only a request naming no resource is refused.
+	if (!(clientAudienceSet.has(audienceForToken) && subjectAudienceSet.has(audienceForToken))) {
+		return audienceWideningRefused(deps, client, subjectValidated, [audienceForToken]);
+	}
 	return { audienceForToken };
+}
+
+/** An audience outside the subject token's: `invalid_target` (RFC 8693 §2.2.2), logged. */
+function audienceWideningRefused(
+	deps: Pick<GrantDependencies, "logger">,
+	client: PublicClient,
+	subjectValidated: ValidatedToken,
+	widenedAudiences: readonly string[],
+): GrantHandlerResult {
+	deps.logger?.warn(
+		{
+			subject: subjectValidated.sub,
+			clientId: client.clientId,
+			widenedAudiences,
+		},
+		"token_exchange_audience_widening_rejected",
+	);
+	return {
+		result: {
+			status: 400,
+			error: "invalid_target",
+			errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
+		},
+	};
 }
 
 /**
@@ -291,7 +316,8 @@ const loggedResources = (
  * - an explicit audience (request or policy, already bounded): its first entry;
  * - omitted, with a single subject audience the client is registered for: that;
  * - otherwise the client's own id, so omitting `audience` cannot mint for an
- *   audience outside the client's allowlist.
+ *   audience outside the client's allowlist. `issuedTarget` refuses it when the
+ *   subject token's audience does not carry it.
  *
  * `generateToken` carries one audience, so only the first `grantedAudience` entry
  * is used; several audiences would need introspection by every party.

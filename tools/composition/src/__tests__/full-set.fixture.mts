@@ -121,6 +121,7 @@ import {
 	ISSUER,
 	resettable,
 	SINGLE_ENV,
+	WEB,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import type { Switches } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import type { FakeStoreUrls } from "@o3co/auth-provider-test-kit";
@@ -813,12 +814,14 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 	// upstream token — is within the client's registration: only the missing
 	// session capability stands in the way. The web client's tokens name
 	// neither the gateway nor its audience, so the registration lets it
-	// exchange tokens issued to others.
+	// exchange tokens issued to others. An exchange issues only an audience
+	// the subject token carries, so the registration lists the web client's
+	// id, which an exchange naming no audience inherits.
 	[GATEWAY.id]: {
 		tokenEndpointAuthMethod: "client_secret_basic",
 		clientSecret: GATEWAY.secret,
 		allowedScopes: ["openid", "profile", "email"],
-		allowedAudiences: [ISSUER],
+		allowedAudiences: [ISSUER, WEB.id],
 		allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
 		allowedAzpForFederationToken: true,
 		allowExchangeOfTokensIssuedToOthers: true,
