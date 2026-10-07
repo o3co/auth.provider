@@ -336,6 +336,23 @@ export async function beginFirstBinding(
 	};
 }
 
+/**
+ * A first binding begun at a login with the account-email proof given first,
+ * through `sender`: one whose factor counts at once, so the binding completes
+ * the login. The composition wires `sender`, and the user has an address.
+ */
+export async function beginProvenFirstBinding(
+	app: express.Express,
+	sender: RecordingMailSender,
+	user: { readonly username: string; readonly password: string } = ALICE,
+): Promise<BegunLogin & { readonly hints: Record<string, unknown> }> {
+	const begun = await beginFirstBinding(app, user);
+	expect(begun.hints.email_proof).toBe(true);
+	const proved = await giveEmailProof(begun.agent, begun.transaction, sender);
+	expect(proved.status, JSON.stringify(proved.body)).toBe(200);
+	return begun;
+}
+
 /** `POST /session/mfa/enrollment` for `kind` on `transaction`. */
 export const beginEnrollment = (
 	agent: Agent,

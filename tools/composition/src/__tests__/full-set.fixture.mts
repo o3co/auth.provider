@@ -244,6 +244,25 @@ export async function removeFactorRecords(
 	return items;
 }
 
+/** RFC 4648 §6 base32, as a TOTP enrollment hands its secret over. */
+export function fromBase32(text: string): Buffer {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+	const bytes: number[] = [];
+	let value = 0;
+	let bits = 0;
+	for (const character of text.replace(/=+$/, "")) {
+		const index = alphabet.indexOf(character);
+		if (index === -1) throw new Error("the enrollment answered a secret that is not base32");
+		value = (value << 5) | index;
+		bits += 5;
+		if (bits >= 8) {
+			bits -= 8;
+			bytes.push((value >>> bits) & 0xff);
+		}
+	}
+	return Buffer.from(bytes);
+}
+
 /**
  * One browser, across the replicas it talks to: every cookie it is handed is
  * sent back, `Secure` ones too, since supertest speaks plain HTTP to what

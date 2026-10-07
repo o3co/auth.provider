@@ -20,7 +20,9 @@
  * counting factor's enrollment on the login's transaction, and
  * `POST /session/mfa/enrollment/complete` takes its proof, then — in this
  * order — consumes the transaction, writes the factor, issues the recovery
- * codes, marks the witness, and resumes the login. What each failure writes,
+ * codes, marks the witness, and resumes the login when the binding counts at
+ * once: one made with the account-email proof. One made without it answers
+ * its factor and codes and establishes no session. What each failure writes,
  * and what it leaves standing.
  */
 
@@ -36,7 +38,7 @@ import {
 	type SessionLifecycleStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
+import { createRecordingMailSender, createTestMfaFactor } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readLongCode } from "#/codes.mjs";
@@ -56,6 +58,7 @@ import {
 	beginEnrollment,
 	beginFirstBinding,
 	beginLogin,
+	beginProvenFirstBinding,
 	completeEnrollment,
 	contributing,
 	cookieSessionTap,
@@ -96,7 +99,7 @@ const recordsOf = async (store: { list(subject: string): Promise<readonly MfaFac
 	Object.fromEntries((await store.list(ALICE.id)).map((record) => [record.kind, record]));
 
 describe("the first login of a subject with no factor", () => {
-	it("binds TOTP and gets its recovery codes: the codes answered once, the factor and the codes written, the session established with the second factor", async () => {
+	it("binds TOTP and gets its recovery codes without the account-email proof: the codes answered once, the factor and the codes written, and no session established — the factor counts from the next sign-in", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const audit = recordingAuditSink();
 		const { app, handle, userSessionStore, transactionStore } = await boot({
@@ -126,7 +129,6 @@ describe("the first login of a subject with no factor", () => {
 		expect(done.status).toBe(200);
 		expect(done.headers["cache-control"]).toBe("no-store");
 		expect(done.body).toEqual({
-			message: "Logged in successfully",
 			factor: { id: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/), kind: "totp" },
 			recovery_codes: expect.any(Array),
 		});
@@ -135,7 +137,7 @@ describe("the first login of a subject with no factor", () => {
 		for (const code of codes) expect(code).toMatch(SHOWN);
 		const guard = handle.components.csrfGuard;
 		if (guard === undefined) throw new Error("the composition holds no CSRF guard");
-		expect(setsCsrfToken(done, guard)).toBe(true);
+		expect(setsCsrfToken(done, guard)).toBe(false);
 
 		const records = await recordsOf(factorStore);
 		expect(Object.keys(records).sort()).toEqual(["recovery_code", "totp"]);
@@ -163,12 +165,7 @@ describe("the first login of a subject with no factor", () => {
 		expect(JSON.stringify(recovery.data)).not.toContain(codes[0] as string);
 
 		expect(await transactionStore.get(transaction)).toBeNull();
-		expect(create).toHaveBeenCalledTimes(1);
-		expect(create.mock.calls[0]?.[0]).toMatchObject({
-			sub: ALICE.id,
-			amr: ["pwd", "otp", "mfa"],
-			authentication: { primary: "pwd", mfaAt: new Date(T0) },
-		});
+		expect(create).not.toHaveBeenCalled();
 
 		expect(audit.of("mfa.factor.enrolled")).toEqual([
 			expect.objectContaining({
@@ -194,6 +191,7 @@ describe("the first login of a subject with no factor", () => {
 	});
 
 	it("writes in this order: the transaction consumed, the factor, the recovery codes, the witness marked, the session, then the codes marked shown", async () => {
+		const sender = createRecordingMailSender();
 		const calls: string[] = [];
 		const transactions = createMemoryMfaTransactionStore();
 		const factors = createMemoryMfaFactorStore();
@@ -232,8 +230,9 @@ describe("the first login of a subject with no factor", () => {
 				},
 			} as UserSessionStore,
 			userRepository: directory,
+			mailSender: sender,
 		});
-		const { agent, transaction } = await beginFirstBinding(app);
+		const { agent, transaction } = await beginProvenFirstBinding(app, sender);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 
 		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
@@ -524,7 +523,7 @@ describe("a first binding that races or fails part-way", () => {
 		]);
 	});
 
-	it("keeps the binding when the codes cannot be written after the factor was: the answer says none were issued, one error line, no codes event", async () => {
+	it("keeps the binding when the codes cannot be written after the factor was: the answer says none were issued, one error line, no codes event, no session", async () => {
 		const factors = createMemoryMfaFactorStore();
 		const audit = recordingAuditSink();
 		const { app, logger, userSessionStore } = await boot({
@@ -546,7 +545,6 @@ describe("a first binding that races or fails part-way", () => {
 
 		expect(done.status).toBe(200);
 		expect(done.body).toEqual({
-			message: "Logged in successfully",
 			factor: { id: expect.any(String), kind: "totp" },
 			recovery_codes_issued: false,
 		});
@@ -558,7 +556,7 @@ describe("a first binding that races or fails part-way", () => {
 		expect((await factors.list(ALICE.id)).map((record) => record.kind)).toEqual(["totp"]);
 		expect(audit.of("mfa.factor.enrolled")).toHaveLength(1);
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
-		expect(create).toHaveBeenCalledTimes(1);
+		expect(create).not.toHaveBeenCalled();
 	});
 
 	it("answers 503 once when the factor cannot be written, the transaction spent, and no session written", async () => {
@@ -592,13 +590,15 @@ describe("a first binding that races or fails part-way", () => {
 	it("answers another requirement that interrupts the resumed login: its 403, the factor bound, and no session written", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const extra = extraRequirement();
+		const sender = createRecordingMailSender();
 		const { app, userSessionStore } = await boot({
 			config: configFor("required", {}, {}, ["mfa", extra.name]),
 			factorStore,
 			extraModules: [extra.module],
+			mailSender: sender,
 		});
 		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
-		const { agent, transaction } = await beginFirstBinding(app);
+		const { agent, transaction } = await beginProvenFirstBinding(app, sender);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 
 		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
@@ -635,10 +635,7 @@ describe("a first binding that races or fails part-way", () => {
 		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
 
 		expect(done.status).toBe(200);
-		expect(done.body).toEqual({
-			message: "Logged in successfully",
-			factor: { id: expect.any(String), kind: "totp" },
-		});
+		expect(done.body).toEqual({ factor: { id: expect.any(String), kind: "totp" } });
 		expect((await factorStore.list(ALICE.id)).map((record) => record.kind)).toEqual(["totp"]);
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
 	});
@@ -688,13 +685,15 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 		const factorStore = createMemoryMfaFactorStore();
 		const audit = recordingAuditSink();
 		const extra = extraRequirement();
+		const sender = createRecordingMailSender();
 		const { app } = await boot({
 			config: configFor("required", {}, {}, ["mfa", extra.name]),
 			factorStore,
 			auditSink: audit,
 			extraModules: [extra.module],
+			mailSender: sender,
 		});
-		const { agent, transaction } = await beginFirstBinding(app);
+		const { agent, transaction } = await beginProvenFirstBinding(app, sender);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 
 		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
@@ -711,6 +710,7 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 	it("says a set it could not write once even when another requirement interrupts the resumed login", async () => {
 		const factors = createMemoryMfaFactorStore();
 		const extra = extraRequirement();
+		const sender = createRecordingMailSender();
 		const { app, logger } = await boot({
 			config: configFor("required", {}, {}, ["mfa", extra.name]),
 			factorStore: {
@@ -721,8 +721,9 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 				},
 			},
 			extraModules: [extra.module],
+			mailSender: sender,
 		});
-		const { agent, transaction } = await beginFirstBinding(app);
+		const { agent, transaction } = await beginProvenFirstBinding(app, sender);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 
 		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
@@ -736,9 +737,11 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 	it("leaves the set unshown when core will not resume the login: 401 login_required", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const store = createMemoryMfaTransactionStore();
+		const sender = createRecordingMailSender();
 		const { app } = await boot({
 			config: configFor("required"),
 			factorStore,
+			mailSender: sender,
 			transactionStore: {
 				...store,
 				// Its continuation waits on a requirement this deployment no longer has.
@@ -750,7 +753,7 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 				},
 			},
 		});
-		const { agent, transaction } = await beginFirstBinding(app);
+		const { agent, transaction } = await beginProvenFirstBinding(app, sender);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 
 		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
@@ -765,6 +768,7 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 	it("leaves the set unshown when the session store cannot write the session: 503", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const sessions = createInMemoryUserSessionStore();
+		const sender = createRecordingMailSender();
 		const { app } = await boot({
 			config: configFor("required"),
 			factorStore,
@@ -774,8 +778,9 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 					throw new Error("session store unreachable");
 				},
 			} as UserSessionStore,
+			mailSender: sender,
 		});
-		const { agent, transaction } = await beginFirstBinding(app);
+		const { agent, transaction } = await beginProvenFirstBinding(app, sender);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 
 		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
@@ -791,10 +796,12 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 		const factors = createMemoryMfaFactorStore();
 		const sessions = createInMemoryUserSessionStore();
 		const audit = recordingAuditSink();
+		const sender = createRecordingMailSender();
 		const { app, handle, logger } = await boot({
 			config: configFor("required"),
 			factorStore: factors,
 			auditSink: audit,
+			mailSender: sender,
 			userSessionStore: {
 				...sessions,
 				// Another writer replaces the set while the session is written.
@@ -808,7 +815,7 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 				},
 			} as UserSessionStore,
 		});
-		const { agent, transaction } = await beginFirstBinding(app);
+		const { agent, transaction } = await beginProvenFirstBinding(app, sender);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 
 		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
@@ -1025,7 +1032,7 @@ describe("two transactions of one subject racing the first binding past a lease 
 		};
 	}
 
-	it("lets exactly one bind: the other's factor is never written, 401 login_required, and only the one that stands issues codes, marks the witness, is audited and signs in", async () => {
+	it("lets exactly one bind: the other's factor is never written, 401 login_required, and only the one that stands issues codes, marks the witness and is audited — neither signs in, the binding made without the account-email proof", async () => {
 		const { answers, memory, audit, directory, create, logger } = await racing();
 
 		const records = await memory.list(ALICE.id);
@@ -1042,7 +1049,7 @@ describe("two transactions of one subject racing the first binding past a lease 
 		expect(audit.of("mfa.factor.enrolled")).toHaveLength(1);
 		expect(audit.of("mfa.recovery_codes.generated")).toHaveLength(1);
 		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
-		expect(create).toHaveBeenCalledTimes(1);
+		expect(create).not.toHaveBeenCalled();
 		expect(overruns(logger)).toBe(2);
 	});
 
@@ -1116,15 +1123,22 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 		return { reads, answer, plainSecret };
 	};
 
-	/** Boots with `factor` installed, and alice at her first binding. */
-	async function atFirstBinding(factor: MfaFactor) {
+	/**
+	 * Boots with `factor` installed, and alice at her first binding — with the
+	 * account-email proof given when `proven`, so the binding completes the login.
+	 */
+	async function atFirstBinding(factor: MfaFactor, proven = false) {
 		const factorStore = createMemoryMfaFactorStore();
+		const sender = createRecordingMailSender();
 		const booted = await boot({
 			config: configFor("required"),
 			factorStore,
 			extraModules: [contributing(factor)],
+			...(proven ? { mailSender: sender } : {}),
 		});
-		const { agent, transaction } = await beginFirstBinding(booted.app);
+		const { agent, transaction } = proven
+			? await beginProvenFirstBinding(booted.app, sender)
+			: await beginFirstBinding(booted.app);
 		return { ...booted, factorStore, agent, transaction };
 	}
 
@@ -1305,10 +1319,13 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 			},
 		});
 		const base = createTestMfaFactor({ kind: "strict" });
-		const { agent, transaction, userSessionStore } = await atFirstBinding({
-			...base,
-			amrFor: () => shifting,
-		});
+		const { agent, transaction, userSessionStore } = await atFirstBinding(
+			{
+				...base,
+				amrFor: () => shifting,
+			},
+			true,
+		);
 		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
 		const begun = await beginEnrollment(agent, transaction, "strict");
 

@@ -395,8 +395,14 @@ export type MfaEnrollmentCompleteOutcome = (
 			readonly outcome: "enrolled";
 			/** What the login persisted, as the store answered it at consumption. */
 			readonly continuation: PrimaryContinuation | undefined;
-			/** What the binding adds to the login: the factor's `amr`, `mfa` when it adds it, and when. */
-			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
+			/**
+			 * What the binding adds to the login it completes, or to the session it
+			 * is made in: the factor's `amr`, `mfa` when it adds it, and when.
+			 * `undefined` for a binding that counts only from the next sign-in that
+			 * uses its factor (`enrollment.mts`): it completes no login and
+			 * escalates no session.
+			 */
+			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date } | undefined;
 			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
 			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
 			/** A login's set is written unshown: the answer that carries its codes marks it (`show`). */
