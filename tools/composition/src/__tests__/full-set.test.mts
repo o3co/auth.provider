@@ -2036,8 +2036,10 @@ describe("token exchange: an exchanged token reaches none of the capabilities it
 	// (with `family_id` and an allowlisted `azp`) what the federation token
 	// route hands the upstream access token out on. A downstream holder of an
 	// exchanged token must reach none of them. The gateway is registered for
-	// `email` and allowlisted for federation tokens, so nothing but the
-	// missing session capability stands in the way.
+	// `email` and allowlisted for federation tokens. At /userinfo nothing but
+	// the missing session capability stands in the way; the federation
+	// routes refuse the exchanged token before that, as a token the gateway
+	// did not obtain for itself (its `aud` does not contain the gateway).
 
 	const exchangeAsGateway = (app: Express, subjectToken: string, scope?: string) =>
 		request(app)
@@ -2099,7 +2101,7 @@ describe("token exchange: an exchanged token reaches none of the capabilities it
 			.post("/oauth/federation/google/token")
 			.set("Authorization", `Bearer ${exchanged}`);
 		expect(res.status).toBe(401);
-		expect(res.body).toEqual({ error: "invalid_token", error_description: "missing sid claim" });
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
 		expect(res.body.access_token).toBeUndefined();
 	});
 
@@ -2117,7 +2119,7 @@ describe("token exchange: an exchanged token reaches none of the capabilities it
 			.type("form")
 			.send({ state: "s" });
 		expect(res.status).toBe(401);
-		expect(res.body).toEqual({ error: "invalid_token", error_description: "missing sid claim" });
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "invalid token" });
 		expect(await store?.get(sid, "google")).not.toBeNull();
 	});
 });
