@@ -53,6 +53,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { capturing, routerInputsOf, withGrants } from "./_helpers/sections.mjs";
 import {
@@ -343,6 +344,10 @@ describe("oauthAuthorizationGrantsModule — manifest shape", () => {
 		expect(oauthAuthorizationGrantsModule.requires).toContain("oauthTokenSettings");
 		expect(oauthAuthorizationGrantsModule.requires).toContain("tokenBindingSettings");
 	});
+
+	it("requires the grantHandlerResolver the authorization_code grant reads the refresh_token grant from", () => {
+		expect(oauthAuthorizationGrantsModule.requires).toContain("grantHandlerResolver");
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -409,6 +414,74 @@ describe("oauthAuthorizationGrantsModule — createTestApp integration", () => {
 		// it must not be registered under === true opt-in semantics.
 		expect(handle.inspect.grants.has("client_credentials")).toBe(false);
 		await handle.dispose();
+	});
+});
+
+/**
+ * The booted authorization_code grant issues a refresh token only while the
+ * composition registers the refresh_token grant.
+ */
+describe("oauthAuthorizationGrantsModule — the code exchange's refresh token follows the refresh_token grant", () => {
+	const redeemableCodeModule = defineModule({
+		name: "test:redeemable-code-repository",
+		provides: {
+			codeRepository: () =>
+				({
+					...fakeCodeRepository,
+					consumeByCode: async () =>
+						codeRecord({
+							code: "auth-code",
+							client_id: "client1",
+							redirect_uri: "https://rp.example/cb",
+							code_challenge: AUTHORIZE_S256_CHALLENGE,
+							code_challenge_method: "S256",
+						}),
+				}) satisfies CodeRepository,
+		},
+	});
+
+	const exchange = async (refreshToken: boolean) => {
+		const config = withGrants(makeValidAppConfig(), { authorizationCode: true, refreshToken });
+		const handle = await createTestApp({
+			modules: [
+				oauthAuthorizationGrantsModule,
+				clientRepositoryModule,
+				redeemableCodeModule,
+				keyStoreModule,
+				...familyStoreModules,
+			],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, oauthTokenSettings },
+		});
+		try {
+			const grant = handle.inspect.grants.get("authorization_code");
+			if (grant === undefined) throw new Error("the authorization_code grant is not registered");
+			const { result } = await grant.handle({
+				body: {
+					code: "auth-code",
+					redirect_uri: "https://rp.example/cb",
+					code_verifier: AUTHORIZE_CODE_VERIFIER,
+				},
+				session: { user: { id: "u1" } },
+				issuer: "https://auth.example",
+				metadata: {},
+				authenticatedClient: {
+					clientId: "client1",
+					tokenEndpointAuthMethod: "client_secret_basic",
+				},
+			});
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
+			return result.tokens;
+		} finally {
+			await handle.dispose();
+		}
+	};
+
+	it("serves a refresh token with the refresh_token grant on", async () => {
+		expect(await exchange(true)).toHaveProperty("refresh_token", expect.any(String));
+	});
+
+	it("serves none with the refresh_token grant off", async () => {
+		expect(await exchange(false)).not.toHaveProperty("refresh_token");
 	});
 });
 
@@ -928,6 +1001,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 
 		const deps: AuthorizationGrantDeps = {
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			grantHandlerResolver: registeredGrants("refresh_token"),
 			oauthTokenSettings,
 			tokenBindingSettings: createTestTokenBindingSettings(),
 			keyStore,
@@ -980,6 +1054,7 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 		const consumeByCode = vi.fn().mockResolvedValue({ code: "auth-code" });
 		const authDeps: AuthorizationGrantDeps = {
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			grantHandlerResolver: registeredGrants("refresh_token"),
 			oauthTokenSettings,
 			tokenBindingSettings: createTestTokenBindingSettings(),
 			keyStore,
@@ -1041,6 +1116,7 @@ describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 		const consumeByCode = vi.fn().mockResolvedValue(null);
 		const deps: AuthorizationGrantDeps = {
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			grantHandlerResolver: registeredGrants("refresh_token"),
 			oauthTokenSettings,
 			tokenBindingSettings: createTestTokenBindingSettings(),
 			keyStore,

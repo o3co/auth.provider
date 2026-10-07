@@ -52,6 +52,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import { joiningLifecycle, openingLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
@@ -182,6 +183,7 @@ const makeGrant = (opts: {
 		keyStore,
 		codeRepository,
 		clientRepository,
+		grantHandlerResolver: registeredGrants("refresh_token"),
 		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
 			issuer: "https://issuer.test",
 			actions: OAUTH_ADMISSION_ACTIONS,

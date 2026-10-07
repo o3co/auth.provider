@@ -45,6 +45,7 @@ const REQUIRES = [
 	"clientRepository",
 	"keyStore",
 	"sessionRequirementResolver",
+	"grantHandlerResolver",
 	"oauthTokenSettings",
 	"tokenBindingSettings",
 ] as const;

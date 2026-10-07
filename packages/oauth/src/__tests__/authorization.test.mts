@@ -35,6 +35,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
@@ -107,6 +108,7 @@ function makeDeps(
 ) {
 	return {
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+		grantHandlerResolver: registeredGrants("refresh_token"),
 		...grantSettingsFrom(mockConfig),
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {
@@ -833,6 +835,7 @@ describe("createAuthorizationGrant", () => {
 
 			const makeLegacyDeps = (requireS256: boolean, codeData: Record<string, unknown>) => ({
 				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+				grantHandlerResolver: registeredGrants("refresh_token"),
 				...grantSettingsFrom(legacyConfig(requireS256)),
 				keyStore: createSymmetricKeyStore("test-secret"),
 				codeRepository: {
@@ -1170,6 +1173,7 @@ describe("createAuthorizationGrant", () => {
 				codeData: Record<string, unknown>,
 			) => ({
 				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+				grantHandlerResolver: registeredGrants("refresh_token"),
 				...grantSettingsFrom(makePkceConfig(pkce)),
 				keyStore: createSymmetricKeyStore("test-secret"),
 				codeRepository: {
@@ -1288,6 +1292,7 @@ describe("createAuthorizationGrant", () => {
 			) {
 				return {
 					sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+					grantHandlerResolver: registeredGrants("refresh_token"),
 					...grantSettingsFrom(mockConfigWithIssuer),
 					keyStore: createSymmetricKeyStore("test-secret"),
 					codeRepository: {
