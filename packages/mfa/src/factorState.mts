@@ -47,9 +47,10 @@
  *   one the provider cannot read — a TOTP whose key is lost among them — or
  *   whose kind it no longer installs fails closed and asks;
  * - whether a step-up could add `mfa` to a session that lacks it
- *   (`mayAddMfaIn`): a record a transaction offers, of a factor that adds
- *   `mfa`, and for a recovery set one whose codes were answered — a set
- *   never shown is a code nobody holds;
+ *   (`mayAddMfaIn`): a `usable` record, of a factor that adds `mfa`, and
+ *   for a recovery set one whose codes were answered — a set never shown is
+ *   a code nobody holds, and a record the provider cannot read verifies
+ *   nothing now;
  * - every reading that judges a recovery set — the offers, the list, a
  *   step-up's `no_qualifying_factor`, a password login's ask, whether a
  *   step-up could add `mfa` — reads the
@@ -243,17 +244,19 @@ export const holdsUsableIn = (read: MfaSubjectRecords): boolean =>
 	holdsUsableRecord(read.context, read.subject, read.records, { counting: false });
 
 /**
- * Whether the subject `read` holds a record a step-up could add `mfa` with:
- * one a transaction offers (`isOffered`), of a factor that adds `mfa`, and —
- * a recovery-code set — whose codes were answered.
+ * Whether the subject `read` holds a record a step-up could add `mfa` with
+ * now: a `usable` one — so one that does not open, or whose codes' key left
+ * the ring, is not — of a factor that adds `mfa`, and, a recovery-code set,
+ * whose codes were answered.
  */
 export const mayAddMfaIn = (read: MfaSubjectRecords): boolean =>
 	read.records.some((record) => {
 		const state = readFactorRecord(read.context, read.subject, record);
-		if (state.state === "not_installed" || !isOffered(state) || !state.factor.addsMfa) {
-			return false;
-		}
-		return !("data" in state) || recoverySetShown(state.factor, state.data) !== false;
+		return (
+			state.state === "usable" &&
+			state.factor.addsMfa &&
+			recoverySetShown(state.factor, state.data) !== false
+		);
 	});
 
 /**

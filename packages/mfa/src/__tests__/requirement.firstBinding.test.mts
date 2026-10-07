@@ -60,6 +60,7 @@ import {
 	FIRST_BINDING_MARK,
 	factorRecord,
 	factorStoreHolding,
+	openingFactorRecord,
 	resolverOver,
 	SEALING,
 	stubFactor,
@@ -378,7 +379,7 @@ describe("a subject with no counting factor whose session recorded a witness tha
 
 	it("reads no witness while a record that may count stands — a counting factor, or a kind no installed factor declares — and holds the session to recent MFA: stepped up toward a factor that adds mfa, unmet where none is installed", async () => {
 		for (const [records, withoutIt] of [
-			[[factorRecord(SUBJECT, "totp")], STEP_UP],
+			[[openingFactorRecord(SUBJECT, "totp")], STEP_UP],
 			[[factorRecord(SUBJECT, "retired-kind")], { outcome: "unmet" }],
 		] as const) {
 			const events: AuditEvent[] = [];

@@ -2577,7 +2577,8 @@ admitted as before, an email code verified later in it included. A user
 whose only counting factor is the email factor steps up with a recovery code
 to add another. Where it has none it can use — the recovery-code factor off
 (`MFA_RECOVERY_CODE_FACTOR_ENABLED=false`), a set whose codes were never shown,
-or one whose codes are used up — those actions answer `401 login_required`
+one whose codes are used up, or one whose codes' key left the ring — a session
+that does not hold `mfa` is answered `401 login_required` for those actions
 rather than a step-up, and regenerating the codes is one of them: the way
 out is the operator reset
 ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)),

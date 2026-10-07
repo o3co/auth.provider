@@ -379,7 +379,13 @@ interface AdmitRow {
 }
 
 /** A TOTP factor u-alice holds: a counting factor. */
-const HOLDING_TOTP: MfaFactorRecord[] = [factorRecord("u-alice")];
+/** Alice holding TOTP, its data sealed under the suite's ring so that it opens. */
+const HOLDING_TOTP: MfaFactorRecord[] = [
+	{
+		...factorRecord("u-alice"),
+		data: suiteSealing().sealFactorData({ subject: "u-alice", id: "f-1", kind: "totp" }, {}),
+	},
+];
 
 /** Lists a store might answer for u-alice, each with an entry that is not a record, named. */
 const listsWithAnEntryNotARecord = (): [string, unknown[]][] => {
@@ -933,6 +939,14 @@ describe("admit — credential_change: a session without mfa is stepped up only 
 			{ ...recoverySet(count).data, shown },
 		),
 	});
+	/** Alice's recovery set whose codes are digests under a key the ring does not hold: its data opens. */
+	const recoverySetWithKeyGone = (shown: boolean): MfaFactorRecord => ({
+		...factorRecord("u-alice", "recovery_code", "f-2"),
+		data: suiteSealing().sealFactorData(
+			{ subject: "u-alice", id: "f-2", kind: "recovery_code" },
+			{ codes: [{ keyId: "k-retired-from-the-ring", digest: "AAAA" }], generation: 0, shown },
+		),
+	});
 	const EMAIL = factorRecord("u-alice", "email");
 	const emailSession = () => about(password(["pwd", "email"], minutesAgo(1)), CHANGE);
 
@@ -954,6 +968,21 @@ describe("admit — credential_change: a session without mfa is stepped up only 
 			expected: UNMET,
 		},
 		{
+			row: "the email factor and a set never answered whose codes' key left the ring → unmet",
+			records: [EMAIL, recoverySetWithKeyGone(false)],
+			expected: UNMET,
+		},
+		{
+			row: "the email factor and a set answered whose codes' key left the ring → unmet: its codes verify nothing",
+			records: [EMAIL, recoverySetWithKeyGone(true)],
+			expected: UNMET,
+		},
+		{
+			row: "the email factor and a TOTP whose data does not open → unmet: it verifies nothing now",
+			records: [EMAIL, factorRecord("u-alice", "totp", "f-3")],
+			expected: UNMET,
+		},
+		{
 			row: "the email factor and a recovery set, the recovery-code factor off → unmet",
 			records: [EMAIL, recoverySetRecord(2)],
 			factors: [FACTORS.totp(), FACTORS.email()],
@@ -966,7 +995,7 @@ describe("admit — credential_change: a session without mfa is stepped up only 
 		},
 		{
 			row: "the email factor and TOTP → step_up",
-			records: [EMAIL, factorRecord("u-alice", "totp", "f-3")],
+			records: [EMAIL, ...HOLDING_TOTP],
 			expected: STEP_UP,
 		},
 		{
