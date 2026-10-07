@@ -88,34 +88,67 @@ export interface OutboundFetchSeams {
 export const systemLookup = async (hostname: string): Promise<readonly string[]> =>
 	(await dnsLookup(hostname, { all: true, order: "verbatim" })).map((entry) => entry.address);
 
-/** libuv's own threadpool size when `UV_THREADPOOL_SIZE` does not set one. */
+/** libuv's own threadpool size when `UV_THREADPOOL_SIZE` is not set. */
 const DEFAULT_THREADPOOL_SIZE = 4;
+/** libuv's largest threadpool. */
+const MAX_THREADPOOL_SIZE = 1024;
 
 /**
- * How many host-name resolutions the process may have outstanding, for a
- * threadpool size as `UV_THREADPOOL_SIZE` gives it (an integer from 1 to
- * 1024; anything else reads as libuv's default, 4): two fewer than the
- * threadpool, and at least one. The system resolver runs on that threadpool,
- * which bcrypt and the file system share, and it cannot be cancelled: a
- * lookup the deadline gave up on keeps a thread until it settles. Keeping
- * the bound below the threadpool leaves threads for the rest however slow
- * name resolution gets.
+ * The threadpool size libuv takes from `UV_THREADPOOL_SIZE`, read as libuv
+ * reads it: absent, 4; present, `atoi` — leading white space, a sign and the
+ * digits that follow, anything else 0 — held in an unsigned integer, so 0
+ * reads as 1, and a negative count or one past 1024 as 1024.
  */
-export function lookupCeilingOf(threadpoolSize: string | undefined): number {
-	const raw = (threadpoolSize ?? "").trim();
-	const size = /^\d{1,4}$/.test(raw) ? Number(raw) : Number.NaN;
-	const threads = size >= 1 && size <= 1024 ? size : DEFAULT_THREADPOOL_SIZE;
-	return Math.max(1, threads - 2);
+function threadpoolSizeOf(value: string | undefined): number {
+	if (value === undefined) return DEFAULT_THREADPOOL_SIZE;
+	const [, sign = "", digits = ""] = /^[\t\n\v\f\r ]*([+-]?)(\d*)/.exec(value) ?? [];
+	const count = digits === "" ? 0 : Number(digits);
+	if (count === 0) return 1;
+	if (sign === "-") return MAX_THREADPOOL_SIZE;
+	return Math.min(count, MAX_THREADPOOL_SIZE);
 }
 
 /**
- * How many calls may wait for a place among the outstanding lookups. A call
- * that finds this many already waiting fails with `timeout` at once, without
- * waiting and without starting a lookup: each waiter holds a listener and its
- * call's deadline, so the queue is bounded as the lookups are. Fixed, not
- * configured.
+ * How many host-name resolutions the process may have outstanding, for
+ * `UV_THREADPOOL_SIZE` as the process started with it (see
+ * `threadpoolSizeOf`): two fewer than the threadpool, and at least one. The
+ * system resolver runs on that threadpool, which bcrypt and the file system
+ * share, and it cannot be cancelled: a lookup the deadline gave up on keeps
+ * its thread until it settles. libuv itself runs at most about half its
+ * threads on such slow work, so name resolution alone cannot take every
+ * thread; this bound keeps the backlog of lookups nobody waits for any more
+ * finite, and with the request share ({@link REQUEST_LOOKUP_SHARE}) keeps one
+ * source of URLs from starving another.
+ */
+export function lookupCeilingOf(threadpoolSize: string | undefined): number {
+	return Math.max(1, threadpoolSizeOf(threadpoolSize) - 2);
+}
+
+/**
+ * How many lookups for URLs a request names (`source: "request"`) may be
+ * outstanding at once, within the process's bound, each counted until it
+ * really settles; the rest of the bound is left to URLs from client
+ * registrations. A request's URL is anyone's to choose, a registration's an
+ * operator's: a caller who aims requests at a resolver that never answers
+ * holds this one place and no other. When the bound is a single place, the
+ * share is none, and a request's lookup fails with `timeout` at once.
+ */
+export const REQUEST_LOOKUP_SHARE = 1;
+
+/**
+ * How many calls may wait for a place among the outstanding lookups, across
+ * the process. A call that finds this many already waiting fails with
+ * `timeout` at once, without waiting and without starting a lookup: each
+ * waiter holds a listener and its call's deadline, so the queue is bounded as
+ * the lookups are. Fixed, not configured.
  */
 export const MAX_WAITING_LOOKUPS = 64;
+
+/**
+ * How many of the {@link MAX_WAITING_LOOKUPS} may be calls for URLs a
+ * request names; the rest stay free for registrations to wait in.
+ */
+export const MAX_REQUEST_WAITING_LOOKUPS = 48;
 
 /** No place among the outstanding lookups, and no room to wait for one. */
 class LookupsSaturated extends Error {}
@@ -286,67 +319,117 @@ const untilAborted = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 export type LookupPermits = (
 	lookup: OutboundFetchSeams["lookup"],
 	hostname: string,
+	source: OutboundUrlSource,
 	signal: AbortSignal,
 ) => Promise<readonly string[]>;
 
+interface LookupWaiter {
+	/** Arrival order across both sources. */
+	readonly arrival: number;
+	readonly grant: () => void;
+}
+
 /**
- * A pool of places for outstanding lookups, bounded at `max`,
- * with at most `maxWaiting` calls waiting for a place. A permit is taken
- * before a lookup starts and given back only when the lookup settles; a
- * waiter is handed the permit directly, in arrival order. The waiters are a
- * `Set`, which iterates in insertion order and drops a cancelled one in
- * constant time.
+ * A pool of `max` places for outstanding lookups, of which a request's URL
+ * may hold {@link REQUEST_LOOKUP_SHARE} (none when `max` is 1), with at most
+ * `maxWaiting` calls waiting, `maxRequestWaiting` of them for a request's
+ * URL. A place is taken before a lookup starts and given back only when the
+ * lookup settles. A freed place goes to the longest-waiting call that may
+ * take it: a request's call waits on while the request share is full, and a
+ * registration's call behind it goes first. Each source's waiters are a
+ * `Set`, which keeps arrival order and drops a cancelled one in constant time.
  */
-export function createLookupPermits(max: number, maxWaiting: number): LookupPermits {
+export function createLookupPermits(
+	max: number,
+	maxWaiting = MAX_WAITING_LOOKUPS,
+	maxRequestWaiting = MAX_REQUEST_WAITING_LOOKUPS,
+): LookupPermits {
+	const requestShare = max >= 2 ? REQUEST_LOOKUP_SHARE : 0;
 	let outstanding = 0;
-	const waiters = new Set<() => void>();
-	const release = (): void => {
-		const next = waiters.values().next();
-		if (next.done === true) {
-			outstanding -= 1;
-			return;
+	let requestOutstanding = 0;
+	let arrivals = 0;
+	const waiting: Record<OutboundUrlSource, Set<LookupWaiter>> = {
+		registration: new Set(),
+		request: new Set(),
+	};
+	const mayStart = (source: OutboundUrlSource): boolean =>
+		outstanding < max && (source === "registration" || requestOutstanding < requestShare);
+	const take = (source: OutboundUrlSource): void => {
+		outstanding += 1;
+		if (source === "request") requestOutstanding += 1;
+	};
+	const firstOf = (source: OutboundUrlSource): LookupWaiter | undefined =>
+		mayStart(source) ? waiting[source].values().next().value : undefined;
+	/** Hands free places to the longest-waiting calls that may take them. */
+	const dispatch = (): void => {
+		for (;;) {
+			const registration = firstOf("registration");
+			const request = firstOf("request");
+			const source: OutboundUrlSource | undefined =
+				request !== undefined &&
+				(registration === undefined || request.arrival < registration.arrival)
+					? "request"
+					: registration !== undefined
+						? "registration"
+						: undefined;
+			if (source === undefined) return;
+			const next = (source === "request" ? request : registration) as LookupWaiter;
+			waiting[source].delete(next);
+			take(source);
+			next.grant();
 		}
-		waiters.delete(next.value);
-		next.value();
+	};
+	const release = (source: OutboundUrlSource): void => {
+		outstanding -= 1;
+		if (source === "request") requestOutstanding -= 1;
+		dispatch();
 	};
 	/**
-	 * A permit; `signal`'s reason once it aborts first, or `LookupsSaturated`
-	 * when no one more may wait. No permit is held in either case.
+	 * A place; `signal`'s reason once it aborts first, or `LookupsSaturated`
+	 * when the source has no share or no one more may wait. No place is held
+	 * in either case.
 	 */
-	const acquire = (signal: AbortSignal): Promise<void> => {
+	const acquire = (source: OutboundUrlSource, signal: AbortSignal): Promise<void> => {
 		signal.throwIfAborted();
-		if (outstanding < max) {
-			outstanding += 1;
+		if (source === "request" && requestShare === 0) throw new LookupsSaturated();
+		// A free place this source may take means no call of its own waits for one.
+		if (mayStart(source)) {
+			take(source);
 			return Promise.resolve();
 		}
-		if (waiters.size >= maxWaiting) throw new LookupsSaturated();
+		const queued = waiting.registration.size + waiting.request.size;
+		if (
+			queued >= maxWaiting ||
+			(source === "request" && waiting.request.size >= maxRequestWaiting)
+		) {
+			throw new LookupsSaturated();
+		}
 		return new Promise<void>((resolve, reject) => {
+			const waiter: LookupWaiter = {
+				arrival: arrivals++,
+				grant: () => {
+					signal.removeEventListener("abort", onAbort);
+					resolve();
+				},
+			};
 			const onAbort = () => {
-				waiters.delete(granted);
+				waiting[source].delete(waiter);
 				reject(signal.reason);
 			};
-			const granted = () => {
-				signal.removeEventListener("abort", onAbort);
-				resolve();
-			};
-			waiters.add(granted);
+			waiting[source].add(waiter);
 			signal.addEventListener("abort", onAbort, { once: true });
 		});
 	};
 	/**
-	 * `lookup(hostname)` under a permit, or `signal`'s reason with no lookup
-	 * started. The permit is given back when the lookup settles, however long
+	 * `lookup(hostname)` under a place, or `signal`'s reason with no lookup
+	 * started. The place is given back when the lookup settles, however long
 	 * after the call stopped waiting for it.
 	 */
-	return async (
-		lookup: OutboundFetchSeams["lookup"],
-		hostname: string,
-		signal: AbortSignal,
-	): Promise<readonly string[]> => {
-		await acquire(signal);
+	return async (lookup, hostname, source, signal) => {
+		await acquire(source, signal);
 		if (signal.aborted) {
-			// Handed a permit after the deadline: no lookup is started on it.
-			release();
+			// Handed a place after the deadline: no lookup is started on it.
+			release(source);
 			throw signal.reason;
 		}
 		let looking: Promise<readonly string[]>;
@@ -355,7 +438,8 @@ export function createLookupPermits(max: number, maxWaiting: number): LookupPerm
 		} catch (err) {
 			looking = Promise.reject(err);
 		}
-		looking.then(release, release);
+		const settled = () => release(source);
+		looking.then(settled, settled);
 		return looking;
 	};
 }
@@ -365,10 +449,7 @@ export function createLookupPermits(max: number, maxWaiting: number): LookupPerm
  * pool for the process: `UV_THREADPOOL_SIZE` is read once, here, as libuv
  * reads it once at its first use of the threadpool.
  */
-const processLookups = createLookupPermits(
-	lookupCeilingOf(process.env.UV_THREADPOOL_SIZE),
-	MAX_WAITING_LOOKUPS,
-);
+const processLookups = createLookupPermits(lookupCeilingOf(process.env.UV_THREADPOOL_SIZE));
 
 /** The answer's body, read whole under `cap`; a refusal past it. */
 async function readBody(
@@ -553,7 +634,7 @@ export function buildOutboundFetch(
 				addresses = [destination.literal];
 			} else {
 				const resolving = seams
-					.lookups(seams.lookup, destination.url.hostname, signal)
+					.lookups(seams.lookup, destination.url.hostname, source, signal)
 					.catch((err: unknown) => {
 						if (err instanceof LookupsSaturated) {
 							throw new OutboundFetchError("timeout", destination.host);

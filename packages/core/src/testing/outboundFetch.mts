@@ -26,7 +26,6 @@ import {
 	buildOutboundFetch,
 	createLookupPermits,
 	lookupCeilingOf,
-	MAX_WAITING_LOOKUPS,
 	type OutboundFetchOptions,
 	systemLookup,
 } from "../net/outbound-fetch.mjs";
@@ -59,10 +58,7 @@ export function createOutboundFetchForTesting(
 	const { lookup, transport, ...rest } = options;
 	return buildOutboundFetch(rest, {
 		lookup: lookup ?? systemLookup,
-		lookups: createLookupPermits(
-			lookupCeilingOf(process.env.UV_THREADPOOL_SIZE),
-			MAX_WAITING_LOOKUPS,
-		),
+		lookups: createLookupPermits(lookupCeilingOf(process.env.UV_THREADPOOL_SIZE)),
 		transport: transport ?? nodeTransport,
 	});
 }

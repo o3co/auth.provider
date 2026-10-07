@@ -29,8 +29,16 @@ const resolver = vi.hoisted(() => ({
 }));
 
 vi.mock("node:dns/promises", () => ({
+	// A name under `rp-` answers a loopback address at once, which the policy
+	// refuses after resolving, so nothing is connected to; every other name
+	// stays outstanding until the test fails it.
 	lookup: (hostname: string) =>
-		new Promise((_resolve, reject) => {
+		new Promise((resolve, reject) => {
+			if (hostname.startsWith("rp-")) {
+				resolver.started.push(hostname);
+				resolve([{ address: "127.0.0.1", family: 4 }]);
+				return;
+			}
 			resolver.started.push(hostname);
 			resolver.fail.push(() =>
 				reject(Object.assign(new Error("not found"), { code: "ENOTFOUND" })),
@@ -70,9 +78,9 @@ afterEach(() => {
 });
 
 describe("the process-wide pool of lookups", () => {
-	it("is shared by separately built fetches: two below the default threadpool of 4", async () => {
+	it("is shared by separately built fetches: two below the default threadpool of 4, for registrations", async () => {
 		const { createOutboundFetch } = await loadWith(undefined);
-		const build = () => createOutboundFetch({ config: {}, source: "request", timeoutMs: 50 });
+		const build = () => createOutboundFetch({ config: {}, source: "registration", timeoutMs: 50 });
 		const first = build();
 		const second = build();
 		const reasons = await Promise.all([
@@ -101,8 +109,8 @@ describe("the process-wide pool of lookups", () => {
 	it("is sized from UV_THREADPOOL_SIZE, read when the module loads", async () => {
 		const { createOutboundFetch } = await loadWith("8");
 		vi.stubEnv("UV_THREADPOOL_SIZE", "64");
-		const first = createOutboundFetch({ config: {}, source: "request", timeoutMs: 50 });
-		const second = createOutboundFetch({ config: {}, source: "request", timeoutMs: 50 });
+		const first = createOutboundFetch({ config: {}, source: "registration", timeoutMs: 50 });
+		const second = createOutboundFetch({ config: {}, source: "registration", timeoutMs: 50 });
 		await Promise.all(
 			Array.from({ length: 10 }, (_, i) =>
 				reasonOf((i % 2 === 0 ? first : second)(`https://h${i}.example/doc`)),
@@ -113,11 +121,37 @@ describe("the process-wide pool of lookups", () => {
 
 	it("keeps at least one place when the threadpool is that small", async () => {
 		const { createOutboundFetch } = await loadWith("2");
-		const fetch = createOutboundFetch({ config: {}, source: "request", timeoutMs: 50 });
+		const fetch = createOutboundFetch({ config: {}, source: "registration", timeoutMs: 50 });
 		await Promise.all([
 			reasonOf(fetch("https://one.example/doc")),
 			reasonOf(fetch("https://two.example/doc")),
 		]);
 		expect(resolver.started).toEqual(["one.example"]);
+	});
+
+	it("keeps a place for registrations however many request lookups are left outstanding", async () => {
+		const { createOutboundFetch } = await loadWith(undefined);
+		const documents = createOutboundFetch({ config: {}, source: "request", timeoutMs: 50 });
+		const jwks = createOutboundFetch({ config: {}, source: "registration", timeoutMs: 50 });
+		const reasons = await Promise.all(
+			Array.from({ length: 6 }, (_, i) => reasonOf(documents(`https://doc${i}.example/c.json`))),
+		);
+		expect(reasons.every((reason) => reason === "timeout")).toBe(true);
+		expect(resolver.started).toEqual(["doc0.example"]);
+		// Resolved and checked: the loopback answer is refused, so nothing is connected to.
+		expect(await reasonOf(jwks("https://rp-a.example/jwks"))).toBe("special_use_address");
+		expect(await reasonOf(jwks("https://rp-b.example/jwks"))).toBe("special_use_address");
+		expect(resolver.started).toEqual(["doc0.example", "rp-a.example", "rp-b.example"]);
+	});
+
+	it("gives requests no share when the pool has one place, so a registration always has it", async () => {
+		const { createOutboundFetch } = await loadWith("3");
+		const documents = createOutboundFetch({ config: {}, source: "request", timeoutMs: 5_000 });
+		const jwks = createOutboundFetch({ config: {}, source: "registration", timeoutMs: 50 });
+		const begun = Date.now();
+		expect(await reasonOf(documents("https://doc.example/c.json"))).toBe("timeout");
+		expect(Date.now() - begun).toBeLessThan(1_000);
+		expect(await reasonOf(jwks("https://rp-a.example/jwks"))).toBe("special_use_address");
+		expect(resolver.started).toEqual(["rp-a.example"]);
 	});
 });

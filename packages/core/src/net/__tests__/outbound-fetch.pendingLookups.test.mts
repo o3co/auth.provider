@@ -23,7 +23,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	buildOutboundFetch,
+	createLookupPermits,
 	lookupCeilingOf,
+	MAX_REQUEST_WAITING_LOOKUPS,
 	MAX_WAITING_LOOKUPS as OUTBOUND_MAX_WAITING_LOOKUPS,
 } from "#/net/outbound-fetch.mjs";
 import type { OutboundTransport } from "#/net/outbound-transport.mjs";
@@ -96,7 +99,7 @@ const fetchOver = (
 ) =>
 	createOutboundFetchForTesting({
 		config: {},
-		source: "request",
+		source: "registration",
 		lookup,
 		transport,
 		timeoutMs,
@@ -126,19 +129,25 @@ const reasonOf = async (promise: Promise<unknown>): Promise<string> => {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("outstanding host-name resolutions", () => {
-	it("is bounded two below the threadpool size UV_THREADPOOL_SIZE states, and at least one", () => {
+	it("is bounded two below the threadpool size, read from UV_THREADPOOL_SIZE as libuv reads it", () => {
+		// Absent: libuv's default of 4.
 		expect(lookupCeilingOf(undefined)).toBe(2);
-		expect(lookupCeilingOf("")).toBe(2);
-		expect(lookupCeilingOf("4")).toBe(2);
+		// Present: atoi — leading digits, else 0 — then 0 reads as 1 and past 1024 as 1024.
+		expect(lookupCeilingOf("")).toBe(1);
+		expect(lookupCeilingOf("0")).toBe(1);
+		expect(lookupCeilingOf("four")).toBe(1);
+		expect(lookupCeilingOf("8abc")).toBe(6);
+		expect(lookupCeilingOf(" 8")).toBe(6);
+		expect(lookupCeilingOf("+8")).toBe(6);
+		expect(lookupCeilingOf("4.9")).toBe(2);
+		expect(lookupCeilingOf("2000")).toBe(1022);
+		expect(lookupCeilingOf("1024")).toBe(1022);
 		expect(lookupCeilingOf("16")).toBe(14);
-		expect(lookupCeilingOf(" 8 ")).toBe(6);
 		expect(lookupCeilingOf("3")).toBe(1);
 		expect(lookupCeilingOf("2")).toBe(1);
 		expect(lookupCeilingOf("1")).toBe(1);
-		expect(lookupCeilingOf("1024")).toBe(1022);
-		for (const unread of ["0", "1025", "-4", "4.5", "1e2", "four", "0x10"]) {
-			expect(lookupCeilingOf(unread)).toBe(2);
-		}
+		// A negative count is a huge unsigned one to libuv, so it is clamped to 1024.
+		expect(lookupCeilingOf("-4")).toBe(1022);
 	});
 
 	it("keeps a resolution the deadline gave up on counted, so the next call starts none and times out", async () => {
@@ -386,5 +395,122 @@ describe("outstanding host-name resolutions", () => {
 			expect(await reasonOf(fetch(`https://rp${i}.example/doc`))).toBe("resolution_failed");
 		}
 		expect(calls).toBe(OUTBOUND_MAX_PENDING_LOOKUPS + 2);
+	});
+});
+
+describe("the share of lookups for URLs a request names", () => {
+	/** A request-source fetch and a registration-source fetch over one pool of `max` places. */
+	const overOnePool = (
+		max: number,
+		lookup: (hostname: string) => Promise<readonly string[]>,
+		timeoutMs = 50,
+	) => {
+		const lookups = createLookupPermits(max);
+		const build = (source: "request" | "registration") =>
+			buildOutboundFetch(
+				{ config: {}, source, timeoutMs },
+				{ lookup, lookups, transport: ok },
+			) as typeof globalThis.fetch;
+		return { request: build("request"), registration: build("registration") };
+	};
+
+	it("is one lookup outstanding, counted until it settles, whatever the pool", async () => {
+		const resolver = heldResolver();
+		const { request } = overOnePool(14, resolver.lookup);
+		const reasons = await Promise.all(
+			Array.from({ length: 10 }, (_, i) => reasonOf(request(`https://doc${i}.example/c.json`))),
+		);
+		expect(reasons.every((reason) => reason === "timeout")).toBe(true);
+		expect(resolver.held).toHaveLength(1);
+		resolver.held[0]?.release();
+		await flush();
+		const next = request("https://after.example/c.json");
+		await flush();
+		expect(resolver.held.at(-1)?.hostname).toBe("after.example");
+		resolver.held.at(-1)?.release();
+		await expect(next).resolves.toHaveProperty("status", 200);
+	});
+
+	it("leaves the rest of the pool to registrations: lookups nobody waits for no longer starve them", async () => {
+		const blackhole = heldResolver();
+		const { request, registration } = overOnePool(2, (hostname) =>
+			hostname.startsWith("doc") ? blackhole.lookup(hostname) : Promise.resolve([PUBLIC_V4]),
+		);
+		await Promise.all([
+			reasonOf(request("https://doc1.example/c.json")),
+			reasonOf(request("https://doc2.example/c.json")),
+		]);
+		expect(blackhole.outstanding()).toBe(1);
+		await expect(registration("https://rp.example/jwks")).resolves.toHaveProperty("status", 200);
+		await expect(registration("https://rp2.example/jwks")).resolves.toHaveProperty("status", 200);
+	});
+
+	it("hands a freed place to a waiting registration ahead of a request whose share is full", async () => {
+		const resolver = heldResolver();
+		const { request, registration } = overOnePool(2, resolver.lookup, 5_000);
+		const r1 = request("https://r1.example/c.json");
+		const g1 = registration("https://g1.example/jwks");
+		await flush();
+		const r2 = request("https://r2.example/c.json");
+		const g2 = registration("https://g2.example/jwks");
+		await flush();
+		expect(resolver.held.map((h) => h.hostname)).toEqual(["r1.example", "g1.example"]);
+
+		resolver.held[1]?.release(); // g1 settles: r2 arrived first, but the request share is full
+		await expect(g1).resolves.toHaveProperty("status", 200);
+		await flush();
+		expect(resolver.held.at(-1)?.hostname).toBe("g2.example");
+
+		resolver.held[0]?.release(); // r1 settles: now r2 may go
+		await expect(r1).resolves.toHaveProperty("status", 200);
+		await flush();
+		expect(resolver.held.at(-1)?.hostname).toBe("r2.example");
+		for (const h of resolver.held) h.release();
+		await Promise.all([r2, g2]);
+	});
+
+	it("bounds the requests waiting below the whole queue, keeping room for registrations to wait", async () => {
+		expect(MAX_REQUEST_WAITING_LOOKUPS).toBe(48);
+		const resolver = heldResolver();
+		const { request, registration } = overOnePool(2, resolver.lookup, 5_000);
+		const held = [request("https://r0.example/c.json"), registration("https://g0.example/jwks")];
+		await flush();
+		const waitingRequests = Array.from({ length: MAX_REQUEST_WAITING_LOOKUPS }, (_, i) =>
+			request(`https://wait${i}.example/c.json`),
+		);
+		for (const call of waitingRequests) call.catch(() => undefined);
+		await flush();
+		const begun = Date.now();
+		expect(await reasonOf(request("https://over.example/c.json"))).toBe("timeout");
+		expect(Date.now() - begun).toBeLessThan(1_000);
+
+		// A registration still waits for a place rather than failing.
+		const queued = registration("https://g1.example/jwks");
+		await flush();
+		resolver.held[1]?.release();
+		await flush();
+		expect(resolver.held.at(-1)?.hostname).toBe("g1.example");
+		for (let i = 0; i < 60; i += 1) {
+			for (const h of resolver.held) h.release();
+			await flush();
+		}
+		await Promise.all([...held, ...waitingRequests, queued]);
+	});
+
+	it("is none when the pool has one place: a request fails with timeout at once, a registration resolves", async () => {
+		const resolver = heldResolver();
+		const { request, registration } = overOnePool(
+			1,
+			async (hostname) => {
+				resolver.held.push({ hostname, release: () => undefined, fail: () => undefined });
+				return [PUBLIC_V4];
+			},
+			5_000,
+		);
+		const begun = Date.now();
+		expect(await reasonOf(request("https://doc.example/c.json"))).toBe("timeout");
+		expect(Date.now() - begun).toBeLessThan(1_000);
+		await expect(registration("https://rp.example/jwks")).resolves.toHaveProperty("status", 200);
+		expect(resolver.held.map((h) => h.hostname)).toEqual(["rp.example"]);
 	});
 });
