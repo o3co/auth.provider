@@ -77,11 +77,6 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	accessTokenDenylist?: AccessTokenDenylist;
 	subjectRevocation?: SubjectRevocation;
 	issuer: string;
-	/**
-	 * When true, the central JWT verifier accepts tokens without a `typ` header and
-	 * warns `jwt_verify_legacy_typ`. Default `false`: typ-less tokens are rejected.
-	 */
-	legacyTypAccept?: boolean;
 	logger?: Logger;
 	/**
 	 * Not an option: the grant checks the refresh-token family (see the
@@ -123,8 +118,7 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
 ): ExchangeTokenValidator {
-	const { keyStore, accessTokenDenylist, subjectRevocation, issuer, legacyTypAccept, logger } =
-		options;
+	const { keyStore, accessTokenDenylist, subjectRevocation, issuer, logger } = options;
 	if ("refreshTokenFamilyRevocation" in options) {
 		throw new Error(
 			"createSelfIssuedAccessTokenValidator: refreshTokenFamilyRevocation is not an option. The validator does not check the refresh-token family; createTokenExchangeGrant does, given refreshTokenFamilyRevocation in its own dependencies. A caller using this validator outside createTokenExchangeGrant must check ValidatedToken.familyId itself and refuse the token when it has no family store.",
@@ -150,7 +144,6 @@ export function createSelfIssuedAccessTokenValidator(
 				const verified = await verifyJwt(token, keyStore, {
 					type: "access_token",
 					expectedIssuer: issuer,
-					legacyTypAccept: legacyTypAccept ?? false,
 					// A revoked subject_token must not be exchangeable for a fresh token.
 					revocation: { denylist: accessTokenDenylist, subjectRevocation },
 					logger,

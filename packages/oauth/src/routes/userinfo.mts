@@ -61,13 +61,6 @@ export interface UserinfoRouterOptions {
 	subjectRevocation?: SubjectRevocation;
 	/** Configured issuer — pinned by the central verifier. */
 	issuer?: string;
-	/**
-	 * When true, accept tokens whose `typ` header is absent (a
-	 * `jwt_verify_legacy_typ` deprecation warning is emitted). Default
-	 * `false` (typ-less tokens rejected); `true` is an explicit
-	 * legacy-acceptance opt-in.
-	 */
-	legacyTypAccept?: boolean;
 	logger?: Logger;
 }
 
@@ -118,7 +111,6 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			const verified = await verifyJwt(token, opts.keyStore, {
 				type: "access_token",
 				expectedIssuer: opts.issuer ?? "",
-				legacyTypAccept: opts.legacyTypAccept ?? false,
 				// Token-accepting surface — forward what the composition
 				// wired, jti denylist and subject watermark both.
 				revocation: {

@@ -101,7 +101,6 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	KEY_STORE_LOCAL_PRIVATE_KEY_PATH: "./config/jwt-private.pem",
 	KEY_STORE_LOCAL_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\nMCo=\n-----END PUBLIC KEY-----",
 	KEY_STORE_LOCAL_PUBLIC_KEY_PATH: "./config/jwt-public.pem",
-	OAUTH_JWT_LEGACY_TYP_ACCEPT: "true",
 
 	// --- oauth tokens / policy ----------------------------------------
 	OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "900",
@@ -314,6 +313,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
  */
 const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 	OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS:
+		"the variable of a removed key, and only captured — any value fails boot",
+	OAUTH_JWT_LEGACY_TYP_ACCEPT:
 		"the variable of a removed key, and only captured — any value fails boot",
 	OAUTH_ACCESS_TOKEN_EXPIRES_IN:
 		"renamed OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN, and only captured — set at any value, beside its new name or not, it fails boot",
@@ -767,7 +768,6 @@ describe("the shipped config boots with every documented override supplied as a 
 		// Each of these arrives from HOCON as a string. A leftover string is
 		// not a cosmetic defect: `=== true` is how the runtime reads them.
 		expect(sessionStoreSection(config).secure).toBe(false);
-		expect(oauthSection(config).jwt.legacyTypAccept).toBe(true);
 		expect(oauthSection(config).requireEmailVerified).toBe(true);
 		expect(oauthSection(config).resourceIndicator?.enabled).toBe(true);
 		expect(config.core?.federations?.google?.enabled).toBe(true);
@@ -1106,14 +1106,6 @@ describe("the shipped config boots with every documented override supplied as a 
 				});
 				expect(sessionStoreSection(config).secure).toBe(expected);
 			});
-
-			it(`OAUTH_JWT_LEGACY_TYP_ACCEPT=${JSON.stringify(supplied)} resolves to ${expected}`, async () => {
-				const config = await bootParsed({
-					...DOCUMENTED_ENV,
-					OAUTH_JWT_LEGACY_TYP_ACCEPT: supplied,
-				});
-				expect(oauthSection(config).jwt.legacyTypAccept).toBe(expected);
-			});
 		}
 
 		it("refuses a spelling it does not recognise rather than guessing", async () => {
@@ -1183,6 +1175,15 @@ describe("the shipped config boots with every documented override supplied as a 
 			});
 			await expect(booting).rejects.toMatchObject({ reason: "environment-variable-renamed" });
 			await expect(booting).rejects.toThrow(/oauth\.authorize\.allowUnmarkedClients/);
+		});
+
+		it("refuses OAUTH_JWT_LEGACY_TYP_ACCEPT as the variable of a removed key, naming oauth.jwt.legacyTypAccept and the upgrade guide", async () => {
+			for (const value of ["true", "false"]) {
+				const booting = bootParsed({ ...DOCUMENTED_ENV, OAUTH_JWT_LEGACY_TYP_ACCEPT: value });
+				await expect(booting).rejects.toMatchObject({ reason: "environment-variable-renamed" });
+				await expect(booting).rejects.toThrow(/oauth\.jwt\.legacyTypAccept/);
+				await expect(booting).rejects.toThrow(/docs\/upgrading-from-v0\.16\.0\.md/);
+			}
 		});
 
 		it("refuses an access-token default above the max, naming both keys", async () => {

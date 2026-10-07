@@ -25,8 +25,9 @@
  * variable, refuse boot as removed. The refresh grant's unknown-family policy
  * is removed at both paths, `oauth-authorization.grants.refreshToken` and
  * `oauth.refreshToken`, with both variables; `legacyRtPolicy`,
- * `legacyTokenCompat` and `oauth.authorize.allowUnmarkedClients` refuse boot
- * as removed. The access-token default is `oauth.accessToken.defaultExpiresIn`
+ * `legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients` and
+ * `oauth.jwt.legacyTypAccept` refuse boot as removed, and so do the variables
+ * of the last two. The access-token default is `oauth.accessToken.defaultExpiresIn`
  * alone: `oauth.accessToken.expiresIn` refuses boot as moved there, and its
  * variable as renamed.
  */
@@ -192,6 +193,7 @@ describe("the package's config/reference.conf", () => {
 		"ENDPOINTS_CONSENT_URL",
 		"OAUTH_CIMD_ENABLED",
 		"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS",
+		"OAUTH_JWT_LEGACY_TYP_ACCEPT",
 		"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
 	])("binds %s in its capture alone", (variable) => {
 		expect(bindings().filter((binding) => binding.startsWith(`${variable} `))).toEqual([
@@ -201,7 +203,7 @@ describe("the package's config/reference.conf", () => {
 });
 
 describe("the paths the settings moved from, on the manifests", () => {
-	it("oauth: the consent page from endpoints.consent.url, the access-token default from oauth.accessToken.expiresIn with its variable, legacyRtPolicy, legacyTokenCompat and allowUnmarkedClients removed with allowUnmarkedClients' variable, and the Client ID Metadata Documents' variables renamed in place", () => {
+	it("oauth: the consent page from endpoints.consent.url, the access-token default from oauth.accessToken.expiresIn with its variable, legacyRtPolicy, legacyTokenCompat, allowUnmarkedClients and jwt.legacyTypAccept removed with the variables of the last two, and the Client ID Metadata Documents' variables renamed in place", () => {
 		const section = everyModule()[0]?.section;
 		expect(section?.relocatedFrom).toEqual({
 			"endpoints.consent.url": "consentPage.url",
@@ -209,6 +211,7 @@ describe("the paths the settings moved from, on the manifests", () => {
 			"oauth.refreshToken.legacyRtPolicy": null,
 			"oauth.refreshToken.legacyTokenCompat": null,
 			"oauth.authorize.allowUnmarkedClients": null,
+			"oauth.jwt.legacyTypAccept": null,
 		});
 		expect(section?.renamedVariables).toMatchObject({
 			ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
@@ -216,8 +219,9 @@ describe("the paths the settings moved from, on the manifests", () => {
 			OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",
 			OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "oauth.clientIdMetadataDocuments.maxConcurrentFetches",
 			OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "oauth.authorize.allowUnmarkedClients",
+			OAUTH_JWT_LEGACY_TYP_ACCEPT: "oauth.jwt.legacyTypAccept",
 		});
-		expect(Object.keys(section?.renamedVariables ?? {})).toHaveLength(15);
+		expect(Object.keys(section?.renamedVariables ?? {})).toHaveLength(16);
 	});
 
 	it("oauth-session: the switch from oauth.grants.session", () => {
@@ -612,6 +616,59 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			expect(err.message).not.toContain(`"${value}"`);
 		},
 	);
+
+	describe("oauth.jwt.legacyTypAccept is removed: a token with no typ header is always refused", () => {
+		it.each([false, true, "true", "false"])(
+			"refuses oauth.jwt.legacyTypAccept = %j as a removed key, pointing at the upgrade guide",
+			async (value) => {
+				const err = await refusal((config) => {
+					const oauth = config.oauth as Record<string, Record<string, unknown>>;
+					return oauthWith(config, { jwt: { ...oauth.jwt, legacyTypAccept: value } });
+				});
+
+				expect(err.details).toEqual({
+					reason: "config-path-relocated",
+					relocated: [{ module: "oauth", from: "oauth.jwt.legacyTypAccept", to: null }],
+				});
+				expect(err.message).toContain(
+					"oauth.jwt.legacyTypAccept was removed; see the upgrade guide (docs/upgrading-from-v0.16.0.md).",
+				);
+			},
+		);
+
+		it.each(["true", "false", ""])(
+			"refuses OAUTH_JWT_LEGACY_TYP_ACCEPT = %j exported, as the variable of a removed key",
+			async (value) => {
+				// No reference binds the variable at the removed key: the
+				// package's reference captures it, and boot refuses it set at all.
+				for (const reference of [coreReference(), REFERENCE]) {
+					const layered = parseFile(fileURLToPath(reference), {
+						env: { OAUTH_JWT_LEGACY_TYP_ACCEPT: value },
+					}).toObject() as { oauth?: { jwt?: Record<string, unknown> } };
+					expect(layered.oauth?.jwt?.legacyTypAccept).toBeUndefined();
+				}
+
+				const err = await refusal((config) => config, { OAUTH_JWT_LEGACY_TYP_ACCEPT: value });
+
+				expect(err.details).toEqual({
+					reason: "environment-variable-renamed",
+					renamed: [
+						{
+							module: "oauth",
+							from: "OAUTH_JWT_LEGACY_TYP_ACCEPT",
+							to: null,
+							path: null,
+							state: "removed",
+						},
+					],
+				});
+				expect(err.message).toContain(
+					"OAUTH_JWT_LEGACY_TYP_ACCEPT sets oauth.jwt.legacyTypAccept, which was removed",
+				);
+				expect(err.message).toContain("docs/upgrading-from-v0.16.0.md");
+			},
+		);
+	});
 
 	it.each([
 		[

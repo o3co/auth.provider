@@ -44,14 +44,17 @@ export { oauthSectionSchema };
  * the access-token default moved from `oauth.accessToken.expiresIn` to
  * `oauth.accessToken.defaultExpiresIn`, its variable,
  * `OAUTH_ACCESS_TOKEN_EXPIRES_IN`, renamed with it
- * (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`); three keys removed, each
+ * (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`); four keys removed, each
  * refusing boot set to a value, since the behaviour it switched no longer
  * exists — `oauth.refreshToken.legacyRtPolicy` (a refresh
  * token lacking `jti` or `family_id` while family rotation is wired is always
  * refused), `oauth.refreshToken.legacyTokenCompat` (no v0.4.x refresh-token
- * shape is accepted) and `oauth.authorize.allowUnmarkedClients` (`/authorize`
- * refuses every client not marked `firstParty: true`), whose variable,
- * `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, refuses boot exported at all; and
+ * shape is accepted), `oauth.authorize.allowUnmarkedClients` (`/authorize`
+ * refuses every client not marked `firstParty: true`) and
+ * `oauth.jwt.legacyTypAccept` (a token with no `typ` header is refused on
+ * every surface), the variables of the last two,
+ * `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` and `OAUTH_JWT_LEGACY_TYP_ACCEPT`,
+ * refusing boot exported at all; and
  * `ENDPOINTS_CONSENT_URL` and the Client ID Metadata Documents' `OAUTH_CIMD_*`
  * variables renamed after their paths (`OAUTH_CONSENT_PAGE_URL`,
  * `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`).
@@ -65,6 +68,7 @@ const SECTION = {
 		"oauth.refreshToken.legacyRtPolicy": null,
 		"oauth.refreshToken.legacyTokenCompat": null,
 		"oauth.authorize.allowUnmarkedClients": null,
+		"oauth.jwt.legacyTypAccept": null,
 	},
 	renamedVariables: {
 		ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
@@ -82,6 +86,7 @@ const SECTION = {
 		OAUTH_CIMD_NEGATIVE_CACHE_MS: "oauth.clientIdMetadataDocuments.negativeCacheMs",
 		OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "oauth.clientIdMetadataDocuments.maxConcurrentFetches",
 		OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "oauth.authorize.allowUnmarkedClients",
+		OAUTH_JWT_LEGACY_TYP_ACCEPT: "oauth.jwt.legacyTypAccept",
 	},
 } as const;
 

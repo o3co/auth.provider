@@ -240,7 +240,7 @@ export interface JwtVerifyOptions {
 	readonly subjectRevocationSkewMs?: number;
 	/**
 	 * Override default `typ` for this {@link JwtType}. Pass `null` to skip
-	 * `typ` checking entirely (legacy migration paths only).
+	 * `typ` checking entirely: a token with any `typ`, or none, then passes it.
 	 */
 	readonly expectedTyp?: string | null;
 	/**
@@ -256,12 +256,6 @@ export interface JwtVerifyOptions {
 	 * rejection is silent (caller handles it via the thrown error).
 	 */
 	readonly logger?: Logger;
-	/**
-	 * Accepts tokens with no `typ` header, with a `jwt_verify_legacy_typ`
-	 * warning, for an operator's bounded migration window from untyped tokens.
-	 * Default `false`: typ-less tokens are rejected.
-	 */
-	readonly legacyTypAccept?: boolean;
 	/**
 	 * REQUIRED: what this verification consults about revocation. Required so
 	 * a new call site cannot skip revocation silently by omission, and a
@@ -297,17 +291,6 @@ const DEFAULT_TYP_BY_TYPE: Record<JwtType, string> = {
 	// at+jwt", and strict external RPs that validate `typ` reject a nonstandard
 	// one. `id+jwt` is refused as an ordinary typ mismatch.
 	id_token: "JWT",
-};
-
-/**
- * Maps the legacy `payload.type` claim of tokens that predate the `typ`
- * header (a refresh token carried `type = "refresh"`) to a {@link JwtType}.
- * Unknown values map to `undefined` and pass under `legacyTypAccept`: an
- * unrecognised hint is not evidence of cross-type confusion.
- */
-const LEGACY_PAYLOAD_TYPE_MAP: Record<string, JwtType> = {
-	refresh: "refresh_token",
-	access: "access_token",
 };
 
 export const DEFAULT_CLOCK_SKEW_MS = 300_000;
@@ -426,8 +409,7 @@ export const REVOCATION_RETENTION_ALLOWANCE_MS =
 /**
  * Centralized JWT verification with alg / iss / aud / typ pinning:
  *  1. decodes the protected header (unverified) for `kid` and `typ`,
- *  2. checks `typ` (legacy acceptance is opt-in via
- *     {@link JwtVerifyOptions.legacyTypAccept}),
+ *  2. checks `typ`: a token with none, or with another, is refused,
  *  3. resolves the key by `kid`, or the current signing kid when absent; a
  *     keystore that cannot answer is `verification_key_unavailable`,
  *  4. runs jose `jwtVerify` with explicit `algorithms`, `issuer` and `audience`,
@@ -455,7 +437,6 @@ export async function verifyJwt(
 		expectedTyp,
 		expectedAlgs,
 		logger,
-		legacyTypAccept = false,
 		revocation,
 		ignoreExpiration = false,
 	} = options;
@@ -489,24 +470,14 @@ export async function verifyJwt(
 			throw err;
 		}
 		if (headerTyp === undefined) {
-			if (legacyTypAccept) {
-				logger?.warn(
-					{
-						reason: "typ",
-						typ: undefined,
-						expectedTyp: effectiveExpectedTyp,
-					},
-					"jwt_verify_legacy_typ",
-				);
-			} else {
-				const err = new JwtVerificationError(
-					"typ",
-					`JWT typ header is required (expected ${effectiveExpectedTyp})`,
-				);
-				emitRejection(logger, err, undefined, header);
-				throw err;
-			}
-		} else if (headerTyp !== effectiveExpectedTyp) {
+			const err = new JwtVerificationError(
+				"typ",
+				`JWT typ header is required (expected ${effectiveExpectedTyp})`,
+			);
+			emitRejection(logger, err, undefined, header);
+			throw err;
+		}
+		if (headerTyp !== effectiveExpectedTyp) {
 			// Quoted sanitised and capped: the message is what a caller's log
 			// carries as the projected error's `detail`, and the header is
 			// whatever the caller wrote — CR/LF and ten thousand characters
@@ -646,22 +617,6 @@ export async function verifyJwt(
 		);
 		emitRejection(logger, err, undefined, header);
 		throw err;
-	}
-
-	// Legacy cross-type guard: when a typ-less token passed under
-	// `legacyTypAccept`, a legacy `payload.type` contradicting the expected
-	// {@link JwtType} is refused, e.g. a typ-less RT (`type: "refresh"`)
-	// presented as an access token at /userinfo.
-	if (header.typ === undefined && typeof payload.type === "string") {
-		const mappedType = LEGACY_PAYLOAD_TYPE_MAP[payload.type];
-		if (mappedType !== undefined && mappedType !== type) {
-			const err = new JwtVerificationError(
-				"typ",
-				`JWT legacy payload.type ${payload.type} maps to ${mappedType}, expected ${type}`,
-			);
-			emitRejection(logger, err, payload, header);
-			throw err;
-		}
 	}
 
 	// iat in the future beyond skew: jose refuses one only when given

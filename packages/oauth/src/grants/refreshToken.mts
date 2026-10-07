@@ -85,8 +85,8 @@ const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
 /**
  * What the refresh grant reads. `sessionRequirementResolver` and `auditSink`
  * feed admission of the token's session; the resolver is required, and a
- * factory built without one is refused. The lifetimes, `legacyTypAccept` and
- * the resource-indicator switch come from the `oauthTokenSettings` slot, and
+ * factory built without one is refused. The lifetimes and the
+ * resource-indicator switch come from the `oauthTokenSettings` slot, and
  * the refresh-token binding rule from core's `tokenBindingSettings`. It
  * reads nothing of the configuration.
  */
@@ -183,7 +183,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 	const tokenSettings = checkOAuthTokenSettings(deps.oauthTokenSettings);
 	const accessTokenExpiresIn = tokenSettings.accessTokenLifetime.defaultExpiresIn;
 	const requestedRefreshExpiresIn = tokenSettings.refreshTokenExpiresIn;
-	const { legacyTypAccept, resourceIndicatorEnabled } = tokenSettings;
+	const { resourceIndicatorEnabled } = tokenSettings;
 	// The refresh-token binding rule, read once from core's
 	// `tokenBindingSettings` slot.
 	const bindConfidentialClients = bindConfidentialClientRefreshTokensFrom(
@@ -201,17 +201,18 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 		refreshTokenValue: string,
 		issuer: string | undefined,
 	): Promise<
-		| { readonly ok: true; readonly payload: JWTPayload; readonly typ: string | undefined }
+		| { readonly ok: true; readonly payload: JWTPayload }
 		| { readonly ok: false; readonly result: GrantError }
 	> => {
 		try {
-			// The verifier pins alg / iss / typ and the signature. aud/azp are
-			// checked by the grant instead, for a more specific error and to
-			// accept tokens that carry `aud` but no `azp`.
+			// The verifier pins alg / iss / typ and the signature: a token whose
+			// `typ` is not `rt+jwt`, or that has none, is refused, so an access
+			// token presented as a refresh token is. aud/azp are checked by the
+			// grant instead, for a more specific error and to accept tokens that
+			// carry `aud` but no `azp`.
 			const verified = await verifyJwt(refreshTokenValue, keyStore, {
 				type: "refresh_token",
 				expectedIssuer: issuer ?? "",
-				legacyTypAccept,
 				// No access-token jti denylist: refresh tokens are revoked through
 				// the family store. The subject watermark is the backstop for a
 				// partial revocation cascade; a rotated token carries a fresh
@@ -220,7 +221,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				revocation: { subjectRevocation },
 				logger,
 			});
-			return { ok: true, payload: verified.payload, typ: verified.header.typ };
+			return { ok: true, payload: verified.payload };
 		} catch (err) {
 			// A dependency the verifier could not consult (revocation store,
 			// keystore) is an outage: `503`, not `invalid_grant`, which tells
@@ -309,20 +310,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 
 			const verified = await verifyPresented(refreshTokenValue, issuer);
 			if (!verified.ok) return { result: verified.result };
-			const { payload: tokenPayload, typ } = verified;
-
-			// Defends against an access token presented as a refresh token. The
-			// verifier refuses any `typ` but `rt+jwt`, yet under `legacyTypAccept`
-			// passes a token with none; this grant refuses that one too.
-			if (typ !== "rt+jwt") {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription: "invalid refresh_token",
-					},
-				};
-			}
+			const { payload: tokenPayload } = verified;
 
 			// Bind the refresh token to its issuing client via `azp` (RFC 9068
 			// §2.2), falling back to `aud` for tokens issued without `azp`.

@@ -61,7 +61,6 @@ export const identifyCaller = async (
 		const verified = await verifyJwt(token, opts.keyStore, {
 			type: "access_token",
 			expectedIssuer: opts.issuer ?? "",
-			legacyTypAccept: opts.legacyTypAccept ?? false,
 			// A token-accepting surface: forward both the jti denylist and the
 			// subject watermark.
 			revocation: {
