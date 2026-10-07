@@ -647,7 +647,7 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   standalone template, `REDIS_CLIENTS_ASSUME_NO_EVICTION=true`,
   `redis-clients.assumeNoEviction`).
 - **BREAKING: the Redis replay seen-set refuses to boot unless the server's
-  `maxmemory-policy` is `noeviction` (#1601).** `redisReplaySeenSetModule`
+  `maxmemory-policy` is `noeviction` (#1612).** `redisReplaySeenSetModule`
   now passes the same eviction gate as the stores in the two entries above:
   the replay seen-set requires a no-eviction policy, as the other stores
   whose loss must not read as absent do. It keeps each DPoP proof,
@@ -2177,7 +2177,7 @@ modules fills them.
   which `makeIoredisClients` provides; a client of your own implements it as
   the other gated stores' clients do.
 - **BREAKING: the Redis replay seen-set's factory is async, and its client
-  reports `durability()` (#1601).** `createRedisReplaySeenSet` and
+  reports `durability()` (#1612).** `createRedisReplaySeenSet` and
   `redisReplaySeenSetBuilder` return a `Promise` of the seen-set, resolved
   once the server passes the eviction gate (the entry under
   [Values read more strictly](#values-read-more-strictly)); a missing client
