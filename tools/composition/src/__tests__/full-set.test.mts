@@ -64,7 +64,11 @@ import {
 	DEVICE_CODE_GRANT_TYPE,
 	deviceAuthorizationGrantModule,
 } from "@o3co/auth-provider-device-grant";
-import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
+import {
+	mfaConfigForTests,
+	seedTotpFactor,
+	totpCodeForTests,
+} from "@o3co/auth-provider-mfa/testing";
 import {
 	ACCESS_TOKEN_TYPE,
 	TOKEN_EXCHANGE_GRANT_TYPE,
@@ -1716,18 +1720,13 @@ describe("recent MFA at the link start and WebAuthn registration, under mfa.mode
 		return { ...signed, sid: sid as string };
 	};
 
-	/** A TOTP factor for alice: a counting factor. */
+	/** A TOTP factor for alice, sealed under the full set's key: a counting factor a step-up can verify with. */
 	const holdTotp = (set: FullSet) =>
-		addFactorRecord(storesOf(set).mfaFactorStore, {
-			id: "f-alice",
+		seedTotpFactor({
+			config: mfaConfigForTests({ key: MFA_KEY }),
+			factorStore: storesOf(set).mfaFactorStore,
 			subject: ALICE.sub,
-			kind: "totp",
-			label: undefined,
-			binding: "password",
-			createdAt: new Date(),
-			lastUsedAt: undefined,
-			version: 0,
-			data: "sealed",
+			id: "f-alice",
 		});
 
 	/** A step-up recorded in alice's session at `at`, as the MFA page's step-up records a verified TOTP code. */
