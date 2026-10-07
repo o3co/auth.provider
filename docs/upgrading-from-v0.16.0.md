@@ -1618,15 +1618,19 @@ modules fills them.
   sid, so this is not expected in practice.
 - **BREAKING: `POST /session/logout` closes only a session of the cookie
   session's own user.** It reads the `UserSession` record the cookie
-  session's `sid` names first: a record whose `sub` is not the cookie
-  session's `user.id` (or a cookie session holding a `sid` and no user) is
-  not closed; the cookie session is destroyed and the answer is
-  `401 login_required` ("The cookie session does not hold the session it
-  names") instead of `200`. A record that is gone is still closed by its
-  `sid` and answers `200`, and a record that cannot be read answers
+  session's `sid` names first: a record that exists and whose `sub` is not
+  the cookie session's `user.id` (any record, for a cookie session holding a
+  `sid` and no user) is not closed; the cookie session is destroyed and the
+  answer is `401 login_required` ("The cookie session does not hold the
+  session it names") instead of `200`. A record that is gone is still closed
+  by its `sid` and answers `200`, with or without a user on the cookie
+  session, and a record that cannot be read answers
   `503 temporarily_unavailable` (`logout_user_session_read_failed`). A login
   writes the `sid` and the user together, so this is not expected in
   practice ([the session README](../packages/session/README.md#what-post-sessionlogout-invalidates)).
+  A router handed a session lifecycle and no `userSessionStore` has no record
+  to close: its logout destroys the cookie session and answers `200`, where it
+  called the lifecycle's `close` and answered `503` when that failed.
 - **A login's rollback closes the session's lifecycle record.** When a login
   fails after its record was created (a cookie-session regeneration or save,
   a federation's token attach or join), the rollback closes the record it

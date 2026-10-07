@@ -649,8 +649,8 @@ What holds:
 - **What renewal orphans.** Records bound to the old express session id are
   lost: a consent `/authorize` parked, a federation-grant browser binding,
   and the session's other open MFA transactions. A flow in another tab starts
-  again. A tab that still holds the old cookie is refused once the session is
-  escalated, and signs in again; its `POST /session/logout` still closes the
+  again. A tab that still holds the old cookie is refused once the session's
+  escalation is recorded with the new nonce, and signs in again; its `POST /session/logout` still closes the
   session, as the renewed cookie's would: the nonce keeps an old copy off the
   escalation, not from ending the session
   ([below](#what-post-sessionlogout-invalidates)).
@@ -664,7 +664,8 @@ through core's session lifecycle, so they invalidate the same things.
 `auth.proxy` injection topology calls — closes the session through core's
 session lifecycle and destroys the express session. A router with a
 `UserSessionStore` requires the lifecycle beside it; a sessionless router
-(no store) has no record to close and destroys the express session alone.
+(no store) has no record to close and destroys the express session alone,
+whether or not it was handed a lifecycle.
 
 The logout closes the session with `sessionLifecycle.close(sid, "session_logout")` (`sessionLifecycleModule` fills the slot). The close runs as `/oauth/logout`'s does, in order: it revokes the session's refresh-token families and removes its federation tokens, then tells its relying parties back-channel (through the notifier `oauthEndpointsModule` contributes), then removes the per-session indexes, then deletes the `UserSession`, and removes the subject-index entry last, so a close still pending keeps the sid where a subject-wide revocation finds it.
 - A close that committed answers the same `200` and destroys the express session, whether its work is `done` or still `pending`: from the commit on, no liveness read answers the session live, and a later close or the lifecycle's sweep resumes what is left. A `pending` close is audited as `logout.close_pending` (`subject`, `sid`), as `/oauth/logout` audits it.
@@ -676,14 +677,18 @@ The logout closes the session with `sessionLifecycle.close(sid, "session_logout"
 the logout reads the `UserSession` record the cookie session's `sid` names,
 and closes the session when the record is the cookie session's user's (its
 `sub` is the cookie session's `user.id`), whatever renewal nonce either holds.
-An old cookie, or a copy of it, from before a step-up renewed the session is
-not admitted anywhere (core's admission answers it `not_live`, `renewed`), but
-its logout closes the session as the renewed cookie's would: the nonce keeps a
-copy the record was renewed away from off the escalation, not from ending the
-session (the MFA ADR's D27). A record that is already gone is closed by its
-`sid`, as above, and the answer is `200`. A record of another subject — or a
-cookie session that names a `sid` and holds no user — is not closed: only the
-cookie session is destroyed, and the answer is
+Once a step-up's escalation is recorded with the renewed cookie session's
+nonce, an old cookie, or a copy of it, from before the renewal is not admitted
+anywhere (core's admission answers it `not_live`, `renewed`); a renewal whose
+record then failed binds no new nonce, and the record's binding stays as it
+was. Either way, the logout of such a copy closes the session as the renewed
+cookie's would: the nonce keeps a copy the record was renewed away from off
+the escalation, not from ending the session (the MFA ADR's D27). A record
+that is already gone is closed by its `sid`, as above, and the answer is
+`200` — with or without a user on the cookie session. A record that exists
+and is not the cookie session's user's — another subject's, or any record
+when the cookie session names a `sid` and holds no user — is not closed: only
+the cookie session is destroyed, and the answer is
 `401 login_required` ("The cookie session does not hold the session it
 names"), so the client does not report a session as closed that was not; a
 retry from the same browser holds no cookie session and answers `200`. A login

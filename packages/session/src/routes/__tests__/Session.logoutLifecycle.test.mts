@@ -234,7 +234,11 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 			close: async () => ({ outcome: "pending", rps: [], federations: [] }),
 		});
 		const { sink, events } = recordingSink();
-		const { app, bag } = buildApp({ sessionLifecycle, auditSink: sink });
+		const { app, bag } = buildApp({
+			userSessionStore: await liveSessionStore(),
+			sessionLifecycle,
+			auditSink: sink,
+		});
 
 		const res = await logout(app);
 
@@ -251,6 +255,7 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 	it("an outcome the lifecycle does not declare: the outage, 503, one error line, and the cookie kept for a retry", async () => {
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
+			userSessionStore: await liveSessionStore(),
 			sessionLifecycle: fakeLifecycle({
 				close: (async () => ({ outcome: "undeclared" })) as unknown as SessionLifecycle["close"],
 			}),
@@ -272,6 +277,7 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		const thrown = new Error("lifecycle exploded");
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
+			userSessionStore: await liveSessionStore(),
 			sessionLifecycle: fakeLifecycle({
 				close: async () => {
 					throw thrown;
@@ -300,6 +306,7 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		const thrown = new RangeError("Invalid array length");
 		const logger = mockLogger();
 		const { app, bag } = buildApp({
+			userSessionStore: await liveSessionStore(),
 			sessionLifecycle: fakeLifecycle({
 				close: async () => {
 					throw thrown;
@@ -324,6 +331,7 @@ describe("POST /session/logout through the session lifecycle: the close's answer
 		const sessionLifecycle = fakeLifecycle();
 		const logger = mockLogger();
 		const { app } = buildApp({
+			userSessionStore: await liveSessionStore(),
 			sessionLifecycle,
 			logger,
 			destroyError: new Error("cookie store down"),
@@ -546,6 +554,22 @@ describe("POST /session/logout through the session lifecycle: what the close run
 });
 
 describe("where a user-session store is wired, core's session lifecycle is required", () => {
+	it("a router handed a lifecycle and no user-session store has no record to close: its logout destroys the cookie session and answers 200", async () => {
+		const sessionLifecycle = fakeLifecycle({
+			close: async () => {
+				throw new Error("lifecycle down");
+			},
+		});
+		const { app, bag } = buildApp({ sessionLifecycle });
+
+		const res = await logout(app);
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ message: "Logged out successfully" });
+		expect(sessionLifecycle.close).not.toHaveBeenCalled();
+		expect(bag.destroyed).toBe(true);
+	});
+
 	it("refuses to build the router with a userSessionStore and no sessionLifecycle, naming both", async () => {
 		const userSessionStore = await liveSessionStore();
 		expect(() => buildApp({ userSessionStore })).toThrow(
@@ -630,6 +654,7 @@ describe("POST /session/logout and the session cookie", () => {
 
 	it("a close that did not commit leaves the session cookie as it is", async () => {
 		const { app } = buildApp({
+			userSessionStore: await liveSessionStore(),
 			sessionLifecycle: fakeLifecycle({
 				close: async () => {
 					throw new Error("lifecycle down");

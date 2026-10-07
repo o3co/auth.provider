@@ -486,8 +486,9 @@ export const createRouter = (
 			// families, tells its relying parties and deletes its records. A
 			// close that committed is the logout's success, its work left
 			// pending or not; one that did not keeps the cookie for a retry. A
-			// sessionless router has no record to close.
-			if (sid && !namesOtherSubject && sessionLifecycle) {
+			// sessionless router (no user-session store) has no record to
+			// close, whatever lifecycle it was handed.
+			if (sid && userSessionStore && !namesOtherSubject && sessionLifecycle) {
 				const closed = await closeSession(sessionLifecycle, sid, sub, req);
 				if (!closed) return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 			}
