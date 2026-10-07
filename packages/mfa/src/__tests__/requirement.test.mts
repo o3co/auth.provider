@@ -58,7 +58,8 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests, sessionRequirementContract } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { sessionRequirementContract } from "@o3co/auth-provider-test-kit";
 import { describe, expect, it, type Mock, vi } from "vitest";
 import { createRecoveryCodeFactor } from "#/recovery/factor.mjs";
 import { createMfaRequirement } from "#/requirement.mjs";
