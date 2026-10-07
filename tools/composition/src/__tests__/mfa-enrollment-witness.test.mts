@@ -45,6 +45,7 @@ import {
 	composeFullSet,
 	type FullSet,
 	type FullSetOptions,
+	fromBase32,
 	GITHUB_HANDLE,
 	GITHUB_LANDING,
 	MFA_KEY,
@@ -70,25 +71,6 @@ function recordingAuditSink(): RecordingAuditSink {
 			events.push(event);
 		},
 	};
-}
-
-/** RFC 4648 §6 base32, as a TOTP enrollment hands its secret over. */
-function fromBase32(text: string): Buffer {
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-	const bytes: number[] = [];
-	let value = 0;
-	let bits = 0;
-	for (const character of text.replace(/=+$/, "")) {
-		const index = alphabet.indexOf(character);
-		if (index === -1) throw new Error("the enrollment answered a secret that is not base32");
-		value = (value << 5) | index;
-		bits += 5;
-		if (bits >= 8) {
-			bits -= 8;
-			bytes.push((value >>> bits) & 0xff);
-		}
-	}
-	return Buffer.from(bytes);
 }
 
 let current: FullSet | undefined;
@@ -154,8 +136,10 @@ const endpointsSince = (from: number) => store.requests.slice(from).map(({ endpo
 
 /**
  * Alice's first login under `mfa.mode = "required"`: the password, `403
- * mfa_enrollment_required`, a TOTP enrollment and its completion. Answers the
- * completion, the factor's secret and the browser.
+ * mfa_enrollment_required`, a TOTP enrollment and its completion. Alice has no
+ * address, so no account-email proof is asked: the completion answers the
+ * factor and its codes and establishes no session, the factor counting from
+ * the next sign-in. Answers the completion, the factor's secret and the browser.
  */
 async function firstBinding(app: Express) {
 	const page = browser();
@@ -181,10 +165,37 @@ async function firstBinding(app: Express) {
 	return { done, secret, page };
 }
 
+/**
+ * Alice's next login on `page`, finished with the TOTP factor `factorId` bound
+ * with `secret` — one step on from the code its enrollment spent, which a
+ * replay check refuses.
+ */
+async function signInWithFactor(
+	app: Express,
+	page: ReturnType<typeof browser>,
+	factorId: string,
+	secret: Buffer,
+) {
+	const login = await page.post(
+		app,
+		"/session/login",
+		{ username: ALICE.username, password: ALICE.password },
+		{ form: true },
+	);
+	expect(login.status, JSON.stringify(login.body)).toBe(403);
+	expect(login.body.error).toBe("mfa_required");
+	const verified = await page.post(app, "/session/mfa/verify", {
+		transaction_id: login.body.transaction,
+		factor_id: factorId,
+		proof: totpCodeForTests(secret, { offset: 1 }),
+	});
+	expect(verified.status, JSON.stringify(verified.body)).toBe(200);
+}
+
 describe.each(["store", "memory"] as const)(
 	"the witness at a first binding, the factors kept in %s",
 	(factors) => {
-		it("marks the subject enrolled in the Store once its first factor is written, and the login completes", async () => {
+		it("marks the subject enrolled in the Store once its first factor is written, and the binding is answered", async () => {
 			const set = await boot(factors);
 			const create = vi.spyOn(storesOf(set).mfaFactorStore, "createIf");
 			const mark = vi.spyOn(storesOf(set).userRepository, "markMfaEnrolled");
@@ -208,7 +219,7 @@ describe.each(["store", "memory"] as const)(
 			expect(warned(set, "mfa_enrollment_witness_unwritten")).toEqual([]);
 		});
 
-		it("completes the login when the Store answers the mark 503, with one warning, and writes the mark at the next TOTP login", async () => {
+		it("answers the binding when the Store answers the mark 503, with one warning, and writes the mark at the next TOTP login", async () => {
 			const set = await boot(factors);
 			store.answer("markMfaEnrolled", () => ({ status: 503 }));
 			const { done, secret } = await firstBinding(set.app);
@@ -280,7 +291,7 @@ describe.each(["store", "memory"] as const)(
 describe.each(["store", "memory"] as const)(
 	"the witness at a removal, the factors kept in %s",
 	(factors) => {
-		it("sends {enrolled: false} to the Store once the last record that may count is removed, after the removal", async () => {
+		it("sends {enrolled: false} to the Store once the last record that may count is removed, after the removal — the session stepped up with the factor its binding left uncounted", async () => {
 			const set = await boot(factors, {
 				adjust: (config) => ({
 					...config,
@@ -303,6 +314,16 @@ describe.each(["store", "memory"] as const)(
 			});
 			expect(done.status, JSON.stringify(done.body)).toBe(200);
 			expect(store.enrolled(ALICE.id)).toBe(true);
+			// Bound without the account-email proof, the factor did not count in this
+			// session: removing it asks for recent MFA, which a step-up with it gives.
+			const opened = await page.post(set.app, "/session/mfa/step-up", {});
+			expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+			const stepped = await page.post(set.app, "/session/mfa/verify", {
+				transaction_id: opened.body.transaction,
+				factor_id: done.body.factor.id,
+				proof: totpCodeForTests(fromBase32(begun.body.secret as string), { offset: 1 }),
+			});
+			expect(stepped.status, JSON.stringify(stepped.body)).toBe(200);
 			const from = store.requests.length;
 
 			const removed = await page.post(set.app, "/session/mfa/factors/remove", {
@@ -323,8 +344,9 @@ describe.each(["store", "memory"] as const)(
 
 		it("sends nothing to the Store's mark endpoint when a record is removed beside a counting factor", async () => {
 			const set = await boot(factors);
-			const { done, page } = await firstBinding(set.app);
+			const { done, page, secret } = await firstBinding(set.app);
 			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			await signInWithFactor(set.app, page, done.body.factor.id as string, secret);
 			const listed = await page.get(set.app, "/session/mfa/factors");
 			expect(listed.status, JSON.stringify(listed.body)).toBe(200);
 			const codes = (listed.body.factors as { id: string; kind: string }[]).find(

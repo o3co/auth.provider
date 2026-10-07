@@ -102,6 +102,11 @@
  *   unshown, for the answer that carries them to mark shown — and marks the
  *   witness. The caller resumes a login, or escalates the session the
  *   binding was made in by what it adds.
+ * - What a binding adds is decided here alone (`countsAtOnce`): one by `mfa`
+ *   or by `email_proof` adds its factor's `amr` and `mfaAt`; a first binding
+ *   by a sign-in alone — `password` or `federated` — adds nothing, its factor
+ *   counting from the next sign-in that uses it, so the caller completes no
+ *   login and escalates no session for it.
  * - A codes write or a witness mark that fails never undoes the factor:
  *   the outcome says so, and the binding stands.
  * - The factor's answers — its enrollment's start and end — are read once,
@@ -177,6 +182,16 @@ type FirstBindingBy = "password" | "federated" | "email_proof";
  * come to; the completion counts by the binding it makes.
  */
 const UNTIL_COMPLETION: FirstBindingBy = "email_proof";
+
+/**
+ * Whether a binding by `binding` counts in the sign-in it is made in — adds
+ * its factor's `amr` and `mfaAt` to the login it completes, or to the session
+ * it is made in (D24): one by `mfa`, beside a second factor already
+ * verified, or by `email_proof`. A first binding by a sign-in alone counts
+ * from the next sign-in that uses its factor.
+ */
+const countsAtOnce = (binding: NonNullable<MfaFactorRecord["binding"]>): boolean =>
+	binding === "mfa" || binding === "email_proof";
 
 const INVALID_LABEL = Object.freeze({ outcome: "invalid_label" as const });
 
@@ -768,10 +783,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				const enrolled = {
 					outcome: "enrolled" as const,
 					continuation: consumed.continuation,
-					adds: {
-						amr: [...new Set([...amr, ...(factor.addsMfa ? [MFA_AMR] : [])])],
-						mfaAt: new Date(nowMs),
-					},
+					adds: countsAtOnce(binding)
+						? {
+								amr: [...new Set([...amr, ...(factor.addsMfa ? [MFA_AMR] : [])])],
+								mfaAt: new Date(nowMs),
+							}
+						: undefined,
 					factor: { id, kind: factor.kind, ...(named === undefined ? {} : { label: named }) },
 					binding,
 					...about,

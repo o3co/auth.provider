@@ -1238,7 +1238,10 @@ ADR's D5, D21, D24).
   `save` the old id is already destroyed and the user signs in again; at
   `regenerate` the old id keeps what it held. A factor bound in a session
   is answered with its recovery codes whatever its escalation came to: they
-  are shown once. A record that fails after the renewal leaves the cookie
+  are shown once. A first factor bound without the account-email proof
+  (`binding` `password` or `federated`) escalates nothing: the session stays
+  as it signed in, and one bound at a login establishes no session — the
+  factor counts from the next sign-in that uses it. A record that fails after the renewal leaves the cookie
   session holding a nonce the record does not. A session never escalated
   before stays as it was and steps up at its next try: the finish expects the
   nonce admission read from the record (`renewalNonce` on the admitted

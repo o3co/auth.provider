@@ -2232,6 +2232,22 @@ if you run a Store, then go `optional` — users enroll at their own pace — an
 of a user with no counting factor is asked to log in again, and that login
 binds their first factor.
 
+**A first factor bound without the account-email proof counts from the next
+sign-in.** Where no proof is asked — no mail sender wired under `when-mail`,
+an account with no address, or `MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF=never` — a
+user's first factor adds nothing to the sign-in it is bound in. At a login,
+`POST /session/mfa/enrollment/complete` answers `200` with the factor and its
+recovery codes, no `message`, and establishes no session: your login page
+shows the codes, then sends the user to sign in again, with the password and
+the factor just bound. From the account page the session stays as it signed
+in, and codes and tokens issued from it carry its `amr` without the factor
+until it steps up with the factor. A first factor bound with the proof, and
+every later factor, count at once as before. MFA is new since v0.16.0, so
+this is no break of a v0.16.0 surface; pre-releases of 0.17.0 counted every
+first binding at once, and a page built against one that navigates to
+`redirect_to` on any `200` from the completion checks `message` first
+([The MFA page's contract](../packages/mfa/README.md#the-mfa-pages-contract)).
+
 **Email factors enrolled on a 0.17.0 pre-release, for an address whose local
 part has upper-case letters, are enrolled again.** The provider now keeps an
 address's local part in the case the user record holds it, and lower-cases

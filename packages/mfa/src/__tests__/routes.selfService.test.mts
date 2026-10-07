@@ -24,9 +24,11 @@
  * recent MFA and binds by `mfa`; a first binding needs a recent sign-in and
  * the one gate — the account-email proof given in that session, where the
  * gate asks for it — and binds by `password` or `email_proof`, with its
- * recovery codes. A binding escalates the session it was made in: its
- * express id renewed, then the factor's `amr` and `mfaAt` recorded on it;
- * the factor and its codes are answered whether or not that lands.
+ * recovery codes. A binding by `mfa` or `email_proof` escalates the session
+ * it was made in: its express id renewed, then the factor's `amr` and `mfaAt`
+ * recorded on it; the factor and its codes are answered whether or not that
+ * lands. A first binding by a sign-in alone leaves the session as it was:
+ * its factor counts from the next sign-in that uses it.
  */
 
 import {
@@ -35,11 +37,9 @@ import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	federatedSessionAuthentication,
-	MFA_AMR,
 	type MfaFactor,
 	type MfaFactorRecord,
 	type Module,
-	OTP_AMR,
 	PASSWORD_AMR,
 	type UserSession,
 	type UserSessionStore,
@@ -209,7 +209,7 @@ const recordsOf = async (store: { list(subject: string): Promise<readonly MfaFac
 	Object.fromEntries((await store.list(ALICE.id)).map((record) => [record.kind, record]));
 
 describe("a first factor from the account page, where no proof is asked", () => {
-	it("binds TOTP on a recent sign-in: the transaction opened in the session, the factor bound by password with its recovery codes, the witness marked, the session escalated by it", async () => {
+	it("binds TOTP on a recent sign-in: the transaction opened in the session, the factor bound by password with its recovery codes, the witness marked, the session left as it was", async () => {
 		const { app, factorStore, transactionStore, userSessionStore, audit, users } = await composed();
 		const { agent, sid } = await signIn(app, userSessionStore);
 		const before = await userSessionStore.get(sid);
@@ -261,13 +261,9 @@ describe("a first factor from the account page, where no proof is asked", () => 
 		expect(records.recovery_code).toMatchObject({ binding: "password" });
 		expect(users.marks).toEqual([{ subject: ALICE.id, enrolled: true }]);
 		expect(await transactionStore.get(transaction)).toBeNull();
-		expect(sessionIdSet(done)).toBeDefined();
-		expect(await userSessionStore.get(sid)).toEqual({
-			...before,
-			amr: [PASSWORD_AMR, OTP_AMR, MFA_AMR],
-			authentication: { ...before?.authentication, mfaAt: new Date(T0) },
-			renewalNonce: expect.any(String),
-		});
+		expect(sessionIdSet(done)).toBeUndefined();
+		expect(await userSessionStore.get(sid)).toEqual(before);
+		expect(before?.amr).toEqual([PASSWORD_AMR]);
 		expect(audit.of("mfa.factor.enrolled")).toEqual([
 			expect.objectContaining({
 				subject: ALICE.id,
@@ -1237,11 +1233,22 @@ describe("a factor's own failure", () => {
 });
 
 describe("a first binding's escalation of its session, when it does not land", () => {
-	/** A first TOTP binding begun on a recent sign-in, with the cookie-session tap mounted. */
-	async function begunBinding(setup: Setup = {}) {
+	/**
+	 * A first TOTP binding begun on a recent sign-in, with the cookie-session
+	 * tap mounted: the account-email proof given in the session first, so the
+	 * binding escalates it, unless `unproven`.
+	 */
+	async function begunBinding(setup: Setup = {}, unproven = false) {
 		const tap = cookieSessionTap();
-		const booted = await composed({ ...setup, extraModules: [tap.module] });
+		const mail = unproven ? null : createRecordingMailSender();
+		const booted = await composed({ ...setup, sender: mail, extraModules: [tap.module] });
 		const { agent, sid } = await signIn(booted.app, booted.userSessionStore);
+		if (mail !== null) {
+			const opened = await stepUp(agent);
+			expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+			const proved = await giveEmailProof(agent, opened.body.transaction as string, mail);
+			expect(proved.status, JSON.stringify(proved.body)).toBe(200);
+		}
 		const begun = await enrollFromAccount(agent, "totp");
 		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
 		await request(booted.app).get("/test-tap");
@@ -1327,9 +1334,10 @@ describe("a first binding's escalation of its session, when it does not land", (
 
 	it("leaves the session as it was, its express id kept, when the session store cannot record a second factor", async () => {
 		const { recordSecondFactor: _record, ...legacy } = createInMemoryUserSessionStore();
-		const { sid, before, userSessionStore, completed } = await begunBinding({
-			userSessionStore: { ...legacy, kind: "legacy-sessions" },
-		});
+		const { sid, before, userSessionStore, completed } = await begunBinding(
+			{ userSessionStore: { ...legacy, kind: "legacy-sessions" } },
+			true,
+		);
 
 		const done = await completed();
 
