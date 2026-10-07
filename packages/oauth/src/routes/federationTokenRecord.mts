@@ -19,9 +19,12 @@
  * store generation, writes only at the generation it read, and answers a
  * record that changed under a refresh. A logout, an unlink or a relink that
  * lands while a request is in flight is therefore never undone or
- * overwritten. No other stage calls the store's conditional members or sees a
- * generation. The route never removes a link from the session's index: a
- * link with no record is answered `404`, and the link ends with the session.
+ * overwritten. A token held across the session's liveness read is handed on
+ * only once the record is confirmed, after that read, at the generation it
+ * was held from (`serveHeld`). No other stage calls the store's conditional
+ * members or sees a generation. The route never removes a link from the
+ * session's index: a link with no record is answered `404`, and the link ends
+ * with the session.
  */
 
 import {
@@ -69,11 +72,59 @@ export const answerIfChanged = async (
 	caller: FederationTokenCaller,
 	read: StoredRecord,
 ): Promise<Response | null> => {
+	const found = await confirmHeld(ctx, caller, read);
+	if (found === "answered") return ctx.res;
+	if (found === "held") return null;
+	return answerDiscardedRefresh(ctx, caller, found);
+};
+
+/**
+ * Hands on what `serve` answers from `held` only if the caller's session was
+ * live at its liveness read and the record was still at `held`'s generation
+ * at the confirming read that follows it. A close that commits between the
+ * two reads is not seen here; the close removes the stored tokens itself. A
+ * record gone by the confirming read is answered as removed (`404`), one
+ * rewritten as a conflict, each logged once as `federation_token_serve_discarded`.
+ */
+export const serveHeld = async (
+	ctx: FederationTokenContext,
+	caller: FederationTokenCaller,
+	held: StoredRecord,
+	serve: () => Promise<Response>,
+): Promise<Response> => {
+	if (!(await checkSessionLive(ctx, caller))) return ctx.res;
+	const found = await confirmHeld(ctx, caller, held);
+	if (found === "answered") return ctx.res;
+	if (found === "held") return serve();
+	logServeDiscarded(ctx, found);
+	return answerChangedRecord(ctx, caller, found);
+};
+
+/** The one line for a held token not handed on because its record changed before the answer. */
+const logServeDiscarded = (ctx: FederationTokenContext, outcome: "missing" | "conflict"): void => {
+	ctx.logger.warn(
+		{
+			federation: ctx.federation,
+			store: "federation_token",
+			reason: outcome === "missing" ? "record_gone" : "record_replaced",
+		},
+		"federation_token_serve_discarded",
+	);
+};
+
+/**
+ * Whether the record is still at `held`'s generation: `held`, `missing`,
+ * `conflict`, or `answered` once a store that cannot answer is answered `503`.
+ */
+const confirmHeld = async (
+	ctx: FederationTokenContext,
+	caller: FederationTokenCaller,
+	held: StoredRecord,
+): Promise<"held" | "missing" | "conflict" | "answered"> => {
 	const found = await readStored(ctx, caller, "get_before_serve");
-	if (found === undefined) return ctx.res;
-	if (found === null) return answerDiscardedRefresh(ctx, caller, "missing");
-	if (found.generation !== read.generation) return answerDiscardedRefresh(ctx, caller, "conflict");
-	return null;
+	if (found === undefined) return "answered";
+	if (found === null) return "missing";
+	return found.generation === held.generation ? "held" : "conflict";
 };
 
 /**
@@ -136,23 +187,24 @@ export const serveStored = async (
 };
 
 /**
- * Replaces the record only while it is still as `read` found it. Rejects when
- * the store cannot answer or answers outside its contract: the write's fate
- * is then unknown.
+ * Replaces the record only while it is still as `read` found it: `updated`
+ * with the record as written. Rejects when the store cannot answer or answers
+ * outside its contract: the write's fate is then unknown.
  */
 export const replaceRecord = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
 	read: StoredRecord,
 	next: FederationTokens,
-): Promise<"updated" | "missing" | "conflict"> => {
-	const answer = await ctx.opts.federationTokenStore.replaceIf(
-		caller.sid,
-		ctx.name,
-		read.generation,
-		next,
+): Promise<
+	| { readonly outcome: "updated"; readonly written: StoredRecord }
+	| { readonly outcome: "missing" | "conflict" }
+> => {
+	const answer = readConditionalReplaceAnswer(
+		await ctx.opts.federationTokenStore.replaceIf(caller.sid, ctx.name, read.generation, next),
 	);
-	return readConditionalReplaceAnswer(answer).outcome;
+	if (answer.outcome !== "updated") return { outcome: answer.outcome };
+	return { outcome: "updated", written: { value: next, generation: answer.generation } };
 };
 
 /** Removes the record only while it is still as `read` found it. Rejects as `replaceRecord` does. */
@@ -171,34 +223,52 @@ export const removeRecord = async (
 
 /**
  * The answer once a refresh's own result is dropped because the record is no
- * longer the one it was made from. `missing`: the user removed the link, so
- * nothing of it is handed on (`404`). `conflict`: the record was rewritten
- * (a relink, or another refresh), so the current record is answered as
- * stored if it is not due and the session is still live, and `503` if it is
- * due: the refresh is never repeated within one request, and the client's
- * retry refreshes it.
+ * longer the one it was made from, logged once as
+ * `federation_token_refresh_discarded`, then answered as
+ * {@link answerChangedRecord} answers.
  */
 export const answerDiscardedRefresh = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
 	outcome: "missing" | "conflict",
 ): Promise<Response> => {
-	const { res, federation, logger } = ctx;
-	logger.warn(
+	ctx.logger.warn(
 		{
-			federation,
+			federation: ctx.federation,
 			store: "federation_token",
 			reason: outcome === "missing" ? "record_gone" : "record_replaced",
 		},
 		"federation_token_refresh_discarded",
 	);
+	return answerChangedRecord(ctx, caller, outcome);
+};
+
+/**
+ * The answer for a record that is no longer the one a token was held from.
+ * `missing`: the user removed the link, so nothing of it is handed on
+ * (`404`). `conflict`: the record was rewritten (a relink, or another
+ * refresh), so the current record is answered as stored if it is not due and
+ * {@link serveHeld} would hand it on; and `503` if it is due or was rewritten
+ * again: the refresh is never repeated within one request, and the client's
+ * retry refreshes it. A record gone or rewritten again by the confirming read
+ * is logged once as `federation_token_serve_discarded`.
+ */
+const answerChangedRecord = async (
+	ctx: FederationTokenContext,
+	caller: FederationTokenCaller,
+	outcome: "missing" | "conflict",
+): Promise<Response> => {
+	const { res } = ctx;
 	if (outcome === "missing") return answerUnlinkedRecord(ctx);
 	const current = await readRecord(ctx, caller, "get_after_conflict");
 	if (current === null) return res;
 	if (!refreshIsDue(ctx, current.value)) {
-		// After the upstream call: served only while the session is still live.
 		if (!(await checkSessionLive(ctx, caller))) return res;
-		return serveStored(ctx, caller, current);
+		const found = await confirmHeld(ctx, caller, current);
+		if (found === "answered") return res;
+		if (found === "held") return serveStored(ctx, caller, current);
+		logServeDiscarded(ctx, found);
+		if (found === "missing") return answerUnlinkedRecord(ctx);
 	}
 	return res.status(503).json({
 		error: "temporarily_unavailable",
