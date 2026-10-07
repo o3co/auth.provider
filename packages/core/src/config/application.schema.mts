@@ -263,8 +263,9 @@ export function resolveRefreshTokenLifetime(config: RefreshTokenLifetimeSource):
 /**
  * Ceiling for a `trust proxy` hop count: a typo guard, not a policy. A large
  * number meant as "trust everything" would silently grant the blanket trust
- * `true` states openly. Exported so the `httpSettings` contract suite, and the
- * module that parses a composition's HTTP settings, hold the value to it.
+ * `true` states openly. Exported so the test kit's `httpSettings` contract
+ * suite, and the module that parses a composition's HTTP settings, hold the
+ * value to it.
  */
 export const MAX_TRUST_PROXY_HOPS = 255;
 

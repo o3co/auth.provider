@@ -26,8 +26,7 @@
 
 import assert from "node:assert/strict";
 import type { ConfiguredFederation, FederationSettings } from "#/federations/settings.mjs";
-import type { ContractCase } from "#/session-admission/testing/requirement.contract.mjs";
-import { unfrozenPath } from "#/testing/slots/shared.mjs";
+import { type ContractCase, unfrozenPath } from "#/testing/slots/shared.mjs";
 
 export interface FederationSettingsContractInput {
 	/** The settings under test: what core fills the slot with, from the configuration its test chose. */

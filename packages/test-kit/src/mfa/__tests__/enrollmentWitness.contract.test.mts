@@ -23,7 +23,6 @@
  */
 
 import type { User, UserRepository } from "@o3co/auth-provider-core";
-import type { ContractCase as CoreContractCase } from "@o3co/auth-provider-core/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	type ContractCase,
@@ -313,8 +312,11 @@ describe("the suite's cases", () => {
 		expect(names(true).length).toBe(names(false).length + 1);
 	});
 
-	it("are the kit's ContractCase, the same shape as core's", () => {
-		expectTypeOf<ContractCase>().toEqualTypeOf<CoreContractCase>();
+	it("are the kit's ContractCase: a name, and a run that answers a promise", () => {
+		expectTypeOf<ContractCase>().toEqualTypeOf<{
+			readonly name: string;
+			readonly run: () => Promise<void>;
+		}>();
 		expectTypeOf(
 			mfaEnrollmentWitnessContract({ build: async () => inProcess(), withOutage: false }),
 		).toEqualTypeOf<readonly ContractCase[]>();

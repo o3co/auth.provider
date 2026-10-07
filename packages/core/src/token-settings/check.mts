@@ -22,9 +22,9 @@
  * configuration only when there is none; never member by member, which
  * would mix two sources in one reading. A member the slot lacks would then
  * read `undefined`, a quiet `false` for a switch, so each member read is
- * held to its contract rule (`oauthTokenSettingsContract`) and a missing or
- * wrong one refuses, naming it. The oauth module's provider always passes;
- * this is for a slot a host fills by hand.
+ * held to its contract rule (the test kit's `oauthTokenSettingsContract`)
+ * and a missing or wrong one refuses, naming it. The oauth module's
+ * provider always passes; this is for a slot a host fills by hand.
  */
 
 import {

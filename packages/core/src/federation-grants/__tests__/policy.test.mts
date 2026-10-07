@@ -17,8 +17,9 @@
 /**
  * The `federationGrantPolicy` slot: what modules outside the federation-grants
  * module read of its section — whether grants are on, and whether a
- * subject-wide revocation may leave them standing — its check, its contract
- * suite and the test double. A composition that holds no slot has grants off.
+ * subject-wide revocation may leave them standing — its check and the test
+ * double. A composition that holds no slot has grants off. The slot's contract
+ * suite is the test kit's, and runs over this double and the check there.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -29,28 +30,7 @@ import {
 import { createApp, defineModule, type ProviderDeps } from "#/index.mjs";
 import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import {
-	createTestFederationGrantPolicy,
-	type FederationGrantPolicyContractInput,
-	federationGrantPolicyContract,
-} from "#/testing/index.mjs";
-
-/** The names of the cases `build` fails. */
-const failing = async (build: FederationGrantPolicyContractInput["build"]): Promise<string[]> => {
-	const failed: string[] = [];
-	for (const { name, run } of federationGrantPolicyContract({ build })) {
-		try {
-			await run();
-		} catch {
-			failed.push(name);
-		}
-	}
-	return failed;
-};
-
-/** A policy built from `members` as written, frozen as a provider would hand it. */
-const policyOf = (members: Record<string, unknown>): FederationGrantPolicy =>
-	Object.freeze({ ...members }) as unknown as FederationGrantPolicy;
+import { createTestFederationGrantPolicy } from "#/testing/index.mjs";
 
 /** Boots `modules` beside a reader of the slot, and answers what the reader was handed. */
 const readThroughBoot = async (
@@ -125,34 +105,6 @@ describe("the federationGrantPolicy slot", () => {
 	});
 });
 
-describe("federationGrantPolicyContract — the double", () => {
-	const cases = federationGrantPolicyContract({ build: () => createTestFederationGrantPolicy() });
-
-	it("names every rule", () => {
-		expect(cases.map((c) => c.name)).toEqual([
-			"enabled is true or false",
-			"allowKeepOnSubjectRevocation is true or false",
-			"allowKeepOnSubjectRevocation is false while grants are off",
-			"the policy is frozen",
-		]);
-	});
-
-	it.each(cases)("$name", async ({ run }) => {
-		await run();
-	});
-
-	it("keeps them with every combination a deployment could configure", async () => {
-		for (const overrides of [
-			{ enabled: false },
-			{ enabled: true },
-			{ enabled: true, allowKeepOnSubjectRevocation: true },
-			{ enabled: true, allowKeepOnSubjectRevocation: false },
-		]) {
-			expect(await failing(() => createTestFederationGrantPolicy(overrides))).toEqual([]);
-		}
-	});
-});
-
 describe("createTestFederationGrantPolicy", () => {
 	it("answers grants off, nothing kept, frozen", () => {
 		const policy = createTestFederationGrantPolicy();
@@ -171,40 +123,6 @@ describe("createTestFederationGrantPolicy", () => {
 			enabled: false,
 			allowKeepOnSubjectRevocation: true,
 		});
-	});
-});
-
-describe("federationGrantPolicyContract — each way a value can break it", () => {
-	it("a switch that is not a boolean: absent, or the string a variable carries", async () => {
-		for (const enabled of [undefined, "true", 1, null]) {
-			expect(
-				await failing(() => policyOf({ enabled, allowKeepOnSubjectRevocation: false })),
-			).toEqual(["enabled is true or false"]);
-		}
-	});
-
-	it("a keep policy that is not a boolean", async () => {
-		for (const allowKeepOnSubjectRevocation of [undefined, "false", 0]) {
-			expect(
-				await failing(() => policyOf({ enabled: true, allowKeepOnSubjectRevocation })),
-			).toEqual(["allowKeepOnSubjectRevocation is true or false"]);
-		}
-	});
-
-	it("an allowance to keep grants while grants are off", async () => {
-		expect(
-			await failing(() =>
-				createTestFederationGrantPolicy({ enabled: false, allowKeepOnSubjectRevocation: true }),
-			),
-		).toEqual(["allowKeepOnSubjectRevocation is false while grants are off"]);
-	});
-
-	it("a policy that is not frozen", async () => {
-		expect(
-			await failing(
-				() => ({ enabled: true, allowKeepOnSubjectRevocation: false }) as FederationGrantPolicy,
-			),
-		).toEqual(["the policy is frozen"]);
 	});
 });
 
@@ -326,9 +244,8 @@ describe("checkFederationGrantPolicy", () => {
 		expect(laterRead).toBe(false);
 	});
 
-	it("passes what the double answers and refuses what the contract refuses", async () => {
+	it("passes what the double answers, as a copy equal to it", () => {
 		const double = createTestFederationGrantPolicy({ enabled: true });
 		expect(checkFederationGrantPolicy(double)).toStrictEqual(double);
-		expect(await failing(() => checkFederationGrantPolicy(double))).toEqual([]);
 	});
 });

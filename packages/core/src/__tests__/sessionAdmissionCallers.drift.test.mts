@@ -650,8 +650,8 @@ describe("session-admission callers", () => {
 		const home = [...sites].filter(([file]) => file.startsWith(HOME));
 		expect(home.length).toBeGreaterThan(0);
 		const inHome = counted(home.flatMap(([, s]) => s));
-		// The five builders — cookie, the code's two reads, link, token — and the contract suite's own live input.
-		expect(inHome.claim).toBe(6);
+		// The five builders — cookie, the code's two reads, link, token.
+		expect(inHome.claim).toBe(5);
 		expect(inHome.selectAcr).toBe(1);
 		expect(inHome.get).toBe(1);
 		expect(inHome.revokedBefore).toBe(1);

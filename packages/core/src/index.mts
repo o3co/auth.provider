@@ -238,7 +238,7 @@ export {
 	// for the packages outside core that read a section this file declares.
 	coerceBooleanFromEnv,
 	isLifetimeSeconds,
-	// The hop ceiling `http.trustProxy` is held to, which the
+	// The hop ceiling `http.trustProxy` is held to, which the test kit's
 	// `httpSettings` contract suite holds the slot's value to as well.
 	MAX_TRUST_PROXY_HOPS,
 	type RefreshTokenLifetimeSource,

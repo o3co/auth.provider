@@ -1,6 +1,6 @@
 # auth.provider
 
-最終更新: 2026-10-06
+最終更新: 2026-10-07
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -143,7 +143,7 @@ templates/standalone          composes the packages above; create-app copies it
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | core のストアポートの Redis 実装。複数レプリカのデプロイメント向け | データベースドライバーを core の外に置く。standalone テンプレートはどのデプロイメントでもこれを必要とする（refresh token family が Redis にある）。これなしで済むのは、単一レプリカで動く独自のコンポジションルートだけ |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | HTTP ユーザーリポジトリ — ユーザーサービス（「the Store」）のクライアント | 外部サービス向けの本番用アダプターを core の外に置く |
 | [`packages/standard`](packages/standard/) | `@o3co/auth-provider-standard` | プロバイダの外の責務の、差し替え可能な標準実装 — いまはプロバイダが発行するワンタイムコードの送信者: SMTP 送信者の section と文面、コードをログに書く開発用送信者 | 差し替え可能: デプロイはそのまま入れるか自前の送信者を書く。core だけに依存する |
-| [`packages/test-kit`](packages/test-kit/) | `@o3co/auth-provider-test-kit` | core の外のコードが実装するものの契約スイート — MFA 登録の証人のもの — と、それを走らせる偽物（偽の Store など） | テスト専用: このリポジトリのアダプターもデプロイ自身の実装も、core だけに依存して同じスイートを import する |
+| [`packages/test-kit`](packages/test-kit/) | `@o3co/auth-provider-test-kit` | core の外のコードが実装するものの契約スイート — モジュールが provide するスロット、セッション要件、ストアのポート、第二要素、メール送信、MFA 登録の証人のもの — と、それを走らせる偽物（偽の Store など） | テスト専用: このリポジトリのアダプターもデプロイ自身の実装も、core だけに依存して同じスイートを import する |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なコンポジションルート: モジュールの選択、設定、ロガー、シャットダウン、Docker | デプロイメントごとの選択。import ではなくコピーされ、公開されない |
 | [`create-app`](create-app/) | `@o3co/create-auth-provider` | テンプレート（`--template`、デフォルト `standalone`）を新しいプロジェクトにコピーする `npx` スキャフォルダー | `bin` 付きで単独公開される |
 

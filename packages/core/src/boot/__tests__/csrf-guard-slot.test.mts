@@ -31,7 +31,7 @@ import type { CsrfGuard, CsrfVerdict } from "#/browser-session/types.mjs";
 import { BootError, createApp, defineModule } from "#/index.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { createTestCsrfGuard } from "#/testing/slots/csrfGuard.mjs";
-import { fakeRequest, fakeResponse, runMiddleware } from "#/testing/slots/fake-http.mjs";
+import { fakeRequest, fakeResponse, runMiddleware } from "./fake-http.mjs";
 
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

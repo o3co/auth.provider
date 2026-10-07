@@ -24,8 +24,7 @@
 
 import assert from "node:assert/strict";
 import { MAX_TIMEOUT_MS, type OutboundPolicy } from "#/net/outbound-policy.mjs";
-import type { ContractCase } from "#/session-admission/testing/requirement.contract.mjs";
-import { unfrozenPath } from "#/testing/slots/shared.mjs";
+import { type ContractCase, unfrozenPath } from "#/testing/slots/shared.mjs";
 
 export interface OutboundPolicyContractInput {
 	/** The policy under test: what core fills the slot with, from the configuration its test chose. */
