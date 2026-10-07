@@ -36,6 +36,7 @@ import {
 	generateIdToken,
 	generateToken,
 	generateTokenResponse,
+	isGrantTypeAllowed,
 	logClientRepositoryUnavailable,
 	loggableError,
 	ownedConfirmation,
@@ -79,10 +80,14 @@ export type AuthorizationGrantDeps = Pick<
 	// the module hands its deps over whole) is what the two reads of the
 	// code's session go through (ADR 2026-09-28-session-admission). Required:
 	// a factory built by hand without one is refused.
+	// `grantHandlerResolver` (synthetic, read at request time) is the registry
+	// `/oauth/token` dispatches against: a refresh token is issued only while
+	// it holds the `refresh_token` grant. Required likewise.
 	ProviderDeps<
 		| "codeRepository"
 		| "clientRepository"
 		| "sessionRequirementResolver"
+		| "grantHandlerResolver"
 		| "oauthTokenSettings"
 		| "tokenBindingSettings",
 		"auditSink" | "sessionLifecycle" | "sessionLifecycleStore"
@@ -121,6 +126,14 @@ const requirementOrOutageRefusal = (
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
 	const { codeRepository, keyStore, logger } = deps;
+	const grants = deps.grantHandlerResolver;
+	if (grants === undefined) {
+		throw new Error(
+			"createAuthorizationGrant: grantHandlerResolver is required. The grant issues a refresh " +
+				"token only while the refresh_token grant is registered, which it reads from the " +
+				"registry the boot planner projects there.",
+		);
+	}
 	if (deps.userSessionStore !== undefined && deps.sessionLifecycle === undefined) {
 		throw new Error(
 			"The authorization_code grant: userSessionStore is wired, but sessionLifecycle is not. " +
@@ -187,14 +200,16 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 
 	/**
 	 * Revoke the family a refused exchange registered, whose tokens were never
-	 * served. Never throws: a failure is one error line, and the refusal
-	 * stands. With a rotation and no revocation wired, the record stays
-	 * active; `oauthAuthorizationGrantsModule` warns of that at boot.
+	 * served; nothing when it opened none. Never throws: a failure is one
+	 * error line, and the refusal stands. With a rotation and no revocation
+	 * wired, the record stays active; `oauthAuthorizationGrantsModule` warns
+	 * of that at boot.
 	 */
 	const revokeRefusedFamily = async (
-		familyId: string,
+		familyId: string | undefined,
 		at: { readonly sid: string; readonly clientId: string },
 	): Promise<void> => {
+		if (familyId === undefined) return;
 		if (!deps.refreshTokenFamilyRotation || !deps.refreshTokenFamilyRevocation) return;
 		try {
 			await deps.refreshTokenFamilyRevocation.revokeFamily(familyId);
@@ -616,10 +631,23 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// Initial rt+jwt opens a new refresh-token family for replay detection
+			// A refresh token only where the client can redeem one (RFC 6749
+			// §4.1.4 makes it optional): the `refresh_token` grant is registered,
+			// and the dispatch's rule allows it to this client. The dispatch has
+			// already applied `oauth.requireGrantTypeAllowlist` to this request,
+			// so a client without a list reaches here only with that switch off.
+			const refreshTokenGrant = grants.get("refresh_token");
+			const issuesRefreshToken =
+				refreshTokenGrant !== undefined &&
+				isGrantTypeAllowed(ctx.authenticatedClient.allowedGrantTypes, "refresh_token", {
+					requireAllowlist: refreshTokenGrant.requiresExplicitGrantAllowlist === true,
+				});
+
+			// The rt+jwt opens a new refresh-token family for replay detection
 			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same
-			// family_id; revoking the family revokes every descendant.
-			const familyId = crypto.randomUUID();
+			// family_id; revoking the family revokes every descendant. No refresh
+			// token, no family: the access token then carries no family_id.
+			const familyId = issuesRefreshToken ? crypto.randomUUID() : undefined;
 
 			// generateToken carries a single `aud`: several granted audiences are
 			// flattened to the first, and the default is the authenticated client,
@@ -694,12 +722,12 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			const amr = wellFormedAmr(codeData.amr);
 			const acr = wellFormedAcr(codeData.acr);
 
-			// Both tokens carry family_id and, when present, sid, so introspect and
-			// refresh need not re-read the session store. No sid without a
-			// userSessionStore.
+			// Both tokens carry family_id, when a family is opened, and sid, when
+			// present, so introspect and refresh need not re-read the session
+			// store. No sid without a userSessionStore.
 			const accessToken = await generateToken(
 				{
-					family_id: familyId,
+					...(familyId !== undefined ? { family_id: familyId } : {}),
 					...(sid ? { sid } : {}),
 					// So a resource server (or auth.policy-verifier) can gate on them.
 					...(amr ? { amr } : {}),
@@ -723,59 +751,62 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// family below is registered under exactly the `jti` and `exp` the
 			// token carries. Never read back from the signer's output, which a
 			// `KeyStore` may return in a form this grant cannot decode.
-			const refreshTokenIssuedAt = issuedAt;
-			const refreshTokenJti = crypto.randomUUID();
-			const refreshToken = await generateToken(
-				{
-					family_id: familyId,
-					...(sid ? { sid } : {}),
-					// For the refresh grant to mirror onto the access tokens it mints:
-					// `amr` and `acr` live on the code, spent here, so nowhere else
-					// holds them.
-					...(amr ? { amr } : {}),
-					...(acr ? { acr } : {}),
-					...(authTime !== undefined ? { auth_time: authTime } : {}),
-				},
-				{
-					expiresIn: refreshTokenExpiresIn,
-					keyStore,
-					issuer,
-					audience,
-					subject,
-					authorizedParty: authenticatedClientId,
-					scope: scopeClaim,
-					tokenType: "rt+jwt",
-					jti: refreshTokenJti,
-					issuedAt: refreshTokenIssuedAt,
-					...(bindRefreshToken && confirmation ? { confirmation } : {}),
-				},
-			);
+			let refreshToken: Token | undefined;
+			if (familyId !== undefined) {
+				const refreshTokenIssuedAt = issuedAt;
+				const refreshTokenJti = crypto.randomUUID();
+				refreshToken = await generateToken(
+					{
+						family_id: familyId,
+						...(sid ? { sid } : {}),
+						// For the refresh grant to mirror onto the access tokens it mints:
+						// `amr` and `acr` live on the code, spent here, so nowhere else
+						// holds them.
+						...(amr ? { amr } : {}),
+						...(acr ? { acr } : {}),
+						...(authTime !== undefined ? { auth_time: authTime } : {}),
+					},
+					{
+						expiresIn: refreshTokenExpiresIn,
+						keyStore,
+						issuer,
+						audience,
+						subject,
+						authorizedParty: authenticatedClientId,
+						scope: scopeClaim,
+						tokenType: "rt+jwt",
+						jti: refreshTokenJti,
+						issuedAt: refreshTokenIssuedAt,
+						...(bindRefreshToken && confirmation ? { confirmation } : {}),
+					},
+				);
 
-			// Register the family so replay detection is active from the first
-			// use; with a rotation wired, no refresh token is served unregistered.
-			if (deps.refreshTokenFamilyRotation) {
-				// Fail closed: a token whose replay detection is blind would break
-				// RFC 6819 §5.2.2.3. A retryable 503, not an HTML 500.
-				try {
-					await deps.refreshTokenFamilyRotation.register(
-						refreshTokenJti,
-						familyId,
-						(refreshTokenIssuedAt + refreshTokenExpiresIn) * 1000,
-					);
-				} catch (err) {
-					storeUnavailable("refresh_token_family", "register", authenticatedClientId, err);
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "refresh token store unavailable",
-						},
-					};
+				// Register the family so replay detection is active from the first
+				// use; with a rotation wired, no refresh token is served unregistered.
+				if (deps.refreshTokenFamilyRotation) {
+					// Fail closed: a token whose replay detection is blind would break
+					// RFC 6819 §5.2.2.3. A retryable 503, not an HTML 500.
+					try {
+						await deps.refreshTokenFamilyRotation.register(
+							refreshTokenJti,
+							familyId,
+							(refreshTokenIssuedAt + refreshTokenExpiresIn) * 1000,
+						);
+					} catch (err) {
+						storeUnavailable("refresh_token_family", "register", authenticatedClientId, err);
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "refresh token store unavailable",
+							},
+						};
+					}
 				}
 			}
 
-			// Link the new family to the user session and register the RP for
-			// back/front-channel logout. Fail closed: a store that cannot answer or
+			// Link the new family, when one is opened, to the user session and
+			// register the RP for back/front-channel logout. Fail closed: a store that cannot answer or
 			// a session gone since /authorize is an error, never tokens invisible
 			// to logout. With a store wired, the first read already refused a code
 			// without a sid.
@@ -843,7 +874,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					let joined: SessionJoinOutcome;
 					try {
 						// biome-ignore lint/style/noNonNullAssertion: see the factory's refusal
-						joined = await deps.sessionLifecycle!.join(sid, { rp, familyId });
+						joined = await deps.sessionLifecycle!.join(sid, {
+							rp,
+							...(familyId !== undefined ? { familyId } : {}),
+						});
 					} catch (error) {
 						return await linkingUnavailable({ error });
 					}

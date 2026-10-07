@@ -34,7 +34,10 @@
  * `oauthTokenSettings` slot, required while the module is on: the oauth
  * module provides it, and a composition without that module fills it. The
  * refresh-token binding rule they read from core's `tokenBindingSettings`
- * slot. The module reads nothing of the configuration beyond its section.
+ * slot. The authorization_code grant reads `grantHandlerResolver`, the
+ * registry `/oauth/token` dispatches against, at request time: it issues a
+ * refresh token only while that registry holds the refresh_token grant. The
+ * module reads nothing of the configuration beyond its section.
  */
 
 import {
@@ -147,6 +150,10 @@ const REQUIRES = [
 	// code's session through `admitSession` with it, twice; the refresh grant
 	// reads the token's.
 	"sessionRequirementResolver",
+	// The synthetic registry `/oauth/token` dispatches against: the
+	// authorization_code grant issues a refresh token only while it holds the
+	// refresh_token grant, read at request time.
+	"grantHandlerResolver",
 	// What the oauth module provides of `oauth {}`: the issuer, the lifetimes,
 	// the resource-indicator switch and `requireEmailVerified`, which every
 	// grant here reads. A composition without that module fills it.

@@ -71,7 +71,14 @@ endpoint, and none without it.
 
 `revokeAllForSubject`, the last of the three call sites above, is the pattern
 for anything that looks like it needs a new slot: the library is downstream of
-the action, never the one taking it. **Message
+the action, never the one taking it. Account state follows the same line. The
+provider keeps no account state and reads none: whether an account is
+disabled, deleted or locked is the Store's to hold and decide, and the Store
+answers a sign-in (`authenticate`, `authenticateByToken`) accordingly. Nothing
+the provider already issued is checked against the account again. When the
+Store disables, deletes or locks an account, it calls `revokeAllForSubject` for
+the subject, as it does after a credential change, and that call is what ends
+the sessions, tokens and grants issued before it. **Message
 delivery is the worked example of where the line falls.** The one flow this
 library drives end to end that must send is multi-factor authentication: the
 one-time codes of its email factor and of the account-email proof (the MFA

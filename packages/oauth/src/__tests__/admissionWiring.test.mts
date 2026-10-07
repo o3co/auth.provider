@@ -53,6 +53,7 @@ import { createSessionGrant } from "#/grants/session.mjs";
 import { oauthAuthorizationGrantsModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionGrantModule } from "#/oauthSession.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 import { routerInputsOf } from "./_helpers/sections.mjs";
 
@@ -162,7 +163,12 @@ describe("the consumers' factories refuse to build without the requirements reso
 	});
 
 	it("createAuthorizationGrant throws, naming the option", () => {
-		const deps = { ...grantDeps, clientRepository, codeRepository };
+		const deps = {
+			...grantDeps,
+			clientRepository,
+			codeRepository,
+			grantHandlerResolver: registeredGrants("refresh_token"),
+		};
 		// @ts-expect-error — the option is required; the refusal at runtime is the test.
 		expect(() => createAuthorizationGrant(deps)).toThrow(/requirements/);
 		expect(() =>
@@ -206,6 +212,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 				...grantDeps,
 				clientRepository,
 				codeRepository,
+				grantHandlerResolver: registeredGrants("refresh_token"),
 				sessionRequirementResolver: forged,
 			}),
 		).toThrow(refusal("createAuthorizationGrant"));

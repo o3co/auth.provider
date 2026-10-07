@@ -116,8 +116,9 @@ both routers share; [`src/federations/`](src/federations/) the toolkit and the
 router's federation parts (claim precedence, consented scope, the transaction
 store, the redirect policy); [`src/modules/`](src/modules/) and
 [`src/store/`](src/store/) the browser session store;
-[`src/internal/`](src/internal/) cookie reading, the constant-time comparison
-and the claims read off a `User`; [`src/csrf.mts`](src/csrf.mts) the CSRF rule;
+[`src/internal/`](src/internal/) cookie reading, the cookie session's store
+failing, the expiry of a destroyed session's cookie, the constant-time
+comparison and the claims read off a `User`; [`src/csrf.mts`](src/csrf.mts) the CSRF rule;
 [`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) the allowlist rule
 the login and federation routes share; and
 [`src/login-entry.mts`](src/login-entry.mts),
@@ -272,6 +273,17 @@ What holds:
   keeps the cookie attributes it was created with (express-session rebuilds the
   cookie from the record), so when these settings tighten, flush the session
   store to have every browser sign in again under the new cookie.
+- **A session destroyed during a request has its cookie expired in the same
+  answer**, whichever route destroyed it — `POST /session/logout`, `oauth`'s
+  `POST /oauth/logout`, or a deployment's own: once `req.session.destroy`
+  calls back without an error, the answer carries one `Set-Cookie` for
+  `session-store.name` dated in the past, with the attributes the cookie is
+  set with (`Path=/`, `HttpOnly`, and `session-store.domain`,
+  `session-store.secure` and `session-store.sameSite`), so the browser drops
+  it ([`src/internal/destroyedSessionCookie.mts`](src/internal/destroyedSessionCookie.mts)).
+  A destroy the store fails leaves the cookie; a regenerated session keeps
+  the new cookie it is given; a destroy that completes after the answer was
+  sent changes nothing.
 - **`memory` is refused under `core.deployment.mode = "multi"`.** express-session's
   `MemoryStore` forks per replica: a login served by one replica is unknown to
   the others, logout clears only the replica it lands on, and a restart loses
@@ -668,10 +680,11 @@ answers `503 temporarily_unavailable`: it closes nothing and keeps the express
 session for a retry.
 
 **The cookie session's destroy.** Once the express session is destroyed, the
-answer also expires the session cookie: a `Set-Cookie` for `session-store.name`
-dated in the past, with the attributes the cookie is set with (`Path=/`,
-`HttpOnly`, and `session-store.domain`, `session-store.secure` and
-`session-store.sameSite`), so the browser drops it. If destroying the express
+answer also expires the session cookie: the session store expires the cookie
+of any session destroyed during a request, `POST /oauth/logout`'s included,
+with the attributes the cookie is set with
+([Browser session store](#browser-session-store)), so the browser drops it;
+the router sets no session cookie of its own. If destroying the express
 session fails — the cookie store's outage — the user is not logged out, so the
 response is `503 temporarily_unavailable`, logged once at error level as
 `session_logout_store_unavailable` (`store: "cookie_session"`, `step:
@@ -1423,7 +1436,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/module.test.mts`](src/__tests__/module.test.mts) | the manifest's slots and absence policies, the two routers at `/session`, and the `callbackURL` boot rule |
 | [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | the middleware route at `/`, the cookie it sets and that it is the provider's policy, each cookie refused at validation through `createApp` and by the route itself before the store opens, the cookies that still mount, and the replica-safety declaration and refusal |
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
-| [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again, and the cookie a logout expires carrying the attributes express-session set it with |
+| [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again; the cookie of a session destroyed during the request expired once with the attributes express-session set it with, by a route or by `POST /session/logout`, and left as it is for a destroy the store fails, a regenerated session and a destroy after the answer |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, its expiry bound, the signer refused when built and read as refusing unless `verify` answers `true`, the origin check and the guard's acceptance rule |
 | [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | the session store's `csrfTokenSigner`: core's contract, the fixed vectors, the entropy floor, a token signed under `session-store.secret` passing `/session/*` and the `csrfGuard` slot, and an override replacing it; `sessionModule` and a hand-built router refused without a signer, signing through the slot's, its tokens passing between the slot and `/session/*`, and reading no `session-store.secret` on any route |
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, the cookie policy refuses whatever would break the contract, over every combination of the cookie's attributes, and a name or domain it refuses is refused at validation with its message; an override of the policy beside the store's module refuses boot, and a composition without the module fills the slot |

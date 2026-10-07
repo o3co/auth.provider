@@ -118,6 +118,7 @@ const makeApp = async (
 		"authorization_code",
 		createAuthorizationGrant({
 			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			grantHandlerResolver: registry,
 			...grantSettingsFrom(config),
 			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 			codeRepository,

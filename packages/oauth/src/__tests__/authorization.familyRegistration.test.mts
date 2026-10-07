@@ -46,6 +46,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 const RP_URI = "https://rp.example/cb";
@@ -94,6 +95,7 @@ async function exchangeCode(keyStore: KeyStore) {
 	const register = vi.fn(rotation.register);
 	const handler = createAuthorizationGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+		grantHandlerResolver: registeredGrants("refresh_token"),
 		...grantSettingsFrom(config),
 		keyStore,
 		clientRepository: { findById: async () => null, authenticate: async () => null },
