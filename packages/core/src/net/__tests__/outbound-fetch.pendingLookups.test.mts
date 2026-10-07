@@ -148,6 +148,13 @@ describe("outstanding host-name resolutions", () => {
 		expect(lookupCeilingOf("1")).toBe(1);
 		// A negative count is a huge unsigned one to libuv, so it is clamped to 1024.
 		expect(lookupCeilingOf("-4")).toBe(1022);
+		// A count atoi cannot hold in an int reads as 0, so one thread: the narrowest bound.
+		expect(lookupCeilingOf("2147483647")).toBe(1022);
+		expect(lookupCeilingOf("2147483648")).toBe(1);
+		expect(lookupCeilingOf("4294967296")).toBe(1);
+		expect(lookupCeilingOf("-4294967296")).toBe(1);
+		expect(lookupCeilingOf("-2147483648")).toBe(1);
+		expect(lookupCeilingOf("99999999999999999999999")).toBe(1);
 	});
 
 	it("keeps a resolution the deadline gave up on counted, so the next call starts none and times out", async () => {

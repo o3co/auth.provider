@@ -97,12 +97,15 @@ const MAX_THREADPOOL_SIZE = 1024;
  * The threadpool size libuv takes from `UV_THREADPOOL_SIZE`, read as libuv
  * reads it: absent, 4; present, `atoi` — leading white space, a sign and the
  * digits that follow, anything else 0 — held in an unsigned integer, so 0
- * reads as 1, and a negative count or one past 1024 as 1024.
+ * reads as 1, and a negative count or one past 1024 as 1024. A count whose
+ * magnitude an `int` cannot hold (2^31 or more) reads as 0, as `atoi`
+ * answers it, and so as one thread: the narrowest bound, never the widest.
  */
 function threadpoolSizeOf(value: string | undefined): number {
 	if (value === undefined) return DEFAULT_THREADPOOL_SIZE;
 	const [, sign = "", digits = ""] = /^[\t\n\v\f\r ]*([+-]?)(\d*)/.exec(value) ?? [];
-	const count = digits === "" ? 0 : Number(digits);
+	const parsed = digits === "" ? 0 : Number(digits);
+	const count = parsed >= 2 ** 31 ? 0 : parsed;
 	if (count === 0) return 1;
 	if (sign === "-") return MAX_THREADPOOL_SIZE;
 	return Math.min(count, MAX_THREADPOOL_SIZE);
@@ -114,11 +117,14 @@ function threadpoolSizeOf(value: string | undefined): number {
  * `threadpoolSizeOf`): two fewer than the threadpool, and at least one. The
  * system resolver runs on that threadpool, which bcrypt and the file system
  * share, and it cannot be cancelled: a lookup the deadline gave up on keeps
- * its thread until it settles. libuv itself runs at most about half its
- * threads on such slow work, so name resolution alone cannot take every
- * thread; this bound keeps the backlog of lookups nobody waits for any more
- * finite, and with the request share ({@link REQUEST_LOOKUP_SHARE}) keeps one
- * source of URLs from starving another.
+ * its thread until it settles. libuv runs host-name resolution on at most
+ * `(n + 1) / 2` of its `n` threads; this bound keeps the outbound fetch's
+ * own lookups finite, those nobody waits for any more included, and with the
+ * request share ({@link REQUEST_LOOKUP_SHARE}) keeps a URL a client supplies
+ * from holding more than one. With a pool of 1 or 2 threads, hung lookups can
+ * still occupy the threads libuv gives such work, which is why the README
+ * asks a deployment with Client ID Metadata Documents for the default size or
+ * more.
  */
 export function lookupCeilingOf(threadpoolSize: string | undefined): number {
 	return Math.max(1, threadpoolSizeOf(threadpoolSize) - 2);
