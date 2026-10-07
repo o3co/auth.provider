@@ -18,6 +18,7 @@ import { createSecretKey } from "node:crypto";
 import {
 	type ClientRepository,
 	createMemoryAccessTokenDenylist,
+	createOutboundFetch,
 	createSymmetricKeyStore,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
@@ -27,6 +28,9 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRevokeRouter } from "#/routes/revoke.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+
+/** Core's outbound fetch, as the composed router hands the endpoint. */
+const outboundFetch = createOutboundFetch({ config: {}, source: "registration" });
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -96,6 +100,7 @@ describe("POST /oauth/revoke — access token path", () => {
 		denylist = createMemoryAccessTokenDenylist();
 
 		const router = createRevokeRouter(express, {
+			fetch: outboundFetch,
 			clientRepository,
 			keyStore,
 			refreshTokenFamilyRevocation: stubRevocation,
@@ -161,6 +166,7 @@ describe("POST /oauth/revoke — access token path", () => {
 	it("refuses construction when denylist-backed AT revocation is claimed without a denylist", () => {
 		expect(() =>
 			createRevokeRouter(express, {
+				fetch: outboundFetch,
 				clientRepository,
 				keyStore,
 				refreshTokenFamilyRevocation: stubRevocation,
@@ -175,6 +181,7 @@ describe("POST /oauth/revoke — access token path", () => {
 	it("names the unsupported escape hatch in the construction failure", () => {
 		expect(() =>
 			createRevokeRouter(express, {
+				fetch: outboundFetch,
 				clientRepository,
 				keyStore,
 				accessTokenRevocation: "denylist",
@@ -192,6 +199,7 @@ describe("POST /oauth/revoke — access token path", () => {
 		// the direct-API caller's behaviour, and the point is that it is honest
 		// rather than silent.
 		const router = createRevokeRouter(express, {
+			fetch: outboundFetch,
 			clientRepository,
 			keyStore,
 			refreshTokenFamilyRevocation: stubRevocation,
@@ -273,6 +281,7 @@ describe("POST /oauth/revoke — cross-type fallback (hint=access_token + RT-sha
 		crossTypeDenylist = createMemoryAccessTokenDenylist();
 
 		const router = createRevokeRouter(express, {
+			fetch: outboundFetch,
 			clientRepository,
 			keyStore,
 			refreshTokenFamilyRevocation: crossTypeRevocation,
@@ -322,6 +331,7 @@ describe('POST /oauth/revoke — accessTokenRevocation: "unsupported"', () => {
 		app.use(
 			"/oauth",
 			createRevokeRouter(express, {
+				fetch: outboundFetch,
 				clientRepository,
 				keyStore,
 				refreshTokenFamilyRevocation: revocation,
@@ -452,6 +462,7 @@ describe("POST /oauth/revoke — public client support", () => {
 		pubDenylist = createMemoryAccessTokenDenylist();
 
 		const router = createRevokeRouter(express, {
+			fetch: outboundFetch,
 			clientRepository: publicClientRepository,
 			keyStore,
 			refreshTokenFamilyRevocation: pubRevocation,

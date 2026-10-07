@@ -18,6 +18,7 @@ import {
 	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
+	createOutboundFetch,
 	defineModule,
 	type Module,
 	type ProviderDeps,
@@ -124,7 +125,8 @@ export const oauthEndpointsModule: Module = defineModule<
 	| "clientRepository"
 	| "keyStore"
 	| "grantHandlerResolver"
-	| "sessionRequirementResolver",
+	| "sessionRequirementResolver"
+	| "outboundPolicy",
 	| "codeRepository"
 	| "rateLimiter"
 	| "auditSink"
@@ -153,6 +155,7 @@ export const oauthEndpointsModule: Module = defineModule<
 		"keyStore",
 		"grantHandlerResolver", // synthetic, auto-injected by boot planner
 		"sessionRequirementResolver", // every consumer of admission takes it (ADR 2026-09-28-session-admission); here it decides the acr drop, and /authorize and the consent step read their sessions through it
+		"outboundPolicy", // core's core.outbound: a client's jwksUri and back-channel logout URI are fetched under it
 	],
 	optional: [
 		"codeRepository", // where /authorize issues its codes; the router requires it with the authorization_code grant
@@ -213,6 +216,7 @@ export const oauthEndpointsModule: Module = defineModule<
 					clientRepository: deps.clientRepository,
 					keyStore: deps.keyStore,
 					issuer: oauthTokenSettingsFrom(deps.section).issuer,
+					fetchImpl: createOutboundFetch({ policy: deps.outboundPolicy, source: "registration" }),
 					logger: deps.logger ?? consoleLogger,
 				}),
 		},
@@ -233,6 +237,7 @@ export const oauthEndpointsModule: Module = defineModule<
 					registry,
 					section: deps.section,
 					federationSettings: deps.federationSettings,
+					outboundPolicy: deps.outboundPolicy,
 					clientRepository: deps.clientRepository,
 					codeRepository: deps.codeRepository,
 					keyStore: deps.keyStore,

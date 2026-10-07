@@ -47,6 +47,7 @@ import {
 	coreConfigForTests,
 	createTestCsrfGuard,
 	createTestOAuthTokenSettings,
+	createTestOutboundPolicy,
 	makeValidCoreConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -605,6 +606,8 @@ describe("the device-grant module — the route it actually contributes", () => 
 	const enabledDeps = (overrides: { limits?: Record<string, RateLimitSpec> } = {}) => ({
 		// The synthetic key boot fills from `core.deployment.mode`.
 		deploymentMode: "single",
+		// The synthetic key boot fills from `core.outbound`.
+		outboundPolicy: createTestOutboundPolicy(),
 		section: sectionOf({
 			enabled: true,
 			verificationUri: "https://example.test/device",
@@ -1878,6 +1881,7 @@ describe("the device-grant module — private_key_jwt on the mounted route", () 
 
 	const depsWith = (replaySeenSet?: unknown) => ({
 		section: sectionOf(ENABLED),
+		outboundPolicy: createTestOutboundPolicy(),
 		oauthTokenSettings: createTestOAuthTokenSettings({ ...WITHIN_CONFIGURATION, issuer: ISSUER }),
 		clientRepository: jwtRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),

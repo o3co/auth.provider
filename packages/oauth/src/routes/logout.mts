@@ -202,8 +202,6 @@ export interface LogoutRouterOptions {
 	 * configured.
 	 */
 	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
-	/** Override for unit tests. Defaults to the global `fetch`. */
-	fetchImpl?: typeof fetch;
 	/** Structured logger for the route's lines. */
 	logger?: Logger;
 	/** Audit sink for operator observability events. No-op when undefined. */

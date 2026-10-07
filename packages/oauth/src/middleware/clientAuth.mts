@@ -52,10 +52,7 @@ export interface ClientAuthMiddlewareOptions {
 	 * header still carries a syntactically valid realm.
 	 */
 	issuer?: string;
-	/**
-	 * Structured logger for repository-failure traces. Defaults to
-	 * `consoleLogger` so existing callers compile unchanged.
-	 */
+	/** Structured logger for refusals and repository failures. Defaults to `consoleLogger`. */
 	logger?: Logger;
 	/**
 	 * Whether `tokenEndpointAuthMethod: "none"` clients are accepted. Only
@@ -76,8 +73,8 @@ export interface ClientAuthMiddlewareOptions {
 	 * alongside `issuer` (RFC 7523 §3). Defaults to `<issuer>/oauth/token`.
 	 */
 	tokenEndpoint?: string;
-	/** The fetch used for a client's `jwksUri`. A proxy, or a test seam. */
-	fetch?: typeof fetch;
+	/** The fetch used for a client's `jwksUri`; see `createClientAssertionVerifier`. */
+	fetch: typeof fetch;
 }
 
 // URI-safe characters per RFC 3986 (plus the few sub-delims commonly seen in
@@ -159,14 +156,8 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  */
 export function createClientAuthMiddleware(
 	clientRepository: ClientRepository,
-	loggerOrOptions: Logger | ClientAuthMiddlewareOptions = {},
+	opts: ClientAuthMiddlewareOptions,
 ): RequestHandler {
-	// Also accepts a bare Logger, as older call sites pass; the options object
-	// is needed to supply `issuer`.
-	const opts: ClientAuthMiddlewareOptions =
-		typeof loggerOrOptions === "object" && "warn" in loggerOrOptions
-			? { logger: loggerOrOptions as Logger }
-			: (loggerOrOptions as ClientAuthMiddlewareOptions);
 	const logger: Logger = opts.logger ?? consoleLogger;
 	const clients = behindClientBoundary(clientRepository, logger);
 	// `resolveRealm` sanitises the issuer. Shared with the sender-constrained

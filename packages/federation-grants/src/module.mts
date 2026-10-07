@@ -41,6 +41,7 @@ import {
 	checkFederationGrantPolicy,
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
+	createOutboundFetch,
 	defineModule,
 	type FederationGrantConnection,
 	type FederationGrantPolicy,
@@ -157,6 +158,9 @@ const REQUIRES = [
 	// federation a connection names is configured and on, and the issuer and
 	// client id a grant's identity is pinned to.
 	"federationSettings",
+	// Core's `core.outbound`, which boot fills: a `private_key_jwt` client's
+	// `jwksUri` is fetched under it.
+	"outboundPolicy",
 ] as const;
 const OPTIONAL = [
 	"federationGrantStore",
@@ -562,6 +566,7 @@ export const federationGrantsModule = defineModule<
 						issuer: issuerOf(deps),
 						...limiterOf(deps),
 						...(deps.replaySeenSet === undefined ? {} : { replaySeenSet: deps.replaySeenSet }),
+						fetch: createOutboundFetch({ policy: deps.outboundPolicy, source: "registration" }),
 						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
 						...(deps.logger === undefined ? {} : { logger: deps.logger }),
 					}),

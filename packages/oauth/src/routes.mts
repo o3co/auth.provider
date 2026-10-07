@@ -29,6 +29,7 @@ import {
 	type ConsentStore,
 	checkResolver,
 	consoleLogger,
+	createOutboundFetch,
 	createRateLimitGuard,
 	emitAuditEvent,
 	type FederationProvider,
@@ -43,6 +44,7 @@ import {
 	type Logger,
 	type LoginEntry,
 	livenessSidOf,
+	type OutboundPolicy,
 	type PendingConsentStore,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
@@ -381,6 +383,7 @@ export const createOAuthRouter = async (
 		registry,
 		section,
 		federationSettings,
+		outboundPolicy,
 		clientRepository: registeredClients,
 		codeRepository,
 		keyStore,
@@ -431,6 +434,14 @@ export const createOAuthRouter = async (
 		 * with core's `createTestFederationSettings`.
 		 */
 		federationSettings: FederationSettings;
+		/**
+		 * Core's `core.outbound` (the `outboundPolicy` slot): every URL a client
+		 * registration names that the router fetches — a `jwksUri` — is fetched
+		 * under it. `oauthEndpointsModule` passes the slot; a router built by
+		 * hand without one is refused. Tests build one with core's
+		 * `createTestOutboundPolicy`.
+		 */
+		outboundPolicy: OutboundPolicy;
 		clientRepository: ClientRepository;
 		/**
 		 * Where `/authorize` issues its codes. Required when `registry` holds
@@ -541,6 +552,11 @@ export const createOAuthRouter = async (
 			"createOAuthRouter: federationSettings is required — core's view of core.federations (the module passes the slot), or createTestFederationSettings from @o3co/auth-provider-core/testing in a test",
 		);
 	}
+	if (!outboundPolicy) {
+		throw new RangeError(
+			"createOAuthRouter: outboundPolicy is required — core's core.outbound (the module passes the slot), or createTestOutboundPolicy from @o3co/auth-provider-core/testing in a test",
+		);
+	}
 	// `/authorize` issues the codes the authorization_code grant redeems, so it
 	// is mounted exactly when that grant is registered — the registry
 	// `/oauth/token` dispatches against — and needs the code repository then.
@@ -589,12 +605,19 @@ export const createOAuthRouter = async (
 	// `private_key_jwt` on every client-authenticated endpoint: the
 	// assertion's `aud` may name the issuer or this token endpoint.
 	const tokenEndpoint = `${canonicalIssuer}/oauth/token`;
+	// Every `jwksUri` a client registration names is fetched through this one,
+	// built here under `core.outbound`, so an egress it refuses fails the build.
+	const registrationFetch = createOutboundFetch({
+		policy: outboundPolicy,
+		source: "registration",
+	});
 	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
 		issuer: canonicalIssuer,
 		logger,
 		allowPublicClients: true,
 		replaySeenSet,
 		tokenEndpoint,
+		fetch: registrationFetch,
 	});
 	// `/oauth/introspect` MUST reject public clients per RFC 7662 §2.1 — a
 	// known client_id is a non-secret value and would otherwise let any party
@@ -604,6 +627,7 @@ export const createOAuthRouter = async (
 		logger,
 		replaySeenSet,
 		tokenEndpoint,
+		fetch: registrationFetch,
 	});
 
 	// The check and outage policy (the limiter's failMode, context, 429
@@ -845,6 +869,7 @@ export const createOAuthRouter = async (
 			// private_key_jwt at /oauth/revoke, verified as at /oauth/token.
 			replaySeenSet,
 			tokenEndpoint,
+			fetch: registrationFetch,
 		}),
 	);
 

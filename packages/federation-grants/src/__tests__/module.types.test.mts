@@ -41,6 +41,8 @@ const REQUIRES = [
 	// The federations a connection names: whether each is configured and on,
 	// and its issuer and client id.
 	"federationSettings",
+	// The policy a client's `jwksUri` is fetched under.
+	"outboundPolicy",
 ] as const;
 const OPTIONAL = [
 	"federationGrantStore",
@@ -72,6 +74,10 @@ describe("federationGrantsModule's deps are the slots it declares", () => {
 		expectTypeOf<FederationGrantsModuleDeps>().branded.toEqualTypeOf<Declared>();
 		expect([...(federationGrantsModule.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(federationGrantsModule.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
+	});
+
+	it("requires core's outboundPolicy, the policy a client's jwksUri is fetched under", () => {
+		expect(federationGrantsModule.requires).toContain("outboundPolicy");
 	});
 
 	it("reads no whole configuration, and leaves the audit sink's declared absence to core's policy", () => {

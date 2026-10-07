@@ -41,6 +41,7 @@ import {
 	WEB,
 	webTokens,
 } from "./all-modules-composition.fixture.mjs";
+import { backchannelPeer, withLoopbackRelyingParties } from "./backchannel-peer.fixture.mjs";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -68,7 +69,9 @@ describe("the template, which composes the session lifecycle module", () => {
 	});
 
 	it("tells a relying party that joined, through the oauth module's notifier, when the session closes", async () => {
+		const peer = await backchannelPeer();
 		const { handle } = await compose({
+			config: withLoopbackRelyingParties,
 			extraClients: {
 				"rp-bc": {
 					tokenEndpointAuthMethod: "client_secret_basic",
@@ -76,7 +79,7 @@ describe("the template, which composes the session lifecycle module", () => {
 					allowedRedirectUris: ["https://rp-bc.test/cb"],
 					allowedScopes: ["openid"],
 					allowedGrantTypes: ["authorization_code"],
-					backchannelLogoutUri: "https://rp-bc.test/logout",
+					backchannelLogoutUri: peer.uri,
 				},
 			},
 		});
@@ -99,7 +102,7 @@ describe("the template, which composes the session lifecycle module", () => {
 			});
 			const rp = {
 				clientId: "rp-bc",
-				backchannelLogoutUri: "https://rp-bc.test/logout",
+				backchannelLogoutUri: peer.uri,
 				backchannelLogoutSessionRequired: true,
 				frontchannelLogoutUri: undefined,
 				frontchannelLogoutSessionRequired: undefined,
@@ -108,15 +111,9 @@ describe("the template, which composes the session lifecycle module", () => {
 			expect(await lifecycle.join("sid-bc", { rp, familyId: "family-bc" })).toEqual({
 				outcome: "joined",
 			});
-			const posted = vi
-				.spyOn(globalThis, "fetch")
-				.mockImplementation(async () => new Response(null, { status: 200 }));
 			expect((await lifecycle.close("sid-bc", "rp_logout")).outcome).toBe("done");
-			expect(posted).toHaveBeenCalledTimes(1);
-			const [url, init] = posted.mock.calls[0] as [string, RequestInit];
-			expect(url).toBe("https://rp-bc.test/logout");
-			const token = new URLSearchParams(String(init.body)).get("logout_token");
-			expect(claimsOf(token ?? "")).toMatchObject({
+			expect(peer.tokens).toHaveLength(1);
+			expect(claimsOf(peer.tokens[0] ?? "")).toMatchObject({
 				iss: ISSUER,
 				aud: "rp-bc",
 				sub: "u-bc",
@@ -124,6 +121,7 @@ describe("the template, which composes the session lifecycle module", () => {
 			});
 		} finally {
 			await handle.dispose();
+			await peer.close();
 		}
 	});
 

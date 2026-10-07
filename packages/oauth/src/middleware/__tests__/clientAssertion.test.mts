@@ -17,11 +17,17 @@
 import { randomUUID } from "node:crypto";
 import {
 	createMemoryReplaySeenSet,
+	createOutboundFetch,
 	type Logger,
 	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	type PublicClient,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
+import {
+	createOutboundFetchForTesting,
+	type OutboundTransport,
+	withOutbound,
+} from "@o3co/auth-provider-core/testing";
 import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -104,12 +110,16 @@ const body = (assertion: string, extra: Record<string, unknown> = {}) => ({
 	...extra,
 });
 
+/** Core's outbound fetch, as a composition hands the verifier. */
+const outboundFetch = createOutboundFetch({ config: {}, source: "registration" });
+
 const build = (overrides: Partial<Parameters<typeof createClientAssertionVerifier>[0]> = {}) =>
 	createClientAssertionVerifier({
 		issuer: ISSUER,
 		tokenEndpoint: TOKEN_ENDPOINT,
 		replaySeenSet: createMemoryReplaySeenSet(),
 		logger: silent,
+		fetch: outboundFetch,
 		...overrides,
 	});
 
@@ -295,6 +305,169 @@ describe("createClientAssertionVerifier", () => {
 				),
 			);
 			expect(out).toMatchObject({ status: 401, error: "invalid_client" });
+		});
+	});
+
+	describe("the fetch is required", () => {
+		it.each([undefined, null, "fetch"])(
+			"refuses to build without a fetch function (%s), so the global fetch is never used",
+			(fetch) => {
+				const global = vi.spyOn(globalThis, "fetch");
+				try {
+					expect(() => build({ fetch: fetch as unknown as typeof globalThis.fetch })).toThrow(
+						/fetch is required/,
+					);
+					expect(global).not.toHaveBeenCalled();
+				} finally {
+					global.mockRestore();
+				}
+			},
+		);
+	});
+
+	describe("jwks_uri through core's outbound fetch", () => {
+		const warnings = () => {
+			const lines: Record<string, unknown>[] = [];
+			const record = (line: unknown, event?: unknown) => {
+				if (event === "client_assertion_refused") lines.push(line as Record<string, unknown>);
+			};
+			const logger: Logger = { ...silent, warn: record, error: record, child: () => logger };
+			return { logger, lines };
+		};
+
+		const answering =
+			(status: number, text = "", headers: [string, string][] = []): OutboundTransport =>
+			async () => ({
+				status,
+				statusText: "",
+				headers,
+				body: (async function* () {
+					if (text.length > 0) yield new TextEncoder().encode(text);
+				})(),
+				close: () => {},
+			});
+
+		const badSignature = async () =>
+			refused(
+				await build().verify(
+					body(await mint({}, { key: stranger.privateKey, kid: "k1" })),
+					findClient(),
+				),
+			);
+
+		it.each([
+			"https://127.0.0.1/jwks",
+			"https://10.0.0.1/jwks",
+			"https://[::1]/jwks",
+			"https://[::ffff:127.0.0.1]/jwks",
+			"https://u:p@rp.test/jwks",
+			"http://rp.test/jwks",
+		])(
+			"through core's outbound fetch, %s is refused exactly as a bad signature is",
+			async (jwksUri) => {
+				const { logger, lines } = warnings();
+				const outcome = refused(
+					await build({ logger }).verify(
+						body(await mint()),
+						findClient(client({ jwks: undefined, jwksUri })),
+					),
+				);
+				expect(outcome).toEqual(await badSignature());
+				expect(outcome).toEqual({
+					kind: "refused",
+					status: 401,
+					error: "invalid_client",
+					description: "Invalid client assertion",
+				});
+				expect(lines).toHaveLength(1);
+				expect(lines[0]).toMatchObject({ reason: "jwks_uri_refused", clientId: CLIENT_ID });
+			},
+		);
+
+		it("refuses a key set that answers with a redirect, without following it", async () => {
+			const transport = vi.fn(answering(302, "", [["location", "https://rp.test/elsewhere"]]));
+			const { logger, lines } = warnings();
+			const outcome = refused(
+				await build({
+					logger,
+					fetch: createOutboundFetchForTesting({
+						config: {},
+						source: "registration",
+						lookup: async () => ["93.184.216.34"],
+						transport,
+					}),
+				}).verify(
+					body(await mint()),
+					findClient(client({ jwks: undefined, jwksUri: "https://rp.test/jwks" })),
+				),
+			);
+			expect(outcome).toMatchObject({ status: 401, description: "Invalid client assertion" });
+			expect(transport).toHaveBeenCalledOnce();
+			expect(lines[0]).toMatchObject({ reason: "jwks_uri_refused" });
+		});
+
+		it("refuses a key set larger than core.outbound.maxResponseBytes", async () => {
+			const { logger, lines } = warnings();
+			const keys = JSON.stringify({ keys: [rp.publicJwk] });
+			const outcome = refused(
+				await build({
+					logger,
+					fetch: createOutboundFetchForTesting({
+						config: withOutbound({}, { maxResponseBytes: 32 }),
+						source: "registration",
+						lookup: async () => ["93.184.216.34"],
+						transport: answering(200, keys, [["content-type", "application/json"]]),
+					}),
+				}).verify(
+					body(await mint()),
+					findClient(client({ jwks: undefined, jwksUri: "https://rp.test/jwks" })),
+				),
+			);
+			expect(outcome).toMatchObject({ status: 401, description: "Invalid client assertion" });
+			expect(lines[0]).toMatchObject({ reason: "jwks_uri_refused" });
+		});
+
+		it("verifies under a key set at a loopback host core.outbound.internalHosts lists", async () => {
+			const transport = vi.fn(
+				answering(200, JSON.stringify({ keys: [rp.publicJwk] }), [
+					["content-type", "application/json"],
+				]),
+			);
+			const outcome = await build({
+				fetch: createOutboundFetchForTesting({
+					config: withOutbound({}, { internalHosts: ["localhost"] }),
+					source: "registration",
+					lookup: async () => ["127.0.0.1"],
+					transport,
+				}),
+			}).verify(
+				body(await mint()),
+				findClient(client({ jwks: undefined, jwksUri: "http://localhost:8080/jwks" })),
+			);
+			expect(outcome).toMatchObject({ kind: "ok" });
+			expect(transport.mock.calls[0]?.[0].addresses).toEqual(["127.0.0.1"]);
+		});
+
+		it("keeps jwks_unavailable for an exchange that fails rather than is refused", async () => {
+			const { logger, lines } = warnings();
+			const outcome = refused(
+				await build({
+					logger,
+					fetch: createOutboundFetchForTesting({
+						config: {},
+						source: "registration",
+						lookup: async () => {
+							throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });
+						},
+						transport: answering(200),
+					}),
+				}).verify(
+					body(await mint()),
+					findClient(client({ jwks: undefined, jwksUri: "https://rp.test/jwks" })),
+				),
+			);
+			expect(outcome).toMatchObject({ status: 401, description: "Invalid client assertion" });
+			expect(lines[0]).toMatchObject({ reason: "jwks_unavailable" });
 		});
 	});
 

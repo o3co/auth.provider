@@ -16,6 +16,7 @@
 import {
 	auditErrorText,
 	generateLogoutToken,
+	isOutboundRefusal,
 	type KeyStore,
 	type Logger,
 	loggableError,
@@ -40,8 +41,13 @@ export interface BroadcastBackchannelLogoutOptions {
 	/** Session ID being terminated. Included in each logout_token when the RP requires sid. */
 	readonly sid: string;
 	readonly keyStore: KeyStore;
-	/** Override for unit tests. Defaults to the global `fetch`. */
-	readonly fetchImpl?: typeof fetch;
+	/**
+	 * The fetch every POST goes through: core's
+	 * `createOutboundFetch({ policy, source: "registration" })` over the
+	 * `outboundPolicy` slot, built once, so `core.outbound` applies. Anything
+	 * else replaces that policy.
+	 */
+	readonly fetchImpl: typeof fetch;
 	/** Per-request timeout in milliseconds. Defaults to 5000ms. */
 	readonly timeoutMs?: number;
 	/** Optional structured logger. Defaults to `console`. */
@@ -52,16 +58,17 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 
 /**
  * POSTs one logout_token to `uri` as OIDC Back-Channel Logout 1.0 §2.5 has
- * it, a form body, under one deadline (default 5000ms): the relying party's
- * answer's status, its body left unread and cancelled, or the rejection of a
- * request that did not complete.
+ * it, a form body, through `options.fetchImpl` alone, under one deadline
+ * (default 5000ms): the relying party's answer's status, its body left unread
+ * and cancelled, or the rejection of a request that did not complete or that
+ * the fetch refused.
  */
 export async function postLogoutToken(
 	uri: string,
 	token: string,
-	options: { readonly fetchImpl?: typeof fetch; readonly timeoutMs?: number } = {},
+	options: { readonly fetchImpl: typeof fetch; readonly timeoutMs?: number },
 ): Promise<{ readonly ok: boolean; readonly status: number }> {
-	const fetchImpl = options.fetchImpl ?? fetch;
+	const fetchImpl = options.fetchImpl;
 	const abort = new AbortController();
 	const timer = setTimeout(() => abort.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 	try {
@@ -81,8 +88,10 @@ export async function postLogoutToken(
 
 /**
  * Best-effort parallel POST of OIDC Back-Channel Logout 1.0 logout_token to each RP's
- * `backchannelLogoutUri`. Never throws; 4xx/5xx/network/timeout failures are logged via
- * `opts.logger ?? console`. RPs without a `backchannelLogoutUri` are skipped.
+ * `backchannelLogoutUri`. Never throws; 4xx/5xx/network/timeout failures, and a
+ * destination the outbound fetch refuses (`step: "destination"`, the RP treated as
+ * unreachable), are logged via `opts.logger ?? console`. RPs without a
+ * `backchannelLogoutUri` are skipped.
  */
 export async function broadcastBackchannelLogout(
 	opts: BroadcastBackchannelLogoutOptions,
@@ -107,7 +116,7 @@ export async function broadcastBackchannelLogout(
 				});
 				try {
 					const res = await postLogoutToken(rp.backchannelLogoutUri, token, {
-						...(opts.fetchImpl === undefined ? {} : { fetchImpl: opts.fetchImpl }),
+						fetchImpl: opts.fetchImpl,
 						...(opts.timeoutMs === undefined ? {} : { timeoutMs: opts.timeoutMs }),
 					});
 					if (!res.ok) {
@@ -118,8 +127,9 @@ export async function broadcastBackchannelLogout(
 						);
 					}
 				} catch (err) {
+					const step = isOutboundRefusal(err) ? "destination" : "post";
 					logger.warn(
-						{ clientId: auditErrorText(rp.clientId), step: "post", err: loggableError(err) },
+						{ clientId: auditErrorText(rp.clientId), step, err: loggableError(err) },
 						"logout_backchannel_failed",
 					);
 				}
