@@ -479,7 +479,7 @@ const myGrantFactory: GrantFactory = (deps) => ({
 
 const myGrantModule = defineModule({
   name: "my-grant",
-  requires: ["config", "keyStore"],
+  requires: ["keyStore"],
   contributes: {
     grants: { my_grant: myGrantFactory },
   },

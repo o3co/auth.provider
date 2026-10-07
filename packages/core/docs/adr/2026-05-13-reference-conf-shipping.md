@@ -75,7 +75,7 @@ registration. HOCON `${?ENV_VAR}` substitution returns a string when the variabl
 
 Amended 2026-10-07 ([#728](https://github.com/o3co/auth.provider/issues/728),
 B12). Decision 4 read the grant switches off the whole configuration. A
-module now reads its own section alone: `oauthAuthorizationModule` reads
+module now reads its own section alone: `oauthAuthorizationGrantsModule` reads
 `oauth-authorization.grants.<grant>.enabled` from its section, as
 `deps.section`, with the same strict `=== true`. The whole configuration,
 the `config` slot, is read by the module objects core ships and by nothing
