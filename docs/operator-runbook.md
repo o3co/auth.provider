@@ -700,7 +700,10 @@ late in their window, as an outage (`mfa_store_unavailable`), never a write
 past its lifetime. Such a refusal leaves the write's outcome unknown, not
 undone: a copy resent after an earlier one committed is refused the same way.
 
-A credential change, or any other call to `revokeAllForSubject`, sets a boundary
+The Store calls `revokeAllForSubject` after a credential change and when it
+disables, deletes or locks an account. The provider reads no account state of
+its own, so this call is what ends the sessions and tokens already issued to
+the subject. Any call to it sets a boundary
 for the subject when a subject revocation store is installed and the write
 succeeds (a failed write is reported as `tokensRevoked: false`). A sign-in dated no later than the boundary plus an allowance is refused: a
 token by its `iat`, a session by its `authTime`. The comparison is inclusive,
@@ -1341,7 +1344,7 @@ Three ways, and they end different amounts of what a user has.
 | --- | --- | --- |
 | let a client disconnect its own integration | `POST /oauth/federation-grants/:grantId/revoke` | That one grant. 204, and 204 again on a retry. Ownership is the only check: a grant whose connection you removed, whose key is out of the ring, or which expired last week can still be ended. |
 | end one grant, or show a user their connected applications | `revokeFederationGrant(deps, grantId, by)` / `listFederationGrantsForSubject(deps, subject)` | That one grant, on the Store's authority. There is no admin route: authenticating the person and checking the grant is theirs belongs to the Store, which has both. |
-| end everything one subject holds | the `subjectRevocationService` component | Sessions, tokens and grants. This is what a credential change calls. |
+| end everything one subject holds | the `subjectRevocationService` component | Sessions, tokens and grants. This is what the Store calls after a credential change, and when it disables, deletes or locks an account. |
 
 The service takes `federationGrants: "revoke" | "keep"`, default `"revoke"`.
 `"keep"` — end the sessions and the tokens, leave the established grants —
