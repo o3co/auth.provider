@@ -13,6 +13,16 @@
  * limitations under the License.
  */
 
+/**
+ * The OIDC Front-Channel Logout 1.0 page: its markup (a hidden iframe per
+ * usable relying party and the post-logout redirect) and its own
+ * Content-Security-Policy, which allows frames only from the origins it
+ * renders (`frame-src`) and the static redirect script only by its hash.
+ * `renderFrontchannelLogoutPage`, internal, returns both for the logout route
+ * to serve; the public `renderFrontchannelLogoutHtml` returns the markup alone.
+ */
+
+import { createHash } from "node:crypto";
 import type { Logger, RedirectUriRejection } from "@o3co/auth-provider-core";
 import {
 	auditErrorText,
@@ -70,16 +80,43 @@ function escapeHtml(s: string): string {
 	return s.replace(/[&<>"']/g, (c) => HTML_ESCAPE[c] ?? c);
 }
 
-/**
- * `JSON.stringify`, then `<` and `>` escaped as `\u003c` / `\u003e`, so an
- * embedded `</script>` cannot close the inline `<script>` block (OWASP "JSON
- * in HTML"). `JSON.stringify` alone leaves `<` and `>` literal.
- */
-function safeJsStringLiteral(s: string): string {
-	return JSON.stringify(s).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
-}
-
 const DEFAULT_REDIRECT_DELAY_MS = 2_000;
+
+/**
+ * The redirect script, the same text on every page: it reads the target and
+ * the delay from its own `data-` attributes, so the policy allows it by one
+ * fixed hash and no value is ever written into script context.
+ */
+const REDIRECT_SCRIPT =
+	"(function(s){setTimeout(function(){window.location.href=s.dataset.target;},Number(s.dataset.delay));})(document.currentScript);";
+const REDIRECT_SCRIPT_SOURCE = `'sha256-${createHash("sha256").update(REDIRECT_SCRIPT, "utf8").digest("base64")}'`;
+
+/**
+ * An http(s) origin a CSP host-source can name exactly: dot-separated labels
+ * of letters, digits and `-`, one optional terminal dot (CSP's host-part
+ * allows it), and an optional port. Anything else (an IPv6 literal, `_`, `;`)
+ * could not be listed, or could break the policy.
+ */
+const SOURCE_EXPRESSION_ORIGIN = /^https?:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?(?::[0-9]+)?$/;
+
+/**
+ * The page's own policy: nothing but frames from `frameOrigins`, and the
+ * redirect script when the page has it.
+ */
+function pagePolicy(frameOrigins: ReadonlySet<string>, redirect: boolean): string {
+	const directives = [
+		"default-src 'none'",
+		"base-uri 'none'",
+		"form-action 'none'",
+		"frame-ancestors 'none'",
+	];
+	// Each frame's own origin. An `http:` source also matches the same host's
+	// `https:` (CSP's secure upgrade): the same relying party, so kept rather
+	// than dropping http front-channel URIs.
+	if (frameOrigins.size > 0) directives.push(`frame-src ${[...frameOrigins].join(" ")}`);
+	if (redirect) directives.push(`script-src ${REDIRECT_SCRIPT_SOURCE}`);
+	return directives.join("; ");
+}
 
 /**
  * `baseUri` with `iss` (and optionally `sid`) set as query parameters,
@@ -146,18 +183,46 @@ function postLogoutRedirectTarget(
 	return target.toString();
 }
 
+/** The front-channel logout page and the one policy it must be sent under. */
+export interface FrontchannelLogoutPage {
+	/** Sent as `Content-Type: text/html; charset=utf-8`. */
+	readonly html: string;
+	/**
+	 * The page's `Content-Security-Policy`, sent as the response's only one: it
+	 * allows frames from exactly the origins the page frames and the page's own
+	 * redirect script by hash, and nothing else. A second policy on the same
+	 * response would be enforced too and could block both.
+	 */
+	readonly contentSecurityPolicy: string;
+}
+
 /**
  * Renders an OIDC Front-Channel Logout 1.0 page: one hidden `<iframe>` per RP
  * with an http(s) `frontchannelLogoutUri` (any other is skipped with a warn),
  * its URL carrying `iss` and, unless `frontchannelLogoutSessionRequired` is
  * `false`, `sid`. With a `postLogoutRedirect` whose `uri` core's
- * `checkRedirectUri` accepts (any other is dropped with a warn), a `<script>`
- * redirects, with the RP's `state`, after
- * `redirectDelayMs` so the iframes can load. Pure; callers MUST send it as
- * `Content-Type: text/html; charset=utf-8`.
+ * `checkRedirectUri` accepts (any other is dropped with a warn), a static
+ * `<script>` redirects, with the RP's `state`, after `redirectDelayMs` so the
+ * iframes can load. Returned with the policy that allows exactly that; an RP
+ * whose origin a CSP source expression cannot name is skipped with a warn.
+ * Pure. Internal: the logout route serves it.
  */
-export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
+export function renderFrontchannelLogoutPage(
+	opts: RenderFrontchannelLogoutHtmlOptions,
+): FrontchannelLogoutPage {
+	return renderPage(opts, true);
+}
+
+/**
+ * The page. `framesNamedByPolicy`: render only the frames whose origin the
+ * returned policy can name, as the page served with it must.
+ */
+function renderPage(
+	opts: RenderFrontchannelLogoutHtmlOptions,
+	framesNamedByPolicy: boolean,
+): FrontchannelLogoutPage {
 	const logger = opts.logger ?? console;
+	const frameOrigins = new Set<string>();
 	const iframes = opts.rps
 		.flatMap((entry) => {
 			// http(s) only, whoever calls this: a registry entry made before the
@@ -168,17 +233,14 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 			// A failure building the iframe URL skips that RP's iframe: throwing
 			// after the session has closed would answer a 500
 			// with an empty body.
+			let iframeSrc: string;
 			try {
 				const includeSid = rp.frontchannelLogoutSessionRequired !== false;
-				const iframeSrc = buildIframeUrl(
+				iframeSrc = buildIframeUrl(
 					rp.frontchannelLogoutUri,
 					opts.issuer,
 					includeSid ? opts.sid : undefined,
 				);
-				// `URL` encodes for URL context; the HTML attribute still needs `&amp;`.
-				return [
-					`<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`,
-				];
 			} catch (err) {
 				logger.warn(
 					{ clientId: auditErrorText(rp.clientId), err: loggableError(err) },
@@ -186,11 +248,29 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 				);
 				return [];
 			}
+			// A frame the page's policy could not allow is not rendered.
+			const origin = new URL(iframeSrc).origin;
+			if (framesNamedByPolicy && !SOURCE_EXPRESSION_ORIGIN.test(origin)) {
+				try {
+					logger.warn(
+						{ clientId: auditErrorText(rp.clientId), reason: "origin-not-a-source-expression" },
+						"logout_frontchannel_iframe_skipped",
+					);
+				} catch {
+					// A logger that throws costs the line, never the page.
+				}
+				return [];
+			}
+			frameOrigins.add(origin);
+			// `URL` encodes for URL context; the HTML attribute still needs `&amp;`.
+			// `hidden`, not a style attribute: the page's policy allows no style.
+			return [
+				`<iframe src="${escapeHtml(iframeSrc)}" hidden aria-hidden="true" referrerpolicy="no-referrer"></iframe>`,
+			];
 		})
 		.join("\n    ");
 
-	// Written into the script as a number literal, so only a non-negative
-	// whole number reaches it.
+	// Read by the script as a number, so only a non-negative whole number is written.
 	const requestedDelay = opts.redirectDelayMs;
 	const delay =
 		Number.isFinite(requestedDelay) && (requestedDelay as number) >= 0
@@ -199,10 +279,10 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 	const redirectTarget = postLogoutRedirectTarget(opts, logger);
 	const redirect =
 		redirectTarget !== undefined
-			? `<script>setTimeout(() => { window.location.href = ${safeJsStringLiteral(redirectTarget)}; }, ${delay});</script>`
+			? `<script data-target="${escapeHtml(redirectTarget)}" data-delay="${delay}">${REDIRECT_SCRIPT}</script>`
 			: "";
 
-	return `<!DOCTYPE html>
+	const html = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Signing out…</title></head>
 <body>
@@ -211,4 +291,17 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
   ${redirect}
 </body>
 </html>`;
+	return {
+		html,
+		contentSecurityPolicy: pagePolicy(frameOrigins, redirectTarget !== undefined),
+	};
+}
+
+/**
+ * The page's markup alone, every http(s) RP framed. A caller that serves it
+ * sends it under a policy of its own that allows the frames' origins and the
+ * redirect script's hash.
+ */
+export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
+	return renderPage(opts, false).html;
 }

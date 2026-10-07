@@ -15,7 +15,7 @@
  */
 import { createSecretKey } from "node:crypto";
 import { exportPKCS8, exportSPKI, generateKeyPair, SignJWT } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { type JwtVerifyOptions, verifyJwt } from "#/jwt/verify.mjs";
 import {
 	createAsymmetricKeyStore,
@@ -207,42 +207,62 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("rejects JWT with wrong typ when legacyTypAccept=false with reason=typ", async () => {
+	it("rejects JWT with wrong typ with reason=typ", async () => {
 		const keyStore = makeKeyStore();
-		// Token typ=rt+jwt verified as access_token (expected at+jwt) — strict mode
+		// Token typ=rt+jwt verified as access_token (expected at+jwt)
 		const jwt = await signValidAccessToken({ typ: "rt+jwt" }, keyStore);
-		await expect(
-			verifyJwt(jwt, keyStore, { ...baseOptions, legacyTypAccept: false }),
-		).rejects.toMatchObject({
+		await expect(verifyJwt(jwt, keyStore, baseOptions)).rejects.toMatchObject({
 			name: "JwtVerificationError",
 			reason: "typ",
 		});
 	});
 
-	it("accepts JWT with undefined typ when legacyTypAccept=true and emits jwt_verify_legacy_typ warning", async () => {
-		const keyStore = makeKeyStore();
-		const logger = makeMockLogger();
-		const jwt = await signValidAccessToken({ typ: undefined }, keyStore);
-		const result = await verifyJwt(jwt, keyStore, {
-			...baseOptions,
-			legacyTypAccept: true,
-			logger,
+	describe("a token with no typ header", () => {
+		it("is rejected with reason=typ", async () => {
+			const keyStore = makeKeyStore();
+			const jwt = await signValidAccessToken({ typ: undefined }, keyStore);
+			await expect(verifyJwt(jwt, keyStore, baseOptions)).rejects.toMatchObject({
+				name: "JwtVerificationError",
+				reason: "typ",
+			});
 		});
-		expect(result.type).toBe("access_token");
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ reason: "typ" }),
-			"jwt_verify_legacy_typ",
-		);
-	});
 
-	it("rejects JWT with undefined typ when legacyTypAccept=false with reason=typ", async () => {
-		const keyStore = makeKeyStore();
-		const jwt = await signValidAccessToken({ typ: undefined }, keyStore);
-		await expect(
-			verifyJwt(jwt, keyStore, { ...baseOptions, legacyTypAccept: false }),
-		).rejects.toMatchObject({
-			name: "JwtVerificationError",
-			reason: "typ",
+		it("is rejected whatever a caller adds to the options, and no acceptance is logged", async () => {
+			// The options declare no switch that admits a typ-less token; a
+			// JavaScript caller still handing one is not obeyed.
+			const keyStore = makeKeyStore();
+			const logger = makeMockLogger();
+			const jwt = await signValidAccessToken({ typ: undefined }, keyStore);
+			const options = { ...baseOptions, logger, legacyTypAccept: true } as JwtVerifyOptions;
+			await expect(verifyJwt(jwt, keyStore, options)).rejects.toMatchObject({
+				name: "JwtVerificationError",
+				reason: "typ",
+			});
+			expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "jwt_verify_legacy_typ");
+		});
+
+		it("is rejected even when its payload.type names the expected type", async () => {
+			// `payload.type` is no substitute for the header: a typ-less token
+			// claiming `type: "access"` is refused as an access token.
+			const keyStore = makeKeyStore();
+			const secretKey = createSecretKey(Buffer.from(TEST_SECRET));
+			const jwt = await new SignJWT({
+				iss: TEST_ISSUER,
+				aud: TEST_AUDIENCE,
+				sub: "user-1",
+				type: "access",
+			})
+				.setProtectedHeader({ alg: "HS256", kid: TEST_KID })
+				.setIssuedAt()
+				.setExpirationTime("5m")
+				.sign(secretKey);
+			await expect(
+				verifyJwt(jwt, keyStore, { ...baseOptions, type: "access_token", revocation: "none" }),
+			).rejects.toMatchObject({ name: "JwtVerificationError", reason: "typ" });
+		});
+
+		it("declares no option that would accept one", () => {
+			expectTypeOf<JwtVerifyOptions>().not.toHaveProperty("legacyTypAccept");
 		});
 	});
 
@@ -262,36 +282,6 @@ describe("verifyJwt", () => {
 		await expect(verifyJwt(jwt, keyStore, baseOptions)).rejects.toMatchObject({
 			name: "JwtVerificationError",
 			reason: "kid_unknown",
-		});
-	});
-
-	it("rejects typ-less token with contradicting legacy payload.type even when legacyTypAccept=true (reason=typ)", async () => {
-		// legacyTypAccept=true must not accept a cross-type token whose legacy
-		// `payload.type` disagrees with the expected JwtType. Example: a
-		// typ-less RT (payload.type=refresh) presented as an access token at
-		// /userinfo.
-		const keyStore = makeKeyStore();
-		const secretKey = createSecretKey(Buffer.from(TEST_SECRET));
-		const jwt = await new SignJWT({
-			iss: TEST_ISSUER,
-			aud: TEST_AUDIENCE,
-			sub: "user-1",
-			type: "refresh",
-		})
-			.setProtectedHeader({ alg: "HS256", kid: TEST_KID })
-			.setIssuedAt()
-			.setExpirationTime("5m")
-			.sign(secretKey);
-		await expect(
-			verifyJwt(jwt, keyStore, {
-				...baseOptions,
-				type: "access_token",
-				revocation: "none",
-				legacyTypAccept: true,
-			}),
-		).rejects.toMatchObject({
-			name: "JwtVerificationError",
-			reason: "typ",
 		});
 	});
 

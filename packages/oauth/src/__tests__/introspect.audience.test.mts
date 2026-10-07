@@ -261,3 +261,52 @@ describe("/oauth/introspect — audience pin", () => {
 		);
 	});
 });
+
+describe("/oauth/introspect — a token with no typ header", () => {
+	const mintTypLess = () =>
+		new SignJWT({ sub: "u1", scope: "read" })
+			.setProtectedHeader({ alg: "HS256", kid: "v0" })
+			.setIssuer(ISSUER)
+			.setAudience(RESOURCE)
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.sign(secretKey);
+
+	it("is reported inactive", async () => {
+		const app = await buildApp();
+
+		const res = await introspectAs(app, RS_BASIC, await mintTypLess());
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ active: false });
+	});
+
+	it("is reported inactive even under a hand-built section that still carries the removed switch", async () => {
+		// The schema refuses `oauth.jwt.legacyTypAccept`; a section handed to
+		// the router without it is not obeyed either.
+		const app = express();
+		app.use(express.json());
+		app.use(express.urlencoded({ extended: false }));
+		const handBuilt = {
+			...config,
+			oauth: {
+				...(config as unknown as { oauth: Record<string, unknown> }).oauth,
+				jwt: { issuer: ISSUER, legacyTypAccept: true },
+			},
+		};
+		const { router } = await createOAuthRouter(express, {
+			requirements: resolverForTests([]),
+			registry: new GrantRegistry(),
+			...routerInputsOf(handBuilt),
+			clientRepository,
+			codeRepository,
+			keyStore,
+		});
+		app.use("/oauth", router);
+
+		const res = await introspectAs(app, RS_BASIC, await mintTypLess());
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ active: false });
+	});
+});

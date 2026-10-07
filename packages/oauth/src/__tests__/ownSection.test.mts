@@ -97,14 +97,13 @@ describe("what the module derives, it derives from its section", () => {
 		const settings = await provide({
 			config: misleadingConfig(),
 			section: sectionOf({
-				jwt: { issuer: "https://section.test", legacyTypAccept: true },
+				jwt: { issuer: "https://section.test" },
 				accessToken: { defaultExpiresIn: 300, maxExpiresIn: 900 },
 				requireEmailVerified: true,
 			}),
 		} as never);
 		expect(settings).toEqual({
 			issuer: "https://section.test",
-			legacyTypAccept: true,
 			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 900 },
 			refreshTokenExpiresIn: 86400,
 			resourceIndicatorEnabled: false,

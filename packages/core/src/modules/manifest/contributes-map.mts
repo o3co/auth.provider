@@ -23,7 +23,6 @@ import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mj
 import type { MfaFactor as ConcreteMfaFactor } from "../../mfa/factor.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
-import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { AdmissionActionDeclaration } from "../../session-admission/actions.mjs";
 import type { SessionRequirement as ConcreteSessionRequirement } from "../../session-admission/requirement.mjs";
 import type { SessionCloseNotifier } from "../../session-lifecycle/notifier.mjs";
@@ -219,25 +218,18 @@ export type TokenBindingMechanismFactory<Deps> = (
 ) => Contributed<TokenBindingMechanism | null>;
 
 /**
- * A `rateLimitBudgets` entry: the default limit and window for keys under one
- * rate-limit prefix the module owns, read from its own settings.
- *
- * Answer parsed numbers (through the module's schema, coercing environment
- * strings, or `requireUsableConfiguredRateLimitSpec`): the budget is held to
- * `isBoundedRateLimitSpec` as answered — a window of at most a year — and
- * `"20"` is not a limit.
- *
- * `null` claims the prefix with no budget of its own — keyed with none, or
- * switched off by the module's settings: absent from `rateLimitBudgetResolver`,
- * yet a second contribution is a duplicate. Absent is not unlimited: keys fall
- * to the limiter's `defaultLimit`. A module claims every prefix it keys.
+ * A `rateLimitBudgets` entry: the claim of one rate-limit prefix the module
+ * keys a limiter under. It answers `null` and contributes no budget: a second
+ * contribution of the prefix is a duplicate, and a key's limit is the
+ * limiter's own `limits` entry for its prefix, else its `defaultLimit`.
+ * Anything else fails the contribution. A module claims every prefix it keys.
  *
  * `verifier`, read once at stage 1, declares the prefix a verifier's own
  * attempt limit, counted on the attempt counter and never by a limiter: a
  * limiter module's own `limits` may not name it. Build the claim with
  * `verifierLimitClaim`.
  */
-export type RateLimitBudgetFactory<Deps> = ((deps: Deps) => Contributed<RateLimitSpec | null>) & {
+export type RateLimitBudgetFactory<Deps> = ((deps: Deps) => Contributed<null>) & {
 	readonly verifier?: VerifierLimitDeclaration;
 };
 
@@ -296,14 +288,14 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 		readonly [name: string]: SessionRequirementFactory<Deps>;
 	};
 	/**
-	 * Rate-limit budgets, keyed by the prefix a limiter key carries before its
-	 * first `:` (`login` for `login:ip:<ip>`). Core composes every module's
-	 * budgets into the synthetic key `rateLimitBudgetResolver`, read at request
-	 * time. A prefix contributed twice refuses boot (`duplicate-contribute`); an
-	 * empty prefix, one holding `:` or one naming an `Object.prototype` member
-	 * refuses it at stage 1 (`contribution-malformed`); an unusable budget fails
-	 * its contribution; a prefix is its claimant's, so an override of one, and a
-	 * host's own collector, are refused (`contribution-kind-guarded`).
+	 * Rate-limit prefix claims, keyed by the prefix a limiter key carries before
+	 * its first `:` (`login` for `login:ip:<ip>`), each answering `null`. A
+	 * prefix contributed twice refuses boot (`duplicate-contribute`); an empty
+	 * prefix, one holding `:` or one naming an `Object.prototype` member refuses
+	 * it at stage 1 (`contribution-malformed`); a factory answering anything but
+	 * `null` fails its contribution; a prefix is its claimant's, so an override
+	 * of one, and a host's own collector, are refused
+	 * (`contribution-kind-guarded`).
 	 */
 	readonly rateLimitBudgets?: {
 		readonly [prefix: string]: RateLimitBudgetFactory<Deps>;

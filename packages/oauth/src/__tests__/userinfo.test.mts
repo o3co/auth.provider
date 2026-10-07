@@ -371,6 +371,52 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.headers["www-authenticate"]).toMatch(/^Bearer/);
 	});
 
+	describe("an access token with no typ header", () => {
+		const typLessAT = () =>
+			new SignJWT({ sub: "u-1", aud: "client", scope: "openid email", sid: "sid-1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setExpirationTime("1h")
+				.setIssuedAt()
+				.sign(secretKey);
+		const liveStore = (): Partial<UserSessionStore> => ({
+			kind: "memory",
+			get: vi.fn().mockResolvedValue(baseSession),
+			create: vi.fn(),
+			delete: vi.fn(),
+		});
+
+		it("is refused as invalid_token", async () => {
+			const res = await callUserinfo({
+				token: await typLessAT(),
+				userSessionStore: liveStore(),
+			});
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+
+		it("is refused whatever a caller adds to the router's options", async () => {
+			// The options declare no switch that admits a typ-less token; a
+			// JavaScript caller still handing one is not obeyed.
+			const app = express();
+			app.use(
+				"/oauth",
+				createRouter(express, {
+					keyStore,
+					sessionLifecycle: livenessOver(liveStore()),
+					legacyTypAccept: true,
+				} as Parameters<typeof createRouter>[1]),
+			);
+
+			const res = await request(app)
+				.get("/oauth/userinfo")
+				.set("Authorization", `Bearer ${await typLessAT()}`);
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+	});
+
 	it("rejects id_token (typ: id+jwt) presented as Bearer", async () => {
 		// id_tokens also share the signing key and can carry sub/sid. Belt-and-
 		// suspenders: even if a client misuses an id_token as a bearer, reject it.

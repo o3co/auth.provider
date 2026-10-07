@@ -29,11 +29,8 @@ import { createApp, defineModule, type OutboundPolicy, type ProviderDeps } from 
 import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { outboundPolicyOf } from "#/net/outbound-fetch.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import {
-	createTestOutboundPolicy,
-	type OutboundSectionForTests,
-	outboundPolicyContract,
-} from "#/testing/index.mjs";
+import { createTestOutboundPolicy, type OutboundSectionForTests } from "#/testing/index.mjs";
+import { outboundPolicyContract } from "./outboundPolicy.contract.mjs";
 
 const RULES = [
 	"allowedHosts, deniedHosts and internalHosts are lists of host patterns",

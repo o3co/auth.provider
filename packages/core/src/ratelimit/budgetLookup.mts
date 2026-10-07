@@ -19,22 +19,14 @@
  * configuration is one budget whichever limiter is mounted.
  */
 
-import { shownConfigValue } from "../config/configuredValue.mjs";
-import type { RateLimitBudgetResolver } from "../modules/manifest/synthetic-keys.mjs";
 import type { RateLimitSpec } from "./types.mjs";
-import { assertUsableRateLimitSpecs, isBoundedRateLimitSpec } from "./usableSpec.mjs";
+import { assertUsableRateLimitSpecs } from "./usableSpec.mjs";
 
 export interface RateLimitBudgetLookupOptions {
-	/** What an operator declared on this limiter, by prefix; wins over a contributed budget. */
+	/** What an operator declared on this limiter, by prefix. */
 	readonly limits?: Readonly<Record<string, RateLimitSpec>>;
-	/** What a key under a prefix nothing budgets is limited by. */
+	/** What a key under a prefix `limits` does not name is limited by. */
 	readonly defaultLimit: RateLimitSpec;
-	/**
-	 * The owners' contributed budgets (`rateLimitBudgetResolver`), read once
-	 * and checked (`isBoundedRateLimitSpec`) at each lookup: they register
-	 * after the limiter is built.
-	 */
-	readonly budgets?: RateLimitBudgetResolver;
 }
 
 /** The prefix a key is limited under, and the budget in force for it. */
@@ -66,13 +58,10 @@ const snapshotSpec = (spec: unknown): unknown =>
 		: spec;
 
 /**
- * A key's budget: the limiter's own `limits` entry for its prefix, else the
- * contributed budget, else `defaultLimit` (never no limit). `limits` and
- * `defaultLimit` are each read once into a frozen copy, refused, naming `who`,
- * unless usable, and held as checked, so no spec a lookup hands out can change. A
- * contributed budget is read once into a frozen copy, which is checked and
- * handed out; one that is not a bounded budget throws at its lookup, so the
- * check is an outage, never an unlimited key.
+ * A key's budget: the limiter's own `limits` entry for its prefix, else
+ * `defaultLimit` (never no limit). `limits` and `defaultLimit` are each read
+ * once into a frozen copy, refused, naming `who`, unless usable, and held as
+ * checked, so no spec a lookup hands out can change.
  */
 export function createRateLimitBudgetLookup(
 	who: string,
@@ -93,19 +82,9 @@ export function createRateLimitBudgetLookup(
 		Object.entries((readLimits ?? {}) as Readonly<Record<string, RateLimitSpec>>),
 	);
 	const defaultLimit = readDefault as RateLimitSpec;
-	const { budgets } = options;
-	const contributed = (prefix: string): RateLimitSpec | undefined => {
-		const budget: unknown = budgets?.get(prefix);
-		if (budget === undefined) return undefined;
-		const read = snapshotSpec(budget);
-		if (isBoundedRateLimitSpec(read)) return read;
-		throw new RangeError(
-			`${who}: the budget contributed for "${prefix}" is not a positive whole limit and a positive whole number of seconds of at most a year (got ${shownConfigValue(read)})`,
-		);
-	};
 	const lookup = (key: string): RateLimitBudget => {
 		const prefix = prefixOf(key);
-		return { prefix, spec: limits.get(prefix) ?? contributed(prefix) ?? defaultLimit };
+		return { prefix, spec: limits.get(prefix) ?? defaultLimit };
 	};
 	return Object.assign(lookup, { defaultLimit });
 }

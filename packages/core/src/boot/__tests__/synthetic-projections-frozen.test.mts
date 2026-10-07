@@ -280,7 +280,6 @@ describe("synthetic projections are frozen where boot injects them", () => {
 		const components = material.components as Readonly<Record<string, unknown>>;
 		expect(Object.hasOwn(components, "grantHandlerResolver")).toBe(true);
 		expect(unfrozenPath(components.grantHandlerResolver)).toBeUndefined();
-		expect(unfrozenPath(components.rateLimitBudgetResolver)).toBeUndefined();
 	});
 });
 

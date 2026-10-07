@@ -35,11 +35,8 @@ import {
 } from "#/middleware/tokenBinding.mjs";
 import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import {
-	createTestOAuthTokenSettings,
-	createTestTokenBindingSettings,
-	tokenBindingSettingsContract,
-} from "#/testing/index.mjs";
+import { createTestOAuthTokenSettings, createTestTokenBindingSettings } from "#/testing/index.mjs";
+import { tokenBindingSettingsContract } from "./tokenBindingSettings.contract.mjs";
 
 const RULES = [
 	"dispatchPolicy is intent-explicit or strict-mutual-exclusion",

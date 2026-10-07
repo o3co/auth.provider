@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import type { RateLimitBudgetResolver } from "../modules/manifest/synthetic-keys.mjs";
 import { createRateLimitBudgetLookup } from "./budgetLookup.mjs";
 import type { RateLimiter, RateLimitSpec } from "./types.mjs";
 
@@ -30,8 +29,6 @@ export interface MemoryRateLimiterOptions {
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit: RateLimitSpec;
 	maxBuckets?: number;
-	/** The owners' contributed budgets, read at each check; `limits` wins over one. */
-	budgets?: RateLimitBudgetResolver;
 }
 
 function normalizeMaxBuckets(value: number | undefined): number {
@@ -48,10 +45,10 @@ function pruneExpiredBuckets(buckets: Map<string, BucketState>, now: number): vo
 
 /**
  * Removes the bucket that resets first. Every `resetAt` is finite: it is
- * `Date.now()` plus a window the lookup checked — at construction, or for a
- * contributed budget at the lookup itself. And a non-empty map always loses one bucket,
- * since the first entry is taken before any comparison, so the caller's
- * `while (size >= max)` loop always makes progress.
+ * `Date.now()` plus a window the lookup checked at construction. And a
+ * non-empty map always loses one bucket, since the first entry is taken
+ * before any comparison, so the caller's `while (size >= max)` loop always
+ * makes progress.
  */
 function evictEarliestResetBucket(buckets: Map<string, BucketState>): void {
 	let evictKey: string | undefined;

@@ -20,7 +20,7 @@ import { resolveOAuthOptions } from "#/resolveOAuthOptions.mjs";
 describe("resolveOAuthOptions", () => {
 	it("carries every knob through from the section the module parsed", () => {
 		const options = resolveOAuthOptions({
-			jwt: { issuer: "https://issuer.example", legacyTypAccept: true },
+			jwt: { issuer: "https://issuer.example" },
 			oidcMode: "dual",
 			requireEmailVerified: true,
 			nonce: { maxLength: 64 },
@@ -28,12 +28,21 @@ describe("resolveOAuthOptions", () => {
 		});
 
 		expect(options.issuer).toBe("https://issuer.example");
-		expect(options.legacyTypAccept).toBe(true);
 		expect(options.oidcMode).toBe("dual");
 		expect(options.requireEmailVerified).toBe(true);
 		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(options.nonceMaxLength).toBe(64);
 		expect(options.resourceIndicatorEnabled).toBe(true);
+	});
+
+	it("resolves no switch for typ-less tokens, even from a hand-built section that carries one", () => {
+		// A token with no `typ` header is refused on every surface; nothing in
+		// the options could admit one.
+		const options = resolveOAuthOptions({
+			jwt: { issuer: "https://issuer.example", legacyTypAccept: true },
+		});
+
+		expect(options).not.toHaveProperty("legacyTypAccept");
 	});
 
 	it("tolerates a hand-built partial section (issuer only) and applies the defaults", () => {
@@ -42,7 +51,6 @@ describe("resolveOAuthOptions", () => {
 		const options = resolveOAuthOptions({ jwt: { issuer: "https://issuer.example" } });
 
 		expect(options.issuer).toBe("https://issuer.example");
-		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
 		// Fixed policy, not a knob — the same object whatever the config.
@@ -56,7 +64,6 @@ describe("resolveOAuthOptions", () => {
 		const options = resolveOAuthOptions({});
 
 		expect(options.issuer).toBeUndefined();
-		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
 		// Fixed policy, not a knob — the same object whatever the config.

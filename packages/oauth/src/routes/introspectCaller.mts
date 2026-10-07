@@ -38,7 +38,6 @@ import { createIntrospectUnavailableAnswers } from "./introspectUnavailable.mjs"
 export const createIntrospectCallerCheck = ({
 	keyStore,
 	canonicalIssuer,
-	legacyTypAccept: legacyTypAcceptOpt,
 	accessTokenDenylist,
 	subjectRevocation,
 	introspectClientAuthMw,
@@ -47,7 +46,6 @@ export const createIntrospectCallerCheck = ({
 }: {
 	readonly keyStore: KeyStore;
 	readonly canonicalIssuer: string;
-	readonly legacyTypAccept: boolean | undefined;
 	readonly accessTokenDenylist: AccessTokenDenylist | undefined;
 	readonly subjectRevocation: SubjectRevocation | undefined;
 	/** What a caller without its own access token as the credential must pass. */
@@ -84,7 +82,6 @@ export const createIntrospectCallerCheck = ({
 				await verifyJwt(credentialToken, keyStore, {
 					type: "access_token",
 					expectedIssuer: canonicalIssuer,
-					legacyTypAccept: legacyTypAcceptOpt ?? false,
 					// Token-accepting surface — forward what the composition
 					// wired, jti denylist and subject watermark both.
 					revocation: { denylist: accessTokenDenylist, subjectRevocation },

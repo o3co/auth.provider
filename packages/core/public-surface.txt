@@ -526,7 +526,6 @@
 . RateLimitBudgetFactory type
 . RateLimitBudgetLookup type
 . RateLimitBudgetLookupOptions type
-. RateLimitBudgetResolver type
 . RateLimitCheckOutcome type
 . RateLimitContext type
 . RateLimitDecision type
@@ -1194,7 +1193,6 @@
 ./modules/manifest Provider type
 ./modules/manifest ProviderDeps type
 ./modules/manifest RateLimitBudgetFactory type
-./modules/manifest RateLimitBudgetResolver type
 ./modules/manifest RelocationWithoutVariable type
 ./modules/manifest ReplicaSafetyDeclaration type
 ./modules/manifest RouteAdvertisement type
@@ -1221,7 +1219,6 @@
 ./testing CoreRelocations type
 ./testing CsrfGuardContractInput type
 ./testing CsrfTokenSignerContractInput type
-./testing DeploymentModeContractInput type
 ./testing FakeIdp type
 ./testing FakeIdpAuthorizationResponse type
 ./testing FakeIdpOptions type
@@ -1229,7 +1226,6 @@
 ./testing FederationEntryForTests type
 ./testing FederationForTests type
 ./testing FederationGrantPolicyContractInput type
-./testing FederationSettingsContractInput type
 ./testing FederationTypeForTestsOptions type
 ./testing GrantRegistry value
 ./testing GrantRegistryError value
@@ -1248,7 +1244,6 @@
 ./testing OutboundAnswer type
 ./testing OutboundExchange type
 ./testing OutboundFetchForTestingOptions type
-./testing OutboundPolicyContractInput type
 ./testing OutboundSectionForTests type
 ./testing OutboundTransport type
 ./testing PackageReferenceCheck type
@@ -1275,7 +1270,6 @@
 ./testing TestRateLimiterOptions type
 ./testing TestUserRepository type
 ./testing TestUserRepositoryOptions type
-./testing TokenBindingSettingsContractInput type
 ./testing auditHooksModule value
 ./testing clientEntries value
 ./testing coreConfigForTests value
@@ -1301,9 +1295,7 @@
 ./testing createTestUserRepository value
 ./testing csrfGuardContract value
 ./testing csrfTokenSignerContract value
-./testing deploymentModeContract value
 ./testing federationGrantPolicyContract value
-./testing federationSettingsContract value
 ./testing federationTypeForTests value
 ./testing httpSettingsContract value
 ./testing loginCompletionContract value
@@ -1313,7 +1305,6 @@
 ./testing mergeAdmission value
 ./testing mergeSessionStore value
 ./testing oauthTokenSettingsContract value
-./testing outboundPolicyContract value
 ./testing packageReferenceProblems value
 ./testing rateLimiterContract value
 ./testing referenceConfProblems value
@@ -1324,7 +1315,6 @@
 ./testing sessionCookiePolicyContract value
 ./testing sessionRequirementContract value
 ./testing testMfaFactorProofs value
-./testing tokenBindingSettingsContract value
 ./testing unreadableModuleLeaves value
 ./testing withFederation value
 ./testing withInsecureSessionCookie value

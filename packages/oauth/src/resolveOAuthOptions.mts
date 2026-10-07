@@ -29,12 +29,6 @@ export interface ResolvedOAuthOptions {
 	 */
 	readonly issuer: unknown;
 	/**
-	 * Defaults to `false`, but is resolved WITHOUT the `?? false` fallback:
-	 * sub-routers (userinfo, logout, federation-token) receive the raw
-	 * optional and apply their own defaulting.
-	 */
-	readonly legacyTypAccept: boolean | undefined;
-	/**
 	 * When acting as an OIDC OP, `/authorize` rejects requests
 	 * that omit `openid` unless operators explicitly chose dual OAuth/OIDC mode.
 	 */
@@ -101,7 +95,7 @@ export interface ResolvedOAuthOptions {
  * embedders composing their own `AppConfig` — resolves to safe defaults.
  */
 type OAuthConfigShape = {
-	jwt?: { issuer?: unknown; legacyTypAccept?: boolean };
+	jwt?: { issuer?: unknown };
 	oidcMode?: "oidc-required" | "dual";
 	requireEmailVerified?: boolean;
 	requireGrantTypeAllowlist?: boolean;
@@ -161,7 +155,6 @@ const positiveIntOrUndefined = (value: unknown): number | undefined => {
  *   enable only on literal `true`; an absent value reads `false`;
  * - `oidcMode` falls back to `"oidc-required"`;
  * - `nonce.maxLength` falls back to `256`;
- * - `legacyTypAccept` stays `undefined` when absent (consumers default it);
  * - `pkce` is fixed policy, not a knob: `resolvePkceOptions` returns
  *   required + S256-only;
  * - `acrValues` is the configured table, or an empty one, read by core's
@@ -176,7 +169,6 @@ export const resolveOAuthOptions = (section: unknown): ResolvedOAuthOptions => {
 
 	return {
 		issuer: oauth?.jwt?.issuer,
-		legacyTypAccept: oauth?.jwt?.legacyTypAccept,
 		oidcMode: oauth?.oidcMode ?? "oidc-required",
 		requireEmailVerified: oauth?.requireEmailVerified === true,
 		pkce: resolvePkceOptions(),

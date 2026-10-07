@@ -16,7 +16,6 @@
 
 import { isStorableLifetime } from "../adapters/expiry.mjs";
 import { configuredNumber, shownConfigValue } from "../config/configuredValue.mjs";
-import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import type { RateLimitSpec } from "./types.mjs";
 
 const isPositiveInteger = (value: unknown): value is number =>
@@ -50,30 +49,13 @@ const described = (spec: unknown): string => {
 };
 
 /**
- * Whether a value is a budget a module may contribute: a positive whole
- * `limit` and a positive whole `windowSeconds` of at most a year
- * (`MAX_DURATION_SECONDS`, the cap every config schema holds a duration to).
- * Unlike {@link isUsableRateLimitSpec} it does not depend on the clock, so a
- * budget that passes it at boot passes it at every later check.
- */
-export const isBoundedRateLimitSpec = (value: unknown): value is RateLimitSpec => {
-	if (typeof value !== "object" || value === null) return false;
-	const { limit, windowSeconds } = value as { limit?: unknown; windowSeconds?: unknown };
-	return (
-		isPositiveInteger(limit) &&
-		isPositiveInteger(windowSeconds) &&
-		windowSeconds <= MAX_DURATION_SECONDS
-	);
-};
-
-/**
  * The budget a configuration gives under `key`, or a `RangeError` naming
  * `key` when it is given but is not a spec a limiter can apply.
  *
- * For a module that contributes a budget read from its own config key. Each
- * field is read as the key's schema coerces it. A given key, hand-built config included, is refused
- * rather than skipped, since skipping it runs the route on the limiter's
- * default. A key not given is the caller's to handle.
+ * For a module that reads a budget from its own config key. Each field is
+ * read as the key's schema coerces it. A given key, hand-built config
+ * included, is refused rather than skipped. A key not given is the caller's
+ * to handle.
  */
 export function requireUsableConfiguredRateLimitSpec(key: string, value: unknown): RateLimitSpec {
 	const spec = readConfiguredRateLimitSpec(value);

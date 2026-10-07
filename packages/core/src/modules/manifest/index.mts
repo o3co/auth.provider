@@ -86,7 +86,6 @@ export type {
 export type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
-	RateLimitBudgetResolver,
 	SessionCloseNotifierResolver,
 	TokenExchangeValidatorResolver,
 } from "./synthetic-keys.mjs";

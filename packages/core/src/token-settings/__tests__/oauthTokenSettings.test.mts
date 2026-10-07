@@ -70,12 +70,14 @@ describe("the oauthTokenSettings slot", () => {
 			ProviderDeps<"oauthTokenSettings">["oauthTokenSettings"]
 		>().toEqualTypeOf<OAuthTokenSettings>();
 		expectTypeOf<OAuthTokenSettings["issuer"]>().toEqualTypeOf<string>();
-		expectTypeOf<OAuthTokenSettings["legacyTypAccept"]>().toEqualTypeOf<boolean>();
 		expectTypeOf<OAuthTokenSettings["accessTokenLifetime"]>().toEqualTypeOf<AccessTokenLifetime>();
 		expectTypeOf<OAuthTokenSettings["refreshTokenExpiresIn"]>().toEqualTypeOf<number>();
 		// The token-binding settings are core's: the slot has no member for
 		// either.
 		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("tokenBinding");
+		// A token with no `typ` header is always refused: no member switches
+		// that.
+		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("legacyTypAccept");
 		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("dispatchPolicy");
 		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("bindConfidentialClientRefreshTokens");
 		expectTypeOf<OAuthTokenSettings["resourceIndicatorEnabled"]>().toEqualTypeOf<boolean>();
@@ -144,7 +146,6 @@ describe("oauthTokenSettingsContract — the double", () => {
 			await failing(() =>
 				createTestOAuthTokenSettings({
 					issuer: "https://idp.example.com/tenant-a",
-					legacyTypAccept: true,
 					accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 86_400 },
 					refreshTokenExpiresIn: 2_592_000,
 					resourceIndicatorEnabled: true,
@@ -159,7 +160,6 @@ describe("createTestOAuthTokenSettings", () => {
 	it("answers the fixture configuration's settings, resolved: nothing absent, every switch off", () => {
 		expect(createTestOAuthTokenSettings()).toStrictEqual({
 			issuer: "https://auth.test",
-			legacyTypAccept: false,
 			accessTokenLifetime: { defaultExpiresIn: 3600, maxExpiresIn: 3600 },
 			refreshTokenExpiresIn: 86_400,
 			resourceIndicatorEnabled: false,
@@ -267,7 +267,7 @@ describe("oauthTokenSettingsContract — each way a value can break it", () => {
 		expect(
 			await failing(() =>
 				settingsWith((draft) => {
-					delete draft.legacyTypAccept;
+					delete draft.requireEmailVerified;
 				}),
 			),
 		).toEqual([rule]);
