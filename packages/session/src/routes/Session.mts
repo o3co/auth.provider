@@ -25,7 +25,7 @@
  * session through core's session lifecycle before destroying the cookie
  * session, unless the record was renewed away from this cookie session
  * (core's `cookieRenewedAway`), when only the cookie session is destroyed.
- * A destroyed cookie session's cookie is expired in the same answer.
+ * The session store module expires a destroyed cookie session's cookie.
  * Where a `UserSessionStore` is wired, the lifecycle is required beside it.
  */
 
@@ -75,7 +75,6 @@ import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { LOGIN_ATTEMPT_TAG, readLoginAttemptSpec } from "../loginAttempts.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
-import { sessionCookieAttributes } from "../session-cookie-policy.mjs";
 
 const DEFAULT_SESSION_TTL_MS = 86400_000;
 
@@ -119,8 +118,7 @@ export const createRouter = (
 		/**
 		 * The session cookie's name and attributes, as the `sessionCookiePolicy`
 		 * slot carries them: the CSRF cookie is named after it and given its
-		 * attributes, a `redirect_to` is held to its domain, and a logout
-		 * expires the session cookie with them.
+		 * attributes, and a `redirect_to` is held to its domain.
 		 */
 		sessionCookie: Pick<SessionCookiePolicy, "name" | "secure" | "sameSite" | "domain">;
 		/**
@@ -500,9 +498,6 @@ export const createRouter = (
 				);
 				return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 			}
-			// The session is gone from the store: expire the browser's cookie
-			// too, with the attributes it was set with, so the browser drops it.
-			res.clearCookie(sessionCookie.name, sessionCookieAttributes(sessionCookie));
 			return res.status(200).json({ message: "Logged out successfully" });
 		});
 

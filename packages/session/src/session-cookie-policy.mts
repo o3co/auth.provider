@@ -28,8 +28,8 @@
  * not among them.
  *
  * {@link sessionCookieAttributes} is the one statement of the attributes the
- * cookie is set with — the ones express-session is given, and the ones a
- * logout expires the cookie with, so a browser matches the two.
+ * cookie is set with — the ones express-session is given, and the ones the
+ * cookie of a destroyed session is expired with, so a browser matches the two.
  *
  * One rule ({@link sessionCookieRefusal}) decides which sections yield a
  * cookie; the store's section schema refuses at validation what it refuses,
@@ -143,8 +143,9 @@ export interface SessionCookieAttributes {
 /**
  * The attributes the session cookie is set with, from its policy: on every
  * path, never readable by script, and the policy's `Secure`, `SameSite` and
- * `Domain`. What express-session is given, and what a logout expires the
- * cookie with: a browser drops a cookie only when the attributes match.
+ * `Domain`. What express-session is given, and what the cookie of a
+ * destroyed session is expired with: a browser drops a cookie only when the
+ * attributes match.
  * `Path=/` and `HttpOnly` are this package's, not the policy's: they hold
  * because this package's session store module sets the cookie.
  */

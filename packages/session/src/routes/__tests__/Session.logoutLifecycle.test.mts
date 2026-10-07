@@ -478,31 +478,26 @@ const setCookiesNamed = (res: request.Response, name: string): string[] => {
 	return lines.filter((line) => line.startsWith(`${name}=`));
 };
 
-/** A `Set-Cookie` line's attributes, lower-cased, with its value and expiry left out. */
-const attributesOf = (line: string): string[] =>
-	line
-		.split(";")
-		.slice(1)
-		.map((part) => part.trim().toLowerCase())
-		.filter((part) => !part.startsWith("expires=") && !part.startsWith("max-age="))
-		.sort();
-
+/**
+ * The session cookie is the session store module's: it expires the cookie of
+ * a session destroyed during the request, whichever route destroyed it
+ * (`src/__tests__/cookieSessionStore.test.mts`). The router sets no session
+ * cookie of its own, so a router used without that module leaves the cookie
+ * as it is.
+ */
 describe("POST /session/logout and the session cookie", () => {
-	it("a logout that destroyed the cookie session expires the session cookie, with the attributes it was set with", async () => {
-		const { app } = buildApp({ sessionLifecycle: fakeLifecycle() });
+	it("a logout that destroyed the cookie session sets no session cookie of its own", async () => {
+		const { app, bag } = buildApp({ sessionLifecycle: fakeLifecycle() });
 
 		const res = await logout(app);
 
 		expect(res.status).toBe(200);
-		const lines = setCookiesNamed(res, "auth.session");
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toMatch(/^auth\.session=;/);
-		expect(lines[0]).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
-		expect(attributesOf(lines[0] as string)).toEqual(["httponly", "path=/", "samesite=lax"]);
+		expect(bag.destroyed).toBe(true);
+		expect(setCookiesNamed(res, "auth.session")).toEqual([]);
 	});
 
-	it("carries the configured name, domain, Secure and SameSite of the session cookie", async () => {
-		const { app } = buildApp({
+	it("nor under a configured name, domain, Secure and SameSite", async () => {
+		const { app, bag } = buildApp({
 			sessionLifecycle: fakeLifecycle(),
 			sessionCookie: {
 				name: "__Secure-app.sid",
@@ -515,25 +510,18 @@ describe("POST /session/logout and the session cookie", () => {
 		const res = await logout(app, "__Secure-app.sid");
 
 		expect(res.status).toBe(200);
-		const lines = setCookiesNamed(res, "__Secure-app.sid");
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
-		expect(attributesOf(lines[0] as string)).toEqual([
-			"domain=auth.example.com",
-			"httponly",
-			"path=/",
-			"samesite=none",
-			"secure",
-		]);
+		expect(bag.destroyed).toBe(true);
+		expect(setCookiesNamed(res, "__Secure-app.sid")).toEqual([]);
 	});
 
-	it("a sessionless router's logout expires the session cookie too", async () => {
-		const { app } = buildApp({});
+	it("nor does a sessionless router's logout", async () => {
+		const { app, bag } = buildApp({});
 
 		const res = await logout(app);
 
 		expect(res.status).toBe(200);
-		expect(setCookiesNamed(res, "auth.session")).toHaveLength(1);
+		expect(bag.destroyed).toBe(true);
+		expect(setCookiesNamed(res, "auth.session")).toEqual([]);
 	});
 
 	it("a cookie store that cannot destroy leaves the session cookie as it is", async () => {
