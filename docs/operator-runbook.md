@@ -1198,8 +1198,8 @@ ADR's D5, D21, D24).
   session's actions read the factor store once each (whether the subject
   holds a counting factor), so a factor store outage answers them `503`.
 - **Replica clocks and recent MFA.** Recent MFA (`mfa.manage.maxAgeSeconds`)
-  is read from the time a session's second factor was recorded (`mfaAt`) —
-  for an account with no counting factor, its sign-in — on the clock of the
+  is read from the time a session's second factor was recorded (`mfaAt`) (or,
+  for an account with no counting factor, its sign-in), on the clock of the
   replica that recorded it. A time up to `DEFAULT_CLOCK_SKEW_MS` (5 minutes)
   ahead of the reading replica's clock reads as now, and one further ahead
   is not recent, so replica clocks that disagree can lengthen the window by
