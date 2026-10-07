@@ -44,7 +44,7 @@
 		}
 	},
 	"dependencies": {
-		"nodemailer": "^10.0.13",
+		"nodemailer": "^10.0.14",
 		"zod": "^4.6.5"
 	},
 	"peerDependencies": {

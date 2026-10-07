@@ -64,7 +64,7 @@
 		"connect-redis": "^10.0.0",
 		"express": "^5.2.1",
 		"express-session": "^1.18.0",
-		"redis": "^6.2.1",
+		"redis": "^6.3.0",
 		"supertest": "^7.3.1",
 		"typescript": "^6.0.3",
 		"vitest": "^5.0.3",
