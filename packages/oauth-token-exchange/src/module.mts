@@ -85,6 +85,10 @@ const OPTIONAL = [
 	// token carries the subject's `sid`, so the logout that ends the one ends
 	// the other.
 	"sessionLifecycle",
+	// The user behind a subject token, which the grant reads through
+	// `findBySubject` under `oauth.requireEmailVerified` alone; the grant refuses
+	// to build without it then.
+	"userRepository",
 ] as const;
 
 type Requires = (typeof REQUIRES)[number];
