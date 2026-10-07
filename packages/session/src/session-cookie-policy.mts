@@ -145,6 +145,8 @@ export interface SessionCookieAttributes {
  * path, never readable by script, and the policy's `Secure`, `SameSite` and
  * `Domain`. What express-session is given, and what a logout expires the
  * cookie with: a browser drops a cookie only when the attributes match.
+ * `Path=/` and `HttpOnly` are this package's, not the policy's: they hold
+ * because this package's session store module sets the cookie.
  */
 export function sessionCookieAttributes(
 	policy: Pick<SessionCookiePolicy, "secure" | "sameSite" | "domain">,
