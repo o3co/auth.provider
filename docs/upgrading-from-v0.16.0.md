@@ -859,7 +859,9 @@ copy of the file to list what is left.
   so a users file migrated from `htpasswd -B` or PHP now works as it is.
 - An unknown username, and a user with a plain-text password, pay a bcrypt
   compare at the highest cost among the file's hashes (cost 10 when it holds
-  none), where it was cost 10 whatever the file held.
+  none), where it was cost 10 whatever the file held. A file whose bcrypt
+  entries share one cost therefore takes the same time on every path: hash
+  every entry at one cost.
 - Each start that builds this repository logs `user_repository_in_memory`
   at warn (`{ store: "userRepository", adapter: "yaml" }`, or `"static"`),
   whatever the environment: the users file is meant for development and

@@ -756,9 +756,12 @@ and optionally `id` (the username when absent) and claims. A password is plain
 text, or a bcrypt hash: anything starting with `$2` is read as one, and must be
 a well-formed `$2a$`, `$2b$` or `$2y$` hash (the last compared as `$2b$`) at a
 cost from 04 to 15 (a compare at 15 takes about 2 s, at 10 about 60 ms, on a
-thread of Node's libuv pool). bcrypt compares only the first 72 bytes of a
-password (about 24 Japanese characters in UTF-8); a plain-text entry is
-compared over its full length.
+thread of Node's libuv pool). `$2b$` and `$2y$` compare only the first 72
+bytes of a password (about 24 Japanese characters in UTF-8). `$2a$` reads the
+same 72 bytes of a password up to 254 bytes long, but counts a longer one's
+length modulo 256, so a password of 255 bytes or more can compare as a
+different one; use `$2b$` for new entries. A plain-text entry is compared over
+its full length.
 Boot refuses an entry that breaks this, an empty `id` or username, two users with the same
 id, and a `username` key inside an entry, naming the user and the field and
 never the value. Each start with the `yaml` backend logs
