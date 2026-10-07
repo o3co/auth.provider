@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createRouter } from "#/routes/userinfo.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { registeredGrants } from "./_helpers/grantRegistry.mjs";
 import { grantSettingsFrom } from "./_helpers/grantSettings.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -114,6 +115,7 @@ const sessionLifecycle = createSessionLifecycle({
 async function exchangeCodeWithoutCookie() {
 	const handler = createAuthorizationGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+		grantHandlerResolver: registeredGrants("refresh_token"),
 		...grantSettingsFrom(config),
 		keyStore,
 		clientRepository,
