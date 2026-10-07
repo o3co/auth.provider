@@ -18,7 +18,7 @@
  * Fresh document URLs whose host names never resolve: each request answers
  * at its deadline, and the resolutions it gave up on stay counted by the
  * outbound fetch, so however many ids a caller invents, the resolutions
- * outstanding stop at the fetch's ceiling.
+ * outstanding stop at the share the fetch leaves such URLs.
  */
 
 import type { Logger } from "@o3co/auth-provider-core";
@@ -34,15 +34,11 @@ import {
 } from "#/clients/clientIdMetadataDocument.mjs";
 
 /**
- * The outbound fetch's bound on outstanding resolutions, as core sizes it:
- * two below the threadpool `UV_THREADPOOL_SIZE` states (4 by default), at
- * least one. A testing fetch has a pool of its own, bounded the same way.
+ * The most resolutions the outbound fetch lets URLs a request names hold at
+ * once: core's request share, one (none when the process's bound is a single
+ * place). A testing fetch has a pool of its own, shared the same way.
  */
-const CEILING = (() => {
-	const raw = (process.env.UV_THREADPOOL_SIZE ?? "").trim();
-	const size = /^\d{1,4}$/.test(raw) ? Number(raw) : Number.NaN;
-	return Math.max(1, (size >= 1 && size <= 1024 ? size : 4) - 2);
-})();
+const REQUEST_SHARE = 1;
 
 const unreachable: OutboundTransport = () => new Promise(() => undefined);
 
@@ -88,7 +84,7 @@ const answeredByTest = () => {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("fresh document URLs whose host names never resolve", () => {
-	it("answer at their deadline and never push outstanding resolutions past the ceiling", async () => {
+	it("answer at their deadline and never push outstanding resolutions past the request share", async () => {
 		let started = 0;
 		const outboundPolicy = createTestOutboundPolicy();
 		const resolver = createClientIdMetadataDocumentResolver({
@@ -107,7 +103,7 @@ describe("fresh document URLs whose host names never resolve", () => {
 			}),
 		});
 
-		const rounds = Math.max(3, Math.ceil((CEILING * 3) / DEFAULT_CIMD_MAX_CONCURRENT_FETCHES));
+		const rounds = 4;
 		let id = 0;
 		for (let round = 0; round < rounds; round += 1) {
 			const begun = Date.now();
@@ -119,10 +115,10 @@ describe("fresh document URLs whose host names never resolve", () => {
 			);
 			expect(answers.every((answer) => answer === null)).toBe(true);
 			expect(Date.now() - begun).toBeLessThan(2_000);
-			expect(started).toBeLessThanOrEqual(CEILING);
+			expect(started).toBeLessThanOrEqual(REQUEST_SHARE);
 		}
-		expect(id).toBeGreaterThan(CEILING * 2);
-		expect(started).toBe(CEILING);
+		expect(id).toBeGreaterThan(DEFAULT_CIMD_MAX_CONCURRENT_FETCHES * 3);
+		expect(started).toBeLessThanOrEqual(REQUEST_SHARE);
 	});
 
 	it("sent all at once, stay within both bounds and are all answered within the deadlines", async () => {
@@ -163,7 +159,7 @@ describe("fresh document URLs whose host names never resolve", () => {
 		expect(Date.now() - begun).toBeLessThan(1_000);
 		// The running fetches and the queue for a slot, at most; the rest never reach the fetch.
 		expect(fetches).toBeLessThanOrEqual(DEFAULT_CIMD_MAX_CONCURRENT_FETCHES * 5);
-		expect(lookups).toBeLessThanOrEqual(CEILING);
+		expect(lookups).toBeLessThanOrEqual(REQUEST_SHARE);
 		expect(warned).toHaveLength(burst);
 		expect(warned.every((message) => message === "cimd_document_fetch_failed")).toBe(true);
 	});
