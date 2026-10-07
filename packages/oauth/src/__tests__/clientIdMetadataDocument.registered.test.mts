@@ -31,6 +31,7 @@ import {
 	type PublicClient,
 	validatedClientRepository,
 } from "@o3co/auth-provider-core";
+import { createTestOutboundPolicy } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import {
 	type ClientIdMetadataDocumentOptions,
@@ -114,7 +115,7 @@ const cimd = (
 		allowedScopes: ["read"],
 		allowedAudiences: [],
 		fetch: fetchImpl,
-		lookup: async () => ["93.184.216.34"],
+		outboundPolicy: createTestOutboundPolicy(),
 		...over,
 	});
 

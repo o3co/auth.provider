@@ -39,6 +39,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestLoginEntry,
+	createTestOutboundPolicy,
 	GrantRegistry,
 	makeValidAppConfig,
 	resolverForTests,
@@ -365,7 +366,7 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 		const fallback = withClientIdMetadataDocuments(answering(null), {
 			allowedScopes: ["read"],
 			allowedAudiences: [],
-			lookup: async () => ["93.184.216.34"],
+			outboundPolicy: createTestOutboundPolicy(),
 			fetch: (async () =>
 				new Response(
 					JSON.stringify({

@@ -130,7 +130,7 @@ const buildRouter = async (
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		consentStore: createMemoryConsentStore(),
 		pendingConsentStore: createMemoryPendingConsentStore(),
-		clientIdMetadataDocuments: { fetch: fetchImpl, lookup: async () => ["93.184.216.34"] },
+		clientIdMetadataDocuments: { fetch: fetchImpl },
 		logger,
 	});
 	const app = express();

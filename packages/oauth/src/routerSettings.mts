@@ -21,7 +21,8 @@
  * federations (`federationSettings`); the canonical issuer (one that is not
  * canonical refuses the build); and the one client repository every endpoint
  * looks a client up in, which reads registered clients through core's
- * client-record boundary.
+ * client-record boundary and fetches a client's metadata document under
+ * core's outbound policy (`outboundPolicy`).
  */
 
 import {
@@ -33,6 +34,7 @@ import {
 	type FederationProvider,
 	type FederationSettings,
 	type Logger,
+	type OutboundPolicy,
 	type SessionRequirementResolver,
 	stepUpReach,
 } from "@o3co/auth-provider-core";
@@ -67,6 +69,7 @@ export const resolveRouterSettings = ({
 	getFederationProviders,
 	registeredClients,
 	consentStore,
+	outboundPolicy,
 	clientIdMetadataDocumentSeams,
 	logger,
 }: {
@@ -83,10 +86,9 @@ export const resolveRouterSettings = ({
 	readonly getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
 	readonly registeredClients: ClientRepository;
 	readonly consentStore: ConsentStore | undefined;
-	readonly clientIdMetadataDocumentSeams: Pick<
-		ClientIdMetadataDocumentOptions,
-		"fetch" | "lookup" | "now"
-	>;
+	/** Core's `outboundPolicy` slot (`core.outbound`): a metadata document is fetched under it. */
+	readonly outboundPolicy: OutboundPolicy;
+	readonly clientIdMetadataDocumentSeams: Pick<ClientIdMetadataDocumentOptions, "fetch" | "now">;
 	readonly logger: Logger;
 }): RouterSettings => {
 	// Every `oauth.*` knob this router consumes is resolved exactly once,
@@ -159,6 +161,7 @@ export const resolveRouterSettings = ({
 					...(cimd.maxConcurrentFetches === undefined
 						? {}
 						: { maxConcurrentFetches: cimd.maxConcurrentFetches }),
+					outboundPolicy,
 					logger,
 					...clientIdMetadataDocumentSeams,
 				})
