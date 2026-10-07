@@ -16,7 +16,6 @@
 import { fileURLToPath } from "node:url";
 import { createApp } from "@o3co/auth-provider-core";
 import express from "express";
-import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import {
 	configDefaultsFor,
@@ -31,6 +30,7 @@ import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
 import { mountRoutes } from "./routes.mjs";
+import { securityHeaders } from "./securityHeaders.mjs";
 import { installGracefulShutdown } from "./shutdown.mjs";
 
 // Step 1: the configuration, in two phases (`configPath.mts`; template
@@ -57,16 +57,7 @@ await (async (): Promise<void> => {
 	// `trust proxy` is set from the `http` module's `httpSettings` once boot
 	// has it (step 3), before a request can arrive.
 	const app = express();
-	app.use(
-		helmet({
-			contentSecurityPolicy: {
-				directives: {
-					defaultSrc: ["'none'"],
-					frameAncestors: ["'none'"],
-				},
-			},
-		}),
-	);
+	app.use(securityHeaders());
 
 	// Timing middleware goes ahead of everything so the histogram covers the
 	// whole stack — including responses produced by middleware that short-circuits

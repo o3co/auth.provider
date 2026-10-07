@@ -57,11 +57,6 @@ export interface OAuthTokenSettings {
 	 */
 	readonly issuer: string;
 	/**
-	 * `oauth.jwt.legacyTypAccept`, `false` when unset: whether verifying a
-	 * token this provider issued accepts one with no `typ` header.
-	 */
-	readonly legacyTypAccept: boolean;
-	/**
 	 * The access-token lifetime as `resolveAccessTokenLifetime` reads
 	 * `oauth.accessToken`: the seconds minted when a request asks for no
 	 * particular lifetime, and the most a request may obtain.

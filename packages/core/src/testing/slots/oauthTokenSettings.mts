@@ -100,7 +100,6 @@ export function oauthTokenSettingsContract(
 			run: async () => {
 				const settings = build();
 				const switches: Record<string, unknown> = {
-					legacyTypAccept: settings.legacyTypAccept,
 					resourceIndicatorEnabled: settings.resourceIndicatorEnabled,
 					requireEmailVerified: settings.requireEmailVerified,
 				};
@@ -130,7 +129,6 @@ export function oauthTokenSettingsContract(
 /** What a test replaces of the double's settings; a nested member is replaced member by member. */
 export interface TestOAuthTokenSettingsOverrides {
 	readonly issuer?: string;
-	readonly legacyTypAccept?: boolean;
 	readonly accessTokenLifetime?: Partial<AccessTokenLifetime>;
 	readonly refreshTokenExpiresIn?: number;
 	readonly resourceIndicatorEnabled?: boolean;
@@ -148,7 +146,6 @@ export function createTestOAuthTokenSettings(
 ): OAuthTokenSettings {
 	return Object.freeze({
 		issuer: overrides.issuer ?? "https://auth.test",
-		legacyTypAccept: overrides.legacyTypAccept ?? false,
 		accessTokenLifetime: Object.freeze({
 			defaultExpiresIn: overrides.accessTokenLifetime?.defaultExpiresIn ?? 3600,
 			maxExpiresIn: overrides.accessTokenLifetime?.maxExpiresIn ?? 3600,

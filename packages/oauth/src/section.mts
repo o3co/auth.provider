@@ -26,7 +26,8 @@
  * Core declares none of these keys: its schema declares `core` alone, and the
  * section's defaults and variables are this package's alone. The module
  * refuses its removed keys (`oauth.refreshToken.legacyRtPolicy`,
- * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`)
+ * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`,
+ * `oauth.jwt.legacyTypAccept`)
  * before the schema parses, from its manifest's `relocatedFrom`, and so do the
  * modules other sections moved to for the paths they moved from
  * (`oauth.grants`, `oauth.dpop`, `oauth.jwt.signingKey`, …), while loaded.
@@ -55,7 +56,7 @@ import { z } from "zod";
  */
 const movedAway = z.object({}).strict().nullable().optional();
 
-/** `oauth.jwt`: the canonical issuer and the typ-less-token switch. */
+/** `oauth.jwt`: the canonical issuer. */
 const jwtSchema = z
 	.object({
 		// Required: the issuer belongs to the deployment, never to a request. An
@@ -70,9 +71,6 @@ const jwtSchema = z
 				});
 			}
 		}),
-		// When true, the JWT verifier accepts a token with no `typ` header, and
-		// warns. A migration override; `reference.conf` ships `false`.
-		legacyTypAccept: coerceBooleanFromEnv.optional(),
 		// The key store's section moved from here.
 		signingKey: movedAway,
 	})

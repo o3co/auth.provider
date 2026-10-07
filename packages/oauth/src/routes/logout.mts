@@ -48,7 +48,7 @@ import {
 	type UsableFrontchannelRP,
 	usableFrontchannelRP,
 } from "../logout/frontchannelLogoutUri.mjs";
-import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
+import { renderFrontchannelLogoutPage } from "../logout/renderFrontchannel.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
@@ -208,12 +208,6 @@ export interface LogoutRouterOptions {
 	logger?: Logger;
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSink;
-	/**
-	 * Accept tokens with no `typ` header, logging `jwt_verify_legacy_typ`.
-	 * Default `false`; `true` is a legacy opt-in. Applies to the bearer access
-	 * token and the id_token_hint.
-	 */
-	legacyTypAccept?: boolean;
 	/**
 	 * Core's session lifecycle: `/oauth/logout` ends the session with its
 	 * `close`, and its notifier tells the relying parties back-channel; the
@@ -402,7 +396,6 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				const verified = await verifyJwt(token, opts.keyStore, {
 					type: "access_token",
 					expectedIssuer: opts.issuer ?? "",
-					legacyTypAccept: opts.legacyTypAccept ?? false,
 					// No revocation check, deliberately: logout only destroys the
 					// session the token names, which is safe for a revoked token and
 					// what a user does right after a credential-change cascade.
@@ -839,7 +832,6 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			const verified = await verifyJwt(idTokenHint, opts.keyStore, {
 				type: "id_token",
 				expectedIssuer: opts.issuer ?? "",
-				legacyTypAccept: opts.legacyTypAccept ?? false,
 				// Deliberately no revocation check: the hint names who is logging
 				// out (OIDC RP-Initiated Logout 1.0); it is not a credential.
 				revocation: "none",
@@ -982,7 +974,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// front-channel logout (7b–7d).
 		const frontchannelRps = acceptsHtml ? await ended.frontchannelRps() : [];
 		if (frontchannelRps.length > 0) {
-			const html = renderFrontchannelLogoutHtml({
+			const page = renderFrontchannelLogoutPage({
 				rps: frontchannelRps,
 				issuer: opts.issuer,
 				sid,
@@ -999,7 +991,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				logger: opts.logger,
 			});
 			res.setHeader("Content-Type", "text/html; charset=utf-8");
-			return res.status(200).send(html);
+			// Replaces any policy the host set: every policy on a response is
+			// enforced, and a host's would block the page's frames and redirect.
+			res.setHeader("Content-Security-Policy", page.contentSecurityPolicy);
+			return res.status(200).send(page.html);
 		}
 
 		// 7b: IdP end-session redirect.

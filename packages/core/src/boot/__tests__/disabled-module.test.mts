@@ -110,7 +110,7 @@ const switched = (ran: string[]): Module =>
 			rateLimitBudgets: {
 				switch_fixture: () => {
 					ran.push("rateLimitBudgets");
-					return { limit: 1, windowSeconds: 60 };
+					return null;
 				},
 			},
 			discoveryMetadata: [
@@ -155,7 +155,6 @@ describe("a module its own section switches off", () => {
 		expect(handle.components.auditSink).toBeUndefined();
 		expect(handle.components.grantHandlerResolver?.get("urn:test:switch-fixture")).toBeUndefined();
 		expect(handle.components.sessionRequirementResolver?.action("acme.switch")).toBeUndefined();
-		expect(handle.components.rateLimitBudgetResolver?.get("switch_fixture")).toBeUndefined();
 		expect(handle.routes.map((route) => route.contributedBy)).not.toContain("switch-fixture");
 		await handle.dispose();
 	});

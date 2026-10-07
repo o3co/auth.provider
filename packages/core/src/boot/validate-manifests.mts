@@ -826,8 +826,8 @@ const FEDERATION_KINDS_REGISTERED =
 
 /**
  * The kinds whose collector is the planner's alone: a host collector
- * for `rateLimitBudgets` could answer a looser budget than the owning module
- * contributed — on RFC 8628 §5.1's device-verification prefix, say —
+ * for `rateLimitBudgets` could let a second module claim a prefix its owner
+ * claimed — RFC 8628 §5.1's device-verification prefix, say —
  * `federationTypes` is what the dispatch of configured federations reads,
  * `admissionActions` is where admission reads the grade it hands the
  * requirements, and `auditHooks` is what the audit fan-out in the `auditSink`
@@ -1009,7 +1009,7 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
  * (`checkContributionContainers`):
  *
  * - a prefix is not empty and holds no `:`, since a limiter key carries it
- *   before its first `:`, whatever the budget's factory answers;
+ *   before its first `:`, whatever the claim's factory answers;
  * - a prefix names no `Object.prototype` member (`constructor`, `__proto__`),
  *   which a limiter looking budgets up on a plain object finds in its place;
  * - a prefix is claimed by the module whose routes key it, so an override of

@@ -591,9 +591,9 @@ describe("createRefreshTokenGrant", () => {
 				expect(result.errorDescription).toBe("refresh token has no subject");
 			});
 
-			it("rejects a typ-less JWT as invalid_grant, with legacyTypAccept off", async () => {
-				// With `legacyTypAccept` off (the default), the verifier refuses
-				// the typ-less token; the grant's own `rt+jwt` gate is not reached.
+			it("rejects a typ-less JWT carrying no payload.type as invalid_grant", async () => {
+				// Nothing marks it a refresh token: the verifier refuses a token
+				// with no `typ` header, and no setting admits one.
 				const typLessUnmarkedToken = await new SignJWT({
 					sub: "u1",
 					azp: DEFAULT_CLIENT_ID,
@@ -608,6 +608,32 @@ describe("createRefreshTokenGrant", () => {
 
 				const { result } = await handler.handle({
 					body: { refresh_token: typLessUnmarkedToken },
+					session: {},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
+
+				expect(result.status).toBe(400);
+				if (!("error" in result)) expect.fail("Expected error in result");
+				expect(result.error).toBe("invalid_grant");
+				expect(result.errorDescription).toBe("invalid refresh_token");
+			});
+
+			it("rejects a typ-less JWT even from a hand-filled settings slot that still carries the former switch", async () => {
+				const typLessToken = await new SignJWT({ sub: "u1", azp: DEFAULT_CLIENT_ID, scope: "read" })
+					.setProtectedHeader({ alg: "HS256", kid: "v0" })
+					.setIssuer("localhost")
+					.setAudience(DEFAULT_CLIENT_ID)
+					.setExpirationTime("24h")
+					.sign(secretKey);
+				const handler = createRefreshTokenGrant({
+					...mockDeps,
+					oauthTokenSettings: { ...mockDeps.oauthTokenSettings, legacyTypAccept: true } as never,
+				});
+
+				const { result } = await handler.handle({
+					body: { refresh_token: typLessToken },
 					session: {},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },

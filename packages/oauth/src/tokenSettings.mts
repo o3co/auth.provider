@@ -50,7 +50,7 @@ import {
  * without the module writes it.
  */
 export interface OAuthTokenSection {
-	readonly jwt?: { readonly issuer?: unknown; readonly legacyTypAccept?: unknown };
+	readonly jwt?: { readonly issuer?: unknown };
 	readonly accessToken?: {
 		readonly defaultExpiresIn?: unknown;
 		readonly maxExpiresIn?: unknown;
@@ -77,7 +77,6 @@ export function oauthTokenSettingsFrom(oauth: OAuthTokenSection | undefined): OA
 	return Object.freeze({
 		// `checkCanonicalIssuer` answered null, which only a string satisfies.
 		issuer: issuer as string,
-		legacyTypAccept: oauth?.jwt?.legacyTypAccept === true,
 		accessTokenLifetime: Object.freeze({ defaultExpiresIn, maxExpiresIn }),
 		refreshTokenExpiresIn: resolveRefreshTokenLifetime(config),
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,

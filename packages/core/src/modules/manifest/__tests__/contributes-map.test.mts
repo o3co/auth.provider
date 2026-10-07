@@ -1,6 +1,5 @@
 import { expect, expectTypeOf, test } from "vitest";
 import type { z } from "zod";
-import type { RateLimitSpec } from "../../../ratelimit/types.mjs";
 import type { verifierLimitClaim } from "../../../ratelimit/verifierLimits.mjs";
 import type { Contributed } from "../contributed.mjs";
 import type {
@@ -93,13 +92,13 @@ test("grantMiddleware is list-shaped (factory array)", () => {
 // it handles
 // ---------------------------------------------------------------------------
 
-test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget or null, a verifier's claim declaring its setting", () => {
+test("rateLimitBudgets is name-keyed by prefix, each factory claiming its prefix with null, a verifier's claim declaring its setting", () => {
 	type Field = NonNullable<ContributesMap<LocalDeps>["rateLimitBudgets"]>;
 	expectTypeOf<Field>().toEqualTypeOf<{
 		readonly [prefix: string]: RateLimitBudgetFactory<LocalDeps>;
 	}>();
 	expectTypeOf<RateLimitBudgetFactory<LocalDeps>>().toEqualTypeOf<
-		((deps: LocalDeps) => Contributed<RateLimitSpec | null>) & {
+		((deps: LocalDeps) => Contributed<null>) & {
 			readonly verifier?: VerifierLimitDeclaration;
 		}
 	>();

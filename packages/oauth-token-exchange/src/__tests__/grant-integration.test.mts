@@ -1989,41 +1989,25 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings, never the
 		).not.toBeNull();
 	});
 
-	it("accepts a subject token with no typ when the slot's legacyTypAccept is on and the configuration's off", async () => {
+	it("refuses a subject token with no typ header", async () => {
 		const token = await untypedToken();
-		const config = configWith({ legacyTypAccept: false });
 		expect(
-			await validatorFor({
-				config,
-				oauthTokenSettings: settings({ legacyTypAccept: true }),
-			}).validate(token, { role: "subject" }),
-		).not.toBeNull();
-	});
-
-	it("refuses a subject token with no typ when the slot's legacyTypAccept is off and the configuration's on", async () => {
-		// A reader that took the slot's `false` for "unset" would fall through
-		// to the configuration's `true`.
-		const token = await untypedToken();
-		const config = configWith({ legacyTypAccept: true });
-		expect(
-			await validatorFor({
-				config,
-				oauthTokenSettings: settings({ legacyTypAccept: false }),
-			}).validate(token, { role: "subject" }),
+			await validatorFor({ config: configWith(), oauthTokenSettings: settings() }).validate(token, {
+				role: "subject",
+			}),
 		).toBeNull();
 	});
 
-	it("reads a slot whole: one without legacyTypAccept is refused, naming the member, not read from the configuration", async () => {
-		// Read member by member, the configuration's `true` would stand in for
-		// the member the slot lacks, and accept an untyped token on a slot
-		// nobody meant to say so.
-		const { legacyTypAccept: _dropped, ...withoutSwitch } = settings();
-		expect(() =>
-			validatorFor({
+	it("refuses a subject token with no typ header even when the slot and the configuration still carry the former switch", async () => {
+		// No setting admits a typ-less token: neither a hand-filled slot nor a
+		// hand-built configuration that still carries the removed key is obeyed.
+		const token = await untypedToken();
+		expect(
+			await validatorFor({
 				config: configWith({ legacyTypAccept: true }),
-				oauthTokenSettings: withoutSwitch,
-			}),
-		).toThrow(/oauthTokenSettings\.legacyTypAccept/);
+				oauthTokenSettings: { ...settings(), legacyTypAccept: true },
+			}).validate(token, { role: "subject" }),
+		).toBeNull();
 	});
 
 	it("mints the slot's default lifetime, not the configuration's", async () => {

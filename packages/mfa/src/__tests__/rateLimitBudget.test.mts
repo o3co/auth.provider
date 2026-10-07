@@ -43,7 +43,13 @@ describe("the MFA routes' prefix", () => {
 
 	it("registers no budget through createApp: the limiter's own limits and defaultLimit decide", async () => {
 		const { handle } = await boot();
-		expect(handle.components.rateLimitBudgetResolver?.get(MFA_RATE_LIMIT_PREFIX)).toBeUndefined();
+		expect(
+			(
+				await handle.components.rateLimiter?.check(`${MFA_RATE_LIMIT_PREFIX}:ip:192.0.2.1`, {
+					ip: "192.0.2.1",
+				})
+			)?.limit,
+		).toBe(1000);
 	});
 });
 

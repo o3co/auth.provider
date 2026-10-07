@@ -33,7 +33,7 @@ import { oauthSectionSchema } from "#/section.mjs";
 
 /** A section every key of which is valid: what the package's reference loads to, with an issuer. */
 const valid = (): Record<string, unknown> => ({
-	jwt: { issuer: "https://auth.test", legacyTypAccept: false },
+	jwt: { issuer: "https://auth.test" },
 	accessToken: { defaultExpiresIn: 3600 },
 	refreshToken: { expiresIn: 86400 },
 	oidcMode: "oidc-required",
@@ -183,6 +183,8 @@ describe("every level refuses a key it does not declare, at its path", () => {
 			"allowUnmarkedClients",
 		],
 		["oauth.accessToken.expiresIn", "accessToken.expiresIn", 3600, "expiresIn"],
+		["oauth.jwt.legacyTypAccept", "jwt.legacyTypAccept", false, "legacyTypAccept"],
+		["oauth.jwt.legacyTypAccept", "jwt.legacyTypAccept", true, "legacyTypAccept"],
 	])(
 		"does not declare %s, which the module's section declares removed (relocatedFrom) and boot refuses before parsing",
 		(_what, path, value, key) => {
@@ -546,7 +548,6 @@ describe("oauth.oidcMode and oauth.revocation", () => {
 
 describe("every boolean reads the string an environment variable carries", () => {
 	const BOOLEANS = [
-		"jwt.legacyTypAccept",
 		"requireEmailVerified",
 		"requireGrantTypeAllowlist",
 		"resourceIndicator.enabled",
@@ -592,13 +593,6 @@ describe("every boolean reads the string an environment variable carries", () =>
 			unknown
 		>;
 		expect(parsed.requireEmailVerified).toBeUndefined();
-	});
-
-	it("leaves an omitted jwt.legacyTypAccept undefined rather than defaulting it", () => {
-		const parsed = oauthSectionSchema.parse(withValue("jwt.legacyTypAccept", undefined)) as {
-			jwt: Record<string, unknown>;
-		};
-		expect(parsed.jwt.legacyTypAccept).toBeUndefined();
 	});
 });
 
