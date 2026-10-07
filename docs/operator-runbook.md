@@ -816,8 +816,10 @@ steps up on the MFA page — `POST /session/mfa/step-up`, then one of their
 factors verified on its transaction — which records recent MFA on the
 session when the factor adds `mfa` or the session holds it already; the
 start is then admitted. A user whose only counting factor is the email factor
-without `MFA_EMAIL_FACTOR_ADDS_MFA` steps up with a recovery code; one without
-codes left needs the operator reset, then a first binding. Where no second factor can be recorded
+without `MFA_EMAIL_FACTOR_ADDS_MFA` steps up with a recovery code; one with
+none it can use — the recovery-code factor off, a set never shown, or its codes
+used up — is answered `401 login_required` instead of a step-up, and needs the
+operator reset, then a first binding. Where no second factor can be recorded
 on the session, the user signs in again instead: session admission says so
 (`SessionView.secondFactorRecordable`) when the session store cannot record a
 step-up, and when the session's record is not in a shape one can be recorded

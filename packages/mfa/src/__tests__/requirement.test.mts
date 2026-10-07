@@ -693,14 +693,14 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			expected: STEP_UP,
 		},
 		{
-			row: "an email code verified inside the window, the subject holding the email factor alone → step_up",
+			row: "an email code verified inside the window, the subject holding the email factor alone → unmet: nothing it holds adds mfa",
 			input: about(password(["pwd", "email"], minutesAgo(1)), CHANGE),
 			records: [factorRecord("u-alice", "email")],
 			factors: [FACTORS.totp(), FACTORS.email()],
-			expected: STEP_UP,
+			expected: UNMET,
 		},
 		{
-			row: "a federated session with a second factor that adds no mfa inside the window → step_up",
+			row: "a federated session with a second factor that adds no mfa inside the window, the email factor alone held → unmet",
 			input: about(
 				record(["fed", "email"], {
 					primary: "fed",
@@ -712,7 +712,7 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			),
 			records: [factorRecord("u-alice", "email")],
 			factors: [FACTORS.totp(), FACTORS.email()],
-			expected: STEP_UP,
+			expected: UNMET,
 		},
 		{
 			row: "an email code verified inside the window in a session that holds mfa → met",
@@ -761,10 +761,11 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			expected: MET,
 		},
 		{
-			row: "a record of a kind no longer installed counts as a counting factor → step_up",
+			row: "a record of a kind no longer installed counts as a counting factor → unmet, never a first binding: no installed factor of its kind adds mfa; under required, the baseline's step_up first",
 			input: about(password(), CHANGE),
 			records: [factorRecord("u-alice", "retired-kind")],
-			expected: STEP_UP,
+			expected: UNMET,
+			required: STEP_UP,
 		},
 		{
 			row: "a code's read is judged as the cookie's",
@@ -901,6 +902,77 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 		expect(await hour.admit(input)).toEqual(MET);
 		expect(await byDefault.admit(input)).toEqual(STEP_UP);
 	});
+});
+
+describe("admit — credential_change: a session without mfa is stepped up only toward a record that can add it", () => {
+	const RECOVERY = createRecoveryCodeFactor({ count: 2 });
+	/** Alice's recovery set of `count` codes as stored, its codes answered unless `shown` says otherwise. */
+	const recoverySetRecord = (count: number, shown = true): MfaFactorRecord => ({
+		...factorRecord("u-alice", "recovery_code", "f-2"),
+		data: suiteSealing().sealFactorData(
+			{ subject: "u-alice", id: "f-2", kind: "recovery_code" },
+			{ ...recoverySet(count).data, shown },
+		),
+	});
+	const EMAIL = factorRecord("u-alice", "email");
+	const emailSession = () => about(password(["pwd", "email"], minutesAgo(1)), CHANGE);
+
+	const rows: ReadonlyArray<{
+		readonly row: string;
+		readonly input?: RequirementInput;
+		readonly records: MfaFactorRecord[];
+		readonly factors?: MfaFactor[];
+		readonly expected: RequirementVerdict;
+	}> = [
+		{
+			row: "the email factor and a recovery set with no code left → unmet",
+			records: [EMAIL, recoverySetRecord(0)],
+			expected: UNMET,
+		},
+		{
+			row: "the email factor and a recovery set whose codes were never answered → unmet",
+			records: [EMAIL, recoverySetRecord(2, false)],
+			expected: UNMET,
+		},
+		{
+			row: "the email factor and a recovery set, the recovery-code factor off → unmet",
+			records: [EMAIL, recoverySetRecord(2)],
+			factors: [FACTORS.totp(), FACTORS.email()],
+			expected: UNMET,
+		},
+		{
+			row: "the email factor and a recovery set with codes left, answered → step_up",
+			records: [EMAIL, recoverySetRecord(2)],
+			expected: STEP_UP,
+		},
+		{
+			row: "the email factor and TOTP → step_up",
+			records: [EMAIL, factorRecord("u-alice", "totp", "f-3")],
+			expected: STEP_UP,
+		},
+		{
+			row: "the email factor alone, in a session that holds mfa and whose second factor is stale → step_up: an email code then meets it",
+			input: about(password(["pwd", "otp", "mfa", "email"], minutesAgo(24 * 60)), CHANGE),
+			records: [EMAIL],
+			expected: STEP_UP,
+		},
+		{
+			row: "the email factor alone, and a session no second factor can be recorded on → reauthenticate, as before",
+			input: unrecordable(emailSession()),
+			records: [EMAIL],
+			expected: REAUTHENTICATE,
+		},
+	];
+
+	for (const mode of ["optional", "required"] as const) {
+		it.each(rows)(`${mode} · $row`, async ({ input, records, factors, expected }) => {
+			const { requirement } = build(mode, {
+				factors: factors ?? [FACTORS.totp(), FACTORS.email(), RECOVERY],
+				factorStore: factorStoreHolding(...records),
+			});
+			expect(await requirement.admit(input ?? emailSession())).toEqual(expected);
+		});
+	}
 });
 
 describe("admit — under required, credential_change is never looser than use", () => {

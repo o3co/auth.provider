@@ -2391,7 +2391,11 @@ Another email code at the step-up leaves them stepped up; TOTP, a passkey or
 a recovery code meets them, and a session signed in with one of those is
 admitted as before, an email code verified later in it included. A user
 whose only counting factor is the email factor steps up with a recovery code
-to add another; one without codes left needs the operator reset
+to add another. Where it has none it can use — the recovery-code factor off
+(`MFA_RECOVERY_CODE_FACTOR_ENABLED=false`), a set whose codes were never shown,
+or one whose codes are used up — those actions answer `401 login_required`
+rather than a step-up, and regenerating the codes is one of them: the way
+out is the operator reset
 ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)),
 then a first binding. To keep the email code sufficient, set
 `MFA_EMAIL_FACTOR_ADDS_MFA=true`, which also lets an email login meet

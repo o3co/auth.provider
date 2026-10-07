@@ -46,8 +46,13 @@
  *   (`asksForSecondFactor`): every state but `exhausted` and `retired`, so
  *   one the provider cannot read — a TOTP whose key is lost among them — or
  *   whose kind it no longer installs fails closed and asks;
+ * - whether a step-up could add `mfa` to a session that lacks it
+ *   (`mayAddMfaIn`): a record a transaction offers, of a factor that adds
+ *   `mfa`, and for a recovery set one whose codes were answered — a set
+ *   never shown is a code nobody holds;
  * - every reading that judges a recovery set — the offers, the list, a
- *   step-up's `no_qualifying_factor`, a password login's ask — reads the
+ *   step-up's `no_qualifying_factor`, a password login's ask, whether a
+ *   step-up could add `mfa` — reads the
  *   subject's records through `readSubjectRecords`, the one place the floor
  *   and the records are read in order, so all agree on what is usable;
  * - whether a first binding may open: `mayCount` (`firstBinding.mts`), which
@@ -71,6 +76,7 @@ import {
 	RECOVERY_CODE_FACTOR_KIND,
 	recoverySetGeneration,
 	recoverySetKeyIds,
+	recoverySetShown,
 } from "./recovery/factor.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 
@@ -235,6 +241,20 @@ const reading = (
 /** Whether the subject `read` holds a usable record of any kind (`holdsUsableRecord`, over its context): a step-up's `no_qualifying_factor`. */
 export const holdsUsableIn = (read: MfaSubjectRecords): boolean =>
 	holdsUsableRecord(read.context, read.subject, read.records, { counting: false });
+
+/**
+ * Whether the subject `read` holds a record a step-up could add `mfa` with:
+ * one a transaction offers (`isOffered`), of a factor that adds `mfa`, and —
+ * a recovery-code set — whose codes were answered.
+ */
+export const mayAddMfaIn = (read: MfaSubjectRecords): boolean =>
+	read.records.some((record) => {
+		const state = readFactorRecord(read.context, read.subject, record);
+		if (state.state === "not_installed" || !isOffered(state) || !state.factor.addsMfa) {
+			return false;
+		}
+		return !("data" in state) || recoverySetShown(state.factor, state.data) !== false;
+	});
 
 /**
  * Whether `subject` holds a usable record that counts among `records`: no

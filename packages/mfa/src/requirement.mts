@@ -39,7 +39,8 @@
  * records it. An action graded `credential_change` changes the
  * ways into the account — adds one, or renames or removes a factor — and is
  * held to recent MFA (`isRecentMfa`: a second factor verified lately, in a
- * session whose vouched `amr` holds `mfa`) over a primary the
+ * session whose vouched `amr` holds `mfa`; a session without it is stepped
+ * up only toward a record that can add it, `unmet` otherwise) over a primary the
  * baseline knows — under `required` on top of the baseline, so it is never
  * looser than `use`: the subject's factor records say whether it may hold a
  * counting factor — a record of a kind no installed factor declares
@@ -106,7 +107,7 @@ import {
 	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
-import { asksForSecondFactor, readSubjectRecords } from "./factorState.mjs";
+import { asksForSecondFactor, mayAddMfaIn, readSubjectRecords } from "./factorState.mjs";
 import {
 	countingKinds,
 	enrollableKinds,
@@ -512,7 +513,10 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	/**
 	 * Recent MFA over a record whose primary the baseline knows, and the
 	 * `amr` admission vouches for on it; a subject with no counting factor is
-	 * a first binding.
+	 * a first binding. Without it, a session that lacks `mfa` is stepped up
+	 * only when the subject holds a record a step-up could add `mfa` with
+	 * (`mayAddMfaIn`), and is unmet otherwise, as where no factor could
+	 * finish a step-up.
 	 */
 	const recent = async (
 		session: SessionView,
@@ -527,13 +531,23 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		if (!(await mayHoldCountingFactor(session.sub))) {
 			return firstBindingIn(session, recorded, action, nowMs);
 		}
+		const holdsMfa = vouched.includes(MFA_AMR);
 		const recentMfa = isRecentMfa(
-			{ authTime: session.authTime, mfaAt: recorded.mfaAt, holdsMfa: vouched.includes(MFA_AMR) },
+			{ authTime: session.authTime, mfaAt: recorded.mfaAt, holdsMfa },
 			{ holdsCountingFactor: true },
 			recentMfaMaxAgeSeconds,
 			nowMs,
 		);
-		return recentMfa ? MET : stepUp(session);
+		if (recentMfa) return MET;
+		const verdict = stepUp(session);
+		if (verdict.outcome !== "step_up" || holdsMfa) return verdict;
+		// A session without mfa is stepped up only toward a record that can add it.
+		const held = await readSubjectRecords({ factors, sealing }, session.sub, {
+			list: listRecords,
+			recoverySetFloor: options.recoverySetFloor,
+			logger,
+		});
+		return mayAddMfaIn(held) ? verdict : UNMET;
 	};
 
 	/** A session a cookie, a code or a link carries, held over its record to the rule its mode and grade name. */
