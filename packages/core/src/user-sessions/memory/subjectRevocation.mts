@@ -17,6 +17,7 @@
 import type { EventLogger } from "../../logging/Logger.mjs";
 import { SUBJECT_REVOCATION_MIN_RETENTION_MS } from "../retention.mjs";
 import {
+	checkSubjectRevocationClock,
 	checkSubjectRevocationInstant,
 	clampSubjectRevocationBoundary,
 } from "../subjectRevocationBoundary.mjs";
@@ -43,8 +44,12 @@ interface Watermark {
  * drag the sessions boundary back.
  *
  * One clock, `now` (default the wall clock), bounds a boundary
- * (`clampSubjectRevocationBoundary`) and lets a record lapse. A boundary it
- * clamps is said at warn on `logger`: the replica that asked runs ahead.
+ * (`clampSubjectRevocationBoundary`) and lets a record lapse. It is read once
+ * per operation, through `checkSubjectRevocationClock`: a reading that is no
+ * instant a `Date` can hold fails the operation with a `RangeError` and
+ * drops nothing, so the record is still in force once the clock recovers. A
+ * boundary it clamps is said at warn on `logger`: the replica that asked runs
+ * ahead.
  */
 export function createInMemorySubjectRevocation(
 	options: { readonly now?: () => number; readonly logger?: Pick<EventLogger, "warn"> } = {},
@@ -52,11 +57,13 @@ export function createInMemorySubjectRevocation(
 	const clock = options.now ?? Date.now;
 	const entries = new Map<string, Watermark>();
 
-	/** The record as it stands, or nothing when it has lapsed. */
-	const live = (subject: string): Watermark | undefined => {
+	const readClock = (): number => checkSubjectRevocationClock(clock());
+
+	/** The record as it stands at `nowMs`, or nothing when it has lapsed. */
+	const live = (subject: string, nowMs: number): Watermark | undefined => {
 		const entry = entries.get(subject);
 		if (entry === undefined) return undefined;
-		if (entry.expiresAtMs <= clock()) {
+		if (entry.expiresAtMs <= nowMs) {
 			entries.delete(subject);
 			return undefined;
 		}
@@ -65,11 +72,12 @@ export function createInMemorySubjectRevocation(
 
 	const write = (
 		subject: string,
+		nowMs: number,
 		sessionsBeforeMs: number,
 		grantsBeforeMs: number | null,
 		callerExpiresAtMs: number,
 	): void => {
-		const existing = live(subject);
+		const existing = live(subject, nowMs);
 		const sessions = Math.max(
 			existing?.sessionsBeforeMs ?? Number.NEGATIVE_INFINITY,
 			sessionsBeforeMs,
@@ -113,9 +121,10 @@ export function createInMemorySubjectRevocation(
 	): void => {
 		const expiresAtMs = checkSubjectRevocationInstant(expiresAt, "expiresAt");
 		const requestedMs = checkSubjectRevocationInstant(before, "before");
-		const { boundary, clamped } = clampSubjectRevocationBoundary(before, clock());
+		const nowMs = readClock();
+		const { boundary, clamped } = clampSubjectRevocationBoundary(before, nowMs);
 		const beforeMs = boundary.getTime();
-		write(subject, beforeMs, grants === "advance" ? beforeMs : null, expiresAtMs);
+		write(subject, nowMs, beforeMs, grants === "advance" ? beforeMs : null, expiresAtMs);
 		if (!clamped) return;
 		try {
 			options.logger?.warn(
@@ -144,14 +153,14 @@ export function createInMemorySubjectRevocation(
 		},
 
 		async revokedBefore(subject) {
-			const entry = live(subject);
+			const entry = live(subject, readClock());
 			// A fresh `Date` every time: one handed out and then mutated by a
 			// caller would otherwise edit the record.
 			return entry === undefined ? null : new Date(entry.sessionsBeforeMs);
 		},
 
 		async grantsRevokedBefore(subject) {
-			const entry = live(subject);
+			const entry = live(subject, readClock());
 			return entry?.grantsBeforeMs == null ? null : new Date(entry.grantsBeforeMs);
 		},
 	};
