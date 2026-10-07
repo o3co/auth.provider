@@ -2005,6 +2005,12 @@ modules fills them.
   the same names, with the kit's own `ContractCase`. The slots' test doubles
   (`createTestCsrfGuard`, `createRecordingLoginCompletion` and the rest) stay
   on core's `./testing`.
+- **`cookieRenewedAway`**, new since v0.16.0 and exported by core in the 0.17
+  release candidates, is removed with no replacement (#1599): no route asks
+  it, since `POST /session/logout` closes the session its cookie session names
+  whatever the renewal nonce. A route of your own that acts on the session
+  admits it with `admitSession`, which answers a cookie session the record was
+  renewed away from `not_live` (`renewed`).
 - **BREAKING: each federation package ships only its type module** (#1297,
   #1299, #1300, #1301). Removed, each with the `ComponentMap` slot it
   required: `googleFederationModule` and `googleFederationConfig` from

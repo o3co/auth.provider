@@ -801,7 +801,6 @@
 . consoleLogger value
 . constantTimeStringEqual value
 . cookieClaim value
-. cookieRenewedAway value
 . cookieSessionUser value
 . copyPlainJson value
 . coreReference value

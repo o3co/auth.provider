@@ -71,7 +71,7 @@ export type LiveSession =
  * `presented`. A record without one (`undefined`, `null`) is bound to none;
  * a value that is not a nonce binds it to no cookie session at all.
  */
-export const renewedAway = (bound: unknown, presented: string | undefined): boolean =>
+const renewedAway = (bound: unknown, presented: string | undefined): boolean =>
 	bound != null && (!isRenewalNonce(bound) || bound !== presented);
 
 /**

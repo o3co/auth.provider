@@ -29,7 +29,6 @@ import {
 	type CodeCarrier,
 	codeClaimRevalidation,
 	cookieClaim,
-	cookieRenewedAway,
 	linkClaim,
 	tokenClaim,
 } from "#/session-admission/admit.mjs";
@@ -203,50 +202,6 @@ describe("admission over a session bound to a renewed cookie session", () => {
 		expect(await admit(store, codeClaimRevalidation(passwordCode(SID), SUB))).toMatchObject({
 			outcome: "admitted",
 		});
-	});
-});
-
-describe("cookieRenewedAway — whether the record a cookie names is bound to another cookie session", () => {
-	it("answers true for a cookie session that does not hold the record's nonce, false for the one that does", async () => {
-		const nonce = newRenewalNonce();
-		const store = await holding(nonce);
-		expect(await cookieRenewedAway(store, cookie(nonce))).toBe(false);
-		for (const presented of [undefined, newRenewalNonce()]) {
-			expect(await cookieRenewedAway(store, cookie(presented)), String(presented)).toBe(true);
-		}
-	});
-
-	it("answers false for a record without a nonce, a record that is gone, and a claim that is not a cookie's", async () => {
-		expect(await cookieRenewedAway(await holding(), cookie(newRenewalNonce()))).toBe(false);
-		expect(await cookieRenewedAway(createInMemoryUserSessionStore(), cookie())).toBe(false);
-		expect(
-			await cookieRenewedAway(await holding(newRenewalNonce()), tokenClaim({ sid: SID, sub: SUB })),
-		).toBe(false);
-	});
-
-	it("reads the record's nonce once, refuses one that is not a nonce, and rejects with the store's outage", async () => {
-		const inner = await holding();
-		let reads = 0;
-		const odd: UserSessionStore = {
-			...inner,
-			get: async (sid) => {
-				const session = await inner.get(sid);
-				if (session === null) return null;
-				return Object.defineProperty({ ...session }, "renewalNonce", {
-					enumerable: true,
-					get: () => (reads++ === 0 ? "not-a-nonce" : undefined),
-				});
-			},
-		};
-		expect(await cookieRenewedAway(odd, cookie("not-a-nonce"))).toBe(true);
-		expect(reads).toBe(1);
-		const down: UserSessionStore = {
-			...inner,
-			get: async () => {
-				throw new Error("store down");
-			},
-		};
-		await expect(cookieRenewedAway(down, cookie())).rejects.toThrow("store down");
 	});
 });
 

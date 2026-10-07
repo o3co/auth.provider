@@ -47,11 +47,11 @@ import {
 	tokenReading,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
-import type { UserSession, UserSessionClaims, UserSessionStore } from "../user-sessions/types.mjs";
+import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
-import { readLiveSession, readRecord, renewedAway } from "./live-session.mjs";
+import { readLiveSession } from "./live-session.mjs";
 import { warnDroppedClaims } from "./login-claims.mjs";
 import {
 	additionsFromDto,
@@ -278,32 +278,6 @@ export const viewOf = (session: UserSession, storeRecords: boolean): SessionView
 		secondFactorRecordable: storeRecords && canRecordSecondFactor(session),
 	});
 };
-
-/**
- * Whether the record a cookie claim names is bound to another cookie
- * session: it carries a renewal nonce the cookie session does not hold, or
- * one that is not a nonce (the record's nonce read once). `false` for a
- * claim that is not a cookie's, one without a `sid`, and a record that is
- * gone or bound to none. For a route that acts on the record without
- * admitting the session and must tell a copy the record was renewed away
- * from; a logout is not one: it ends the session its cookie session names,
- * for the same subject, whatever the nonce. The answer is as of this read: a
- * renewal recorded after it does not change what the caller does next.
- * Rejects with the store's own error, never answering
- * `unavailable`: the one exception to admission's promise that a store that
- * throws is `unavailable`, and its caller handles the rejection.
- */
-export async function cookieRenewedAway(
-	store: UserSessionStore,
-	claim: SessionClaim,
-): Promise<boolean> {
-	if (!isObject(claim) || claim.carrier !== "cookie") return false;
-	const sid = nonEmptyString(claim.sid);
-	if (sid === undefined) return false;
-	const record = await readRecord(store, sid);
-	if (record == null) return false;
-	return renewedAway(record.renewalNonce, nonEmptyString(claim.renewalNonce));
-}
 
 /** A copy of `view` with Dates of its own; the facts are frozen and shared. */
 const copyView = (view: SessionView): SessionView =>

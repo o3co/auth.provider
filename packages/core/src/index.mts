@@ -1151,7 +1151,6 @@ export {
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	cookieClaim,
-	cookieRenewedAway,
 	cookieSessionUser,
 	establishWithoutAsking,
 	type FederatedLogin,
