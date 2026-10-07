@@ -130,7 +130,9 @@ const deserialize = (raw: string): RefreshTokenFamily => {
  *
  * `WATCH` is connection-scoped, so each `updateFamily` call takes its own
  * `client.duplicate()` and reuses it across retries (`EXEC` clears the watch);
- * `registerFamily` and `findFamily` use the base client.
+ * `registerFamily` and `findFamily` use the base client. A duplicate's
+ * connection is never replaced, so a connection lost during a call fails it
+ * with the client's error rather than committing without the `WATCH`.
  *
  * It resolves once the server's eviction policy passes the gate
  * (`internal/eviction-policy.mts`).
