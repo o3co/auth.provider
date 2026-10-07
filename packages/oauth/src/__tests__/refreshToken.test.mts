@@ -1699,8 +1699,15 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("uses policy grantedAudience when within client.allowedAudiences", async () => {
-			// Policy narrows to ["https://api.example"] ∈ allowedAudiences → 200, token aud is https://api.example.
-			const token = await makeRefreshToken({ scope: "read" });
+			// Policy narrows to ["https://api.example"] ∈ allowedAudiences and the
+			// presented token's aud → 200, token aud is https://api.example.
+			const token = await new SignJWT({ sub: "u1", scope: "read", azp: DEFAULT_CLIENT_ID })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuedAt()
+				.setIssuer("localhost")
+				.setAudience(["https://api.example", "https://other.example"])
+				.setExpirationTime("24h")
+				.sign(secretKey);
 			const deps = depsWithAudiencePolicy(async () => ({
 				outcome: "allow",
 				grantedAudience: ["https://api.example"],

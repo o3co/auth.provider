@@ -65,6 +65,19 @@ enforcement in D1 then rejects it.
 A policy-returned audience always wins; derivation only fills the gap the
 policy left.
 
+Amended 2026-10-07. On `refresh_token`, the presented refresh token's `aud`
+is a second ceiling beside `allowedAudiences ∪ {clientId}`, and the default:
+RFC 8707 §2.2 holds a resource requested on a refresh to what the original
+grant authorized, as RFC 6749 §6 holds its scope. A plain refresh keeps the
+original audience instead of falling back to the client id; a `resource`
+outside it is not derivable, so D1 rejects it `invalid_target`; and a
+policy-returned audience is validated against both ceilings. The policy is
+handed the original audience as `GrantPolicyRequest.originalAudience`. A
+token that names no `aud` is held to its client's id. A default the
+registration no longer holds is refused `invalid_grant`, never replaced by
+the client id. The rotated refresh token carries the original audience (and
+scope), never what this refresh narrowed the access token to.
+
 ### D2 — Multiple distinct resources are rejected, not split or merged
 
 #173 left this open ("the AS may issue one token per resource OR a single token

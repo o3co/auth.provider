@@ -723,6 +723,29 @@ The boot refusals you can meet, with their messages, are in
   them; an answer with neither is refused the same way. See the
   [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
   note 18.
+- **BREAKING: a refresh keeps the audience of the token it presents.** On
+  `refresh_token`, the presented refresh token's `aud` is the ceiling and the
+  default for the new tokens' audience, as its scope already is. A plain
+  refresh (no `resource`, no audience from the policy) keeps the original
+  `aud`; it used to issue for the client id. Once the client's
+  registration (`allowedAudiences` ∪ `{client_id}`) no longer holds that
+  `aud`, a refresh of the token is `400 invalid_grant` (`invalid_target`
+  when it asks for a `resource` that derives nothing) and the family is left
+  untouched; the user signs in again. A `resource` outside the
+  original `aud` is `400 invalid_target`, even when the client's
+  `allowedAudiences` lists it; it used to be issued. A policy's
+  `grantedAudience` outside the original `aud` is `500 server_error`, as one
+  outside `allowedAudiences` is. Narrowing applies only to the access token
+  issued: the rotated refresh token keeps the presented token's scope and
+  original audience, so a refresh that asks for less no longer narrows the
+  refresh token for good, and the response's `scope` is the access token's
+  (RFC 6749 §6). The policy receives the original audience as
+  `GrantPolicyRequest.originalAudience` (#1567). **What to do:** a client that
+  refreshes to reach a different resource than its authorization named
+  requests that resource at `/authorize` instead. A resource server that
+  expected refreshed access tokens to carry the client id as `aud` accepts
+  the resource `aud` the original grant carried. See the
+  [oauth README](../packages/oauth/README.md#refresh_token).
 - **BREAKING: the code exchange issues a refresh token only where the client
   can redeem one.** The `authorization_code` grant returns a `refresh_token`,
   opens its family and joins the family to the session only when the

@@ -117,11 +117,13 @@ const makeCCCtx = (body: Record<string, unknown> = {}): GrantContext => ({
 
 // ----- refresh_token -----
 
+// Issued to CLIENT_ID for both resources: a refresh issues for an audience
+// within the presented token's.
 const makeRefreshToken = async (): Promise<string> =>
-	new SignJWT({ sub: "u1", scope: "read write" })
+	new SignJWT({ sub: "u1", scope: "read write", azp: CLIENT_ID })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 		.setIssuer("localhost")
-		.setAudience(CLIENT_ID)
+		.setAudience([API, OTHER])
 		.setExpirationTime("24h")
 		.sign(secretKey);
 
@@ -311,14 +313,14 @@ describe("RFC 8707 resource → audience binding — client_credentials", () => 
 
 describe("RFC 8707 resource → audience binding — refresh_token", () => {
 	it("derives the audience from an allowed resource when no policy narrows one", async () => {
-		// Without derivation `finalAudience` stays the authenticated client id
-		// and an otherwise-allowed resource would reject.
+		// Without derivation the audience stays the original's first entry, API,
+		// and OTHER would reject.
 		const grant = createRefreshTokenGrant(makeRefreshDeps());
-		const out = await grant.handle(makeRefreshCtx(await makeRefreshToken(), { resource: API }));
+		const out = await grant.handle(makeRefreshCtx(await makeRefreshToken(), { resource: OTHER }));
 
 		expect(out.result.status).toBe(200);
 		if (!("tokens" in out.result)) throw new Error("expected tokens");
-		expect(decodeJwt(out.result.tokens.access_token).aud).toBe(API);
+		expect(decodeJwt(out.result.tokens.access_token).aud).toBe(OTHER);
 	});
 
 	it("rejects invalid_target for a resource the client is not allowed", async () => {

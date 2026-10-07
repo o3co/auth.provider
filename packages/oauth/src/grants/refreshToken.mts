@@ -14,6 +14,27 @@
  * limitations under the License.
  */
 
+/**
+ * The `refresh_token` grant (RFC 6749 §6): redeems a refresh token issued to
+ * the authenticated client for a new access token and a rotated refresh
+ * token in the same family.
+ *
+ * What it keeps:
+ * - The presented token is the original grant, and its ceiling. Its scope
+ *   bounds the scope the request or the policy may narrow to, and its
+ *   effective audience (its `aud`, or the client id when it carries none)
+ *   bounds the audience a `resource` or the policy may narrow to (RFC 8707
+ *   §2.2). Each audience is also held to the client's registration.
+ * - Narrowing applies to the access token issued, never to the rotated
+ *   refresh token, which carries the original scope and audience. An
+ *   original audience the registration no longer holds is refused, never
+ *   re-issued.
+ * - Sender binding continues (DPoP, mTLS); the session is admitted and the
+ *   subject's revocation watermark read again before signing; the family
+ *   rotation is committed before anything is signed, and a replay revokes
+ *   the family.
+ */
+
 import { randomUUID } from "node:crypto";
 import {
 	type Admission,
@@ -118,6 +139,18 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 				errorDescription: describeAdmissionOutage(admission.store),
 			};
 	}
+};
+
+/**
+ * The presented refresh token's audience: the ceiling and the default for the
+ * audience a refresh issues. A token that names none was issued for its
+ * client, the one the `azp` binding proved.
+ */
+const readOriginalAudience = (aud: JWTPayload["aud"], clientId: string): readonly string[] => {
+	const named = (Array.isArray(aud) ? aud : [aud]).filter(
+		(value): value is string => typeof value === "string" && value.length > 0,
+	);
+	return named.length > 0 ? named : [clientId];
 };
 
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
@@ -436,9 +469,16 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			}
 
 			let finalScope = grantedScope;
-			// Issue to the authenticated client, which the binding gate above
-			// proved equals the presented token's azp/aud.
-			let finalAudience: string | null = authenticatedClientId;
+			// RFC 8707 §2.2: the issued audience stays within the original grant's,
+			// and within the client's registration, as the scope stays within the
+			// original grant's (RFC 6749 §6). The refresh token carries the
+			// original audience, its first entry (`generateToken` carries one
+			// `aud`), which is also the access token's when nothing narrows it.
+			const originalAudience = readOriginalAudience(tokenPayload.aud, authenticatedClientId);
+			const withinOriginal = (audiences: readonly string[]): readonly string[] =>
+				audiences.filter((audience) => originalAudience.includes(audience));
+			const refreshAudience = originalAudience[0] ?? authenticatedClientId;
+			let finalAudience: string | null = refreshAudience;
 			// Whether the policy named the audience, which may be the client id itself.
 			let policyChoseAudience = false;
 
@@ -461,6 +501,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						requestedScope: requested === undefined ? undefined : [...requested],
 						// A copy: `originalScopes` is the ceiling the answer is held to.
 						originalScope: scopeStr ? [...originalScopes] : undefined,
+						// A copy, as above: `originalAudience` is the audience ceiling.
+						originalAudience: [...originalAudience],
 						// RFC 8707: only under `oauth.resourceIndicator.enabled`.
 						resource: requestedResource ?? undefined,
 					},
@@ -476,10 +518,11 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				// An empty grant → null so the response omits scope.
 				finalScope = outcome.scopes.length > 0 ? outcome.scopes.join(" ") : null;
 				// A policy may narrow the audience to one of this client's
-				// `allowedAudiences` and nothing else; naming none leaves it as is.
+				// `allowedAudiences` within the original audience, and nothing
+				// else; naming none leaves it as is.
 				const policyAudience = boundPolicyAudience(
 					decision,
-					ctx.authenticatedClient.allowedAudiences ?? [],
+					withinOriginal(ctx.authenticatedClient.allowedAudiences ?? []),
 				);
 				if (!policyAudience.ok) return { result: policyAudience.result };
 				if (policyAudience.audience !== null) {
@@ -489,14 +532,30 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			}
 
 			// RFC 8707 §2: when no policy narrowed the audience, derive it from
-			// the requested resource within `allowedAudiences ∪ {clientId}`. A
-			// policy decision always wins.
-			if (!policyChoseAudience && requestedResource) {
+			// the requested resource within `allowedAudiences ∪ {clientId}` and
+			// the original audience. A policy decision always wins. A resource
+			// that derives nothing is `invalid_target` here, never left to the
+			// original audience's default.
+			if (!policyChoseAudience && requestedResource && requestedResource.length > 0) {
 				const derived = deriveAudienceFromResources(
 					requestedResource,
-					new Set([...(ctx.authenticatedClient.allowedAudiences ?? []), authenticatedClientId]),
+					new Set(
+						withinOriginal([
+							...(ctx.authenticatedClient.allowedAudiences ?? []),
+							authenticatedClientId,
+						]),
+					),
 				);
-				if (derived !== undefined) finalAudience = derived;
+				if (derived === undefined) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `requested_resources_not_in_audience: ${requestedResource.join(" ")}`,
+						},
+					};
+				}
+				finalAudience = derived;
 			}
 
 			// RFC 8707 §2: the audience must represent the requested resource.
@@ -509,6 +568,24 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						status: 400,
 						error: "invalid_target",
 						errorDescription: `requested_resources_not_in_audience: ${unrepresented.join(" ")}`,
+					},
+				};
+			}
+
+			// The original audience, which the refresh token carries and the
+			// access token defaults to, is held to the registration as a policy's
+			// or a resource's choice is; one no longer registered is refused,
+			// never replaced or re-issued. Before admission and the rotation, so
+			// the family is left as it was.
+			if (
+				refreshAudience !== authenticatedClientId &&
+				!(ctx.authenticatedClient.allowedAudiences ?? []).includes(refreshAudience)
+			) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "the grant's audience is no longer registered for this client",
 					},
 				};
 			}
@@ -570,6 +647,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// An empty string (e.g. requested=" ") becomes null so the token
 			// response omits scope rather than emitting `scope: ""`.
 			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
+			// RFC 6749 §6: the new refresh token's scope is the presented one's,
+			// whatever this access token was narrowed to.
+			const refreshScopeClaim = originalScopes.length > 0 ? originalScopes.join(" ") : null;
 
 			// New tokens inherit the request-time binding. The access token's
 			// `cnf` is `presentedConfirmation`: only the member the binding's
@@ -834,11 +914,12 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						expiresIn: refreshExpiresIn,
 						keyStore,
 						issuer,
-						audience: finalAudience,
+						// The original grant's, never this access token's narrowing.
+						audience: refreshAudience,
 						subject: subjectStr ?? null,
 						// As above.
 						authorizedParty: authenticatedClientId,
-						scope: scopeClaim,
+						scope: refreshScopeClaim,
 						tokenType: "rt+jwt",
 						// The identity reserved with the family store above.
 						jti: newRefreshJti,
