@@ -21,7 +21,9 @@
  * issuance. An answer whose members are accessors that answer differently on
  * a later read cannot have one value checked and another minted. A member
  * whose read throws is the validator's outage (503), and a `sub` that is not
- * a string is a failed validation.
+ * a string, or `claims` that are not an object, is a failed validation, at the
+ * first asking and at the second. A claim key never changes what the copy
+ * answers for another claim: an own `__proto__` key is copied as a key.
  */
 
 import type {
@@ -40,6 +42,7 @@ import {
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
+import { snapshotValidated } from "#/validatedSnapshot.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, tokensOf } from "./fixtures.mjs";
 
 const JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt";
@@ -97,10 +100,19 @@ function shiftingAnswer(): ValidatedToken {
 	) as ValidatedToken;
 }
 
-function build(answer: () => ValidatedToken) {
+/** The answer for `role`'s token, on that token's `call`th asking (from 1). */
+type Answering = (role: "subject" | "actor", call: number) => unknown;
+
+function build(answer: Answering) {
 	const userRepository = createTestUserRepository({ users });
 	const policyRequests: GrantPolicyRequest[] = [];
-	const validator: ExchangeTokenValidator = { validate: vi.fn(async () => answer()) };
+	const calls = { subject: 0, actor: 0 };
+	const validator: ExchangeTokenValidator = {
+		validate: vi.fn(
+			async (_token: string, { role }: { readonly role: "subject" | "actor" }) =>
+				answer(role, ++calls[role]) as ValidatedToken | null,
+		),
+	};
 	const logger = {
 		trace: vi.fn(),
 		debug: vi.fn(),
@@ -131,7 +143,7 @@ function build(answer: () => ValidatedToken) {
 			},
 		},
 	});
-	const exchange = async (): Promise<GrantResult> =>
+	const exchange = async (body: Record<string, string> = {}): Promise<GrantResult> =>
 		(
 			await grant.handle({
 				body: {
@@ -140,6 +152,7 @@ function build(answer: () => ValidatedToken) {
 					client_secret: SECRET,
 					subject_token: "an-external-token",
 					subject_token_type: JWT_TOKEN_TYPE,
+					...body,
 				},
 				session: {},
 				issuer: ISSUER,
@@ -210,4 +223,176 @@ describe("token exchange reads each validator answer once", () => {
 			expect(h.lookups()).toEqual([]);
 		});
 	}
+});
+
+const EXP = () => Math.floor(Date.now() / 1000) + 3600;
+
+/** A well-formed subject answer naming the client, with `extra` laid over it. */
+const subjectAnswer = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+	sub: "user-1",
+	aud: "billing",
+	scope: "read",
+	claims: { azp: client.clientId, exp: EXP() },
+	...extra,
+});
+
+const WITH_ACTOR = { actor_token: "an-actor-token", actor_token_type: JWT_TOKEN_TYPE };
+
+const failedValidation = (role: "subject" | "actor") => ({
+	status: 400,
+	error: "invalid_request",
+	errorDescription: `${role}_token validation failed`,
+});
+
+describe("token exchange reads each validator answer once — shapes and claims", () => {
+	it("refuses an answer whose claims are not an object as a failed validation", async () => {
+		const h = build(() => subjectAnswer({ claims: "azp=client-a" }));
+
+		expect(await h.exchange()).toEqual(failedValidation("subject"));
+		expect(h.lookups()).toEqual([]);
+	});
+
+	for (const [label, second] of [
+		["whose sub is not a string", { sub: 42, claims: {} }],
+		["whose claims are not an object", { sub: "user-1", claims: null }],
+		["that is not an object", "user-1"],
+	] as const) {
+		it(`refuses an exchange whose second asking answers ${label}, as a failed validation`, async () => {
+			const h = build((_role, call) => (call === 1 ? subjectAnswer() : second));
+
+			expect(await h.exchange()).toEqual(failedValidation("subject"));
+		});
+	}
+
+	it("mints from the claims the checks read, when a claim's accessor changes on a later read", async () => {
+		const exp = EXP();
+		const claims = Object.defineProperties(
+			{},
+			{
+				azp: { get: shifting(client.clientId, "client-other"), enumerable: true },
+				// Unbound at the matrix; bound on any later read.
+				cnf: { get: shifting<unknown>(undefined, { jkt: "a-key" }), enumerable: true },
+				// Live at the expiry check; long past on any later read.
+				exp: { get: shifting(exp, 1), enumerable: true },
+			},
+		);
+		const h = build(() => subjectAnswer({ claims }));
+
+		const issued = decodeJwt(tokensOf(await h.exchange()).access_token);
+
+		expect(issued.cnf).toBeUndefined();
+		expect(issued.exp).toBeLessThanOrEqual(exp);
+	});
+
+	it("carries the subject's act chain as the checks read it, when a nested accessor changes", async () => {
+		const act = Object.defineProperties(
+			{},
+			{ sub: { get: shifting("svc-0", "svc-9"), enumerable: true } },
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({
+						act,
+						claims: { azp: client.clientId, exp: EXP(), may_act: { sub: "svc-a" } },
+					})
+				: { sub: "svc-a", claims: {} },
+		);
+
+		const issued = decodeJwt(tokensOf(await h.exchange(WITH_ACTOR)).access_token);
+
+		expect(issued.act).toEqual({ sub: "svc-a", act: { sub: "svc-0" } });
+	});
+
+	it("holds delegation to the may_act it checked, when the claim's accessor changes on a later read", async () => {
+		const claims = Object.defineProperties(
+			{ azp: client.clientId, exp: EXP() },
+			{
+				may_act: {
+					get: shifting<unknown>({ sub: "svc-a" }, { sub: "svc-other" }),
+					enumerable: true,
+				},
+			},
+		);
+		const h = build((role) =>
+			role === "subject" ? subjectAnswer({ claims }) : { sub: "svc-a", claims: {} },
+		);
+
+		const issued = decodeJwt(tokensOf(await h.exchange(WITH_ACTOR)).access_token);
+
+		expect(issued.act).toEqual({ sub: "svc-a" });
+	});
+
+	it("records the actor the checks passed, when the actor answer's sub changes on a later read", async () => {
+		const actor = Object.freeze(
+			Object.defineProperties(
+				{},
+				{
+					sub: { get: shifting("svc-a", "svc-b"), enumerable: true },
+					claims: { value: Object.freeze({}), enumerable: true },
+				},
+			),
+		);
+		const h = build((role) =>
+			role === "subject"
+				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: { sub: "svc-a" } } })
+				: actor,
+		);
+
+		const issued = decodeJwt(tokensOf(await h.exchange(WITH_ACTOR)).access_token);
+
+		expect(issued.act).toEqual({ sub: "svc-a" });
+	});
+});
+
+describe("snapshotValidated — an own __proto__ key", () => {
+	it("copies a claims key named __proto__ as a key, never as the copy's prototype", () => {
+		const answer = JSON.parse(
+			'{"sub":"user-1","claims":{"__proto__":{"azp":"client-a","cnf":{"jkt":"a-key"}}}}',
+		);
+
+		const copy = snapshotValidated(answer);
+
+		expect(copy?.claims.azp).toBeUndefined();
+		expect(copy?.claims.cnf).toBeUndefined();
+		expect(Object.getPrototypeOf(copy?.claims)).toBe(Object.prototype);
+		expect(Object.hasOwn(copy?.claims ?? {}, "__proto__")).toBe(true);
+	});
+
+	it("copies a nested key named __proto__ as a key", () => {
+		const answer = JSON.parse(
+			'{"sub":"user-1","claims":{"cnf":{"__proto__":{"jkt":"a-key"}},"may_act":{"__proto__":{"sub":"svc-a"}}},"act":{"__proto__":{"sub":"svc-0"}}}',
+		);
+
+		const copy = snapshotValidated(answer);
+
+		expect((copy?.claims.cnf as Record<string, unknown>).jkt).toBeUndefined();
+		expect((copy?.claims.may_act as Record<string, unknown>).sub).toBeUndefined();
+		expect(copy?.act?.sub).toBeUndefined();
+		expect(Object.hasOwn(copy?.claims.cnf as object, "__proto__")).toBe(true);
+	});
+
+	it("refuses, at the exchange, a subject token whose only azp sits under an own __proto__ key", async () => {
+		const h = build(() =>
+			JSON.parse('{"sub":"user-1","aud":"billing","claims":{"__proto__":{"azp":"client-a"}}}'),
+		);
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "subject_token azp and aud do not name this client",
+		});
+	});
+
+	it("mints unbound, at the exchange, for a subject token whose only cnf sits under an own __proto__ key", async () => {
+		const exp = EXP();
+		const h = build(() =>
+			JSON.parse(
+				`{"sub":"user-1","aud":"billing","claims":{"azp":"client-a","exp":${exp},"cnf":{"__proto__":{"jkt":"a-key"}},"__proto__":{"cnf":{"jkt":"a-key"}}}}`,
+			),
+		);
+
+		const issued = decodeJwt(tokensOf(await h.exchange()).access_token);
+
+		expect(issued.cnf).toBeUndefined();
+	});
 });

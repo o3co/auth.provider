@@ -37,7 +37,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { invalidRequest, isRefusal } from "./answers.mjs";
 import type { TokenRequest } from "./tokenRequest.mjs";
-import { snapshotValidated } from "./validatedSnapshot.mjs";
+import { isValidatedShape, snapshotValidated } from "./validatedSnapshot.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 
 /** The validator for each presented token, and the issued token type, checked. */
@@ -225,8 +225,12 @@ export async function revalidate(
 	return isRefusal(answer) ? answer : null;
 }
 
-/** A revalidation's reading of an answer: whether there is one, nothing of it read. */
-const gateOnly = (answer: ValidatedToken): ValidatedToken | null => answer;
+/**
+ * A revalidation's reading of an answer: held to the first asking's shape (an
+ * object with a string `sub` and object `claims`), and nothing of it copied.
+ */
+const gateOnly = (answer: ValidatedToken): ValidatedToken | null =>
+	isValidatedShape(answer) ? answer : null;
 
 /**
  * The validator's answer for a presented token, as `read` takes it — by
