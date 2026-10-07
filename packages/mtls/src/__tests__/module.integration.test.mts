@@ -48,6 +48,8 @@ const EXPECTED_THUMBPRINT = createHash("sha256")
 	.update(LEAF_DER)
 	.digest("base64url")
 	.replace(/=+$/, "");
+/** Lowercase hex SHA-256 of the leaf's DER: what Envoy writes as XFCC `Hash=`. */
+const LEAF_HASH_HEX = createHash("sha256").update(LEAF_DER).digest("hex");
 
 interface MtlsTestConfig {
 	enabled: boolean;
@@ -192,7 +194,7 @@ describe("mtlsModule — integration via createApp", () => {
 		app.use(express.json());
 		app.use(handle.router);
 
-		const xfcc = `By=spiffe://example;Hash=abc;Cert=${encodeURIComponent(LEAF_PEM)}`;
+		const xfcc = `By=spiffe://example;Hash=${LEAF_HASH_HEX};Cert=${encodeURIComponent(LEAF_PEM)}`;
 		const res = await request(app)
 			.post("/oauth/token")
 			.set("x-forwarded-client-cert", xfcc)
