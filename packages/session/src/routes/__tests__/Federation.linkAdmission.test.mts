@@ -51,8 +51,8 @@ import { openingLifecycleStore } from "../../__tests__/_helpers/sessionLifecycle
 import {
 	buildFederationApp,
 	HARNESS_ISSUER,
-	HARNESS_TRANSACTION_COOKIE_NAME,
 	type HarnessApp,
+	harnessTransactionCookieName,
 } from "./federation-harness.mjs";
 
 const QUERY_CALLBACK_URL = "https://app.example.com/session/oauth/federation/test/callback";
@@ -541,7 +541,7 @@ describe("the link callback reads the session the start bound through admission 
 		const begun = await start(harness, "posting");
 		expect(begun.status).toBe(302);
 		const cookie = (begun.headers["set-cookie"] as unknown as string[]).find((c) =>
-			c.startsWith(`${HARNESS_TRANSACTION_COOKIE_NAME}=`),
+			c.startsWith(`${harnessTransactionCookieName("posting")}=`),
 		);
 		const [key] = [...harness.records.keys()];
 		const stored = harness.records.get(key as string) as { federation: { state: string } };

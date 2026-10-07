@@ -78,17 +78,12 @@ export const logStoreUnavailable = (
 };
 
 /** A composition fault a federation route can meet, as its log line names it. */
-type FederationMisconfiguration =
-	| "no_callback_url"
-	| "no_redirect_policy"
-	| "no_session_store"
-	| "no_callback_path";
+type FederationMisconfiguration = "no_callback_url" | "no_redirect_policy" | "no_session_store";
 
 /**
  * A federation route met a composition fault — a provider with no callback URL
- * or no redirect policy, a `form_post` federation with no express-session
- * store on its requests or a callback URL with no path to scope its cookie
- * to. No client causes it and no retry fixes it: one line at error level,
+ * or no redirect policy, or a `form_post` federation with no express-session
+ * store on its requests. No client causes it and no retry fixes it: one line at error level,
  * `federation_misconfigured`, with the `reason`; the caller answers `500`.
  */
 export const logMisconfigured = (

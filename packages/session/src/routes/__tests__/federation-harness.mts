@@ -59,14 +59,18 @@ type StoredSession = {
 export type HarnessSessionStore = Map<string, StoredSession>;
 
 /**
- * The transaction cookie these harness apps issue, named from a session
- * cookie name the harness picks, as the session module names it from the
- * deployment's: the router is handed its name and has none of its own.
+ * The session cookie name these harness apps hand the router, as the session
+ * module hands it the deployment's; the router names each federation's
+ * transaction cookie from it.
  */
 export const HARNESS_SESSION_COOKIE_NAME = "harness.session";
-export const HARNESS_TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookieName(
-	HARNESS_SESSION_COOKIE_NAME,
-);
+
+/** The transaction cookie a harness app issues for the federation `name`. */
+export const harnessTransactionCookieName = (name: string): string =>
+	deriveFederationTransactionCookieName(HARNESS_SESSION_COOKIE_NAME, name);
+
+/** The transaction cookie a harness app issues for its `apple` federation. */
+export const HARNESS_TRANSACTION_COOKIE_NAME = harnessTransactionCookieName("apple");
 
 /**
  * The issuer a harness test registers its requirements' pages on, as boot
@@ -310,7 +314,7 @@ export function buildFederationApp({
 			sessionLifecycleStore: sessionLifecycleStore ?? openingLifecycleStore(),
 			sessionLifecycle: lifecycle,
 			federationTokenStore,
-			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+			sessionCookieName: HARNESS_SESSION_COOKIE_NAME,
 			requirements: requirements ?? resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			...(auditSink ? { auditSink } : {}),
 			...(logger ? { logger } : {}),

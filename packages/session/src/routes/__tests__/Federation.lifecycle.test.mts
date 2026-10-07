@@ -46,7 +46,7 @@ import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {
 	HARNESS_ISSUER,
-	HARNESS_TRANSACTION_COOKIE_NAME,
+	HARNESS_SESSION_COOKIE_NAME,
 	type HarnessSessionStore,
 	makePermissivePolicy,
 	makeSessionApp,
@@ -164,7 +164,7 @@ async function world(options: WorldOptions = {}) {
 			federationTokenStore,
 			sessionLifecycleStore: lifecycleStore,
 			sessionLifecycle,
-			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+			sessionCookieName: HARNESS_SESSION_COOKIE_NAME,
 			requirements: resolverForTests([], {
 				issuer: HARNESS_ISSUER,
 				actions: SESSION_ADMISSION_ACTIONS,
@@ -410,7 +410,7 @@ describe("the federation routes require core's session lifecycle beside the user
 				userRepository: { authenticate: vi.fn(), authenticateByToken: vi.fn() } as never,
 				userSessionStore: createInMemoryUserSessionStore(),
 				federationTokenStore: {} as FederationTokenStore,
-				federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+				sessionCookieName: HARNESS_SESSION_COOKIE_NAME,
 				requirements: resolverForTests([], {
 					issuer: HARNESS_ISSUER,
 					actions: SESSION_ADMISSION_ACTIONS,
@@ -431,7 +431,7 @@ describe("the federation routes require core's session lifecycle beside the user
 				userSessionStore: createInMemoryUserSessionStore(),
 				sessionLifecycle: {} as SessionLifecycle,
 				federationTokenStore: {} as FederationTokenStore,
-				federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+				sessionCookieName: HARNESS_SESSION_COOKIE_NAME,
 				requirements: resolverForTests([], {
 					issuer: HARNESS_ISSUER,
 					actions: SESSION_ADMISSION_ACTIONS,

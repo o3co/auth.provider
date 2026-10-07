@@ -29,8 +29,8 @@ import type { FederationProvider } from "./types.mjs";
  * A `form_post` callback is a cross-site POST, on which a `SameSite=Lax`
  * cookie is not sent. The router gives the flow a cookie of its own rather
  * than changing the session's: the state moves into a federation transaction
- * (an opaque id in a short-lived, path-scoped `SameSite=None; Secure;
- * HttpOnly` cookie, the envelope in a store record; see
+ * (an opaque id in a short-lived `__Host-` `SameSite=None; Secure;
+ * HttpOnly` cookie of the federation's own, the envelope in a store record; see
  * `federations/transaction.mts` in `@o3co/auth-provider-session`).
  *
  * The session cookie must keep its configured attributes on every session:

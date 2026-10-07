@@ -403,9 +403,10 @@ The manifest ([`src/module.mts`](src/module.mts)):
   option, where a value that is none of the three, absence included, is a
   TypeError at construction. The federation router built by hand takes
   core's view of the federations as the required `federationSettings` option,
-  the transaction cookie's name as the required
-  `federationTransactionCookieName` (the module names it after the
-  `sessionCookiePolicy` slot's cookie), and where a link may start from as
+  the deployment's session cookie name as the required `sessionCookieName`
+  (the module passes the `sessionCookiePolicy` slot's cookie name; each
+  `form_post` federation's transaction cookie is named from it), and where a
+  link may start from as
   `linkTrustedOrigins` (the module passes `session.csrf.trustedOrigins`; absent,
   only this site's own pages), and throws without the first two.
 - A link reads the session's federations from core's session lifecycle.
@@ -910,12 +911,11 @@ IdP uses a nonce, and persists them — with `redirect_to` and the link intent �
 that cannot persist them is `503 temporarily_unavailable` and redirects nobody,
 logged once at error level as `federation_start_store_unavailable` (`store`:
 `cookie_session` or `federation_transaction`). A `form_post` federation with no
-express-session store on the request, or whose callback URL has no path, is the
-composition's fault: `500 misconfiguration`. Every composition fault these
-routes meet — that one, a provider with no callback URL, one with no redirect
-policy — is logged once at error level as `federation_misconfigured` with the
-`reason` (`no_session_store`, `no_callback_path`, `no_callback_url`,
-`no_redirect_policy`). The
+express-session store on the request is the composition's fault:
+`500 misconfiguration`. Every composition fault these routes meet — that one, a
+provider with no callback URL, one with no redirect policy — is logged once at
+error level as `federation_misconfigured` with the `reason`
+(`no_session_store`, `no_callback_url`, `no_redirect_policy`). The
 `redirect_uri` handed to `buildAuthorizationUrl` is the federation's
 `callbackURL` from config. For a `form_post` federation the router appends
 `response_mode=form_post` to the URL the adapter returned; for a `query` one the
@@ -1043,19 +1043,29 @@ So the cross-site part has its own cookie and its own record:
 
 | | value |
 |---|---|
-| cookie name | `__Secure-<session-store.name, minus any prefix>.federation` — e.g. `__Host-auth.session` and `auth.session` both give `__Secure-auth.session.federation` |
-| attributes | `HttpOnly; Secure; SameSite=None`, `Path` scoped to that provider's callback URL, `Max-Age` = the transaction lifetime (10 minutes) |
+| cookie name | `__Host-<session-store.name, minus any prefix>.federation.<federation>` — e.g. `__Host-auth.session` and `auth.session` both give `__Host-auth.session.federation.apple` for the `apple` federation |
+| attributes | `HttpOnly; Secure; SameSite=None; Path=/`, no `Domain`, `Max-Age` = the transaction lifetime (10 minutes) |
 | contents | an opaque 256-bit id, and nothing else |
 | record | `state`, `codeVerifier`, `nonce`, `redirectTo`, the link intent and the provider name, in the express-session store under a `fedtx:` key prefix |
 
-The name is derived from `session-store.name` the way the CSRF cookie's is. The prefix
-is the one deviation, and it is applied **unconditionally**: `__Secure-` rather
-than `__Host-` because `__Host-` requires `Path=/` and this cookie is
-path-scoped to the callback, so a `__Host-` name would be dropped by every
-browser; and unconditionally because this cookie is `SameSite=None` and
-therefore always `Secure` (browsers drop a `SameSite=None` cookie that is not).
-A deployment with a `form_post` federation therefore serves the callback over
-HTTPS — which Apple requires of its return URL anyway.
+The name is derived from `session-store.name` the way the CSRF cookie's is, with
+the federation's name appended. The prefix is applied **unconditionally**:
+`__Host-`, whatever prefix the session cookie name carries, because the cookie's
+value is what the callback takes as proof that this browser started this flow
+(see [Only this host can set the transaction cookie](#only-this-host-can-set-the-transaction-cookie)).
+`__Host-` requires `Secure`, `Path=/` and no `Domain`; the cookie is
+`SameSite=None` and therefore always `Secure` anyway (browsers drop a
+`SameSite=None` cookie that is not). A deployment with a `form_post` federation
+therefore serves the callback over HTTPS — which Apple requires of its return
+URL anyway.
+
+Because the cookie is `Path=/`, the federation's name is what keeps two
+federations' transactions apart: a browser may have one flow in flight per
+`form_post` federation at once, each under its own cookie, and a callback reads
+only its own federation's. A second start of the same federation replaces the
+first's cookie, so only the latest flow of a federation can complete. The
+cookie rides every request to the auth host while the transaction lives; only
+the callback reads it.
 
 **The application session cookie keeps the attributes the deployment
 configured**, on every session, whether or not it ever started a `form_post`
@@ -1074,65 +1084,43 @@ An abandoned flow leaves only the short-lived cookie, and the record expires wit
 it: the expiry is written into the record as `cookie.expires`, which is what
 `MemoryStore` reaps on read and what `connect-redis` turns into the key's `EX`.
 
-#### Every host on the auth host's registrable domain is inside the trust boundary
+#### Only this host can set the transaction cookie
 
-`__Host-` is what pins a cookie to exactly one host; `__Secure-` only requires
-HTTPS. The transaction cookie is issued host-only (no `Domain` attribute), but
-its `__Secure-` name does not stop another host from setting a cookie of the
-same name with a `Domain` that covers the auth host, and the browser sends that
-one to the callback too. So the transaction cookie is the one place a
-`form_post` flow is weaker than the session cookie, which is `__Host-` by
-default — host-only, and checked as such at boot.
-
-- **What an attacker needs:** control of any host that can set a cookie for the
-  auth host — for `auth.example.com`, any host under its registrable domain
-  `example.com`: `blog.example.com`, a forgotten staging host, a dangling DNS
-  record, XSS on a lower-trust app next door, a shared-hosting neighbour.
-  Nothing from this deployment: no session, no `state`, no account.
-- **What it gets them:** from that host they set `__Secure-<name>.federation`
-  with `Domain=example.com` in a victim's browser, start their own federation
-  flow, plant *their* transaction id, and auto-submit
-  *their* `state` and `code` to the callback. The victim's browser ends up
-  logged into the **attacker's** federated account, and whatever the victim does
-  next is recorded against it. It does not read the victim's session, expose
-  credentials or reach the victim's own account — identity confusion, not
-  account takeover.
-- **Why signing the cookie would not help:** the attacker's transaction is
-  genuinely theirs, so anything the server would accept as its own issuance is
-  something they legitimately hold. It is inherent to a path-scoped cookie.
-- **What to do:** treat every host under the auth host's registrable domain —
-  every `*.example.com` for `auth.example.com` — as inside the deployment's trust
-  boundary, and run no untrusted or lower-trust content on any of them.
-  `session-store.domain = null` (the `__Host-` default) protects the session cookie,
-  not the transaction cookie; it does nothing against this. That is the rule the
-  signed CSRF token exists to survive on the login routes; here there is no
-  session to bind to, so the rule is the whole mitigation.
+`__Host-` is what pins a cookie to exactly one host. A browser refuses a
+`__Host-` cookie that carries a `Domain`, lacks `Secure` or has a `Path` other
+than `/`, so no other host — another host under the auth host's registrable
+domain included — and no plain-HTTP hop can set the transaction cookie in a
+browser. The callback reads the transaction id from that one name and from no
+other: a transaction id arriving under any other cookie name, a `__Secure-`
+one included, names no transaction (`400 invalid_session`). So the transaction
+a callback completes is always one this host started for this browser, and the
+transaction cookie is as host-bound as the session cookie, which is `__Host-`
+by default.
 
 #### When a transaction is spent
 
-Both the record and the cookie are dropped on every callback exit that
-**judged** the transaction — success, `invalid_state`, `exchange_failed`,
-`unknown_user` alike — and are deliberately *not* dropped by a refusal that
-judged nothing. The rule: **a refusal spends the transaction when the request
-made a claim about it, and leaves it alone when it made none.** A `state` is
-that claim. A callback carrying no `state` — checked once the record has resolved to this provider — claims nothing and costs nothing
-(`400 invalid_request`, record untouched); a GET is refused with `405` before
-the cookie is read. A *wrong* `state` is an attempt on this transaction, and it
-still spends it, so a guess gets no second try; so does a transaction id that
-resolves to no record or to another provider's (`400 invalid_session`), and a
-store read that fails spends it best-effort (`503`; a spend that fails there, or
-on a refusal, is one `federation_cleanup_failed` warn). The distinction matters because
-the cookie is `SameSite=None` by necessity and accompanies any cross-site
-request to the callback path: if every refusal consumed the record, a third
-party could destroy a victim's in-flight login with one `<img>` tag.
+**A transaction is spent only once `state` matches**: the record and the
+cookie are dropped on every callback exit after that — success,
+`exchange_failed`, `unknown_user` alike. A refusal before it spends nothing. A
+callback carrying no `state` — checked once the record has resolved to this
+provider — is `400 invalid_request`; a *wrong* `state` is `400 invalid_state`;
+both leave the record and its cookie in place, so the matching callback still
+completes. A GET is refused with `405` before the cookie is read. The one
+refusal that drops the transaction is a transaction id that resolves to no
+record or to another provider's (`400 invalid_session`), and a store read that
+fails drops it best-effort (`503`; a drop that fails there, or on that refusal,
+is one `federation_cleanup_failed` warn).
 
-That rule is `form_post`-only. A `query` federation keeps its envelope in the
-session and retires it only on the path that *matched* `state`, so a wrong
-`state` leaves the envelope in place — because the session cookie is
-`SameSite=Lax` and **is** sent on a top-level cross-site GET, so spending the
-envelope on a mismatch would give a third party the same availability attack.
-The guess it would defend against is not a real one: `state` is 128 bits from
-the CSPRNG. Only the "no `state`" rule is shared by both modes.
+This matters because the cookie is `SameSite=None` by necessity and
+accompanies any cross-site request to the auth host, an `<img>` GET or an
+auto-submitted form included: a refusal leaves the record in place, so the
+login or link in progress still completes at its own callback. Keeping the
+transaction on a mismatch costs nothing: `state` is 128 bits from the CSPRNG,
+and any number of mismatches leaves a match no more likely.
+
+A `query` federation follows the same rule: it keeps its envelope in the
+session and retires it only on the path that *matched* `state`, because the
+session cookie is `SameSite=Lax` and **is** sent on a top-level cross-site GET.
 
 #### What "single use" guarantees
 

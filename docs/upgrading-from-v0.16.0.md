@@ -1107,6 +1107,24 @@ The boot refusals you can meet, with their messages, are in
   copied or minted. At either, a member whose read throws is
   `503 temporarily_unavailable`, as a validator that throws. See the
   oauth-token-exchange README, "External JWT subject_token".
+- **BREAKING: a `form_post` federation's transaction cookie is `__Host-`,
+  one per federation.** The cookie a `form_post` federation (Sign in with
+  Apple) start issues is named
+  `__Host-<session-store.name, minus any prefix>.federation.<federation>` —
+  `__Host-auth.session.federation.apple` for the default session cookie and
+  an `apple` federation — and is `HttpOnly; Secure; SameSite=None; Path=/`
+  with no `Domain`. It was `__Secure-<…>.federation`, with its `Path` the
+  federation's callback path. The callback reads only the new name, so a
+  sign-in started before the upgrade and completed after it is refused
+  `400 invalid_session` and must be started again; the old cookie expires on
+  its own within the transaction lifetime (10 minutes). A browser may have
+  one sign-in in flight per `form_post` federation at once, as before. A
+  `form_post` start no longer reads a path from the federation's
+  `callbackURL`: the `federation_misconfigured` reason `no_callback_path` is
+  gone. A `form_post` callback with a wrong `state` is still
+  `400 invalid_state`, but no longer spends the transaction: its cookie stays
+  and the matching callback completes. See the session README, "The
+  transaction cookie" and "When a transaction is spent".
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a
   stable label as `username` for a user without one.
@@ -2414,6 +2432,16 @@ modules fills them.
   `durability(): Promise<RedisDurability>`, which `makeIoredisClients`
   provides; a client of your own implements it as the other gated stores'
   clients do.
+- **BREAKING: the federation transaction cookie is named per federation.**
+  In `@o3co/auth-provider-session`, `deriveFederationTransactionCookieName`
+  takes the federation's name as a second argument
+  (`deriveFederationTransactionCookieName(sessionCookieName, federationName)`)
+  and returns `__Host-<…>.federation.<federation>`. The federation router
+  built by hand (`createRouter` in `routes/Federation.mts`) takes the
+  deployment's session cookie name as the required `sessionCookieName`
+  instead of `federationTransactionCookieName`, and names each `form_post`
+  federation's cookie from it; it throws without it. `sessionModule` passes
+  the `sessionCookiePolicy` slot's name.
 
 ## Stores and records you implement
 

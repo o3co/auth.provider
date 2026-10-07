@@ -17,8 +17,9 @@
 /**
  * The callback's state check, its security boundary: the ephemeral state read
  * from where the start kept it, `state` compared with it, and the state
- * retired before any async work. A request with no `state` leaves the
- * transaction in place; a wrong `state` spends it.
+ * retired before any async work. A request with no `state`, or a wrong
+ * one, leaves the transaction in place: it is spent only once `state`
+ * matches.
  */
 
 import {
@@ -123,7 +124,7 @@ export const consumeCallbackState = async (
 
 	if (responseMode === "form_post") {
 		transactions = transactionStore(req);
-		transactionId = readCookie(req, transactionCookieName);
+		transactionId = readCookie(req, transactionCookieName(provider));
 		if (!transactions || transactionId === undefined || transactionId.length === 0) {
 			// No transaction cookie, no transaction. This is the refusal an
 			// attacker replaying a `state` from another browser meets.
@@ -154,19 +155,15 @@ export const consumeCallbackState = async (
 		return null;
 	}
 
-	// A refusal spends the transaction when the request made a claim about
-	// it (presented a `state`, right or wrong: one guess is all there is),
-	// and leaves it alone when it made none. The `form_post` transaction
-	// cookie is `SameSite=None`, so it rides any cross-site request (an
-	// `<img>` GET included); if a parameterless request spent it, a third
-	// party could kill a victim's in-flight flow.
-	//
-	// A `query` federation's envelope lives in the session and is retired
-	// only after `state` matches, so a wrong `state` leaves it in place: the
-	// `SameSite=Lax` session cookie rides a top-level cross-site GET, so
-	// retiring on a mismatch would hand any third party that same
-	// availability attack. Unlimited guesses at a 128-bit CSPRNG `state` are
-	// worth no more than one.
+	// The ephemeral state is spent only once `state` matches. A request
+	// with no `state`, or a wrong one, is refused and leaves it in place, in
+	// both modes: the `form_post` transaction cookie is `SameSite=None`, so
+	// it rides any cross-site request (an `<img>` GET or an auto-submitted
+	// form included), and a `query` federation's `SameSite=Lax` session
+	// cookie rides a top-level cross-site GET. Such a request leaves the
+	// state in place, so the flow in progress still completes. Any number of
+	// mismatches against a 128-bit CSPRNG `state` leaves a match no more
+	// likely.
 	if (typeof params.state !== "string" || params.state.length === 0) {
 		res.status(400).json({
 			error: "invalid_request",
@@ -178,7 +175,6 @@ export const consumeCallbackState = async (
 	// CSRF state check — unchanged, and deliberately so: the transaction
 	// cookie is an addition to this comparison, never a replacement for it.
 	if (params.state !== fed.state) {
-		await discardTransaction();
 		res.status(400).json({
 			error: "invalid_state",
 			error_description: "CSRF state mismatch",

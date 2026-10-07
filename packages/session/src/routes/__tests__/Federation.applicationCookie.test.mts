@@ -45,7 +45,7 @@ import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {
-	HARNESS_TRANSACTION_COOKIE_NAME,
+	HARNESS_SESSION_COOKIE_NAME,
 	makeFederationTokenStore,
 	makePermissivePolicy,
 	makeUserRepository,
@@ -152,7 +152,7 @@ function buildRealApp({ rolling = false }: { rolling?: boolean } = {}): RealApp 
 		createRouter(express, {
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			federationSettings: createTestFederationSettings(),
-			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+			sessionCookieName: HARNESS_SESSION_COOKIE_NAME,
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map(
 				[...providers.keys()].map((name) => [name, makePermissivePolicy()]),

@@ -132,7 +132,7 @@ export const createRouter = (
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		federationTransactionTtlMs = DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
-		federationTransactionCookieName,
+		sessionCookieName,
 		requirements,
 		auditSink,
 		logger = consoleLogger,
@@ -185,12 +185,12 @@ export const createRouter = (
 		 */
 		federationTransactionTtlMs?: number;
 		/**
-		 * Name of the `form_post` transaction cookie: the deployment's session
-		 * cookie name run through `deriveFederationTransactionCookieName`,
-		 * so it inherits the operator's naming without inheriting a `__Host-`
-		 * prefix this path-scoped cookie could not satisfy.
+		 * The deployment's session cookie name. Each `form_post` federation's
+		 * transaction cookie is named from it by
+		 * `deriveFederationTransactionCookieName`, as
+		 * `__Host-<name>.federation.<federation>`, whatever prefix it carries.
 		 */
-		federationTransactionCookieName: string;
+		sessionCookieName: string;
 		/**
 		 * The registered session requirements the link routes admit through.
 		 * Required: a missing resolver, or one the boot planner did not build,
@@ -211,8 +211,8 @@ export const createRouter = (
 	if (!userRepository) throw new Error("federation routes require userRepository");
 	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
 	if (!federationSettings) throw new Error("federation routes require federationSettings");
-	if (!federationTransactionCookieName) {
-		throw new Error("federation routes require federationTransactionCookieName");
+	if (!sessionCookieName) {
+		throw new Error("federation routes require sessionCookieName");
 	}
 	if (!sessionLifecycle) {
 		throw new Error(
@@ -285,7 +285,7 @@ export const createRouter = (
 		logger,
 		linkTrustedOrigins,
 		admitLink,
-		...createTransactionCookie(providerCallbackUrls, federationTransactionCookieName),
+		...createTransactionCookie(sessionCookieName),
 	};
 
 	/**
