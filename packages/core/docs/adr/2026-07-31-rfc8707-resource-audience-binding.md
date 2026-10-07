@@ -75,7 +75,8 @@ policy-returned audience is validated against both ceilings. The policy is
 handed the original audience as `GrantPolicyRequest.originalAudience`. A
 token that names no `aud` is held to its client's id. A default the
 registration no longer holds is refused `invalid_grant`, never replaced by
-the client id.
+the client id. The rotated refresh token carries the original audience (and
+scope), never what this refresh narrowed the access token to.
 
 ### D2 — Multiple distinct resources are rejected, not split or merged
 

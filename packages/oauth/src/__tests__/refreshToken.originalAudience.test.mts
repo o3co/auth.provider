@@ -145,7 +145,8 @@ describe("refresh_token — a resource is held to the original audience", () => 
 		);
 		const { access, refreshClaims } = issued(result);
 		expect(access.aud).toBe(OTHER);
-		expect(refreshClaims.aud).toBe(OTHER);
+		// The refresh token keeps the original audience, its first entry.
+		expect(refreshClaims.aud).toBe(API);
 	});
 });
 
@@ -165,7 +166,7 @@ describe("refresh_token — a policy audience is held to the original audience",
 		})).handle(ctx(await refreshToken([API, OTHER])));
 		const { access, refreshClaims } = issued(result);
 		expect(access.aud).toBe(OTHER);
-		expect(refreshClaims.aud).toBe(OTHER);
+		expect(refreshClaims.aud).toBe(API);
 	});
 
 	it("hands the policy the original audience", async () => {
@@ -304,12 +305,20 @@ describe("refresh_token — a resource the registration no longer holds is inval
 		},
 	);
 
-	it("still issues for the registered entry of the same token", async () => {
-		const { grant } = withSpies();
+	it("refuses invalid_grant for a registered resource when the refresh token's own audience is no longer registered", async () => {
+		// The rotated refresh token would carry API, the original audience,
+		// which the registration dropped: it is refused, never re-issued.
+		const { grant, admit, rotate } = withSpies();
 		const { result } = await grant.handle(
 			ctx(await familyToken([API, OTHER]), { resource: OTHER }, [OTHER]),
 		);
-		expect(issued(result).access.aud).toBe(OTHER);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "the grant's audience is no longer registered for this client",
+		});
+		expect(admit).not.toHaveBeenCalled();
+		expect(rotate).not.toHaveBeenCalled();
 	});
 });
 
@@ -355,5 +364,70 @@ describe("refresh_token — how the original audience is read", () => {
 		const second = issued((await grant.handle(ctx(first.refresh))).result);
 		expect(second.access.aud).toBe(OTHER);
 		expect(second.refreshClaims.aud).toBe(OTHER);
+	});
+});
+
+describe("refresh_token — narrowing applies to the access token, never to the rotated refresh token", () => {
+	/** A refresh token issued to `CLIENT_ID` for `aud` with `scope`. */
+	const scopedToken = (scope: string, aud: string | string[]): Promise<string> =>
+		new SignJWT({ sub: "u1", scope, azp: CLIENT_ID })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer("localhost")
+			.setAudience(aud)
+			.setExpirationTime("24h")
+			.sign(createSecretKey(Buffer.from(SECRET)));
+
+	it("keeps the original scope on the refresh token when the request narrows it", async () => {
+		const grant = grantWith();
+		const { result } = await grant.handle(
+			ctx(await scopedToken("read write", API), { scope: "read" }),
+		);
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		// The response's `scope` is the access token's.
+		expect(result.tokens.scope).toBe("read");
+		const first = issued(result);
+		expect(first.access.scope).toBe("read");
+		expect(first.refreshClaims.scope).toBe("read write");
+
+		const second = await grant.handle(ctx(first.refresh));
+		if (!("tokens" in second.result)) throw new Error("expected tokens");
+		expect(second.result.tokens.scope).toBe("read write");
+		expect(issued(second.result).access.scope).toBe("read write");
+	});
+
+	it("keeps the original scope on the refresh token when the policy narrows it", async () => {
+		const { result } = await grantWith(async () => ({
+			outcome: "allow",
+			grantedScope: ["read"],
+		})).handle(ctx(await scopedToken("read write", API)));
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		expect(result.tokens.scope).toBe("read");
+		const { access, refreshClaims } = issued(result);
+		expect(access.scope).toBe("read");
+		expect(refreshClaims.scope).toBe("read write");
+	});
+
+	it("gives a plain refresh the original audience back after a resource narrowed one", async () => {
+		const grant = grantWith();
+		const first = issued(
+			(await grant.handle(ctx(await scopedToken("read", [API, OTHER]), { resource: OTHER })))
+				.result,
+		);
+		expect(first.access.aud).toBe(OTHER);
+		expect(first.refreshClaims.aud).toBe(API);
+
+		const second = issued((await grant.handle(ctx(first.refresh))).result);
+		expect(second.access.aud).toBe(API);
+		expect(second.refreshClaims.aud).toBe(API);
+	});
+
+	it("keeps the original audience on the refresh token when the policy narrows it", async () => {
+		const { result } = await grantWith(async () => ({
+			outcome: "allow",
+			grantedAudience: [OTHER],
+		})).handle(ctx(await scopedToken("read", [API, OTHER])));
+		const { access, refreshClaims } = issued(result);
+		expect(access.aud).toBe(OTHER);
+		expect(refreshClaims.aud).toBe(API);
 	});
 });
