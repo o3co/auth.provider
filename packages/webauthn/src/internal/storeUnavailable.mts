@@ -33,7 +33,8 @@ export type WebAuthnStore =
 	| "challenge"
 	| "challenge_ceremony"
 	| "refresh_token_family"
-	| "revocation_boundary";
+	| "revocation_boundary"
+	| "user_repository";
 
 const DESCRIPTIONS: Readonly<Record<WebAuthnStore, string>> = {
 	webauthn_credential: "credential store unavailable",
@@ -44,6 +45,8 @@ const DESCRIPTIONS: Readonly<Record<WebAuthnStore, string>> = {
 	refresh_token_family: "refresh token store unavailable",
 	// The subject's revocation boundary; a value it answers that cannot be compared counts too.
 	revocation_boundary: "revocation boundary unavailable",
+	// The user behind the credential, read under `oauth.requireEmailVerified`.
+	user_repository: "identity resolution unavailable",
 };
 
 /** The `error_description` a 503 for `store` carries. */
@@ -52,7 +55,10 @@ export const storeUnavailableDescription = (store: WebAuthnStore): string => DES
 /** Where a ceremony route's store call failed. */
 export interface CeremonyStoreFailure {
 	readonly site: "registration_options" | "registration_verify" | "authentication_options";
-	readonly store: Exclude<WebAuthnStore, "refresh_token_family" | "revocation_boundary">;
+	readonly store: Exclude<
+		WebAuthnStore,
+		"refresh_token_family" | "revocation_boundary" | "user_repository"
+	>;
 	readonly step: "list" | "issue" | "consume" | "register";
 }
 
