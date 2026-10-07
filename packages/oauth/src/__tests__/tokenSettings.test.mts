@@ -47,8 +47,8 @@ import {
 	createTestApp,
 	createTestOAuthTokenSettings,
 	makeValidAppConfig,
-	oauthTokenSettingsContract,
 } from "@o3co/auth-provider-core/testing";
+import { oauthTokenSettingsContract } from "@o3co/auth-provider-test-kit";
 import { describe, expect, it } from "vitest";
 import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthTokenSettingsFrom } from "#/tokenSettings.mjs";
