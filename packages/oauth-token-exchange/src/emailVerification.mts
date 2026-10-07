@@ -19,7 +19,7 @@
  * path that mints for a user applies. With the setting on, the user behind the
  * subject — the `sub` the issued token names — is read through
  * `userRepository.findBySubject`: a user the Store does not hold, or whose
- * email is not verified (core's `isEmailVerified`), is `invalid_grant`, and a
+ * email is not verified (core's `isEmailVerified`), is `invalid_request`, and a
  * read that throws is a 503. No subject is exempt: a subject that is a
  * client's (a `client_credentials` token's `sub`) names no user the Store
  * holds. Built with the setting on and no repository that can look a user
@@ -35,6 +35,7 @@ import {
 	type SupportsSubjectLookup,
 	supportsSubjectLookup,
 } from "@o3co/auth-provider-core";
+import { invalidRequest } from "./answers.mjs";
 
 /** What the gate reads: the optional `userRepository` slot, and the logger an outage is reported on. */
 export type EmailGateDependencies = Pick<GrantDependencies, "logger"> &
@@ -82,14 +83,8 @@ export function emailGate(deps: EmailGateDependencies, requireEmailVerified: boo
 			};
 		}
 		if (verified) return null;
-		// `invalid_grant`, as the session and passkey grants answer the same user: the
-		// refusal is the user's, not the presented token's.
-		return {
-			result: {
-				status: 400,
-				error: "invalid_grant",
-				errorDescription: "email address is not verified",
-			},
-		};
+		// RFC 8693 §2.2.2: a subject token unacceptable based on policy is
+		// `invalid_request`, as every other token this grant refuses.
+		return invalidRequest("email address is not verified");
 	};
 }
