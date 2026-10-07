@@ -45,7 +45,7 @@
 		"connect-redis": "^10.0.0",
 		"express": "^5.0.0",
 		"express-session": "^1.17.0",
-		"redis": "^6.3.0"
+		"redis": "^6.2.1"
 	},
 	"peerDependenciesMeta": {
 		"connect-redis": {
