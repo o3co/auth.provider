@@ -241,6 +241,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - **その順序の代償。** `rotate` がコミットした時点で、提示されたトークンは使用済みになる。その後に署名器が失敗すると — KMS の障害 — 誰もトークンを持たないローテーションが残る: グラントは `503 temporarily_unavailable` を返し、ファミリー ID・使用済みの `jti`・予約された `jti` を付けて `refresh_token_rotation_orphaned` をログに出す。これはストアが実際にローテーションをコミットしたときだけで、`unknownFamilyPolicy` で受け入れた未知のファミリーは通常の署名器の振る舞いのままである（ローテーションを配線していない構成は、このグラントでは起動しない）。クライアントの再試行は古いトークンを提示し、それは今やリプレイとして読まれるので、ファミリーは失効し、ユーザーは再認証する。
 - **署名の前にウォーターマークとセッションを読み直す。** ポリシーの後、ローテーションの前に、セッションのアドミッションに続けて提示されたトークンをもう一度検証する（サブジェクトの失効ウォーターマークを含むので、それが最後の読み取りになる）。ローテーションがコミットした後も、何かに署名する前に、その両方をもう一度行い、ファミリーの残りの有効期間も測り直す。どちらも最初の確認と同じく拒否し、同じ応答を返す（`400 invalid_grant`、障害なら `503 temporarily_unavailable`）。ウォーターマークは、`userSessionStore` が配線されているか、トークンが `sid` を持つかにかかわらず読む。ローテーションがコミットした後の拒否では、提示されたトークンは使用済みで、予約したトークンは署名されないので、`refreshTokenFamilyRevocation` でファミリーも失効させる。そこでファミリーストアが失敗したときは `step: "revoke"` を付けて `refresh_token_store_unavailable` としてログに出す。
 - **リプレイはファミリーを失効させる**（RFC 6819 §5.2.2）。モジュールがローテーションと並べて `refreshTokenFamilyRevocation` を読むのはそのためである。また `iat` がサブジェクトの失効ウォーターマーク以前のリフレッシュトークンは `invalid_grant` になる。
+- **audience はスコープと同じく元の付与の範囲にとどまる。** 提示されたリフレッシュトークンの `aud` が、リフレッシュで発行するトークンの audience の上限であり既定値である（RFC 8707 §2.2）。その `scope` が発行するトークンのスコープの上限であるのと同じ（RFC 6749 §6）。`aud` を持たないトークンは、そのクライアントの id に制限される。素のリフレッシュ — `resource` が無く、ポリシーも audience を選ばない — は元の audience を保つ。複数を名指すときはその最初のエントリー。`resource` からの導出は元の audience とクライアントの `allowedAudiences` ∪ `{client_id}` の範囲で行い、元の audience の外の `resource` は、登録が挙げていても `400 invalid_target` になる。ポリシーの `grantedAudience` は元の audience とクライアントの `allowedAudiences` に制限され、どちらかの外は `500 server_error`（core の `policyOutOfBounds`）。ポリシーには元の audience が `GrantPolicyRequest.originalAudience` として `originalScope` の隣に渡される。新しいリフレッシュトークンは新しいアクセストークンと同じ audience を持つので、この上限はファミリー全体で保たれる。別のリソース向けのトークンには、新しい認可（`/authorize`）が要る。
 - **依存先が落ちていて検証できなかったトークンは `invalid_grant` ではなく `503 temporarily_unavailable`** — キーストア（"verification key unavailable"）やサブジェクトのウォーターマーク（"revocation store unavailable"）が答えない場合で、`site: "refresh_token"` 付きの `token_verification_unavailable` としてログに出す。RFC 6749 §5.2 の `invalid_grant` はクライアントにリフレッシュトークンを捨てさせるので、障害にそれで答えると、その間にリフレッシュした全員をログアウトさせてしまう。キーストアが持たない kid は引き続き `invalid_grant`。ファミリーストアの障害も `503` で、ストアと段階（`rotate`、またはリプレイが必要とする `revoke`）を付けて `refresh_token_store_unavailable` としてログに出す。
 
 ### `session`
@@ -444,7 +445,7 @@ grant_type=client_credentials
 - そのクライアントの登録済み `allowedAudiences` のエントリー、または
 - そのクライアント自身の `client_id`。
 
-これは発行するどのグラントも audience を導出する上限（`client_credentials`、`refresh_token`、`/authorize`）と同じなので、イントロスペクションは登録がこのクライアントとの関連を既に信頼した audience をちょうど受け入れ、それ以上は受け入れない。
+これは発行するどのグラントも audience を導出する上限（`client_credentials`、`/authorize`、そして提示されたトークンの audience の範囲にもとどめる `refresh_token`）と同じなので、イントロスペクションは登録がこのクライアントとの関連を既に信頼した audience をちょうど受け入れ、それ以上は受け入れない。
 
 この規則は RFC 8707 のリソースインジケーターを使い始めた瞬間に効いてくる。そのときすべてのアクセストークンは `aud: <resource URI>` を持つので、`client_id` だけに固定すると**リソースサーバーが自分のトークンをイントロスペクトできない** — リソース URI そのものである `client_id` で登録されていない限り `active: false` を受け取る。代わりにリソース URI を許可された audience として登録すること:
 

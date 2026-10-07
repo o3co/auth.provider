@@ -42,11 +42,13 @@ const keyStore = createSymmetricKeyStore(SECRET);
 const CLIENT_ID = "client1";
 const API = "https://api.example";
 
+// Issued to CLIENT_ID for itself and API: a refresh issues for an audience
+// within the presented token's.
 const refreshToken = (): Promise<string> =>
-	new SignJWT({ sub: "u1", scope: "read" })
+	new SignJWT({ sub: "u1", scope: "read", azp: CLIENT_ID })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 		.setIssuer("localhost")
-		.setAudience(CLIENT_ID)
+		.setAudience([CLIENT_ID, API])
 		.setExpirationTime("24h")
 		.sign(createSecretKey(Buffer.from(SECRET)));
 

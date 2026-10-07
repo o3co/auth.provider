@@ -129,6 +129,18 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 	}
 };
 
+/**
+ * The presented refresh token's audience: the ceiling and the default for the
+ * audience a refresh issues. A token that names none was issued for its
+ * client, the one the `azp` binding proved.
+ */
+const readOriginalAudience = (aud: JWTPayload["aud"], clientId: string): readonly string[] => {
+	const named = (Array.isArray(aud) ? aud : [aud]).filter(
+		(value): value is string => typeof value === "string" && value.length > 0,
+	);
+	return named.length > 0 ? named : [clientId];
+};
+
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
 	const { keyStore, logger, subjectRevocation } = deps;
 	if (deps.userSessionStore !== undefined && deps.sessionLifecycleStore === undefined) {
@@ -448,9 +460,14 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			}
 
 			let finalScope = grantedScope;
-			// Issue to the authenticated client, which the binding gate above
-			// proved equals the presented token's azp/aud.
-			let finalAudience: string | null = authenticatedClientId;
+			// RFC 8707 §2.2: the issued audience stays within the original grant's,
+			// and within the client's registration, as the scope stays within the
+			// original grant's (RFC 6749 §6). With nothing chosen, it is the
+			// original audience; `generateToken` carries one `aud`.
+			const originalAudience = readOriginalAudience(tokenPayload.aud, authenticatedClientId);
+			const withinOriginal = (audiences: readonly string[]): readonly string[] =>
+				audiences.filter((audience) => originalAudience.includes(audience));
+			let finalAudience: string | null = originalAudience[0] ?? authenticatedClientId;
 			// Whether the policy named the audience, which may be the client id itself.
 			let policyChoseAudience = false;
 
@@ -473,6 +490,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						requestedScope: requested === undefined ? undefined : [...requested],
 						// A copy: `originalScopes` is the ceiling the answer is held to.
 						originalScope: scopeStr ? [...originalScopes] : undefined,
+						// A copy, as above: `originalAudience` is the audience ceiling.
+						originalAudience: [...originalAudience],
 						// RFC 8707: only under `oauth.resourceIndicator.enabled`.
 						resource: requestedResource ?? undefined,
 					},
@@ -488,10 +507,11 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				// An empty grant → null so the response omits scope.
 				finalScope = outcome.scopes.length > 0 ? outcome.scopes.join(" ") : null;
 				// A policy may narrow the audience to one of this client's
-				// `allowedAudiences` and nothing else; naming none leaves it as is.
+				// `allowedAudiences` within the original audience, and nothing
+				// else; naming none leaves it as is.
 				const policyAudience = boundPolicyAudience(
 					decision,
-					ctx.authenticatedClient.allowedAudiences ?? [],
+					withinOriginal(ctx.authenticatedClient.allowedAudiences ?? []),
 				);
 				if (!policyAudience.ok) return { result: policyAudience.result };
 				if (policyAudience.audience !== null) {
@@ -501,12 +521,17 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			}
 
 			// RFC 8707 §2: when no policy narrowed the audience, derive it from
-			// the requested resource within `allowedAudiences ∪ {clientId}`. A
-			// policy decision always wins.
+			// the requested resource within `allowedAudiences ∪ {clientId}` and
+			// the original audience. A policy decision always wins.
 			if (!policyChoseAudience && requestedResource) {
 				const derived = deriveAudienceFromResources(
 					requestedResource,
-					new Set([...(ctx.authenticatedClient.allowedAudiences ?? []), authenticatedClientId]),
+					new Set(
+						withinOriginal([
+							...(ctx.authenticatedClient.allowedAudiences ?? []),
+							authenticatedClientId,
+						]),
+					),
 				);
 				if (derived !== undefined) finalAudience = derived;
 			}
