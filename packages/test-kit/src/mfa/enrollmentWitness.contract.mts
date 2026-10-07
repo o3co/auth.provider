@@ -41,7 +41,7 @@ import {
 	supportsMfaEnrollmentWitness,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 /** A user the backend holds: its subject (`User.id`) and what each read resolves to it. */
 export interface MfaEnrollmentWitnessUser {

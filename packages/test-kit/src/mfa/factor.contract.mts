@@ -81,7 +81,8 @@ import {
 	normaliseMailAddress,
 	PASSWORD_AMR,
 } from "@o3co/auth-provider-core";
-import { type ContractCase, createTestMfaDigests } from "@o3co/auth-provider-core/testing";
+import { createTestMfaDigests } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 
 /** What the start of an enrollment answers: the state the coordinator keeps, and the page's response. */
 export type MfaFactorEnrollmentStart = Awaited<ReturnType<MfaFactor["beginEnrollment"]>>;

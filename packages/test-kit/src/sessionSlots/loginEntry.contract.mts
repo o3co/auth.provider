@@ -15,19 +15,18 @@
  */
 
 /**
- * The contract suite of the `loginEntry` slot and its test double.
+ * The contract suite of core's `loginEntry` slot.
  * `loginEntryContract(input)` holds `urlFor` to the protocol `/authorize`
  * and the federation-grants connect flow send a browser by: `redirect_to`
  * added once to the page's own query, before any fragment (which is kept),
  * the target encoded whole so its query and fragment never read as the
  * page's; a page whose query already carries `redirect_to` is refused when
- * the entry is built. `createTestLoginEntry` keeps it, for `/login` by
- * default. Published on `@o3co/auth-provider-core/testing`.
+ * the entry is built. Core's `createTestLoginEntry` keeps it.
  */
 
 import assert from "node:assert/strict";
 import type { LoginEntry } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 import { CONTRACT_ORIGIN } from "./fakeHttp.mjs";
 import { unfrozenPath } from "./shared.mjs";
 

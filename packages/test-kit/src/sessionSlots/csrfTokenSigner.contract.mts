@@ -15,7 +15,7 @@
  */
 
 /**
- * The contract suite of the `csrfTokenSigner` slot and its test double.
+ * The contract suite of core's `csrfTokenSigner` slot.
  *
  * `csrfTokenSignerContract(input)` holds a signer to what the `csrfGuard`
  * provider relies on: `sign` answers a base64url signature (it sits between a
@@ -32,8 +32,8 @@
  * verify tokens an earlier one issued pins it in its own tests.
  *
  * Constant-time `verify` is part of the contract but not checked: a unit
- * suite cannot measure timing reliably. `createTestCsrfTokenSigner` keeps
- * these rules with a random key.
+ * suite cannot measure timing reliably. Core's `createTestCsrfTokenSigner`
+ * keeps these rules.
  */
 
 import assert from "node:assert/strict";
@@ -44,7 +44,7 @@ import {
 	CSRF_SIGNATURE_MIN_LENGTH,
 	type CsrfTokenSigner,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 import { unfrozenPath } from "./shared.mjs";
 
 export interface CsrfTokenSignerContractInput {

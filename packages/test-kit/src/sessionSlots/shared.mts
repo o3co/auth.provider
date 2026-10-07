@@ -16,7 +16,7 @@
 
 /**
  * What the slot contract suites share: the one reading of "frozen all the
- * way down" a settings slot is held to. Not on the testing entry.
+ * way down" a settings slot is held to. Not on the kit's entry.
  */
 
 /**

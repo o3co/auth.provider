@@ -15,9 +15,9 @@
  */
 
 /**
- * The contract suite of the `csrfGuard` slot and its test double.
+ * The contract suite of core's `csrfGuard` slot.
  *
- * `csrfGuardContract(input)` drives a guard over `fake-http.mts` requests on
+ * `csrfGuardContract(input)` drives a guard over `fakeHttp.mts` requests on
  * one origin and holds it to the session package's rules:
  *
  * - Requests (`check`, `middleware`): an `Origin` (or, without one, a
@@ -40,9 +40,7 @@
  *   `sessionCookie`, secure, same-site and scoped like the session cookie.
  * - The guard is frozen.
  *
- * `createTestCsrfGuard` keeps these rules with its own signing key beside the
- * given session cookie (the fixture's by default). Published on
- * `@o3co/auth-provider-core/testing`.
+ * Core's `createTestCsrfGuard` keeps these rules.
  */
 
 import assert from "node:assert/strict";
@@ -52,8 +50,8 @@ import type {
 	NavigationVerdict,
 	SessionCookiePolicy,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
 import type { Request } from "express";
+import type { ContractCase } from "../contractCase.mjs";
 import {
 	CONTRACT_ORIGIN,
 	type FakeResponseRecord,

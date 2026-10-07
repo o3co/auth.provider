@@ -69,12 +69,12 @@ import {
 	type StoreGeneration,
 	type VersionedSet,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
 import {
 	type ConditionalSetHarness,
 	type ConditionalSetTarget,
 	conditionalSetContract,
 } from "../conditionalWrite/conditionalWrite.contract.mjs";
+import type { ContractCase } from "../contractCase.mjs";
 import type {
 	MfaFactorStoreContractInput,
 	MfaFactorStoreHarness,

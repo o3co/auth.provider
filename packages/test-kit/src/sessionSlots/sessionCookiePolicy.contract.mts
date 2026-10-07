@@ -15,18 +15,16 @@
  */
 
 /**
- * The contract suite of the `sessionCookiePolicy` slot and its test double.
+ * The contract suite of core's `sessionCookiePolicy` slot.
  * `sessionCookiePolicyContract(input)` holds the policy to what the session
  * configuration and store hold the cookie to, what a browser keeps
- * included (`SameSite=None`, `__Secure-` and `__Host-` names).
- * `createTestSessionCookiePolicy` answers the fixture configuration's
- * cookie with any attribute replaced; it checks nothing. Published on
- * `@o3co/auth-provider-core/testing`.
+ * included (`SameSite=None`, `__Secure-` and `__Host-` names). Core's
+ * `createTestSessionCookiePolicy` answers a policy to run it over.
  */
 
 import assert from "node:assert/strict";
 import { MAX_DURATION_MS, type SessionCookiePolicy } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
+import type { ContractCase } from "../contractCase.mjs";
 import { unfrozenPath } from "./shared.mjs";
 
 export interface SessionCookiePolicyContractInput {

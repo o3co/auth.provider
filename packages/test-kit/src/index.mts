@@ -20,8 +20,6 @@
  * it; production code never does. It depends on core alone.
  */
 
-/** A suite's case, as core's slot suites give them: run each with any test runner's `it`. */
-export type { ContractCase } from "@o3co/auth-provider-core/testing";
 export {
 	type AttemptCounterContractInput,
 	type AttemptCounterHarness,
@@ -38,6 +36,7 @@ export {
 	conditionalRecordContract,
 	conditionalSetContract,
 } from "./conditionalWrite/conditionalWrite.contract.mjs";
+export type { ContractCase } from "./contractCase.mjs";
 export {
 	type FederationTokenStoreConditionalContractInput,
 	type FederationTokenStoreConditionalHarness,
@@ -85,6 +84,26 @@ export {
 	type SessionLifecycleStoreHarness,
 	sessionLifecycleStoreContract,
 } from "./sessionLifecycle/sessionLifecycleStore.contract.mjs";
+export {
+	type CsrfGuardContractInput,
+	csrfGuardContract,
+} from "./sessionSlots/csrfGuard.contract.mjs";
+export {
+	type CsrfTokenSignerContractInput,
+	csrfTokenSignerContract,
+} from "./sessionSlots/csrfTokenSigner.contract.mjs";
+export {
+	type LoginCompletionContractInput,
+	loginCompletionContract,
+} from "./sessionSlots/loginCompletion.contract.mjs";
+export {
+	type LoginEntryContractInput,
+	loginEntryContract,
+} from "./sessionSlots/loginEntry.contract.mjs";
+export {
+	type SessionCookiePolicyContractInput,
+	sessionCookiePolicyContract,
+} from "./sessionSlots/sessionCookiePolicy.contract.mjs";
 export {
 	type WebAuthnCredentialStoreContractInput,
 	type WebAuthnCredentialStoreHarness,

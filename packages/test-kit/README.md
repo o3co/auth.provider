@@ -1,6 +1,6 @@
 # @o3co/auth-provider-test-kit
 
-Last updated: 2026-10-05
+Last updated: 2026-10-07
 
 Contract suites for what code outside `@o3co/auth-provider-core` implements
 of auth.provider's ports, and the fakes they run against. Test code imports
@@ -53,7 +53,19 @@ devDependencies.
 - `sessionLifecycleStoreContract`, the contract suite of
   `SessionLifecycleStore`, the record that fences joining a session against
   closing it, in
-  [`src/sessionLifecycle/sessionLifecycleStore.contract.mts`](src/sessionLifecycle/sessionLifecycleStore.contract.mts).
+  [`src/sessionLifecycle/sessionLifecycleStore.contract.mts`](src/sessionLifecycle/sessionLifecycleStore.contract.mts);
+- the contract suites of the session slots, which the session package's
+  modules fill or a deployment's own: `csrfGuardContract` (`csrfGuard`, whether
+  a browser's request may change state and a navigation start a flow),
+  `csrfTokenSignerContract` (`csrfTokenSigner`, the CSRF token's signing
+  key), `loginCompletionContract` (`loginCompletion`, establishing a session
+  and answering an interruption at the end of a login), `loginEntryContract`
+  (`loginEntry`, the login page and its `redirect_to`) and
+  `sessionCookiePolicyContract` (`sessionCookiePolicy`, the session
+  cookie's attributes), in [`src/sessionSlots/`](src/sessionSlots/), with
+  the fake Express request and response they drive a component over;
+- `ContractCase`, the `{ name, run }` case every suite of the kit answers,
+  in [`src/contractCase.mts`](src/contractCase.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
@@ -61,10 +73,14 @@ devDependencies.
 means ([`@o3co/auth-provider-foundation`](../foundation/README.md#the-stores-mfa-endpoints));
 any adapter, core's in-process ones included (the kit's own tests run
 `mfaFactorStoreContract`, `mfaFactorStoreConditionalContract`, `federationTokenStoreConditionalContract`, `webAuthnCredentialStoreContract`, `attemptCounterContract` and `sessionLifecycleStoreContract` over core's); the doubles a factor's tests use — `createTestMfaFactor`,
-`testMfaFactorProofs` and `createTestMfaDigests` — which stay on
-`@o3co/auth-provider-core/testing`, since core's own tests use them and core
-cannot depend on this package. The other ports' suites are core's, on
-`@o3co/auth-provider-core/testing` and in core's own tests.
+`testMfaFactorProofs` and `createTestMfaDigests` — and the session slots'
+doubles — `createTestCsrfGuard`, `createTestCsrfTokenSigner`,
+`createRecordingLoginCompletion`, `createTestLoginEntry` and
+`createTestSessionCookiePolicy`, which the kit's own tests run the session
+slots' suites over — which stay on `@o3co/auth-provider-core/testing`, since
+core's own tests use them and core cannot depend on this package. The other
+ports' suites are core's, on `@o3co/auth-provider-core/testing` and in
+core's own tests.
 
 **Why a separate package.** Core's tests test core. A contract suite is the
 specification of a port implemented elsewhere, so it ships where every
@@ -77,13 +93,15 @@ depending on core alone, rather than copying it.
 npm install --save-dev @o3co/auth-provider-test-kit @o3co/auth-provider-core
 ```
 
-Peer dependency: `@o3co/auth-provider-core`. No dependency of its own.
+Peer dependencies: `@o3co/auth-provider-core`, and `express`, optional — the
+session slots' suites drive a component over Express's request and response
+types, as core's slots declare them. No dependency of its own.
 
 ## The enrollment witness's contract suite
 
-A suite is a list of `{ name, run }` cases (core's `ContractCase`, which the
-kit re-exports), as the slot suites on `@o3co/auth-provider-core/testing` are,
-so any test runner runs it:
+A suite is a list of `{ name, run }` cases (the kit's `ContractCase`, the
+shape of the slot suites on `@o3co/auth-provider-core/testing` too), so any
+test runner runs it:
 
 ```typescript
 import { mfaEnrollmentWitnessContract } from "@o3co/auth-provider-test-kit";

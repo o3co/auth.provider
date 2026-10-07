@@ -15,11 +15,11 @@
  */
 
 /**
- * The contract suite of the `loginCompletion` slot, and its test double.
+ * The contract suite of core's `loginCompletion` slot.
  * See ADR 2026-09-28-session-admission.
  *
  * `loginCompletionContract(input)` drives a completion over the fake
- * express session of `fake-http.mts` and holds it to what the session
+ * express session of `fakeHttp.mts` and holds it to what the session
  * package's `establishSession` and `answerInterruption` do:
  *
  * - What core did not build is refused with a `RangeError` before anything
@@ -43,9 +43,7 @@
  *   so the suite cannot see the old id destroyed: that is express-session's
  *   regeneration, which the session package's own tests drive.
  *
- * `createRecordingLoginCompletion` keeps that contract with made-up `sid`s
- * and can stand in for a session store that is down. Published on
- * `@o3co/auth-provider-core/testing`.
+ * Core's `createRecordingLoginCompletion` keeps that contract.
  */
 
 import assert from "node:assert/strict";
@@ -72,8 +70,9 @@ import {
 	type SessionRenewalStep,
 	type SessionRequirement,
 } from "@o3co/auth-provider-core";
-import { type ContractCase, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import type { Request } from "express";
+import type { ContractCase } from "../contractCase.mjs";
 import {
 	type FakeRequestOptions,
 	type FakeResponseRecord,
@@ -675,7 +674,7 @@ export function loginCompletionContract(
 	return cases;
 }
 
-/** The express session as the double drives it: express-session's operations, and the fields a login writes. */
+/** The express session as the suite reads and seeds it: express-session's operations, and the fields a login writes. */
 interface CookieSession {
 	regenerate(done: (err?: unknown) => void): void;
 	save(done: (err?: unknown) => void): void;

@@ -313,7 +313,7 @@ describe("the suite's cases", () => {
 		expect(names(true).length).toBe(names(false).length + 1);
 	});
 
-	it("are core's ContractCase, which the kit re-exports", () => {
+	it("are the kit's ContractCase, the same shape as core's", () => {
 		expectTypeOf<ContractCase>().toEqualTypeOf<CoreContractCase>();
 		expectTypeOf(
 			mfaEnrollmentWitnessContract({ build: async () => inProcess(), withOutage: false }),

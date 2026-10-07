@@ -38,12 +38,12 @@ import {
 	readVersioned,
 	type Versioned,
 } from "@o3co/auth-provider-core";
-import type { ContractCase } from "@o3co/auth-provider-core/testing";
 import {
 	type ConditionalRecordHarness,
 	type ConditionalRecordTarget,
 	conditionalRecordContract,
 } from "../conditionalWrite/conditionalWrite.contract.mjs";
+import type { ContractCase } from "../contractCase.mjs";
 
 /** What one case runs over. */
 export interface FederationTokenStoreConditionalHarness {
