@@ -93,9 +93,8 @@ the kit's own tests run the slots' suites over — `createTestCsrfGuard`,
 `createTestHttpSettings`, `createTestOAuthTokenSettings`,
 `createTestFederationGrantPolicy` and `createTestRateLimiter` — which stay
 on `@o3co/auth-provider-core/testing`, since core's own tests use them and
-core cannot depend on this package. The other
-ports' suites are core's, on `@o3co/auth-provider-core/testing` and in
-core's own tests.
+core cannot depend on this package. The ports that have no suite here are
+held by core's own tests, which are not published.
 
 **Why a separate package.** Core's tests test core. A contract suite is the
 specification of a port implemented elsewhere, so it ships where every
@@ -115,7 +114,7 @@ types, as core's slots declare them. No dependency of its own.
 ## The enrollment witness's contract suite
 
 A suite is a list of `{ name, run }` cases (the kit's `ContractCase`, the
-shape of the slot suites on `@o3co/auth-provider-core/testing` too), so any
+shape every suite here shares), so any
 test runner runs it:
 
 ```typescript
