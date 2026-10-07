@@ -1850,7 +1850,10 @@ characters.
 Plus one short-lived **duplicate** of the shared socket per refresh rotation:
 `WATCH` is connection-scoped in Redis, so `updateFamily` opens `client.duplicate()`
 for its compare-and-swap and closes it on exit
-(`packages/redis/src/refresh-token-family.mts`). Under refresh-heavy load
+(`packages/redis/src/refresh-token-family.mts`). The duplicate neither
+reconnects nor queues: a rotation whose connection drops fails with the
+connection's error rather than committing without its `WATCH`
+(`packages/redis/src/ioredis/clients/refresh-token-family.mts`). Under refresh-heavy load
 against a managed Redis with TLS/AUTH this is connection churn — tracked as
 `#293` item 7, undecided at `v0.11.0`.
 

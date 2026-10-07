@@ -63,6 +63,7 @@ function makeFakeIoredis(execReplies: unknown[]) {
 		on: vi.fn(),
 		quit: vi.fn(async () => "OK"),
 		disconnect: vi.fn(),
+		connect: vi.fn(async () => undefined),
 		multi: vi.fn(() => {
 			const commands: unknown[] = [];
 			queued.push(commands);

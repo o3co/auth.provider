@@ -40,7 +40,10 @@ export interface RefreshTokenFamilyMultiClient {
 /**
  * Backing client for RefreshTokenFamilyStore adapters. The `duplicate()` method
  * returns a `DisposableRefreshTokenFamilyClient` bound to a new underlying
- * connection, required for WATCH/MULTI/EXEC CAS isolation.
+ * connection, required for WATCH/MULTI/EXEC CAS isolation. That connection is
+ * never replaced: once it is lost, every later command on the duplicate
+ * rejects, since a command carried to a new connection runs without the
+ * `WATCH`.
  */
 export interface RefreshTokenFamilyClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;

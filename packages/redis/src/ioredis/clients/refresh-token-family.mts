@@ -16,8 +16,9 @@
 
 /**
  * The refresh-token family store's client over one ioredis connection. Its `duplicate()` opens
- * a connection of its own, logs that connection's errors by their projection only, and closes
- * it on disposal without ever rejecting.
+ * a connection of its own that never carries a command across a reconnect, logs that
+ * connection's errors by their projection only, and closes it on disposal without ever
+ * rejecting.
  */
 
 import { type EventLogger, loggableError } from "@o3co/auth-provider-core";
@@ -30,6 +31,20 @@ import type {
 import { assertPipelineSucceeded } from "../commands.mjs";
 import { type IoredisDurabilityOptions, redisDurability } from "../durability.mjs";
 
+/**
+ * The duplicate's connection options over the parent's. `WATCH` lives and dies with one
+ * connection, so the duplicate has no reconnect, no offline queue and no resend: once its
+ * connection is lost, every later command, the `EXEC` included, rejects. It connects when
+ * built, and its commands wait for that, since without an offline queue a command sent while
+ * connecting is refused.
+ */
+const DUPLICATE_OPTIONS = {
+	lazyConnect: true,
+	enableOfflineQueue: false,
+	retryStrategy: () => null,
+	autoResendUnfulfilledCommands: false,
+} as const;
+
 export function makeIoredisRefreshTokenFamilyClient(
 	io: Redis,
 	logger: EventLogger,
@@ -37,16 +52,21 @@ export function makeIoredisRefreshTokenFamilyClient(
 ): RefreshTokenFamilyClient {
 	// RefreshTokenFamilyClient needs duplicate() returning DisposableRefreshTokenFamilyClient.
 	// The duplicate is built by recursively wrapping the duplicated ioredis instance.
-	const buildRefreshClient = (underlying: Redis): RefreshTokenFamilyClient => ({
-		set: (k, v, _mode, ttl, _cond) => underlying.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>,
-		get: (k) => underlying.get(k),
-		pttl: (k) => underlying.pttl(k),
-		watch: (...keys) => underlying.watch(...keys) as Promise<"OK">,
-		unwatch: () => underlying.unwatch() as Promise<"OK">,
-		multi: () => buildRefreshMulti(underlying.multi()),
-		durability: () => redisDurability(underlying, options),
+	// No command is sent on `underlying` before `connected` settles.
+	const buildRefreshClient = (
+		underlying: Redis,
+		connected: Promise<unknown>,
+	): RefreshTokenFamilyClient => ({
+		set: (k, v, _mode, ttl, _cond) =>
+			connected.then(() => underlying.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>),
+		get: (k) => connected.then(() => underlying.get(k)),
+		pttl: (k) => connected.then(() => underlying.pttl(k)),
+		watch: (...keys) => connected.then(() => underlying.watch(...keys) as Promise<"OK">),
+		unwatch: () => connected.then(() => underlying.unwatch() as Promise<"OK">),
+		multi: () => buildRefreshMulti(underlying.multi(), connected),
+		durability: () => connected.then(() => redisDurability(underlying, options)),
 		duplicate: () => {
-			const dup = underlying.duplicate();
+			const dup = underlying.duplicate(DUPLICATE_OPTIONS);
 			// `duplicate()` copies options but not listeners, and an `error` event with no
 			// listener throws and takes the process down. This connection never leaves the
 			// wrapper, so the listener is ours. It logs the projection: ioredis attaches the
@@ -55,7 +75,10 @@ export function makeIoredisRefreshTokenFamilyClient(
 			dup.on("error", (err: unknown) => {
 				logger.error({ err: loggableError(err) }, "redis_duplicate_connection_error");
 			});
-			const inner = buildRefreshClient(dup);
+			// A failed connect is the error of the first command; it is logged by the listener.
+			const connected = dup.connect();
+			connected.catch(() => {});
+			const inner = buildRefreshClient(dup, connected);
 			const disposable: DisposableRefreshTokenFamilyClient = {
 				...inner,
 				[Symbol.asyncDispose]: async () => {
@@ -75,7 +98,10 @@ export function makeIoredisRefreshTokenFamilyClient(
 		},
 	});
 
-	const buildRefreshMulti = (p: ReturnType<Redis["multi"]>): RefreshTokenFamilyMultiClient => {
+	const buildRefreshMulti = (
+		p: ReturnType<Redis["multi"]>,
+		connected: Promise<unknown>,
+	): RefreshTokenFamilyMultiClient => {
 		const m: RefreshTokenFamilyMultiClient = {
 			set: (k, v, _mode, ttl) => {
 				p.set(k, v, "PX", ttl);
@@ -84,11 +110,15 @@ export function makeIoredisRefreshTokenFamilyClient(
 			// `null` survives as the WATCH-abort signal `updateFamily` retries on;
 			// a queued SET that failed must not be reported as a committed
 			// rotation.
-			exec: async () => assertPipelineSucceeded(await p.exec(), "refreshTokenFamilyClient.exec"),
+			exec: async () => {
+				await connected;
+				return assertPipelineSucceeded(await p.exec(), "refreshTokenFamilyClient.exec");
+			},
 		};
 		return m;
 	};
 
-	const refreshTokenFamilyClient = buildRefreshClient(io);
+	// The caller's connection, its options and its lifetime stay the caller's.
+	const refreshTokenFamilyClient = buildRefreshClient(io, Promise.resolve());
 	return refreshTokenFamilyClient;
 }

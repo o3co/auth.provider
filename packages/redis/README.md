@@ -430,7 +430,10 @@ spreading.
 
 `makeIoredisClients` derives every client from the one connection you hand it
 and opens none of its own (the exception is
-`refreshTokenFamilyClient.duplicate()`, one per refresh rotation).
+`refreshTokenFamilyClient.duplicate()`, one per refresh rotation, which takes
+your connection's options with no reconnect and no offline queue: its
+compare-and-set holds only on the connection that took the `WATCH`, so a
+rotation whose connection is lost fails rather than commits).
 Connection-level ioredis options are therefore shared by every client it
 returns, and the ones governing how a partition *ends* are the ones worth
 setting deliberately:
