@@ -926,6 +926,17 @@ The boot refusals you can meet, with their messages, are in
   another grant. With the setting off nothing changes. See the
   [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
   note 24.
+- **Token exchange reads a contributed validator's answer once.** The answer
+  a `tokenExchangeValidators` entry returns is read once into a plain, frozen
+  copy, which every check, the grant policy and issuance read: claims that
+  are not enumerable own properties (beyond `azp`, `exp`, `iss`, `cnf` and
+  `may_act`, which are read by name) are not carried, and class instances
+  reach the policy flattened to their own enumerable fields. An answer whose
+  `sub` is not a string, or whose `claims` are not an object, is a failed
+  validation (`400 invalid_request`, `subject_token validation failed`), at
+  the first validation and at the one before minting; a member whose read
+  throws is `503 temporarily_unavailable`, as a validator that throws. See
+  the oauth-token-exchange README, "External JWT subject_token".
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a
   stable label as `username` for a user without one.
