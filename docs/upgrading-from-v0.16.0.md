@@ -821,12 +821,15 @@ The boot refusals you can meet, with their messages, are in
 ### The users file (the `yaml` / `static` user repository)
 
 Core's YAML user repository, the development and test adapter, now refuses at
-boot an entry it could never sign in as written (#1560). Each refusal is
+boot an entry it could never sign in as written (#1560). An entry that breaks
+the entry rules is refused as
 `Invalid entry "<username>" in <file>: <field>: <reason>`, or, for a map
 handed to `InMemoryUserRepository` directly,
-`InMemoryUserRepository: invalid entry "<username>": <field>: <reason>`; it
-names the user and the field, never the password or the hash. Start against a
-copy of the file to list what is left.
+`InMemoryUserRepository: invalid entry "<username>": <field>: <reason>`. The
+refusals that look across entries (an empty username, a shared id, more than
+one cost) come from `InMemoryUserRepository` and name the field, with the
+users that share an id or, for costs, only the costs. None quotes a password
+or a hash. Start against a copy of the file to list what is left.
 
 - **BREAKING: a password starting with `$2` is read as a bcrypt hash, and one
   that is not well formed refuses the boot.** A well-formed hash is `$2a$`,

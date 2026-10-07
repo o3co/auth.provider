@@ -765,7 +765,7 @@ its full length.
 Every bcrypt entry uses one cost. Boot refuses a password that breaks these
 rules, bcrypt entries at more than one cost (naming the costs), an empty `id`
 or username, two users with the same id, and a `username` key inside an entry,
-naming the user and the field and never the value. Each start with the `yaml` backend logs
+naming the field and the user or the costs, never a value. Each start with the `yaml` backend logs
 `user_repository_in_memory` at warn on the template's logger (`LOGGING_LEVEL`
 applies), whatever the environment: the users file is meant for development
 and tests. See
