@@ -48,7 +48,7 @@ import {
 	type UsableFrontchannelRP,
 	usableFrontchannelRP,
 } from "../logout/frontchannelLogoutUri.mjs";
-import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
+import { renderFrontchannelLogoutPage } from "../logout/renderFrontchannel.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
@@ -982,7 +982,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// front-channel logout (7b–7d).
 		const frontchannelRps = acceptsHtml ? await ended.frontchannelRps() : [];
 		if (frontchannelRps.length > 0) {
-			const html = renderFrontchannelLogoutHtml({
+			const page = renderFrontchannelLogoutPage({
 				rps: frontchannelRps,
 				issuer: opts.issuer,
 				sid,
@@ -999,7 +999,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				logger: opts.logger,
 			});
 			res.setHeader("Content-Type", "text/html; charset=utf-8");
-			return res.status(200).send(html);
+			// Replaces any policy the host set: every policy on a response is
+			// enforced, and a host's would block the page's frames and redirect.
+			res.setHeader("Content-Security-Policy", page.contentSecurityPolicy);
+			return res.status(200).send(page.html);
 		}
 
 		// 7b: IdP end-session redirect.

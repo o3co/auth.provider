@@ -39,6 +39,13 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionCloseNotifier } from "#/logout/sessionCloseNotifier.mjs";
 import { createRouter } from "#/routes/logout.mjs";
+import {
+	hashSourceOf,
+	iframeSrcsOf,
+	parsePolicy,
+	policyHeaderCount,
+	scriptsOf,
+} from "./_helpers/frontchannelPage.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	expectBestEffortWarn,
@@ -654,6 +661,88 @@ describe("POST /oauth/logout", () => {
 			expect(res.headers["content-type"]).toMatch(/text\/html/);
 			expect(res.text).toContain("<iframe");
 			expect(res.text).toContain("rp1.example.com");
+		});
+
+		it("sends the page under its own Content-Security-Policy, replacing the one a host set", async () => {
+			const rpData = [
+				{
+					clientId: "client-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
+				},
+				{
+					clientId: "rp-2",
+					frontchannelLogoutUri: "https://rp2.example.com:8443/fc",
+					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
+				},
+			];
+			const clientRepo = makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					allowedRedirectUris: [],
+					allowedScopes: [],
+					postLogoutRedirectUris: ["https://trusted.example.com/logged-out"],
+				}),
+			});
+			// A host's global policy, set ahead of the route as helmet sets it.
+			const host = express();
+			host.use((_req, res, next) => {
+				res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'");
+				next();
+			});
+			host.use(buildApp({ joinedRps: rpData, clientRepo }));
+
+			const res = await postLogout(
+				host,
+				{
+					id_token_hint: await mintIdToken(),
+					post_logout_redirect_uri: "https://trusted.example.com/logged-out",
+					state: "s-1",
+				},
+				{ Accept: "text/html" },
+			);
+
+			expect(res.status).toBe(200);
+			expect(policyHeaderCount(res)).toBe(1);
+			const policy = parsePolicy(res.headers["content-security-policy"] as string);
+			expect([...(policy.get("frame-src") ?? [])].sort()).toEqual([
+				"https://rp1.example.com",
+				"https://rp2.example.com:8443",
+			]);
+			expect(
+				iframeSrcsOf(res.text)
+					.map((src) => new URL(src).origin)
+					.sort(),
+			).toEqual(["https://rp1.example.com", "https://rp2.example.com:8443"]);
+			const [script] = scriptsOf(res.text);
+			expect(script?.attributes["data-target"]).toBe(
+				"https://trusted.example.com/logged-out?state=s-1",
+			);
+			expect(policy.get("script-src")).toEqual([hashSourceOf(script?.text ?? "")]);
+			// The page's other headers are as they were.
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
+			expect(res.headers["content-type"]).toBe("text/html; charset=utf-8");
+		});
+
+		it("leaves the host's policy on an answer that is not the page", async () => {
+			const host = express();
+			host.use((_req, res, next) => {
+				res.setHeader("Content-Security-Policy", "default-src 'none'");
+				next();
+			});
+			host.use(buildApp());
+
+			const res = await postLogout(host, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(200);
+			expect(res.headers["content-security-policy"]).toBe("default-src 'none'");
 		});
 
 		const storedRP = (clientId: string, frontchannelLogoutUri: string) => ({

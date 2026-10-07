@@ -603,6 +603,10 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
 
+**フロントチャネルのページは自分の `Content-Security-Policy` を設定する**。その 1 つの応答ではホストのポリシーを置き換えるので、ホストの全体のポリシー（たとえば standalone テンプレートの `default-src 'none'`）はこのページを許可する必要がない。ページのポリシーは、描画する iframe のオリジンちょうどからのフレーム（`frame-src`。iframe を描画しないときは無し）と、リダイレクトのスクリプトをその `sha256` ハッシュで許可し、ほかはすべて `'none'` とする（`base-uri`、`form-action`、`frame-ancestors` を含む）。スクリプトはどのページでも同じ文字列で、リダイレクト先と遅延を自分の `data-` 属性から読むので、iframe の読み込みを待たずに `redirectDelayMs` の後にリダイレクトする。フロントチャネルのオリジンを CSP のソース式で表せない relying party（IPv6 リテラル、または英字・数字・`-`・`.` 以外の文字を含むホスト）には、そのページでは iframe を出さず、`logout_frontchannel_iframe_skipped` として warn で 1 回、`reason: "origin-not-a-source-expression"` とともに記録する。
+
+`renderFrontchannelLogoutHtml` は HTML だけを返し、フロントチャネルの URI が `http`/`https` のすべての relying party に iframe を出す。ページを自分で配信するホストは、適切な `Content-Security-Policy` を自分で付けて送る必要がある。relying party のフロントチャネルのオリジンからのフレーム（`frame-src`）と、ページのリダイレクトのスクリプトを、その文字列の `sha256` ハッシュ（どのページでも同じ）で許可するもの（`script-src`）である。より厳しいポリシーの下では、フレームとリダイレクトはブロックされる。
+
 残りは終了の答えで決まる:
 
 - `done` — 終了の作業がすべて済んだ。ファミリーの失効、フェデレーショントークンとセッションのインデックスの削除、relying party への通知、`UserSession` の削除。
