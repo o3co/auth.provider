@@ -2582,7 +2582,11 @@ that does not hold `mfa` is answered `401 login_required` for those actions
 rather than a step-up, and regenerating the codes is one of them: the way
 out is the operator reset
 ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)),
-then a first binding. To keep the email code sufficient, set
+then a first binding. An email factor under `MFA_EMAIL_FACTOR_ADDS_MFA=true`
+whose recorded address is no longer the account's still counts as one that
+can add `mfa`: the step-up is offered, and its challenge answers `403`
+(`mfa.email_address_mismatch`); the user re-enrolls the factor, or steps up
+with another. To keep the email code sufficient, set
 `MFA_EMAIL_FACTOR_ADDS_MFA=true`, which also lets an email login meet
 `urn:o3co:acr:mfa` — only where passwords are not reset by email. MFA is new
 since v0.16.0, so this is no break of a v0.16.0 surface; pre-releases of
