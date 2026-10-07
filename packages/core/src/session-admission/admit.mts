@@ -286,8 +286,9 @@ export const viewOf = (session: UserSession, storeRecords: boolean): SessionView
  * claim that is not a cookie's, one without a `sid`, and a record that is
  * gone or bound to none. For a route that acts on the record without
  * admitting the session — a logout — so a copy the record was renewed away
- * from does not end it; a renewal recorded after this read is not seen by
- * the caller's next step. Rejects with the store's own error, never answering
+ * from does not end it. The answer is as of this read: a renewal recorded
+ * after it does not change what the caller does next. Rejects with the
+ * store's own error, never answering
  * `unavailable`: the one exception to admission's promise that a store that
  * throws is `unavailable`, and its caller handles the rejection.
  */
