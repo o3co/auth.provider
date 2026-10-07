@@ -61,6 +61,7 @@ import {
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { sessionRequirementContract } from "@o3co/auth-provider-test-kit";
 import { describe, expect, it, type Mock, vi } from "vitest";
+import { createEmailFactor } from "#/email/factor.mjs";
 import { createRecoveryCodeFactor } from "#/recovery/factor.mjs";
 import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
@@ -767,11 +768,10 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			expected: MET,
 		},
 		{
-			row: "a record of a kind no longer installed counts as a counting factor → unmet, never a first binding: no installed factor of its kind adds mfa; under required, the baseline's step_up first",
+			row: "a record of a kind no longer installed counts as a counting factor → unmet, never a first binding: no installed factor of its kind adds mfa",
 			input: about(password(), CHANGE),
 			records: [factorRecord("u-alice", "retired-kind")],
 			expected: UNMET,
-			required: STEP_UP,
 		},
 		{
 			row: "a code's read is judged as the cookie's",
@@ -1002,6 +1002,81 @@ describe("admit — credential_change: a session without mfa is stepped up only 
 			expect(await requirement.admit(input ?? emailSession())).toEqual(expected);
 		});
 	}
+
+	it("required: a password session with no second factor, the email factor alone held, is unmet for credential_change and still stepped up for use", async () => {
+		const { requirement } = build("required", {
+			factors: [FACTORS.totp(), FACTORS.email(), RECOVERY],
+			factorStore: factorStoreHolding(EMAIL),
+		});
+		expect(await requirement.admit(about(password(), CHANGE))).toEqual(UNMET);
+		expect(await requirement.admit(about(password(), USE))).toEqual(STEP_UP);
+	});
+
+	it("required: a password session with no second factor, TOTP held, is stepped up for credential_change as before", async () => {
+		const { requirement } = build("required", {
+			factors: [FACTORS.totp(), FACTORS.email(), RECOVERY],
+			factorStore: factorStoreHolding(EMAIL, ...HOLDING_TOTP),
+		});
+		expect(await requirement.admit(about(password(), CHANGE))).toEqual(STEP_UP);
+	});
+
+	describe("an email factor that adds mfa counts only where its code can be mailed", () => {
+		const ADDING_EMAIL = createEmailFactor({ addsMfa: true, codeTtlSeconds: 600 });
+		/** Alice's email factor whose recorded address digest is `addressDigest`, its data sealed so that it opens. */
+		const emailRecord = (addressDigest: unknown): MfaFactorRecord => ({
+			...factorRecord("u-alice", "email", "f-4"),
+			data: suiteSealing().sealFactorData(
+				{ subject: "u-alice", id: "f-4", kind: "email" },
+				{ addressDigest },
+			),
+		});
+		const UNDER_THE_RING = suiteSealing().digestsFor("email").digest(["alice@example.com"]);
+		/** `input` whose session recorded the login's address as `mailAddress`. */
+		const recordedAddress = (
+			input: RequirementInput,
+			mailAddress: "address" | "none" | "unreadable",
+		): RequirementInput => ({
+			...input,
+			session:
+				input.session === null
+					? null
+					: {
+							...input.session,
+							enrollmentFacts: { ...NOT_ENROLLED_FACTS, mailAddress },
+						},
+		});
+		const admit = async (
+			record: MfaFactorRecord,
+			mailAddress: "address" | "none" | "unreadable",
+		) => {
+			const { requirement } = build("required", {
+				factors: [FACTORS.totp(), ADDING_EMAIL, RECOVERY],
+				factorStore: factorStoreHolding(record),
+			});
+			return requirement.admit(
+				recordedAddress(about(password(["pwd", "otp"], minutesAgo(1)), CHANGE), mailAddress),
+			);
+		};
+
+		it("steps up toward one whose address digest is under the ring, the session's login holding an address", async () => {
+			expect(await admit(emailRecord(UNDER_THE_RING), "address")).toEqual(STEP_UP);
+		});
+
+		it("is unmet when the key of its recorded address digest left the ring", async () => {
+			expect(
+				await admit(emailRecord({ keyId: "k-retired-from-the-ring", digest: "AAAA" }), "address"),
+			).toEqual(UNMET);
+		});
+
+		it("is unmet when the session's login held no address, or one that cannot be read", async () => {
+			expect(await admit(emailRecord(UNDER_THE_RING), "none")).toEqual(UNMET);
+			expect(await admit(emailRecord(UNDER_THE_RING), "unreadable")).toEqual(UNMET);
+		});
+
+		it("is unmet when it records no address digest it can read", async () => {
+			expect(await admit(emailRecord("not a digest"), "address")).toEqual(UNMET);
+		});
+	});
 });
 
 describe("admit — under required, credential_change is never looser than use", () => {
