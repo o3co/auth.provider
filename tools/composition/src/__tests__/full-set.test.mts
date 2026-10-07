@@ -1342,9 +1342,12 @@ describe("every added module's primary route answers in the one app", () => {
 			});
 		expect(res.status).toBe(200);
 		expect(res.body.issued_token_type).toBe(ACCESS_TOKEN_TYPE);
+		// Issued for the subject token's own audience, which the gateway's
+		// registration lists: never for an audience the subject token does not carry.
 		expect(tokenPayload(res.body.access_token as string)).toMatchObject({
 			sub: ALICE.sub,
 			azp: GATEWAY.id,
+			aud: WEB.id,
 		});
 	});
 

@@ -118,8 +118,23 @@ describe("token exchange — the calling client must be named by the subject tok
 	});
 
 	it("accepts a subject token whose azp is the calling client", async () => {
-		const result = await exchange({ aud: "other-api", azp: "resource-server" });
+		const result = await exchange(
+			{ aud: "other-api", azp: "resource-server" },
+			client({ allowedAudiences: ["other-api"] }),
+		);
 		expect(result.status).toBe(200);
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("other-api");
+	});
+
+	it("issues for a subject token accepted by its azp only an audience that token carries", async () => {
+		// Accepted by its azp, the token still names only `other-api`: the default
+		// audience, the client's own id, lies outside it.
+		const result = await exchange({ aud: "other-api", azp: "resource-server" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: resource-server",
+		});
 	});
 
 	it("refuses a subject token whose aud string and azp name another client", async () => {
@@ -182,10 +197,55 @@ describe("token exchange — allowExchangeOfTokensIssuedToOthers on the registra
 	it("accepts a subject token naming another client when the registration sets it", async () => {
 		const result = await exchange(
 			{ aud: "other-api", azp: "web-app" },
+			client({ allowExchangeOfTokensIssuedToOthers: true, allowedAudiences: ["other-api"] }),
+		);
+		expect(result.status).toBe(200);
+		// An omitted audience inherits the subject token's one audience, which the
+		// registration carries; the client's own id is not among the token's audience.
+		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("other-api");
+	});
+
+	it("refuses an omitted audience for a subject token of another client that names no audience", async () => {
+		// A subject token without `aud` is read as naming the client's own id only
+		// when it is the client's own (its azp). This one is web-app's, so it names
+		// no audience at all, and nothing is within both ceilings.
+		const logger = spyLogger();
+		const result = await exchange(
+			{ aud: undefined, azp: "web-app" },
+			client({ allowExchangeOfTokensIssuedToOthers: true }),
+			logger,
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: resource-server",
+		});
+		expect(logger.warn.mock.calls.map(([, event]) => event)).toEqual([
+			"token_exchange_audience_widening_rejected",
+		]);
+	});
+
+	it("refuses its own id named as the audience for a subject token of another client that names no audience", async () => {
+		const named = await buildGrant(client({ allowExchangeOfTokensIssuedToOthers: true })).handle(
+			ctx({
+				subject_token: await signSelfIssuedAccessToken({ aud: undefined, azp: "web-app" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "resource-server",
+			}),
+		);
+		expect(named.result).toEqual({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: resource-server",
+		});
+	});
+
+	it("issues for its own id from its own subject token that names no audience", async () => {
+		const result = await exchange(
+			{ aud: undefined, azp: "resource-server" },
 			client({ allowExchangeOfTokensIssuedToOthers: true }),
 		);
 		expect(result.status).toBe(200);
-		// An omitted audience still defaults to the calling client's own id.
 		expect(decodeJwt(tokensOf(result).access_token).aud).toBe("resource-server");
 	});
 
@@ -280,7 +340,7 @@ describe("token exchange — the client binding beside an actor token", () => {
 	it("delegates for a subject token naming another client when the registration sets the opt-out", async () => {
 		const result = await delegate(
 			{ aud: "other-api", azp: "web-app" },
-			client({ allowExchangeOfTokensIssuedToOthers: true }),
+			client({ allowExchangeOfTokensIssuedToOthers: true, allowedAudiences: ["other-api"] }),
 		);
 		expect(result.status).toBe(200);
 		expect(decodeJwt(tokensOf(result).access_token).act).toEqual({ sub: "svc-a" });

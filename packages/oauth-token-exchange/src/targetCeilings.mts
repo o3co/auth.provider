@@ -17,8 +17,9 @@
 /**
  * The scope and the targets a token exchange may name: the scope within the subject
  * token's and the client's `allowedScopes`, the audience within the client's
- * registration and the subject token's audience, and every resource equal to the
- * audience the token is minted for. What the request asks past them is refused.
+ * registration and the subject token's audience — requested, granted or defaulted —
+ * and every resource equal to the audience the token is minted for. What the
+ * request asks past them, or a default that lies past them, is refused.
  */
 
 import {
@@ -110,13 +111,14 @@ export function requestTargets(
 	}
 
 	// The audience ceilings: the client's registration (`allowedAudiences` plus its
-	// own id) and the subject token's audience (its client id when it names none).
-	// The request is held to both before the policy runs, so its refusal is its own;
-	// a policy's `grantedAudience` is held to the same two in the policy hook.
+	// own id) and the subject token's audience (see `subjectAudienceBoundary`). The
+	// request is held to both before the policy runs, so its refusal is its own; a
+	// policy's `grantedAudience` is held to the same two in the policy hook, and the
+	// default an omitted audience takes to the same two in `issuedTarget`. The
+	// subject's audience is read once, so the ceiling, the default and the final
+	// check all see the one value.
 	const clientAudienceSet = new Set([...(client.allowedAudiences ?? []), client.clientId]);
-	const subjectAudienceSet = new Set(
-		subjectAudienceBoundary(subjectValidated.aud, client.clientId),
-	);
+	const subjectAudienceSet = subjectAudienceBoundary(subjectValidated, client.clientId);
 	// Targets are read by core's `readTargetParameter`. A value that is neither a
 	// string nor an array of strings is refused, never converted
 	// (`String([["billing"]])` is `"billing"`): `invalid_target` for `resource` (RFC
@@ -162,43 +164,30 @@ export function requestTargets(
 			...new Set(requestedAudience.filter((audience) => !subjectAudienceSet.has(audience))),
 		];
 		if (widenedAudiences.length > 0) {
-			deps.logger?.warn(
-				{
-					subject: subjectValidated.sub,
-					clientId: client.clientId,
-					widenedAudiences,
-				},
-				"token_exchange_audience_widening_rejected",
-			);
-			return {
-				result: {
-					status: 400,
-					error: "invalid_target",
-					errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
-				},
-			};
+			return audienceWideningRefused(deps, client, subjectValidated, widenedAudiences);
 		}
 	}
 	// A requested `resource` must equal the issued audience (RFC 8707, checked again
-	// after the policy), which is the client id or an audience both the registration
-	// and the subject token carry. A resource outside that set can never be
-	// represented, so it is the request's own `invalid_target`, answered before a
-	// policy could turn it into a policy-ceiling 500. Absent a policy, this names the
-	// same resources the later check would.
+	// after the policy), which is an audience both the registration and the subject
+	// token carry — the client id included, only when the subject token carries it. A
+	// resource outside that set can never be represented, so it is the request's own
+	// `invalid_target`, answered before a policy could turn it into a policy-ceiling
+	// 500. It names every requested resource the request's own audience would not
+	// equal or that lies outside the ceilings (the client id, when it is the default
+	// and the subject token does not carry it).
 	if (requestedResource) {
-		const unrepresentable = requestedResource.some(
-			(resource) =>
-				resource !== client.clientId &&
-				!(clientAudienceSet.has(resource) && subjectAudienceSet.has(resource)),
-		);
-		if (unrepresentable) {
+		const withinCeilings = (resource: string) =>
+			clientAudienceSet.has(resource) && subjectAudienceSet.has(resource);
+		if (!requestedResource.every(withinCeilings)) {
 			const requestAudience = issuedAudience(
 				requestedAudience ?? undefined,
-				subjectValidated.aud,
+				subjectAudienceSet,
 				clientAudienceSet,
 				client.clientId,
 			);
-			const missingResources = requestedResource.filter((resource) => resource !== requestAudience);
+			const missingResources = requestedResource.filter(
+				(resource) => resource !== requestAudience || !withinCeilings(resource),
+			);
 			deps.logger?.warn(
 				{
 					subject: subjectValidated.sub,
@@ -229,20 +218,24 @@ export function requestTargets(
 	};
 }
 
-/** The audience the token is minted for, and every requested resource held equal to it. */
+/**
+ * The audience the token is minted for, within both audience ceilings whether it was
+ * requested, granted or defaulted, and every requested resource held equal to it.
+ */
 export function issuedTarget(
 	deps: Pick<GrantDependencies, "logger">,
 	client: PublicClient,
 	subjectValidated: ValidatedToken,
 	{
 		clientAudienceSet,
+		subjectAudienceSet,
 		requestedResource,
-	}: Pick<RequestTargets, "clientAudienceSet" | "requestedResource">,
+	}: Pick<RequestTargets, "clientAudienceSet" | "subjectAudienceSet" | "requestedResource">,
 	grantedAudience: readonly string[] | undefined,
 ): { readonly audienceForToken: string } | GrantHandlerResult {
 	const audienceForToken = issuedAudience(
 		grantedAudience,
-		subjectValidated.aud,
+		subjectAudienceSet,
 		clientAudienceSet,
 		client.clientId,
 	);
@@ -268,7 +261,39 @@ export function issuedTarget(
 			};
 		}
 	}
+	// A requested or granted audience already met both ceilings; this holds the
+	// default an omitted audience takes to them too. The client's own id is the one
+	// default that can lie outside the subject token's audience, and it is refused
+	// as a requested one would be. A requested resource reaching here equals the
+	// audience and already met both, so only a request naming no resource is refused.
+	if (!(clientAudienceSet.has(audienceForToken) && subjectAudienceSet.has(audienceForToken))) {
+		return audienceWideningRefused(deps, client, subjectValidated, [audienceForToken]);
+	}
 	return { audienceForToken };
+}
+
+/** An audience outside the subject token's: `invalid_target` (RFC 8693 §2.2.2), logged. */
+function audienceWideningRefused(
+	deps: Pick<GrantDependencies, "logger">,
+	client: PublicClient,
+	subjectValidated: ValidatedToken,
+	widenedAudiences: readonly string[],
+): GrantHandlerResult {
+	deps.logger?.warn(
+		{
+			subject: subjectValidated.sub,
+			clientId: client.clientId,
+			widenedAudiences,
+		},
+		"token_exchange_audience_widening_rejected",
+	);
+	return {
+		result: {
+			status: 400,
+			error: "invalid_target",
+			errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
+		},
+	};
 }
 
 /**
@@ -289,40 +314,44 @@ const loggedResources = (
 /**
  * The single audience an exchanged token is minted for:
  * - an explicit audience (request or policy, already bounded): its first entry;
- * - omitted, with a single subject audience the client is registered for: that;
+ * - omitted, with a subject audience of one value the client is registered for:
+ *   that;
  * - otherwise the client's own id, so omitting `audience` cannot mint for an
- *   audience outside the client's allowlist.
+ *   audience outside the client's allowlist. `issuedTarget` refuses it when the
+ *   subject token's audience does not carry it.
  *
  * `generateToken` carries one audience, so only the first `grantedAudience` entry
  * is used; several audiences would need introspection by every party.
  */
 function issuedAudience(
 	grantedAudience: readonly string[] | undefined,
-	subjectAud: ValidatedToken["aud"],
+	subjectAudienceSet: ReadonlySet<string>,
 	clientAudienceSet: ReadonlySet<string>,
 	clientId: string,
 ): string {
 	if (grantedAudience && grantedAudience.length > 0) return grantedAudience[0] ?? clientId; // `?? clientId` is forward-compat for noUncheckedIndexedAccess
-	const single =
-		typeof subjectAud === "string"
-			? subjectAud
-			: Array.isArray(subjectAud) && subjectAud.length === 1
-				? subjectAud[0]
-				: undefined;
-	if (typeof single === "string" && clientAudienceSet.has(single)) return single;
+	if (subjectAudienceSet.size === 1) {
+		const [single] = subjectAudienceSet;
+		if (single !== undefined && clientAudienceSet.has(single)) return single;
+	}
 	return clientId;
 }
 
+/**
+ * The subject token's audience, read from the validator's answer once: the
+ * non-empty strings of its `aud`, de-duplicated. A subject token naming none is
+ * read as naming the client's own id only when it is the client's own (its `azp`
+ * is the client's id); a token of another client naming none names no audience,
+ * so nothing is within it.
+ */
 function subjectAudienceBoundary(
-	audience: ValidatedToken["aud"],
+	subjectValidated: ValidatedToken,
 	clientId: string,
-): readonly string[] {
-	if (typeof audience === "string" && audience.length > 0) return [audience];
-	if (Array.isArray(audience)) {
-		const values = audience.filter(
-			(value): value is string => typeof value === "string" && value.length > 0,
-		);
-		return values.length > 0 ? values : [clientId];
-	}
-	return [clientId];
+): ReadonlySet<string> {
+	const audience: unknown = subjectValidated.aud;
+	const values = (Array.isArray(audience) ? audience : [audience]).filter(
+		(value): value is string => typeof value === "string" && value.length > 0,
+	);
+	if (values.length > 0) return new Set(values);
+	return new Set(subjectValidated.claims.azp === clientId ? [clientId] : []);
 }

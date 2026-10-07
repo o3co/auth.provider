@@ -826,6 +826,42 @@ The boot refusals you can meet, with their messages, are in
   through its `aud` or the opt-out. See the
   [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
   note 18.
+- **BREAKING: token exchange issues only an audience the subject token
+  carries.** An exchange that names no `audience` used to be issued for the
+  calling client's id whenever the subject token's audience was not a single
+  value the client is registered for, also when that audience did not name
+  the client (a subject token accepted by its `azp`). The default is now held
+  to the subject token's audience as a requested audience is. When the
+  request names no `audience`, the policy grants none, the default falls back
+  to the client's id, and the subject token's `aud` does not include that id,
+  the exchange is `400 invalid_target` / `audience_widening_not_allowed:
+  <client_id>`, logged at warn as `token_exchange_audience_widening_rejected`.
+  A subject token's single audience that the client is registered for is
+  still inherited, as before.
+  A `resource` equal to the client's id is held to the same rule and is
+  `400 invalid_target` / `requested_resources_not_in_audience`. A subject
+  token with no `aud` is read as naming the client's id only when it is the
+  client's own (its `azp` is the client's id), and then still defaults to
+  it; a token of another client with no `aud` names no audience, so a
+  requested or default audience for it is `400 invalid_target` (a policy
+  that grants one is the existing `500 server_error`, and without
+  `allowExchangeOfTokensIssuedToOthers` such a token is refused earlier by
+  the caller binding, `400 invalid_request`), and
+  `GrantPolicyRequest.originalAudience` is empty for it. A policy's
+  `grantedAudience` replaces the default as before (#1602). A client
+  registered with `allowExchangeOfTokensIssuedToOthers: true`, such as a
+  gateway, is the one most often affected: it no longer receives a token for
+  its own id from a token issued to another client, when that token's
+  audience does not include the calling client's id (or it names none). **What to do:** grep for
+  `token_exchange_audience_widening_rejected` against a staging copy. For a
+  client it names, list the subject tokens' audience in the registration's
+  `allowedAudiences` (an exchange naming no `audience` inherits a subject
+  token's single audience the registration lists) or name it in `audience`,
+  or present a subject token whose `aud` contains the client's own id. A
+  token of another client that names no audience cannot be exchanged; have
+  its issuer stamp an `aud`. See the
+  [oauth-token-exchange README](../packages/oauth-token-exchange/README.md#security-notes),
+  note 4.
 - **BREAKING: a refresh keeps the audience of the token it presents.** On
   `refresh_token`, the presented refresh token's `aud` is the ceiling and the
   default for the new tokens' audience, as its scope already is. A plain
