@@ -486,7 +486,7 @@ Implemented:
 
 Not implemented:
 
-- The passwordless grant stamping `hwk` or `swk` by the backup state: it stamps `hwk` for every passkey
+- The passwordless grant stamping `hwk` or `swk` by the backup state: it stamps `hwk` for every passkey, and keeps doing so (decided; see O9 in the [MFA ADR](../core/docs/adr/2026-09-25-multi-factor-authentication.md)). Only a second factor's `amr` tells a device-bound key from a backup-eligible (multi-device) one, as the authenticator reports it
 - Audience derivation from `resource` for this grant — `client_credentials`, `refresh_token` and `/authorize` derive it; here `resource` reaches the policy hook and nothing else, and the audience a passkey token gets is the rule on `AuthenticatedClient.allowedAudiences` ([#520](https://github.com/o3co/auth.provider/issues/520))
 - Attestation root verification for the formats the library ships no trust anchors for (`packed`, `tpm`, `fido-u2f`) — see [`attestationPreference` default](#security--attestationpreference-default)
 - Proof of possession at registration — see [Known limitations](#known-limitations)

@@ -880,7 +880,9 @@ ADR's D5, D21, D24).
   transaction's attempts). How many codes a password holder can have sent
   during a hold is that limit: set it on your mail sender (see **Mail**).
   `@o3co/auth-provider-standard`'s SMTP sender has no limit setting of its
-  own: with it, the cap is your relay's quota. Apart from the sender, your
+  own: with it, the cap is your relay's quota, so set a per-recipient limit
+  at the relay, refused with a reply the sender reads as a limit (see
+  **Mail failures**). Apart from the sender, your
   `rateLimiter` bounds the MFA requests of each client address
   (`mfa:ip:<ip>`), challenges included: its `limits.mfa`, or else its
   `defaultLimit`; with the limiter declared absent, nothing does. A held proof is answered
@@ -1195,6 +1197,17 @@ ADR's D5, D21, D24).
   action, and binds its first factor at that login. Under `required` such a
   session's actions read the factor store once each (whether the subject
   holds a counting factor), so a factor store outage answers them `503`.
+- **Replica clocks and recent MFA.** Recent MFA (`mfa.manage.maxAgeSeconds`)
+  is read from the time a session's second factor was recorded (`mfaAt`) (or,
+  for an account with no counting factor, its sign-in), on the clock of the
+  replica that recorded it. A time up to `DEFAULT_CLOCK_SKEW_MS` (5 minutes)
+  ahead of the reading replica's clock reads as now, and one further ahead
+  is not recent, so replica clocks that disagree can lengthen the window by
+  up to 5 minutes. A session's account-email proof is read with the same
+  allowance — accepted when given within the window plus 5 minutes — but
+  the store answers it only until its time plus the window. Keep the
+  replicas' clocks synchronised (NTP; see
+  [Replica clocks and subject revocation](#replica-clocks-and-subject-revocation)).
 - **Renewing the session id after an escalation.** A session whose
   authentication is raised in place — a step-up of its second factor, or a
   factor bound in it from the account page — is
