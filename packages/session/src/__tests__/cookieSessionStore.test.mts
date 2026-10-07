@@ -29,6 +29,9 @@
  * session the request carried a cookie for) and report the same outage twice.
  * These cases pin that the store sees one write.
  *
+ * A logout that destroyed the session expires the cookie express-session
+ * set, with the attributes it was set with.
+ *
  * Booted through `createApp` with the real express-session and connect-redis,
  * over a node-redis client faked in memory (the one seam).
  */
@@ -596,5 +599,42 @@ describe("a cookie-session record the store holds but cannot read", () => {
 		expect(res.status).toBe(503);
 		expect(logger.warn).not.toHaveBeenCalled();
 		expect(logger.error).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("the session cookie at logout, through the store's own cookie", () => {
+	/** A `Set-Cookie` line's attributes, lower-cased, with its value and expiry left out. */
+	const attributesOf = (line: string): string[] =>
+		line
+			.split(";")
+			.slice(1)
+			.map((part) => part.trim().toLowerCase())
+			.filter((part) => !part.startsWith("expires=") && !part.startsWith("max-age="))
+			.sort();
+	const sessionCookieLines = (res: request.Response): string[] => {
+		const raw = res.headers["set-cookie"] as unknown as string[] | string | undefined;
+		const lines = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+		return lines.filter((line) => line.startsWith("test.sid="));
+	};
+
+	it("POST /session/logout expires the cookie express-session set, with the same attributes", async () => {
+		const agent = request.agent(await boot(spyLogger()));
+		const written = await agent.get("/probe/write");
+		expect(written.status).toBe(200);
+		const [setLine] = sessionCookieLines(written);
+		expect(setLine).toBeDefined();
+		const csrf = await agent.get("/session/csrf");
+
+		const res = await agent
+			.post("/session/logout")
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string);
+
+		expect(res.status).toBe(200);
+		const cleared = sessionCookieLines(res);
+		expect(cleared).toHaveLength(1);
+		expect(cleared[0]).toMatch(/^test\.sid=;/);
+		expect(cleared[0]).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+		expect(attributesOf(cleared[0] as string)).toEqual(attributesOf(setLine as string));
+		expect((await agent.get("/probe/read")).body).toEqual({ value: null });
 	});
 });

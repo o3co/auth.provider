@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -667,11 +667,16 @@ read, that is logged as `logout_user_session_read_failed` and the logout
 answers `503 temporarily_unavailable`: it closes nothing and keeps the express
 session for a retry.
 
-**The cookie session's destroy.** If destroying the express session fails —
+**The cookie session's destroy.** Once the express session is destroyed, the
+answer also expires the session cookie: a `Set-Cookie` for `session-store.name`
+dated in the past, with the attributes the cookie is set with (`Path=/`,
+`HttpOnly`, and `session-store.domain`, `session-store.secure` and
+`session-store.sameSite`), so the browser drops it. If destroying the express
+session fails —
 the cookie store's outage — the user is not logged out, so the response is
 `503 temporarily_unavailable`, logged once at error level as
 `session_logout_store_unavailable` (`store: "cookie_session"`, `step:
-"destroy"`, the `sid`), and the client retries; by then the session's close has
+"destroy"`, the `sid`), and the client retries, the cookie left as it is; by then the session's close has
 committed, so `/authorize` refuses the surviving cookie on its own account. A
 session carrying no `sid` has nothing to close and only the express session is
 destroyed.

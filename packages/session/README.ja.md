@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-10-06
+最終更新: 2026-10-07
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージの type がプロバイダーと並べて作るリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -195,7 +195,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 - コミットされなかった終了、または例外を投げたライフサイクル（エラーの種類を問わず、`RangeError` も含む）は `503 temporarily_unavailable` を返し、再試行のために express session を残す。コミットが live なレコードを見つけず（ストアの時計でセッションの終わりが過ぎていた）、保存するレコードなしにその場で走らせた作業が失敗した終了もこれに含まれ、再試行がそれを再び走らせる。`session_logout_store_unavailable`（error、`store: "session_lifecycle"`、`step: "close"`、`sid`）として 1 回ログに出し、エラーの射影はライフサイクルが reject したときに持つ。`done`・`pending` 以外の答えも同じ障害で、射影するエラーは無い。
 - 終了の作業の一つが失敗すると core の `session_close_item_failed`（warn、`item` 付き）となり、終了は保留のまま残る。`item: "delete_user_session"` にアラートを掛ける。
 
-**cookie セッションの破棄。** express session の破棄が失敗する — cookie ストアの障害 — とユーザーはログアウトできていないので、応答は `503 temporarily_unavailable` で、error レベルで 1 行、`session_logout_store_unavailable`（`store: "cookie_session"`、`step: "destroy"`、`sid`）としてログに出て、クライアントは再試行する。その時点でセッションの終了はコミット済みなので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには終了するものが無く、express session だけが破棄される。
+**cookie セッションの破棄。** express session を破棄すると、応答はセッション cookie も失効させる: `session-store.name` の cookie を過去の日付で、cookie を設定したときと同じ属性（`Path=/`、`HttpOnly`、`session-store.domain`、`session-store.secure`、`session-store.sameSite`）で返す `Set-Cookie` で、ブラウザはそれを捨てる。express session の破棄が失敗する — cookie ストアの障害 — とユーザーはログアウトできていないので、応答は `503 temporarily_unavailable` で、error レベルで 1 行、`session_logout_store_unavailable`（`store: "cookie_session"`、`step: "destroy"`、`sid`）としてログに出て、cookie はそのまま残り、クライアントは再試行する。その時点でセッションの終了はコミット済みなので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには終了するものが無く、express session だけが破棄される。
 
 ### 状態変更ルートの CSRF 対策
 
