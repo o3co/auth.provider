@@ -48,7 +48,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { repositoriesModuleFor, templateReference } from "../modules.mjs";
-import { repositoriesSectionSchema } from "../sections.mjs";
+import { keyStoreSectionSchema, repositoriesSectionSchema } from "../sections.mjs";
 import {
 	type BothPhases,
 	bothPhasesOf,
@@ -186,16 +186,18 @@ describe("a token the Store refuses, seen from outside the booted app", () => {
 		ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 	};
 
+	// The template's `key-store` section, read by its own schema, without the
+	// section's relocation bridge.
 	const testKeyStoreModule = defineModule({
-		name: "test:key-store",
-		requires: ["config"] as const,
+		name: "key-store",
+		section: { schema: keyStoreSectionSchema },
 		provides: {
-			keyStore: async ({ config: c }) => {
+			keyStore: async ({ section }) => {
 				const factory = createKeyStoreFactory();
 				registerBuiltinKeyStores(factory);
 				return factory.create({
 					type: "local",
-					...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
+					...(section.local ?? {}),
 				});
 			},
 		},

@@ -115,10 +115,11 @@ lockfile. Then:
     too: the packages no longer declare those slots, and nothing reads
     them.
   - Code of a fork's own that read `core.federations` from what
-    `readSwitches` answers gets nothing there now. Read it at boot, from the
-    parsed configuration (a module that requires `config`, as the bridges
-    did), or let a federation type module handle the entry, which core
-    hands it at boot: the template bundles Google's and OIDC's, and the
+    `readSwitches` answers gets nothing there now. Read what core reads of
+    each entry at boot, from the `federationSettings` slot (a module that
+    requires `config` to read it, as the bridges did, now refuses boot:
+    [below](#slots-admission-and-wiring)), or let a federation type module
+    handle the entry, which core hands it at boot: the template bundles Google's and OIDC's, and the
     GitHub and Apple packages ship `githubFederationTypeModule()` and
     `appleFederationTypeModule()`.
   - Each entry's keys are now read by its type's strict schema: a key the
@@ -1063,15 +1064,25 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
-- **A module's write to the `config` slot throws.** Every module that
-  requires `config` is handed the configuration boot parsed as plain data
-  frozen all the way down: one object those modules and core share. A
-  factory that changes a value there, to steer what a later module or core
-  reads, now throws a `TypeError` in strict-mode code (every ES module),
-  which refuses boot as the factory's failure (`provides-factory-failed`,
-  `contribute-factory-failed`); in sloppy-mode code the write is silently
-  ignored. Either way the value does not change. Copy what the module needs,
-  or set the value in the configuration (#1492).
+- **BREAKING: a module outside core that requires `config` refuses boot.**
+  The `config` slot, the whole configuration, is read by the modules core ships
+  alone, known by the manifest objects themselves. A module of your own that
+  lists `config` in its `requires` or its `optional` — switched on or not —
+  now refuses boot before any factory runs (`reserved-component-key`,
+  details `{ componentKey: "config", source, module }`), the message naming
+  the module and the slot; so does a module named as one of core's, or a
+  copy of one. Declare the module's own section (`section: { schema }`, read
+  at the module's name) and read it as `deps.section`; read what another
+  module owns through its slot (`federationSettings` for `core.federations`,
+  `outboundPolicy`, `oauthTokenSettings`, `tokenBindingSettings`,
+  `deploymentMode`). Code outside a module reads the parsed configuration
+  from the handle, `handle.components.config` (#728 B12).
+- **A write to the `config` slot throws.** The slot holds the configuration
+  boot parsed as plain data frozen all the way down: one object core's
+  modules, core and the handle share. Code that changes a value there now
+  throws a `TypeError` in strict-mode code (every ES module); in sloppy-mode
+  code the write is silently ignored. Either way the value does not change.
+  Copy what you need, or set the value in the configuration (#1492).
 - **A write to the audit fan-out throws.** When a module contributes
   `auditHooks`, the `auditSink` slot holds core's fan-out, and it is now
   frozen: assigning to it (`deps.auditSink.record = ...`) throws a

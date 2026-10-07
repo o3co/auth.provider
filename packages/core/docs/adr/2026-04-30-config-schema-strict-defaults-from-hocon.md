@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-04-30).
+Accepted (2026-04-30). Amended 2026-10-07 (whose schema a section is, and who reads the
+whole configuration: see the end of Decision).
 
 ## Context
 
@@ -68,6 +69,19 @@ Concretely:
   `package.json#exports` (per A2-γ spec §6.1 + §7), so sibling
   packages and downstream applications can reuse the same baseline
   without copying it.
+
+Amended 2026-10-07 ([#728](https://github.com/o3co/auth.provider/issues/728),
+B12). The schemas above are no longer one schema over the whole
+configuration that every module reads. Each module declares the schema of
+its own section, at its name; boot parses that section and hands it to the
+module as `deps.section`, and core's schema declares `core {}` alone. The
+whole configuration, the `config` slot, is core's: only the module objects
+core ships read it, and boot refuses any other module that lists it in its
+`requires` or its `optional`, switched on or not, before any factory runs
+(`reserved-component-key`, naming the module and the slot). What this ADR
+decides holds for every section's schema: it describes a shape and carries
+no default; the defaults live in the `reference.conf` of the package that
+owns the section (ADR 2026-05-13).
 
 ## Rationale
 

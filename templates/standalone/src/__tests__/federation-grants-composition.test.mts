@@ -44,6 +44,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
+import { keyStoreSectionSchema } from "../sections.mjs";
 import { installGracefulShutdown } from "../shutdown.mjs";
 import {
 	type BothPhases,
@@ -187,16 +188,18 @@ const testRepositoriesModule = defineModule({
 	},
 });
 
+// The template's `key-store` section, read by its own schema, without the
+// section's relocation bridge.
 const testKeyStoreModule = defineModule({
-	name: "test:key-store",
-	requires: ["config"] as const,
+	name: "key-store",
+	section: { schema: keyStoreSectionSchema },
 	provides: {
-		keyStore: async ({ config: c }) => {
+		keyStore: async ({ section }) => {
 			const factory = createKeyStoreFactory();
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
+				...(section.local ?? {}),
 			});
 		},
 	},

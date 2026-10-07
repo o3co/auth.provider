@@ -60,6 +60,11 @@ import type { SessionCloseNotifier } from "../session-lifecycle/notifier.mjs";
 // satisfies `B extends BootstrapMap` and modules can name them in `requires`.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
+		/**
+		 * The whole configuration, as stage 1 parsed it. Read by core's own
+		 * modules alone: any other module that lists it refuses boot
+		 * (`reserved-component-key`) and reads its own section as `deps.section`.
+		 */
 		readonly config: AppConfig;
 		readonly pathResolver: PathResolver;
 		/**
@@ -1056,6 +1061,10 @@ export interface InvalidRouteAdvertisementPathDetails {
  *   configuration section: its deps would carry both under one name, the
  *   section shadowing the slot. Elsewhere `section` is an ordinary slot, so
  *   only this module is refused (`module`).
+ * - `config`, the whole configuration, required or read optionally by a
+ *   module that is not one of core's own (`module`), switched on or not: a
+ *   module reads its own section as `deps.section`, and what another module
+ *   owns through a slot.
  * - `__proto__` as an own key of a host map (`source`): set on the component
  *   map it would replace the prototype, so every key of its value would read
  *   as a component no module provided.

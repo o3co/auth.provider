@@ -48,6 +48,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import type { Switches } from "../configPath.mjs";
+import { keyStoreSectionSchema } from "../sections.mjs";
 import { capturedRenames, inProcessAdapters } from "./library-references.fixture.mjs";
 
 const keyPair = generateKeyPairSync("ed25519", {
@@ -161,16 +162,18 @@ const testRepositoriesModule = defineModule({
 	} as never,
 });
 
+// The template's `key-store` section, read by its own schema, without the
+// section's relocation bridge.
 const testKeyStoreModule = defineModule({
-	name: "test:key-store",
-	requires: ["config"] as const,
+	name: "key-store",
+	section: { schema: keyStoreSectionSchema },
 	provides: {
-		keyStore: async ({ config: c }) => {
+		keyStore: async ({ section }) => {
 			const factory = createKeyStoreFactory();
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
+				...(section.local ?? {}),
 			});
 		},
 	},

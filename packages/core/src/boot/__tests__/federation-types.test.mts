@@ -94,7 +94,7 @@ function acmePackage(
 	);
 	const module = defineModule({
 		name: "federation-acme",
-		requires: ["config"],
+		requires: ["federationSettings"],
 		contributes: {
 			federationTypes: {
 				acme: {
@@ -187,12 +187,12 @@ describe("federationTypes — declared by type", () => {
 		const provider = await registered?.create(instance);
 		expect(provider?.name).toBe("corp");
 		expect(factory).toHaveBeenCalledWith(
-			expect.objectContaining({ config: expect.anything() }),
+			expect.objectContaining({ federationSettings: expect.anything() }),
 			instance,
 		);
 		expect(await registered?.redirectPolicy(instance)).toMatchObject({ for: "corp" });
 		expect(redirectPolicy).toHaveBeenCalledWith(
-			expect.objectContaining({ config: expect.anything() }),
+			expect.objectContaining({ federationSettings: expect.anything() }),
 			instance,
 		);
 	});
@@ -247,11 +247,14 @@ describe("core.federations — dispatched by type", () => {
 		// Core's keys are stripped before the type's strict schema reads the entry;
 		// the callback URL, core's, comes beside it.
 		expect(factory).toHaveBeenCalledTimes(2);
-		expect(factory).toHaveBeenCalledWith(expect.objectContaining({ config: expect.anything() }), {
-			name: "corp",
-			callbackURL: "https://auth.example/session/federation/corp/callback",
-			entry: { issuer: "https://corp.example" },
-		});
+		expect(factory).toHaveBeenCalledWith(
+			expect.objectContaining({ federationSettings: expect.anything() }),
+			{
+				name: "corp",
+				callbackURL: "https://auth.example/session/federation/corp/callback",
+				entry: { issuer: "https://corp.example" },
+			},
+		);
 		expect(redirectPolicy).toHaveBeenCalledWith(expect.anything(), {
 			name: "partner",
 			callbackURL: "https://auth.example/session/federation/partner/callback",
