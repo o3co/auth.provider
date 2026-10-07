@@ -1640,6 +1640,36 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		expect(captured?.resource).toEqual(["https://api.example.com"]);
 	});
 
+	it("passes the subject token's audience to the policy hook as originalAudience", async () => {
+		let captured = null as GrantPolicyRequest | null;
+		const capturing: GrantPolicyHook = {
+			kind: "capture",
+			async evaluate(req) {
+				captured = req;
+				return { outcome: "allow" };
+			},
+		};
+		const g = buildGrant({
+			grantPolicy: capturing,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["https://api.example.com"] }),
+			),
+		});
+		const token = await signSelfIssuedAccessToken({
+			aud: ["https://api.example.com", "client-a"],
+			family_id: "fam-1",
+		});
+		await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(captured?.originalAudience).toEqual(["https://api.example.com", "client-a"]);
+	});
+
 	it("rejects resource when it is missing from the issued-token audience", async () => {
 		const policy: GrantPolicyHook = {
 			kind: "resource-missing",
