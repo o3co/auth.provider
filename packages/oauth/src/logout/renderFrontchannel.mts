@@ -13,6 +13,15 @@
  * limitations under the License.
  */
 
+/**
+ * The OIDC Front-Channel Logout 1.0 page: its markup (a hidden iframe per
+ * usable relying party and the post-logout redirect) and its own
+ * Content-Security-Policy, which allows frames only from the origins it
+ * renders (`frame-src`) and the static redirect script only by its hash.
+ * `renderFrontchannelLogoutPage`, internal, returns both for the logout route
+ * to serve; the public `renderFrontchannelLogoutHtml` returns the markup alone.
+ */
+
 import { createHash } from "node:crypto";
 import type { Logger, RedirectUriRejection } from "@o3co/auth-provider-core";
 import {
