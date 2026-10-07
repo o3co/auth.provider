@@ -17,7 +17,10 @@
 /**
  * boot/config-slot.mts: who may read the `config` slot, the whole
  * configuration — core's own modules, known by identity — and the stage-1
- * refusal of every other module that lists it.
+ * refusal of every other module that lists it. The check guards what a module
+ * declares: deployment code runs in-process and is trusted, so code that
+ * rewrites one of core's own module objects keeps that object's identity, and
+ * is outside what this check guards.
  */
 
 import type { Module } from "../modules/manifest/module-spec.mjs";

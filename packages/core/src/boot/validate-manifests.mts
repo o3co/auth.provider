@@ -274,9 +274,20 @@ function normaliseChannel(
 }
 
 /**
+ * A manifest's `requires` or `optional`, read once: a list copied and frozen,
+ * so what stage 1 checks is what planning and every factory's deps use,
+ * whatever later changes the manifest's own array; absent, the empty list.
+ * A value that is not a list is kept as read, for the checks to meet.
+ */
+const dependencyList = (value: unknown): readonly ComponentKey[] =>
+	Array.isArray(value)
+		? Object.freeze([...(value as readonly ComponentKey[])])
+		: ((value ?? []) as readonly ComponentKey[]);
+
+/**
  * Flatten a raw Module manifest into a NormalisedModule for fast lookup
  * by subsequent checks. Collects:
- * - `requires` / `optional` key arrays
+ * - `requires` / `optional` key lists, copied and frozen
  * - `providesKeys` from `Object.keys(module.provides ?? {})`
  * - `contributesEntries` / `overridesEntries` as flat ContributionEntry[],
  *   and `containers`, each kind's container as read
@@ -285,8 +296,8 @@ function normaliseChannel(
  * @internal
  */
 function normaliseModule(m: Module): NormalisedModule {
-	const requires = (m.requires ?? []) as readonly ComponentKey[];
-	const optional = (m.optional ?? []) as readonly ComponentKey[];
+	const requires = dependencyList(m.requires);
+	const optional = dependencyList(m.optional);
 	const providesKeys = Object.keys(m.provides ?? {}) as ComponentKey[];
 	// Read once: the closure check refuses and describes what was read here.
 	const authoritativeDeclared: unknown = m.authoritative;

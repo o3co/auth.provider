@@ -163,6 +163,91 @@ describe("a module outside core that lists config refuses boot", () => {
 	});
 });
 
+/**
+ * A module whose lists gain `config` after stage 1 read them: `grow` appends
+ * it to the list named, from the hook given, and `seen` records the deps its
+ * factory is handed.
+ */
+function growingModule(
+	name: string,
+	list: "requires" | "optional",
+	hook: "isEnabled" | "schema" | "provider",
+	seen: { deps?: Record<string, unknown> },
+): readonly Module[] {
+	const requires: string[] = [];
+	const optional: string[] = [];
+	const grow = () => {
+		(list === "requires" ? requires : optional).push("config");
+	};
+	const reader = defineModule({
+		name,
+		requires: requires as never,
+		optional: optional as never,
+		section: {
+			schema: z.object({}).transform((value) => {
+				if (hook === "schema") grow();
+				return value;
+			}),
+			isEnabled: () => {
+				if (hook === "isEnabled") grow();
+				return true;
+			},
+		},
+		provides: {
+			[`${name}.slot`]: (deps: Record<string, unknown>) => {
+				seen.deps = { ...deps };
+				return {};
+			},
+		},
+		lifecycle: { [`${name}.slot`]: { eager: true } },
+	} as never);
+	if (hook !== "provider") return [reader];
+	// A provider that runs first, and grows the reader's list as it does.
+	const earlier = defineModule({
+		name: `${name}-earlier`,
+		provides: {
+			[`${name}.earlier`]: () => {
+				grow();
+				return {};
+			},
+		},
+		lifecycle: { [`${name}.earlier`]: { eager: true } },
+	} as never);
+	return [earlier, reader];
+}
+
+describe("the lists stage 1 checked are the lists boot uses", () => {
+	for (const list of ["requires", "optional"] as const) {
+		for (const hook of ["isEnabled", "schema", "provider"] as const) {
+			it(`hands no config to a module whose ${list} gains it from its ${hook} after the check`, async () => {
+				const seen: { deps?: Record<string, unknown> } = {};
+				const name = `acme-grows-${list}-${hook}`;
+				let handle: Awaited<ReturnType<typeof createApp>> | undefined;
+				try {
+					handle = await createApp({
+						modules: growingModule(name, list, hook, seen),
+						bootstrapComponents: {
+							...boot(),
+							config: { ...(boot().config as object), [name]: {} },
+						} as never,
+					});
+				} catch (err) {
+					// A refusal is as good: the configuration was not handed over.
+					expect(err).toBeInstanceOf(BootError);
+					expect(seen.deps?.config).toBeUndefined();
+					return;
+				}
+				try {
+					expect(seen.deps).toBeDefined();
+					expect(seen.deps).not.toHaveProperty("config");
+				} finally {
+					await handle.dispose();
+				}
+			});
+		}
+	}
+});
+
 describe("core's own modules read config", () => {
 	it("boots every module core ships that lists config", async () => {
 		const notifier = defineModule({
@@ -218,15 +303,12 @@ describe("core's own modules read config", () => {
 		// The scan reads module objects at all: not vacuously passing.
 		expect(exported.length).toBeGreaterThan(5);
 
-		const readers = exported.filter(listsConfig).map((m) => m.name);
-		expect([...new Set(readers)].sort()).toEqual(
-			CONFIG_READING_CORE_MODULES.map((m) => m.name).sort(),
-		);
-		// Each listed module is the object core exports, and still lists config:
-		// the list only shrinks.
-		for (const m of CONFIG_READING_CORE_MODULES) {
-			expect(exported).toContain(m);
-			expect(listsConfig(m)).toBe(true);
-		}
+		// By identity: the reader objects core exports are the allow-list's
+		// objects, both ways, and each still lists config.
+		const readers = new Set(exported.filter(listsConfig));
+		const allowed = new Set(CONFIG_READING_CORE_MODULES);
+		expect([...readers].filter((m) => !allowed.has(m)).map((m) => m.name)).toEqual([]);
+		expect([...allowed].filter((m) => !readers.has(m)).map((m) => m.name)).toEqual([]);
+		expect(readers.size).toBe(CONFIG_READING_CORE_MODULES.length);
 	});
 });

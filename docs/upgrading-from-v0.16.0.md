@@ -1028,8 +1028,8 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
-- **A module outside core that requires `config` refuses boot.** The
-  `config` slot, the whole configuration, is read by the modules core ships
+- **BREAKING: a module outside core that requires `config` refuses boot.**
+  The `config` slot, the whole configuration, is read by the modules core ships
   alone, known by the manifest objects themselves. A module of your own that
   lists `config` in its `requires` or its `optional` — switched on or not —
   now refuses boot before any factory runs (`reserved-component-key`,
