@@ -957,7 +957,7 @@ describe("/oauth/logout through the session lifecycle: the upstream end-session"
 
 describe("POST /oauth/federation/:name/logout through the session lifecycle", () => {
 	async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<string> {
-		return new SignJWT({ sub: "u-1", sid: SID, azp: "client-1", ...extra })
+		return new SignJWT({ sub: "u-1", sid: SID, azp: "client-1", aud: "client-1", ...extra })
 			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
 			.setExpirationTime("1h")
 			.setIssuedAt()

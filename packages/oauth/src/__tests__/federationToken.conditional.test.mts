@@ -62,7 +62,7 @@ const SID = "sid-1";
 const NAME = "google";
 
 const mintAccessToken = (): Promise<string> =>
-	new SignJWT({ sub: "u-1", sid: SID, azp: "client-1", family_id: "fam-1" })
+	new SignJWT({ sub: "u-1", sid: SID, azp: "client-1", aud: "client-1", family_id: "fam-1" })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
 		.setExpirationTime("1h")
 		.setIssuedAt()

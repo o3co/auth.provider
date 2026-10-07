@@ -505,7 +505,7 @@ describe("POST /oauth/federation/:name/token through the session lifecycle", () 
 			.post("/oauth/federation/google/token")
 			.set(
 				"Authorization",
-				`Bearer ${await mintAccessToken({ sid, azp: "client-1", family_id: "fam-1" })}`,
+				`Bearer ${await mintAccessToken({ sid, azp: "client-1", aud: "client-1", family_id: "fam-1" })}`,
 			)
 			.send();
 

@@ -219,11 +219,18 @@ export const idTokenHint = (sid: string): string => signed("JWT", { aud: CLIENT_
 
 /**
  * An access token for the session as the authorization-code grant issues it
- * to the client: `azp`, `sid` and a refresh-token `family_id`. The `session`
- * grant's token names no family, and the federation token route asks for one.
+ * to the client, for the client itself: `aud` and `azp`, `sid` and a
+ * refresh-token `family_id`. The `session` grant's token names no family, and
+ * the federation token route asks for one.
  */
 export const accessTokenWithFamily = (sid: string): string =>
-	signed("at+jwt", { azp: CLIENT_ID, sid, family_id: "family-1", scope: "openid" });
+	signed("at+jwt", {
+		aud: CLIENT_ID,
+		azp: CLIENT_ID,
+		sid,
+		family_id: "family-1",
+		scope: "openid",
+	});
 
 const claimsOf = (jwt: string): Record<string, unknown> =>
 	JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64url").toString("utf8")) as Record<

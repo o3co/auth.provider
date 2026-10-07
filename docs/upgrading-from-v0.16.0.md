@@ -938,6 +938,42 @@ The boot refusals you can meet, with their messages, are in
   that lands during that read is answered `404 federation_not_linked`. A
   relink is answered as a record rewritten meanwhile: the new record if it is
   not due, else `503`.
+- **BREAKING: the federation token and federation logout routes accept only
+  a token the client obtained for itself.** Both routes need an access token
+  whose `aud` (a string or an array) contains the client id its `azp` names.
+  - `POST /oauth/federation/:name/token` answers any other token
+    `401 invalid_token` / `invalid token`, logged at warn as
+    `federation_token_jwt_verify_failed` with `reason: "aud"`. A token with no
+    `azp` is answered the same way (it used to be `missing azp claim`).
+  - `POST /oauth/federation/:name/logout` answers a token that names its
+    client and lacks it in `aud` the same way
+    (`federation_logout_jwt_verify_failed`), and nothing is disconnected. It
+    also refuses a token whose `azp` claim is not a non-empty string, and
+    still accepts one with no `azp` claim, its audience unchecked.
+  - Neither route logs `jwt_verify_aud_skipped` any longer for a token that
+    names its client.
+
+  These tokens carry another audience, and no longer qualify:
+  - an authorization that named a `resource` (RFC 8707), and the refresh
+    tokens and access tokens of its grant: a refresh keeps the audience of
+    the token it presents;
+  - a code exchange or refresh whose audience the `grantPolicy` chose
+    (`grantedAudience`), unless it chose the client id;
+  - the `session` grant's tokens of a client with `allowedAudiences`: the
+    grant issues for the first entry, or for the policy's choice, and has no
+    way to ask for the client id. They carry no `family_id`, so the
+    federation token route never accepted them; the federation logout route
+    did.
+
+  A code exchange with no `resource` and no policy audience issues for the
+  client id, and keeps working. **What to do:** call either route with a
+  token issued for the client itself: from an authorization that names no
+  `resource`, under a policy that leaves the audience alone or chooses the
+  client id. A client with only tokens for another audience gets
+  `401 invalid_token` from both routes. For federation logout that fails
+  closed: the federation stays connected until the session ends, and
+  RP-initiated logout (`/oauth/logout`) ends it with the session. See the
+  [oauth README](../packages/oauth/README.md#authentication).
 - **Token binding (#858).** Under `core.tokenBinding.dispatchPolicy =
   "intent-explicit"`, the v0.16.0 default, two mechanisms that both succeed
   at the deciding tier make a `/oauth/token` request `400 invalid_request`,
