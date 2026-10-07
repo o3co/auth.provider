@@ -66,6 +66,12 @@ const makeApp = async (opts: {
 	authorizationCode?: boolean;
 	/** Set the cache and fetch-budget knobs in config. */
 	knobs?: boolean;
+	/** `staleIfErrorMs` in config. Default: not set. */
+	staleIfErrorMs?: number;
+	/** The document server's answers, in order. Default: the document, every time. */
+	answers?: ReadonlyArray<() => Response>;
+	/** The resolver's clock. Default: the system clock. */
+	now?: () => number;
 }) => {
 	const config = {
 		oauth: {
@@ -87,6 +93,7 @@ const makeApp = async (opts: {
 							maxConcurrentFetches: 2,
 						}
 					: {}),
+				...(opts.staleIfErrorMs === undefined ? {} : { staleIfErrorMs: opts.staleIfErrorMs }),
 			},
 		},
 		rateLimit: { failMode: "open" as const },
@@ -103,13 +110,18 @@ const makeApp = async (opts: {
 		consumeByCode: async () => null,
 		removeByCode: async () => {},
 	};
-	const fetchImpl = vi.fn(
-		async () =>
-			new Response(JSON.stringify(opts.document ?? document), {
-				status: 200,
-				headers: { "content-type": "application/json" },
-			}),
-	) as unknown as typeof fetch;
+	const answers = opts.answers ?? [];
+	let calls = 0;
+	const fetchImpl = vi.fn(async () => {
+		const answer = answers[Math.min(calls, answers.length - 1)];
+		calls += 1;
+		return answer !== undefined
+			? answer()
+			: new Response(JSON.stringify(opts.document ?? document), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+	}) as unknown as typeof fetch;
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
@@ -125,7 +137,11 @@ const makeApp = async (opts: {
 					consentStore: createMemoryConsentStore(),
 					pendingConsentStore: createMemoryPendingConsentStore(),
 				}),
-		clientIdMetadataDocuments: { fetch: fetchImpl, lookup: async () => ["93.184.216.34"] },
+		clientIdMetadataDocuments: {
+			fetch: fetchImpl,
+			lookup: async () => ["93.184.216.34"],
+			...(opts.now === undefined ? {} : { now: opts.now }),
+		},
 		logger: createMockLogger(),
 	});
 	const session: Record<string, unknown> = { isAuthenticated: true, user: { id: "user-1" } };
@@ -260,5 +276,52 @@ describe("/authorize honours the refusal window the operator set for the documen
 		expect((await authorize(app)).status).toBe(400);
 		expect((await authorize(app)).status).toBe(400);
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("/authorize with a document whose revalidation fails after it expired", () => {
+	const served = () =>
+		new Response(JSON.stringify(document), {
+			status: 200,
+			headers: { "content-type": "application/json", "cache-control": "max-age=60" },
+		});
+	const unavailable = () =>
+		new Response(JSON.stringify({ error: "down" }), {
+			status: 503,
+			headers: { "content-type": "application/json" },
+		});
+
+	it("answers the client as unknown when no stale-if-error window is configured", async () => {
+		const clock = { now: 1_000_000 };
+		const { app, fetchImpl } = await makeApp({
+			enabled: true,
+			answers: [served, unavailable],
+			now: () => clock.now,
+		});
+		expect((await authorize(app)).status).toBe(302);
+		clock.now += 61_000; // the cached document has expired; its server answers 503
+		const res = await authorize(app);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_client");
+		expect(res.headers.location).toBeUndefined();
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it("keeps the expired registration inside the window the operator configured", async () => {
+		const clock = { now: 1_000_000 };
+		const { app, fetchImpl } = await makeApp({
+			enabled: true,
+			staleIfErrorMs: 120_000,
+			answers: [served, unavailable],
+			now: () => clock.now,
+		});
+		expect((await authorize(app)).status).toBe(302);
+		clock.now += 61_000;
+		const res = await authorize(app);
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location as string, "https://issuer.example").pathname).toBe(
+			"/consent",
+		);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
 });

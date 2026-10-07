@@ -215,6 +215,14 @@ describe("the reference, read by the module's schema", () => {
 		});
 	});
 
+	it("ships no stale-if-error window for client metadata documents; the variable sets one", () => {
+		expect(load().clientIdMetadataDocuments).toMatchObject({ staleIfErrorMs: 0 });
+		expect(
+			load({ OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS: "300000" })
+				.clientIdMetadataDocuments,
+		).toMatchObject({ staleIfErrorMs: 300000 });
+	});
+
 	describe("the access-token lifetime", () => {
 		const lifetime = (env: Record<string, string> = {}, applicationConf?: string) =>
 			resolveAccessTokenLifetime({ oauth: load(env, applicationConf) });
