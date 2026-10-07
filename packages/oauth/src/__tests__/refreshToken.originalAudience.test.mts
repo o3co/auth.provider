@@ -29,6 +29,8 @@ import {
 	type GrantPolicyHook,
 	type GrantPolicyRequest,
 	type GrantResult,
+	type UserSession,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	createTestOAuthTokenSettings,
@@ -39,6 +41,7 @@ import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { openedLifecycleStore } from "./_helpers/sessionLifecycle.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -193,54 +196,82 @@ describe("refresh_token — a policy audience is held to the original audience",
 	});
 });
 
-describe("refresh_token — a plain refresh needs its original audience still registered", () => {
-	/** A token of family `fam-1`, as one the family store holds. */
-	const familyToken = (aud: string): Promise<string> =>
-		new SignJWT({ sub: "u1", scope: "read", azp: CLIENT_ID, family_id: "fam-1" })
-			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
-			.setIssuer("localhost")
-			.setAudience(aud)
-			.setJti("rt-1")
-			.setExpirationTime("24h")
-			.sign(createSecretKey(Buffer.from(SECRET)));
+/** A token of family `fam-1` and session `sid-1`, as the stores below hold them. */
+const familyToken = (aud: string | string[]): Promise<string> =>
+	new SignJWT({ sub: "u1", scope: "read", azp: CLIENT_ID, family_id: "fam-1", sid: "sid-1" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+		.setIssuer("localhost")
+		.setAudience(aud)
+		.setJti("rt-1")
+		.setExpirationTime("24h")
+		.sign(createSecretKey(Buffer.from(SECRET)));
 
-	const withFamily = () => {
-		const rotate = vi.fn(async () => ({ outcome: "rotated" as const }));
-		const revokeFamily = vi.fn(async () => {});
-		const grant = createRefreshTokenGrant({
-			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
-			oauthTokenSettings: createTestOAuthTokenSettings({ resourceIndicatorEnabled: true }),
-			tokenBindingSettings: createTestTokenBindingSettings(),
-			keyStore,
-			refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate },
-			refreshTokenFamilyRevocation: { revokeFamily, isFamilyRevoked: async () => false },
-		} as RefreshTokenGrantDeps);
-		return { grant, rotate, revokeFamily };
+/**
+ * The grant over spies: `admit`, the session read admission makes for the
+ * token's `sid`; `rotate` and `revokeFamily`, the family store's.
+ */
+const withSpies = (evaluate?: GrantPolicyHook["evaluate"]) => {
+	const admit = vi.fn(
+		async (): Promise<UserSession | null> => ({
+			sid: "sid-1",
+			sub: "u1",
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 3600_000),
+			claims: {},
+			amr: undefined,
+			authentication: undefined,
+		}),
+	);
+	const userSessionStore: UserSessionStore = {
+		kind: "stub",
+		get: admit,
+		async create() {},
+		async delete() {},
 	};
+	const rotate = vi.fn(async () => ({ outcome: "rotated" as const }));
+	const revokeFamily = vi.fn(async () => {});
+	const grant = createRefreshTokenGrant({
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+		oauthTokenSettings: createTestOAuthTokenSettings({ resourceIndicatorEnabled: true }),
+		tokenBindingSettings: createTestTokenBindingSettings(),
+		keyStore,
+		userSessionStore,
+		sessionLifecycleStore: openedLifecycleStore(["sid-1", "u1"]),
+		refreshTokenFamilyRotation: { register: vi.fn(async () => {}), rotate },
+		refreshTokenFamilyRevocation: { revokeFamily, isFamilyRevoked: async () => false },
+		...(evaluate ? { grantPolicy: { kind: "stub", evaluate } } : {}),
+	} as RefreshTokenGrantDeps);
+	return { grant, admit, rotate, revokeFamily };
+};
 
-	it("refuses invalid_grant, leaving the family untouched, when the original aud is no longer registered", async () => {
-		const { grant, rotate, revokeFamily } = withFamily();
+describe("refresh_token — a plain refresh needs its original audience still registered", () => {
+	it("refuses invalid_grant before admission, leaving the family untouched, when the original aud is no longer registered", async () => {
+		const { grant, admit, rotate, revokeFamily } = withSpies();
 		const { result } = await grant.handle(ctx(await familyToken(API), {}, [OTHER]));
 		expect(result).toMatchObject({
 			status: 400,
 			error: "invalid_grant",
 			errorDescription: "the grant's audience is no longer registered for this client",
 		});
+		expect(admit).not.toHaveBeenCalled();
 		expect(rotate).not.toHaveBeenCalled();
 		expect(revokeFamily).not.toHaveBeenCalled();
 	});
 
 	it("refuses it with a silent policy wired too", async () => {
-		const { result } = await grantWith(async () => ({ outcome: "allow" })).handle(
-			ctx(await refreshToken(API), {}, []),
-		);
+		const { grant, admit, rotate } = withSpies(async () => ({ outcome: "allow" }));
+		const { result } = await grant.handle(ctx(await familyToken(API), {}, []));
 		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(admit).not.toHaveBeenCalled();
+		expect(rotate).not.toHaveBeenCalled();
 	});
 
-	it("rotates and issues while the original aud is registered", async () => {
-		const { grant, rotate } = withFamily();
+	it("admits, rotates and issues while the original aud is registered", async () => {
+		const { grant, admit, rotate } = withSpies();
 		const { result } = await grant.handle(ctx(await familyToken(API), {}, [API]));
 		expect(issued(result).access.aud).toBe(API);
+		expect(admit).toHaveBeenCalled();
 		expect(rotate).toHaveBeenCalledTimes(1);
 	});
 
@@ -248,9 +279,81 @@ describe("refresh_token — a plain refresh needs its original audience still re
 		["no allowedAudiences", []],
 		["other allowedAudiences", [API, OTHER]],
 	] as const)("always issues a token for the client id itself (%s)", async (_, allowed) => {
-		const { grant, rotate } = withFamily();
+		const { grant, rotate } = withSpies();
 		const { result } = await grant.handle(ctx(await familyToken(CLIENT_ID), {}, allowed));
 		expect(issued(result).access.aud).toBe(CLIENT_ID);
 		expect(rotate).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("refresh_token — a resource the registration no longer holds is invalid_target", () => {
+	it.each([
+		["no policy", undefined],
+		["a silent policy", async () => ({ outcome: "allow" as const })],
+	] as const)(
+		"refuses a resource inside the original aud but outside the registration (%s)",
+		async (_, evaluate) => {
+			const { grant, admit, rotate, revokeFamily } = withSpies(evaluate);
+			const { result } = await grant.handle(
+				ctx(await familyToken([API, OTHER]), { resource: API }, [OTHER]),
+			);
+			expect(result).toMatchObject({ status: 400, error: "invalid_target" });
+			expect(admit).not.toHaveBeenCalled();
+			expect(rotate).not.toHaveBeenCalled();
+			expect(revokeFamily).not.toHaveBeenCalled();
+		},
+	);
+
+	it("still issues for the registered entry of the same token", async () => {
+		const { grant } = withSpies();
+		const { result } = await grant.handle(
+			ctx(await familyToken([API, OTHER]), { resource: OTHER }, [OTHER]),
+		);
+		expect(issued(result).access.aud).toBe(OTHER);
+	});
+});
+
+describe("refresh_token — how the original audience is read", () => {
+	it("holds an empty aud array to the client id", async () => {
+		const plain = await grantWith().handle(ctx(await refreshToken([])));
+		expect(issued(plain.result).access.aud).toBe(CLIENT_ID);
+		const targeted = await grantWith().handle(ctx(await refreshToken([]), { resource: API }));
+		expect(targeted.result).toMatchObject({ status: 400, error: "invalid_target" });
+	});
+
+	it("reads duplicate entries as one audience", async () => {
+		const plain = await grantWith().handle(ctx(await refreshToken([API, API])));
+		expect(issued(plain.result).access.aud).toBe(API);
+		const targeted = await grantWith().handle(
+			ctx(await refreshToken([API, API]), { resource: API }),
+		);
+		expect(issued(targeted.result).access.aud).toBe(API);
+		const other = await grantWith().handle(
+			ctx(await refreshToken([API, API]), { resource: OTHER }),
+		);
+		expect(other.result).toMatchObject({ status: 400, error: "invalid_target" });
+	});
+
+	it("compares audiences exactly, case included", async () => {
+		const upper = "https://API.example";
+		const resource = await grantWith().handle(ctx(await refreshToken(API), { resource: upper }));
+		expect(resource.result).toMatchObject({ status: 400, error: "invalid_target" });
+		const plain = await grantWith().handle(ctx(await refreshToken(upper)));
+		expect(plain.result).toMatchObject({ status: 400, error: "invalid_grant" });
+		const policy = await grantWith(async () => ({
+			outcome: "allow",
+			grantedAudience: [upper],
+		})).handle(ctx(await refreshToken(API), {}, [API, upper]));
+		expect(policy.result).toMatchObject({ status: 500, error: "server_error" });
+	});
+
+	it("keeps the first entry of a multi-audience token across two rotations", async () => {
+		const grant = grantWith();
+		const first = issued((await grant.handle(ctx(await refreshToken([OTHER, API])))).result);
+		expect(first.access.aud).toBe(OTHER);
+		expect(first.refreshClaims.aud).toBe(OTHER);
+		const second = issued((await grant.handle(ctx(first.refresh))).result);
+		expect(second.access.aud).toBe(OTHER);
+		expect(second.refreshClaims.aud).toBe(OTHER);
 	});
 });

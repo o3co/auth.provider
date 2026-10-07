@@ -522,8 +522,10 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 
 			// RFC 8707 §2: when no policy narrowed the audience, derive it from
 			// the requested resource within `allowedAudiences ∪ {clientId}` and
-			// the original audience. A policy decision always wins.
-			if (!policyChoseAudience && requestedResource) {
+			// the original audience. A policy decision always wins. A resource
+			// that derives nothing is `invalid_target` here, never left to the
+			// original audience's default.
+			if (!policyChoseAudience && requestedResource && requestedResource.length > 0) {
 				const derived = deriveAudienceFromResources(
 					requestedResource,
 					new Set(
@@ -533,7 +535,16 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						]),
 					),
 				);
-				if (derived !== undefined) finalAudience = derived;
+				if (derived === undefined) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `requested_resources_not_in_audience: ${requestedResource.join(" ")}`,
+						},
+					};
+				}
+				finalAudience = derived;
 			}
 
 			// RFC 8707 §2: the audience must represent the requested resource.
