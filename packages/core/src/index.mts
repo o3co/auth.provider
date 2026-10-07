@@ -1097,11 +1097,13 @@ export type {
 	LinkFederatedIdentityResult,
 	MfaEnrollmentWitness,
 	SupportsMfaEnrollmentWitness,
+	SupportsSubjectLookup,
 	UserRepository,
 } from "./repositories/UserRepository.mjs";
 export {
 	readMfaEnrollmentWitness,
 	supportsMfaEnrollmentWitness,
+	supportsSubjectLookup,
 } from "./repositories/UserRepository.mjs";
 // A login's one read of the `User` a repository answers: the subject and the
 // claims are read from its snapshot, never from the `User` again.
