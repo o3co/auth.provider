@@ -298,7 +298,7 @@ describe("token exchange reads each validator answer once — shapes and claims"
 						act,
 						claims: { azp: client.clientId, exp: EXP(), may_act: { sub: "svc-a" } },
 					})
-				: { sub: "svc-a", claims: {} },
+				: { sub: "svc-a", claims: { azp: client.clientId } },
 		);
 
 		const issued = decodeJwt(tokensOf(await h.exchange(WITH_ACTOR)).access_token);
@@ -317,7 +317,9 @@ describe("token exchange reads each validator answer once — shapes and claims"
 			},
 		);
 		const h = build((role) =>
-			role === "subject" ? subjectAnswer({ claims }) : { sub: "svc-a", claims: {} },
+			role === "subject"
+				? subjectAnswer({ claims })
+				: { sub: "svc-a", claims: { azp: client.clientId } },
 		);
 
 		const issued = decodeJwt(tokensOf(await h.exchange(WITH_ACTOR)).access_token);
@@ -331,7 +333,7 @@ describe("token exchange reads each validator answer once — shapes and claims"
 				{},
 				{
 					sub: { get: shifting("svc-a", "svc-b"), enumerable: true },
-					claims: { value: Object.freeze({}), enumerable: true },
+					claims: { value: Object.freeze({ azp: client.clientId }), enumerable: true },
 				},
 			),
 		);
@@ -422,7 +424,7 @@ describe("token exchange reads each validator answer once — members read by na
 		const h = build((role) =>
 			role === "subject"
 				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
-				: { sub: "svc-a", claims: { iss: "https://actor-issuer.example" } },
+				: { sub: "svc-a", claims: { azp: client.clientId, iss: "https://actor-issuer.example" } },
 		);
 
 		expect(await h.exchange(WITH_ACTOR)).toEqual({
@@ -440,7 +442,7 @@ describe("token exchange reads each validator answer once — members read by na
 		const h = build((role) =>
 			role === "subject"
 				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: [entry] } })
-				: { sub: "svc-a", claims: { iss: "https://actor-issuer.example" } },
+				: { sub: "svc-a", claims: { azp: client.clientId, iss: "https://actor-issuer.example" } },
 		);
 
 		expect(await h.exchange(WITH_ACTOR)).toEqual({
@@ -456,7 +458,7 @@ describe("token exchange reads each validator answer once — members read by na
 		const h = build((role) =>
 			role === "subject"
 				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
-				: { sub: "svc-a", claims: { iss: ISSUER } },
+				: { sub: "svc-a", claims: { azp: client.clientId, iss: ISSUER } },
 		);
 
 		expect(await h.exchange(WITH_ACTOR)).toMatchObject({
@@ -597,7 +599,9 @@ describe("token exchange reads each validator answer once — members only a rea
 	it("still refuses the actor claims whose may_act only a read by name sees refuse", async () => {
 		const claims = hidden({ azp: client.clientId, exp: EXP(), may_act: { sub: "svc-other" } });
 		const h = build((role) =>
-			role === "subject" ? subjectAnswer({ claims }) : { sub: "svc-a", claims: {} },
+			role === "subject"
+				? subjectAnswer({ claims })
+				: { sub: "svc-a", claims: { azp: client.clientId } },
 		);
 
 		expect(await h.exchange(WITH_ACTOR)).toEqual({
@@ -617,7 +621,7 @@ describe("token exchange reads each validator answer once — members only a rea
 			const h = build((role) =>
 				role === "subject"
 					? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
-					: { sub: "svc-a", claims: {} },
+					: { sub: "svc-a", claims: { azp: client.clientId } },
 			);
 
 			expect(await h.exchange(WITH_ACTOR)).toEqual({
@@ -653,7 +657,7 @@ describe("token exchange reads each validator answer once — plain data only", 
 							act,
 							claims: { azp: client.clientId, exp: EXP(), may_act: { sub: "svc-a" } },
 						})
-					: { sub: "svc-a", claims: {} },
+					: { sub: "svc-a", claims: { azp: client.clientId } },
 			{ keyStore: await remoteSigningKeyStore() },
 		);
 
@@ -722,7 +726,7 @@ describe("token exchange reads each validator answer once — presence asked onc
 					? subjectAnswer({
 							claims: { azp: client.clientId, exp: EXP(), may_act: mayAct() },
 						})
-					: { sub: "svc-a", claims: { iss: ISSUER } },
+					: { sub: "svc-a", claims: { azp: client.clientId, iss: ISSUER } },
 			);
 
 			expect(await h.exchange(WITH_ACTOR)).toEqual({
@@ -770,7 +774,7 @@ describe("token exchange reads each validator answer once — arrays as native i
 		build((role) =>
 			role === "subject"
 				? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
-				: { sub: "svc-a", claims: {} },
+				: { sub: "svc-a", claims: { azp: client.clientId } },
 		);
 
 	it("refuses the actor a may_act array names only at an index its presence check hides", async () => {
