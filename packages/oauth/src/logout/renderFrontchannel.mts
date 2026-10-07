@@ -83,11 +83,12 @@ const REDIRECT_SCRIPT =
 const REDIRECT_SCRIPT_SOURCE = `'sha256-${createHash("sha256").update(REDIRECT_SCRIPT, "utf8").digest("base64")}'`;
 
 /**
- * An http(s) origin a CSP host-source can name exactly: a hostname of
- * letters, digits, `-` and `.`, and an optional port. Anything else (an IPv6
- * literal, `_`, `;`) could not be listed, or could break the policy.
+ * An http(s) origin a CSP host-source can name exactly: dot-separated labels
+ * of letters, digits and `-`, one optional terminal dot (CSP's host-part
+ * allows it), and an optional port. Anything else (an IPv6 literal, `_`, `;`)
+ * could not be listed, or could break the policy.
  */
-const SOURCE_EXPRESSION_ORIGIN = /^https?:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::[0-9]+)?$/;
+const SOURCE_EXPRESSION_ORIGIN = /^https?:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?(?::[0-9]+)?$/;
 
 /**
  * The page's own policy: nothing but frames from `frameOrigins`, and the
@@ -100,6 +101,9 @@ function pagePolicy(frameOrigins: ReadonlySet<string>, redirect: boolean): strin
 		"form-action 'none'",
 		"frame-ancestors 'none'",
 	];
+	// Each frame's own origin. An `http:` source also matches the same host's
+	// `https:` (CSP's secure upgrade): the same relying party, so kept rather
+	// than dropping http front-channel URIs.
 	if (frameOrigins.size > 0) directives.push(`frame-src ${[...frameOrigins].join(" ")}`);
 	if (redirect) directives.push(`script-src ${REDIRECT_SCRIPT_SOURCE}`);
 	return directives.join("; ");

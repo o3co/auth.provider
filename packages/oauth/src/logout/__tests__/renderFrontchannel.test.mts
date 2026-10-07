@@ -736,6 +736,53 @@ describe("renderFrontchannelLogoutHtml", () => {
 			expect(logger.warn).not.toHaveBeenCalled();
 		});
 
+		describe("a hostname with a terminal dot, which a host-source may end with", () => {
+			const rps: FrontchannelRP[] = [
+				{ clientId: "default-port", frontchannelLogoutUri: "https://rp.example./fc" },
+				{ clientId: "explicit-default-port", frontchannelLogoutUri: "https://rp1.example.:443/fc" },
+				{ clientId: "explicit-port", frontchannelLogoutUri: "https://rp2.example.:8443/fc" },
+			];
+			const ORIGINS = ["https://rp.example.", "https://rp1.example.", "https://rp2.example.:8443"];
+
+			it("is framed on the served page, its origin listed in frame-src exactly as the iframe's", () => {
+				const logger = createMockLogger();
+				const { html, contentSecurityPolicy } = page(rps, { logger });
+
+				expect(iframeSrcsOf(html).map((src) => new URL(src).origin)).toEqual(ORIGINS);
+				expect(parsePolicy(contentSecurityPolicy).get("frame-src")).toEqual(ORIGINS);
+				expect(logger.warn).not.toHaveBeenCalled();
+			});
+
+			it("is framed by renderFrontchannelLogoutHtml", () => {
+				const logger = createMockLogger();
+				const html = renderFrontchannelLogoutHtml({
+					rps,
+					issuer: "https://auth.example",
+					sid: "sid-1",
+					logger,
+				});
+
+				expect(iframeSrcsOf(html).map((src) => new URL(src).origin)).toEqual(ORIGINS);
+				expect(logger.warn).not.toHaveBeenCalled();
+			});
+		});
+
+		it("lists an http RP's origin as its http source, which a browser also matches to the same host's https", () => {
+			const { html, contentSecurityPolicy } = page([
+				{ clientId: "http", frontchannelLogoutUri: "http://rp.example/fc" },
+				{ clientId: "http-port", frontchannelLogoutUri: "http://rp2.example:8080/fc" },
+			]);
+
+			expect(iframeSrcsOf(html).map((src) => new URL(src).origin)).toEqual([
+				"http://rp.example",
+				"http://rp2.example:8080",
+			]);
+			expect(parsePolicy(contentSecurityPolicy).get("frame-src")).toEqual([
+				"http://rp.example",
+				"http://rp2.example:8080",
+			]);
+		});
+
 		describe("the redirect runs under the policy", () => {
 			it("allows its one static script by hash, and the script reads the target from its own data attribute", () => {
 				const { html, contentSecurityPolicy } = page(
