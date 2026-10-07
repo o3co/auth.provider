@@ -122,8 +122,8 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 };
 
 /**
- * Workspace packages the template does not depend on, so nothing here can
- * boot them. Each but the test kit, which has no module, is a module a
+ * Workspace packages the template does not compose (the test kit is a
+ * devDependency only), so nothing here can boot them. Each but the test kit, which has no module, is a module a
  * deployment adds to this manifest by hand —
  * `modules.mts` provides the Redis clients their stores need for that reason
  * — and `tools/composition` in the monorepo boots each beside every module
