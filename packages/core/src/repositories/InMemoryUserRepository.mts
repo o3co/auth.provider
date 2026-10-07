@@ -134,13 +134,19 @@ export const UserEntrySchema = z
 export type UserEntry = z.infer<typeof UserEntrySchema>;
 
 /**
- * Refuse a user map that could not be served as written: an entry the schema
+ * Refuse a user map that could not be served as written: an empty username
+ * (the entry's key, and its id where it sets none), an entry the schema
  * refuses, or two users with the same id (the `id`, or the username where none
  * is set). Each refusal names the users and the field, never a value.
  */
 function assertHoldable(users: ReadonlyMap<string, UserEntry>): void {
 	const byId = new Map<string, string>();
 	for (const [username, entry] of users) {
+		if (username === "") {
+			throw new Error(
+				"InMemoryUserRepository: an entry's username (its key) is empty; a username must not be empty",
+			);
+		}
 		const parsed = UserEntrySchema.safeParse(entry);
 		if (!parsed.success) {
 			throw new Error(

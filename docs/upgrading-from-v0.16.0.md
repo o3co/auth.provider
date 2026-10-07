@@ -844,7 +844,9 @@ copy of the file to list what is left.
   again at a cost from 04 to 15; 10 to 12 is usual.
 - **BREAKING: an empty `id` refuses the boot.** The user signed in with the
   right password and was then refused with a `500`. Set a non-empty `id`, or
-  remove the key to make the username the id.
+  remove the key to make the username the id. An entry keyed by an empty
+  username (`"":`) is refused the same way, since its username would be its
+  id: give it a username.
 - **BREAKING: two users with the same id refuse the boot**, naming both
   usernames. The id is the entry's `id`, or its username when it sets none,
   so `alice: { id: bob }` beside a `bob` entry without an `id` is refused

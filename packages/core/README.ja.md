@@ -504,7 +504,7 @@ const clientRepo = new InMemoryClientRepository(clients);
 const userRepo = new InMemoryUserRepository(users);
 ```
 
-ユーザーファイルのキーはユーザー名です。エントリは `password` と、任意で `id`（無ければユーザー名）と任意のクレームを持ちます。`UserEntrySchema` を渡した `loadYamlMap` と `InMemoryUserRepository` はどちらも、次のものをユーザーとフィールドを名指しして（値は決して出さずに）拒否します: `$2` で始まるのに、コスト 04 から 15 の整った `$2a$`・`$2b$`・`$2y$` の bcrypt ハッシュではないパスワード（`$2y$` は `$2b$` として比較します）、空の `id`、エントリ内の `username` キー、そしてリポジトリでは同じ id を持つ二人のユーザー。このリポジトリは開発とテスト用です（[`src/repositories/README.md`](src/repositories/README.md)）。
+ユーザーファイルのキーはユーザー名です。エントリは `password` と、任意で `id`（無ければユーザー名）と任意のクレームを持ちます。`UserEntrySchema` を渡した `loadYamlMap` と `InMemoryUserRepository` はどちらも、次のものをユーザーとフィールドを名指しして（値は決して出さずに）拒否します: `$2` で始まるのに、コスト 04 から 15 の整った `$2a$`・`$2b$`・`$2y$` の bcrypt ハッシュではないパスワード（`$2y$` は `$2b$` として比較します）、空の `id`、エントリ内の `username` キー、そしてリポジトリでは空のユーザー名と、同じ id を持つ二人のユーザー。このリポジトリは開発とテスト用です（[`src/repositories/README.md`](src/repositories/README.md)）。
 
 テストでは、`@o3co/auth-provider-core/testing` の `clientEntries` が、コードに書いたエントリから同じマップを作ります（[`src/testing/fixtures/clientEntries.mts`](src/testing/fixtures/clientEntries.mts)）。各エントリは登録ファイルと同じ形で書き、スキーマのデフォルトは省きます。`InMemoryClientRepository` が各エントリをパースします:
 

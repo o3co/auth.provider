@@ -185,6 +185,23 @@ bob:
 			);
 		});
 
+		it("refuses a users file with an empty username, under either name", async () => {
+			const yamlPath = writeYaml(
+				"users-empty-name.yaml",
+				`"":
+  password: "plainpass"
+`,
+			);
+
+			const { userFactory } = createRepositoryFactories();
+
+			for (const type of ["yaml", "static"]) {
+				await expect(userFactory.create({ type, path: yamlPath }), type).rejects.toThrow(
+					/username/,
+				);
+			}
+		});
+
 		it("refuses a users file in which two users have the same id, naming both users", async () => {
 			const yamlPath = writeYaml(
 				"users-same-id.yaml",

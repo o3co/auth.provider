@@ -759,7 +759,7 @@ cost from 04 to 15 (a compare at 15 takes about 2 s, at 10 about 60 ms, on a
 thread of Node's libuv pool). bcrypt compares only the first 72 bytes of a
 password (about 24 Japanese characters in UTF-8); a plain-text entry is
 compared over its full length.
-Boot refuses an entry that breaks this, an empty `id`, two users with the same
+Boot refuses an entry that breaks this, an empty `id` or username, two users with the same
 id, and a `username` key inside an entry, naming the user and the field and
 never the value. Each start with the `yaml` backend logs
 `user_repository_in_memory` at warn, whatever the environment: the users file

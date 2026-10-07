@@ -150,6 +150,14 @@ describe("InMemoryUserRepository", () => {
 			).toBeUndefined();
 		});
 
+		it("refuses an empty username, which would be an empty id, naming the field", () => {
+			for (const entry of [{ password: "plain" }, { password: "plain", id: "u1" }]) {
+				const refusal = refusalOf(new Map([["", entry]]));
+				expect(refusal, JSON.stringify(entry)).toMatch(/username/);
+				expect(refusal, JSON.stringify(entry)).not.toContain("plain");
+			}
+		});
+
 		it("refuses a username key in an entry: the entry's key is its username", () => {
 			for (const username of ["bob", "alice"]) {
 				expect(issuesOf({ password: "secret123", username })).toEqual([
@@ -283,6 +291,31 @@ describe("InMemoryUserRepository", () => {
 					"$2b$10$",
 				);
 				expect(await dummyCostFor(new Map(), "nobody")).toBe("$2b$10$");
+			} finally {
+				compareSpy.mockRestore();
+			}
+		});
+
+		it("runs the unknown-user and plain-text compares through bcrypt at the highest cost of the entries' real hashes", async () => {
+			const compareSpy = spyOnCompare();
+			try {
+				const repo = new InMemoryUserRepository(
+					new Map([
+						["alice", { password: await bcrypt.hash("alice-pass", 4) }],
+						["bob", { password: await bcrypt.hash("bob-pass", 5) }],
+						["carol", { password: "carol-pass" }],
+					]),
+				);
+
+				expect(await repo.authenticate("nobody", "alice-pass")).toBeNull();
+				expect(await repo.authenticate("carol", "carol-pass")).not.toBeNull();
+				expect((await repo.authenticate("bob", "bob-pass"))?.username).toBe("bob");
+
+				const [unknownUser, plainText, known] = compareSpy.mock.calls.map(([, hash]) => hash);
+				// bcrypt reads the cost it then runs at from the hash it is handed.
+				expect(bcrypt.getRounds(unknownUser as string)).toBe(5);
+				expect(bcrypt.getRounds(plainText as string)).toBe(5);
+				expect(bcrypt.getRounds(known as string)).toBe(5);
 			} finally {
 				compareSpy.mockRestore();
 			}
