@@ -937,13 +937,16 @@ The boot refusals you can meet, with their messages, are in
   policy is not handed the answer: its `GrantPolicyRequest` carries the
   fields derived from it — `subject` from `sub`, `originalScope` from
   `scope`, `originalAudience` from `aud` — now read from the copy, with the
-  values they had for an answer of plain data. An answer that is not a
-  record (an object that is not an array), whose `sub` is not a string, or
-  whose `claims` are not a record, is a failed validation
-  (`400 invalid_request`, `subject_token validation failed`), at the first
-  validation and at the one before minting, and so is an array where a
-  check reads a record (`cnf`, a `may_act` entry, `act`); a member whose read
-  throws is `503 temporarily_unavailable`, as a validator that throws. See
+  values they had for an answer of plain data. At the first validation, an
+  answer that is not a record (an object that is not an array), whose `sub`
+  is not a string, whose `claims` are not a record, or that has an array
+  where a check reads a record (`cnf`, a `may_act` entry, `act`), is a failed
+  validation (`400 invalid_request`, `subject_token validation failed`). A
+  member read by name is read whether or not `in` reports it. The answer to
+  the validation before minting is held to the shape alone — a record with a
+  string `sub` and record `claims` — and nothing of it is copied or minted.
+  At either, a member whose read throws is `503 temporarily_unavailable`, as
+  a validator that throws. See
   the oauth-token-exchange README, "External JWT subject_token".
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a

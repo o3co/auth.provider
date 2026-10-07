@@ -551,3 +551,77 @@ describe("token exchange reads each validator answer once — records, never arr
 		expect(await h.exchange(WITH_ACTOR)).toEqual(failedValidation("actor"));
 	});
 });
+
+/**
+ * A record whose members a read by name sees, while `in`, `Object.keys` and
+ * the property descriptors report none: a lazy proxy over a backend.
+ */
+function hidden(members: Record<string, unknown>): object {
+	return new Proxy(
+		{},
+		{
+			get: (_target, key) => (typeof key === "string" ? members[key] : undefined),
+			has: () => false,
+			ownKeys: () => [],
+			getOwnPropertyDescriptor: () => undefined,
+		},
+	);
+}
+
+describe("token exchange reads each validator answer once — members only a read by name sees", () => {
+	it("still requires the proof for claims whose cnf only a read by name sees", async () => {
+		const claims = hidden({ azp: client.clientId, exp: EXP(), cnf: { jkt: "a-key" } });
+		const h = build(() => subjectAnswer({ claims }));
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "subject_token requires a DPoP proof",
+		});
+	});
+
+	it("still refuses claims whose past exp only a read by name sees", async () => {
+		const claims = hidden({ azp: client.clientId, exp: Math.floor(Date.now() / 1000) - 60 });
+		const h = build(() => subjectAnswer({ claims }));
+
+		expect(await h.exchange()).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "subject_token has expired",
+		});
+	});
+
+	it("still refuses the actor claims whose may_act only a read by name sees refuse", async () => {
+		const claims = hidden({ azp: client.clientId, exp: EXP(), may_act: { sub: "svc-other" } });
+		const h = build((role) =>
+			role === "subject" ? subjectAnswer({ claims }) : { sub: "svc-a", claims: {} },
+		);
+
+		expect(await h.exchange(WITH_ACTOR)).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "may_act_violation: actor not authorized by subject token",
+		});
+	});
+
+	for (const [label, mayAct] of [
+		["a may_act", hidden({ sub: "svc-a" })],
+		["a may_act entry", [hidden({ sub: "svc-a" })]],
+	] as const) {
+		it(`still refuses the actor for ${label} whose sub and iss no presence check reports`, async () => {
+			// Delegation tests an entry's members with `in`: an entry that reports
+			// neither matches no actor, whatever a read by name answers.
+			const h = build((role) =>
+				role === "subject"
+					? subjectAnswer({ claims: { azp: client.clientId, exp: EXP(), may_act: mayAct } })
+					: { sub: "svc-a", claims: {} },
+			);
+
+			expect(await h.exchange(WITH_ACTOR)).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "may_act_violation: actor not authorized by subject token",
+			});
+		});
+	}
+});
