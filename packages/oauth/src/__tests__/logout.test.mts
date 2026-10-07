@@ -1196,6 +1196,109 @@ describe("POST /oauth/logout", () => {
 		});
 	});
 
+	describe("the front-channel page of a session whose federation ends sessions upstream", () => {
+		const REGISTERED = "https://trusted.example.com/logged-out";
+		const FRONTCHANNEL_RP = {
+			clientId: "client-1",
+			frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+			registeredAt: new Date(),
+			backchannelLogoutUri: undefined,
+			backchannelLogoutSessionRequired: undefined,
+			frontchannelLogoutSessionRequired: undefined,
+		};
+
+		/** An upstream that ends at its end-session endpoint with what it is handed. */
+		const upstreamEndSession = vi.fn(
+			async (req: { postLogoutRedirectUri?: string; state?: string }) => {
+				const url = new URL("https://idp.example/end-session");
+				url.searchParams.set("id_token_hint", "upstream-hint");
+				if (req.postLogoutRedirectUri !== undefined) {
+					url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
+				}
+				if (req.state !== undefined) url.searchParams.set("state", req.state);
+				return { url, method: "GET" as const };
+			},
+		);
+
+		function build(provider: FederationProvider) {
+			return buildApp({
+				joinedRps: [FRONTCHANNEL_RP],
+				joinedFederations: ["upstream"],
+				getFederationProviders: () => new Map<string, FederationProvider>([["upstream", provider]]),
+				clientRepo: makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						postLogoutRedirectUris: [REGISTERED],
+						frontchannelLogoutUri: FRONTCHANNEL_RP.frontchannelLogoutUri,
+					}),
+				}),
+			});
+		}
+		const withEndSession = () =>
+			({
+				...federationBase("upstream"),
+				endSession: upstreamEndSession,
+			}) as unknown as FederationProvider;
+		const body = async () => ({
+			id_token_hint: await mintIdToken(),
+			post_logout_redirect_uri: REGISTERED,
+			state: "s-1",
+		});
+
+		it("ends at the upstream end-session URL, which carries post_logout_redirect_uri and state", async () => {
+			const res = await postLogout(build(withEndSession()), await body(), {
+				Accept: "text/html",
+			});
+
+			expect(res.status).toBe(200);
+			expect(res.headers["content-type"]).toBe("text/html; charset=utf-8");
+			expect(iframeSrcsOf(res.text).map((src) => new URL(src).origin)).toEqual([
+				"https://rp1.example.com",
+			]);
+			const [script] = scriptsOf(res.text);
+			const target = new URL(script?.attributes["data-target"] ?? "");
+			expect(target.origin + target.pathname).toBe("https://idp.example/end-session");
+			expect(target.searchParams.get("post_logout_redirect_uri")).toBe(REGISTERED);
+			expect(target.searchParams.get("state")).toBe("s-1");
+			expect(target.searchParams.get("id_token_hint")).toBe("upstream-hint");
+		});
+
+		it("sends the page under its one policy, which allows the same script by hash and frames the same origins", async () => {
+			const res = await postLogout(build(withEndSession()), await body(), {
+				Accept: "text/html",
+			});
+
+			expect(policyHeaderCount(res)).toBe(1);
+			const policy = parsePolicy(res.headers["content-security-policy"] as string);
+			const [script] = scriptsOf(res.text);
+			expect(policy.get("script-src")).toEqual([hashSourceOf(script?.text ?? "")]);
+			expect(policy.get("frame-src")).toEqual(["https://rp1.example.com"]);
+			expect(policy.get("default-src")).toEqual(["'none'"]);
+			expect(policy.get("form-action")).toEqual(["'none'"]);
+		});
+
+		it("ends at the post_logout_redirect_uri with state when the federation does not end sessions upstream", async () => {
+			const res = await postLogout(build(federationBase("upstream")), await body(), {
+				Accept: "text/html",
+			});
+
+			expect(res.status).toBe(200);
+			expect(scriptsOf(res.text)[0]?.attributes["data-target"]).toBe(`${REGISTERED}?state=s-1`);
+		});
+
+		it("answers a request that does not prefer HTML with the 303 to the upstream end-session URL", async () => {
+			const res = await postLogout(build(withEndSession()), await body());
+
+			expect(res.status).toBe(303);
+			const location = new URL(res.headers.location as string);
+			expect(location.origin + location.pathname).toBe("https://idp.example/end-session");
+			expect(location.searchParams.get("post_logout_redirect_uri")).toBe(REGISTERED);
+			expect(location.searchParams.get("state")).toBe("s-1");
+		});
+	});
+
 	// The upstream end-session call is handed the caller's
 	// post_logout_redirect_uri only once it matched the client's registered
 	// list: an adapter for an IdP that publishes no end-session endpoint

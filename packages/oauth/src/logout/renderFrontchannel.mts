@@ -15,11 +15,13 @@
 
 /**
  * The OIDC Front-Channel Logout 1.0 page: its markup (a hidden iframe per
- * usable relying party and the post-logout redirect) and its own
- * Content-Security-Policy, which allows frames only from the origins it
- * renders (`frame-src`) and the static redirect script only by its hash.
- * `renderFrontchannelLogoutPage`, internal, returns both for the logout route
- * to serve; the public `renderFrontchannelLogoutHtml` returns the markup alone.
+ * usable relying party and the redirect that ends the logout: the upstream
+ * end-session URL when the logout route has one, else the post-logout
+ * redirect) and its own Content-Security-Policy, which allows frames only from
+ * the origins it renders (`frame-src`) and the static redirect script only by
+ * its hash. `renderFrontchannelLogoutPage`, internal, returns both for the
+ * logout route to serve; the public `renderFrontchannelLogoutHtml` returns the
+ * markup alone.
  */
 
 import { createHash } from "node:crypto";
@@ -66,6 +68,18 @@ export interface RenderFrontchannelLogoutHtmlOptions {
 	 * or its iframe must be skipped. Falls back to `console` when omitted.
 	 */
 	readonly logger?: Logger;
+}
+
+/** The logout route's page: the public options, and where the logout continues upstream. */
+export interface FrontchannelLogoutPageOptions extends RenderFrontchannelLogoutHtmlOptions {
+	/**
+	 * The upstream IdP's end-session URL, as the session's federation built it
+	 * for this logout, carrying the validated `post_logout_redirect_uri` and
+	 * the RP's `state` itself. When set, the page sends the browser there in
+	 * place of `postLogoutRedirect`, after the same delay; see
+	 * {@link upstreamEndSessionTarget} for the check it is held to.
+	 */
+	readonly upstreamEndSessionUri?: string | undefined;
 }
 
 const HTML_ESCAPE: Record<string, string> = {
@@ -140,6 +154,19 @@ type PostLogoutRedirectRefusal =
 	| "state-not-a-string"
 	| "unreadable";
 
+/** The page without its redirect: one warn with the reason, never the value. */
+function refuseRedirect(
+	logger: Pick<Logger, "warn">,
+	reason: PostLogoutRedirectRefusal,
+): undefined {
+	try {
+		logger.warn({ reason }, "logout_frontchannel_redirect_refused");
+	} catch {
+		// A logger that throws costs the line, never the page.
+	}
+	return undefined;
+}
+
 /**
  * Where the page's script sends the browser: `opts.postLogoutRedirect.uri`
  * when core's `checkRedirectUri` accepts it as written, with a non-empty
@@ -152,14 +179,7 @@ function postLogoutRedirectTarget(
 	opts: RenderFrontchannelLogoutHtmlOptions,
 	logger: Pick<Logger, "warn">,
 ): string | undefined {
-	const refuse = (reason: PostLogoutRedirectRefusal): undefined => {
-		try {
-			logger.warn({ reason }, "logout_frontchannel_redirect_refused");
-		} catch {
-			// A logger that throws costs the line, never the page.
-		}
-		return undefined;
-	};
+	const refuse = (reason: PostLogoutRedirectRefusal): undefined => refuseRedirect(logger, reason);
 	// Each read once, through core's `guardedRead`: `null` is a read that
 	// threw, never logged since its message could carry the value.
 	const redirectRead = guardedRead(opts, "postLogoutRedirect");
@@ -183,6 +203,29 @@ function postLogoutRedirectTarget(
 	return target.toString();
 }
 
+/**
+ * Where the page's script sends the browser for a logout that continues
+ * upstream: `uri` as parsed, when core's `checkRedirectUri` accepts it with
+ * its query removed — the scheme, fragment and userinfo rules of a redirect
+ * URI. Its query is the upstream's own end-session request, sent as built,
+ * so it may carry `state`, which a redirect URI's query may not. A refused
+ * `uri` leaves the page without its redirect, warned as for
+ * `postLogoutRedirect`. Never throws.
+ */
+function upstreamEndSessionTarget(uri: string, logger: Pick<Logger, "warn">): string | undefined {
+	let url: URL;
+	try {
+		url = new URL(uri);
+	} catch {
+		return refuseRedirect(logger, "unparsable");
+	}
+	const withoutQuery = new URL(url.href);
+	withoutQuery.search = "";
+	const rejection = checkRedirectUri(withoutQuery.href);
+	if (rejection !== null) return refuseRedirect(logger, rejection.reason);
+	return url.href;
+}
+
 /** The front-channel logout page and the one policy it must be sent under. */
 export interface FrontchannelLogoutPage {
 	/** Sent as `Content-Type: text/html; charset=utf-8`. */
@@ -203,23 +246,27 @@ export interface FrontchannelLogoutPage {
  * `false`, `sid`. With a `postLogoutRedirect` whose `uri` core's
  * `checkRedirectUri` accepts (any other is dropped with a warn), a static
  * `<script>` redirects, with the RP's `state`, after `redirectDelayMs` so the
- * iframes can load. Returned with the policy that allows exactly that; an RP
- * whose origin a CSP source expression cannot name is skipped with a warn.
- * Pure. Internal: the logout route serves it.
+ * iframes can load; with an `upstreamEndSessionUri`, the script redirects
+ * there instead, after the same delay. Returned with the policy that allows
+ * exactly that; an RP whose origin a CSP source expression cannot name is
+ * skipped with a warn. Pure. Internal: the logout route serves it.
  */
 export function renderFrontchannelLogoutPage(
-	opts: RenderFrontchannelLogoutHtmlOptions,
+	opts: FrontchannelLogoutPageOptions,
 ): FrontchannelLogoutPage {
-	return renderPage(opts, true);
+	return renderPage(opts, true, opts.upstreamEndSessionUri);
 }
 
 /**
  * The page. `framesNamedByPolicy`: render only the frames whose origin the
  * returned policy can name, as the page served with it must.
+ * `upstreamEndSessionUri`: where the redirect goes in place of
+ * `opts.postLogoutRedirect`, when defined.
  */
 function renderPage(
 	opts: RenderFrontchannelLogoutHtmlOptions,
 	framesNamedByPolicy: boolean,
+	upstreamEndSessionUri: string | undefined,
 ): FrontchannelLogoutPage {
 	const logger = opts.logger ?? console;
 	const frameOrigins = new Set<string>();
@@ -276,7 +323,10 @@ function renderPage(
 		Number.isFinite(requestedDelay) && (requestedDelay as number) >= 0
 			? Math.trunc(requestedDelay as number)
 			: DEFAULT_REDIRECT_DELAY_MS;
-	const redirectTarget = postLogoutRedirectTarget(opts, logger);
+	const redirectTarget =
+		upstreamEndSessionUri !== undefined
+			? upstreamEndSessionTarget(upstreamEndSessionUri, logger)
+			: postLogoutRedirectTarget(opts, logger);
 	const redirect =
 		redirectTarget !== undefined
 			? `<script data-target="${escapeHtml(redirectTarget)}" data-delay="${delay}">${REDIRECT_SCRIPT}</script>`
@@ -303,5 +353,5 @@ function renderPage(
  * redirect script's hash.
  */
 export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
-	return renderPage(opts, false).html;
+	return renderPage(opts, false, undefined).html;
 }
