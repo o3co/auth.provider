@@ -55,6 +55,7 @@ import {
 	type TestUserRepositoryOptions,
 } from "@o3co/auth-provider-core/testing";
 import { oauthEndpointsModule } from "@o3co/auth-provider-oauth";
+import { oauthConfigForTests } from "@o3co/auth-provider-oauth/testing";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
@@ -387,13 +388,13 @@ describe("a composition installing tokenExchangeModule under oauth.requireEmailV
 
 	/** Boots the token-exchange composition with the setting on, `userRepository` filled when given. */
 	async function boot(userRepository?: UserRepository): Promise<express.Express> {
-		const base = makeValidAppConfig();
+		// The oauth module's section from its testing entry, with the setting on and
+		// the revocation stores, which this composition does not wire, declared absent.
+		const { oauth } = oauthConfigForTests({ issuer: ISSUER });
 		const config: AppConfig = {
-			...base,
+			...makeValidAppConfig(),
 			oauth: {
-				...base.oauth,
-				jwt: { ...base.oauth.jwt, issuer: ISSUER },
-				oidcMode: "oidc-required",
+				...oauth,
 				requireEmailVerified: true,
 				revocation: { accessToken: "unsupported", subject: "unsupported" },
 			},

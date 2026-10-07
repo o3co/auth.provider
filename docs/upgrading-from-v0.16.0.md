@@ -1013,8 +1013,12 @@ The boot refusals you can meet, with their messages, are in
   hold. The `actor_token`'s subject is not read. With the setting on, a
   composition installing `tokenExchangeModule` whose `userRepository` is
   unfilled or has no `findBySubject` refuses to start
-  (`contribute-factory-failed`). **What to do:** before turning the setting
-  on, or upgrading with it on, implement `findBySubject` on your repository,
+  (`contribute-factory-failed`). None of the bundled user repositories
+  (`yaml`, `static`, `http`) implements `findBySubject` yet: with the setting
+  on, a composition with `tokenExchangeModule` needs a repository of your own
+  that does, or it refuses to boot. **What to do:** before turning the
+  setting on, or upgrading with it on, implement `findBySubject` on your
+  repository,
   answering the `User` for the `sub` your exchanged tokens carry, and move
   machine-to-machine callers that exchange `client_credentials` tokens to
   another grant. With the setting off nothing changes. See the

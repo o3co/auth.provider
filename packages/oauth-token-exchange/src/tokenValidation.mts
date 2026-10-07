@@ -37,6 +37,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { invalidRequest, isRefusal } from "./answers.mjs";
 import type { TokenRequest } from "./tokenRequest.mjs";
+import { snapshotValidated } from "./validatedSnapshot.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 
 /** The validator for each presented token, and the issued token type, checked. */
@@ -220,24 +221,32 @@ export async function revalidate(
 	token: string,
 	validator: ExchangeTokenValidator,
 ): Promise<GrantHandlerResult | null> {
-	const answer = await askValidator(deps, role, token, validator);
+	const answer = await askValidator(deps, role, token, validator, gateOnly);
 	return isRefusal(answer) ? answer : null;
 }
 
+/** A revalidation's reading of an answer: whether there is one, nothing of it read. */
+const gateOnly = (answer: ValidatedToken): ValidatedToken | null => answer;
+
 /**
- * The validator's answer for a presented token, or the refusal: `null` is a
- * failed validation, and a throw (a keystore or revocation store down; core's
- * `ExchangeTokenValidator` contract) a logged `503`, never a verdict on the token.
+ * The validator's answer for a presented token, as `read` takes it — by
+ * default into the plain, frozen copy every later stage reads
+ * (`snapshotValidated`) — or the refusal: `null`, or an answer that is no
+ * answer, is a failed validation, and a throw (a keystore or revocation store
+ * down; core's `ExchangeTokenValidator` contract), or a member of the answer
+ * whose read throws, a logged `503`, never a verdict on the token.
  */
 async function askValidator(
 	deps: Pick<GrantDependencies, "logger">,
 	role: "subject" | "actor",
 	token: string,
 	validator: ExchangeTokenValidator,
+	read: (answer: ValidatedToken) => ValidatedToken | null = snapshotValidated,
 ): Promise<{ readonly validated: ValidatedToken } | GrantHandlerResult> {
 	let validated: ValidatedToken | null;
 	try {
-		validated = await validator.validate(token, { role });
+		const answer = await validator.validate(token, { role });
+		validated = answer ? read(answer) : null;
 	} catch (err) {
 		(deps.logger ?? consoleLogger).error(
 			{ role, err: loggableError(err) },
