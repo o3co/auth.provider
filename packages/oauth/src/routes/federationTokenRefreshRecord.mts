@@ -24,8 +24,9 @@
  * refresh was made from, and a stored token is answered only from it; a
  * refresh whose record was removed or rewritten meanwhile is dropped, never
  * written over what replaced it. No token is answered after the upstream call
- * unless the caller's session is still live when it is answered: a close that
- * committed meanwhile removes the stored tokens itself.
+ * unless the caller's session is still live when it is answered (a close that
+ * committed meanwhile removes the stored tokens itself) and, read after that,
+ * the record is still the one the token is held from (`serveHeld`).
  */
 
 import { canonicalScope, emitAuditEvent, loggableError } from "@o3co/auth-provider-core";
@@ -37,10 +38,10 @@ import {
 	answerIfChanged,
 	replaceRecord,
 	type StoredRecord,
+	serveHeld,
 } from "./federationTokenRecord.mjs";
 import { narrowedScope, type RefreshReading } from "./federationTokenRefreshAnswer.mjs";
 import { stampRefreshFailed } from "./federationTokenRefreshFailure.mjs";
-import { checkSessionLive } from "./federationTokenSession.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
 
 /**
@@ -75,10 +76,10 @@ export const recordRefresh = async (
 	 * rewritten since (a relink, or another refresh) is left as it is, since
 	 * an equal refresh token does not make it the same connection, and that
 	 * outcome is returned so the refusal is answered as a dropped refresh.
-	 * `updated` once kept; `undefined` when nothing was written.
+	 * The record as written once kept; `undefined` when nothing was written.
 	 */
 	const keepRotatedRefreshToken = async (): Promise<
-		"updated" | "missing" | "conflict" | undefined
+		StoredRecord | "missing" | "conflict" | undefined
 	> => {
 		if (rotatedRefreshToken !== undefined && rotatedRefreshToken !== currentTokens.refreshToken) {
 			try {
@@ -89,17 +90,16 @@ export const recordRefresh = async (
 					// `id_token` is what logout sends as `id_token_hint`.
 					idToken: rotatedIdToken ?? currentTokens.idToken,
 				});
-				if (outcome !== "updated") {
-					logger.warn(
-						{
-							federation,
-							store: "federation_token",
-							reason: outcome === "missing" ? "record_gone" : "replaced_concurrently",
-						},
-						"federation_token_keep_rotated_skipped",
-					);
-				}
-				return outcome;
+				if (outcome.outcome === "updated") return outcome.written;
+				logger.warn(
+					{
+						federation,
+						store: "federation_token",
+						reason: outcome.outcome === "missing" ? "record_gone" : "replaced_concurrently",
+					},
+					"federation_token_keep_rotated_skipped",
+				);
+				return outcome.outcome;
 			} catch (error) {
 				logger.warn(
 					{ federation, store: "federation_token", step: "replace_if", err: loggableError(error) },
@@ -117,7 +117,7 @@ export const recordRefresh = async (
 		const servesStored = !lifetime.accepted && currentTokens.expiresAt === null;
 		// The stored token is handed on only from the record the refresh was
 		// made from; a kept rotation already confirmed it by its write.
-		if (servesStored && kept !== "updated") {
+		if (servesStored && kept === undefined) {
 			const changed = await answerIfChanged(ctx, caller, current);
 			if (changed !== null) return changed;
 		}
@@ -139,8 +139,9 @@ export const recordRefresh = async (
 			if (!isDisclosable(currentTokens)) {
 				return refuseUndisclosableTokenType(ctx, caller, currentTokens.tokenType);
 			}
-			if (!(await checkSessionLive(ctx, caller))) return res;
-			return answerToken(ctx, caller, currentTokens, false);
+			return serveHeld(ctx, caller, kept ?? current, () =>
+				answerToken(ctx, caller, currentTokens, false),
+			);
 		}
 		stampRefreshFailed(ctx, caller, current);
 		return res.status(500).json({
@@ -198,12 +199,12 @@ export const recordRefresh = async (
 	}
 	// Removed or rewritten since it was read: this refresh's tokens belong to a
 	// connection that is gone, and are neither stored nor handed on.
-	if (outcome !== "updated") return answerDiscardedRefresh(ctx, caller, outcome);
-
-	if (!(await checkSessionLive(ctx, caller))) return res;
+	if (outcome.outcome !== "updated") return answerDiscardedRefresh(ctx, caller, outcome.outcome);
 
 	// 11h: `updatedTokens`, not the adapter's object: the answer was read
 	// once, and a getter read a second time may answer differently from what
 	// was just written to the store.
-	return answerToken(ctx, caller, updatedTokens, true);
+	return serveHeld(ctx, caller, outcome.written, () =>
+		answerToken(ctx, caller, updatedTokens, true),
+	);
 };

@@ -806,7 +806,13 @@ The boot refusals you can meet, with their messages, are in
   so the host's own fallback answers (#1174).
 - **The federation token route** stores a refreshed upstream token for at
   most `maxTokenLifetimeMs`, 24 hours by default, so a long-lived one is
-  refreshed upstream at least that often (#1060).
+  refreshed upstream at least that often (#1060). After an upstream call, or
+  after waiting for the refresh lock, it reads the record once more after the
+  session's liveness read and hands on a token only while the record is
+  still the one the token was held from. A federation logout or an unlink
+  that lands during that read is answered `404 federation_not_linked`. A
+  relink is answered as a record rewritten meanwhile: the new record if it is
+  not due, else `503`.
 - **Token binding (#858).** Under `core.tokenBinding.dispatchPolicy =
   "intent-explicit"`, the v0.16.0 default, two mechanisms that both succeed
   at the deciding tier make a `/oauth/token` request `400 invalid_request`,

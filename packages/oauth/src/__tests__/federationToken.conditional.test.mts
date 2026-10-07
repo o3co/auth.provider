@@ -122,12 +122,15 @@ interface Route {
 /**
  * The route over `store`, seeded with `seed` unless it is `null`; the
  * provider's refresh runs `refresh` with the store, which is where a
- * concurrent logout or relink lands.
+ * concurrent logout or relink lands. `duringLiveness` runs inside each
+ * liveness read of the session, numbered from 1 (the caller's standing check),
+ * before it answers: where a logout landing while that read is awaited lands.
  */
 const route = async (opts: {
 	seed: FederationTokens | null;
 	refresh?: (store: Store) => Promise<unknown>;
 	store?: Store;
+	duringLiveness?: (store: Store, call: number) => Promise<void>;
 }): Promise<Route> => {
 	const store = opts.store ?? memoryStore();
 	if (opts.seed !== null) await store.attach(SID, NAME, opts.seed);
@@ -138,18 +141,24 @@ const route = async (opts: {
 		removeFederation: vi.fn(async () => {}),
 		removeBySid: vi.fn(async () => {}),
 	} as SessionFederationIndex;
+	const session = {
+		sid: SID,
+		sub: "u-1",
+		authTime: new Date(),
+		createdAt: new Date(),
+		expiresAt: new Date(Date.now() + 3_600_000),
+		claims: {},
+		amr: undefined,
+		authentication: undefined,
+	};
+	let livenessReads = 0;
 	const sessionStore: UserSessionStore = {
 		kind: "memory",
 		create: vi.fn(),
-		get: vi.fn().mockResolvedValue({
-			sid: SID,
-			sub: "u-1",
-			authTime: new Date(),
-			createdAt: new Date(),
-			expiresAt: new Date(Date.now() + 3_600_000),
-			claims: {},
-			amr: undefined,
-			authentication: undefined,
+		get: vi.fn(async () => {
+			livenessReads += 1;
+			await opts.duringLiveness?.(store, livenessReads);
+			return session;
 		}),
 		delete: vi.fn(),
 	};
@@ -783,5 +792,197 @@ describe("federation token route — a write the store answers outside its contr
 			{ federation: NAME, store: "federation_token", step: "replace_if" },
 			_label === "a rejection" ? "ReplyError" : "TypeError",
 		);
+	});
+});
+
+describe("federation token route — a record removed or replaced while the session's liveness is read is not handed on", () => {
+	/** A federation logout of this connection: its record removed. */
+	const logout = async (store: Store) => {
+		await store.delete(SID, NAME);
+	};
+	/** A logout and a relink: the record replaced by a new, not-due connection. */
+	const relinkTo =
+		(next: FederationTokens) =>
+		async (store: Store): Promise<void> => {
+			await store.delete(SID, NAME);
+			await store.attach(SID, NAME, next);
+		};
+	/** Runs `change` inside the liveness read numbered `call`, once. */
+	const atLivenessRead =
+		(call: number, change: (store: Store) => Promise<void>) =>
+		async (store: Store, n: number): Promise<void> => {
+			if (n === call) await change(store);
+		};
+	const linkedNoExpiry = (): FederationTokens => ({ ...linkA(), expiresAt: null });
+	/** A connection another refresh wrote: not due. */
+	const refreshedElsewhere = (): FederationTokens => ({
+		...linkA(),
+		accessToken: "other-at",
+		expiresAt: new Date(Date.now() + 3_600_000),
+	});
+	/** Makes the record not due just before the lock is taken, as a refresh that held it would. */
+	const refreshedBeforeLock = (r: Route): void => {
+		const acquireLock = r.store.acquireLock.bind(r.store);
+		r.store.acquireLock = async (...args) => {
+			const read = await r.store.getVersioned(SID, NAME);
+			if (read === null) throw new Error("the fixture's record is gone");
+			await r.store.replaceIf(SID, NAME, read.generation, refreshedElsewhere());
+			return acquireLock(...args);
+		};
+	};
+
+	const expectUnlinked = (r: Route, res: request.Response): void => {
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("federation_not_linked");
+		expect(res.body.access_token).toBeUndefined();
+		expect(audited(r, "federation.token.success")).toEqual([]);
+	};
+
+	describe("a refreshed token", () => {
+		it("answers 404 when a logout lands during the liveness read after the write", async () => {
+			const r = await route({ seed: linkA(), duringLiveness: atLivenessRead(2, logout) });
+
+			const res = await r.post();
+
+			expectUnlinked(r, res);
+			expect(await r.store.get(SID, NAME)).toBeNull();
+		});
+
+		it("answers the relink, as a conflict, when one lands during the liveness read after the write", async () => {
+			const b = linkB();
+			const r = await route({ seed: linkA(), duringLiveness: atLivenessRead(2, relinkTo(b)) });
+
+			const res = await r.post();
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("b-at");
+			expect(await r.store.get(SID, NAME)).toEqual(b);
+			expect(r.refreshToken).toHaveBeenCalledTimes(1);
+		});
+
+		it("is still answered when nothing lands", async () => {
+			const r = await route({ seed: linkA() });
+
+			const res = await r.post();
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("new-at");
+		});
+	});
+
+	describe("the stored token of a record with no finite expiry", () => {
+		it.each([
+			["no rotated refresh token", {}],
+			["a rotated refresh token kept on the record", { refreshToken: "rotated-rt" }],
+		])(
+			"answers 404 when a logout lands during the liveness read, with %s",
+			async (_label, rotation) => {
+				const r = await route({
+					seed: linkedNoExpiry(),
+					refresh: async () => ({ accessToken: "new-at", expiresIn: Number.NaN, ...rotation }),
+					duringLiveness: atLivenessRead(2, logout),
+				});
+
+				const res = await r.post();
+
+				expectUnlinked(r, res);
+				expect(await r.store.get(SID, NAME)).toBeNull();
+			},
+		);
+
+		it("answers the relink, as a conflict, when one lands during the liveness read", async () => {
+			const b = linkB();
+			const r = await route({
+				seed: linkedNoExpiry(),
+				refresh: async () => ({
+					accessToken: "new-at",
+					expiresIn: Number.NaN,
+					refreshToken: "rotated-rt",
+				}),
+				duringLiveness: atLivenessRead(2, relinkTo(b)),
+			});
+
+			const res = await r.post();
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("b-at");
+			expect(await r.store.get(SID, NAME)).toEqual(b);
+		});
+	});
+
+	describe("the record that won a conflict", () => {
+		it("answers 404 when a logout lands during the liveness read before it is served", async () => {
+			const r = await route({
+				seed: linkA(),
+				refresh: async (store) => {
+					await relinkTo(linkB())(store);
+					return { accessToken: "new-at", expiresIn: 3600 };
+				},
+				duringLiveness: atLivenessRead(2, logout),
+			});
+
+			const res = await r.post();
+
+			expectUnlinked(r, res);
+			expect(await r.store.get(SID, NAME)).toBeNull();
+		});
+
+		it("answers 503, serving nothing, when it is replaced again during the liveness read", async () => {
+			const c = { ...linkB(), accessToken: "c-at" };
+			const r = await route({
+				seed: linkA(),
+				refresh: async (store) => {
+					await relinkTo(linkB())(store);
+					return { accessToken: "new-at", expiresIn: 3600 };
+				},
+				duringLiveness: atLivenessRead(2, relinkTo(c)),
+			});
+
+			const res = await r.post();
+
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe(
+				"the federation token was replaced concurrently; retry",
+			);
+			expect(res.body.access_token).toBeUndefined();
+			expect(audited(r, "federation.token.success")).toEqual([]);
+			expect(r.refreshToken).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("the record a refresh holding the lock left not due", () => {
+		it("answers 404 when a logout lands during the liveness read after the lock", async () => {
+			const r = await route({ seed: linkA(), duringLiveness: atLivenessRead(2, logout) });
+			refreshedBeforeLock(r);
+
+			const res = await r.post();
+
+			expectUnlinked(r, res);
+			expect(r.refreshToken).not.toHaveBeenCalled();
+			expect(await r.store.get(SID, NAME)).toBeNull();
+		});
+
+		it("answers the relink, as a conflict, when one lands during the liveness read after the lock", async () => {
+			const b = linkB();
+			const r = await route({ seed: linkA(), duringLiveness: atLivenessRead(2, relinkTo(b)) });
+			refreshedBeforeLock(r);
+
+			const res = await r.post();
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("b-at");
+			expect(r.refreshToken).not.toHaveBeenCalled();
+		});
+
+		it("is still served when nothing lands", async () => {
+			const r = await route({ seed: linkA() });
+			refreshedBeforeLock(r);
+
+			const res = await r.post();
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("other-at");
+			expect(r.refreshToken).not.toHaveBeenCalled();
+		});
 	});
 });

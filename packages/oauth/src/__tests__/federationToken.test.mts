@@ -161,23 +161,29 @@ function makeFamilyRevocation(
 /** The generation every read of the double answers, and so the one every write is conditional on. */
 const READ_GENERATION = "g-read" as StoreGeneration;
 
+/** The generation the double's default conditional replace answers, and its reads answer after it. */
+const WRITTEN_GENERATION = "g-written" as StoreGeneration;
+
 /**
  * A store whose versioned read answers what its `get` answers, at
- * `READ_GENERATION`, so a case states the record it reads by overriding
- * `get`. Its conditional writes land unless a case overrides them.
+ * `READ_GENERATION` until its default conditional replace lands and at
+ * `WRITTEN_GENERATION` after, so a case states the record it reads by
+ * overriding `get`. Its conditional writes land unless a case overrides them.
  */
 function makeFedTokenStore(override?: Partial<FederationTokenStore>): FederationTokenStore {
+	let generation = READ_GENERATION;
 	const store: FederationTokenStore = {
 		kind: "memory",
 		attach: vi.fn(),
 		get: vi.fn().mockResolvedValue(baseFedTokens),
 		getVersioned: vi.fn(async (sid: string, name: string) => {
 			const value = await store.get(sid, name);
-			return value === null ? null : { value, generation: READ_GENERATION };
+			return value === null ? null : { value, generation };
 		}),
-		replaceIf: vi
-			.fn()
-			.mockResolvedValue({ outcome: "updated", generation: "g-written" as StoreGeneration }),
+		replaceIf: vi.fn(async () => {
+			generation = WRITTEN_GENERATION;
+			return { outcome: "updated" as const, generation: WRITTEN_GENERATION };
+		}),
 		removeIf: vi.fn().mockResolvedValue({ outcome: "removed" }),
 		removeBySid: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn().mockResolvedValue(undefined),
@@ -1257,9 +1263,14 @@ describe("POST /oauth/federation/:name/token", () => {
 			const lockingStore = {
 				...makeFedTokenStore({
 					get: vi.fn().mockResolvedValue(expiredTokens),
+					// The generation the write answered, once it has settled.
+					getVersioned: vi.fn(async () => ({
+						value: expiredTokens,
+						generation: order.includes("replaceIf") ? WRITTEN_GENERATION : READ_GENERATION,
+					})),
 					replaceIf: settleLater<ConditionalReplaceAnswer>(order, "replaceIf", {
 						outcome: "updated",
-						generation: "g-written" as StoreGeneration,
+						generation: WRITTEN_GENERATION,
 					}),
 					removeIf: settleLater<ConditionalRemoveAnswer>(order, "removeIf", {
 						outcome: "removed",
