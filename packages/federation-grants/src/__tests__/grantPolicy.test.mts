@@ -30,7 +30,7 @@ import {
 import {
 	type FederationGrantPolicyContractInput,
 	federationGrantPolicyContract,
-} from "@o3co/auth-provider-core/testing";
+} from "@o3co/auth-provider-test-kit";
 import { describe, expect, it } from "vitest";
 import {
 	type FederationGrantsModuleDeps,
